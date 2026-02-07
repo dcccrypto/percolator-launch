@@ -8,7 +8,7 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "https://api.mainnet-beta.solana.com";
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "https://mainnet.helius-rpc.com/?api-key=e568033d-06d6-49d1-ba90-b3564c91851b";
 
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const wallets = useMemo(() => [], []);
