@@ -36,7 +36,7 @@ import {
   buildIx,
   getAta,
 } from "@percolator/core";
-import { config } from "@/lib/config";
+import { getConfig } from "@/lib/config";
 import dynamic from "next/dynamic";
 
 const WalletMultiButton = dynamic(
@@ -133,6 +133,7 @@ export default function LaunchPage() {
     setDeploying(true);
     setStep(2);
 
+    const config = getConfig();
     const programId = new PublicKey(config.programId);
     const matcherProgramId = new PublicKey(config.matcherProgramId);
     const collateralMint = new PublicKey(tokenInfo.mint);
@@ -210,7 +211,7 @@ export default function LaunchPage() {
         maintenanceMarginBps,
         initialMarginBps,
         tradingFeeBps: tradingFeeBps.toString(),
-        maxAccounts: "4096",
+        maxAccounts: "128",
         newAccountFee: "1000000",
         riskReductionThreshold: "0",
         maintenanceFeePerSlot: "0",
