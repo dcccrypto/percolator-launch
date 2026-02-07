@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd packages/core && pnpm build && cd ../../app && pnpm build",
+  "buildCommand": "pnpm --filter @percolator/core build && cd app && next build",
   "outputDirectory": "app/.next",
   "framework": "nextjs",
   "installCommand": "pnpm install"
