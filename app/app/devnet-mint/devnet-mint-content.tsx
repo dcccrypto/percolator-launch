@@ -24,7 +24,7 @@ const DEVNET_RPC = "https://devnet.helius-rpc.com/?api-key=e568033d-06d6-49d1-ba
 const DEFAULT_RECIPIENT = "HoibauLv7EPDTr3oCAwE1UETuUio6w8DZjKM5AoTWsUM";
 
 const DevnetMintContent: FC = () => {
-  const { publicKey, sendTransaction, connected } = useWallet();
+  const { publicKey, signTransaction, connected } = useWallet();
 
   const [balance, setBalance] = useState<number | null>(null);
   const [decimals, setDecimals] = useState(9);
@@ -79,7 +79,7 @@ const DevnetMintContent: FC = () => {
 
   // Create mint + mint tokens
   const handleCreateAndMint = useCallback(async () => {
-    if (!publicKey || !sendTransaction) return;
+    if (!publicKey || !signTransaction) return;
     setLoading(true);
     setStatus("Creating mint…");
     setMintAddress(null);
@@ -126,8 +126,10 @@ const DevnetMintContent: FC = () => {
       // Partially sign with mint keypair
       tx.partialSign(mintKeypair);
 
-      // Send via wallet adapter — skip preflight to avoid simulation issues
-      const sig = await sendTransaction(tx, connection, {
+      // Sign with wallet, then send raw tx directly via our Helius RPC (bypasses Phantom's RPC)
+      if (!signTransaction) throw new Error("Wallet does not support signTransaction");
+      const signed = await signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signed.serialize(), {
         skipPreflight: false,
         preflightCommitment: "confirmed",
       });
@@ -145,7 +147,7 @@ const DevnetMintContent: FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [publicKey, sendTransaction, recipient, decimals, supply, refreshBalance]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [publicKey, signTransaction, recipient, decimals, supply, refreshBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const copyMint = () => {
     if (mintAddress) {
