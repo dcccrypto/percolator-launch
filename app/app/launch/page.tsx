@@ -182,9 +182,9 @@ export default function LaunchPage() {
       // Step 1: Vault ATA
       updateStep(1, { status: "active" });
       const [vaultPda] = deriveVaultAuthority(programId, slabPk);
-      const vaultAta = await getAta(vaultPda, collateralMint);
-      // Create ATA via spl-token (the init market ix expects it to exist)
-      const { createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
+      const { getAssociatedTokenAddress: getATA, createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
+      // vaultPda is off-curve (PDA), so we need allowOwnerOffCurve = true
+      const vaultAta = await getATA(collateralMint, vaultPda, true);
       const createAtaTx = new Transaction();
       createAtaTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: config.priorityFee }));
       createAtaTx.add(createAssociatedTokenAccountInstruction(publicKey, vaultAta, vaultPda, collateralMint));
@@ -428,8 +428,13 @@ export default function LaunchPage() {
       setStep(3);
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
+      console.error("Deploy error:", e);
       const activeIdx = steps.findIndex((s) => s.status === "active");
       if (activeIdx >= 0) updateStep(activeIdx, { status: "error", error: errMsg });
+      // Also show in a user-visible way
+      if (errMsg.includes("User rejected")) {
+        if (activeIdx >= 0) updateStep(activeIdx, { status: "error", error: "Transaction rejected by wallet" });
+      }
     } finally {
       setDeploying(false);
     }
