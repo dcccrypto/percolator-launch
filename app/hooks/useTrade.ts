@@ -49,7 +49,7 @@ export function useTrade(slabAddress: string) {
           ]),
           data: encodeTradeCpi({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString() }),
         });
-        return await sendTx({ connection, wallet, instruction: ix, computeUnits: 400_000 });
+        return await sendTx({ connection, wallet, instructions: [ix], computeUnits: 400_000 });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);

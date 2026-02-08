@@ -39,7 +39,7 @@ export function useInitUser(slabAddress: string) {
           ]),
           data: encodeInitUser({ feePayment: feePayment.toString() }),
         });
-        return await sendTx({ connection, wallet, instruction: ix });
+        return await sendTx({ connection, wallet, instructions: [ix] });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         throw e;

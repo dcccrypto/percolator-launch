@@ -39,7 +39,7 @@ export function useDeposit(slabAddress: string) {
           ]),
           data: encodeDepositCollateral({ userIdx: params.userIdx, amount: params.amount.toString() }),
         });
-        return await sendTx({ connection, wallet, instruction: ix });
+        return await sendTx({ connection, wallet, instructions: [ix] });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         throw e;

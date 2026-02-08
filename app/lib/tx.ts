@@ -4,14 +4,14 @@ import type { WalletContextState } from "@solana/wallet-adapter-react";
 export interface SendTxParams {
   connection: Connection;
   wallet: WalletContextState;
-  instruction: TransactionInstruction;
+  instructions: TransactionInstruction[];
   computeUnits?: number;
 }
 
 export async function sendTx({
   connection,
   wallet,
-  instruction,
+  instructions,
   computeUnits = 200_000,
 }: SendTxParams): Promise<string> {
   if (!wallet.publicKey || !wallet.signTransaction) {
@@ -21,7 +21,9 @@ export async function sendTx({
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
-  tx.add(instruction);
+  for (const ix of instructions) {
+    tx.add(ix);
+  }
 
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
