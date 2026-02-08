@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "node:http";
 import type { OracleService } from "../services/oracle.js";
+import type { PriceEngine } from "../services/PriceEngine.js";
 import { eventBus } from "../services/events.js";
 
 interface WsClient {
@@ -11,6 +12,7 @@ interface WsClient {
 export function setupWebSocket(
   server: Server,
   oracleService: OracleService,
+  priceEngine?: PriceEngine,
 ): WebSocketServer {
   const wss = new WebSocketServer({ server });
   const clients: WsClient[] = [];
@@ -38,9 +40,6 @@ export function setupWebSocket(
     const client: WsClient = { ws, subscriptions: new Set(["*"]) };
     clients.push(client);
 
-    // Send current prices on connect
-    const crankMarkets = Array.from(new Set([...clients.flatMap((c) => [...c.subscriptions])]));
-    // Actually just send all we have — iterate nothing specific, user will subscribe
     ws.send(JSON.stringify({ type: "connected", message: "Percolator WebSocket connected" }));
 
     ws.on("message", (raw) => {
@@ -48,10 +47,18 @@ export function setupWebSocket(
         const msg = JSON.parse(raw.toString()) as { type: string; slabAddress?: string };
         if (msg.type === "subscribe" && msg.slabAddress) {
           client.subscriptions.add(msg.slabAddress);
+
+          // Also subscribe PriceEngine to this slab for Helius real-time updates
+          if (priceEngine) {
+            priceEngine.subscribeToSlab(msg.slabAddress);
+          }
+
           ws.send(JSON.stringify({ type: "subscribed", slabAddress: msg.slabAddress }));
 
-          // Send current price if available
-          const price = oracleService.getCurrentPrice(msg.slabAddress);
+          // Send current price if available (try PriceEngine first)
+          const enginePrice = priceEngine?.getLatestPrice(msg.slabAddress);
+          const oraclePrice = oracleService.getCurrentPrice(msg.slabAddress);
+          const price = enginePrice ?? oraclePrice;
           if (price) {
             ws.send(
               JSON.stringify({
