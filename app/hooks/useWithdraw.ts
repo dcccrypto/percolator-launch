@@ -5,10 +5,8 @@ import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
   encodeWithdrawCollateral,
-  encodePushOraclePrice,
   encodeKeeperCrank,
   ACCOUNTS_WITHDRAW_COLLATERAL,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_KEEPER_CRANK,
   buildAccountMetas,
   WELL_KNOWN,
@@ -46,22 +44,13 @@ export function useWithdraw(slabAddress: string) {
 
         const instructions = [];
 
-        // Auto-crank: push fresh oracle price + crank before withdraw (admin oracle mode)
-        const userIsAuthority = mktConfig.oracleAuthority?.equals(wallet.publicKey);
-        if (isHyperp && userIsAuthority) {
-          const now = Math.floor(Date.now() / 1000);
-          const priceE6 = mktConfig.authorityPriceE6?.toString() ?? "1000000";
-          instructions.push(buildIx({
-            programId,
-            keys: buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [wallet.publicKey, slabPk]),
-            data: encodePushOraclePrice({ priceE6, timestamp: now.toString() }),
-          }));
-          instructions.push(buildIx({
-            programId,
-            keys: buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [wallet.publicKey, slabPk, WELL_KNOWN.clock, slabPk]),
-            data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
-          }));
-        }
+        // Always prepend permissionless crank before withdraw
+        // Market goes stale after 400 slots (~3 min)
+        instructions.push(buildIx({
+          programId,
+          keys: buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount]),
+          data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
+        }));
 
         instructions.push(buildIx({
           programId,

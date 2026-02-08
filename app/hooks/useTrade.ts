@@ -5,10 +5,8 @@ import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
   encodeTradeCpi,
-  encodePushOraclePrice,
   encodeKeeperCrank,
   ACCOUNTS_TRADE_CPI,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_KEEPER_CRANK,
   buildAccountMetas,
   buildIx,
@@ -47,27 +45,15 @@ export function useTrade(slabAddress: string) {
 
         const instructions = [];
 
-        // Auto-crank: push fresh oracle price + crank before trade (admin oracle mode)
-        // Only push price if user IS the oracle authority (otherwise crank service handles it)
-        const userIsAuthority = mktConfig.oracleAuthority?.equals(wallet.publicKey);
-        if (isHyperp && userIsAuthority) {
-          const now = Math.floor(Date.now() / 1000);
-          // Use last known price from slab state or default
-          const priceE6 = mktConfig.authorityPriceE6?.toString() ?? "1000000";
-          const pushIx = buildIx({
-            programId,
-            keys: buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [wallet.publicKey, slabPk]),
-            data: encodePushOraclePrice({ priceE6, timestamp: now.toString() }),
-          });
-          instructions.push(pushIx);
-
-          const crankIx = buildIx({
-            programId,
-            keys: buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [wallet.publicKey, slabPk, WELL_KNOWN.clock, slabPk]),
-            data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
-          });
-          instructions.push(crankIx);
-        }
+        // Always prepend a permissionless crank before trading
+        // Market goes stale after 400 slots (~3 min) — each user tx refreshes it
+        // callerIdx=65535 = permissionless, anyone can crank
+        const crankIx = buildIx({
+          programId,
+          keys: buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount]),
+          data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
+        });
+        instructions.push(crankIx);
 
         const tradeIx = buildIx({
           programId,
