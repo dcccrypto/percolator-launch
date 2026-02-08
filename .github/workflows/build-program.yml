@@ -34,10 +34,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (stable)
+      - name: Install Rust (1.82 - generates lockfile v3 compatible with cargo-build-sbf)
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85.0
+          toolchain: 1.82.0
 
       - name: Cache Rust
         uses: actions/cache@v4
@@ -64,12 +64,9 @@ jobs:
           blake3 = { git = "https://github.com/BLAKE3-team/BLAKE3", tag = "1.5.5" }
           EOF
 
-      - name: Force lockfile v3 (cargo-build-sbf ships cargo 1.79, can't read v4)
+      - name: Remove lockfile (let cargo-build-sbf regenerate)
         working-directory: program
-        run: |
-          rm -f Cargo.lock
-          mkdir -p .cargo
-          echo -e '[lockfile]\nversion = 3' >> .cargo/config.toml
+        run: rm -f Cargo.lock
 
       - name: Build program (MAX_ACCOUNTS=${{ matrix.max_accounts }})
         working-directory: program
