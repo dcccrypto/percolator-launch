@@ -9,7 +9,9 @@ export type ServerEvent =
   | "crank.failure"
   | "crank.stale"
   | "trade.executed"
-  | "position.liquidated";
+  | "position.liquidated"
+  | "liquidation.success"
+  | "liquidation.failure";
 
 export interface EventPayload {
   event: ServerEvent;
