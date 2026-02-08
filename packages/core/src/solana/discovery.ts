@@ -28,11 +28,18 @@ const MAGIC_BYTES = new Uint8Array([0x50, 0x45, 0x52, 0x43, 0x4f, 0x4c, 0x41, 0x
  * Each tier supports a different number of accounts (trader slots).
  * Slab layout: fixed_overhead(8624) + bitmap(N/64 * 8) + accounts(N * 240)
  */
+/**
+ * Slab tier definitions.
+ * IMPORTANT: dataSize must match the compiled program's SLAB_LEN for that MAX_ACCOUNTS.
+ * The on-chain program has a hardcoded SLAB_LEN — slab account data.len() must equal it exactly.
+ * Formula: HEADER(72) + CONFIG(320) + ENGINE_FIXED(936) + next_free(MAX_ACCOUNTS*2) + padding + ACCOUNTS(MAX_ACCOUNTS*240)
+ * Use the Rust program's computed SLAB_LEN (printed in error logs as first arg) as source of truth.
+ */
 export const SLAB_TIERS = {
-  micro:  { maxAccounts: 64,   dataSize: 24_008,  label: "Micro",  description: "64 slots · ~0.17 SOL" },
-  small:  { maxAccounts: 256,  dataSize: 70_112,  label: "Small",  description: "256 slots · ~0.49 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 254_528, label: "Medium", description: "1,024 slots · ~1.77 SOL" },
-  large:  { maxAccounts: 4096, dataSize: 992_560, label: "Large",  description: "4,096 slots · ~6.91 SOL" },
+  micro:  { maxAccounts: 64,   dataSize: 16_320,   label: "Micro",  description: "64 slots · ~0.12 SOL" },
+  small:  { maxAccounts: 256,  dataSize: 62_808,   label: "Small",  description: "256 slots · ~0.44 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 248_760,  label: "Medium", description: "1,024 slots · ~1.73 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 992_568,  label: "Large",  description: "4,096 slots · ~6.87 SOL" },
 } as const;
 
 export type SlabTierKey = keyof typeof SLAB_TIERS;
