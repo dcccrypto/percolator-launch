@@ -17,8 +17,9 @@ COPY packages/server/package.json packages/server/
 COPY packages/server/tsconfig.json packages/server/
 COPY packages/server/src/ packages/server/src/
 
-# Install deps (only for core + server, skip native modules)
-RUN pnpm install --filter @percolator/core --filter @percolator/server --ignore-scripts --no-optional
+# Install deps (only for core + server, skip native modules except rollup)
+RUN pnpm install --filter @percolator/core --filter @percolator/server --ignore-scripts --no-optional && \
+    pnpm add -D @rollup/rollup-linux-x64-gnu --filter @percolator/core --ignore-scripts
 
 # Build core first (server depends on it)
 RUN cd packages/core && npx tsup
