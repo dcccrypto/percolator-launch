@@ -121,10 +121,24 @@ export class CrankService {
     let success = 0;
     let failed = 0;
 
-    for (const [slabAddress] of this.markets) {
+    const keypair = loadKeypair(config.crankKeypair);
+    const crankPubkey = keypair.publicKey;
+
+    for (const [slabAddress, state] of this.markets) {
+      // Only crank markets where we are the oracle authority
+      const oracleAuth = state.market.config.oracleAuthority;
+      if (!oracleAuth.equals(crankPubkey)) {
+        continue; // Not our market — skip
+      }
+
       const ok = await this.crankMarket(slabAddress);
       if (ok) success++;
       else failed++;
+
+      // Small delay between markets to avoid 429 rate limits
+      if (this.markets.size > 1) {
+        await new Promise(r => setTimeout(r, 500));
+      }
     }
 
     return { success, failed };
