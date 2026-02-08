@@ -65,9 +65,10 @@ jobs:
           # Downgrade lockfile version from v4 to v3 for cargo-build-sbf compat
           sed -i 's/^version = 4$/version = 3/' Cargo.lock
           
-          # Pin time to avoid time-macros edition2024
+          # Pin crates whose latest versions use edition2024 manifests
           cargo update time --precise 0.3.36 2>/dev/null || true
           cargo update time-macros --precise 0.2.18 2>/dev/null || true
+          cargo update constant_time_eq --precise 0.3.0 2>/dev/null || true
           
           # Debug: show what we resolved
           echo "=== Lockfile version ==="

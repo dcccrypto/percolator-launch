@@ -30,7 +30,6 @@ percolator = { path = "../percolator" }
 # Pin crates that use edition2024 manifests (incompatible with cargo-build-sbf's cargo 1.79)
 [patch.crates-io]
 blake3 = { git = "https://github.com/BLAKE3-team/BLAKE3", tag = "1.5.5" }
-constant_time_eq = { git = "https://github.com/cesarb/constant_time_eq", tag = "v0.3.1" }
 
 [dev-dependencies]
 bincode = "1"
