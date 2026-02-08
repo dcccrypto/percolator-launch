@@ -19,7 +19,7 @@ function formatNum(n: number | null | undefined): string {
 }
 
 function shortenAddress(addr: string, chars = 4): string {
-  return `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
+  return `${addr.slice(0, chars)}…${addr.slice(-chars)}`;
 }
 
 type SortKey = "volume" | "oi" | "recent" | "health";
@@ -50,209 +50,180 @@ export default function MarketsPage() {
 
   const merged = useMemo<MergedMarket[]>(() => {
     const sbMap = new Map<string, MarketWithStats>();
-    for (const m of supabaseMarkets) {
-      sbMap.set(m.slab_address, m);
-    }
+    for (const m of supabaseMarkets) sbMap.set(m.slab_address, m);
     return discovered.map((d) => {
       const addr = d.slabAddress.toBase58();
       const sb = sbMap.get(addr) ?? null;
-      return {
-        slabAddress: addr,
-        symbol: sb?.symbol ?? null,
-        name: sb?.name ?? null,
-        onChain: d,
-        supabase: sb,
-      };
+      return { slabAddress: addr, symbol: sb?.symbol ?? null, name: sb?.name ?? null, onChain: d, supabase: sb };
     });
   }, [discovered, supabaseMarkets]);
 
   const filtered = useMemo(() => {
     let list = merged;
-
-    // Search filter
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter(
-        (m) =>
-          (m.symbol?.toLowerCase().includes(q)) ||
-          (m.name?.toLowerCase().includes(q)) ||
-          m.slabAddress.toLowerCase().includes(q)
+      list = list.filter((m) =>
+        m.symbol?.toLowerCase().includes(q) || m.name?.toLowerCase().includes(q) || m.slabAddress.toLowerCase().includes(q)
       );
     }
-
-    // Sort
     list = [...list].sort((a, b) => {
       switch (sortBy) {
-        case "volume":
-          return (b.supabase?.volume_total ?? 0) - (a.supabase?.volume_total ?? 0);
-        case "oi":
-          return Number(b.onChain.engine.totalOpenInterest - a.onChain.engine.totalOpenInterest);
+        case "volume": return (b.supabase?.volume_total ?? 0) - (a.supabase?.volume_total ?? 0);
+        case "oi": return Number(b.onChain.engine.totalOpenInterest - a.onChain.engine.totalOpenInterest);
         case "health": {
           const ha = computeMarketHealth(a.onChain.engine);
           const hb = computeMarketHealth(b.onChain.engine);
           const order: Record<string, number> = { healthy: 0, caution: 1, warning: 2, empty: 3 };
           return (order[ha.level] ?? 5) - (order[hb.level] ?? 5);
         }
-        case "recent":
-        default:
-          return 0; // keep discovery order (most recent first usually)
+        default: return 0;
       }
     });
-
     return list;
   }, [merged, search, sortBy]);
 
   const loading = discoveryLoading && supabaseLoading;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Markets</h1>
-          <p className="mt-1 text-slate-400">Perpetual futures for any Solana token</p>
+    <div className="terminal-grid min-h-[calc(100vh-48px)]">
+      <div className="mx-auto max-w-[1800px] px-3 py-6 lg:px-4">
+        {/* Header */}
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Markets</h1>
+            <p className="mt-0.5 text-sm text-[#4a5068]">Perpetual futures for any Solana token</p>
+          </div>
+          <Link
+            href="/launch"
+            className="rounded-lg bg-[#00d4aa] px-5 py-2 text-center text-sm font-bold text-[#080a0f] transition-all hover:bg-[#00e8bb] hover:shadow-[0_0_20px_rgba(0,212,170,0.15)]"
+          >
+            + Launch Market
+          </Link>
         </div>
-        <Link
-          href="/launch"
-          className="rounded-xl bg-emerald-500 px-6 py-2.5 text-center font-semibold text-white transition-all duration-150 hover:bg-emerald-400 hover:shadow-lg hover:shadow-emerald-500/20 focus-visible:ring-2 focus-visible:ring-emerald-500"
-        >
-          + Launch Market
-        </Link>
-      </div>
 
-      {/* Search & Sort */}
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#52525b]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by token name or address..."
-            className="w-full rounded-lg border border-[#1e2433] bg-[#111318] py-2.5 pl-10 pr-4 text-sm text-[#e4e4e7] placeholder-[#52525b] transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-          />
-        </div>
-        <div className="flex gap-1.5">
-          {(
-            [
+        {/* Search & Sort */}
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <svg className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#2a2f40]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search token or address…"
+              className="w-full rounded-lg border border-[#1a1d2a] bg-[#0c0e14] py-2 pl-9 pr-4 text-sm text-[#e8eaf0] placeholder-[#2a2f40] focus:border-[#00d4aa]/40 focus:outline-none focus:ring-1 focus:ring-[#00d4aa]/20"
+            />
+          </div>
+          <div className="flex gap-1 rounded-lg bg-[#0c0e14] p-0.5 ring-1 ring-[#1a1d2a]">
+            {([
               { key: "volume" as SortKey, label: "Volume" },
               { key: "oi" as SortKey, label: "OI" },
               { key: "health" as SortKey, label: "Health" },
               { key: "recent" as SortKey, label: "Recent" },
-            ] as const
-          ).map((opt) => (
-            <button
-              key={opt.key}
-              onClick={() => setSortBy(opt.key)}
-              className={`rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150 ${
-                sortBy === opt.key
-                  ? "bg-blue-600 text-white shadow-sm shadow-blue-600/20"
-                  : "bg-[#111318] text-[#71717a] hover:bg-[#1a1d24] hover:text-[#a1a1aa]"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-[72px] animate-pulse rounded-xl border border-[#1e2433] bg-[#111318]" />
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-[#1e2433] bg-[#111318] p-16 text-center">
-          {search ? (
-            <>
-              <div className="mb-4 text-5xl">🔍</div>
-              <h3 className="mb-2 text-xl font-semibold text-white">No markets found</h3>
-              <p className="text-slate-400">Try a different search term.</p>
-            </>
-          ) : (
-            <>
-              <div className="mb-4 text-5xl">🚀</div>
-              <h3 className="mb-2 text-xl font-semibold text-white">No markets yet</h3>
-              <p className="mb-6 text-slate-400">Be the first to launch a perpetual futures market.</p>
-              <Link
-                href="/launch"
-                className="inline-block rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white hover:bg-emerald-400"
+            ]).map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setSortBy(opt.key)}
+                className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-all ${
+                  sortBy === opt.key
+                    ? "bg-[#1a1d2a] text-white"
+                    : "text-[#4a5068] hover:text-[#7a8194]"
+                }`}
               >
-                Launch First Market
-              </Link>
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-[#1e2433]">
-          {/* Header */}
-          <div className="grid grid-cols-8 gap-4 border-b border-[#1e2433] bg-[#0a0b0f] px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">
-            <div className="col-span-2">Market</div>
-            <div className="text-right">Price</div>
-            <div className="text-right">Open Interest</div>
-            <div className="text-right">Capital</div>
-            <div className="text-right">Insurance</div>
-            <div className="text-right">Leverage</div>
-            <div className="text-right">Health</div>
+                {opt.label}
+              </button>
+            ))}
           </div>
-
-          {/* Rows */}
-          {filtered.map((m) => {
-            const health = computeMarketHealth(m.onChain.engine);
-            const maxLev = m.onChain.params.initialMarginBps > 0n
-              ? Math.floor(10000 / Number(m.onChain.params.initialMarginBps))
-              : 0;
-            const oiTokens = formatTokenAmount(m.onChain.engine.totalOpenInterest);
-            const capitalTokens = formatTokenAmount(m.onChain.engine.cTot);
-            const insuranceTokens = formatTokenAmount(m.onChain.engine.insuranceFund.balance);
-            const lastPrice = m.supabase?.last_price;
-
-            return (
-              <Link
-                key={m.slabAddress}
-                href={`/trade/${m.slabAddress}`}
-                className="grid grid-cols-8 gap-4 border-b border-[#1e2433] bg-[#111318] px-6 py-4 transition-all duration-150 hover:bg-[#1a1d24] hover:shadow-sm"
-              >
-                <div className="col-span-2">
-                  <div className="font-semibold text-white">
-                    {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {m.name ?? shortenAddress(m.onChain.config.collateralMint.toBase58())}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="font-mono text-white">
-                    {lastPrice != null ? `$${lastPrice < 0.01 ? lastPrice.toFixed(6) : lastPrice < 1 ? lastPrice.toFixed(4) : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="font-mono text-slate-300">{oiTokens}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-mono text-slate-300">{capitalTokens}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-mono text-emerald-400">{insuranceTokens}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-slate-300">{maxLev}x</div>
-                </div>
-                <div className="text-right">
-                  <HealthBadge level={health.level} />
-                </div>
-              </Link>
-            );
-          })}
         </div>
-      )}
 
-      {/* Recent Activity */}
-      <div className="mt-12">
-        <h2 className="mb-4 text-xl font-bold text-white">Recent Activity</h2>
-        <ActivityFeed />
+        {/* Table */}
+        {loading ? (
+          <div className="space-y-1">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-[56px] animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1a1d2a]" />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-xl bg-[#0c0e14] p-16 text-center ring-1 ring-[#1a1d2a]">
+            {search ? (
+              <>
+                <div className="mb-3 text-3xl text-[#1a1d2a]">🔍</div>
+                <h3 className="mb-1 text-lg font-semibold text-white">No markets found</h3>
+                <p className="text-sm text-[#4a5068]">Try a different search.</p>
+              </>
+            ) : (
+              <>
+                <div className="mb-3 text-3xl text-[#1a1d2a]">🚀</div>
+                <h3 className="mb-1 text-lg font-semibold text-white">No markets yet</h3>
+                <p className="mb-4 text-sm text-[#4a5068]">Be the first.</p>
+                <Link href="/launch" className="inline-block rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f]">
+                  Launch First Market
+                </Link>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-lg ring-1 ring-[#1a1d2a]">
+            {/* Header row */}
+            <div className="grid grid-cols-8 gap-4 bg-[#080a0f] px-4 py-2.5 text-[9px] font-medium uppercase tracking-wider text-[#2a2f40]">
+              <div className="col-span-2">Market</div>
+              <div className="text-right">Price</div>
+              <div className="text-right">Open Interest</div>
+              <div className="text-right">Capital</div>
+              <div className="text-right">Insurance</div>
+              <div className="text-right">Max Lev</div>
+              <div className="text-right">Health</div>
+            </div>
+
+            {filtered.map((m, i) => {
+              const health = computeMarketHealth(m.onChain.engine);
+              const maxLev = m.onChain.params.initialMarginBps > 0n
+                ? Math.floor(10000 / Number(m.onChain.params.initialMarginBps)) : 0;
+              const oiTokens = formatTokenAmount(m.onChain.engine.totalOpenInterest);
+              const capitalTokens = formatTokenAmount(m.onChain.engine.cTot);
+              const insuranceTokens = formatTokenAmount(m.onChain.engine.insuranceFund.balance);
+              const lastPrice = m.supabase?.last_price;
+
+              return (
+                <Link
+                  key={m.slabAddress}
+                  href={`/trade/${m.slabAddress}`}
+                  className={`grid grid-cols-8 gap-4 px-4 py-3 transition-all hover:bg-[#131620] ${
+                    i > 0 ? "border-t border-[#1a1d2a]/50" : ""
+                  } bg-[#0c0e14]`}
+                >
+                  <div className="col-span-2">
+                    <div className="font-semibold text-white">
+                      {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
+                    </div>
+                    <div className="text-[11px] text-[#2a2f40]">
+                      {m.name ?? shortenAddress(m.onChain.config.collateralMint.toBase58())}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="data-cell text-sm text-white">
+                      {lastPrice != null
+                        ? `$${lastPrice < 0.01 ? lastPrice.toFixed(6) : lastPrice < 1 ? lastPrice.toFixed(4) : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="data-cell text-right text-sm text-[#7a8194]">{oiTokens}</div>
+                  <div className="data-cell text-right text-sm text-[#7a8194]">{capitalTokens}</div>
+                  <div className="data-cell text-right text-sm text-[#00d4aa]">{insuranceTokens}</div>
+                  <div className="text-right text-sm text-[#7a8194]">{maxLev}×</div>
+                  <div className="text-right"><HealthBadge level={health.level} /></div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Activity */}
+        <div className="mt-8">
+          <h2 className="mb-4 text-lg font-bold text-white">Recent Activity</h2>
+          <ActivityFeed />
+        </div>
       </div>
     </div>
   );

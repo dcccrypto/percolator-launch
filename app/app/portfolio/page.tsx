@@ -23,120 +23,116 @@ export default function PortfolioPage() {
 
   if (!connected) {
     return (
-      <div className="mx-auto max-w-7xl px-4 py-12">
-        <h1 className="mb-2 text-3xl font-bold text-white">Portfolio</h1>
-        <p className="mb-8 text-slate-400">View all your positions across markets.</p>
-        <div className="rounded-2xl border border-[#1e2433] bg-[#111318] p-16 text-center">
-          <p className="mb-4 text-slate-400">Connect your wallet to view positions</p>
-          <WalletMultiButton />
+      <div className="terminal-grid min-h-[calc(100vh-48px)]">
+        <div className="mx-auto max-w-[1800px] px-3 py-6 lg:px-4">
+          <h1 className="mb-1 text-2xl font-bold text-white">Portfolio</h1>
+          <p className="mb-6 text-sm text-[#4a5068]">View all your positions across markets</p>
+          <div className="rounded-xl bg-[#0c0e14] p-16 text-center ring-1 ring-[#1a1d2a]">
+            <p className="mb-4 text-sm text-[#4a5068]">Connect your wallet to view positions</p>
+            <WalletMultiButton />
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12">
-      <h1 className="mb-2 text-3xl font-bold text-white">Portfolio</h1>
-      <p className="mb-8 text-slate-400">All your positions across Percolator markets.</p>
+    <div className="terminal-grid min-h-[calc(100vh-48px)]">
+      <div className="mx-auto max-w-[1800px] px-3 py-6 lg:px-4">
+        <h1 className="mb-1 text-2xl font-bold text-white">Portfolio</h1>
+        <p className="mb-6 text-sm text-[#4a5068]">All positions across Percolator markets</p>
 
-      {/* Aggregate Stats */}
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-[#1e2433] bg-[#111318] p-5">
-          <p className="text-xs text-slate-500">Total Deposited</p>
-          <p className="mt-1 text-xl font-bold text-white">
-            {loading ? "..." : formatTokenAmount(totalDeposited)}
-          </p>
+        {/* Summary cards */}
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-lg bg-[#0c0e14] p-4 ring-1 ring-[#1a1d2a]">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-[#2a2f40]">Total Deposited</p>
+            <p className="mt-1 data-cell text-xl font-bold text-white">
+              {loading ? "…" : formatTokenAmount(totalDeposited)}
+            </p>
+          </div>
+          <div className="rounded-lg bg-[#0c0e14] p-4 ring-1 ring-[#1a1d2a]">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-[#2a2f40]">Total PnL</p>
+            <p className={`mt-1 data-cell text-xl font-bold ${totalPnl >= 0n ? "text-[#00e68a]" : "text-[#ff4d6a]"}`}>
+              {loading ? "…" : formatPnl(totalPnl)}
+            </p>
+          </div>
+          <div className="rounded-lg bg-[#0c0e14] p-4 ring-1 ring-[#1a1d2a]">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-[#2a2f40]">Active Positions</p>
+            <p className="mt-1 data-cell text-xl font-bold text-white">
+              {loading ? "…" : positions.length}
+            </p>
+          </div>
         </div>
-        <div className="rounded-xl border border-[#1e2433] bg-[#111318] p-5">
-          <p className="text-xs text-slate-500">Total PnL</p>
-          <p className={`mt-1 text-xl font-bold ${totalPnl >= 0n ? "text-emerald-400" : "text-red-400"}`}>
-            {loading ? "..." : formatPnl(totalPnl)}
-          </p>
-        </div>
-        <div className="rounded-xl border border-[#1e2433] bg-[#111318] p-5">
-          <p className="text-xs text-slate-500">Active Positions</p>
-          <p className="mt-1 text-xl font-bold text-white">
-            {loading ? "..." : positions.length}
-          </p>
-        </div>
+
+        {/* Positions */}
+        {loading ? (
+          <div className="space-y-2">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-16 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1a1d2a]" />
+            ))}
+          </div>
+        ) : positions.length === 0 ? (
+          <div className="rounded-xl bg-[#0c0e14] p-16 text-center ring-1 ring-[#1a1d2a]">
+            <div className="mb-3 text-3xl text-[#1a1d2a]">📊</div>
+            <h3 className="mb-1 text-lg font-semibold text-white">No positions yet</h3>
+            <p className="mb-4 text-sm text-[#4a5068]">Browse markets to start trading.</p>
+            <Link href="/markets" className="inline-block rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f]">
+              Browse Markets
+            </Link>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-lg ring-1 ring-[#1a1d2a]">
+            {/* Header */}
+            <div className="grid grid-cols-6 gap-4 bg-[#080a0f] px-4 py-2.5 text-[9px] font-medium uppercase tracking-wider text-[#2a2f40]">
+              <div>Market</div>
+              <div className="text-center">Side</div>
+              <div className="text-right">Size</div>
+              <div className="text-right">Entry</div>
+              <div className="text-right">Capital</div>
+              <div className="text-right">PnL</div>
+            </div>
+
+            {positions.map((pos, i) => {
+              const side = pos.account.positionSize > 0n ? "Long" : pos.account.positionSize < 0n ? "Short" : "Flat";
+              const sizeAbs = pos.account.positionSize < 0n ? -pos.account.positionSize : pos.account.positionSize;
+              const pnlPositive = pos.account.pnl >= 0n;
+
+              return (
+                <Link
+                  key={`${pos.slabAddress}-${i}`}
+                  href={`/trade/${pos.slabAddress}`}
+                  className={`grid grid-cols-6 gap-4 px-4 py-3 transition-all hover:bg-[#131620] ${
+                    i > 0 ? "border-t border-[#1a1d2a]/50" : ""
+                  } bg-[#0c0e14]`}
+                >
+                  <div>
+                    <span className="data-cell text-sm font-semibold text-white">
+                      {pos.slabAddress.slice(0, 8)}…
+                    </span>
+                  </div>
+                  <div className="text-center">
+                    <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                      side === "Long"
+                        ? "bg-[#00e68a]/10 text-[#00e68a]"
+                        : side === "Short"
+                        ? "bg-[#ff4d6a]/10 text-[#ff4d6a]"
+                        : "bg-[#1a1d2a] text-[#4a5068]"
+                    }`}>
+                      {side.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="data-cell text-right text-sm text-white">{formatTokenAmount(sizeAbs)}</div>
+                  <div className="data-cell text-right text-sm text-[#7a8194]">{formatPriceE6(pos.account.entryPrice)}</div>
+                  <div className="data-cell text-right text-sm text-[#7a8194]">{formatTokenAmount(pos.account.capital)}</div>
+                  <div className={`data-cell text-right text-sm font-medium ${pnlPositive ? "text-[#00e68a]" : "text-[#ff4d6a]"}`}>
+                    {formatPnl(pos.account.pnl)}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </div>
-
-      {/* Positions */}
-      {loading ? (
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-20 animate-pulse rounded-xl border border-[#1e2433] bg-[#111318]" />
-          ))}
-        </div>
-      ) : positions.length === 0 ? (
-        <div className="rounded-2xl border border-[#1e2433] bg-[#111318] p-16 text-center">
-          <div className="mb-4 text-5xl">📊</div>
-          <h3 className="mb-2 text-xl font-semibold text-white">No positions yet</h3>
-          <p className="mb-6 text-slate-400">Browse markets to start trading.</p>
-          <Link
-            href="/markets"
-            className="inline-block rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white hover:bg-emerald-400"
-          >
-            Browse Markets
-          </Link>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {positions.map((pos, i) => {
-            const side = pos.account.positionSize > 0n ? "Long" : pos.account.positionSize < 0n ? "Short" : "Flat";
-            const sizeAbs = pos.account.positionSize < 0n ? -pos.account.positionSize : pos.account.positionSize;
-            const pnlPositive = pos.account.pnl >= 0n;
-
-            return (
-              <Link
-                key={`${pos.slabAddress}-${i}`}
-                href={`/trade/${pos.slabAddress}`}
-                className="block rounded-xl border border-[#1e2433] bg-[#111318] p-5 transition-colors hover:bg-[#1a1d24]"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-white">
-                        {pos.slabAddress.slice(0, 8)}...
-                      </span>
-                      <span className={`rounded px-2 py-0.5 text-xs font-bold ${
-                        side === "Long"
-                          ? "bg-emerald-500/10 text-emerald-400"
-                          : side === "Short"
-                          ? "bg-red-500/10 text-red-400"
-                          : "bg-slate-500/10 text-slate-400"
-                      }`}>
-                        {side}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-6 text-sm">
-                    <div>
-                      <p className="text-xs text-slate-500">Size</p>
-                      <p className="font-mono text-white">{formatTokenAmount(sizeAbs)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-500">Entry</p>
-                      <p className="font-mono text-white">{formatPriceE6(pos.account.entryPrice)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-500">Capital</p>
-                      <p className="font-mono text-white">{formatTokenAmount(pos.account.capital)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-500">PnL</p>
-                      <p className={`font-mono ${pnlPositive ? "text-emerald-400" : "text-red-400"}`}>
-                        {formatPnl(pos.account.pnl)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
