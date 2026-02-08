@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { PublicKey } from "@solana/web3.js";
-import { fetchSlab, parseHeader, parseConfig, parseEngine } from "@percolator/core";
+import { fetchSlab, parseHeader, parseConfig, parseEngine, SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 import { getConnection } from "../utils/solana.js";
 import type { CrankService } from "../services/crank.js";
 import type { MarketLifecycleManager, LaunchOptions } from "../services/lifecycle.js";
@@ -72,15 +72,65 @@ export function marketRoutes(deps: MarketDeps): Hono {
   });
 
   // POST /markets/launch — one-click launch
+  // Input: { mint: string, slabTier?: "micro"|"small"|"medium"|"large", options?: LaunchOptions }
+  // Returns market config for frontend tx execution, or discovered market if already created
   app.post("/markets/launch", async (c) => {
-    const body = await c.req.json<{ mint: string; options?: LaunchOptions }>();
-    const result = await deps.lifecycleManager.launchMarket(body.mint, body.options ?? {});
-    if (!result.market) {
-      return c.json({ error: "Market not found for mint" }, 404);
+    const body = await c.req.json<{
+      mint: string;
+      slabTier?: SlabTierKey;
+      options?: LaunchOptions;
+    }>();
+
+    const { mint, slabTier = "small", options = {} } = body;
+
+    if (!mint) {
+      return c.json({ error: "Missing mint address" }, 400);
     }
+
+    // Validate mint
+    try {
+      new PublicKey(mint);
+    } catch {
+      return c.json({ error: "Invalid mint address" }, 400);
+    }
+
+    // Validate slab tier
+    if (!(slabTier in SLAB_TIERS)) {
+      return c.json({ error: `Invalid slabTier: ${slabTier}` }, 400);
+    }
+
+    // Try to find an existing market first
+    const existing = await deps.lifecycleManager.launchMarket(mint, options);
+    if (existing.market) {
+      const tier = SLAB_TIERS[slabTier];
+      return c.json({
+        marketId: existing.market.slabAddress.toBase58(),
+        slabAddress: existing.market.slabAddress.toBase58(),
+        status: "live" as const,
+        slabTier,
+        slabDataSize: tier.dataSize,
+        maxAccounts: tier.maxAccounts,
+      });
+    }
+
+    // No existing market — prepare launch config
+    const result = await deps.lifecycleManager.prepareLaunch(mint, slabTier);
+    if (result.status === "failed") {
+      return c.json({ error: "Failed to prepare launch" }, 500);
+    }
+
+    // Also detect pool info for the response
+    const pool = await deps.lifecycleManager.detectDexPool(mint);
+
     return c.json({
-      slabAddress: result.market.slabAddress.toBase58(),
-      registered: result.registered,
+      ...result,
+      pool: pool ? {
+        poolAddress: pool.poolAddress,
+        dexId: pool.dexId,
+        pairLabel: pool.pairLabel,
+        liquidityUsd: pool.liquidityUsd,
+        priceUsd: pool.priceUsd,
+      } : null,
     });
   });
 

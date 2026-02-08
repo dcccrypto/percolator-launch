@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 
 export type ServerEvent =
+  | "market.creating"
   | "market.created"
   | "market.updated"
   | "price.updated"

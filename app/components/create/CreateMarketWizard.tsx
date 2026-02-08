@@ -9,6 +9,7 @@ import { useCreateMarket, type CreateMarketParams } from "@/hooks/useCreateMarke
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { usePythFeedSearch } from "@/hooks/usePythFeedSearch";
 import { useDexPoolSearch, type DexPoolResult } from "@/hooks/useDexPoolSearch";
+import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 
@@ -68,11 +69,206 @@ const FieldHint: FC<{ children: React.ReactNode }> = ({ children }) => (
   <p className="mt-1 text-xs text-[#52525b]">{children}</p>
 );
 
+/** Quick Launch sub-component */
+const QuickLaunchPanel: FC<{
+  onFallbackToManual: (mint: string, pool: DexPoolResult | null) => void;
+}> = ({ onFallbackToManual }) => {
+  const { publicKey } = useWallet();
+  const { state, create, reset } = useCreateMarket();
+  const [quickMint, setQuickMint] = useState("");
+  const [quickSlabTier, setQuickSlabTier] = useState<SlabTierKey>("small");
+  const quickLaunch = useQuickLaunch(quickMint.length >= 32 ? quickMint : null);
+
+  const handleQuickCreate = () => {
+    if (!quickLaunch.config || !quickLaunch.poolInfo || !publicKey) return;
+
+    const c = quickLaunch.config;
+    const pool = quickLaunch.poolInfo;
+    const tier = SLAB_TIERS[quickSlabTier];
+
+    // Derive oracle feed from pool address
+    const poolPk = new PublicKey(pool.poolAddress);
+    const oracleFeed = Array.from(poolPk.toBytes())
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    const priceE6 = Math.round(pool.priceUsd * 1_000_000);
+
+    const params: CreateMarketParams = {
+      mint: new PublicKey(c.mint),
+      initialPriceE6: BigInt(priceE6 > 0 ? priceE6 : 1_000_000),
+      lpCollateral: parseHumanAmount(c.lpCollateral, c.decimals),
+      insuranceAmount: parseHumanAmount("500000", c.decimals),
+      oracleFeed,
+      invert: false,
+      tradingFeeBps: 30,
+      initialMarginBps: 1000,
+      maxAccounts: tier.maxAccounts,
+      slabDataSize: tier.dataSize,
+    };
+    create(params);
+  };
+
+  // Show creation progress
+  if (state.loading || state.step > 0 || state.error) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm">
+          <h2 className="mb-4 text-lg font-semibold text-[#e4e4e7]">Quick Launch — Creating Market</h2>
+          <div className="space-y-3">
+            {[0, 1, 2, 3, 4, 5].map((i) => {
+              let status: "pending" | "active" | "done" | "error" = "pending";
+              if (state.step > i || state.step === 6) status = "done";
+              else if (state.step === i && state.loading) status = "active";
+              else if (state.step === i && state.error) status = "error";
+              const labels = ["Create slab account", "Create vault token account", "Initialize market", "Initialize LP", "Deposit collateral & insurance", "Oracle setup & crank"];
+              return (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
+                    {status === "done" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-900/40 text-xs text-green-400">&#10003;</span>}
+                    {status === "active" && <span className="flex h-6 w-6 items-center justify-center"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1e1e2e] border-t-[#e4e4e7]" /></span>}
+                    {status === "error" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-red-900/40 text-xs text-red-400">!</span>}
+                    {status === "pending" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1a1a2e] text-xs text-[#52525b]">{i + 1}</span>}
+                  </div>
+                  <span className={`text-sm ${status === "done" ? "text-green-400" : status === "active" ? "font-medium text-[#e4e4e7]" : status === "error" ? "text-red-400" : "text-[#52525b]"}`}>{labels[i]}</span>
+                </div>
+              );
+            })}
+          </div>
+          {state.error && (
+            <div className="mt-4 rounded-lg bg-red-900/20 p-3">
+              <p className="text-sm text-red-400">{state.error}</p>
+              <div className="mt-3 flex gap-2">
+                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-3 py-1.5 text-xs font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Start over</button>
+              </div>
+            </div>
+          )}
+          {state.step === 6 && state.slabAddress && (
+            <div className="mt-4 rounded-lg bg-green-900/20 p-4">
+              <p className="text-sm font-medium text-green-300">Market created successfully!</p>
+              <p className="mt-1 font-mono text-xs text-green-400">Slab: {state.slabAddress}</p>
+              <div className="mt-3 flex gap-2">
+                <Link href={`/trade?market=${state.slabAddress}`} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700">Trade this market</Link>
+                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-4 py-2 text-sm font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Create another</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm space-y-5">
+      <div>
+        <h3 className="text-sm font-semibold text-[#e4e4e7] mb-1">⚡ Quick Launch</h3>
+        <p className="text-xs text-[#52525b]">Paste a token mint → we auto-detect the DEX pool and set optimal risk params. One click to deploy.</p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-[#e4e4e7]">Token Mint Address</label>
+        <input
+          type="text"
+          value={quickMint}
+          onChange={(e) => setQuickMint(e.target.value.trim())}
+          placeholder="Paste any Solana token mint..."
+          className="mt-1 w-full rounded-lg border border-[#1e1e2e] bg-[#1a1a28] px-3 py-2 font-mono text-xs text-[#e4e4e7] placeholder-[#52525b] focus:border-blue-500 focus:outline-none"
+        />
+      </div>
+
+      {/* Slab Tier Selector */}
+      <div>
+        <label className="block text-sm font-medium text-[#e4e4e7] mb-2">Market Size</label>
+        <div className="grid grid-cols-4 gap-2">
+          {(Object.entries(SLAB_TIERS) as [SlabTierKey, typeof SLAB_TIERS[SlabTierKey]][]).map(([key, tier]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setQuickSlabTier(key)}
+              className={`rounded-lg border p-2 text-center transition-colors ${
+                quickSlabTier === key
+                  ? "border-blue-500 bg-blue-500/10"
+                  : "border-[#1e1e2e] bg-[#1a1a28] hover:border-[#2e2e3e]"
+              }`}
+            >
+              <p className={`text-xs font-semibold ${quickSlabTier === key ? "text-blue-400" : "text-[#e4e4e7]"}`}>{tier.label}</p>
+              <p className="text-[10px] text-[#52525b]">{tier.maxAccounts} slots</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {quickLaunch.loading && (
+        <div className="flex items-center gap-2 text-[#71717a]">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1e1e2e] border-t-[#e4e4e7]" />
+          <span className="text-xs">Auto-detecting token &amp; DEX pool...</span>
+        </div>
+      )}
+
+      {quickLaunch.error && (
+        <p className="text-xs text-red-400">{quickLaunch.error}</p>
+      )}
+
+      {quickLaunch.config && !quickLaunch.loading && (
+        <>
+          {/* Detected info */}
+          <div className="rounded-lg bg-blue-900/20 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-sm font-medium text-[#e4e4e7]">{quickLaunch.config.symbol}</span>
+                <span className="ml-2 text-xs text-[#71717a]">{quickLaunch.config.name}</span>
+              </div>
+              {quickLaunch.poolInfo && (
+                <span className="text-xs text-green-400">
+                  {quickLaunch.poolInfo.pairLabel} · ${quickLaunch.poolInfo.liquidityUsd.toLocaleString()} liq
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-[10px] text-[#52525b]">Fee</p>
+                <p className="text-xs font-medium text-[#e4e4e7]">30 bps</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-[#52525b]">Margin</p>
+                <p className="text-xs font-medium text-[#e4e4e7]">1000 bps</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-[#52525b]">Leverage</p>
+                <p className="text-xs font-medium text-[#e4e4e7]">10x</p>
+              </div>
+            </div>
+          </div>
+
+          {!quickLaunch.poolInfo && (
+            <div className="rounded-lg bg-amber-900/20 p-3">
+              <p className="text-xs text-amber-400">No DEX pool found. You can still launch with manual oracle or <button type="button" onClick={() => onFallbackToManual(quickMint, null)} className="underline hover:text-amber-300">switch to manual mode</button>.</p>
+            </div>
+          )}
+
+          {publicKey ? (
+            <button
+              onClick={handleQuickCreate}
+              disabled={!quickLaunch.poolInfo}
+              className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-[#1e1e2e] disabled:text-[#52525b]"
+            >
+              🚀 Launch Market
+            </button>
+          ) : (
+            <p className="text-sm text-amber-400 text-center">Connect your wallet to launch</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 export const CreateMarketWizard: FC = () => {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
   const { state, create, reset } = useCreateMarket();
 
+  const [wizardMode, setWizardMode] = useState<"quick" | "manual">("quick");
   const [mint, setMint] = useState("");
   const [oracleMode, setOracleMode] = useState<"pyth" | "dex">("dex");
   const [feedId, setFeedId] = useState("");
@@ -202,6 +398,17 @@ export const CreateMarketWizard: FC = () => {
     create(params, state.step);
   };
 
+  const handleFallbackToManual = (fallbackMint: string, pool: DexPoolResult | null) => {
+    setWizardMode("manual");
+    setMint(fallbackMint);
+    if (pool) {
+      setDexPoolAddress(pool.poolAddress);
+      setSelectedDexPool(pool);
+    }
+    setOracleMode("dex");
+    setOpenStep(1);
+  };
+
   if (state.loading || state.step > 0 || state.error) {
     return (
       <div className="space-y-4">
@@ -261,6 +468,37 @@ export const CreateMarketWizard: FC = () => {
 
   return (
     <div className="space-y-4">
+      {/* Mode Switcher */}
+      <div className="flex rounded-xl border border-[#1e1e2e] bg-[#12121a] p-1">
+        <button
+          type="button"
+          onClick={() => setWizardMode("quick")}
+          className={`flex-1 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
+            wizardMode === "quick"
+              ? "bg-blue-600 text-white"
+              : "text-[#71717a] hover:text-[#e4e4e7]"
+          }`}
+        >
+          ⚡ Quick Launch
+        </button>
+        <button
+          type="button"
+          onClick={() => setWizardMode("manual")}
+          className={`flex-1 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
+            wizardMode === "manual"
+              ? "bg-blue-600 text-white"
+              : "text-[#71717a] hover:text-[#e4e4e7]"
+          }`}
+        >
+          🔧 Manual Setup
+        </button>
+      </div>
+
+      {wizardMode === "quick" && (
+        <QuickLaunchPanel onFallbackToManual={handleFallbackToManual} />
+      )}
+
+      {wizardMode === "manual" && <>
       <StepSection open={openStep === 1} onToggle={() => setOpenStep(openStep === 1 ? 0 : 1)} title="Token & Oracle" stepNum={1} valid={step1Valid}>
         <div className="space-y-4">
           <div>
@@ -458,6 +696,7 @@ export const CreateMarketWizard: FC = () => {
           <button onClick={handleCreate} disabled={!allValid || !publicKey} className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-[#1e1e2e] disabled:text-[#52525b]">Create Market</button>
         </div>
       </StepSection>
+      </>}
     </div>
   );
 };
