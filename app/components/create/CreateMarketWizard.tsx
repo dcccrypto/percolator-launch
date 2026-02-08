@@ -10,6 +10,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { usePythFeedSearch } from "@/hooks/usePythFeedSearch";
 import { useDexPoolSearch, type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
+import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 
 function isValidBase58Pubkey(s: string): boolean {
   try {
@@ -80,6 +81,7 @@ export const CreateMarketWizard: FC = () => {
   const [dexPoolAddress, setDexPoolAddress] = useState("");
   const [invert, setInvert] = useState(false);
 
+  const [slabTier, setSlabTier] = useState<SlabTierKey>("small");
   const [tradingFeeBps, setTradingFeeBps] = useState(30);
   const [initialMarginBps, setInitialMarginBps] = useState(1000);
 
@@ -165,6 +167,7 @@ export const CreateMarketWizard: FC = () => {
   const handleCreate = () => {
     if (!allValid) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
+    const selectedTier = SLAB_TIERS[slabTier];
     const params: CreateMarketParams = {
       mint: new PublicKey(mint),
       initialPriceE6: priceE6,
@@ -174,6 +177,8 @@ export const CreateMarketWizard: FC = () => {
       invert,
       tradingFeeBps,
       initialMarginBps,
+      maxAccounts: selectedTier.maxAccounts,
+      slabDataSize: selectedTier.dataSize,
     };
     create(params);
   };
@@ -181,6 +186,7 @@ export const CreateMarketWizard: FC = () => {
   const handleRetry = () => {
     if (!allValid || !state.slabAddress) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
+    const selectedTier = SLAB_TIERS[slabTier];
     const params: CreateMarketParams = {
       mint: new PublicKey(mint),
       initialPriceE6: priceE6,
@@ -190,6 +196,8 @@ export const CreateMarketWizard: FC = () => {
       invert,
       tradingFeeBps,
       initialMarginBps,
+      maxAccounts: selectedTier.maxAccounts,
+      slabDataSize: selectedTier.dataSize,
     };
     create(params, state.step);
   };
@@ -354,6 +362,30 @@ export const CreateMarketWizard: FC = () => {
 
       <StepSection open={openStep === 2} onToggle={() => setOpenStep(openStep === 2 ? 0 : 2)} title="Risk Parameters" stepNum={2} valid={step2Valid}>
         <div className="space-y-4">
+          {/* Slab Tier Selector */}
+          <div>
+            <label className="block text-sm font-medium text-[#e4e4e7] mb-2">Market Capacity (Slab Size)</label>
+            <FieldHint>How many trader slots this market supports. Larger = more traders but higher rent cost.</FieldHint>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {(Object.entries(SLAB_TIERS) as [SlabTierKey, typeof SLAB_TIERS[SlabTierKey]][]).map(([key, tier]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSlabTier(key)}
+                  className={`rounded-lg border p-3 text-left transition-colors ${
+                    slabTier === key
+                      ? "border-blue-500 bg-blue-500/10"
+                      : "border-[#1e1e2e] bg-[#1a1a28] hover:border-[#2e2e3e]"
+                  }`}
+                >
+                  <p className={`text-sm font-semibold ${slabTier === key ? "text-blue-400" : "text-[#e4e4e7]"}`}>
+                    {tier.label}
+                  </p>
+                  <p className="text-xs text-[#71717a]">{tier.description}</p>
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <label className="block text-sm font-medium text-[#e4e4e7]">Trading Fee: {tradingFeeBps} bps ({(tradingFeeBps / 100).toFixed(2)}%)</label>
             <FieldHint>Fee charged on every trade. 30 bps (0.30%) is standard for most perp exchanges.</FieldHint>

@@ -23,8 +23,33 @@ export interface DiscoveredMarket {
 /** PERCOLAT magic bytes */
 const MAGIC_BYTES = new Uint8Array([0x50, 0x45, 0x52, 0x43, 0x4f, 0x4c, 0x41, 0x54]);
 
-/** Full slab size */
-const SLAB_DATA_SIZE = 992_560;
+/** 
+ * Slab tier definitions — variable slab sizes for different market needs.
+ * Each tier supports a different number of accounts (trader slots).
+ * Slab layout: fixed_overhead(8624) + bitmap(N/64 * 8) + accounts(N * 240)
+ */
+export const SLAB_TIERS = {
+  micro:  { maxAccounts: 64,   dataSize: 24_008,  label: "Micro",  description: "64 slots · ~0.17 SOL" },
+  small:  { maxAccounts: 256,  dataSize: 70_112,  label: "Small",  description: "256 slots · ~0.49 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 254_528, label: "Medium", description: "1,024 slots · ~1.77 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 992_560, label: "Large",  description: "4,096 slots · ~6.91 SOL" },
+} as const;
+
+export type SlabTierKey = keyof typeof SLAB_TIERS;
+
+/** Calculate slab data size for arbitrary account count */
+export function slabDataSize(maxAccounts: number): number {
+  const FIXED_OVERHEAD = 8624;
+  const ACCOUNT_SIZE = 240;
+  const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
+  return FIXED_OVERHEAD + bitmapBytes + maxAccounts * ACCOUNT_SIZE;
+}
+
+/** All known slab data sizes for discovery */
+const ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map(t => t.dataSize);
+
+/** Legacy constant for backward compat */
+const SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 
 /** We need header(72) + config(320) + engine up to nextAccountId (928+8). Total ~1328. Use 1400 for margin. */
 const HEADER_SLICE_LENGTH = 1400;
@@ -107,18 +132,29 @@ export async function discoverMarkets(
   connection: Connection,
   programId: PublicKey,
 ): Promise<DiscoveredMarket[]> {
-  let accounts;
+  // Query all known slab sizes in parallel to discover markets of any tier
+  let rawAccounts: { pubkey: PublicKey; account: { data: Buffer | Uint8Array } }[] = [];
   try {
-    accounts = await connection.getProgramAccounts(programId, {
-      filters: [{ dataSize: SLAB_DATA_SIZE }],
-      dataSlice: { offset: 0, length: HEADER_SLICE_LENGTH },
-    });
+    const queries = ALL_SLAB_SIZES.map(size =>
+      connection.getProgramAccounts(programId, {
+        filters: [{ dataSize: size }],
+        dataSlice: { offset: 0, length: HEADER_SLICE_LENGTH },
+      })
+    );
+    const results = await Promise.allSettled(queries);
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        for (const entry of result.value) {
+          rawAccounts.push(entry as { pubkey: PublicKey; account: { data: Buffer | Uint8Array } });
+        }
+      }
+    }
   } catch (err) {
     console.warn(
-      "[discoverMarkets] dataSize filter failed, falling back to memcmp:",
+      "[discoverMarkets] dataSize filters failed, falling back to memcmp:",
       err instanceof Error ? err.message : err,
     );
-    accounts = await connection.getProgramAccounts(programId, {
+    const fallback = await connection.getProgramAccounts(programId, {
       filters: [
         {
           memcmp: {
@@ -129,7 +165,9 @@ export async function discoverMarkets(
       ],
       dataSlice: { offset: 0, length: HEADER_SLICE_LENGTH },
     });
+    rawAccounts = [...fallback] as { pubkey: PublicKey; account: { data: Buffer | Uint8Array } }[];
   }
+  const accounts = rawAccounts;
 
   const markets: DiscoveredMarket[] = [];
 

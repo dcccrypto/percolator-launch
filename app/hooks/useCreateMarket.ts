@@ -35,7 +35,8 @@ import {
 import { sendTx } from "@/lib/tx";
 import { config } from "@/lib/config";
 
-const SLAB_SIZE = 992_560;
+import { SLAB_TIERS, slabDataSize } from "@percolator/core";
+const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
 const ALL_ZEROS_FEED = "0".repeat(64);
 
 export interface CreateMarketParams {
@@ -47,6 +48,10 @@ export interface CreateMarketParams {
   invert: boolean;
   tradingFeeBps: number;
   initialMarginBps: number;
+  /** Number of trader slots (64, 256, 1024, 4096). Defaults to 4096 if omitted. */
+  maxAccounts?: number;
+  /** Slab data size in bytes. Calculated from maxAccounts if omitted. */
+  slabDataSize?: number;
 }
 
 export interface CreateMarketState {
@@ -130,12 +135,13 @@ export function useCreateMarket() {
         if (startStep <= 0) {
           setState((s) => ({ ...s, step: 0, stepLabel: STEP_LABELS[0] }));
 
-          const slabRent = await connection.getMinimumBalanceForRentExemption(SLAB_SIZE);
+          const effectiveSlabSize = params.slabDataSize ?? DEFAULT_SLAB_SIZE;
+          const slabRent = await connection.getMinimumBalanceForRentExemption(effectiveSlabSize);
           const createAccountIx = SystemProgram.createAccount({
             fromPubkey: wallet.publicKey,
             newAccountPubkey: slabKp.publicKey,
             lamports: slabRent,
-            space: SLAB_SIZE,
+            space: effectiveSlabSize,
             programId,
           });
 
@@ -196,7 +202,7 @@ export function useCreateMarket() {
             maintenanceMarginBps: (initialMarginBps / 2n).toString(),
             initialMarginBps: initialMarginBps.toString(),
             tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
-            maxAccounts: "4096",
+            maxAccounts: (params.maxAccounts ?? 4096).toString(),
             newAccountFee: "1000000",
             riskReductionThreshold: "0",
             maintenanceFeePerSlot: "0",
