@@ -1,0 +1,124 @@
+name: Build Solana Program
+
+on:
+  push:
+    paths:
+      - 'program/**'
+      - 'percolator/**'
+      - '.github/workflows/build-program.yml'
+  pull_request:
+    paths:
+      - 'program/**'
+      - 'percolator/**'
+  workflow_dispatch:
+    inputs:
+      max_accounts:
+        description: 'MAX_ACCOUNTS size (64, 256, 1024, 4096)'
+        required: false
+        default: '64'
+
+jobs:
+  build:
+    name: Build Program (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - variant: small
+            features: "test"
+            max_accounts: 64
+          - variant: full
+            features: ""
+            max_accounts: 4096
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            program/target
+          key: ${{ runner.os }}-cargo-${{ matrix.variant }}-${{ hashFiles('program/Cargo.lock') }}
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v1.18.26/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Pin blake3 to avoid edition2024
+        working-directory: program
+        run: |
+          # blake3 >= 1.6.0 uses edition2024 which needs cargo 1.85+
+          # cargo-build-sbf uses its own cargo (1.79) so we pin blake3
+          cat >> Cargo.toml <<'EOF'
+
+          [patch.crates-io]
+          blake3 = { git = "https://github.com/BLAKE3-team/BLAKE3", tag = "1.5.5" }
+          EOF
+
+      - name: Build program (MAX_ACCOUNTS=${{ matrix.max_accounts }})
+        working-directory: program
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            cargo-build-sbf --features "${{ matrix.features }}"
+          else
+            cargo-build-sbf
+          fi
+
+      - name: Build matcher
+        working-directory: program
+        run: |
+          # If matcher exists as separate crate, build it too
+          if [ -d "../matcher" ]; then
+            cd ../matcher
+            cargo-build-sbf
+          fi
+
+      - name: Upload program binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: percolator-program-${{ matrix.variant }}
+          path: |
+            program/target/deploy/*.so
+          retention-days: 30
+
+      - name: Show binary sizes
+        run: |
+          echo "Program binaries:"
+          ls -lh program/target/deploy/*.so 2>/dev/null || echo "No .so files found"
+
+  test:
+    name: Run Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            percolator/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('percolator/Cargo.lock') }}
+
+      - name: Test risk engine
+        working-directory: percolator
+        run: cargo test --all-features
+
+      - name: Test with MAX_ACCOUNTS=64
+        working-directory: percolator
+        run: cargo test --features test
