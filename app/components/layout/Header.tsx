@@ -39,6 +39,12 @@ export const Header: FC = () => {
               Markets
             </Link>
             <Link
+              href="/create"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-emerald-400/70 transition-colors hover:bg-[#1e2433] hover:text-emerald-300"
+            >
+              ✨ Create
+            </Link>
+            <Link
               href="/devnet-mint"
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-yellow-400/70 transition-colors hover:bg-[#1e2433] hover:text-yellow-300"
             >

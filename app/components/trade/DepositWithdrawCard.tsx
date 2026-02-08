@@ -11,12 +11,12 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
 
-export const DepositWithdrawCard: FC = () => {
+export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { connected } = useWallet();
   const userAccount = useUserAccount();
-  const { deposit, loading: depositLoading, error: depositError } = useDeposit();
-  const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw();
-  const { initUser, loading: initLoading, error: initError } = useInitUser();
+  const { deposit, loading: depositLoading, error: depositError } = useDeposit(slabAddress);
+  const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
+  const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
   const { config: mktConfig } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";

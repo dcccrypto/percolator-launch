@@ -26,10 +26,10 @@ function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
 }
 
-export const TradeForm: FC = () => {
+export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { connected } = useWallet();
   const userAccount = useUserAccount();
-  const { trade, loading, error } = useTrade();
+  const { trade, loading, error } = useTrade(slabAddress);
   const { params } = useEngineState();
   const { accounts, config: mktConfig } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);

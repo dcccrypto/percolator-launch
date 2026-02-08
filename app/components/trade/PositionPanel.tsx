@@ -14,10 +14,10 @@ function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
 }
 
-export const PositionPanel: FC = () => {
+export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = useUserAccount();
   const config = useMarketConfig();
-  const { trade, loading: closeLoading, error: closeError } = useTrade();
+  const { trade, loading: closeLoading, error: closeError } = useTrade(slabAddress);
   const { accounts, config: mktConfig } = useSlabState();
   const { priceE6: livePriceE6 } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
