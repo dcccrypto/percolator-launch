@@ -318,19 +318,9 @@ export function useCreateMarket() {
           ]);
           instructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
 
-          // LAST: Delegate oracle authority to crank wallet
-          // This MUST be last because SetOracleAuthority clears authority_price_e6 to 0
-          if (isAdminOracle) {
-            const cfg = getConfig();
-            const oracleAuthority = cfg.crankWallet
-              ? new PublicKey(cfg.crankWallet)
-              : wallet.publicKey;
-            const setAuthToCrankData = encodeSetOracleAuthority({ newAuthority: oracleAuthority });
-            const setAuthToCrankKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_AUTHORITY, [
-              wallet.publicKey, slabPk,
-            ]);
-            instructions.push(buildIx({ programId, keys: setAuthToCrankKeys, data: setAuthToCrankData }));
-          }
+          // NOTE: Do NOT delegate oracle authority here — SetOracleAuthority clears
+          // authority_price_e6 to 0, which would break the final crank in Step 4.
+          // Delegation happens at the very end of Step 4 instead.
 
           const sig = await sendTx({
             connection, wallet, instructions, computeUnits: 500_000,
@@ -429,17 +419,46 @@ export function useCreateMarket() {
           const topupIx = buildIx({ programId, keys: topupKeys, data: topupData });
 
           // Post-LP crank — engine needs to recognize LP capital
+          // Must push fresh price first (user is still oracle authority at this point)
+          const finalInstructions = [depositIx, topupIx];
+
+          if (isAdminOracle) {
+            const now2 = Math.floor(Date.now() / 1000);
+            const pushData2 = encodePushOraclePrice({
+              priceE6: params.initialPriceE6.toString(),
+              timestamp: now2.toString(),
+            });
+            const pushKeys2 = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
+              wallet.publicKey, slabPk,
+            ]);
+            finalInstructions.push(buildIx({ programId, keys: pushKeys2, data: pushData2 }));
+          }
+
           const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
           const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
           const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
             wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
           ]);
-          const crankIx = buildIx({ programId, keys: crankKeys, data: crankData });
+          finalInstructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
+
+          // LAST: Delegate oracle authority to crank wallet
+          // SetOracleAuthority clears authority_price_e6 to 0 — must be absolute last
+          if (isAdminOracle) {
+            const cfg = getConfig();
+            const oracleAuthority = cfg.crankWallet
+              ? new PublicKey(cfg.crankWallet)
+              : wallet.publicKey;
+            const setAuthToCrankData = encodeSetOracleAuthority({ newAuthority: oracleAuthority });
+            const setAuthToCrankKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_AUTHORITY, [
+              wallet.publicKey, slabPk,
+            ]);
+            finalInstructions.push(buildIx({ programId, keys: setAuthToCrankKeys, data: setAuthToCrankData }));
+          }
 
           const sig = await sendTx({
             connection, wallet,
-            instructions: [depositIx, topupIx, crankIx],
-            computeUnits: 300_000,
+            instructions: finalInstructions,
+            computeUnits: 400_000,
           });
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
