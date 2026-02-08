@@ -235,6 +235,17 @@ export const ACCOUNTS_WITHDRAW_INSURANCE: readonly AccountSpec[] = [
   { name: "vaultPda", signer: false, writable: false },
 ] as const;
 
+/**
+ * InitVamm (matcher instruction): 4 accounts
+ * Sent to the matcher program to configure a vAMM context for an LP.
+ */
+export const ACCOUNTS_INIT_VAMM: readonly AccountSpec[] = [
+  { name: "lpOwner", signer: true, writable: true },
+  { name: "matcherCtx", signer: false, writable: true },
+  { name: "slab", signer: false, writable: false },
+  { name: "lpPda", signer: false, writable: false },
+] as const;
+
 // ============================================================================
 // ACCOUNT META BUILDERS
 // ============================================================================

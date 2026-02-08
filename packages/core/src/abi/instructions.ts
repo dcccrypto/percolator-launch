@@ -419,3 +419,108 @@ export function encodeResolveMarket(): Uint8Array {
 export function encodeWithdrawInsurance(): Uint8Array {
   return encU8(IX_TAG.WithdrawInsurance);
 }
+
+// ============================================================================
+// MATCHER INSTRUCTIONS (sent to matcher program, not percolator)
+// ============================================================================
+
+/**
+ * Matcher instruction tags
+ */
+export const MATCHER_IX_TAG = {
+  InitPassive: 0,
+  InitCurve: 1,
+  InitVamm: 2,
+} as const;
+
+/**
+ * InitVamm matcher instruction data (66 bytes)
+ * Tag 2 — configures a vAMM LP with spread/impact pricing.
+ *
+ * Layout: tag(1) + mode(1) + tradingFeeBps(4) + baseSpreadBps(4) +
+ *         maxTotalBps(4) + impactKBps(4) + liquidityNotionalE6(16) +
+ *         maxFillAbs(16) + maxInventoryAbs(16)
+ */
+export interface InitVammArgs {
+  mode: number;                         // 0 = passive, 1 = vAMM
+  tradingFeeBps: number;                // Trading fee in bps (e.g. 5 = 0.05%)
+  baseSpreadBps: number;                // Base spread in bps (e.g. 10 = 0.10%)
+  maxTotalBps: number;                  // Max total (spread + impact + fee) in bps
+  impactKBps: number;                   // Impact coefficient at full liquidity
+  liquidityNotionalE6: bigint | string; // Notional liquidity for impact calc (e6)
+  maxFillAbs: bigint | string;          // Max fill per trade (abs units)
+  maxInventoryAbs: bigint | string;     // Max inventory (0 = unlimited)
+}
+
+export function encodeInitVamm(args: InitVammArgs): Uint8Array {
+  return concatBytes(
+    encU8(MATCHER_IX_TAG.InitVamm),
+    encU8(args.mode),
+    encU32(args.tradingFeeBps),
+    encU32(args.baseSpreadBps),
+    encU32(args.maxTotalBps),
+    encU32(args.impactKBps),
+    encU128(args.liquidityNotionalE6),
+    encU128(args.maxFillAbs),
+    encU128(args.maxInventoryAbs),
+  );
+}
+
+// ============================================================================
+// SMART PRICE ROUTER — quote computation for LP selection
+// ============================================================================
+
+/**
+ * Parsed vAMM matcher parameters (from on-chain matcher context account)
+ */
+export interface VammMatcherParams {
+  mode: number;                    // 0 = Passive, 1 = vAMM
+  tradingFeeBps: number;
+  baseSpreadBps: number;
+  maxTotalBps: number;
+  impactKBps: number;
+  liquidityNotionalE6: bigint;
+}
+
+/** Magic bytes identifying a vAMM matcher context: "PERCMATC" as u64 LE */
+export const VAMM_MAGIC = 0x5045_5243_4d41_5443n;
+
+/** Offset into matcher context where vAMM params start */
+export const CTX_VAMM_OFFSET = 64;
+
+const BPS_DENOM = 10_000n;
+
+/**
+ * Compute execution price for a given LP quote.
+ * For buys (isLong=true): price above oracle.
+ * For sells (isLong=false): price below oracle.
+ */
+export function computeVammQuote(
+  params: VammMatcherParams,
+  oraclePriceE6: bigint,
+  tradeSize: bigint,
+  isLong: boolean,
+): bigint {
+  const absSize = tradeSize < 0n ? -tradeSize : tradeSize;
+  const absNotionalE6 = (absSize * oraclePriceE6) / 1_000_000n;
+
+  // Impact for vAMM mode
+  let impactBps = 0n;
+  if (params.mode === 1 && params.liquidityNotionalE6 > 0n) {
+    impactBps = (absNotionalE6 * BigInt(params.impactKBps)) / params.liquidityNotionalE6;
+  }
+
+  // Total = base_spread + trading_fee + impact, capped at max_total
+  const maxTotal = BigInt(params.maxTotalBps);
+  const baseFee = BigInt(params.baseSpreadBps) + BigInt(params.tradingFeeBps);
+  const maxImpact = maxTotal > baseFee ? maxTotal - baseFee : 0n;
+  const clampedImpact = impactBps < maxImpact ? impactBps : maxImpact;
+  let totalBps = baseFee + clampedImpact;
+  if (totalBps > maxTotal) totalBps = maxTotal;
+
+  if (isLong) {
+    return (oraclePriceE6 * (BPS_DENOM + totalBps)) / BPS_DENOM;
+  } else {
+    return (oraclePriceE6 * (BPS_DENOM - totalBps)) / BPS_DENOM;
+  }
+}

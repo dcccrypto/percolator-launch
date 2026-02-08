@@ -95,6 +95,13 @@ const QuickLaunchPanel: FC<{
     }
   }, [quickLaunch.config]);
 
+  // vAMM state
+  const [enableVamm, setEnableVamm] = useState(false);
+  const [vammSpreadBps, setVammSpreadBps] = useState(10);
+  const [vammImpactKBps, setVammImpactKBps] = useState(100);
+  const [vammMaxTotalBps, setVammMaxTotalBps] = useState(200);
+  const [vammLiquidityE6, setVammLiquidityE6] = useState("10000000");
+
   const effectiveTradingFee = tradingFeeBps ?? quickLaunch.config?.tradingFeeBps ?? 30;
   const effectiveMargin = initialMarginBps ?? quickLaunch.config?.initialMarginBps ?? 1000;
   const effectiveLpCollateral = lpCollateral ?? quickLaunch.config?.lpCollateral ?? "1000000";
@@ -326,6 +333,65 @@ const QuickLaunchPanel: FC<{
                   <p className="mt-0.5 text-[9px] text-[#52525b]">Base units for insurance</p>
                 </div>
               </div>
+
+              {/* vAMM Toggle */}
+              <div className="border-t border-[#1e1e2e] pt-3">
+                <label className="flex items-center gap-2 text-sm text-[#e4e4e7]">
+                  <input
+                    type="checkbox"
+                    checked={enableVamm}
+                    onChange={(e) => setEnableVamm(e.target.checked)}
+                    className="rounded border-[#1e1e2e]"
+                  />
+                  Enable vAMM LP
+                </label>
+                <p className="mt-0.5 text-[9px] text-[#52525b]">Virtual AMM with spread/impact pricing. Provides tighter quotes than passive LP for liquid markets.</p>
+              </div>
+
+              {enableVamm && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-medium text-[#71717a] mb-1">Base Spread (bps)</label>
+                    <input
+                      type="number"
+                      value={vammSpreadBps}
+                      onChange={(e) => setVammSpreadBps(Math.max(1, Math.min(500, Number(e.target.value))))}
+                      className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                    />
+                    <p className="mt-0.5 text-[9px] text-[#52525b]">{(vammSpreadBps / 100).toFixed(2)}% minimum spread</p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-[#71717a] mb-1">Impact K (bps)</label>
+                    <input
+                      type="number"
+                      value={vammImpactKBps}
+                      onChange={(e) => setVammImpactKBps(Math.max(1, Math.min(1000, Number(e.target.value))))}
+                      className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                    />
+                    <p className="mt-0.5 text-[9px] text-[#52525b]">Price impact coefficient</p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-[#71717a] mb-1">Max Total (bps)</label>
+                    <input
+                      type="number"
+                      value={vammMaxTotalBps}
+                      onChange={(e) => setVammMaxTotalBps(Math.max(10, Math.min(1000, Number(e.target.value))))}
+                      className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                    />
+                    <p className="mt-0.5 text-[9px] text-[#52525b]">Cap on spread + impact + fee</p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-[#71717a] mb-1">Liquidity (notional)</label>
+                    <input
+                      type="text"
+                      value={vammLiquidityE6}
+                      onChange={(e) => setVammLiquidityE6(e.target.value.replace(/[^0-9]/g, ""))}
+                      className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                    />
+                    <p className="mt-0.5 text-[9px] text-[#52525b]">Virtual liquidity depth (e6)</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
