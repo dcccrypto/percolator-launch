@@ -76,12 +76,10 @@ export interface CreateMarketState {
 
 const STEP_LABELS = [
   "Creating slab account...",
-  "Creating vault token account...",
-  "Initializing market...",
+  "Initializing market & vault...",
   "Oracle setup & pre-LP crank...",
   "Initializing LP...",
-  "Depositing collateral & insurance...",
-  "Final crank...",
+  "Depositing collateral, insurance & final crank...",
 ];
 
 export function useCreateMarket() {
@@ -172,7 +170,7 @@ export function useCreateMarket() {
           }));
         }
 
-        // Step 1: Create vault ATA
+        // Step 1: Create vault ATA + InitMarket (merged — 1 tx instead of 2)
         if (startStep <= 1) {
           setState((s) => ({ ...s, step: 1, stepLabel: STEP_LABELS[1] }));
 
@@ -183,22 +181,6 @@ export function useCreateMarket() {
             vaultPda,
             params.mint,
           );
-
-          const sig = await sendTx({
-            connection,
-            wallet,
-            instructions: [createAtaIx],
-            computeUnits: 100_000,
-          });
-
-          setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
-        } else {
-          vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
-        }
-
-        // Step 2: InitMarket
-        if (startStep <= 2) {
-          setState((s) => ({ ...s, step: 2, stepLabel: STEP_LABELS[2] }));
 
           const initialMarginBps = BigInt(params.initialMarginBps);
           const initMarketData = encodeInitMarket({
@@ -237,20 +219,23 @@ export function useCreateMarket() {
             WELL_KNOWN.systemProgram,
           ]);
 
-          const ix = buildIx({ programId, keys: initMarketKeys, data: initMarketData });
+          const initMarketIx = buildIx({ programId, keys: initMarketKeys, data: initMarketData });
           const sig = await sendTx({
             connection,
             wallet,
-            instructions: [ix],
+            instructions: [createAtaIx, initMarketIx],
+            computeUnits: 200_000,
           });
 
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
+        } else {
+          vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
         }
 
-        // Step 3: Oracle setup + UpdateConfig + pre-LP crank
+        // Step 2: Oracle setup + UpdateConfig + pre-LP crank
         // MidTermDev does this BEFORE InitLP — market must be cranked first
-        if (startStep <= 3) {
-          setState((s) => ({ ...s, step: 3, stepLabel: STEP_LABELS[3] }));
+        if (startStep <= 2) {
+          setState((s) => ({ ...s, step: 2, stepLabel: STEP_LABELS[2] }));
 
           const instructions: TransactionInstruction[] = [];
 
@@ -320,9 +305,9 @@ export function useCreateMarket() {
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
 
-        // Step 4: InitLP with matcher program (atomic: create ctx + init vAMM + init LP)
-        if (startStep <= 4) {
-          setState((s) => ({ ...s, step: 4, stepLabel: STEP_LABELS[4] }));
+        // Step 3: InitLP with matcher program (atomic: create ctx + init vAMM + init LP)
+        if (startStep <= 3) {
+          setState((s) => ({ ...s, step: 3, stepLabel: STEP_LABELS[3] }));
 
           const userAta = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
           const matcherProgramId = new PublicKey(getConfig().matcherProgramId);
@@ -388,9 +373,9 @@ export function useCreateMarket() {
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
 
-        // Step 5: DepositCollateral + TopUpInsurance
-        if (startStep <= 5) {
-          setState((s) => ({ ...s, step: 5, stepLabel: STEP_LABELS[5] }));
+        // Step 4: DepositCollateral + TopUpInsurance + Final Crank (merged)
+        if (startStep <= 4) {
+          setState((s) => ({ ...s, step: 4, stepLabel: STEP_LABELS[4] }));
 
           const userAta = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
 
@@ -410,36 +395,18 @@ export function useCreateMarket() {
           ]);
           const topupIx = buildIx({ programId, keys: topupKeys, data: topupData });
 
-          const sig = await sendTx({
-            connection, wallet,
-            instructions: [depositIx, topupIx],
-            computeUnits: 200_000,
-          });
-          setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
-        }
-
-        // Step 6: Post-LP crank — engine needs to recognize LP capital
-        {
-          setState((s) => ({ ...s, step: 6, stepLabel: "Final crank..." }));
-
-          const instructions: TransactionInstruction[] = [];
-          const isAdminOracleMarket = params.oracleFeed === ALL_ZEROS_FEED;
-
-          if (isAdminOracleMarket) {
-            // Push fresh price from crank wallet perspective — but we're still the admin at this point
-            // The crank wallet is now the oracle authority, so we prepend a crank + oracle push
-            // Actually, the user can still crank (callerIdx=65535 = permissionless)
-          }
-
-          const oracleAccount = isAdminOracleMarket ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
+          // Post-LP crank — engine needs to recognize LP capital
+          const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
           const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
           const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
             wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
           ]);
-          instructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
+          const crankIx = buildIx({ programId, keys: crankKeys, data: crankData });
 
           const sig = await sendTx({
-            connection, wallet, instructions, computeUnits: 200_000,
+            connection, wallet,
+            instructions: [depositIx, topupIx, crankIx],
+            computeUnits: 300_000,
           });
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
@@ -472,7 +439,7 @@ export function useCreateMarket() {
         setState((s) => ({
           ...s,
           loading: false,
-          step: 7,
+          step: 5,
           stepLabel: "Market created!",
         }));
       } catch (e) {

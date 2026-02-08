@@ -156,12 +156,12 @@ const QuickLaunchPanel: FC<{
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm">
           <h2 className="mb-4 text-lg font-semibold text-[#e4e4e7]">Quick Launch — Creating Market</h2>
           <div className="space-y-3">
-            {[0, 1, 2, 3, 4, 5].map((i) => {
+            {[0, 1, 2, 3, 4].map((i) => {
               let status: "pending" | "active" | "done" | "error" = "pending";
-              if (state.step > i || state.step === 6) status = "done";
+              if (state.step > i || state.step === 5) status = "done";
               else if (state.step === i && state.loading) status = "active";
               else if (state.step === i && state.error) status = "error";
-              const labels = ["Create slab account", "Create vault token account", "Initialize market", "Oracle setup & crank", "Initialize LP", "Deposit collateral & insurance"];
+              const labels = ["Create slab account", "Initialize market & vault", "Oracle setup & crank", "Initialize LP", "Deposit, insurance & finalize"];
               return (
                 <div key={i} className="flex items-center gap-3">
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
@@ -183,7 +183,7 @@ const QuickLaunchPanel: FC<{
               </div>
             </div>
           )}
-          {state.step === 6 && state.slabAddress && (
+          {state.step === 5 && state.slabAddress && (
             <div className="mt-4 rounded-lg bg-green-900/20 p-4">
               <p className="text-sm font-medium text-green-300">Market created successfully!</p>
               <p className="mt-1 font-mono text-xs text-green-400">Slab: {state.slabAddress}</p>
@@ -587,12 +587,12 @@ export const CreateMarketWizard: FC = () => {
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm">
           <h2 className="mb-4 text-lg font-semibold text-[#e4e4e7]">Creating Market</h2>
           <div className="space-y-3">
-            {[0, 1, 2, 3, 4, 5].map((i) => {
+            {[0, 1, 2, 3, 4].map((i) => {
               let status: "pending" | "active" | "done" | "error" = "pending";
-              if (state.step > i || state.step === 6) status = "done";
+              if (state.step > i || state.step === 5) status = "done";
               else if (state.step === i && state.loading) status = "active";
               else if (state.step === i && state.error) status = "error";
-              const labels = ["Create slab account", "Create vault token account", "Initialize market", "Oracle setup & crank", "Initialize LP", "Deposit collateral & insurance"];
+              const labels = ["Create slab account", "Initialize market & vault", "Oracle setup & crank", "Initialize LP", "Deposit, insurance & finalize"];
               return (
                 <div key={i} className="flex items-center gap-3">
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
@@ -615,7 +615,7 @@ export const CreateMarketWizard: FC = () => {
               </div>
             </div>
           )}
-          {state.step === 6 && state.slabAddress && (
+          {state.step === 5 && state.slabAddress && (
             <div className="mt-4 rounded-lg bg-green-900/20 p-4">
               <p className="text-sm font-medium text-green-300">Market created successfully!</p>
               <p className="mt-1 font-mono text-xs text-green-400">Slab: {state.slabAddress}</p>
