@@ -49,14 +49,17 @@ jobs:
       - name: Generate compatible lockfile
         working-directory: program
         run: |
-          # Use Rust 1.78 to generate lockfile — resolves deps compatible with rustc 1.78/1.79
-          # This avoids indexmap 2.12+, time-macros 0.2.27+, etc that need newer Rust
+          # Use Rust 1.78 to generate lockfile
           rm -f Cargo.lock
           cargo generate-lockfile
+          # Pin crates that use edition2024 Cargo.toml features (incompatible with 1.78)
+          cargo update time-macros --precise 0.2.26 2>/dev/null || true
+          cargo update time-core --precise 0.1.2 2>/dev/null || true
+          cargo update time --precise 0.3.36 2>/dev/null || true
           echo "Lockfile version:"
           head -3 Cargo.lock
-          echo "indexmap version:"
-          grep -A1 'name = "indexmap"' Cargo.lock | grep version || echo "not found"
+          echo "time-macros version:"
+          grep -A1 'name = "time-macros"' Cargo.lock | grep version || echo "not found"
 
       - name: Build program
         working-directory: program
