@@ -3,7 +3,11 @@ export function formatTokenAmount(raw: bigint, decimals: number = 6): string {
   const whole = raw / divisor;
   const frac = raw % divisor;
   const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
-  return fracStr ? `${whole}.${fracStr}` : whole.toString();
+  return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString();
+}
+
+export function formatPriceE6(priceE6: bigint): string {
+  return formatTokenAmount(priceE6, 6);
 }
 
 export function formatBps(bps: bigint | number): string {
@@ -18,4 +22,41 @@ export function formatUsd(priceE6: bigint): string {
 
 export function shortenAddress(address: string, chars: number = 4): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
+}
+
+export function formatSlotAge(currentSlot: bigint, targetSlot: bigint): string {
+  const diff = currentSlot - targetSlot;
+  if (diff <= 0n) return "0s";
+  const seconds = Number(diff) / 2.5;
+  if (seconds < 60) return `${seconds.toFixed(0)}s`;
+  if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`;
+  return `${(seconds / 3600).toFixed(1)}h`;
+}
+
+export function formatI128Amount(raw: bigint, decimals: number = 6): string {
+  const negative = raw < 0n;
+  const abs = negative ? -raw : raw;
+  const divisor = BigInt(10 ** decimals);
+  const whole = abs / divisor;
+  const formatted = whole.toLocaleString();
+  return negative ? `-${formatted}` : formatted;
+}
+
+/** Format PnL with full precision and +/- prefix */
+export function formatPnl(raw: bigint, decimals: number = 6): string {
+  const negative = raw < 0n;
+  const abs = negative ? -raw : raw;
+  const divisor = BigInt(10 ** decimals);
+  const whole = abs / divisor;
+  const frac = abs % divisor;
+  const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
+  const num = fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString();
+  if (negative) return `-${num}`;
+  if (raw > 0n) return `+${num}`;
+  return num;
+}
+
+/** Format margin percentage from bps */
+export function formatMarginPct(marginBps: number): string {
+  return `${(marginBps / 100).toFixed(1)}%`;
 }

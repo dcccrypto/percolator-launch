@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatTokenAmount, formatBps, formatUsd } from "../lib/format";
+import { formatTokenAmount, formatBps, formatUsd, formatPnl, formatSlotAge, shortenAddress } from "../lib/format";
 
 describe("formatTokenAmount", () => {
   it("formats zero", () => expect(formatTokenAmount(0n)).toBe("0"));
@@ -18,4 +18,19 @@ describe("formatBps", () => {
 describe("formatUsd", () => {
   it("formats $1", () => expect(formatUsd(1000000n)).toContain("1"));
   it("formats $0.50", () => expect(formatUsd(500000n)).toContain("0.5"));
+});
+
+describe("formatPnl", () => {
+  it("formats positive PnL with +", () => expect(formatPnl(1500000n)).toBe("+1.5"));
+  it("formats negative PnL with -", () => expect(formatPnl(-2000000n)).toBe("-2"));
+  it("formats zero", () => expect(formatPnl(0n)).toBe("0"));
+});
+
+describe("formatSlotAge", () => {
+  it("formats seconds", () => expect(formatSlotAge(100n, 90n)).toBe("4s"));
+  it("formats zero for same slot", () => expect(formatSlotAge(100n, 100n)).toBe("0s"));
+});
+
+describe("shortenAddress", () => {
+  it("shortens", () => expect(shortenAddress("abcdefghijklmnop")).toBe("abcd...mnop"));
 });

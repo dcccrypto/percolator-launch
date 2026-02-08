@@ -1,0 +1,43 @@
+[package]
+name = "percolator-prog"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "percolator_prog"
+path = "src/percolator.rs"
+
+[features]
+no-entrypoint = []
+test-sbf = []
+devnet = []
+test = ["percolator/test"]  # Use MAX_ACCOUNTS=64 for tests
+cu-audit = []  # Enable compute unit checkpoints for CU auditing
+unsafe_close = []  # Skip all validation in CloseSlab instruction
+
+[dependencies]
+solana-program = "1.18"
+spl-token = { version = "4.0", features = ["no-entrypoint"] }
+thiserror = "1.0"
+bytemuck = { version = "1.14", features = ["derive", "min_const_generics"] }
+pyth-sdk-solana = "0.10"
+pinocchio = "0.6"
+arrayref = "0.3"
+num-derive = "0.4"
+num-traits = "0.2"
+percolator = { path = "../percolator" }
+
+[dev-dependencies]
+bincode = "1"
+solana-sdk = "1.18"
+solana-client = "1.18"
+rand = "0.8"
+rand_xorshift = "0.3"
+proptest = "1.4"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serial_test = "3"
+litesvm = "0.1"
+shellexpand = "3"
+serde_json = "1"

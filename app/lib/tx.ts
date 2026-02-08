@@ -1,11 +1,13 @@
 import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram } from "@solana/web3.js";
 import type { WalletContextState } from "@solana/wallet-adapter-react";
+import type { Signer } from "@solana/web3.js";
 
 export interface SendTxParams {
   connection: Connection;
   wallet: WalletContextState;
   instructions: TransactionInstruction[];
   computeUnits?: number;
+  signers?: Signer[];
 }
 
 export async function sendTx({
@@ -13,6 +15,7 @@ export async function sendTx({
   wallet,
   instructions,
   computeUnits = 200_000,
+  signers = [],
 }: SendTxParams): Promise<string> {
   if (!wallet.publicKey || !wallet.signTransaction) {
     throw new Error("Wallet not connected");
@@ -28,6 +31,11 @@ export async function sendTx({
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
   tx.feePayer = wallet.publicKey;
+
+  // Sign with any additional signers (e.g. slab keypair for createAccount)
+  if (signers.length > 0) {
+    tx.partialSign(...signers);
+  }
 
   // Use signTransaction + sendRawTransaction to bypass Phantom's RPC
   // (Phantom's sendTransaction routes through its own endpoint which rate-limits)
