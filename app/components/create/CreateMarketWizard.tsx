@@ -142,6 +142,9 @@ const QuickLaunchPanel: FC<{
       initialMarginBps: effectiveMargin,
       maxAccounts: tier.maxAccounts,
       slabDataSize: tier.dataSize,
+      symbol: c.symbol ?? "UNKNOWN",
+      name: c.name ?? "Unknown Token",
+      decimals: c.decimals ?? 6,
     };
     create(params);
   };
@@ -541,6 +544,9 @@ export const CreateMarketWizard: FC = () => {
       initialMarginBps,
       maxAccounts: selectedTier.maxAccounts,
       slabDataSize: selectedTier.dataSize,
+      symbol: symbol || "UNKNOWN",
+      name: name || "Unknown Token",
+      decimals: decimals,
     };
     create(params);
   };

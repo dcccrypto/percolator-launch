@@ -56,6 +56,12 @@ export interface CreateMarketParams {
   maxAccounts?: number;
   /** Slab data size in bytes. Calculated from maxAccounts if omitted. */
   slabDataSize?: number;
+  /** Token symbol for dashboard */
+  symbol?: string;
+  /** Token name for dashboard */
+  name?: string;
+  /** Token decimals */
+  decimals?: number;
 }
 
 export interface CreateMarketState {
@@ -397,6 +403,30 @@ export function useCreateMarket() {
             computeUnits: 200_000,
           });
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
+        }
+
+        // Register market in Supabase so dashboard can see it
+        try {
+          await fetch("/api/markets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              slab_address: slabPk.toBase58(),
+              mint_address: params.mint.toBase58(),
+              symbol: params.symbol ?? "UNKNOWN",
+              name: params.name ?? "Unknown Token",
+              decimals: params.decimals ?? 6,
+              deployer: wallet.publicKey.toBase58(),
+              oracle_authority: isAdminOracle ? wallet.publicKey.toBase58() : null,
+              initial_price_e6: params.initialPriceE6.toString(),
+              max_leverage: Math.floor(10000 / Number(params.initialMarginBps)),
+              trading_fee_bps: Number(params.tradingFeeBps),
+              lp_collateral: params.lpCollateral.toString(),
+            }),
+          });
+        } catch {
+          // Non-fatal — market is on-chain even if DB write fails
+          console.warn("Failed to register market in dashboard DB");
         }
 
         // Done!
