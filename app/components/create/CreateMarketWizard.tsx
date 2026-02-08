@@ -76,7 +76,7 @@ const QuickLaunchPanel: FC<{
   const { publicKey } = useWallet();
   const { state, create, reset } = useCreateMarket();
   const [quickMint, setQuickMint] = useState("");
-  const [quickSlabTier, setQuickSlabTier] = useState<SlabTierKey>("micro");
+  const [quickSlabTier, setQuickSlabTier] = useState<SlabTierKey>("small");
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Overridable params — initialized from auto-config when it loads
   const [tradingFeeBps, setTradingFeeBps] = useState<number | null>(null);
@@ -443,7 +443,7 @@ export const CreateMarketWizard: FC = () => {
   const [dexPoolAddress, setDexPoolAddress] = useState("");
   const [invert, setInvert] = useState(false);
 
-  const [slabTier, setSlabTier] = useState<SlabTierKey>("micro");
+  const [slabTier, setSlabTier] = useState<SlabTierKey>("small");
   const [tradingFeeBps, setTradingFeeBps] = useState(30);
   const [initialMarginBps, setInitialMarginBps] = useState(1000);
 
