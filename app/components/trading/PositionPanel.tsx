@@ -48,8 +48,7 @@ export const PositionPanel: FC = () => {
           <div className="flex items-center justify-between">
             <span className="text-xs text-slate-500">Unrealized PnL</span>
             <span className={`text-sm font-medium ${pnlColor}`}>
-              {account.pnl > 0n ? "+" : ""}{formatTokenAmount(account.pnl < 0n ? -account.pnl : account.pnl)}
-              {account.pnl < 0n ? " (loss)" : ""}
+              {account.pnl > 0n ? "+" : account.pnl < 0n ? "-" : ""}{formatTokenAmount(account.pnl < 0n ? -account.pnl : account.pnl)}
             </span>
           </div>
         </div>

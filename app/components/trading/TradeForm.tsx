@@ -165,7 +165,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {lastSig && (
         <p className="mt-2 text-xs text-slate-500">
           Tx:{" "}
-          <a href={`https://explorer.solana.com/tx/${lastSig}`} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">
+          <a href={`https://explorer.solana.com/tx/${lastSig}${typeof window !== "undefined" && localStorage.getItem("percolator_network") === "mainnet" ? "" : "?cluster=devnet"}`} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">
             {lastSig.slice(0, 16)}...
           </a>
         </p>
