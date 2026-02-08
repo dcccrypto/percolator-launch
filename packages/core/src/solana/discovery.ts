@@ -166,7 +166,7 @@ export async function discoverMarkets(
         {
           memcmp: {
             offset: 0,
-            bytes: "ERjBEaJzTfy", // base58 of PERCOLAT (8 bytes)
+            bytes: "F6P2QNqpQV5", // base58 of TALOCREP (u64 LE magic)
           },
         },
       ],
