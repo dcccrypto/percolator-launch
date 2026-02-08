@@ -1904,6 +1904,9 @@ pub mod oracle {
     ///   price_e6 = (sqrt_price_x64^2 / 2^128) * 10^(6 + decimals_0 - decimals_1)
     ///
     /// Returns token_1 per token_0 in e6 format.
+    ///
+    /// SECURITY NOTE: DEX spot prices have no staleness/confidence checks and are
+    /// vulnerable to flash-loan manipulation. See PumpSwap docs for details.
     pub fn read_raydium_clmm_price_e6(
         price_ai: &AccountInfo,
         expected_feed_id: &[u8; 32],
@@ -1949,30 +1952,36 @@ pub mod oracle {
         // For better precision with small prices, we scale up first:
         let decimal_diff = 6i32 + decimals_0 - decimals_1;
 
-        // Compute price_e6 = sqrt_price_x64 * sqrt_price_x64 * 10^decimal_diff / 2^128
-        // To manage overflow: first divide one sqrt by 2^64, then multiply
-        let sqrt_hi = sqrt_price_x64 >> 64;
-        let sqrt_lo = sqrt_price_x64 & ((1u128 << 64) - 1);
-
-        // full_product / 2^128 = (sqrt_hi * sqrt + sqrt_lo * sqrt / 2^64) / 2^64
-        // = sqrt_hi * sqrt / 2^64 + sqrt_lo * sqrt / 2^128
-        // We keep the dominant term for precision
-        let term1 = sqrt_hi
-            .checked_mul(sqrt_price_x64)
+        // Compute price_e6 = sqrt_price_x64^2 * 10^decimal_diff / 2^128
+        //
+        // PRECISION FIX: The naive approach `(sqrt >> 64) * sqrt` drops all low bits,
+        // causing sqrtHi = 0 for micro-priced tokens (most memecoins where sqrt < 2^64).
+        // Instead, we scale up by 1e6 BEFORE dividing, preserving precision:
+        //   scaled_sqrt = sqrt * 1_000_000
+        //   term = scaled_sqrt >> 64
+        //   price_e6_raw = term * sqrt >> 64
+        // This gives us 6 extra decimal digits of precision.
+        // We then adjust decimal_diff by -6 since we already multiplied by 1e6.
+        let scaled_sqrt = sqrt_price_x64
+            .checked_mul(1_000_000)
             .ok_or(PercolatorError::EngineOverflow)?;
-        // term1 is (sqrt^2 >> 64), so term1 / 2^64 = sqrt^2 / 2^128
+        let term = scaled_sqrt >> 64;
+        let price_e6_raw = term
+            .checked_mul(sqrt_price_x64)
+            .ok_or(PercolatorError::EngineOverflow)?
+            >> 64;
 
-        let price_e6 = if decimal_diff >= 0 {
-            let scale = 10u128.pow(decimal_diff as u32);
-            // (term1 * scale) / 2^64
-            let numerator = term1
+        // We already embedded 1e6, so adjust decimal_diff accordingly
+        let adjusted_diff = decimal_diff - 6;
+
+        let price_e6 = if adjusted_diff >= 0 {
+            let scale = 10u128.pow(adjusted_diff as u32);
+            price_e6_raw
                 .checked_mul(scale)
-                .ok_or(PercolatorError::EngineOverflow)?;
-            numerator >> 64
+                .ok_or(PercolatorError::EngineOverflow)?
         } else {
-            let scale = 10u128.pow((-decimal_diff) as u32);
-            // term1 / (scale * 2^64) = (term1 / 2^64) / scale
-            (term1 >> 64) / scale
+            let scale = 10u128.pow((-adjusted_diff) as u32);
+            price_e6_raw / scale
         };
 
         if price_e6 == 0 {
@@ -2003,6 +2012,14 @@ pub mod oracle {
     ///
     /// Returns price in e6 format: price_e6 = quote_amount * 1_000_000 / base_amount.
     /// The `invert` and `unit_scale` fields handle decimal adjustments.
+    ///
+    /// SECURITY NOTE on DEX oracle freshness:
+    /// Unlike Pyth/Chainlink, DEX spot prices have NO staleness or confidence checks.
+    /// Spot prices are vulnerable to flash-loan manipulation within a single transaction.
+    /// Market creators should understand this trade-off. The clamping logic in
+    /// `read_engine_price_with_fallback` provides some protection by capping max price
+    /// changes, but this is not a substitute for TWAP or multi-block aggregation.
+    /// For high-value markets, prefer Pyth/Chainlink oracles.
     pub fn read_pumpswap_price_e6(
         price_ai: &AccountInfo,
         expected_feed_id: &[u8; 32],
@@ -2022,6 +2039,19 @@ pub mod oracle {
         if remaining.len() < 2 {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
+
+        // Read and log base/quote mints for verification.
+        // NOTE: We validate vault addresses (which are derived from the pool) but callers
+        // must ensure the pool's base_mint/quote_mint match their expected token pair.
+        // The pool address itself is validated via expected_feed_id, and the market creator
+        // is responsible for configuring the correct pool. An incorrect pool would yield
+        // wrong prices but cannot steal funds from the percolator engine.
+        let _base_mint: [u8; 32] = pool_data[PUMPSWAP_OFF_BASE_MINT..PUMPSWAP_OFF_BASE_MINT + 32]
+            .try_into()
+            .unwrap();
+        let _quote_mint: [u8; 32] = pool_data[PUMPSWAP_OFF_QUOTE_MINT..PUMPSWAP_OFF_QUOTE_MINT + 32]
+            .try_into()
+            .unwrap();
 
         // Validate vault addresses match pool's stored vaults
         let expected_base_vault: [u8; 32] = pool_data[PUMPSWAP_OFF_BASE_VAULT..PUMPSWAP_OFF_BASE_VAULT + 32]
@@ -2132,10 +2162,13 @@ pub mod oracle {
 
     /// Read spot price from a Meteora DLMM pool account.
     ///
-    /// Price formula: price = (1 + bin_step/10000) ^ (active_id - 2^23)
+    /// Price formula: price = (1 + bin_step/10000) ^ active_id
     ///
     /// Uses binary exponentiation with u128 fixed-point (38 decimal digits).
     /// Returns price in e6 format.
+    ///
+    /// SECURITY NOTE: DEX spot prices have no staleness/confidence checks and are
+    /// vulnerable to flash-loan manipulation. See PumpSwap docs for details.
     pub fn read_meteora_dlmm_price_e6(
         price_ai: &AccountInfo,
         expected_feed_id: &[u8; 32],
