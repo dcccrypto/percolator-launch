@@ -9,6 +9,7 @@ const CA = "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump";
 export default function Home() {
   const [copied, setCopied] = useState(false);
   const [stats, setStats] = useState({ markets: 0, volume: 0, insurance: 0 });
+  const [featured, setFeatured] = useState<{ slab_address: string; symbol: string | null; volume_total: number }[]>([]);
 
   const copyCA = () => {
     navigator.clipboard.writeText(CA);
@@ -18,13 +19,16 @@ export default function Home() {
 
   useEffect(() => {
     async function loadStats() {
-      const { data } = await supabase.from("markets_with_stats").select("volume_total, insurance_fund");
+      const { data } = await supabase.from("markets_with_stats").select("slab_address, symbol, volume_total, insurance_fund");
       if (data) {
         setStats({
           markets: data.length,
           volume: data.reduce((s, m) => s + (m.volume_total || 0), 0),
           insurance: data.reduce((s, m) => s + (m.insurance_fund || 0), 0),
         });
+        // Top 3 by volume
+        const sorted = [...data].sort((a, b) => (b.volume_total || 0) - (a.volume_total || 0)).slice(0, 3);
+        setFeatured(sorted.map((m) => ({ slab_address: m.slab_address, symbol: m.symbol, volume_total: m.volume_total || 0 })));
       }
     }
     loadStats();
@@ -55,11 +59,11 @@ export default function Home() {
             Percolator
           </h1>
           <p className="mx-auto mb-4 max-w-xl text-xl font-medium text-slate-300 md:text-2xl">
-            Perpetual futures for any token.
+            Trade any token with leverage. No permission needed.
           </p>
           <p className="mx-auto mb-10 max-w-2xl text-base text-slate-500">
             Deploy a leveraged perpetual futures market on Solana in one click.
-            No smart contract. No permission. Just paste a token mint and go.
+            No smart contract. No governance. Just paste a token mint and go.
           </p>
 
           {/* CTA */}
@@ -151,6 +155,37 @@ export default function Home() {
           ))}
         </div>
       </div>
+
+      {/* Featured Markets */}
+      {featured.length > 0 && (
+        <div className="relative mx-auto max-w-6xl px-4 pb-20">
+          <h2 className="mb-4 text-center text-sm font-bold uppercase tracking-widest text-emerald-400">
+            Featured Markets
+          </h2>
+          <p className="mb-8 text-center text-2xl font-bold text-white">
+            Top markets by volume
+          </p>
+          <div className="grid gap-4 md:grid-cols-3">
+            {featured.map((m) => (
+              <Link
+                key={m.slab_address}
+                href={`/trade/${m.slab_address}`}
+                className="group rounded-2xl border border-[#1e2433] bg-[#111318] p-6 transition-all duration-200 hover:border-emerald-500/30 hover:bg-[#1a1d24] hover:shadow-lg hover:shadow-emerald-500/5"
+              >
+                <div className="mb-2 text-lg font-bold text-white group-hover:text-emerald-300">
+                  {m.symbol ? `${m.symbol}/USD` : `${m.slab_address.slice(0, 6)}...`}
+                </div>
+                <div className="text-sm text-slate-400">
+                  Volume: <span className="font-mono text-slate-200">{m.volume_total >= 1000 ? `$${(m.volume_total / 1000).toFixed(1)}K` : `$${m.volume_total.toLocaleString()}`}</span>
+                </div>
+                <div className="mt-3 text-xs font-medium text-emerald-400 opacity-0 transition-opacity group-hover:opacity-100">
+                  Trade →
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Features */}
       <div className="relative mx-auto max-w-6xl px-4 pb-20">
