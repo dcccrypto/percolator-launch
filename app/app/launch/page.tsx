@@ -37,6 +37,7 @@ import {
   getAta,
 } from "@percolator/core";
 import { getConfig } from "@/lib/config";
+import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import dynamic from "next/dynamic";
 
 const WalletMultiButton = dynamic(
@@ -62,8 +63,11 @@ export default function LaunchPage() {
   const { publicKey, signTransaction, connected } = useWallet();
   const { connection } = useConnection();
 
+  const [activeTab, setActiveTab] = useState<"quick" | "advanced">("quick");
   const [step, setStep] = useState(0); // 0=token, 1=params, 2=deploy, 3=done
   const [mintInput, setMintInput] = useState("");
+  const [quickMint, setQuickMint] = useState<string | null>(null);
+  const quickLaunch = useQuickLaunch(quickMint);
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
   const [fetchingToken, setFetchingToken] = useState(false);
   const [tokenError, setTokenError] = useState("");
@@ -546,6 +550,146 @@ export default function LaunchPage() {
       <h1 className="mb-2 text-3xl font-bold text-white">Launch a Perp Market</h1>
       <p className="mb-8 text-slate-400">Deploy a perpetual futures market for any Solana token.</p>
 
+      {/* Tab Switcher */}
+      <div className="mb-6 flex rounded-xl border border-[#1e2433] bg-[#0a0b0f] p-1">
+        <button
+          onClick={() => setActiveTab("quick")}
+          className={`flex-1 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
+            activeTab === "quick"
+              ? "bg-emerald-500 text-white"
+              : "text-slate-400 hover:text-white"
+          }`}
+        >
+          ⚡ Quick Launch
+        </button>
+        <button
+          onClick={() => setActiveTab("advanced")}
+          className={`flex-1 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
+            activeTab === "advanced"
+              ? "bg-emerald-500 text-white"
+              : "text-slate-400 hover:text-white"
+          }`}
+        >
+          🔧 Advanced
+        </button>
+      </div>
+
+      {/* Quick Launch Tab */}
+      {activeTab === "quick" && step < 2 && (
+        <div className="rounded-2xl border border-[#1e2433] bg-[#111318] p-8">
+          {!connected ? (
+            <div className="text-center">
+              <p className="mb-4 text-slate-400">Connect your wallet to get started</p>
+              <WalletMultiButton />
+            </div>
+          ) : (
+            <>
+              <label className="mb-2 block text-sm text-slate-400">Token Mint Address</label>
+              <div className="mb-4 flex gap-2">
+                <input
+                  type="text"
+                  value={quickMint ?? ""}
+                  onChange={(e) => setQuickMint(e.target.value || null)}
+                  placeholder="Paste any Solana token mint..."
+                  className="flex-1 rounded-xl border border-[#1e2433] bg-[#0a0b0f] px-4 py-3 text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {quickLaunch.loading && (
+                <div className="flex items-center gap-2 py-4 text-slate-400">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+                  Auto-detecting token &amp; pool...
+                </div>
+              )}
+
+              {quickLaunch.error && (
+                <p className="mb-4 text-sm text-red-400">{quickLaunch.error}</p>
+              )}
+
+              {quickLaunch.config && !quickLaunch.loading && (
+                <div className="space-y-4">
+                  {/* Detected Token */}
+                  <div className="rounded-xl border border-[#1e2433] bg-[#0a0b0f] p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-lg font-bold text-white">{quickLaunch.config.symbol}</p>
+                        <p className="text-sm text-slate-400">{quickLaunch.config.name}</p>
+                      </div>
+                      <div className={`rounded-full px-3 py-1 text-xs font-bold ${
+                        quickLaunch.config.liquidityTier === "high"
+                          ? "bg-emerald-500/10 text-emerald-400"
+                          : quickLaunch.config.liquidityTier === "medium"
+                          ? "bg-yellow-500/10 text-yellow-400"
+                          : "bg-red-500/10 text-red-400"
+                      }`}>
+                        {quickLaunch.config.liquidityTier.toUpperCase()} LIQUIDITY
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pool Info */}
+                  {quickLaunch.poolInfo && (
+                    <div className="rounded-xl border border-[#1e2433] bg-[#0a0b0f] p-4">
+                      <p className="mb-1 text-xs text-slate-500">Best DEX Pool</p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-white">{quickLaunch.poolInfo.pairLabel} ({quickLaunch.poolInfo.dexId})</span>
+                        <span className="text-sm text-emerald-400">${quickLaunch.poolInfo.liquidityUsd.toLocaleString()} liquidity</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Suggested Params */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-[#1e2433] bg-[#0a0b0f] p-3">
+                      <p className="text-xs text-slate-500">Price</p>
+                      <p className="font-mono text-white">${quickLaunch.config.initialPrice}</p>
+                    </div>
+                    <div className="rounded-xl border border-[#1e2433] bg-[#0a0b0f] p-3">
+                      <p className="text-xs text-slate-500">Max Leverage</p>
+                      <p className="font-mono text-white">{quickLaunch.config.maxLeverage}x</p>
+                    </div>
+                    <div className="rounded-xl border border-[#1e2433] bg-[#0a0b0f] p-3">
+                      <p className="text-xs text-slate-500">Initial Margin</p>
+                      <p className="font-mono text-white">{quickLaunch.config.initialMarginBps} bps</p>
+                    </div>
+                    <div className="rounded-xl border border-[#1e2433] bg-[#0a0b0f] p-3">
+                      <p className="text-xs text-slate-500">Trading Fee</p>
+                      <p className="font-mono text-white">{quickLaunch.config.tradingFeeBps} bps</p>
+                    </div>
+                  </div>
+
+                  {/* Cost Estimate */}
+                  <div className="rounded-xl border border-yellow-500/10 bg-yellow-500/5 p-4">
+                    <p className="text-sm text-yellow-400">⚠️ Estimated cost: ~7 SOL for on-chain storage (refundable if you close the market).</p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      // Transfer quick launch config to advanced form state and deploy
+                      const c = quickLaunch.config!;
+                      setMintInput(c.mint);
+                      setTokenInfo({ mint: c.mint, name: c.name, symbol: c.symbol, decimals: c.decimals });
+                      setInitialPrice(c.initialPrice);
+                      setMaxLeverage(c.maxLeverage);
+                      setTradingFeeBps(c.tradingFeeBps);
+                      setLpCollateral(c.lpCollateral);
+                      // Go directly to deploy
+                      setStep(1);
+                      setActiveTab("advanced");
+                    }}
+                    className="w-full rounded-xl bg-emerald-500 py-3 font-semibold text-white transition-colors hover:bg-emerald-400"
+                  >
+                    🚀 Review &amp; Launch
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Steps indicator (Advanced tab or during deploy/done) */}
+      {(activeTab === "advanced" || step >= 2) && <>
       {/* Steps indicator */}
       <div className="mb-8 flex items-center gap-2">
         {["Token", "Parameters", "Deploy", "Done"].map((label, i) => (
@@ -762,6 +906,7 @@ export default function LaunchPage() {
           </a>
         </div>
       )}
+      </>}
     </div>
   );
 }

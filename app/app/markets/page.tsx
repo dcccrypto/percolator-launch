@@ -9,6 +9,7 @@ import { formatTokenAmount } from "@/lib/format";
 import type { MarketWithStats } from "@/lib/supabase";
 import { supabase } from "@/lib/supabase";
 import type { DiscoveredMarket } from "@percolator/core";
+import { ActivityFeed } from "@/components/market/ActivityFeed";
 
 function formatNum(n: number | null | undefined, decimals = 2): string {
   if (n === null || n === undefined) return "—";
@@ -159,6 +160,12 @@ export default function MarketsPage() {
           })}
         </div>
       )}
+
+      {/* Recent Activity */}
+      <div className="mt-12">
+        <h2 className="mb-4 text-xl font-bold text-white">Recent Activity</h2>
+        <ActivityFeed />
+      </div>
     </div>
   );
 }

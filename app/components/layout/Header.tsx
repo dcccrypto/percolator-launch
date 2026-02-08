@@ -39,6 +39,12 @@ export const Header: FC = () => {
               Markets
             </Link>
             <Link
+              href="/portfolio"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-400 transition-colors hover:bg-[#1e2433] hover:text-white"
+            >
+              Portfolio
+            </Link>
+            <Link
               href="/create"
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-emerald-400/70 transition-colors hover:bg-[#1e2433] hover:text-emerald-300"
             >
