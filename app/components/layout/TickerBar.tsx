@@ -3,9 +3,9 @@
 import { FC } from "react";
 
 const PHRASES = [
+  "don't trust, verify.",
   "⚠️ devnet — not real money",
   "break things. report bugs.",
-  "verify everything on-chain",
   "mainnet soon™",
 ];
 
