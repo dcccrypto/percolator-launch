@@ -137,7 +137,7 @@ async function main() {
 
   const header = parseHeader(slabInfo.data);
   const config = parseConfig(slabInfo.data);
-  const engine = parseEngine(slabInfo.data, layout);
+  const engine = parseEngine(slabInfo.data);
 
   console.log(`  Program: ${programId.toBase58()}`);
   console.log(`  Admin: ${header.admin.toBase58()}`);
@@ -259,7 +259,7 @@ async function main() {
   // Verify insurance fund increased
   const postSlabInfo = await connection.getAccountInfo(slabPk);
   if (postSlabInfo) {
-    const postEngine = parseEngine(postSlabInfo.data, layout);
+    const postEngine = parseEngine(postSlabInfo.data);
     console.log(`  Insurance balance after: ${postEngine.insuranceFund.balance}`);
     assert(postEngine.insuranceFund.balance > engine.insuranceFund.balance, 'Insurance fund increased');
   }
