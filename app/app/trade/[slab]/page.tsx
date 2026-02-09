@@ -11,6 +11,7 @@ import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
 import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { MarketBookCard } from "@/components/trade/MarketBookCard";
 import { PriceChart } from "@/components/trade/PriceChart";
+import { TradeHistory } from "@/components/trade/TradeHistory";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { ShareButton } from "@/components/market/ShareCard";
 import { computeMarketHealth } from "@/lib/health";
@@ -111,6 +112,9 @@ function TradePageInner({ slab }: { slab: string }) {
           <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
             <MarketStatsCard />
           </div>
+          <Collapsible title="recent trades" defaultOpen={true}>
+            <TradeHistory slabAddress={slab} />
+          </Collapsible>
         </div>
       </div>
 
