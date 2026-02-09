@@ -1,87 +1,64 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useState, useRef, useEffect } from "react";
+import gsap from "gsap";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { TradeForm } from "@/components/trade/TradeForm";
 import { PositionPanel } from "@/components/trade/PositionPanel";
 import { AccountsCard } from "@/components/trade/AccountsCard";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
-import { InsuranceLPPanel } from "@/components/trade/InsuranceLPPanel";
 import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
 import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { MarketBookCard } from "@/components/trade/MarketBookCard";
 import { PriceChart } from "@/components/trade/PriceChart";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { ShareButton } from "@/components/market/ShareCard";
+import { GlassCard } from "@/components/ui/GlassCard";
 import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 
 function Collapsible({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-lg border border-[#1e2433] bg-[#0d1117]">
+    <GlassCard padding="none" hover={false}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-[#b0b7c8] md:hidden"
+        className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-[#8B95B0] transition-colors hover:text-[#F0F4FF] md:hidden"
       >
         {title}
-        <span className="text-xs text-[#4a5068]">{open ? "▲" : "▼"}</span>
+        <span className={`text-xs text-[#3D4563] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▼</span>
       </button>
       <div className={`${open ? "block" : "hidden"} md:block`}>{children}</div>
-    </div>
-  );
-}
-
-function TradeLoadingSkeleton() {
-  return (
-    <div className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-8">
-      <div className="mb-6 flex items-center gap-4">
-        <div className="h-8 w-48 animate-pulse rounded-lg bg-[#0c0e14]" />
-        <div className="h-6 w-16 animate-pulse rounded-full bg-[#0c0e14]" />
-      </div>
-      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          <div className="h-64 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1e2433]" />
-          <div className="h-48 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1e2433]" />
-        </div>
-        <div className="space-y-4">
-          <div className="h-32 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1e2433]" />
-          <div className="h-32 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1e2433]" />
-        </div>
-      </div>
-    </div>
+    </GlassCard>
   );
 }
 
 function TradePageInner({ slab }: { slab: string }) {
-  const { engine, loading, error } = useSlabState();
+  const { engine } = useSlabState();
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  if (loading) return <TradeLoadingSkeleton />;
+  // Page entrance animation
+  useEffect(() => {
+    if (!containerRef.current) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
-  if (error || !engine) {
-    return (
-      <div className="mx-auto max-w-7xl px-3 py-16 text-center sm:px-4">
-        <div className="mb-3 text-3xl text-[#1e2433]">⚠️</div>
-        <h2 className="mb-2 text-xl font-bold text-white">Market not found</h2>
-        <p className="mb-6 text-sm text-[#4a5068]">
-          {error || "This slab address doesn\u2019t exist or hasn\u2019t been initialized yet."}
-        </p>
-        <a href="/markets" className="inline-block rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f]">
-          Browse Markets
-        </a>
-      </div>
+    const panels = containerRef.current.querySelectorAll(".trade-panel");
+    gsap.fromTo(
+      panels,
+      { opacity: 0, y: 20 },
+      { opacity: 1, y: 0, duration: 0.5, stagger: 0.08, ease: "power3.out", delay: 0.1 }
     );
-  }
+  }, []);
 
   return (
-    <div className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-8">
+    <div ref={containerRef} className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-8">
       {/* Header */}
-      <div className="mb-4 flex flex-wrap items-center gap-3 sm:mb-6 sm:gap-4">
+      <div className="trade-panel mb-4 flex flex-wrap items-center gap-3 sm:mb-6 sm:gap-4">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-white sm:text-2xl">Trade</h1>
-          <p className="truncate font-mono text-[10px] text-[#4a5068] sm:text-xs">{slab}</p>
+          <h1 className="text-xl font-bold text-white sm:text-2xl" style={{ fontFamily: "var(--font-space-grotesk)" }}>Trade</h1>
+          <p className="truncate font-[var(--font-jetbrains-mono)] text-[10px] text-[#3D4563] sm:text-xs">{slab}</p>
         </div>
         {health && <HealthBadge level={health.level} />}
         <div className="ml-auto flex items-center gap-3">
@@ -92,8 +69,8 @@ function TradePageInner({ slab }: { slab: string }) {
           />
           {priceUsd != null && (
             <div className="text-right">
-              <div className="text-[10px] text-[#4a5068] sm:text-xs">Jupiter Price</div>
-              <div className="font-mono text-base text-white sm:text-lg">
+              <div className="text-[10px] text-[#3D4563] sm:text-xs">Jupiter Price</div>
+              <div className="font-[var(--font-jetbrains-mono)] text-base font-bold text-white sm:text-lg">
                 ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}
               </div>
             </div>
@@ -102,28 +79,49 @@ function TradePageInner({ slab }: { slab: string }) {
       </div>
 
       {/* Main grid */}
-      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
-        {/* Left column — 2/3 */}
-        <div className="space-y-4 sm:space-y-6 lg:col-span-2">
-          <PriceChart slabAddress={slab} />
-          <TradeForm slabAddress={slab} />
-          <PositionPanel slabAddress={slab} />
+      <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
+        {/* Left column */}
+        <div className="space-y-4 sm:space-y-5 lg:col-span-2">
+          <GlassCard padding="none" hover={false} className="trade-panel overflow-hidden">
+            <PriceChart slabAddress={slab} />
+          </GlassCard>
+          <GlassCard padding="none" hover={false} className="trade-panel">
+            <TradeForm slabAddress={slab} />
+          </GlassCard>
+          <div className="trade-panel">
+            <GlassCard padding="none" hover={false}>
+              <PositionPanel slabAddress={slab} />
+            </GlassCard>
+          </div>
         </div>
 
-        {/* Right column — 1/3 */}
-        <div className="space-y-4 sm:space-y-6">
-          <AccountsCard />
-          <DepositWithdrawCard slabAddress={slab} />
-          <InsuranceLPPanel />
-          <Collapsible title="Engine Health" defaultOpen={false}>
-            <EngineHealthCard />
-          </Collapsible>
-          <MarketStatsCard />
+        {/* Right column */}
+        <div className="space-y-4 sm:space-y-5">
+          <div className="trade-panel">
+            <GlassCard padding="none" hover={false}>
+              <AccountsCard />
+            </GlassCard>
+          </div>
+          <div className="trade-panel">
+            <GlassCard padding="none" hover={false}>
+              <DepositWithdrawCard slabAddress={slab} />
+            </GlassCard>
+          </div>
+          <div className="trade-panel">
+            <Collapsible title="Engine Health" defaultOpen={false}>
+              <EngineHealthCard />
+            </Collapsible>
+          </div>
+          <div className="trade-panel">
+            <GlassCard padding="none" hover={false}>
+              <MarketStatsCard />
+            </GlassCard>
+          </div>
         </div>
       </div>
 
-      {/* Full-width below */}
-      <div className="mt-4 sm:mt-6">
+      {/* Full-width */}
+      <div className="trade-panel mt-4 sm:mt-5">
         <Collapsible title="Market Book" defaultOpen={false}>
           <MarketBookCard />
         </Collapsible>
