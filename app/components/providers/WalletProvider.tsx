@@ -11,7 +11,12 @@ import { getConfig } from "@/lib/config";
 
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const wallets = useMemo(() => [], []);
-  const rpcUrl = useMemo(() => getConfig().rpcUrl, []);
+  const rpcUrl = useMemo(() => {
+    const url = getConfig().rpcUrl;
+    // Fallback for SSG/build time when env vars may be unavailable
+    if (!url || !url.startsWith("http")) return "https://api.devnet.solana.com";
+    return url;
+  }, []);
 
   return (
     <ConnectionProvider endpoint={rpcUrl}>
