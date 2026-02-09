@@ -38,14 +38,14 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (!userAccount) {
     return (
-      <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.02]] p-6 shadow-sm">
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-6 shadow-sm">
         <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
           Position
         </h3>
         <div className="space-y-3">
-          <div className="h-4 w-24 animate-pulse rounded bg-[white/[0.05]]" />
-          <div className="h-4 w-32 animate-pulse rounded bg-[white/[0.05]]" />
-          <div className="h-4 w-20 animate-pulse rounded bg-[white/[0.05]]" />
+          <div className="h-4 w-24 animate-pulse rounded bg-white/5" />
+          <div className="h-4 w-32 animate-pulse rounded bg-white/5" />
+          <div className="h-4 w-20 animate-pulse rounded bg-white/5" />
         </div>
       </div>
     );
@@ -90,7 +90,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const pnlBgColor =
     pnlTokens === 0n
-      ? "bg-[white/[0.05]]"
+      ? "bg-white/5"
       : pnlTokens > 0n
         ? "bg-[#00FFB2]/10"
         : "bg-[#FF4466]/10";
@@ -120,7 +120,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   return (
-    <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.02]] p-6 shadow-sm">
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-6 shadow-sm">
       <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
         Position
       </h3>
@@ -151,7 +151,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </div>
             </div>
             {/* PnL bar */}
-            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[white/[0.06]]">
+            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
                   pnlTokens >= 0n ? "bg-[#00FFB2]" : "bg-[#FF4466]"
@@ -194,7 +194,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#8B95B0]">Oracle Price</span>
+            <span className="text-xs text-[#8B95B0]">Market Price</span>
             <span className="font-mono text-sm text-[#F0F4FF]">
               {formatUsd(currentPriceE6)}
             </span>
@@ -253,7 +253,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowConfirm(false)}
-                  className="flex-1 rounded-lg border border-[white/[0.06]] bg-[white/[0.05]] py-2 text-xs font-medium text-[#8B95B0] transition-colors hover:bg-[white/[0.06]]"
+                  className="flex-1 rounded-lg border border-white/[0.06] bg-white/5 py-2 text-xs font-medium text-[#8B95B0] transition-colors hover:bg-white/[0.06]"
                 >
                   Cancel
                 </button>

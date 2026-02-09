@@ -117,7 +117,10 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div className="mt-1 text-xs text-slate-500">Price chart building... (updates with each trade)</div>
           </>
         ) : (
-          <div className="text-sm text-slate-500">No price data yet</div>
+          <>
+            <div className="text-sm text-slate-500">No price data yet</div>
+            <div className="mt-1 text-xs text-slate-600">Prices will appear after the first trade on this market.</div>
+          </>
         )}
       </div>
     );

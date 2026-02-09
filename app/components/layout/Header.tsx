@@ -169,6 +169,15 @@ export const Header: FC = () => {
                 {link.label}
               </Link>
             ))}
+            {network === "devnet" && (
+              <Link
+                href="/devnet-mint"
+                onClick={() => setMobileOpen(false)}
+                className="rounded-lg px-4 py-3 text-sm font-medium text-[#FFB800]/70 transition-all hover:text-[#FFB800]"
+              >
+                🏭 Faucet
+              </Link>
+            )}
           </nav>
         </div>
       )}

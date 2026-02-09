@@ -2,10 +2,18 @@
 
 import { useRef, useEffect } from "react";
 import gsap from "gsap";
+import { useWallet } from "@solana/wallet-adapter-react";
+import dynamic from "next/dynamic";
 import { CreateMarketWizard } from "@/components/create/CreateMarketWizard";
 import { GlassCard } from "@/components/ui/GlassCard";
 
+const WalletMultiButton = dynamic(
+  () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
+  { ssr: false }
+);
+
 export default function CreatePage() {
+  const { connected } = useWallet();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,6 +41,13 @@ export default function CreatePage() {
             Deploy a perpetual futures market for any Solana token. No permission needed.
           </p>
         </div>
+        {!connected && (
+          <div className="mt-6 flex items-center gap-3 rounded-xl border border-[#FFB800]/20 bg-[#FFB800]/[0.05] p-4">
+            <span className="text-[#FFB800]">⚠️</span>
+            <p className="flex-1 text-sm text-[#FFB800]">Connect your wallet to launch a market.</p>
+            <WalletMultiButton />
+          </div>
+        )}
         <div className="mt-8">
           <GlassCard padding="lg" hover={false} glow>
             <CreateMarketWizard />

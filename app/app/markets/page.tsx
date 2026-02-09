@@ -97,7 +97,7 @@ export default function MarketsPage() {
     return list;
   }, [merged, search, sortBy]);
 
-  const loading = discoveryLoading && supabaseLoading;
+  const loading = discoveryLoading || supabaseLoading;
 
   return (
     <div className="min-h-[calc(100vh-48px)]">

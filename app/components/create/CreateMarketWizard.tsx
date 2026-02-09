@@ -882,7 +882,10 @@ export const CreateMarketWizard: FC = () => {
           </table>
           <div className="rounded-lg bg-[#1a1a28] p-3">
             <p className="text-xs text-[#71717a]">Estimated SOL cost</p>
-            <p className="text-sm font-medium text-[#e4e4e7]">~6.9 SOL (slab rent + tx fees)</p>
+            <p className="text-sm font-medium text-[#e4e4e7]">
+              ~{slabTier === "small" ? "0.5" : slabTier === "medium" ? "1.8" : "7.0"} SOL (market rent + tx fees)
+            </p>
+            <p className="mt-0.5 text-[9px] text-[#52525b]">Rent is recoverable if market is closed.</p>
           </div>
           {!publicKey && <p className="text-sm text-amber-400">Connect your wallet to create a market.</p>}
           <button onClick={handleCreate} disabled={!allValid || !publicKey} className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-[#1e1e2e] disabled:text-[#52525b]">Create Market</button>

@@ -11,6 +11,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { AccountKind } from "@percolator/core";
 import { PreTradeSummary } from "@/components/trade/PreTradeSummary";
+import { InfoIcon } from "@/components/ui/Tooltip";
 
 const LEVERAGE_PRESETS = [1, 2, 3, 5, 10];
 const MARGIN_PRESETS = [25, 50, 75, 100];
@@ -100,7 +101,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (!connected) {
     return (
-      <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.03]] p-6 text-center shadow-sm">
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-6 text-center shadow-sm">
         <p className="text-[#8B95B0]">Connect your wallet to trade</p>
       </div>
     );
@@ -108,9 +109,9 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (!userAccount) {
     return (
-      <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.03]] p-6 text-center shadow-sm">
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-6 text-center shadow-sm">
         <p className="text-[#8B95B0]">
-          No account found. Go to Dashboard to create one.
+          No trading account yet. Use the <strong className="text-[#F0F4FF]">Create Account</strong> button in the Deposit panel on the right to get started.
         </p>
       </div>
     );
@@ -118,7 +119,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (hasPosition) {
     return (
-      <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.03]] p-6 shadow-sm">
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-6 shadow-sm">
         <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
           Trade
         </h3>
@@ -151,7 +152,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   return (
-    <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.03]] p-6 shadow-sm">
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-6 shadow-sm">
       <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
         Trade
       </h3>
@@ -162,8 +163,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           onClick={() => setDirection("long")}
           className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-all duration-150 ${
             direction === "long"
-              ? "bg-#00FFB2 text-white shadow-lg shadow-#00FFB2/20"
-              : "bg-[white/[0.05]] text-[#8B95B0] hover:bg-[white/[0.06]] hover:text-[#8B95B0]"
+              ? "bg-[#00FFB2] text-white shadow-lg shadow-[#00FFB2]/20"
+              : "bg-white/5 text-[#8B95B0] hover:bg-white/[0.06] hover:text-[#F0F4FF]"
           }`}
         >
           Long
@@ -173,7 +174,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-all duration-150 ${
             direction === "short"
               ? "bg-[#FF4466] text-white shadow-lg shadow-[#FF4466]/20"
-              : "bg-[white/[0.05]] text-[#8B95B0] hover:bg-[white/[0.06]] hover:text-[#8B95B0]"
+              : "bg-white/5 text-[#8B95B0] hover:bg-white/[0.06] hover:text-[#F0F4FF]"
           }`}
         >
           Short
@@ -183,7 +184,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Margin input */}
       <div className="mb-3">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-xs text-[#8B95B0]">Margin ({symbol})</label>
+          <label className="text-xs text-[#8B95B0]">Margin ({symbol})<InfoIcon tooltip="The amount of collateral you're putting up for this trade. If your position loses more than your margin, you get liquidated." /></label>
           <span className="text-xs text-[#8B95B0]">
             Balance: <span className="text-[#8B95B0]">{formatPerc(capital)}</span>
           </span>
@@ -200,7 +201,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             className={`w-full rounded-lg border px-3 py-2.5 pr-14 text-[#F0F4FF] placeholder-[#3D4563] focus:outline-none focus:ring-2 focus-visible:ring-2 ${
               exceedsMargin
                 ? "border-[#FF4466]/50 bg-red-900/20 focus:border-[#FF4466] focus:ring-[#FF4466]/30"
-                : "border-[white/[0.06]] bg-[white/[0.04]] focus:border-[#7B61FF] focus:ring-[#7B61FF]/30"
+                : "border-white/[0.06] bg-white/[0.04] focus:border-[#7B61FF] focus:ring-[#7B61FF]/30"
             }`}
           />
           <button
@@ -225,7 +226,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <button
             key={pct}
             onClick={() => setMarginPercent(pct)}
-            className="flex-1 rounded-md bg-[white/[0.05]] py-1.5 text-xs font-medium text-[#8B95B0] transition-colors hover:bg-[white/[0.06]] hover:text-[#8B95B0] focus-visible:ring-2 focus-visible:ring-[#7B61FF]/30"
+            className="flex-1 rounded-md bg-white/5 py-1.5 text-xs font-medium text-[#8B95B0] transition-colors hover:bg-white/[0.06] hover:text-[#8B95B0] focus-visible:ring-2 focus-visible:ring-[#7B61FF]/30"
           >
             {pct}%
           </button>
@@ -235,7 +236,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Leverage slider + presets */}
       <div className="mb-4">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-xs text-[#8B95B0]">Leverage</label>
+          <label className="text-xs text-[#8B95B0]">Leverage<InfoIcon tooltip="Multiplies your position size. 5x leverage means 5x the profit but also 5x the loss. Higher leverage = higher risk of liquidation." /></label>
           <span className="text-xs font-medium text-[#F0F4FF]">{leverage}x</span>
         </div>
         <input
@@ -245,7 +246,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           step={1}
           value={leverage}
           onChange={(e) => setLeverage(Number(e.target.value))}
-          className="mb-2 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[white/[0.05]] accent-[#7B61FF] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#7B61FF] [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-[#7B61FF]/30"
+          className="mb-2 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/5 accent-[#7B61FF] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#7B61FF] [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-[#7B61FF]/30"
         />
         <div className="flex gap-1.5">
           {availableLeverage.map((l) => (
@@ -255,7 +256,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all duration-150 focus-visible:ring-2 focus-visible:ring-[#7B61FF]/30 ${
                 leverage === l
                   ? "bg-[#7B61FF] text-white shadow-sm shadow-[#7B61FF]/20"
-                  : "bg-[white/[0.05]] text-[#8B95B0] hover:bg-[white/[0.06]]"
+                  : "bg-white/5 text-[#8B95B0] hover:bg-white/[0.06]"
               }`}
             >
               {l}x
@@ -282,9 +283,9 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <button
         onClick={handleTrade}
         disabled={loading || !marginInput || positionSize <= 0n || exceedsMargin}
-        className={`w-full rounded-lg py-3 text-sm font-medium text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[white/[0.03]] ${
+        className={`w-full rounded-lg py-3 text-sm font-medium text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0c14] ${
           direction === "long"
-            ? "bg-#00FFB2 hover:bg-#00FFB2 hover:shadow-lg hover:shadow-#00FFB2/20 focus-visible:ring-#00FFB2"
+            ? "bg-[#00FFB2] hover:bg-[#00e0a0] hover:shadow-lg hover:shadow-[#00FFB2]/20 focus-visible:ring-[#00FFB2]"
             : "bg-[#FF4466] hover:bg-[#FF4466] hover:shadow-lg hover:shadow-[#FF4466]/20 focus-visible:ring-[#FF4466]"
         }`}
       >

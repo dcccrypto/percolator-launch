@@ -116,13 +116,13 @@ function HeroTitle() {
         </span>
       </h1>
       <p className="hero-word mx-auto mb-3 max-w-2xl text-lg font-medium text-[#c4cbde] opacity-0 md:text-xl">
-        Launch perpetual futures markets for any Solana token.
+        Launch leveraged trading markets for any Solana token.
         <br className="hidden sm:block" />
         No code. No permission. One click.
       </p>
       <p className="hero-word mx-auto mb-8 max-w-xl text-sm text-[#5a6382] opacity-0">
-        Pick any SPL token, set your leverage and fees, deploy on-chain.
-        Anyone can trade it immediately. Built on toly&apos;s Percolator program.
+        Pick any Solana token, set your leverage and fees, deploy on-chain.
+        Anyone can bet on price going up or down — immediately. Powered by Percolator.
       </p>
     </div>
   );
@@ -417,7 +417,7 @@ export default function Home() {
             <a href={`https://explorer.solana.com/address/${cfg.programId}?cluster=${cfg.network}`} target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#8B95B0]">
               Program: <span className="font-[var(--font-jetbrains-mono)]">{cfg.programId ? `${cfg.programId.slice(0, 6)}...${cfg.programId.slice(-4)}` : "..."}</span>
             </a>
-            <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#8B95B0]">
+            <a href="https://github.com/dcccrypto/percolator-launch" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#8B95B0]">
               GitHub
             </a>
             <a href="https://x.com/aaboroday" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#8B95B0]">
