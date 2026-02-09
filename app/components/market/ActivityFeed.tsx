@@ -111,7 +111,7 @@ export function ActivityFeed() {
     return (
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-14 animate-pulse rounded-lg border border-[#1e2433] bg-[#111318]" />
+          <div key={i} className="h-14 animate-pulse rounded-lg border border-white/[0.06] bg-white/[0.05]" />
         ))}
       </div>
     );
@@ -119,7 +119,7 @@ export function ActivityFeed() {
 
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-[#1e2433] bg-[#111318] p-8 text-center">
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.05] p-8 text-center">
         <p className="text-sm text-slate-500">No recent activity yet.</p>
       </div>
     );
@@ -130,7 +130,7 @@ export function ActivityFeed() {
       {items.map((item) => (
         <div
           key={item.id}
-          className="flex items-center gap-3 rounded-lg border border-[#1e2433] bg-[#111318] px-4 py-3"
+          className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.05] px-4 py-3"
         >
           <span className="text-lg">{eventIcon(item.eventType)}</span>
           <div className="min-w-0 flex-1">

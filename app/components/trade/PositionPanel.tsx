@@ -38,14 +38,14 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (!userAccount) {
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#0a0b0f] p-6 shadow-sm">
-        <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#71717a]">
+      <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.02]] p-6 shadow-sm">
+        <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
           Position
         </h3>
         <div className="space-y-3">
-          <div className="h-4 w-24 animate-pulse rounded bg-[#1a1a2e]" />
-          <div className="h-4 w-32 animate-pulse rounded bg-[#1a1a2e]" />
-          <div className="h-4 w-20 animate-pulse rounded bg-[#1a1a2e]" />
+          <div className="h-4 w-24 animate-pulse rounded bg-[white/[0.05]]" />
+          <div className="h-4 w-32 animate-pulse rounded bg-[white/[0.05]]" />
+          <div className="h-4 w-20 animate-pulse rounded bg-[white/[0.05]]" />
         </div>
       </div>
     );
@@ -83,17 +83,17 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // --- Colours ---
   const pnlColor =
     pnlTokens === 0n
-      ? "text-[#71717a]"
+      ? "text-[#8B95B0]"
       : pnlTokens > 0n
-        ? "text-[#00d4aa]"
-        : "text-red-400";
+        ? "text-[#00FFB2]"
+        : "text-[#FF4466]";
 
   const pnlBgColor =
     pnlTokens === 0n
-      ? "bg-[#1a1a2e]"
+      ? "bg-[white/[0.05]]"
       : pnlTokens > 0n
-        ? "bg-[#00d4aa]/10"
-        : "bg-red-500/10";
+        ? "bg-[#00FFB2]/10"
+        : "bg-[#FF4466]/10";
 
   const pnlBarWidth = Math.min(100, Math.max(0, Math.abs(roe)));
 
@@ -120,19 +120,19 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   return (
-    <div className="rounded-xl border border-[#1e1e2e] bg-[#0a0b0f] p-6 shadow-sm">
-      <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#71717a]">
+    <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.02]] p-6 shadow-sm">
+      <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
         Position
       </h3>
 
       {!hasPosition ? (
-        <p className="text-sm text-[#71717a]">No open position</p>
+        <p className="text-sm text-[#8B95B0]">No open position</p>
       ) : (
         <div className="space-y-3">
           {/* PnL highlight bar */}
           <div className={`rounded-lg ${pnlBgColor} p-3`}>
             <div className="flex items-center justify-between">
-              <span className="text-xs text-[#71717a]">Unrealized PnL</span>
+              <span className="text-xs text-[#8B95B0]">Unrealized PnL</span>
               <div className="text-right">
                 <span className={`font-mono text-sm font-bold ${pnlColor}`}>
                   {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
@@ -151,15 +151,15 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </div>
             </div>
             {/* PnL bar */}
-            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[#1e1e2e]">
+            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[white/[0.06]]">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
-                  pnlTokens >= 0n ? "bg-[#00d4aa]" : "bg-red-500"
+                  pnlTokens >= 0n ? "bg-[#00FFB2]" : "bg-[#FF4466]"
                 }`}
                 style={{ width: `${pnlBarWidth}%` }}
               />
             </div>
-            <div className="mt-1 flex justify-between text-[10px] text-[#52525b]">
+            <div className="mt-1 flex justify-between text-[10px] text-[#3D4563]">
               <span>
                 PnL%:{" "}
                 <span className={`font-mono ${pnlColor}`}>
@@ -172,42 +172,42 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
           {/* Position details */}
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#71717a]">Direction</span>
+            <span className="text-xs text-[#8B95B0]">Direction</span>
             <span
               className={`text-sm font-medium ${
-                isLong ? "text-[#00d4aa]" : "text-red-400"
+                isLong ? "text-[#00FFB2]" : "text-[#FF4466]"
               }`}
             >
               {isLong ? "LONG" : "SHORT"}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#71717a]">Size</span>
-            <span className="font-mono text-sm text-[#e4e4e7]">
+            <span className="text-xs text-[#8B95B0]">Size</span>
+            <span className="font-mono text-sm text-[#F0F4FF]">
               {formatTokenAmount(absPosition)} {symbol}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#71717a]">Entry Price</span>
-            <span className="font-mono text-sm text-[#e4e4e7]">
+            <span className="text-xs text-[#8B95B0]">Entry Price</span>
+            <span className="font-mono text-sm text-[#F0F4FF]">
               {formatUsd(entryPriceE6)}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#71717a]">Oracle Price</span>
-            <span className="font-mono text-sm text-[#e4e4e7]">
+            <span className="text-xs text-[#8B95B0]">Oracle Price</span>
+            <span className="font-mono text-sm text-[#F0F4FF]">
               {formatUsd(currentPriceE6)}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#71717a]">Liq. Price</span>
+            <span className="text-xs text-[#8B95B0]">Liq. Price</span>
             <span className="font-mono text-sm text-amber-400">
               {liqPriceE6 > 0n ? formatUsd(liqPriceE6) : "—"}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#71717a]">Margin Health</span>
-            <span className="font-mono text-sm text-[#a1a1aa]">
+            <span className="text-xs text-[#8B95B0]">Margin Health</span>
+            <span className="font-mono text-sm text-[#8B95B0]">
               {marginHealthStr}
             </span>
           </div>
@@ -217,26 +217,26 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <button
               onClick={() => setShowConfirm(true)}
               disabled={closeLoading}
-              className="mt-2 w-full rounded-lg border border-red-600/30 bg-red-600/10 py-2.5 text-sm font-medium text-red-400 transition-all duration-150 hover:bg-red-600/20 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-red-500/30"
+              className="mt-2 w-full rounded-lg border border-[#FF4466]/30 bg-[#FF4466]/10 py-2.5 text-sm font-medium text-[#FF4466] transition-all duration-150 hover:bg-[#FF4466]/20 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[#FF4466]/30"
             >
               Close Position
             </button>
           ) : (
-            <div className="mt-2 space-y-2 rounded-lg border border-red-600/30 bg-red-900/10 p-3">
-              <p className="text-xs text-[#a1a1aa]">
+            <div className="mt-2 space-y-2 rounded-lg border border-[#FF4466]/30 bg-red-900/10 p-3">
+              <p className="text-xs text-[#8B95B0]">
                 Close {isLong ? "LONG" : "SHORT"}{" "}
                 {formatTokenAmount(absPosition)} {symbol}?
               </p>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[#71717a]">Est. PnL</span>
+                <span className="text-[#8B95B0]">Est. PnL</span>
                 <span className={`font-mono font-medium ${pnlColor}`}>
                   {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
                   {formatTokenAmount(abs(pnlTokens))} {symbol}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[#71717a]">You&apos;ll receive</span>
-                <span className="font-mono font-medium text-[#e4e4e7]">
+                <span className="text-[#8B95B0]">You&apos;ll receive</span>
+                <span className="font-mono font-medium text-[#F0F4FF]">
                   ~
                   {formatTokenAmount(
                     pnlTokens > 0n
@@ -253,14 +253,14 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowConfirm(false)}
-                  className="flex-1 rounded-lg border border-[#1e1e2e] bg-[#1a1a2e] py-2 text-xs font-medium text-[#71717a] transition-colors hover:bg-[#1e1e2e]"
+                  className="flex-1 rounded-lg border border-[white/[0.06]] bg-[white/[0.05]] py-2 text-xs font-medium text-[#8B95B0] transition-colors hover:bg-[white/[0.06]]"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleClose}
                   disabled={closeLoading}
-                  className="flex-1 rounded-lg bg-red-600 py-2 text-xs font-medium text-white transition-colors hover:bg-red-500 disabled:opacity-50"
+                  className="flex-1 rounded-lg bg-[#FF4466] py-2 text-xs font-medium text-white transition-colors hover:bg-[#FF4466] disabled:opacity-50"
                 >
                   {closeLoading ? "Closing..." : "Confirm Close"}
                 </button>
@@ -268,16 +268,16 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
           )}
 
-          {closeError && <p className="text-xs text-red-400">{closeError}</p>}
+          {closeError && <p className="text-xs text-[#FF4466]">{closeError}</p>}
 
           {closeSig && (
-            <p className="text-xs text-[#71717a]">
+            <p className="text-xs text-[#8B95B0]">
               Closed:{" "}
               <a
                 href={`${explorerTxUrl(closeSig)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-400 hover:underline"
+                className="text-[#7B61FF] hover:underline"
               >
                 {closeSig.slice(0, 16)}...
               </a>

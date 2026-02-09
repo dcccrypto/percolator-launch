@@ -100,16 +100,16 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (!connected) {
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 text-center shadow-sm">
-        <p className="text-[#71717a]">Connect your wallet to trade</p>
+      <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.03]] p-6 text-center shadow-sm">
+        <p className="text-[#8B95B0]">Connect your wallet to trade</p>
       </div>
     );
   }
 
   if (!userAccount) {
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 text-center shadow-sm">
-        <p className="text-[#71717a]">
+      <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.03]] p-6 text-center shadow-sm">
+        <p className="text-[#8B95B0]">
           No account found. Go to Dashboard to create one.
         </p>
       </div>
@@ -118,8 +118,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (hasPosition) {
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm">
-        <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#71717a]">
+      <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.03]] p-6 shadow-sm">
+        <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
           Trade
         </h3>
         <div className="rounded-lg border border-amber-900/50 bg-amber-900/20 p-4 text-sm text-amber-300">
@@ -151,8 +151,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   return (
-    <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm">
-      <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#71717a]">
+    <div className="rounded-xl border border-[white/[0.06]] bg-[white/[0.03]] p-6 shadow-sm">
+      <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
         Trade
       </h3>
 
@@ -162,8 +162,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           onClick={() => setDirection("long")}
           className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-all duration-150 ${
             direction === "long"
-              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
-              : "bg-[#1a1a2e] text-[#71717a] hover:bg-[#1e1e2e] hover:text-[#a1a1aa]"
+              ? "bg-#00FFB2 text-white shadow-lg shadow-#00FFB2/20"
+              : "bg-[white/[0.05]] text-[#8B95B0] hover:bg-[white/[0.06]] hover:text-[#8B95B0]"
           }`}
         >
           Long
@@ -172,8 +172,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           onClick={() => setDirection("short")}
           className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-all duration-150 ${
             direction === "short"
-              ? "bg-red-600 text-white shadow-lg shadow-red-600/20"
-              : "bg-[#1a1a2e] text-[#71717a] hover:bg-[#1e1e2e] hover:text-[#a1a1aa]"
+              ? "bg-[#FF4466] text-white shadow-lg shadow-[#FF4466]/20"
+              : "bg-[white/[0.05]] text-[#8B95B0] hover:bg-[white/[0.06]] hover:text-[#8B95B0]"
           }`}
         >
           Short
@@ -183,9 +183,9 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Margin input */}
       <div className="mb-3">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-xs text-[#71717a]">Margin ({symbol})</label>
-          <span className="text-xs text-[#71717a]">
-            Balance: <span className="text-[#a1a1aa]">{formatPerc(capital)}</span>
+          <label className="text-xs text-[#8B95B0]">Margin ({symbol})</label>
+          <span className="text-xs text-[#8B95B0]">
+            Balance: <span className="text-[#8B95B0]">{formatPerc(capital)}</span>
           </span>
         </div>
         <div className="relative">
@@ -197,23 +197,23 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               if (e.key === "Enter") handleTrade();
             }}
             placeholder="0.00"
-            className={`w-full rounded-lg border px-3 py-2.5 pr-14 text-[#e4e4e7] placeholder-[#52525b] focus:outline-none focus:ring-2 focus-visible:ring-2 ${
+            className={`w-full rounded-lg border px-3 py-2.5 pr-14 text-[#F0F4FF] placeholder-[#3D4563] focus:outline-none focus:ring-2 focus-visible:ring-2 ${
               exceedsMargin
-                ? "border-red-500/50 bg-red-900/20 focus:border-red-500 focus:ring-red-500/30"
-                : "border-[#1e1e2e] bg-[#1a1a28] focus:border-blue-500 focus:ring-blue-500/30"
+                ? "border-[#FF4466]/50 bg-red-900/20 focus:border-[#FF4466] focus:ring-[#FF4466]/30"
+                : "border-[white/[0.06]] bg-[white/[0.04]] focus:border-[#7B61FF] focus:ring-[#7B61FF]/30"
             }`}
           />
           <button
             onClick={() => {
               if (capital > 0n) setMarginInput((capital / 1_000_000n).toString());
             }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-blue-600/20 px-2 py-0.5 text-xs font-medium text-blue-400 transition-colors hover:bg-blue-600/30"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-[#7B61FF]/20 px-2 py-0.5 text-xs font-medium text-[#7B61FF] transition-colors hover:bg-[#7B61FF]/30"
           >
             Max
           </button>
         </div>
         {exceedsMargin && (
-          <p className="mt-1 text-xs text-red-400">
+          <p className="mt-1 text-xs text-[#FF4466]">
             Exceeds balance ({formatPerc(capital)} {symbol})
           </p>
         )}
@@ -225,7 +225,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <button
             key={pct}
             onClick={() => setMarginPercent(pct)}
-            className="flex-1 rounded-md bg-[#1a1a2e] py-1.5 text-xs font-medium text-[#71717a] transition-colors hover:bg-[#1e1e2e] hover:text-[#a1a1aa] focus-visible:ring-2 focus-visible:ring-blue-500/30"
+            className="flex-1 rounded-md bg-[white/[0.05]] py-1.5 text-xs font-medium text-[#8B95B0] transition-colors hover:bg-[white/[0.06]] hover:text-[#8B95B0] focus-visible:ring-2 focus-visible:ring-[#7B61FF]/30"
           >
             {pct}%
           </button>
@@ -235,8 +235,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Leverage slider + presets */}
       <div className="mb-4">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-xs text-[#71717a]">Leverage</label>
-          <span className="text-xs font-medium text-[#e4e4e7]">{leverage}x</span>
+          <label className="text-xs text-[#8B95B0]">Leverage</label>
+          <span className="text-xs font-medium text-[#F0F4FF]">{leverage}x</span>
         </div>
         <input
           type="range"
@@ -245,17 +245,17 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           step={1}
           value={leverage}
           onChange={(e) => setLeverage(Number(e.target.value))}
-          className="mb-2 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#1a1a2e] accent-blue-500 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-blue-500/30"
+          className="mb-2 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[white/[0.05]] accent-[#7B61FF] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#7B61FF] [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-[#7B61FF]/30"
         />
         <div className="flex gap-1.5">
           {availableLeverage.map((l) => (
             <button
               key={l}
               onClick={() => setLeverage(l)}
-              className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all duration-150 focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
+              className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all duration-150 focus-visible:ring-2 focus-visible:ring-[#7B61FF]/30 ${
                 leverage === l
-                  ? "bg-blue-600 text-white shadow-sm shadow-blue-600/20"
-                  : "bg-[#1a1a2e] text-[#71717a] hover:bg-[#1e1e2e]"
+                  ? "bg-[#7B61FF] text-white shadow-sm shadow-[#7B61FF]/20"
+                  : "bg-[white/[0.05]] text-[#8B95B0] hover:bg-[white/[0.06]]"
               }`}
             >
               {l}x
@@ -282,32 +282,32 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <button
         onClick={handleTrade}
         disabled={loading || !marginInput || positionSize <= 0n || exceedsMargin}
-        className={`w-full rounded-lg py-3 text-sm font-medium text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#12121a] ${
+        className={`w-full rounded-lg py-3 text-sm font-medium text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[white/[0.03]] ${
           direction === "long"
-            ? "bg-emerald-600 hover:bg-emerald-500 hover:shadow-lg hover:shadow-emerald-600/20 focus-visible:ring-emerald-500"
-            : "bg-red-600 hover:bg-red-500 hover:shadow-lg hover:shadow-red-600/20 focus-visible:ring-red-500"
+            ? "bg-#00FFB2 hover:bg-#00FFB2 hover:shadow-lg hover:shadow-#00FFB2/20 focus-visible:ring-#00FFB2"
+            : "bg-[#FF4466] hover:bg-[#FF4466] hover:shadow-lg hover:shadow-[#FF4466]/20 focus-visible:ring-[#FF4466]"
         }`}
       >
         {loading
           ? "Sending..."
           : `${direction === "long" ? "Long" : "Short"} ${leverage}x`}
       </button>
-      <p className="mt-1.5 text-center text-[10px] text-[#52525b]">
+      <p className="mt-1.5 text-center text-[10px] text-[#3D4563]">
         Press Enter to submit
       </p>
 
       {error && (
-        <p className="mt-2 text-xs text-red-400">{error}</p>
+        <p className="mt-2 text-xs text-[#FF4466]">{error}</p>
       )}
 
       {lastSig && (
-        <p className="mt-2 text-xs text-[#71717a]">
+        <p className="mt-2 text-xs text-[#8B95B0]">
           Tx:{" "}
           <a
             href={`${explorerTxUrl(lastSig)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-400 hover:underline"
+            className="text-[#7B61FF] hover:underline"
           >
             {lastSig.slice(0, 16)}...
           </a>

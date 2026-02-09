@@ -62,9 +62,9 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
   const isLong = direction === "long";
 
   return (
-    <div className="mb-4 rounded-lg border border-[#1e2433] bg-[#0a0b0f]/80 px-3.5 py-3 text-xs backdrop-blur-sm">
+    <div className="mb-4 rounded-lg border border-white/[0.06] bg-white/[0.02]/80 px-3.5 py-3 text-xs backdrop-blur-sm">
       <div className="mb-2 flex items-center gap-2">
-        <div className={`h-1.5 w-1.5 rounded-full ${isLong ? "bg-[#00d4aa]" : "bg-red-500"}`} />
+        <div className={`h-1.5 w-1.5 rounded-full ${isLong ? "bg-[#00FFB2]" : "bg-red-500"}`} />
         <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
           Order Summary
         </span>
@@ -74,7 +74,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         <SummaryRow
           label="Direction"
           value={`${isLong ? "Long" : "Short"} ${leverage}x`}
-          valueClass={isLong ? "text-[#00d4aa]" : "text-red-400"}
+          valueClass={isLong ? "text-[#00FFB2]" : "text-red-400"}
         />
         <SummaryRow label="Est. Entry Price" value={formatUsd(estEntry)} />
         <SummaryRow
@@ -93,7 +93,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         <SummaryRow
           label="Est. Liq Price"
           value={formatUsd(liqPrice)}
-          valueClass={isLong ? "text-red-400" : "text-[#00d4aa]"}
+          valueClass={isLong ? "text-red-400" : "text-[#00FFB2]"}
         />
       </div>
     </div>

@@ -206,14 +206,14 @@ const DevnetMintContent: FC = () => {
     }
   }, [publicKey, signTransaction, existingMint, mintMoreAmount, recipient, refreshBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cardClass = "rounded-xl border border-[#1e2433] bg-[#12131a] p-6";
+  const cardClass = "rounded-xl border border-white/[0.06] bg-[#12131a] p-6";
   const btnPrimary =
     "rounded-lg bg-emerald-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed";
   const inputClass =
-    "w-full rounded-lg border border-[#1e2433] bg-[#0a0b0f] px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none";
+    "w-full rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none";
 
   return (
-    <div className="min-h-screen bg-[#0a0b0f] px-4 py-12">
+    <div className="min-h-screen bg-white/[0.02] px-4 py-12">
       <div className="mx-auto max-w-xl space-y-6">
         <div className="text-center">
           <h1 className="text-3xl font-extrabold text-white">
@@ -368,12 +368,12 @@ const DevnetMintContent: FC = () => {
               ✅ Token Created
             </h2>
             <div className="flex items-center gap-2">
-              <code className="flex-1 overflow-hidden text-ellipsis rounded bg-[#0a0b0f] px-3 py-2 text-xs text-white">
+              <code className="flex-1 overflow-hidden text-ellipsis rounded bg-white/[0.02] px-3 py-2 text-xs text-white">
                 {mintAddress}
               </code>
               <button
                 onClick={copyMint}
-                className="rounded-lg border border-[#1e2433] px-3 py-2 text-xs text-slate-400 transition-colors hover:bg-[#1e2433] hover:text-white"
+                className="rounded-lg border border-white/[0.06] px-3 py-2 text-xs text-slate-400 transition-colors hover:bg-[#1e2433] hover:text-white"
               >
                 {copied ? "Copied!" : "Copy"}
               </button>
