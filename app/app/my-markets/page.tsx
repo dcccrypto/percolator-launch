@@ -61,7 +61,7 @@ const ConfirmDialog: FC<{
             variant={danger ? "secondary" : "primary"}
             size="sm"
             onClick={onConfirm}
-            className={danger ? "!border-red-500/30 !text-red-400 hover:!bg-red-500/10" : ""}
+            className={danger ? "!border-[#FF4466]/30 !text-[#FF4466] hover:!bg-[#FF4466]/10" : ""}
           >
             {confirmLabel}
           </GlowButton>
@@ -161,7 +161,7 @@ const MarketCard: FC<{
               {shortAddr(slab)} &rarr;
             </a>
           </div>
-          <span className={`text-xs font-bold ${healthy ? "text-[#00FFB2]" : "text-red-400"}`}>
+          <span className={`text-xs font-bold ${healthy ? "text-[#00FFB2]" : "text-[#FF4466]"}`}>
             {healthy ? "healthy" : "stale"}
           </span>
         </div>
@@ -208,7 +208,7 @@ const MarketCard: FC<{
           <button
             onClick={() => setShowBurnConfirm(true)}
             disabled={actions.loading === "renounceAdmin"}
-            className="text-xs text-red-400/70 hover:text-red-400 transition-colors disabled:opacity-40"
+            className="text-xs text-[#FF4466]/70 hover:text-[#FF4466] transition-colors disabled:opacity-40"
           >
             burn admin key
           </button>
@@ -321,7 +321,7 @@ const MyMarketsPage: FC = () => {
       <main className="mx-auto max-w-5xl px-4 py-24 text-center">
         <div className="mx-auto max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
           <h1 className="text-xl font-bold text-white">something broke.</h1>
-          <p className="mt-2 text-sm text-red-400">{error}</p>
+          <p className="mt-2 text-sm text-[#FF4466]">{error}</p>
         </div>
       </main>
     );

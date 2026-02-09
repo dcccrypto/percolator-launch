@@ -22,10 +22,10 @@ function eventIcon(type: ActivityItem["eventType"]): string {
 
 function eventColor(type: ActivityItem["eventType"]): string {
   switch (type) {
-    case "new_market": return "text-emerald-400";
-    case "trade": return "text-blue-400";
-    case "large_trade": return "text-yellow-400";
-    case "liquidation": return "text-red-400";
+    case "new_market": return "text-[#00FFB2]";
+    case "trade": return "text-[#00FFB2]";
+    case "large_trade": return "text-[#FFB800]";
+    case "liquidation": return "text-[#FF4466]";
   }
 }
 

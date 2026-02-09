@@ -40,7 +40,7 @@ export const MarketBrowser: FC = () => {
       : error;
     return (
       <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-8 text-center shadow-sm">
-        <p className="text-red-400">Error: {helpMsg}</p>
+        <p className="text-[#FF4466]">Error: {helpMsg}</p>
       </div>
     );
   }
@@ -92,7 +92,7 @@ export const MarketBrowser: FC = () => {
                       href={`https://solscan.io/token/${mintBase58}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm font-medium text-blue-400 hover:underline"
+                      className="text-sm font-medium text-[#00FFB2] hover:underline"
                     >
                       {symbol}
                     </a>
@@ -102,7 +102,7 @@ export const MarketBrowser: FC = () => {
                       className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
                         isAdminOracle(m)
                           ? "bg-amber-900/40 text-amber-400"
-                          : "bg-blue-900/40 text-blue-400"
+                          : "bg-[#00FFB2]/[0.08] text-[#00FFB2]"
                       }`}
                     >
                       {isAdminOracle(m) ? "Admin" : "Pyth"}
@@ -123,7 +123,7 @@ export const MarketBrowser: FC = () => {
                   <td className="px-4 py-3 text-right">
                     <Link
                       href={`/trade?market=${slab}`}
-                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+                      className="rounded-lg bg-[#00FFB2] px-3 py-1.5 text-xs font-medium text-[#06080d] transition-colors hover:bg-[#00FFB2]/80"
                     >
                       Trade
                     </Link>

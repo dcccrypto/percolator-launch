@@ -17,7 +17,7 @@ export const FundingRate: FC = () => {
   const bpsPerSlot = Number(fundingRate ?? 0n);
   const hourlyRate = bpsPerSlot * 2.5 * 3600;
   const annualizedRate = bpsPerSlot * 2.5 * 3600 * 24 * 365;
-  const rateColor = bpsPerSlot === 0 ? "text-[#3D4563]" : bpsPerSlot > 0 ? "text-emerald-400" : "text-red-400";
+  const rateColor = bpsPerSlot === 0 ? "text-[#3D4563]" : bpsPerSlot > 0 ? "text-[#00FFB2]" : "text-[#FF4466]";
 
   return (
     <div className="rounded-2xl border border-white/[0.06] bg-white/[0.05] p-6">

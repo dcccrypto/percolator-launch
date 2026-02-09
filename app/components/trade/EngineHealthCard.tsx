@@ -7,9 +7,9 @@ import { computeMarketHealth } from "@/lib/health";
 import { formatTokenAmount, formatSlotAge } from "@/lib/format";
 
 const HEALTH_COLORS: Record<string, string> = {
-  healthy: "bg-green-900/40 text-green-400",
-  caution: "bg-yellow-900/40 text-yellow-400",
-  warning: "bg-red-900/40 text-red-400",
+  healthy: "bg-[#00FFB2]/[0.1] text-[#00FFB2]",
+  caution: "bg-[#FFB800]/[0.1] text-[#FFB800]",
+  warning: "bg-[#FF4466]/[0.1] text-[#FF4466]",
   empty: "bg-[#1a1a2e] text-[#71717a]",
 };
 

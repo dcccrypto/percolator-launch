@@ -32,7 +32,7 @@ export const OrderConfirm: FC<OrderConfirmProps> = ({
             Direction:{" "}
             <span
               className={
-                direction === "long" ? "text-emerald-400" : "text-red-400"
+                direction === "long" ? "text-[#00FFB2]" : "text-[#FF4466]"
               }
             >
               {direction.toUpperCase()}
@@ -53,7 +53,7 @@ export const OrderConfirm: FC<OrderConfirmProps> = ({
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            className="flex-1 rounded-lg bg-[#00FFB2] py-2 text-sm font-medium text-[#06080d] transition-colors hover:bg-[#00FFB2]/80 disabled:opacity-50"
           >
             {loading ? "Sending..." : "Confirm"}
           </button>

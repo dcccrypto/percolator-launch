@@ -43,11 +43,11 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
         <button
           onClick={async () => { try { const sig = await initUser(); setLastSig(sig ?? null); } catch {} }}
           disabled={initLoading}
-          className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="w-full rounded-lg bg-[#00FFB2] py-2.5 text-sm font-medium text-[#06080d] hover:bg-[#00FFB2]/80 disabled:opacity-50"
         >
           {initLoading ? "Creating..." : "Create Account"}
         </button>
-        {initError && <p className="mt-2 text-xs text-red-400">{initError}</p>}
+        {initError && <p className="mt-2 text-xs text-[#FF4466]">{initError}</p>}
         {lastSig && <p className="mt-2 text-xs text-[#52525b]">Tx: {lastSig.slice(0, 12)}...</p>}
       </div>
     );
@@ -90,20 +90,20 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           value={amount}
           onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
           placeholder={`Amount (${symbol})`}
-          className="w-full rounded-lg border border-[#1e1e2e] bg-[#1a1a28] px-3 py-2 text-sm text-[#e4e4e7] placeholder-[#52525b] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-full rounded-lg border border-white/[0.06] bg-white/[0.05] px-3 py-2 text-sm text-[#e4e4e7] placeholder-[#52525b] focus:border-[#00FFB2]/40 focus:outline-none focus:ring-1 focus:ring-[#00FFB2]/20"
         />
       </div>
 
       <button
         onClick={handleSubmit}
         disabled={loading || !amount}
-        className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-lg bg-[#00FFB2] py-2.5 text-sm font-medium text-[#06080d] hover:bg-[#00FFB2]/80 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Sending..." : mode === "deposit" ? "Deposit" : "Withdraw"}
       </button>
 
-      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-      {lastSig && <p className="mt-2 text-xs text-[#52525b]">Tx: <a href={`${explorerTxUrl(lastSig)}`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{lastSig.slice(0, 12)}...</a></p>}
+      {error && <p className="mt-2 text-xs text-[#FF4466]">{error}</p>}
+      {lastSig && <p className="mt-2 text-xs text-[#52525b]">Tx: <a href={`${explorerTxUrl(lastSig)}`} target="_blank" rel="noopener noreferrer" className="text-[#00FFB2] hover:underline">{lastSig.slice(0, 12)}...</a></p>}
     </div>
   );
 };

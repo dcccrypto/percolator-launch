@@ -234,7 +234,7 @@ const DevnetMintContent: FC = () => {
               ✓ Connected: <span className="font-mono text-xs">{publicKey?.toBase58()}</span>
             </p>
           ) : (
-            <p className="text-sm text-yellow-400">
+            <p className="text-sm text-[#FFB800]">
               Connect your wallet using the button in the header
             </p>
           )}

@@ -5,16 +5,16 @@ import { useToastContext, type ToastItem } from "@/hooks/useToast";
 
 const COLORS: Record<ToastItem["type"], { bg: string; border: string; icon: string }> = {
   success: { bg: "bg-emerald-500/10", border: "border-emerald-500/30", icon: "✓" },
-  error: { bg: "bg-red-500/10", border: "border-red-500/30", icon: "✕" },
-  info: { bg: "bg-blue-500/10", border: "border-blue-500/30", icon: "ℹ" },
-  warning: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", icon: "⚠" },
+  error: { bg: "bg-[#FF4466]/10", border: "border-[#FF4466]/30", icon: "✕" },
+  info: { bg: "bg-[#00FFB2]/10", border: "border-[#00FFB2]/30", icon: "ℹ" },
+  warning: { bg: "bg-[#FFB800]/10", border: "border-[#FFB800]/30", icon: "⚠" },
 };
 
 const TEXT_COLORS: Record<ToastItem["type"], string> = {
   success: "text-emerald-400",
-  error: "text-red-400",
-  info: "text-blue-400",
-  warning: "text-yellow-400",
+  error: "text-[#FF4466]",
+  info: "text-[#00FFB2]",
+  warning: "text-[#FFB800]",
 };
 
 const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({

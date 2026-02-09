@@ -20,7 +20,7 @@ export const CopyableAddress: FC<{ address: string; chars?: number; className?: 
   return (
     <button
       onClick={handleCopy}
-      className={`inline-flex items-center gap-1 font-mono transition-colors hover:text-blue-400 ${className}`}
+      className={`inline-flex items-center gap-1 font-mono transition-colors hover:text-[#00FFB2] ${className}`}
       title="Click to copy"
     >
       <span>{address.slice(0, chars)}...{address.slice(-chars)}</span>

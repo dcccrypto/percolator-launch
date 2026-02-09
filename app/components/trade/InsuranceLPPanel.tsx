@@ -91,7 +91,7 @@ export function InsuranceLPPanel() {
         <span className="text-lg">🛡️</span>
         <h3 className="text-sm font-semibold text-[#F0F4FF]">Insurance Pool</h3>
         {state.mintExists && (
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 rounded border border-emerald-500/20">
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#00FFB2]/10 text-[#00FFB2] rounded border border-[#00FFB2]/20">
             LIVE
           </span>
         )}
@@ -129,7 +129,7 @@ export function InsuranceLPPanel() {
             </div>
             <div className="text-right">
               <p className="text-[10px] text-[#5a6382] uppercase">Redeemable</p>
-              <p className="text-sm font-mono text-emerald-400">{formatSol(state.userRedeemableValue)} SOL</p>
+              <p className="text-sm font-mono text-[#00FFB2]">{formatSol(state.userRedeemableValue)} SOL</p>
             </div>
           </div>
         </div>
@@ -140,7 +140,7 @@ export function InsuranceLPPanel() {
         <button
           onClick={handleCreateMint}
           disabled={loading}
-          className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-white/[0.05] disabled:text-[#5a6382] text-white text-sm font-medium rounded transition-colors mb-3"
+          className="w-full py-2 px-4 bg-[#00FFB2] hover:bg-[#00FFB2]/80 disabled:bg-white/[0.05] disabled:text-[#5a6382] text-[#06080d] text-sm font-medium rounded transition-colors mb-3"
         >
           {loading ? 'Creating...' : 'Create Insurance LP Mint'}
         </button>
@@ -162,7 +162,7 @@ export function InsuranceLPPanel() {
               onClick={() => { setMode('deposit'); setAmount(''); }}
               className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
                 mode === 'deposit'
-                  ? 'bg-emerald-600 text-white'
+                  ? 'bg-[#00FFB2] text-[#06080d]'
                   : 'text-[#8B95B0] hover:text-[#F0F4FF]'
               }`}
             >
@@ -172,7 +172,7 @@ export function InsuranceLPPanel() {
               onClick={() => { setMode('withdraw'); setAmount(''); }}
               className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
                 mode === 'withdraw'
-                  ? 'bg-red-600 text-white'
+                  ? 'bg-[#FF4466] text-white'
                   : 'text-[#8B95B0] hover:text-[#F0F4FF]'
               }`}
             >
@@ -194,7 +194,7 @@ export function InsuranceLPPanel() {
             {mode === 'withdraw' && state.userLpBalance > 0n && (
               <button
                 onClick={() => setAmount((Number(state.userLpBalance) / 1e9).toString())}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-indigo-400 hover:text-indigo-300"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[#00FFB2] hover:text-[#00FFB2]/80"
               >
                 MAX
               </button>
@@ -219,8 +219,8 @@ export function InsuranceLPPanel() {
             disabled={loading || !amount || parseFloat(amount) <= 0}
             className={`w-full py-2 px-4 text-white text-sm font-medium rounded transition-colors disabled:bg-white/[0.05] disabled:text-[#5a6382] ${
               mode === 'deposit'
-                ? 'bg-emerald-600 hover:bg-emerald-500'
-                : 'bg-red-600 hover:bg-red-500'
+                ? 'bg-[#00FFB2] hover:bg-[#00FFB2]/80 text-[#06080d]'
+                : 'bg-[#FF4466] hover:bg-[#FF4466]/80'
             }`}
           >
             {loading
@@ -236,7 +236,7 @@ export function InsuranceLPPanel() {
       {/* Status */}
       {(txStatus || error) && (
         <p className={`text-xs mt-2 ${
-          (txStatus || error || '').includes('Error') ? 'text-red-400' : 'text-emerald-400'
+          (txStatus || error || '').includes('Error') ? 'text-[#FF4466]' : 'text-[#00FFB2]'
         }`}>
           {txStatus || error}
         </p>

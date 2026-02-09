@@ -37,7 +37,7 @@ export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, 
       <div className="mb-3 flex items-baseline gap-3">
         <span className="font-mono text-xl text-white">${fmtPrice}</span>
         {change24h != null && (
-          <span className={`text-sm font-medium ${change24h >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+          <span className={`text-sm font-medium ${change24h >= 0 ? "text-[#00FFB2]" : "text-[#FF4466]"}`}>
             {changeStr}
           </span>
         )}
