@@ -1,7 +1,8 @@
 "use client";
 
-import { FC, useState, useEffect } from "react";
+import { FC, useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import gsap from "gsap";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useMyMarkets, type MyMarket } from "@/hooks/useMyMarkets";
@@ -13,8 +14,7 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { getConfig, explorerAccountUrl } from "@/lib/config";
 import { deriveInsuranceLpMint } from "@percolator/core";
 
-/* ─── helpers ─── */
-
+/* helpers */
 function fmt(v: bigint, decimals = 6): string {
   const n = Number(v) / 10 ** decimals;
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -26,7 +26,7 @@ function fmtPrice(v: bigint): string {
 }
 
 function shortAddr(addr: string): string {
-  return addr.slice(0, 6) + "…" + addr.slice(-4);
+  return addr.slice(0, 6) + "..." + addr.slice(-4);
 }
 
 function timeAgo(slot: bigint, currentSlot: bigint): string {
@@ -39,18 +39,7 @@ function timeAgo(slot: bigint, currentSlot: bigint): string {
   return `${Math.floor(secs / 86400)}d ago`;
 }
 
-/* ─── stat card ─── */
-
-const StatCard: FC<{ label: string; value: string; sub?: string }> = ({ label, value, sub }) => (
-  <GlassCard padding="sm" hover={false}>
-    <p className="text-xs text-[#8B95B0]">{label}</p>
-    <p className="mt-1 text-xl font-bold text-white">{value}</p>
-    {sub && <p className="mt-0.5 text-xs text-[#8B95B0]">{sub}</p>}
-  </GlassCard>
-);
-
-/* ─── confirmation dialog ─── */
-
+/* confirm dialog */
 const ConfirmDialog: FC<{
   open: boolean;
   title: string;
@@ -62,14 +51,12 @@ const ConfirmDialog: FC<{
 }> = ({ open, title, description, confirmLabel, onConfirm, onCancel, danger }) => {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <GlassCard padding="lg" hover={false} className="mx-4 max-w-md">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="mx-4 max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
         <h3 className="text-lg font-bold text-white">{title}</h3>
-        <p className="mt-2 text-sm text-[#8B95B0]">{description}</p>
+        <p className="mt-2 text-sm text-[#71717a]">{description}</p>
         <div className="mt-6 flex gap-3">
-          <GlowButton variant="ghost" size="sm" onClick={onCancel}>
-            Cancel
-          </GlowButton>
+          <GlowButton variant="ghost" size="sm" onClick={onCancel}>cancel</GlowButton>
           <GlowButton
             variant={danger ? "secondary" : "primary"}
             size="sm"
@@ -79,13 +66,12 @@ const ConfirmDialog: FC<{
             {confirmLabel}
           </GlowButton>
         </div>
-      </GlassCard>
+      </div>
     </div>
   );
 };
 
-/* ─── input dialog ─── */
-
+/* input dialog */
 const InputDialog: FC<{
   open: boolean;
   title: string;
@@ -98,20 +84,18 @@ const InputDialog: FC<{
   const [value, setValue] = useState("");
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <GlassCard padding="lg" hover={false} className="mx-4 max-w-md w-full">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="mx-4 max-w-md w-full rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
         <h3 className="text-lg font-bold text-white">{title}</h3>
-        <p className="mt-2 text-sm text-[#8B95B0]">{description}</p>
+        <p className="mt-2 text-sm text-[#71717a]">{description}</p>
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={placeholder}
-          className="mt-4 w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-sm text-white placeholder-[#8B95B0]/50 outline-none focus:border-[#00FFB2]/30"
+          className="mt-4 w-full rounded-[4px] border border-[#1a1a1f] bg-[#09090b] px-4 py-2.5 text-sm text-white placeholder-[#3f3f46] outline-none focus:border-[#3f3f46]"
         />
         <div className="mt-4 flex gap-3">
-          <GlowButton variant="ghost" size="sm" onClick={onCancel}>
-            Cancel
-          </GlowButton>
+          <GlowButton variant="ghost" size="sm" onClick={onCancel}>cancel</GlowButton>
           <GlowButton
             variant="primary"
             size="sm"
@@ -121,13 +105,12 @@ const InputDialog: FC<{
             {confirmLabel}
           </GlowButton>
         </div>
-      </GlassCard>
+      </div>
     </div>
   );
 };
 
-/* ─── market card ─── */
-
+/* market card */
 const MarketCard: FC<{
   market: MyMarket;
   insuranceMintExists: boolean;
@@ -156,7 +139,7 @@ const MarketCard: FC<{
   async function handleAction(name: string, fn: () => Promise<string>) {
     try {
       const sig = await fn();
-      toast(`${name} successful! Tx: ${sig.slice(0, 16)}…`, "success");
+      toast(`${name} successful! Tx: ${sig.slice(0, 16)}...`, "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : `${name} failed`, "error");
     }
@@ -164,176 +147,141 @@ const MarketCard: FC<{
 
   return (
     <>
-      <GlassCard padding="none" glow hover={false}>
+      <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.06] p-5">
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#00FFB2]/20 to-[#7B61FF]/20 text-sm font-bold text-[#00FFB2]">
-              P
-            </span>
-            <div>
-              <p className="font-semibold text-white">{market.label}</p>
-              <a
-                href={explorerAccountUrl(slab)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-[#8B95B0] hover:text-[#00FFB2] transition-colors"
-              >
-                {shortAddr(slab)} ↗
-              </a>
-            </div>
+        <div className="flex items-center justify-between border-b border-[#1a1a1f] p-5">
+          <div>
+            <p className="font-semibold text-white">{market.label}</p>
+            <a
+              href={explorerAccountUrl(slab)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-[#71717a] hover:text-[#00FFB2] transition-colors"
+            >
+              {shortAddr(slab)} &rarr;
+            </a>
           </div>
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-bold ${
-              healthy
-                ? "bg-[#00FFB2]/10 text-[#00FFB2]"
-                : "bg-red-500/10 text-red-400"
-            }`}
-          >
-            {healthy ? "● Healthy" : "● Stale"}
+          <span className={`text-xs font-bold ${healthy ? "text-[#00FFB2]" : "text-red-400"}`}>
+            {healthy ? "healthy" : "stale"}
           </span>
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 gap-px bg-white/[0.03] sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-px sm:grid-cols-4">
           {[
-            { label: "Oracle Price", value: oraclePrice > 0n ? fmtPrice(oraclePrice) : "N/A" },
-            { label: "Open Interest", value: fmt(oi) },
-            { label: "Vault Balance", value: fmt(vault) },
-            { label: "Insurance", value: fmt(insurance) },
-            { label: "Last Crank", value: timeAgo(lastCrank, currentSlot) },
-            { label: "Staleness", value: `${staleness} slots` },
-            { label: "Oracle Authority", value: hasOracleAuthority ? shortAddr(oracleAuthority) : "None" },
-            { label: "Active Accounts", value: market.engine.numUsedAccounts.toString() },
+            { label: "oracle price", value: oraclePrice > 0n ? fmtPrice(oraclePrice) : "N/A" },
+            { label: "open interest", value: fmt(oi) },
+            { label: "vault balance", value: fmt(vault) },
+            { label: "insurance", value: fmt(insurance) },
+            { label: "last crank", value: timeAgo(lastCrank, currentSlot) },
+            { label: "staleness", value: `${staleness} slots` },
+            { label: "oracle authority", value: hasOracleAuthority ? shortAddr(oracleAuthority) : "none" },
+            { label: "active accounts", value: market.engine.numUsedAccounts.toString() },
           ].map((s) => (
-            <div key={s.label} className="bg-[#0a0c14] p-4">
-              <p className="text-[10px] uppercase tracking-wider text-[#8B95B0]/70">{s.label}</p>
-              <p className="mt-1 text-sm font-medium text-white">{s.value}</p>
+            <div key={s.label} className="border-t border-[#1a1a1f] p-4">
+              <p className="text-[10px] uppercase tracking-wider text-[#3f3f46]">{s.label}</p>
+              <p className="mt-1 text-sm text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{s.value}</p>
             </div>
           ))}
         </div>
 
         {/* Actions */}
-        <div className="flex flex-wrap gap-2 border-t border-white/[0.06] p-5">
-          <GlowButton variant="secondary" size="sm" onClick={() => setShowOracleInput(true)} disabled={actions.loading === "setOracleAuthority"}>
-            🔑 Set Oracle Authority
-          </GlowButton>
-          <GlowButton variant="secondary" size="sm" onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"}>
-            📊 Push Price
-          </GlowButton>
-          <GlowButton variant="secondary" size="sm" onClick={() => setShowTopUpInput(true)} disabled={actions.loading === "topUpInsurance"}>
-            🛡️ Top Up Insurance
-          </GlowButton>
+        <div className="flex flex-wrap gap-2 border-t border-[#1a1a1f] p-5">
+          <button onClick={() => setShowOracleInput(true)} disabled={actions.loading === "setOracleAuthority"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
+            set oracle authority
+          </button>
+          <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
+            push price
+          </button>
+          <button onClick={() => setShowTopUpInput(true)} disabled={actions.loading === "topUpInsurance"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
+            top up insurance
+          </button>
           {!insuranceMintExists && (
-            <GlowButton
-              variant="secondary"
-              size="sm"
+            <button
               onClick={() => handleAction("Create Insurance Mint", () => actions.createInsuranceMint(market))}
               disabled={actions.loading === "createInsuranceMint"}
+              className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40"
             >
-              {actions.loading === "createInsuranceMint" ? "Creating…" : "🏦 Create Insurance Mint"}
-            </GlowButton>
+              {actions.loading === "createInsuranceMint" ? "creating..." : "create insurance mint"}
+            </button>
           )}
-          <GlowButton
-            variant="ghost"
-            size="sm"
+          <button
             onClick={() => setShowBurnConfirm(true)}
             disabled={actions.loading === "renounceAdmin"}
-            className="!text-red-400/70 hover:!text-red-400"
+            className="text-xs text-red-400/70 hover:text-red-400 transition-colors disabled:opacity-40"
           >
-            🔥 Burn Admin Key
-          </GlowButton>
-          <Link href={`/trade/${slab}`}>
-            <GlowButton variant="ghost" size="sm">
-              Trade →
-            </GlowButton>
+            burn admin key
+          </button>
+          <Link href={`/trade/${slab}`} className="text-xs text-[#00FFB2] hover:opacity-80 transition-opacity">
+            trade &rarr;
           </Link>
         </div>
-      </GlassCard>
+      </div>
 
       {/* Dialogs */}
       <InputDialog
         open={showOracleInput}
-        title="Set Oracle Authority"
-        description="Enter the public key that will be authorized to push oracle price updates. Typically your crank wallet."
-        placeholder={cfg.crankWallet || "Pubkey…"}
-        confirmLabel="Set Authority"
-        onConfirm={(v) => {
-          setShowOracleInput(false);
-          handleAction("Set Oracle Authority", () => actions.setOracleAuthority(market, v));
-        }}
+        title="set oracle authority"
+        description="enter the public key that will be authorized to push oracle price updates."
+        placeholder={cfg.crankWallet || "pubkey..."}
+        confirmLabel="set authority"
+        onConfirm={(v) => { setShowOracleInput(false); handleAction("Set Oracle Authority", () => actions.setOracleAuthority(market, v)); }}
         onCancel={() => setShowOracleInput(false)}
       />
-
       <InputDialog
         open={showPriceInput}
-        title="Push Oracle Price"
-        description="Enter the price in USD (e.g. 1.50). This will be converted to E6 format internally."
+        title="push oracle price"
+        description="enter the price in USD (e.g. 1.50)."
         placeholder="1.00"
-        confirmLabel="Push Price"
-        onConfirm={(v) => {
-          setShowPriceInput(false);
-          const priceE6 = Math.round(parseFloat(v) * 1e6).toString();
-          handleAction("Push Price", () => actions.pushPrice(market, priceE6));
-        }}
+        confirmLabel="push price"
+        onConfirm={(v) => { setShowPriceInput(false); const priceE6 = Math.round(parseFloat(v) * 1e6).toString(); handleAction("Push Price", () => actions.pushPrice(market, priceE6)); }}
         onCancel={() => setShowPriceInput(false)}
       />
-
       <InputDialog
         open={showTopUpInput}
-        title="Top Up Insurance Fund"
-        description="Enter the amount of collateral tokens to add to the insurance fund (in token units, e.g. 100)."
+        title="top up insurance fund"
+        description="enter the amount of collateral tokens to add."
         placeholder="100"
-        confirmLabel="Top Up"
-        onConfirm={(v) => {
-          setShowTopUpInput(false);
-          const amount = BigInt(Math.round(parseFloat(v) * 1e6));
-          handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount));
-        }}
+        confirmLabel="top up"
+        onConfirm={(v) => { setShowTopUpInput(false); const amount = BigInt(Math.round(parseFloat(v) * 1e6)); handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount)); }}
         onCancel={() => setShowTopUpInput(false)}
       />
-
       <ConfirmDialog
         open={showBurnConfirm}
-        title="⚠️ Burn Admin Key"
-        description="This action is IRREVERSIBLE. Once you renounce admin, you will never be able to update config, set oracle, or perform any admin actions on this market. The market becomes fully immutable."
-        confirmLabel="I understand, burn it"
+        title="burn admin key"
+        description="this is permanent. like, actually permanent. you will never be able to update config, set oracle, or perform any admin actions on this market again."
+        confirmLabel="burn it"
         danger
-        onConfirm={() => {
-          setShowBurnConfirm(false);
-          handleAction("Burn Admin Key", () => actions.renounceAdmin(market));
-        }}
+        onConfirm={() => { setShowBurnConfirm(false); handleAction("Burn Admin Key", () => actions.renounceAdmin(market)); }}
         onCancel={() => setShowBurnConfirm(false)}
       />
     </>
   );
 };
 
-/* ─── loading skeleton ─── */
-
+/* loading skeleton */
 const LoadingSkeleton: FC = () => (
-  <main className="mx-auto max-w-6xl px-4 py-12">
-    <div className="mb-8 flex items-center justify-between">
-      <ShimmerSkeleton className="h-9 w-48" />
-      <ShimmerSkeleton className="h-10 w-32" rounded="xl" />
-    </div>
+  <main className="mx-auto max-w-5xl px-4 py-12">
+    <ShimmerSkeleton className="mb-8 h-9 w-48" />
     <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-      {[1, 2, 3].map((i) => (
-        <ShimmerSkeleton key={i} className="h-24" rounded="2xl" />
-      ))}
+      {[1, 2, 3].map((i) => <ShimmerSkeleton key={i} className="h-20" />)}
     </div>
-    {[1, 2].map((i) => (
-      <ShimmerSkeleton key={i} className="mb-4 h-72" rounded="2xl" />
-    ))}
+    {[1, 2].map((i) => <ShimmerSkeleton key={i} className="mb-4 h-64" />)}
   </main>
 );
 
-/* ─── main page ─── */
-
+/* main page */
 const MyMarketsPage: FC = () => {
   const { myMarkets, loading, error, connected } = useMyMarkets();
   const { connection } = useConnection();
   const [insuranceMintMap, setInsuranceMintMap] = useState<Record<string, boolean>>({});
+  const pageRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pageRef.current) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
+  }, []);
 
   useEffect(() => {
     if (!myMarkets.length) return;
@@ -357,14 +305,11 @@ const MyMarketsPage: FC = () => {
 
   if (!connected) {
     return (
-      <main className="mx-auto max-w-6xl px-4 py-24 text-center">
-        <GlassCard padding="lg" hover={false} className="mx-auto max-w-md">
-          <div className="text-4xl">🔐</div>
-          <h1 className="mt-4 text-2xl font-bold text-white">Admin Dashboard</h1>
-          <p className="mt-2 text-sm text-[#8B95B0]">
-            Connect your wallet to manage your Percolator markets.
-          </p>
-        </GlassCard>
+      <main className="mx-auto max-w-5xl px-4 py-24 text-center">
+        <div className="mx-auto max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
+          <h1 className="text-xl font-bold text-white">your markets</h1>
+          <p className="mt-2 text-sm text-[#71717a]">connect your wallet to see what you&apos;ve built.</p>
+        </div>
       </main>
     );
   }
@@ -373,29 +318,25 @@ const MyMarketsPage: FC = () => {
 
   if (error) {
     return (
-      <main className="mx-auto max-w-6xl px-4 py-24 text-center">
-        <GlassCard padding="lg" hover={false} className="mx-auto max-w-md">
-          <div className="text-4xl">❌</div>
-          <h1 className="mt-4 text-2xl font-bold text-white">Error</h1>
+      <main className="mx-auto max-w-5xl px-4 py-24 text-center">
+        <div className="mx-auto max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
+          <h1 className="text-xl font-bold text-white">something broke.</h1>
           <p className="mt-2 text-sm text-red-400">{error}</p>
-        </GlassCard>
+        </div>
       </main>
     );
   }
 
   if (myMarkets.length === 0) {
     return (
-      <main className="mx-auto max-w-6xl px-4 py-24 text-center">
-        <GlassCard padding="lg" hover={false} className="mx-auto max-w-md">
-          <div className="text-4xl">🚀</div>
-          <h1 className="mt-4 text-2xl font-bold text-white">No Markets Yet</h1>
-          <p className="mt-2 mb-6 text-sm text-[#8B95B0]">
-            You haven&apos;t created any markets. Launch your first one!
-          </p>
+      <main className="mx-auto max-w-5xl px-4 py-24 text-center">
+        <div className="mx-auto max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
+          <h1 className="text-xl font-bold text-white">nothing here yet.</h1>
+          <p className="mt-2 mb-6 text-sm text-[#71717a]">you haven&apos;t created any markets. go make something.</p>
           <Link href="/create">
-            <GlowButton>✨ Create Market</GlowButton>
+            <GlowButton>launch a market</GlowButton>
           </Link>
-        </GlassCard>
+        </div>
       </main>
     );
   }
@@ -405,21 +346,28 @@ const MyMarketsPage: FC = () => {
   const totalInsurance = myMarkets.reduce((acc, m) => acc + m.engine.insuranceFund.balance, 0n);
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-12">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <main ref={pageRef} className="mx-auto max-w-5xl px-4 py-10 opacity-0">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">Admin Dashboard</h1>
-          <p className="mt-1 text-sm text-[#8B95B0]">Manage your Percolator markets</p>
+          <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>your markets</h1>
+          <p className="mt-1 text-sm text-[#71717a]">manage what you&apos;ve built.</p>
         </div>
         <Link href="/create">
-          <GlowButton size="sm">+ New Market</GlowButton>
+          <GlowButton size="sm">+ new market</GlowButton>
         </Link>
       </div>
 
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Markets" value={totalMarkets.toString()} />
-        <StatCard label="Total TVL (Vault)" value={fmt(totalVault)} sub="collateral tokens" />
-        <StatCard label="Total Insurance" value={fmt(totalInsurance)} sub="collateral tokens" />
+        {[
+          { label: "total markets", value: totalMarkets.toString() },
+          { label: "total TVL", value: fmt(totalVault) },
+          { label: "total insurance", value: fmt(totalInsurance) },
+        ].map((s) => (
+          <div key={s.label} className="rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-4">
+            <p className="text-xs text-[#71717a]">{s.label}</p>
+            <p className="mt-1 text-xl font-bold text-white">{s.value}</p>
+          </div>
+        ))}
       </div>
 
       <div className="grid gap-6">
