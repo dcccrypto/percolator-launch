@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
+import gsap from "gsap";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
@@ -9,16 +10,11 @@ import { formatTokenAmount } from "@/lib/format";
 import type { MarketWithStats } from "@/lib/supabase";
 import { supabase } from "@/lib/supabase";
 import type { DiscoveredMarket } from "@percolator/core";
-import { SLAB_TIERS } from "@percolator/core";
 import { ActivityFeed } from "@/components/market/ActivityFeed";
-
-function getSlabTierFromAccounts(maxAccounts: number): { label: string; color: string } {
-  const small = SLAB_TIERS.small.maxAccounts;
-  const medium = SLAB_TIERS.medium.maxAccounts;
-  if (maxAccounts <= small) return { label: "S", color: "text-[#b0b7c8] bg-[#b0b7c8]/10" };
-  if (maxAccounts <= medium) return { label: "M", color: "text-[#00d4aa] bg-[#00d4aa]/10" };
-  return { label: "L", color: "text-[#f0b232] bg-[#f0b232]/10" };
-}
+import { GlassCard } from "@/components/ui/GlassCard";
+import { GlowButton } from "@/components/ui/GlowButton";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+import { ScrollReveal } from "@/components/ui/ScrollReveal";
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
@@ -47,6 +43,8 @@ export default function MarketsPage() {
   const [supabaseLoading, setSupabaseLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("volume");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function load() {
@@ -56,6 +54,14 @@ export default function MarketsPage() {
     }
     load();
   }, []);
+
+  // Staggered row entrance
+  useEffect(() => {
+    if (!listRef.current || discoveryLoading) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const rows = listRef.current.querySelectorAll(".market-row");
+    gsap.fromTo(rows, { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.4, stagger: 0.06, ease: "power3.out" });
+  }, [discoveryLoading, search, sortBy]);
 
   const merged = useMemo<MergedMarket[]>(() => {
     const sbMap = new Map<string, MarketWithStats>();
@@ -94,37 +100,42 @@ export default function MarketsPage() {
   const loading = discoveryLoading && supabaseLoading;
 
   return (
-    <div className="terminal-grid min-h-[calc(100vh-48px)]">
-      <div className="mx-auto max-w-[1800px] px-3 py-6 lg:px-4">
+    <div className="min-h-[calc(100vh-48px)]">
+      <div className="mx-auto max-w-7xl px-3 py-6 lg:px-4">
         {/* Header */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">Markets</h1>
-            <p className="mt-0.5 text-sm text-[#4a5068]">Perpetual futures for any Solana token</p>
+            <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>Markets</h1>
+            <p className="mt-1 text-sm text-[#8B95B0]">Perpetual futures for any Solana token</p>
           </div>
-          <Link
-            href="/create"
-            className="rounded-lg bg-[#00d4aa] px-5 py-2 text-center text-sm font-bold text-[#080a0f] transition-all hover:bg-[#00e8bb] hover:shadow-[0_0_20px_rgba(0,212,170,0.15)]"
-          >
-            + Launch Market
+          <Link href="/create">
+            <GlowButton>+ Launch Market</GlowButton>
           </Link>
         </div>
 
         {/* Search & Sort */}
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#2a2f40]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className={`relative flex-1 transition-all duration-300 ${searchFocused ? "scale-[1.01]" : ""}`}>
+            <svg className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#3D4563]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
               placeholder="Search token or address…"
-              className="w-full rounded-lg border border-[#1a1d2a] bg-[#0c0e14] py-2 pl-9 pr-4 text-sm text-[#e8eaf0] placeholder-[#2a2f40] focus:border-[#00d4aa]/40 focus:outline-none focus:ring-1 focus:ring-[#00d4aa]/20"
+              className={[
+                "w-full rounded-xl border bg-white/[0.03] py-2.5 pl-10 pr-4 text-sm text-[#F0F4FF] placeholder-[#3D4563] backdrop-blur-sm",
+                "focus:outline-none transition-all duration-300",
+                searchFocused
+                  ? "border-[#00FFB2]/30 shadow-[0_0_20px_rgba(0,255,178,0.08)]"
+                  : "border-white/[0.06]",
+              ].join(" ")}
             />
           </div>
-          <div className="flex gap-1 rounded-lg bg-[#0c0e14] p-0.5 ring-1 ring-[#1a1d2a]">
+          <div className="flex gap-1 rounded-xl border border-white/[0.06] bg-white/[0.02] p-1 backdrop-blur-sm">
             {([
               { key: "volume" as SortKey, label: "Volume" },
               { key: "oi" as SortKey, label: "OI" },
@@ -134,11 +145,12 @@ export default function MarketsPage() {
               <button
                 key={opt.key}
                 onClick={() => setSortBy(opt.key)}
-                className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-all ${
+                className={[
+                  "rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all duration-200",
                   sortBy === opt.key
-                    ? "bg-[#1a1d2a] text-white"
-                    : "text-[#4a5068] hover:text-[#7a8194]"
-                }`}
+                    ? "bg-[#00FFB2]/[0.1] text-[#00FFB2] shadow-[0_0_10px_rgba(0,255,178,0.08)]"
+                    : "text-[#3D4563] hover:text-[#8B95B0]",
+                ].join(" ")}
               >
                 {opt.label}
               </button>
@@ -148,34 +160,34 @@ export default function MarketsPage() {
 
         {/* Table */}
         {loading ? (
-          <div className="space-y-1">
+          <div className="space-y-2">
             {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-[56px] animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1a1d2a]" />
+              <ShimmerSkeleton key={i} className="h-[60px]" rounded="xl" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="rounded-xl bg-[#0c0e14] p-16 text-center ring-1 ring-[#1a1d2a]">
+          <GlassCard glow className="p-16 text-center">
             {search ? (
               <>
-                <div className="mb-3 text-3xl text-[#1a1d2a]">🔍</div>
-                <h3 className="mb-1 text-lg font-semibold text-white">No markets found</h3>
-                <p className="text-sm text-[#4a5068]">Try a different search.</p>
+                <div className="mb-4 text-4xl opacity-30">🔍</div>
+                <h3 className="mb-2 text-lg font-semibold text-white">No markets found</h3>
+                <p className="text-sm text-[#8B95B0]">Try a different search.</p>
               </>
             ) : (
               <>
-                <div className="mb-3 text-3xl text-[#1a1d2a]">🚀</div>
-                <h3 className="mb-1 text-lg font-semibold text-white">No markets yet</h3>
-                <p className="mb-4 text-sm text-[#4a5068]">Be the first.</p>
-                <Link href="/create" className="inline-block rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f]">
-                  Launch First Market
+                <div className="mb-4 text-4xl opacity-30">🚀</div>
+                <h3 className="mb-2 text-lg font-semibold text-white">No markets yet</h3>
+                <p className="mb-6 text-sm text-[#8B95B0]">Be the first to launch.</p>
+                <Link href="/create">
+                  <GlowButton>Launch First Market</GlowButton>
                 </Link>
               </>
             )}
-          </div>
+          </GlassCard>
         ) : (
-          <div className="overflow-hidden rounded-lg ring-1 ring-[#1a1d2a]">
+          <div ref={listRef} className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.01] backdrop-blur-sm">
             {/* Header row */}
-            <div className="grid grid-cols-8 gap-4 bg-[#080a0f] px-4 py-2.5 text-[9px] font-medium uppercase tracking-wider text-[#2a2f40]">
+            <div className="grid grid-cols-8 gap-4 border-b border-white/[0.04] px-5 py-3 text-[9px] font-medium uppercase tracking-[0.15em] text-[#3D4563]">
               <div className="col-span-2">Market</div>
               <div className="text-right">Price</div>
               <div className="text-right">Open Interest</div>
@@ -198,39 +210,31 @@ export default function MarketsPage() {
                 <Link
                   key={m.slabAddress}
                   href={`/trade/${m.slabAddress}`}
-                  className={`grid grid-cols-8 gap-4 px-4 py-3 transition-all hover:bg-[#131620] ${
-                    i > 0 ? "border-t border-[#1a1d2a]/50" : ""
-                  } bg-[#0c0e14]`}
+                  className={[
+                    "market-row grid grid-cols-8 gap-4 px-5 py-4 transition-all duration-200",
+                    "hover:bg-[#00FFB2]/[0.02] hover:shadow-[inset_0_0_30px_rgba(0,255,178,0.02)]",
+                    i > 0 ? "border-t border-white/[0.03]" : "",
+                  ].join(" ")}
                 >
-                  <div className="col-span-2 flex items-center gap-2">
-                    <div>
-                      <div className="font-semibold text-white">
-                        {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
-                      </div>
-                      <div className="text-[11px] text-[#2a2f40]">
-                        {m.name ?? shortenAddress(m.onChain.config.collateralMint.toBase58())}
-                      </div>
+                  <div className="col-span-2">
+                    <div className="font-semibold text-white transition-colors group-hover:text-[#00FFB2]">
+                      {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
                     </div>
-                    {(() => {
-                      const tier = getSlabTierFromAccounts(Number(m.onChain.params.maxAccounts));
-                      return (
-                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${tier.color}`}>
-                          {tier.label}
-                        </span>
-                      );
-                    })()}
+                    <div className="text-[11px] text-[#3D4563]">
+                      {m.name ?? shortenAddress(m.onChain.config.collateralMint.toBase58())}
+                    </div>
                   </div>
                   <div className="text-right">
-                    <span className="data-cell text-sm text-white">
+                    <span className="font-[var(--font-jetbrains-mono)] text-sm text-white">
                       {lastPrice != null
                         ? `$${lastPrice < 0.01 ? lastPrice.toFixed(6) : lastPrice < 1 ? lastPrice.toFixed(4) : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                         : "—"}
                     </span>
                   </div>
-                  <div className="data-cell text-right text-sm text-[#7a8194]">{oiTokens}</div>
-                  <div className="data-cell text-right text-sm text-[#7a8194]">{capitalTokens}</div>
-                  <div className="data-cell text-right text-sm text-[#00d4aa]">{insuranceTokens}</div>
-                  <div className="text-right text-sm text-[#7a8194]">{maxLev}×</div>
+                  <div className="font-[var(--font-jetbrains-mono)] text-right text-sm text-[#8B95B0]">{oiTokens}</div>
+                  <div className="font-[var(--font-jetbrains-mono)] text-right text-sm text-[#8B95B0]">{capitalTokens}</div>
+                  <div className="font-[var(--font-jetbrains-mono)] text-right text-sm text-[#00FFB2]">{insuranceTokens}</div>
+                  <div className="text-right text-sm text-[#8B95B0]">{maxLev}×</div>
                   <div className="text-right"><HealthBadge level={health.level} /></div>
                 </Link>
               );
@@ -239,10 +243,12 @@ export default function MarketsPage() {
         )}
 
         {/* Activity */}
-        <div className="mt-8">
-          <h2 className="mb-4 text-lg font-bold text-white">Recent Activity</h2>
-          <ActivityFeed />
-        </div>
+        <ScrollReveal className="mt-10">
+          <h2 className="mb-5 text-xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>Recent Activity</h2>
+          <GlassCard padding="none" hover={false}>
+            <ActivityFeed />
+          </GlassCard>
+        </ScrollReveal>
       </div>
     </div>
   );
