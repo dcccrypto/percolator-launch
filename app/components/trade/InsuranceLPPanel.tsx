@@ -86,10 +86,10 @@ export function InsuranceLPPanel() {
   })();
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+    <div className="bg-white/[0.03] border border-white/[0.06] rounded-lg p-4">
       <div className="flex items-center gap-2 mb-4">
         <span className="text-lg">🛡️</span>
-        <h3 className="text-sm font-semibold text-zinc-200">Insurance Pool</h3>
+        <h3 className="text-sm font-semibold text-[#F0F4FF]">Insurance Pool</h3>
         {state.mintExists && (
           <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 rounded border border-emerald-500/20">
             LIVE
@@ -100,20 +100,20 @@ export function InsuranceLPPanel() {
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div>
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Pool Size</p>
-          <p className="text-sm font-mono text-zinc-200">{formatSol(state.insuranceBalance)} SOL</p>
+          <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Pool Size</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatSol(state.insuranceBalance)} SOL</p>
         </div>
         <div>
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">LP Supply</p>
-          <p className="text-sm font-mono text-zinc-200">{formatSol(state.lpSupply)}</p>
+          <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">LP Supply</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatSol(state.lpSupply)}</p>
         </div>
         <div>
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Rate</p>
-          <p className="text-sm font-mono text-zinc-200">{formatRate(state.redemptionRateE6)} SOL/LP</p>
+          <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Rate</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatRate(state.redemptionRateE6)} SOL/LP</p>
         </div>
         <div>
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Your Share</p>
-          <p className="text-sm font-mono text-zinc-200">
+          <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Your Share</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">
             {state.userSharePct > 0 ? `${state.userSharePct.toFixed(1)}%` : '—'}
           </p>
         </div>
@@ -121,14 +121,14 @@ export function InsuranceLPPanel() {
 
       {/* User Position */}
       {state.userLpBalance > 0n && (
-        <div className="bg-zinc-800/50 rounded p-3 mb-4 border border-zinc-700/50">
+        <div className="bg-white/[0.05]/50 rounded p-3 mb-4 border border-white/[0.08]/50">
           <div className="flex justify-between items-center">
             <div>
-              <p className="text-[10px] text-zinc-500 uppercase">Your LP Tokens</p>
-              <p className="text-sm font-mono text-zinc-200">{formatSol(state.userLpBalance)}</p>
+              <p className="text-[10px] text-[#5a6382] uppercase">Your LP Tokens</p>
+              <p className="text-sm font-mono text-[#F0F4FF]">{formatSol(state.userLpBalance)}</p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] text-zinc-500 uppercase">Redeemable</p>
+              <p className="text-[10px] text-[#5a6382] uppercase">Redeemable</p>
               <p className="text-sm font-mono text-emerald-400">{formatSol(state.userRedeemableValue)} SOL</p>
             </div>
           </div>
@@ -140,7 +140,7 @@ export function InsuranceLPPanel() {
         <button
           onClick={handleCreateMint}
           disabled={loading}
-          className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded transition-colors mb-3"
+          className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-white/[0.05] disabled:text-[#5a6382] text-white text-sm font-medium rounded transition-colors mb-3"
         >
           {loading ? 'Creating...' : 'Create Insurance LP Mint'}
         </button>
@@ -148,7 +148,7 @@ export function InsuranceLPPanel() {
 
       {/* Not created yet */}
       {!state.mintExists && !isAdmin && (
-        <p className="text-xs text-zinc-500 text-center py-2">
+        <p className="text-xs text-[#5a6382] text-center py-2">
           Insurance LP not yet enabled for this market
         </p>
       )}
@@ -157,13 +157,13 @@ export function InsuranceLPPanel() {
       {state.mintExists && publicKey && (
         <>
           {/* Tab Switcher */}
-          <div className="flex gap-1 mb-3 bg-zinc-800 rounded p-0.5">
+          <div className="flex gap-1 mb-3 bg-white/[0.05] rounded p-0.5">
             <button
               onClick={() => { setMode('deposit'); setAmount(''); }}
               className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
                 mode === 'deposit'
                   ? 'bg-emerald-600 text-white'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                  : 'text-[#8B95B0] hover:text-[#F0F4FF]'
               }`}
             >
               Deposit
@@ -173,7 +173,7 @@ export function InsuranceLPPanel() {
               className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
                 mode === 'withdraw'
                   ? 'bg-red-600 text-white'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                  : 'text-[#8B95B0] hover:text-[#F0F4FF]'
               }`}
             >
               Withdraw
@@ -187,7 +187,7 @@ export function InsuranceLPPanel() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder={mode === 'deposit' ? 'Amount (SOL)' : 'LP tokens'}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+              className="w-full bg-white/[0.05] border border-white/[0.08] rounded px-3 py-2 text-sm text-[#F0F4FF] font-mono placeholder:text-[#3D4563] focus:outline-none focus:border-white/[0.12]"
               min="0"
               step="0.001"
             />
@@ -203,13 +203,13 @@ export function InsuranceLPPanel() {
 
           {/* Preview */}
           {previewTokens !== null && mode === 'deposit' && (
-            <p className="text-xs text-zinc-500 mb-3">
-              You receive: <span className="text-zinc-300 font-mono">~{formatSol(previewTokens)}</span> LP tokens
+            <p className="text-xs text-[#5a6382] mb-3">
+              You receive: <span className="text-[#c4cbde] font-mono">~{formatSol(previewTokens)}</span> LP tokens
             </p>
           )}
           {previewCollateral !== null && mode === 'withdraw' && (
-            <p className="text-xs text-zinc-500 mb-3">
-              You receive: <span className="text-zinc-300 font-mono">~{formatSol(previewCollateral)}</span> SOL
+            <p className="text-xs text-[#5a6382] mb-3">
+              You receive: <span className="text-[#c4cbde] font-mono">~{formatSol(previewCollateral)}</span> SOL
             </p>
           )}
 
@@ -217,7 +217,7 @@ export function InsuranceLPPanel() {
           <button
             onClick={mode === 'deposit' ? handleDeposit : handleWithdraw}
             disabled={loading || !amount || parseFloat(amount) <= 0}
-            className={`w-full py-2 px-4 text-white text-sm font-medium rounded transition-colors disabled:bg-zinc-700 disabled:text-zinc-500 ${
+            className={`w-full py-2 px-4 text-white text-sm font-medium rounded transition-colors disabled:bg-white/[0.05] disabled:text-[#5a6382] ${
               mode === 'deposit'
                 ? 'bg-emerald-600 hover:bg-emerald-500'
                 : 'bg-red-600 hover:bg-red-500'

@@ -29,10 +29,10 @@ export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, 
   };
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-[#0d1117] p-4">
+    <div className="rounded-lg border border-white/[0.06] bg-[#0d1117] p-4">
       <div className="mb-3 flex items-center gap-2">
         <span className="text-lg font-bold text-white">{marketName}</span>
-        <span className="text-xs text-slate-500">PERP</span>
+        <span className="text-xs text-[#5a6382]">PERP</span>
       </div>
       <div className="mb-3 flex items-baseline gap-3">
         <span className="font-mono text-xl text-white">${fmtPrice}</span>
@@ -45,13 +45,13 @@ export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, 
       <div className="flex gap-2">
         <button
           onClick={copyLink}
-          className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-zinc-700"
+          className="flex-1 rounded-md border border-white/[0.08] bg-white/[0.05] px-3 py-1.5 text-xs text-[#c4cbde] transition hover:bg-white/[0.06]"
         >
           {copied ? "Copied ✓" : "Copy Link"}
         </button>
         <button
           onClick={shareOnX}
-          className="flex-1 rounded-md bg-white px-3 py-1.5 text-xs font-medium text-black transition hover:bg-slate-200"
+          className="flex-1 rounded-md bg-[#00FFB2] px-3 py-1.5 text-xs font-medium text-black transition hover:bg-[#00FFB2]/80"
         >
           Share on 𝕏
         </button>
@@ -68,7 +68,7 @@ export const ShareButton: FC<Omit<ShareCardProps, "change24h"> & { change24h?: n
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs text-slate-300 transition hover:bg-zinc-700"
+        className="rounded-md border border-white/[0.08] bg-white/[0.05] px-2.5 py-1 text-xs text-[#c4cbde] transition hover:bg-white/[0.06]"
         title="Share"
       >
         ↗ Share

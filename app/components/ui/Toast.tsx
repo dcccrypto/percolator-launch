@@ -41,13 +41,13 @@ const SingleToast: FC<{ item: ToastItem; onDismiss: (id: string) => void }> = ({
       }`}
     >
       <span className={`text-base font-bold ${TEXT_COLORS[item.type]}`}>{c.icon}</span>
-      <span className="text-sm text-slate-200">{item.message}</span>
+      <span className="text-sm text-[#F0F4FF]">{item.message}</span>
       <button
         onClick={() => {
           setVisible(false);
           setTimeout(() => onDismiss(item.id), 300);
         }}
-        className="ml-2 text-slate-500 hover:text-slate-300"
+        className="ml-2 text-[#5a6382] hover:text-[#c4cbde]"
       >
         ✕
       </button>

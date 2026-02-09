@@ -120,7 +120,7 @@ export function ActivityFeed() {
   if (items.length === 0) {
     return (
       <div className="rounded-xl border border-white/[0.06] bg-white/[0.05] p-8 text-center">
-        <p className="text-sm text-slate-500">No recent activity yet.</p>
+        <p className="text-sm text-[#5a6382]">No recent activity yet.</p>
       </div>
     );
   }
@@ -138,10 +138,10 @@ export function ActivityFeed() {
               <span className={`text-sm font-semibold ${eventColor(item.eventType)}`}>
                 {item.market}
               </span>
-              <span className="text-sm text-slate-300">{item.details}</span>
+              <span className="text-sm text-[#c4cbde]">{item.details}</span>
             </div>
           </div>
-          <span className="whitespace-nowrap text-xs text-slate-500">{timeAgo(item.timestamp)}</span>
+          <span className="whitespace-nowrap text-xs text-[#5a6382]">{timeAgo(item.timestamp)}</span>
         </div>
       ))}
     </div>

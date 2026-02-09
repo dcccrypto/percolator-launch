@@ -22,7 +22,7 @@ interface PreTradeSummaryProps {
 function SummaryRow({
   label,
   value,
-  valueClass = "text-slate-200",
+  valueClass = "text-[#F0F4FF]",
 }: {
   label: string;
   value: string;
@@ -30,7 +30,7 @@ function SummaryRow({
 }) {
   return (
     <div className="flex items-center justify-between py-1">
-      <span className="text-slate-500">{label}</span>
+      <span className="text-[#5a6382]">{label}</span>
       <span className={`font-mono font-medium ${valueClass}`}>{value}</span>
     </div>
   );
@@ -65,7 +65,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
     <div className="mb-4 rounded-lg border border-white/[0.06] bg-white/[0.02]/80 px-3.5 py-3 text-xs backdrop-blur-sm">
       <div className="mb-2 flex items-center gap-2">
         <div className={`h-1.5 w-1.5 rounded-full ${isLong ? "bg-[#00FFB2]" : "bg-red-500"}`} />
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-[#5a6382]">
           Order Summary
         </span>
       </div>
@@ -84,7 +84,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         <SummaryRow
           label="Trading Fee"
           value={`${formatTokenAmount(fee)} ${symbol}`}
-          valueClass="text-slate-400"
+          valueClass="text-[#8B95B0]"
         />
         <SummaryRow
           label="Margin Required"
