@@ -26,7 +26,13 @@ const insuranceService = new InsuranceLPService(crankService);
 
 // Hono app
 const app = new Hono();
-app.use("*", cors());
+// C1: CORS lockdown — only allow configured origins
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "https://percolator-launch.vercel.app,http://localhost:3000").split(",").map(s => s.trim()).filter(Boolean);
+app.use("*", cors({
+  origin: allowedOrigins,
+  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowHeaders: ["Content-Type", "x-api-key"],
+}));
 
 // Mount routes
 app.route("/", healthRoutes({ crankService, liquidationService }));

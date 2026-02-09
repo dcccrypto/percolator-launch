@@ -26,6 +26,7 @@ export class PriceEngine {
   private slabToSubId = new Map<string, number>();
   private priceHistory = new Map<string, PriceTick[]>();
   private readonly maxHistory = 100;
+  private readonly maxTrackedMarkets = 500;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
   private readonly maxReconnectDelay = 30_000;
@@ -300,6 +301,20 @@ export class PriceEngine {
     history.push(tick);
     if (history.length > this.maxHistory) {
       history.splice(0, history.length - this.maxHistory);
+    }
+    // Evict least recently updated market if we exceed the global limit
+    if (this.priceHistory.size > this.maxTrackedMarkets) {
+      let oldestKey: string | null = null;
+      let oldestTime = Infinity;
+      for (const [key, hist] of this.priceHistory) {
+        if (key === slabAddress) continue;
+        const lastTs = hist.length > 0 ? hist[hist.length - 1].timestamp : 0;
+        if (lastTs < oldestTime) {
+          oldestTime = lastTs;
+          oldestKey = key;
+        }
+      }
+      if (oldestKey) this.priceHistory.delete(oldestKey);
     }
   }
 }

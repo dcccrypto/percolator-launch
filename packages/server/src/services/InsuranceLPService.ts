@@ -55,10 +55,13 @@ export class InsuranceLPService {
 
     for (const [slab, state] of markets.entries()) {
       try {
-        // Read insurance vault balance and LP supply from on-chain engine data
+        // TODO: Insurance balance should come from engine.insurance (the on-chain insurance fund field).
+        // TODO: LP supply should come from the insurance LP mint supply (SPL token via getTokenSupply).
+        // engine.vault is total vault balance (not insurance) and engine.totalOpenInterest is OI (not LP supply).
+        // Using 0 as default until correct fields are wired in.
         const engine = state.market.engine;
-        const insuranceBalance = Number(engine.vault);
-        const lpSupply = Number(engine.totalOpenInterest); // LP mint supply tracked via engine
+        const insuranceBalance = 0;
+        const lpSupply = 0;
 
         const redemptionRateE6 =
           lpSupply > 0 ? Math.floor((insuranceBalance * 1_000_000) / lpSupply) : 1_000_000;
@@ -133,13 +136,15 @@ export class InsuranceLPService {
 
   async getDepositorCount(slab: string): Promise<number> {
     const db = getSupabase();
-    const { count, error } = await db
+    const { data, error } = await db
       .from("insurance_lp_events")
-      .select("user_wallet", { count: "exact", head: true })
+      .select("user_wallet")
       .eq("slab", slab)
       .eq("event_type", "deposit");
 
     if (error) throw error;
-    return count ?? 0;
+    if (!data) return 0;
+    const uniqueWallets = new Set(data.map((row: { user_wallet: string }) => row.user_wallet));
+    return uniqueWallets.size;
   }
 }

@@ -51,6 +51,7 @@ export function getFallbackConnection(): Connection {
 interface CacheEntry { data: unknown; fetchedAt: number; }
 const accountCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5_000;
+const MAX_CACHE_SIZE = 500;
 
 export function getCachedAccountInfo(key: string): unknown | undefined {
   const entry = accountCache.get(key);
@@ -61,6 +62,16 @@ export function getCachedAccountInfo(key: string): unknown | undefined {
 
 export function setCachedAccountInfo(key: string, data: unknown): void {
   accountCache.set(key, { data, fetchedAt: Date.now() });
+  // Evict oldest entries when cache exceeds max size
+  if (accountCache.size > MAX_CACHE_SIZE) {
+    const entriesToEvict = accountCache.size - MAX_CACHE_SIZE;
+    let evicted = 0;
+    for (const [k] of accountCache) {
+      if (evicted >= entriesToEvict) break;
+      accountCache.delete(k);
+      evicted++;
+    }
+  }
 }
 
 setInterval(() => {

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { OracleService } from "../services/oracle.js";
 import type { PriceEngine } from "../services/PriceEngine.js";
+import { validateSlab } from "../middleware/validateSlab.js";
 
 export function priceRoutes(deps: {
   oracleService: OracleService;
@@ -21,7 +22,7 @@ export function priceRoutes(deps: {
   });
 
   // GET /prices/:slab — current price + 24h stats
-  app.get("/prices/:slab", (c) => {
+  app.get("/prices/:slab", validateSlab, (c) => {
     const slab = c.req.param("slab");
 
     // Try PriceEngine first (real-time), fallback to OracleService
@@ -55,7 +56,7 @@ export function priceRoutes(deps: {
   });
 
   // GET /prices/:slab/history — price history (in-memory)
-  app.get("/prices/:slab/history", (c) => {
+  app.get("/prices/:slab/history", validateSlab, (c) => {
     const slab = c.req.param("slab");
 
     // Merge: prefer PriceEngine history, fallback to OracleService

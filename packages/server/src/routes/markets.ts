@@ -1,5 +1,8 @@
 import { Hono } from "hono";
 import { PublicKey } from "@solana/web3.js";
+import { validateSlab } from "../middleware/validateSlab.js";
+import { requireApiKey } from "../middleware/auth.js";
+import { readRateLimit, writeRateLimit } from "../middleware/rate-limit.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine, SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 import { getConnection } from "../utils/solana.js";
 import { config } from "../config.js";
@@ -14,8 +17,8 @@ interface MarketDeps {
 export function marketRoutes(deps: MarketDeps): Hono {
   const app = new Hono();
 
-  // GET /markets — list all discovered markets with stats
-  app.get("/markets", (c) => {
+  // GET /markets — list all discovered markets with stats (H1: rate limited)
+  app.get("/markets", readRateLimit(), (c) => {
     const markets = deps.crankService.getMarkets();
     const result = Array.from(markets.entries()).map(([key, state]) => ({
       slabAddress: key,
@@ -28,8 +31,8 @@ export function marketRoutes(deps: MarketDeps): Hono {
     return c.json({ markets: result });
   });
 
-  // GET /markets/:slab — single market details
-  app.get("/markets/:slab", async (c) => {
+  // GET /markets/:slab — single market details (H1: rate limited)
+  app.get("/markets/:slab", readRateLimit(), validateSlab, async (c) => {
     const slab = c.req.param("slab");
     try {
       const connection = getConnection();
@@ -65,8 +68,8 @@ export function marketRoutes(deps: MarketDeps): Hono {
     }
   });
 
-  // POST /markets — register an existing market (verified on-chain)
-  app.post("/markets", async (c) => {
+  // POST /markets — register an existing market (C2: auth, H1: rate limited)
+  app.post("/markets", writeRateLimit(), requireApiKey(), async (c) => {
     const body = await c.req.json<{ slabAddress: string; metadata?: Record<string, unknown> }>();
 
     // Verify slab exists on-chain and is owned by our program
@@ -77,9 +80,10 @@ export function marketRoutes(deps: MarketDeps): Hono {
       if (!accountInfo) {
         return c.json({ error: "Slab account does not exist on-chain" }, 400);
       }
-      const programId = new PublicKey(config.programId);
-      if (!accountInfo.owner.equals(programId)) {
-        return c.json({ error: "Slab account not owned by percolator program" }, 400);
+      const knownProgramIds = config.allProgramIds.map((id) => new PublicKey(id));
+      const ownerMatch = knownProgramIds.some((pid) => accountInfo.owner.equals(pid));
+      if (!ownerMatch) {
+        return c.json({ error: "Slab account not owned by any known percolator program" }, 400);
       }
     } catch {
       return c.json({ error: "Failed to verify slab on-chain" }, 400);
@@ -92,7 +96,7 @@ export function marketRoutes(deps: MarketDeps): Hono {
   // POST /markets/launch — one-click launch
   // Input: { mint: string, slabTier?: "micro"|"small"|"medium"|"large", options?: LaunchOptions }
   // Returns market config for frontend tx execution, or discovered market if already created
-  app.post("/markets/launch", async (c) => {
+  app.post("/markets/launch", writeRateLimit(), requireApiKey(), async (c) => {
     const body = await c.req.json<{
       mint: string;
       slabTier?: SlabTierKey;

@@ -53,6 +53,11 @@ export function setNetwork(network: Network) {
 // For backward compat
 export const config = getConfig();
 
+/** Backend API URL — reads NEXT_PUBLIC_BACKEND_URL with Railway production as fallback */
+export function getBackendUrl(): string {
+  return process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://percolator-api-production.up.railway.app";
+}
+
 /** Build an explorer URL for a transaction */
 export function explorerTxUrl(sig: string): string {
   const c = getConfig();
