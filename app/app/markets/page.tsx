@@ -10,11 +10,7 @@ import { formatTokenAmount } from "@/lib/format";
 import type { MarketWithStats } from "@/lib/supabase";
 import { supabase } from "@/lib/supabase";
 import type { DiscoveredMarket } from "@percolator/core";
-import { ActivityFeed } from "@/components/market/ActivityFeed";
-import { GlassCard } from "@/components/ui/GlassCard";
-import { GlowButton } from "@/components/ui/GlowButton";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
-import { ScrollReveal } from "@/components/ui/ScrollReveal";
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
@@ -24,7 +20,7 @@ function formatNum(n: number | null | undefined): string {
 }
 
 function shortenAddress(addr: string, chars = 4): string {
-  return `${addr.slice(0, chars)}…${addr.slice(-chars)}`;
+  return `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
 }
 
 type SortKey = "volume" | "oi" | "recent" | "health";
@@ -43,8 +39,7 @@ export default function MarketsPage() {
   const [supabaseLoading, setSupabaseLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("volume");
-  const [searchFocused, setSearchFocused] = useState(false);
-  const listRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function load() {
@@ -55,13 +50,12 @@ export default function MarketsPage() {
     load();
   }, []);
 
-  // Staggered row entrance
+  // Page fade in
   useEffect(() => {
-    if (!listRef.current || discoveryLoading) return;
+    if (!pageRef.current) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const rows = listRef.current.querySelectorAll(".market-row");
-    gsap.fromTo(rows, { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.4, stagger: 0.06, ease: "power3.out" });
-  }, [discoveryLoading, search, sortBy]);
+    gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
+  }, []);
 
   const merged = useMemo<MergedMarket[]>(() => {
     const sbMap = new Map<string, MarketWithStats>();
@@ -100,56 +94,50 @@ export default function MarketsPage() {
   const loading = discoveryLoading || supabaseLoading;
 
   return (
-    <div className="min-h-[calc(100vh-48px)]">
-      <div className="mx-auto max-w-7xl px-3 py-6 lg:px-4">
+    <div ref={pageRef} className="min-h-[calc(100vh-48px)] opacity-0">
+      <div className="mx-auto max-w-5xl px-4 py-10">
         {/* Header */}
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>Markets</h1>
-            <p className="mt-1 text-sm text-[#8B95B0]">Perpetual futures for any Solana token</p>
+            <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>markets</h1>
+            <p className="mt-1 text-sm text-[#71717a]">perpetual futures, pick your poison.</p>
           </div>
           <Link href="/create">
-            <GlowButton>+ Launch Market</GlowButton>
+            <button className="rounded-[4px] bg-[#00FFB2] px-5 py-2.5 text-sm font-bold text-[#09090b] transition-opacity hover:opacity-85">
+              + launch market
+            </button>
           </Link>
         </div>
 
         {/* Search & Sort */}
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className={`relative flex-1 transition-all duration-300 ${searchFocused ? "scale-[1.01]" : ""}`}>
-            <svg className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#3D4563]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <div className="relative flex-1">
+            <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#3f3f46]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-              placeholder="Search token or address…"
-              className={[
-                "w-full rounded-xl border bg-white/[0.03] py-2.5 pl-10 pr-4 text-sm text-[#F0F4FF] placeholder-[#3D4563] backdrop-blur-sm",
-                "focus:outline-none transition-all duration-300",
-                searchFocused
-                  ? "border-[#00FFB2]/30 shadow-[0_0_20px_rgba(0,255,178,0.08)]"
-                  : "border-white/[0.06]",
-              ].join(" ")}
+              placeholder="search token or address..."
+              className="w-full rounded-[4px] border border-[#1a1a1f] bg-[#111113] py-2.5 pl-10 pr-4 text-sm text-[#fafafa] placeholder-[#3f3f46] focus:border-[#3f3f46] focus:outline-none"
             />
           </div>
-          <div className="flex gap-1 rounded-xl border border-white/[0.06] bg-white/[0.02] p-1 backdrop-blur-sm">
+          <div className="flex gap-1 rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-1">
             {([
-              { key: "volume" as SortKey, label: "Volume" },
+              { key: "volume" as SortKey, label: "volume" },
               { key: "oi" as SortKey, label: "OI" },
-              { key: "health" as SortKey, label: "Health" },
-              { key: "recent" as SortKey, label: "Recent" },
+              { key: "health" as SortKey, label: "health" },
+              { key: "recent" as SortKey, label: "recent" },
             ]).map((opt) => (
               <button
                 key={opt.key}
                 onClick={() => setSortBy(opt.key)}
                 className={[
-                  "rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all duration-200",
+                  "rounded-[4px] px-3 py-1.5 text-[11px] font-medium transition-colors",
                   sortBy === opt.key
-                    ? "bg-[#00FFB2]/[0.1] text-[#00FFB2] shadow-[0_0_10px_rgba(0,255,178,0.08)]"
-                    : "text-[#3D4563] hover:text-[#8B95B0]",
+                    ? "bg-[#1a1a1f] text-[#00FFB2]"
+                    : "text-[#3f3f46] hover:text-[#71717a]",
                 ].join(" ")}
               >
                 {opt.label}
@@ -162,39 +150,40 @@ export default function MarketsPage() {
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3, 4, 5].map((i) => (
-              <ShimmerSkeleton key={i} className="h-[60px]" rounded="xl" />
+              <ShimmerSkeleton key={i} className="h-[52px]" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <GlassCard glow className="p-16 text-center">
+          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-16 text-center">
             {search ? (
               <>
-                <div className="mb-4 text-4xl opacity-30">🔍</div>
-                <h3 className="mb-2 text-lg font-semibold text-white">No markets found</h3>
-                <p className="text-sm text-[#8B95B0]">Try a different search.</p>
+                <h3 className="text-base font-semibold text-white">nothing here.</h3>
+                <p className="mt-1 text-sm text-[#71717a]">try a different search.</p>
               </>
             ) : (
               <>
-                <div className="mb-4 text-4xl opacity-30">🚀</div>
-                <h3 className="mb-2 text-lg font-semibold text-white">No markets yet</h3>
-                <p className="mb-6 text-sm text-[#8B95B0]">Be the first to launch.</p>
-                <Link href="/create">
-                  <GlowButton>Launch First Market</GlowButton>
-                </Link>
+                <h3 className="text-base font-semibold text-white">no markets yet. be the main character.</h3>
+                <div className="mt-4">
+                  <Link href="/create">
+                    <button className="rounded-[4px] bg-[#00FFB2] px-5 py-2.5 text-sm font-bold text-[#09090b] transition-opacity hover:opacity-85">
+                      launch first market
+                    </button>
+                  </Link>
+                </div>
               </>
             )}
-          </GlassCard>
+          </div>
         ) : (
-          <div ref={listRef} className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.01] backdrop-blur-sm">
+          <div className="overflow-hidden rounded-[4px] border border-[#1a1a1f]">
             {/* Header row */}
-            <div className="grid grid-cols-8 gap-4 border-b border-white/[0.04] px-5 py-3 text-[9px] font-medium uppercase tracking-[0.15em] text-[#3D4563]">
-              <div className="col-span-2">Market</div>
-              <div className="text-right">Price</div>
-              <div className="text-right">Open Interest</div>
-              <div className="text-right">Capital</div>
-              <div className="text-right">Insurance</div>
-              <div className="text-right">Max Lev</div>
-              <div className="text-right">Health</div>
+            <div className="grid grid-cols-8 gap-4 border-b border-[#1a1a1f] bg-[#111113] px-4 py-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[#3f3f46]">
+              <div className="col-span-2">token</div>
+              <div className="text-right">price</div>
+              <div className="text-right">OI</div>
+              <div className="text-right">volume</div>
+              <div className="text-right">insurance</div>
+              <div className="text-right">max lev</div>
+              <div className="text-right">health</div>
             </div>
 
             {filtered.map((m, i) => {
@@ -211,44 +200,35 @@ export default function MarketsPage() {
                   key={m.slabAddress}
                   href={`/trade/${m.slabAddress}`}
                   className={[
-                    "market-row grid grid-cols-8 gap-4 px-5 py-4 transition-all duration-200",
-                    "hover:bg-[#00FFB2]/[0.02] hover:shadow-[inset_0_0_30px_rgba(0,255,178,0.02)]",
-                    i > 0 ? "border-t border-white/[0.03]" : "",
+                    "grid grid-cols-8 gap-4 px-4 py-3.5 transition-colors hover:bg-[#111113]",
+                    i > 0 ? "border-t border-[#1a1a1f]" : "",
                   ].join(" ")}
                 >
                   <div className="col-span-2">
-                    <div className="font-semibold text-white transition-colors group-hover:text-[#00FFB2]">
+                    <div className="font-semibold text-white text-sm">
                       {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
                     </div>
-                    <div className="text-[11px] text-[#3D4563]">
+                    <div className="text-[11px] text-[#3f3f46]">
                       {m.name ?? shortenAddress(m.onChain.config.collateralMint.toBase58())}
                     </div>
                   </div>
                   <div className="text-right">
-                    <span className="font-[var(--font-jetbrains-mono)] text-sm text-white">
+                    <span className="text-sm text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                       {lastPrice != null
                         ? `$${lastPrice < 0.01 ? lastPrice.toFixed(6) : lastPrice < 1 ? lastPrice.toFixed(4) : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                         : "—"}
                     </span>
                   </div>
-                  <div className="font-[var(--font-jetbrains-mono)] text-right text-sm text-[#8B95B0]">{oiTokens}</div>
-                  <div className="font-[var(--font-jetbrains-mono)] text-right text-sm text-[#8B95B0]">{capitalTokens}</div>
-                  <div className="font-[var(--font-jetbrains-mono)] text-right text-sm text-[#00FFB2]">{insuranceTokens}</div>
-                  <div className="text-right text-sm text-[#8B95B0]">{maxLev}×</div>
+                  <div className="text-right text-sm text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiTokens}</div>
+                  <div className="text-right text-sm text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{capitalTokens}</div>
+                  <div className="text-right text-sm text-[#00FFB2]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceTokens}</div>
+                  <div className="text-right text-sm text-[#71717a]">{maxLev}x</div>
                   <div className="text-right"><HealthBadge level={health.level} /></div>
                 </Link>
               );
             })}
           </div>
         )}
-
-        {/* Activity */}
-        <ScrollReveal className="mt-10">
-          <h2 className="mb-5 text-xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>Recent Activity</h2>
-          <GlassCard padding="none" hover={false}>
-            <ActivityFeed />
-          </GlassCard>
-        </ScrollReveal>
       </div>
     </div>
   );
