@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} min-h-screen bg-[#06080d] text-[#F0F4FF] antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} min-h-screen bg-[#09090b] text-[#fafafa] antialiased`}>
         <Providers>
           <div className="flex min-h-screen flex-col">
             <Header />

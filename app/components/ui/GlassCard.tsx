@@ -17,13 +17,11 @@ export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
       <div
         ref={ref}
         className={[
-          "relative overflow-hidden rounded-2xl",
-          "border border-white/[0.06]",
-          "bg-white/[0.03] backdrop-blur-xl",
-          glow ? "shadow-[0_0_30px_rgba(0,255,178,0.06)]" : "shadow-[0_0_20px_rgba(0,0,0,0.3)]",
-          hover ? "glass-hover" : "",
+          "rounded-[4px]",
+          "border border-[#1a1a1f]",
+          "bg-[#111113]",
+          hover ? "transition-colors duration-200 hover:bg-[#161618]" : "",
           paddingMap[padding],
-          "noise",
           className,
         ].filter(Boolean).join(" ")}
         {...props}

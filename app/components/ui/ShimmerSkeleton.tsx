@@ -5,12 +5,8 @@ interface ShimmerSkeletonProps {
   rounded?: "sm" | "md" | "lg" | "xl" | "2xl" | "full";
 }
 
-export function ShimmerSkeleton({ className = "", rounded = "lg" }: ShimmerSkeletonProps) {
+export function ShimmerSkeleton({ className = "" }: ShimmerSkeletonProps) {
   return (
-    <div
-      className={`relative overflow-hidden rounded-${rounded} bg-white/[0.03] ${className}`}
-    >
-      <div className="absolute inset-0 shimmer" />
-    </div>
+    <div className={`rounded-[4px] shimmer ${className}`} />
   );
 }
