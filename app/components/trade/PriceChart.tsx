@@ -110,16 +110,16 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (prices.length < 2) {
     return (
-      <div className="flex h-[200px] flex-col items-center justify-center rounded-lg border border-zinc-800 bg-[#0d1117]">
+      <div className="flex h-[200px] flex-col items-center justify-center rounded-lg border border-white/[0.06] bg-[#0d1117]">
         {currentPrice > 0 ? (
           <>
             <div className="text-2xl font-bold text-white">${currentPrice < 0.01 ? currentPrice.toFixed(6) : currentPrice.toFixed(2)}</div>
-            <div className="mt-1 text-xs text-slate-500">Price chart building... (updates with each trade)</div>
+            <div className="mt-1 text-xs text-[#5a6382]">Price chart building... (updates with each trade)</div>
           </>
         ) : (
           <>
-            <div className="text-sm text-slate-500">No price data yet</div>
-            <div className="mt-1 text-xs text-slate-600">Prices will appear after the first trade on this market.</div>
+            <div className="text-sm text-[#5a6382]">No price data yet</div>
+            <div className="mt-1 text-xs text-[#3D4563]">Prices will appear after the first trade on this market.</div>
           </>
         )}
       </div>
@@ -148,14 +148,14 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }, [minT, maxT]);
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-[#0d1117] p-3">
+    <div className="rounded-lg border border-white/[0.06] bg-[#0d1117] p-3">
       <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="text-slate-400">Price</span>
+        <span className="text-[#8B95B0]">Price</span>
         <div className="flex gap-3">
-          <span className="text-slate-500">
+          <span className="text-[#5a6382]">
             H: <span className="text-white">${fmtPrice(high)}</span>
           </span>
-          <span className="text-slate-500">
+          <span className="text-[#5a6382]">
             L: <span className="text-white">${fmtPrice(low)}</span>
           </span>
           <span style={{ color }}>
@@ -164,7 +164,7 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       </div>
       {hoveredTime && (
-        <div className="mb-1 text-right text-[10px] text-slate-500">
+        <div className="mb-1 text-right text-[10px] text-[#5a6382]">
           {hoveredTime.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </div>
       )}
@@ -194,7 +194,7 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           return <circle cx={cx} cy={cy} r="3" fill={color} />;
         })()}
       </svg>
-      <div className="relative mt-1 flex justify-between text-[10px] text-slate-600">
+      <div className="relative mt-1 flex justify-between text-[10px] text-[#3D4563]">
         {timeLabels.map((tl, i) => (
           <span key={i}>{tl.label}</span>
         ))}

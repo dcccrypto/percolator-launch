@@ -219,14 +219,14 @@ const DevnetMintContent: FC = () => {
           <h1 className="text-3xl font-extrabold text-white">
             🏭 Devnet Token Factory
           </h1>
-          <p className="mt-2 text-sm text-slate-400">
+          <p className="mt-2 text-sm text-[#8B95B0]">
             Create SPL tokens on devnet for testing with the launch wizard
           </p>
         </div>
 
         {/* Step 1 - Wallet */}
         <div className={cardClass}>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-400">
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[#8B95B0]">
             Step 1 · Connect Wallet
           </h2>
           {connected ? (
@@ -243,7 +243,7 @@ const DevnetMintContent: FC = () => {
         {/* Step 2 - Airdrop */}
         {connected && (
           <div className={cardClass}>
-            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-400">
+            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[#8B95B0]">
               Step 2 · Devnet SOL
             </h2>
             <div className="flex items-center justify-between">
@@ -263,13 +263,13 @@ const DevnetMintContent: FC = () => {
         {/* Step 3 - Config */}
         {connected && (
           <div className={cardClass}>
-            <h2 className="mb-4 text-sm font-bold uppercase tracking-wider text-slate-400">
+            <h2 className="mb-4 text-sm font-bold uppercase tracking-wider text-[#8B95B0]">
               Step 3 · Token Config
             </h2>
             <div className="space-y-3">
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="mb-1 block text-xs text-slate-400">Decimals</label>
+                  <label className="mb-1 block text-xs text-[#8B95B0]">Decimals</label>
                   <input
                     type="number"
                     min={0}
@@ -280,7 +280,7 @@ const DevnetMintContent: FC = () => {
                   />
                 </div>
                 <div className="flex-[2]">
-                  <label className="mb-1 block text-xs text-slate-400">Supply</label>
+                  <label className="mb-1 block text-xs text-[#8B95B0]">Supply</label>
                   <input
                     type="text"
                     value={supply}
@@ -290,7 +290,7 @@ const DevnetMintContent: FC = () => {
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Recipient Address</label>
+                <label className="mb-1 block text-xs text-[#8B95B0]">Recipient Address</label>
                 <input
                   type="text"
                   value={recipient}
@@ -305,7 +305,7 @@ const DevnetMintContent: FC = () => {
         {/* Step 4 - Create */}
         {connected && (
           <div className={cardClass}>
-            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-400">
+            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[#8B95B0]">
               Step 4 · Create &amp; Mint
             </h2>
             <button
@@ -321,13 +321,13 @@ const DevnetMintContent: FC = () => {
         {/* Mint More - existing token */}
         {connected && (
           <div className={cardClass}>
-            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-400">
+            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[#8B95B0]">
               🔄 Mint More (Existing Token)
             </h2>
-            <p className="mb-3 text-xs text-slate-500">Already deployed a market? Mint more of the same token to your wallet.</p>
+            <p className="mb-3 text-xs text-[#5a6382]">Already deployed a market? Mint more of the same token to your wallet.</p>
             <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Existing Mint Address</label>
+                <label className="mb-1 block text-xs text-[#8B95B0]">Existing Mint Address</label>
                 <input
                   type="text"
                   value={existingMint}
@@ -337,7 +337,7 @@ const DevnetMintContent: FC = () => {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Amount to Mint</label>
+                <label className="mb-1 block text-xs text-[#8B95B0]">Amount to Mint</label>
                 <input
                   type="text"
                   value={mintMoreAmount}
@@ -358,7 +358,7 @@ const DevnetMintContent: FC = () => {
 
         {/* Status */}
         {status && (
-          <p className="text-center text-sm text-slate-400">{status}</p>
+          <p className="text-center text-sm text-[#8B95B0]">{status}</p>
         )}
 
         {/* Result */}
@@ -373,7 +373,7 @@ const DevnetMintContent: FC = () => {
               </code>
               <button
                 onClick={copyMint}
-                className="rounded-lg border border-white/[0.06] px-3 py-2 text-xs text-slate-400 transition-colors hover:bg-[#1e2433] hover:text-white"
+                className="rounded-lg border border-white/[0.06] px-3 py-2 text-xs text-[#8B95B0] transition-colors hover:bg-[#1e2433] hover:text-white"
               >
                 {copied ? "Copied!" : "Copy"}
               </button>
