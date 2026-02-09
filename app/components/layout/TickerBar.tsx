@@ -3,16 +3,16 @@
 import { FC } from "react";
 
 const PHRASES = [
-  "don't trust, verify.",
-  "read the code before you ape.",
-  "check the slab. check the oracle. check everything.",
-  "open source. on-chain. auditable.",
-  "verify the program ID. always.",
-  "your collateral, your responsibility.",
-  "inspect every transaction before signing.",
-  "no admin keys on mainnet. verify it yourself.",
-  "dyor is not a meme — it's a lifestyle.",
-  "trust math, not promises.",
+  "⚠️ devnet — not real money.",
+  "break things. report bugs. help us build.",
+  "test tokens only — get some from the faucet.",
+  "create a market. open a trade. try to break it.",
+  "everything you see is on-chain — verify on solscan.",
+  "found a bug? you're a legend. let us know.",
+  "mainnet soon™ — help us get there.",
+  "open source. check the code. trust nothing.",
+  "this is a playground. go wild.",
+  "don't trust, verify. (especially on devnet.)",
 ];
 
 export const TickerBar: FC = () => {
@@ -29,7 +29,7 @@ export const TickerBar: FC = () => {
             key={i}
             className="inline-flex items-center whitespace-nowrap px-6"
           >
-            <span className="text-[#00FFB2]/70">{phrase}</span>
+            <span className="text-[#FFB800]/80">{phrase}</span>
             <span className="ml-6 text-[#1a1a1f]">✦</span>
           </span>
         ))}
