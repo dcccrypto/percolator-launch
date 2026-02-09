@@ -161,9 +161,10 @@ fn encode_init_market(fixture: &MarketFixture, crank_staleness: u64) -> Vec<u8> 
     encode_u16(500, &mut data); // conf_filter_bps
     data.push(0u8); // invert
     encode_u32(0, &mut data); // unit_scale
+    encode_u64(0, &mut data); // initial_mark_price_e6
 
-    encode_u64(0, &mut data);
-    encode_u64(0, &mut data);
+    encode_u64(0, &mut data); // warmup_period_slots
+    encode_u64(0, &mut data); // maintenance_margin_bps
     encode_u64(0, &mut data);
     encode_u64(0, &mut data);
     encode_u64(64, &mut data);

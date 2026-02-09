@@ -61,7 +61,7 @@ import {
   SLAB_TIERS,
 } from "../../packages/core/dist/index.js";
 
-const RPC = "https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}";
+const RPC = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
 const PROGRAM_ID = new PublicKey("8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL");
 const MATCHER_PROGRAM_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
 const MATCHER_CTX_SIZE = 320;
