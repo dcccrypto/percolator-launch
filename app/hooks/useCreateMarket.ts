@@ -103,7 +103,7 @@ export function useCreateMarket() {
 
       // Select program based on slab tier — each MAX_ACCOUNTS variant is a separate deployment
       const cfg = getConfig();
-      const tierMap: Record<number, string> = { 256: "small", 1024: "medium" };
+      const tierMap: Record<number, string> = { 256: "small", 1024: "medium", 4096: "large" };
       const tierKey = tierMap[params.maxAccounts ?? 256] ?? "small";
       const programsByTier = (cfg as Record<string, unknown>).programsBySlabTier as Record<string, string> | undefined;
       const selectedProgramId = programsByTier?.[tierKey] ?? cfg.programId;

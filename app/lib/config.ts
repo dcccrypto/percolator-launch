@@ -24,6 +24,7 @@ const CONFIGS = {
     programsBySlabTier: {
       small: "8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL",   // 256 slots
       medium: "9RKMpUGWemamrMg75zLgjYPmjWGzfah7wf9rgVrTddnT",  // 1024 slots
+      large: "58XqjfaeBVcJBrK6mdY51SaeEW1UFmFX9sVimxpryFEu",   // 4096 slots
     } as Record<string, string>,
   },
 } as const;
