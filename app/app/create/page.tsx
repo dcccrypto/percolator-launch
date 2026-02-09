@@ -26,11 +26,11 @@ export default function CreatePage() {
       <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
         launch a market
       </h1>
-      <p className="mt-2 text-sm text-[#71717a]">
+      <p className="mt-2 text-sm text-[#8B95B0]">
         takes about 60 seconds and some sol.
       </p>
 
-      <div className="mt-2 text-xs text-[#3f3f46]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+      <div className="mt-2 text-xs text-[#5a6382]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
         small: ~0.5 SOL &middot; medium: ~2 SOL &middot; large: ~7 SOL
       </div>
 
@@ -41,7 +41,7 @@ export default function CreatePage() {
         </div>
       )}
 
-      <div className="mt-8 rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-6 md:p-8">
+      <div className="mt-8 rounded-[4px] border border-white/[0.06] bg-white/[0.03] backdrop-blur-xl p-6 md:p-8">
         <CreateMarketWizard />
       </div>
     </div>

@@ -36,7 +36,7 @@ interface StepProps {
 }
 
 const StepSection: FC<StepProps> = ({ open, onToggle, title, stepNum, valid, children }) => (
-  <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] shadow-sm">
+  <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-xl shadow-sm">
     <button
       type="button"
       onClick={onToggle}
@@ -45,15 +45,15 @@ const StepSection: FC<StepProps> = ({ open, onToggle, title, stepNum, valid, chi
       <div className="flex items-center gap-3">
         <span
           className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-            valid ? "bg-green-900/40 text-green-400" : "bg-[#1a1a2e] text-[#71717a]"
+            valid ? "bg-[#00FFB2]/[0.1] text-[#00FFB2]" : "bg-white/[0.05] text-[#8B95B0]"
           }`}
         >
           {valid ? "\u2713" : stepNum}
         </span>
-        <span className="text-sm font-semibold text-[#e4e4e7]">{title}</span>
+        <span className="text-sm font-semibold text-[#F0F4FF]">{title}</span>
       </div>
       <svg
-        className={`h-4 w-4 text-[#71717a] transition-transform ${open ? "rotate-180" : ""}`}
+        className={`h-4 w-4 text-[#8B95B0] transition-transform ${open ? "rotate-180" : ""}`}
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -61,12 +61,12 @@ const StepSection: FC<StepProps> = ({ open, onToggle, title, stepNum, valid, chi
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
       </svg>
     </button>
-    {open && <div className="border-t border-[#1e1e2e] px-5 py-4">{children}</div>}
+    {open && <div className="border-t border-white/[0.06] px-5 py-4">{children}</div>}
   </div>
 );
 
 const FieldHint: FC<{ children: React.ReactNode }> = ({ children }) => (
-  <p className="mt-1 text-xs text-[#52525b]">{children}</p>
+  <p className="mt-1 text-xs text-[#5a6382]">{children}</p>
 );
 
 /** Quick Launch sub-component */
@@ -153,8 +153,8 @@ const QuickLaunchPanel: FC<{
   if (state.loading || state.step > 0 || state.error) {
     return (
       <div className="space-y-4">
-        <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-[#e4e4e7]">Quick Launch — Creating Market</h2>
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-6 shadow-sm">
+          <h2 className="mb-4 text-lg font-semibold text-[#F0F4FF]">Quick Launch — Creating Market</h2>
           <div className="space-y-3">
             {[0, 1, 2, 3, 4].map((i) => {
               let status: "pending" | "active" | "done" | "error" = "pending";
@@ -165,12 +165,12 @@ const QuickLaunchPanel: FC<{
               return (
                 <div key={i} className="flex items-center gap-3">
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
-                    {status === "done" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-900/40 text-xs text-green-400">&#10003;</span>}
-                    {status === "active" && <span className="flex h-6 w-6 items-center justify-center"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1e1e2e] border-t-[#e4e4e7]" /></span>}
+                    {status === "done" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-900/40 text-xs text-[#00FFB2]">&#10003;</span>}
+                    {status === "active" && <span className="flex h-6 w-6 items-center justify-center"><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/[0.06] border-t-[#F0F4FF]" /></span>}
                     {status === "error" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-red-900/40 text-xs text-red-400">!</span>}
-                    {status === "pending" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1a1a2e] text-xs text-[#52525b]">{i + 1}</span>}
+                    {status === "pending" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/[0.05] text-xs text-[#5a6382]">{i + 1}</span>}
                   </div>
-                  <span className={`text-sm ${status === "done" ? "text-green-400" : status === "active" ? "font-medium text-[#e4e4e7]" : status === "error" ? "text-red-400" : "text-[#52525b]"}`}>{labels[i]}</span>
+                  <span className={`text-sm ${status === "done" ? "text-[#00FFB2]" : status === "active" ? "font-medium text-[#F0F4FF]" : status === "error" ? "text-red-400" : "text-[#5a6382]"}`}>{labels[i]}</span>
                 </div>
               );
             })}
@@ -179,7 +179,7 @@ const QuickLaunchPanel: FC<{
             <div className="mt-4 rounded-lg bg-red-900/20 p-3">
               <p className="text-sm text-red-400">{state.error}</p>
               <div className="mt-3 flex gap-2">
-                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-3 py-1.5 text-xs font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Start over</button>
+                <button onClick={reset} className="rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-[#F0F4FF] hover:bg-white/[0.03]">Start over</button>
               </div>
             </div>
           )}
@@ -193,7 +193,7 @@ const QuickLaunchPanel: FC<{
                 <Link href={`/trade/${state.slabAddress}`} className="rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f] transition-all hover:bg-[#00e8bb]">
                   Start Trading →
                 </Link>
-                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-6 py-2.5 text-sm font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Create another</button>
+                <button onClick={reset} className="rounded-lg bg-white/[0.05] px-6 py-2.5 text-sm font-medium text-[#F0F4FF] hover:bg-white/[0.03]">Create another</button>
               </div>
             </div>
           )}
@@ -203,26 +203,26 @@ const QuickLaunchPanel: FC<{
   }
 
   return (
-    <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm space-y-5">
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-6 shadow-sm space-y-5">
       <div>
-        <h3 className="text-sm font-semibold text-[#e4e4e7] mb-1">⚡ Quick Launch</h3>
-        <p className="text-xs text-[#52525b]">Paste a token mint → we auto-detect the DEX pool and set optimal risk params. One click to deploy.</p>
+        <h3 className="text-sm font-semibold text-[#F0F4FF] mb-1">⚡ Quick Launch</h3>
+        <p className="text-xs text-[#5a6382]">Paste a token mint → we auto-detect the DEX pool and set optimal risk params. One click to deploy.</p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-[#e4e4e7]">Token Mint Address</label>
+        <label className="block text-sm font-medium text-[#F0F4FF]">Token Mint Address</label>
         <input
           type="text"
           value={quickMint}
           onChange={(e) => setQuickMint(e.target.value.trim())}
           placeholder="Paste any Solana token mint..."
-          className="mt-1 w-full rounded-lg border border-[#1e1e2e] bg-[#1a1a28] px-3 py-2 font-mono text-xs text-[#e4e4e7] placeholder-[#52525b] focus:border-blue-500 focus:outline-none"
+          className="mt-1 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 font-mono text-xs text-[#F0F4FF] placeholder:text-[#5a6382] focus:border-[#00FFB2]/40 focus:outline-none"
         />
       </div>
 
       {/* Slab Tier Selector */}
       <div>
-        <label className="block text-sm font-medium text-[#e4e4e7] mb-2">Market Size</label>
+        <label className="block text-sm font-medium text-[#F0F4FF] mb-2">Market Size</label>
         <div className="grid grid-cols-4 gap-2">
           {(Object.entries(SLAB_TIERS) as [SlabTierKey, typeof SLAB_TIERS[SlabTierKey]][]).map(([key, tier]) => (
             <button
@@ -231,20 +231,20 @@ const QuickLaunchPanel: FC<{
               onClick={() => setQuickSlabTier(key)}
               className={`rounded-lg border p-2 text-center transition-colors ${
                 quickSlabTier === key
-                  ? "border-blue-500 bg-blue-500/10"
-                  : "border-[#1e1e2e] bg-[#1a1a28] hover:border-[#2e2e3e]"
+                  ? "border-[#00FFB2]/40 bg-[#00FFB2]/[0.08] shadow-[0_0_20px_rgba(0,255,178,0.1)]"
+                  : "border-white/[0.06] bg-white/[0.03] hover:border-white/[0.1]"
               }`}
             >
-              <p className={`text-xs font-semibold ${quickSlabTier === key ? "text-blue-400" : "text-[#e4e4e7]"}`}>{tier.label}</p>
-              <p className="text-[10px] text-[#52525b]">{tier.maxAccounts} slots</p>
+              <p className={`text-xs font-semibold ${quickSlabTier === key ? "text-[#00FFB2]" : "text-[#F0F4FF]"}`}>{tier.label}</p>
+              <p className="text-[10px] text-[#5a6382]">{tier.maxAccounts} slots</p>
             </button>
           ))}
         </div>
       </div>
 
       {quickLaunch.loading && (
-        <div className="flex items-center gap-2 text-[#71717a]">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1e1e2e] border-t-[#e4e4e7]" />
+        <div className="flex items-center gap-2 text-[#8B95B0]">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/[0.06] border-t-[#F0F4FF]" />
           <span className="text-xs">Auto-detecting token &amp; DEX pool...</span>
         </div>
       )}
@@ -260,30 +260,30 @@ const QuickLaunchPanel: FC<{
       {quickLaunch.config && !quickLaunch.loading && (
         <>
           {/* Detected info */}
-          <div className="rounded-lg bg-blue-900/20 p-3 space-y-2">
+          <div className="rounded-lg bg-[#00FFB2]/[0.08] p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-sm font-medium text-[#e4e4e7]">{quickLaunch.config.symbol}</span>
-                <span className="ml-2 text-xs text-[#71717a]">{quickLaunch.config.name}</span>
+                <span className="text-sm font-medium text-[#F0F4FF]">{quickLaunch.config.symbol}</span>
+                <span className="ml-2 text-xs text-[#8B95B0]">{quickLaunch.config.name}</span>
               </div>
               {quickLaunch.poolInfo && (
-                <span className="text-xs text-green-400">
+                <span className="text-xs text-[#00FFB2]">
                   {quickLaunch.poolInfo.pairLabel} · ${quickLaunch.poolInfo.liquidityUsd.toLocaleString()} liq
                 </span>
               )}
             </div>
             <div className="grid grid-cols-3 gap-2 text-center">
               <div>
-                <p className="text-[10px] text-[#52525b]">Fee</p>
-                <p className="text-xs font-medium text-[#e4e4e7]">{effectiveTradingFee} bps</p>
+                <p className="text-[10px] text-[#5a6382]">Fee</p>
+                <p className="text-xs font-medium text-[#F0F4FF]">{effectiveTradingFee} bps</p>
               </div>
               <div>
-                <p className="text-[10px] text-[#52525b]">Margin</p>
-                <p className="text-xs font-medium text-[#e4e4e7]">{effectiveMargin} bps</p>
+                <p className="text-[10px] text-[#5a6382]">Margin</p>
+                <p className="text-xs font-medium text-[#F0F4FF]">{effectiveMargin} bps</p>
               </div>
               <div>
-                <p className="text-[10px] text-[#52525b]">Leverage</p>
-                <p className="text-xs font-medium text-[#e4e4e7]">{effectiveMaxLeverage}x</p>
+                <p className="text-[10px] text-[#5a6382]">Leverage</p>
+                <p className="text-xs font-medium text-[#F0F4FF]">{effectiveMaxLeverage}x</p>
               </div>
             </div>
           </div>
@@ -292,114 +292,114 @@ const QuickLaunchPanel: FC<{
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center gap-1.5 text-xs text-[#71717a] hover:text-[#a1a1aa] transition-colors"
+            className="flex items-center gap-1.5 text-xs text-[#8B95B0] hover:text-[#a1a1aa] transition-colors"
           >
             <span className={`transition-transform ${showAdvanced ? "rotate-90" : ""}`}>▶</span>
             Advanced Settings
           </button>
 
           {showAdvanced && (
-            <div className="space-y-3 rounded-lg border border-[#1e1e2e] bg-[#0a0a12] p-4">
+            <div className="space-y-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-medium text-[#71717a] mb-1">Trading Fee (bps)</label>
+                  <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">Trading Fee (bps)</label>
                   <input
                     type="number"
                     value={effectiveTradingFee}
                     onChange={(e) => setTradingFeeBps(Math.max(1, Math.min(1000, Number(e.target.value))))}
-                    className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                   />
-                  <p className="mt-0.5 text-[9px] text-[#52525b]">{(effectiveTradingFee / 100).toFixed(2)}% per trade</p>
+                  <p className="mt-0.5 text-[9px] text-[#5a6382]">{(effectiveTradingFee / 100).toFixed(2)}% per trade</p>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-medium text-[#71717a] mb-1">Initial Margin (bps)</label>
+                  <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">Initial Margin (bps)</label>
                   <input
                     type="number"
                     value={effectiveMargin}
                     onChange={(e) => setInitialMarginBps(Math.max(100, Math.min(10000, Number(e.target.value))))}
-                    className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                   />
-                  <p className="mt-0.5 text-[9px] text-[#52525b]">Max {effectiveMaxLeverage}x leverage</p>
+                  <p className="mt-0.5 text-[9px] text-[#5a6382]">Max {effectiveMaxLeverage}x leverage</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-medium text-[#71717a] mb-1">LP Collateral</label>
+                  <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">LP Collateral</label>
                   <input
                     type="text"
                     value={effectiveLpCollateral}
                     onChange={(e) => setLpCollateral(e.target.value.replace(/[^0-9]/g, ""))}
-                    className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                   />
-                  <p className="mt-0.5 text-[9px] text-[#52525b]">Base units deposited as LP</p>
+                  <p className="mt-0.5 text-[9px] text-[#5a6382]">Base units deposited as LP</p>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-medium text-[#71717a] mb-1">Insurance Fund</label>
+                  <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">Insurance Fund</label>
                   <input
                     type="text"
                     value={insuranceAmount}
                     onChange={(e) => setInsuranceAmount(e.target.value.replace(/[^0-9]/g, ""))}
-                    className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                   />
-                  <p className="mt-0.5 text-[9px] text-[#52525b]">Base units for insurance</p>
+                  <p className="mt-0.5 text-[9px] text-[#5a6382]">Base units for insurance</p>
                 </div>
               </div>
 
               {/* vAMM Toggle */}
-              <div className="border-t border-[#1e1e2e] pt-3">
-                <label className="flex items-center gap-2 text-sm text-[#e4e4e7]">
+              <div className="border-t border-white/[0.06] pt-3">
+                <label className="flex items-center gap-2 text-sm text-[#F0F4FF]">
                   <input
                     type="checkbox"
                     checked={enableVamm}
                     onChange={(e) => setEnableVamm(e.target.checked)}
-                    className="rounded border-[#1e1e2e]"
+                    className="rounded border-white/[0.06]"
                   />
                   Enable vAMM LP
                 </label>
-                <p className="mt-0.5 text-[9px] text-[#52525b]">Virtual AMM with spread/impact pricing. Provides tighter quotes than passive LP for liquid markets.</p>
+                <p className="mt-0.5 text-[9px] text-[#5a6382]">Virtual AMM with spread/impact pricing. Provides tighter quotes than passive LP for liquid markets.</p>
               </div>
 
               {enableVamm && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-medium text-[#71717a] mb-1">Base Spread (bps)</label>
+                    <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">Base Spread (bps)</label>
                     <input
                       type="number"
                       value={vammSpreadBps}
                       onChange={(e) => setVammSpreadBps(Math.max(1, Math.min(500, Number(e.target.value))))}
-                      className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                      className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                     />
-                    <p className="mt-0.5 text-[9px] text-[#52525b]">{(vammSpreadBps / 100).toFixed(2)}% minimum spread</p>
+                    <p className="mt-0.5 text-[9px] text-[#5a6382]">{(vammSpreadBps / 100).toFixed(2)}% minimum spread</p>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-[#71717a] mb-1">Impact K (bps)</label>
+                    <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">Impact K (bps)</label>
                     <input
                       type="number"
                       value={vammImpactKBps}
                       onChange={(e) => setVammImpactKBps(Math.max(1, Math.min(1000, Number(e.target.value))))}
-                      className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                      className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                     />
-                    <p className="mt-0.5 text-[9px] text-[#52525b]">Price impact coefficient</p>
+                    <p className="mt-0.5 text-[9px] text-[#5a6382]">Price impact coefficient</p>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-[#71717a] mb-1">Max Total (bps)</label>
+                    <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">Max Total (bps)</label>
                     <input
                       type="number"
                       value={vammMaxTotalBps}
                       onChange={(e) => setVammMaxTotalBps(Math.max(10, Math.min(1000, Number(e.target.value))))}
-                      className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                      className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                     />
-                    <p className="mt-0.5 text-[9px] text-[#52525b]">Cap on spread + impact + fee</p>
+                    <p className="mt-0.5 text-[9px] text-[#5a6382]">Cap on spread + impact + fee</p>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-[#71717a] mb-1">Liquidity (notional)</label>
+                    <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">Liquidity (notional)</label>
                     <input
                       type="text"
                       value={vammLiquidityE6}
                       onChange={(e) => setVammLiquidityE6(e.target.value.replace(/[^0-9]/g, ""))}
-                      className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                      className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                     />
-                    <p className="mt-0.5 text-[9px] text-[#52525b]">Virtual liquidity depth (e6)</p>
+                    <p className="mt-0.5 text-[9px] text-[#5a6382]">Virtual liquidity depth (e6)</p>
                   </div>
                 </div>
               )}
@@ -412,33 +412,33 @@ const QuickLaunchPanel: FC<{
                 <p className="text-xs text-amber-400">No DEX pool found — using admin oracle mode. Set an initial price below.</p>
               </div>
               <div>
-                <label className="block text-[10px] font-medium text-[#71717a] mb-1">Initial Price (USD)</label>
+                <label className="block text-[10px] font-medium text-[#8B95B0] mb-1">Initial Price (USD)</label>
                 <input
                   type="text"
                   value={manualPrice}
                   onChange={(e) => setManualPrice(e.target.value.replace(/[^0-9.]/g, ""))}
                   placeholder="1.000000"
-                  className="w-full rounded-lg border border-[#1e1e2e] bg-[#12121a] px-3 py-1.5 text-sm text-[#e4e4e7] focus:border-blue-500 focus:outline-none"
+                  className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm text-[#F0F4FF] focus:border-[#00FFB2]/40 focus:outline-none"
                 />
               </div>
             </div>
           )}
 
           {/* Estimated cost */}
-          <div className="rounded-lg bg-[#0a0a12] p-3 ring-1 ring-[#1e1e2e]">
+          <div className="rounded-lg bg-white/[0.02] p-3 ring-1 ring-white/[0.06]">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-[#52525b]">Estimated SOL cost</span>
-              <span className="data-cell text-sm font-bold text-[#e4e4e7]">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-[#5a6382]">Estimated SOL cost</span>
+              <span className="data-cell text-sm font-bold text-[#F0F4FF]">
                 ~{quickSlabTier === "small" ? "0.5" : quickSlabTier === "medium" ? "1.8" : quickSlabTier === "large" ? "7.0" : "7.0"} SOL
               </span>
             </div>
-            <p className="mt-1 text-[9px] text-[#52525b]">Slab rent + transaction fees. Rent is recoverable if market is closed.</p>
+            <p className="mt-1 text-[9px] text-[#5a6382]">Slab rent + transaction fees. Rent is recoverable if market is closed.</p>
           </div>
 
           <button
             onClick={handleQuickCreate}
             disabled={!publicKey || !quickLaunch.config}
-            className="w-full rounded-lg bg-[#00d4aa] py-3 text-sm font-bold text-[#080a0f] transition-all hover:bg-[#00e8bb] hover:shadow-[0_0_20px_rgba(0,212,170,0.15)] disabled:cursor-not-allowed disabled:bg-[#1e1e2e] disabled:text-[#52525b]"
+            className="w-full rounded-xl bg-gradient-to-r from-[#00FFB2] to-[#00d4aa] py-3 text-sm font-bold text-[#06080d] transition-all hover:shadow-[0_0_40px_rgba(0,255,178,0.25)] disabled:cursor-not-allowed disabled:bg-white/[0.03] disabled:bg-none disabled:text-[#5a6382]"
           >
             {!publicKey ? "Connect wallet to launch" : "🚀 Launch Market"}
           </button>
@@ -600,8 +600,8 @@ export const CreateMarketWizard: FC = () => {
   if (state.loading || state.step > 0 || state.error) {
     return (
       <div className="space-y-4">
-        <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-[#e4e4e7]">Creating Market</h2>
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-6 shadow-sm">
+          <h2 className="mb-4 text-lg font-semibold text-[#F0F4FF]">Creating Market</h2>
           <div className="space-y-3">
             {[0, 1, 2, 3, 4].map((i) => {
               let status: "pending" | "active" | "done" | "error" = "pending";
@@ -612,12 +612,12 @@ export const CreateMarketWizard: FC = () => {
               return (
                 <div key={i} className="flex items-center gap-3">
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
-                    {status === "done" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-900/40 text-xs text-green-400">&#10003;</span>}
-                    {status === "active" && <span className="flex h-6 w-6 items-center justify-center"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1e1e2e] border-t-[#e4e4e7]" /></span>}
+                    {status === "done" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-900/40 text-xs text-[#00FFB2]">&#10003;</span>}
+                    {status === "active" && <span className="flex h-6 w-6 items-center justify-center"><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/[0.06] border-t-[#F0F4FF]" /></span>}
                     {status === "error" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-red-900/40 text-xs text-red-400">!</span>}
-                    {status === "pending" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1a1a2e] text-xs text-[#52525b]">{i + 1}</span>}
+                    {status === "pending" && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/[0.05] text-xs text-[#5a6382]">{i + 1}</span>}
                   </div>
-                  <span className={`text-sm ${status === "done" ? "text-green-400" : status === "active" ? "font-medium text-[#e4e4e7]" : status === "error" ? "text-red-400" : "text-[#52525b]"}`}>{labels[i]}</span>
+                  <span className={`text-sm ${status === "done" ? "text-[#00FFB2]" : status === "active" ? "font-medium text-[#F0F4FF]" : status === "error" ? "text-red-400" : "text-[#5a6382]"}`}>{labels[i]}</span>
                 </div>
               );
             })}
@@ -626,8 +626,8 @@ export const CreateMarketWizard: FC = () => {
             <div className="mt-4 rounded-lg bg-red-900/20 p-3">
               <p className="text-sm text-red-400">{state.error}</p>
               <div className="mt-3 flex gap-2">
-                <button onClick={handleRetry} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700">Retry from step {state.step + 1}</button>
-                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-3 py-1.5 text-xs font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Start over</button>
+                <button onClick={handleRetry} className="rounded-lg bg-[#FF4466] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#FF4466]/80">Retry from step {state.step + 1}</button>
+                <button onClick={reset} className="rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-[#F0F4FF] hover:bg-white/[0.03]">Start over</button>
               </div>
             </div>
           )}
@@ -641,15 +641,15 @@ export const CreateMarketWizard: FC = () => {
                 <Link href={`/trade/${state.slabAddress}`} className="rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f] transition-all hover:bg-[#00e8bb]">
                   Start Trading →
                 </Link>
-                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-6 py-2.5 text-sm font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Create another</button>
+                <button onClick={reset} className="rounded-lg bg-white/[0.05] px-6 py-2.5 text-sm font-medium text-[#F0F4FF] hover:bg-white/[0.03]">Create another</button>
               </div>
             </div>
           )}
           {state.txSigs.length > 0 && (
-            <div className="mt-4 border-t border-[#1e1e2e] pt-3">
-              <p className="text-xs font-medium text-[#71717a] uppercase">Transaction signatures</p>
+            <div className="mt-4 border-t border-white/[0.06] pt-3">
+              <p className="text-xs font-medium text-[#8B95B0] uppercase">Transaction signatures</p>
               <div className="mt-1 space-y-1">
-                {state.txSigs.map((sig, i) => <p key={i} className="font-mono text-xs text-[#71717a] truncate">{sig}</p>)}
+                {state.txSigs.map((sig, i) => <p key={i} className="font-mono text-xs text-[#8B95B0] truncate">{sig}</p>)}
               </div>
             </div>
           )}
@@ -661,14 +661,14 @@ export const CreateMarketWizard: FC = () => {
   return (
     <div className="space-y-4">
       {/* Mode Switcher */}
-      <div className="flex rounded-xl border border-[#1e1e2e] bg-[#12121a] p-1">
+      <div className="flex rounded-xl border border-white/[0.06] bg-white/[0.03] p-1">
         <button
           type="button"
           onClick={() => setWizardMode("quick")}
           className={`flex-1 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
             wizardMode === "quick"
-              ? "bg-blue-600 text-white"
-              : "text-[#71717a] hover:text-[#e4e4e7]"
+              ? "bg-[#00FFB2] text-[#06080d] font-bold"
+              : "text-[#8B95B0] hover:text-[#F0F4FF]"
           }`}
         >
           ⚡ Quick Launch
@@ -678,8 +678,8 @@ export const CreateMarketWizard: FC = () => {
           onClick={() => setWizardMode("manual")}
           className={`flex-1 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
             wizardMode === "manual"
-              ? "bg-blue-600 text-white"
-              : "text-[#71717a] hover:text-[#e4e4e7]"
+              ? "bg-[#00FFB2] text-[#06080d] font-bold"
+              : "text-[#8B95B0] hover:text-[#F0F4FF]"
           }`}
         >
           🔧 Manual Setup
@@ -694,95 +694,95 @@ export const CreateMarketWizard: FC = () => {
       <StepSection open={openStep === 1} onToggle={() => setOpenStep(openStep === 1 ? 0 : 1)} title="Token & Oracle" stepNum={1} valid={step1Valid}>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-[#e4e4e7]">Collateral Mint Address</label>
+            <label className="block text-sm font-medium text-[#F0F4FF]">Collateral Mint Address</label>
             <FieldHint>The SPL token used as collateral. Traders deposit this token and profits/losses are settled in it.</FieldHint>
-            <input type="text" value={mint} onChange={(e) => setMint(e.target.value.trim())} placeholder="e.g. EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" className={`mt-1 w-full rounded-lg border px-3 py-2 font-mono text-xs text-[#e4e4e7] placeholder-[#52525b] ${mint && !mintValid ? "border-red-500/50 bg-red-900/20" : "border-[#1e1e2e] bg-[#1a1a28]"} focus:border-blue-500 focus:outline-none`} />
+            <input type="text" value={mint} onChange={(e) => setMint(e.target.value.trim())} placeholder="e.g. EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" className={`mt-1 w-full rounded-lg border px-3 py-2 font-mono text-xs text-[#F0F4FF] placeholder:text-[#5a6382] ${mint && !mintValid ? "border-red-500/50 bg-red-900/20" : "border-white/[0.06] bg-white/[0.03]"} focus:border-[#00FFB2]/40 focus:outline-none`} />
             {mint && !mintValid && <p className="mt-1 text-xs text-red-400">Invalid base58 public key</p>}
             {tokenMeta && mintValid && (
-              <div className="mt-2 flex items-center gap-3 rounded-lg bg-blue-900/20 p-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-900/40 text-xs font-bold text-blue-400">{tokenMeta.symbol.slice(0, 2)}</div>
+              <div className="mt-2 flex items-center gap-3 rounded-lg bg-[#00FFB2]/[0.08] p-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#00FFB2]/[0.15] text-xs font-bold text-[#00FFB2]">{tokenMeta.symbol.slice(0, 2)}</div>
                 <div>
-                  <p className="text-sm font-medium text-[#e4e4e7]">{tokenMeta.name} ({tokenMeta.symbol})</p>
-                  <p className="text-xs text-[#71717a]">{tokenMeta.decimals} decimals</p>
+                  <p className="text-sm font-medium text-[#F0F4FF]">{tokenMeta.name} ({tokenMeta.symbol})</p>
+                  <p className="text-xs text-[#8B95B0]">{tokenMeta.decimals} decimals</p>
                 </div>
               </div>
             )}
-            {balanceLoading && mintValid && <p className="mt-1 text-xs text-[#52525b]">Loading balance...</p>}
+            {balanceLoading && mintValid && <p className="mt-1 text-xs text-[#5a6382]">Loading balance...</p>}
             {tokenBalance !== null && tokenMeta && (
-              <p className="mt-1 text-xs text-[#71717a]">Your balance: <span className="font-medium text-[#e4e4e7]">{formatHumanAmount(tokenBalance, tokenMeta.decimals)} {tokenMeta.symbol}</span></p>
+              <p className="mt-1 text-xs text-[#8B95B0]">Your balance: <span className="font-medium text-[#F0F4FF]">{formatHumanAmount(tokenBalance, tokenMeta.decimals)} {tokenMeta.symbol}</span></p>
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-[#e4e4e7]">Oracle Mode</label>
+            <label className="block text-sm font-medium text-[#F0F4FF]">Oracle Mode</label>
             <FieldHint><strong>DEX Pool</strong> — uses an on-chain DEX pool as oracle. Works with any token that has a pool. <strong>Pyth</strong> — uses Pyth Network&apos;s decentralized price feeds for major assets.</FieldHint>
             <div className="mt-2 flex gap-2">
-              <button type="button" onClick={() => { setOracleMode("dex"); setFeedId(""); setSelectedFeedName(null); }} className={`rounded-lg px-4 py-2 text-sm font-medium ${oracleMode === "dex" ? "bg-blue-600 text-white" : "bg-[#1a1a2e] text-[#71717a] hover:bg-[#1e1e2e]"}`}>DEX Pool</button>
-              <button type="button" onClick={() => { setOracleMode("pyth"); setDexPoolAddress(""); setSelectedDexPool(null); }} className={`rounded-lg px-4 py-2 text-sm font-medium ${oracleMode === "pyth" ? "bg-blue-600 text-white" : "bg-[#1a1a2e] text-[#71717a] hover:bg-[#1e1e2e]"}`}>Pyth Oracle</button>
+              <button type="button" onClick={() => { setOracleMode("dex"); setFeedId(""); setSelectedFeedName(null); }} className={`rounded-lg px-4 py-2 text-sm font-medium ${oracleMode === "dex" ? "bg-[#00FFB2] text-[#06080d] font-bold" : "bg-white/[0.05] text-[#8B95B0] hover:bg-white/[0.03]"}`}>DEX Pool</button>
+              <button type="button" onClick={() => { setOracleMode("pyth"); setDexPoolAddress(""); setSelectedDexPool(null); }} className={`rounded-lg px-4 py-2 text-sm font-medium ${oracleMode === "pyth" ? "bg-[#00FFB2] text-[#06080d] font-bold" : "bg-white/[0.05] text-[#8B95B0] hover:bg-white/[0.03]"}`}>Pyth Oracle</button>
             </div>
           </div>
           {oracleMode === "pyth" && (
             <div>
-              <label className="block text-sm font-medium text-[#e4e4e7]">Pyth Feed ID (hex, 64 chars)</label>
+              <label className="block text-sm font-medium text-[#F0F4FF]">Pyth Feed ID (hex, 64 chars)</label>
               {pythFeeds.length > 0 && !feedId && (
                 <div className="mt-2 space-y-1">
-                  <p className="text-xs text-[#71717a]">Select a feed:</p>
+                  <p className="text-xs text-[#8B95B0]">Select a feed:</p>
                   {pythFeeds.map((f) => (
-                    <button key={f.id} type="button" onClick={() => { setFeedId(f.id); setSelectedFeedName(f.displayName); }} className="flex w-full items-center justify-between rounded-lg border border-[#1e1e2e] px-3 py-2 text-left text-sm hover:border-blue-500/50 hover:bg-blue-900/20">
-                      <span className="font-medium text-[#e4e4e7]">{f.displayName}</span>
-                      <span className="font-mono text-xs text-[#52525b]">{f.id.slice(0, 12)}...</span>
+                    <button key={f.id} type="button" onClick={() => { setFeedId(f.id); setSelectedFeedName(f.displayName); }} className="flex w-full items-center justify-between rounded-lg border border-white/[0.06] px-3 py-2 text-left text-sm hover:border-[#00FFB2]/30 hover:bg-[#00FFB2]/[0.08]">
+                      <span className="font-medium text-[#F0F4FF]">{f.displayName}</span>
+                      <span className="font-mono text-xs text-[#5a6382]">{f.id.slice(0, 12)}...</span>
                     </button>
                   ))}
                 </div>
               )}
-              {pythLoading && <p className="mt-1 text-xs text-[#52525b]">Searching Pyth feeds...</p>}
-              {!pythLoading && pythFeeds.length === 0 && tokenMeta?.symbol && <p className="mt-1 text-xs text-[#52525b]">No Pyth feeds found for &ldquo;{tokenMeta.symbol}&rdquo;. Enter a feed ID manually below.</p>}
+              {pythLoading && <p className="mt-1 text-xs text-[#5a6382]">Searching Pyth feeds...</p>}
+              {!pythLoading && pythFeeds.length === 0 && tokenMeta?.symbol && <p className="mt-1 text-xs text-[#5a6382]">No Pyth feeds found for &ldquo;{tokenMeta.symbol}&rdquo;. Enter a feed ID manually below.</p>}
               {feedId && selectedFeedName && (
-                <div className="mt-2 flex items-center justify-between rounded-lg bg-blue-900/20 p-2">
-                  <span className="text-sm font-medium text-blue-300">{selectedFeedName}</span>
-                  <button type="button" onClick={() => { setFeedId(""); setSelectedFeedName(null); }} className="text-xs text-blue-400 hover:underline">Change</button>
+                <div className="mt-2 flex items-center justify-between rounded-lg bg-[#00FFB2]/[0.08] p-2">
+                  <span className="text-sm font-medium text-[#00FFB2]">{selectedFeedName}</span>
+                  <button type="button" onClick={() => { setFeedId(""); setSelectedFeedName(null); }} className="text-xs text-[#00FFB2] hover:underline">Change</button>
                 </div>
               )}
-              <input type="text" value={feedId} onChange={(e) => { setFeedId(e.target.value.trim()); setSelectedFeedName(null); }} placeholder="e.g. ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d" className={`mt-1 w-full rounded-lg border px-3 py-2 font-mono text-xs text-[#e4e4e7] placeholder-[#52525b] ${feedId && !feedValid ? "border-red-500/50 bg-red-900/20" : "border-[#1e1e2e] bg-[#1a1a28]"} focus:border-blue-500 focus:outline-none`} />
+              <input type="text" value={feedId} onChange={(e) => { setFeedId(e.target.value.trim()); setSelectedFeedName(null); }} placeholder="e.g. ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d" className={`mt-1 w-full rounded-lg border px-3 py-2 font-mono text-xs text-[#F0F4FF] placeholder:text-[#5a6382] ${feedId && !feedValid ? "border-red-500/50 bg-red-900/20" : "border-white/[0.06] bg-white/[0.03]"} focus:border-[#00FFB2]/40 focus:outline-none`} />
               {feedId && !feedValid && <p className="mt-1 text-xs text-red-400">Must be exactly 64 hex characters</p>}
-              <a href="https://pyth.network/developers/price-feed-ids" target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-blue-400 hover:underline">Browse all Pyth feed IDs</a>
+              <a href="https://pyth.network/developers/price-feed-ids" target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-[#00FFB2] hover:underline">Browse all Pyth feed IDs</a>
             </div>
           )}
           {oracleMode === "dex" && (
             <div>
-              <label className="block text-sm font-medium text-[#e4e4e7]">DEX Pool Address</label>
+              <label className="block text-sm font-medium text-[#F0F4FF]">DEX Pool Address</label>
               <FieldHint>Uses an on-chain DEX pool as the price oracle. Works with any token that has a trading pool on PumpSwap, Raydium, or Meteora. Fully permissionless — no external oracle operator needed.</FieldHint>
               {dexPools.length > 0 && !dexPoolAddress && (
                 <div className="mt-2 space-y-1">
-                  <p className="text-xs text-[#71717a]">Discovered pools (by liquidity):</p>
+                  <p className="text-xs text-[#8B95B0]">Discovered pools (by liquidity):</p>
                   {dexPools.map((pool) => (
-                    <button key={pool.poolAddress} type="button" onClick={() => { setDexPoolAddress(pool.poolAddress); setSelectedDexPool(pool); }} className="flex w-full items-center justify-between rounded-lg border border-[#1e1e2e] px-3 py-2 text-left text-sm hover:border-blue-500/50 hover:bg-blue-900/20">
+                    <button key={pool.poolAddress} type="button" onClick={() => { setDexPoolAddress(pool.poolAddress); setSelectedDexPool(pool); }} className="flex w-full items-center justify-between rounded-lg border border-white/[0.06] px-3 py-2 text-left text-sm hover:border-[#00FFB2]/30 hover:bg-[#00FFB2]/[0.08]">
                       <div>
-                        <span className="font-medium text-[#e4e4e7]">{pool.pairLabel}</span>
-                        <span className="ml-2 text-xs text-[#52525b] capitalize">{pool.dexId}</span>
+                        <span className="font-medium text-[#F0F4FF]">{pool.pairLabel}</span>
+                        <span className="ml-2 text-xs text-[#5a6382] capitalize">{pool.dexId}</span>
                       </div>
-                      <div className="text-right"><span className="text-xs text-[#71717a]">${pool.liquidityUsd.toLocaleString()} liq</span></div>
+                      <div className="text-right"><span className="text-xs text-[#8B95B0]">${pool.liquidityUsd.toLocaleString()} liq</span></div>
                     </button>
                   ))}
                 </div>
               )}
-              {dexPoolsLoading && <p className="mt-1 text-xs text-[#52525b]">Searching DEX pools...</p>}
-              {!dexPoolsLoading && dexPools.length === 0 && mintValid && <p className="mt-1 text-xs text-[#52525b]">No supported DEX pools found. Enter a pool address manually.</p>}
+              {dexPoolsLoading && <p className="mt-1 text-xs text-[#5a6382]">Searching DEX pools...</p>}
+              {!dexPoolsLoading && dexPools.length === 0 && mintValid && <p className="mt-1 text-xs text-[#5a6382]">No supported DEX pools found. Enter a pool address manually.</p>}
               {dexPoolAddress && selectedDexPool && (
-                <div className="mt-2 flex items-center justify-between rounded-lg bg-blue-900/20 p-2">
+                <div className="mt-2 flex items-center justify-between rounded-lg bg-[#00FFB2]/[0.08] p-2">
                   <div>
-                    <span className="text-sm font-medium text-blue-300">{selectedDexPool.pairLabel}</span>
-                    <span className="ml-2 text-xs text-blue-400 capitalize">{selectedDexPool.dexId}</span>
+                    <span className="text-sm font-medium text-[#00FFB2]">{selectedDexPool.pairLabel}</span>
+                    <span className="ml-2 text-xs text-[#00FFB2] capitalize">{selectedDexPool.dexId}</span>
                   </div>
-                  <button type="button" onClick={() => { setDexPoolAddress(""); setSelectedDexPool(null); }} className="text-xs text-blue-400 hover:underline">Change</button>
+                  <button type="button" onClick={() => { setDexPoolAddress(""); setSelectedDexPool(null); }} className="text-xs text-[#00FFB2] hover:underline">Change</button>
                 </div>
               )}
-              <input type="text" value={dexPoolAddress} onChange={(e) => { setDexPoolAddress(e.target.value.trim()); setSelectedDexPool(null); }} placeholder="Pool address (base58)" className={`mt-1 w-full rounded-lg border px-3 py-2 font-mono text-xs text-[#e4e4e7] placeholder-[#52525b] ${dexPoolAddress && !dexPoolValid ? "border-red-500/50 bg-red-900/20" : "border-[#1e1e2e] bg-[#1a1a28]"} focus:border-blue-500 focus:outline-none`} />
+              <input type="text" value={dexPoolAddress} onChange={(e) => { setDexPoolAddress(e.target.value.trim()); setSelectedDexPool(null); }} placeholder="Pool address (base58)" className={`mt-1 w-full rounded-lg border px-3 py-2 font-mono text-xs text-[#F0F4FF] placeholder:text-[#5a6382] ${dexPoolAddress && !dexPoolValid ? "border-red-500/50 bg-red-900/20" : "border-white/[0.06] bg-white/[0.03]"} focus:border-[#00FFB2]/40 focus:outline-none`} />
               {dexPoolAddress && !dexPoolValid && <p className="mt-1 text-xs text-red-400">Invalid base58 public key</p>}
             </div>
           )}
           <div>
-            <label className="flex items-center gap-2 text-sm text-[#e4e4e7]">
-              <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} className="rounded border-[#1e1e2e]" />
+            <label className="flex items-center gap-2 text-sm text-[#F0F4FF]">
+              <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} className="rounded border-white/[0.06]" />
               Invert price feed
             </label>
             <FieldHint>Enable if the collateral IS the asset being priced (e.g. SOL-denominated SOL/USD market).</FieldHint>
@@ -794,7 +794,7 @@ export const CreateMarketWizard: FC = () => {
         <div className="space-y-4">
           {/* Slab Tier Selector */}
           <div>
-            <label className="block text-sm font-medium text-[#e4e4e7] mb-2">Market Capacity (Slab Size)</label>
+            <label className="block text-sm font-medium text-[#F0F4FF] mb-2">Market Capacity (Slab Size)</label>
             <FieldHint>How many trader slots this market supports. Larger = more traders but higher rent cost.</FieldHint>
             <div className="mt-2 grid grid-cols-2 gap-2">
               {(Object.entries(SLAB_TIERS) as [SlabTierKey, typeof SLAB_TIERS[SlabTierKey]][]).map(([key, tier]) => (
@@ -804,37 +804,37 @@ export const CreateMarketWizard: FC = () => {
                   onClick={() => setSlabTier(key)}
                   className={`rounded-lg border p-3 text-left transition-colors ${
                     slabTier === key
-                      ? "border-blue-500 bg-blue-500/10"
-                      : "border-[#1e1e2e] bg-[#1a1a28] hover:border-[#2e2e3e]"
+                      ? "border-[#00FFB2]/40 bg-[#00FFB2]/[0.08] shadow-[0_0_20px_rgba(0,255,178,0.1)]"
+                      : "border-white/[0.06] bg-white/[0.03] hover:border-white/[0.1]"
                   }`}
                 >
-                  <p className={`text-sm font-semibold ${slabTier === key ? "text-blue-400" : "text-[#e4e4e7]"}`}>
+                  <p className={`text-sm font-semibold ${slabTier === key ? "text-[#00FFB2]" : "text-[#F0F4FF]"}`}>
                     {tier.label}
                   </p>
-                  <p className="text-xs text-[#71717a]">{tier.description}</p>
+                  <p className="text-xs text-[#8B95B0]">{tier.description}</p>
                 </button>
               ))}
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-[#e4e4e7]">Trading Fee: {tradingFeeBps} bps ({(tradingFeeBps / 100).toFixed(2)}%)</label>
+            <label className="block text-sm font-medium text-[#F0F4FF]">Trading Fee: {tradingFeeBps} bps ({(tradingFeeBps / 100).toFixed(2)}%)</label>
             <FieldHint>Fee charged on every trade. 30 bps (0.30%) is standard for most perp exchanges.</FieldHint>
             <input type="range" min={1} max={100} value={tradingFeeBps} onChange={(e) => setTradingFeeBps(Number(e.target.value))} className="mt-1 w-full" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-[#e4e4e7]">Initial Margin: {initialMarginBps} bps ({(initialMarginBps / 100).toFixed(1)}%)</label>
+            <label className="block text-sm font-medium text-[#F0F4FF]">Initial Margin: {initialMarginBps} bps ({(initialMarginBps / 100).toFixed(1)}%)</label>
             <FieldHint>Minimum collateral to open a position as % of notional. {initialMarginBps} bps = {(initialMarginBps / 100).toFixed(0)}% = {maxLeverage}x max leverage.</FieldHint>
             <input type="range" min={100} max={5000} step={100} value={initialMarginBps} onChange={(e) => setInitialMarginBps(Number(e.target.value))} className="mt-1 w-full" />
           </div>
-          <div className="grid grid-cols-2 gap-4 rounded-lg bg-[#1a1a28] p-3">
+          <div className="grid grid-cols-2 gap-4 rounded-lg bg-white/[0.03] p-3">
             <div>
-              <p className="text-xs text-[#71717a]">Maintenance Margin</p>
-              <p className="text-sm font-medium text-[#e4e4e7]">{(maintenanceMarginBps / 100).toFixed(1)}%</p>
-              <p className="text-xs text-[#52525b]">Positions below this are liquidated</p>
+              <p className="text-xs text-[#8B95B0]">Maintenance Margin</p>
+              <p className="text-sm font-medium text-[#F0F4FF]">{(maintenanceMarginBps / 100).toFixed(1)}%</p>
+              <p className="text-xs text-[#5a6382]">Positions below this are liquidated</p>
             </div>
             <div>
-              <p className="text-xs text-[#71717a]">Max Leverage</p>
-              <p className="text-sm font-medium text-[#e4e4e7]">{maxLeverage}x</p>
+              <p className="text-xs text-[#8B95B0]">Max Leverage</p>
+              <p className="text-sm font-medium text-[#F0F4FF]">{maxLeverage}x</p>
             </div>
           </div>
         </div>
@@ -843,21 +843,21 @@ export const CreateMarketWizard: FC = () => {
       <StepSection open={openStep === 3} onToggle={() => setOpenStep(openStep === 3 ? 0 : 3)} title="Liquidity Setup" stepNum={3} valid={step3Valid}>
         <div className="space-y-4">
           {tokenBalance !== null && tokenMeta && (
-            <div className="rounded-lg bg-[#1a1a28] p-3">
-              <p className="text-xs text-[#71717a]">Your balance</p>
-              <p className="text-sm font-medium text-[#e4e4e7]">{formatHumanAmount(tokenBalance, tokenMeta.decimals)} {tokenMeta.symbol}</p>
+            <div className="rounded-lg bg-white/[0.03] p-3">
+              <p className="text-xs text-[#8B95B0]">Your balance</p>
+              <p className="text-sm font-medium text-[#F0F4FF]">{formatHumanAmount(tokenBalance, tokenMeta.decimals)} {tokenMeta.symbol}</p>
             </div>
           )}
-          {balanceLoading && <p className="text-xs text-[#52525b]">Loading balance...</p>}
+          {balanceLoading && <p className="text-xs text-[#5a6382]">Loading balance...</p>}
           <div>
-            <label className="block text-sm font-medium text-[#e4e4e7]">LP Collateral{tokenMeta ? ` (${tokenMeta.symbol})` : ""}</label>
+            <label className="block text-sm font-medium text-[#F0F4FF]">LP Collateral{tokenMeta ? ` (${tokenMeta.symbol})` : ""}</label>
             <FieldHint>Initial liquidity backing the other side of every trade. More collateral = market handles larger positions.</FieldHint>
-            <input type="text" value={lpCollateral} onChange={(e) => setLpCollateral(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="e.g. 1000.00" className="mt-1 w-full rounded-lg border border-[#1e1e2e] bg-[#1a1a28] px-3 py-2 text-sm text-[#e4e4e7] placeholder-[#52525b] focus:border-blue-500 focus:outline-none" />
+            <input type="text" value={lpCollateral} onChange={(e) => setLpCollateral(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="e.g. 1000.00" className="mt-1 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-[#F0F4FF] placeholder:text-[#5a6382] focus:border-[#00FFB2]/40 focus:outline-none" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-[#e4e4e7]">Insurance Fund{tokenMeta ? ` (${tokenMeta.symbol})` : ""}</label>
+            <label className="block text-sm font-medium text-[#F0F4FF]">Insurance Fund{tokenMeta ? ` (${tokenMeta.symbol})` : ""}</label>
             <FieldHint>Safety buffer absorbing losses from liquidations. More insurance = healthier market.</FieldHint>
-            <input type="text" value={insuranceAmount} onChange={(e) => setInsuranceAmount(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="e.g. 500.00" className="mt-1 w-full rounded-lg border border-[#1e1e2e] bg-[#1a1a28] px-3 py-2 text-sm text-[#e4e4e7] placeholder-[#52525b] focus:border-blue-500 focus:outline-none" />
+            <input type="text" value={insuranceAmount} onChange={(e) => setInsuranceAmount(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="e.g. 500.00" className="mt-1 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-[#F0F4FF] placeholder:text-[#5a6382] focus:border-[#00FFB2]/40 focus:outline-none" />
           </div>
           {balanceWarning && (
             <div className="rounded-lg bg-amber-900/20 p-3">
@@ -870,25 +870,25 @@ export const CreateMarketWizard: FC = () => {
       <StepSection open={openStep === 4} onToggle={() => setOpenStep(openStep === 4 ? 0 : 4)} title="Review & Create" stepNum={4} valid={false}>
         <div className="space-y-4">
           <table className="w-full text-sm">
-            <tbody className="divide-y divide-[#1e1e2e]">
-              <tr><td className="py-2 text-[#71717a]">Mint</td><td className="py-2 text-right text-[#e4e4e7]">{tokenMeta ? <span>{tokenMeta.name} ({tokenMeta.symbol})</span> : mintValid ? <span className="font-mono text-xs">{mint.slice(0, 12)}...</span> : "—"}</td></tr>
-              <tr><td className="py-2 text-[#71717a]">Oracle</td><td className="py-2 text-right text-[#e4e4e7]">{oracleMode === "dex" ? selectedDexPool ? `DEX — ${selectedDexPool.pairLabel} (${selectedDexPool.dexId})` : `DEX — ${dexPoolAddress.slice(0, 12)}...` : selectedFeedName ? `Pyth — ${selectedFeedName}` : `Pyth — ${feedId.slice(0, 12)}...`}</td></tr>
-              <tr><td className="py-2 text-[#71717a]">Inverted</td><td className="py-2 text-right text-[#e4e4e7]">{invert ? "Yes" : "No"}</td></tr>
-              <tr><td className="py-2 text-[#71717a]">Trading Fee</td><td className="py-2 text-right text-[#e4e4e7]">{tradingFeeBps} bps ({(tradingFeeBps / 100).toFixed(2)}%)</td></tr>
-              <tr><td className="py-2 text-[#71717a]">Initial Margin</td><td className="py-2 text-right text-[#e4e4e7]">{initialMarginBps} bps ({maxLeverage}x max)</td></tr>
-              <tr><td className="py-2 text-[#71717a]">LP Collateral</td><td className="py-2 text-right text-[#e4e4e7]">{lpCollateral ? `${lpCollateral} ${symbol}` : "—"}</td></tr>
-              <tr><td className="py-2 text-[#71717a]">Insurance Fund</td><td className="py-2 text-right text-[#e4e4e7]">{insuranceAmount ? `${insuranceAmount} ${symbol}` : "—"}</td></tr>
+            <tbody className="divide-y divide-white/[0.06]">
+              <tr><td className="py-2 text-[#8B95B0]">Mint</td><td className="py-2 text-right text-[#F0F4FF]">{tokenMeta ? <span>{tokenMeta.name} ({tokenMeta.symbol})</span> : mintValid ? <span className="font-mono text-xs">{mint.slice(0, 12)}...</span> : "—"}</td></tr>
+              <tr><td className="py-2 text-[#8B95B0]">Oracle</td><td className="py-2 text-right text-[#F0F4FF]">{oracleMode === "dex" ? selectedDexPool ? `DEX — ${selectedDexPool.pairLabel} (${selectedDexPool.dexId})` : `DEX — ${dexPoolAddress.slice(0, 12)}...` : selectedFeedName ? `Pyth — ${selectedFeedName}` : `Pyth — ${feedId.slice(0, 12)}...`}</td></tr>
+              <tr><td className="py-2 text-[#8B95B0]">Inverted</td><td className="py-2 text-right text-[#F0F4FF]">{invert ? "Yes" : "No"}</td></tr>
+              <tr><td className="py-2 text-[#8B95B0]">Trading Fee</td><td className="py-2 text-right text-[#F0F4FF]">{tradingFeeBps} bps ({(tradingFeeBps / 100).toFixed(2)}%)</td></tr>
+              <tr><td className="py-2 text-[#8B95B0]">Initial Margin</td><td className="py-2 text-right text-[#F0F4FF]">{initialMarginBps} bps ({maxLeverage}x max)</td></tr>
+              <tr><td className="py-2 text-[#8B95B0]">LP Collateral</td><td className="py-2 text-right text-[#F0F4FF]">{lpCollateral ? `${lpCollateral} ${symbol}` : "—"}</td></tr>
+              <tr><td className="py-2 text-[#8B95B0]">Insurance Fund</td><td className="py-2 text-right text-[#F0F4FF]">{insuranceAmount ? `${insuranceAmount} ${symbol}` : "—"}</td></tr>
             </tbody>
           </table>
-          <div className="rounded-lg bg-[#1a1a28] p-3">
-            <p className="text-xs text-[#71717a]">Estimated SOL cost</p>
-            <p className="text-sm font-medium text-[#e4e4e7]">
+          <div className="rounded-lg bg-white/[0.03] p-3">
+            <p className="text-xs text-[#8B95B0]">Estimated SOL cost</p>
+            <p className="text-sm font-medium text-[#F0F4FF]">
               ~{slabTier === "small" ? "0.5" : slabTier === "medium" ? "1.8" : "7.0"} SOL (market rent + tx fees)
             </p>
-            <p className="mt-0.5 text-[9px] text-[#52525b]">Rent is recoverable if market is closed.</p>
+            <p className="mt-0.5 text-[9px] text-[#5a6382]">Rent is recoverable if market is closed.</p>
           </div>
           {!publicKey && <p className="text-sm text-amber-400">Connect your wallet to create a market.</p>}
-          <button onClick={handleCreate} disabled={!allValid || !publicKey} className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-[#1e1e2e] disabled:text-[#52525b]">Create Market</button>
+          <button onClick={handleCreate} disabled={!allValid || !publicKey} className="w-full rounded-xl bg-gradient-to-r from-[#00FFB2] to-[#00d4aa] py-3 text-sm font-bold text-[#06080d] transition-all hover:shadow-[0_0_40px_rgba(0,255,178,0.25)] disabled:cursor-not-allowed disabled:bg-white/[0.03] disabled:bg-none disabled:text-[#5a6382]">Create Market</button>
         </div>
       </StepSection>
       </>}
