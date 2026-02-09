@@ -184,12 +184,16 @@ const QuickLaunchPanel: FC<{
             </div>
           )}
           {state.step === 5 && state.slabAddress && (
-            <div className="mt-4 rounded-lg bg-green-900/20 p-4">
-              <p className="text-sm font-medium text-green-300">Market created successfully!</p>
-              <p className="mt-1 font-mono text-xs text-green-400">Slab: {state.slabAddress}</p>
-              <div className="mt-3 flex gap-2">
-                <Link href={`/trade/${state.slabAddress}`} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700">Trade this market</Link>
-                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-4 py-2 text-sm font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Create another</button>
+            <div className="mt-6 rounded-xl bg-[#00d4aa]/5 p-6 text-center ring-1 ring-[#00d4aa]/20">
+              <div className="mb-2 text-3xl">🎉</div>
+              <h3 className="mb-1 text-lg font-bold text-white">Market is live!</h3>
+              <p className="mb-1 text-sm text-[#b0b7c8]">Your perpetual futures market has been deployed.</p>
+              <p className="mb-4 font-mono text-[11px] text-[#4a5068] break-all">{state.slabAddress}</p>
+              <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+                <Link href={`/trade/${state.slabAddress}`} className="rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f] transition-all hover:bg-[#00e8bb]">
+                  Start Trading →
+                </Link>
+                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-6 py-2.5 text-sm font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Create another</button>
               </div>
             </div>
           )}
@@ -420,10 +424,21 @@ const QuickLaunchPanel: FC<{
             </div>
           )}
 
+          {/* Estimated cost */}
+          <div className="rounded-lg bg-[#0a0a12] p-3 ring-1 ring-[#1e1e2e]">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-[#52525b]">Estimated SOL cost</span>
+              <span className="data-cell text-sm font-bold text-[#e4e4e7]">
+                ~{quickSlabTier === "small" ? "0.5" : quickSlabTier === "medium" ? "1.8" : quickSlabTier === "large" ? "7.0" : "7.0"} SOL
+              </span>
+            </div>
+            <p className="mt-1 text-[9px] text-[#52525b]">Slab rent + transaction fees. Rent is recoverable if market is closed.</p>
+          </div>
+
           <button
             onClick={handleQuickCreate}
             disabled={!publicKey || !quickLaunch.config}
-            className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-[#1e1e2e] disabled:text-[#52525b]"
+            className="w-full rounded-lg bg-[#00d4aa] py-3 text-sm font-bold text-[#080a0f] transition-all hover:bg-[#00e8bb] hover:shadow-[0_0_20px_rgba(0,212,170,0.15)] disabled:cursor-not-allowed disabled:bg-[#1e1e2e] disabled:text-[#52525b]"
           >
             {!publicKey ? "Connect wallet to launch" : "🚀 Launch Market"}
           </button>
@@ -617,12 +632,16 @@ export const CreateMarketWizard: FC = () => {
             </div>
           )}
           {state.step === 5 && state.slabAddress && (
-            <div className="mt-4 rounded-lg bg-green-900/20 p-4">
-              <p className="text-sm font-medium text-green-300">Market created successfully!</p>
-              <p className="mt-1 font-mono text-xs text-green-400">Slab: {state.slabAddress}</p>
-              <div className="mt-3 flex gap-2">
-                <Link href={`/trade/${state.slabAddress}`} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700">Trade this market</Link>
-                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-4 py-2 text-sm font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Create another</button>
+            <div className="mt-6 rounded-xl bg-[#00d4aa]/5 p-6 text-center ring-1 ring-[#00d4aa]/20">
+              <div className="mb-2 text-3xl">🎉</div>
+              <h3 className="mb-1 text-lg font-bold text-white">Market is live!</h3>
+              <p className="mb-1 text-sm text-[#b0b7c8]">Your perpetual futures market has been deployed.</p>
+              <p className="mb-4 font-mono text-[11px] text-[#4a5068] break-all">{state.slabAddress}</p>
+              <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+                <Link href={`/trade/${state.slabAddress}`} className="rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f] transition-all hover:bg-[#00e8bb]">
+                  Start Trading →
+                </Link>
+                <button onClick={reset} className="rounded-lg bg-[#1a1a2e] px-6 py-2.5 text-sm font-medium text-[#e4e4e7] hover:bg-[#1e1e2e]">Create another</button>
               </div>
             </div>
           )}

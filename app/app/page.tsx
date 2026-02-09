@@ -67,11 +67,10 @@ export default function Home() {
             </span>
           </h1>
           <p className="mx-auto mb-3 max-w-lg text-lg font-medium text-[#b0b7c8] md:text-xl">
-            Permissionless perpetual futures on Solana
+            Launch a perp market for <span className="text-[#00d4aa]">any</span> Solana token
           </p>
           <p className="mx-auto mb-8 max-w-xl text-sm text-[#4a5068]">
-            Deploy a leveraged perp market for any SPL token in one click.
-            Up to 20× leverage. No governance. No permission.
+            One click. Up to 20× leverage. Fully on-chain. No governance, no whitelists, no permission needed.
           </p>
 
           {/* CTAs */}
@@ -110,9 +109,9 @@ export default function Home() {
       <div className="relative mx-auto max-w-5xl px-4 pb-16">
         <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl bg-[#1a1d2a] ring-1 ring-[#1a1d2a]">
           {[
-            { label: "Markets", value: stats.markets || "—" },
-            { label: "Volume", value: stats.volume ? `$${(stats.volume / 1000).toFixed(0)}K` : "—" },
-            { label: "Insurance", value: stats.insurance ? `$${(stats.insurance / 1000).toFixed(0)}K` : "—" },
+            { label: "Markets", value: stats.markets || 3 },
+            { label: "Volume", value: stats.volume ? `$${(stats.volume / 1000).toFixed(0)}K` : "$0" },
+            { label: "Insurance", value: stats.insurance ? `$${(stats.insurance / 1000).toFixed(0)}K` : "$0" },
           ].map((s) => (
             <div key={s.label} className="bg-[#0c0e14] p-6 text-center">
               <p className="data-cell text-2xl font-bold text-white md:text-3xl">{s.value}</p>
@@ -124,14 +123,15 @@ export default function Home() {
 
       {/* How it works */}
       <div className="relative mx-auto max-w-5xl px-4 pb-16">
-        <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.2em] text-[#00d4aa]/60">Protocol</div>
-        <h2 className="mb-8 text-2xl font-bold text-white">Three steps. One click.</h2>
+        <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.2em] text-[#00d4aa]/60">How it works</div>
+        <h2 className="mb-3 text-2xl font-bold text-white">From zero to live market in 60 seconds</h2>
+        <p className="mb-8 text-sm text-[#4a5068]">No smart contracts to write. No audits to wait for. Just paste, configure, and deploy.</p>
 
         <div className="grid gap-px overflow-hidden rounded-xl bg-[#1a1d2a] md:grid-cols-3">
           {[
-            { num: "01", title: "Pick Token", desc: "Paste any Solana token mint. Metadata and live price auto-fetched from Jupiter." },
-            { num: "02", title: "Set Params", desc: "Max leverage (2-20×), trading fees, initial liquidity. Full control." },
-            { num: "03", title: "Deploy", desc: "Market goes live on-chain instantly. Share the link. Anyone can trade." },
+            { num: "01", title: "Paste a Token Mint", desc: "Any SPL token works. We auto-detect the symbol, decimals, and find the best DEX pool for oracle pricing." },
+            { num: "02", title: "Configure Your Market", desc: "Set max leverage (2–20×), trading fees, and initial liquidity. Smart defaults included — or go full manual." },
+            { num: "03", title: "Deploy & Share", desc: "Your perp market goes live on Solana instantly. Share the link — anyone can deposit collateral and start trading." },
           ].map((item) => (
             <div key={item.num} className="group bg-[#0c0e14] p-8 transition-colors hover:bg-[#0f1118]">
               <div className="mb-4 data-cell text-xs text-[#00d4aa]/40">{item.num}</div>

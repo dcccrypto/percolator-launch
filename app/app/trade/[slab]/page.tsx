@@ -18,23 +18,61 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 function Collapsible({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-lg border border-zinc-800 bg-[#0d1117]">
+    <div className="rounded-lg border border-[#1e2433] bg-[#0d1117]">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-slate-300 md:hidden"
+        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-[#b0b7c8] md:hidden"
       >
         {title}
-        <span className="text-xs text-slate-500">{open ? "▲" : "▼"}</span>
+        <span className="text-xs text-[#4a5068]">{open ? "▲" : "▼"}</span>
       </button>
       <div className={`${open ? "block" : "hidden"} md:block`}>{children}</div>
     </div>
   );
 }
 
+function TradeLoadingSkeleton() {
+  return (
+    <div className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-8">
+      <div className="mb-6 flex items-center gap-4">
+        <div className="h-8 w-48 animate-pulse rounded-lg bg-[#0c0e14]" />
+        <div className="h-6 w-16 animate-pulse rounded-full bg-[#0c0e14]" />
+      </div>
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
+        <div className="space-y-4 lg:col-span-2">
+          <div className="h-64 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1e2433]" />
+          <div className="h-48 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1e2433]" />
+        </div>
+        <div className="space-y-4">
+          <div className="h-32 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1e2433]" />
+          <div className="h-32 animate-pulse rounded-lg bg-[#0c0e14] ring-1 ring-[#1e2433]" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TradePageInner({ slab }: { slab: string }) {
-  const { engine } = useSlabState();
+  const { engine, loading, error } = useSlabState();
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
+
+  if (loading) return <TradeLoadingSkeleton />;
+
+  if (error || !engine) {
+    return (
+      <div className="mx-auto max-w-7xl px-3 py-16 text-center sm:px-4">
+        <div className="mb-3 text-3xl text-[#1e2433]">⚠️</div>
+        <h2 className="mb-2 text-xl font-bold text-white">Market not found</h2>
+        <p className="mb-6 text-sm text-[#4a5068]">
+          {error || "This slab address doesn\u2019t exist or hasn\u2019t been initialized yet."}
+        </p>
+        <a href="/markets" className="inline-block rounded-lg bg-[#00d4aa] px-6 py-2.5 text-sm font-bold text-[#080a0f]">
+          Browse Markets
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-8">
@@ -42,7 +80,7 @@ function TradePageInner({ slab }: { slab: string }) {
       <div className="mb-4 flex flex-wrap items-center gap-3 sm:mb-6 sm:gap-4">
         <div className="min-w-0">
           <h1 className="text-xl font-bold text-white sm:text-2xl">Trade</h1>
-          <p className="truncate font-mono text-[10px] text-slate-500 sm:text-xs">{slab}</p>
+          <p className="truncate font-mono text-[10px] text-[#4a5068] sm:text-xs">{slab}</p>
         </div>
         {health && <HealthBadge level={health.level} />}
         <div className="ml-auto flex items-center gap-3">
@@ -53,7 +91,7 @@ function TradePageInner({ slab }: { slab: string }) {
           />
           {priceUsd != null && (
             <div className="text-right">
-              <div className="text-[10px] text-slate-500 sm:text-xs">Jupiter Price</div>
+              <div className="text-[10px] text-[#4a5068] sm:text-xs">Jupiter Price</div>
               <div className="font-mono text-base text-white sm:text-lg">
                 ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}
               </div>

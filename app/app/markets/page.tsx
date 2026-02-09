@@ -9,7 +9,16 @@ import { formatTokenAmount } from "@/lib/format";
 import type { MarketWithStats } from "@/lib/supabase";
 import { supabase } from "@/lib/supabase";
 import type { DiscoveredMarket } from "@percolator/core";
+import { SLAB_TIERS } from "@percolator/core";
 import { ActivityFeed } from "@/components/market/ActivityFeed";
+
+function getSlabTierFromAccounts(maxAccounts: number): { label: string; color: string } {
+  const small = SLAB_TIERS.small.maxAccounts;
+  const medium = SLAB_TIERS.medium.maxAccounts;
+  if (maxAccounts <= small) return { label: "S", color: "text-[#b0b7c8] bg-[#b0b7c8]/10" };
+  if (maxAccounts <= medium) return { label: "M", color: "text-[#00d4aa] bg-[#00d4aa]/10" };
+  return { label: "L", color: "text-[#f0b232] bg-[#f0b232]/10" };
+}
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
@@ -193,13 +202,23 @@ export default function MarketsPage() {
                     i > 0 ? "border-t border-[#1a1d2a]/50" : ""
                   } bg-[#0c0e14]`}
                 >
-                  <div className="col-span-2">
-                    <div className="font-semibold text-white">
-                      {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
+                  <div className="col-span-2 flex items-center gap-2">
+                    <div>
+                      <div className="font-semibold text-white">
+                        {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
+                      </div>
+                      <div className="text-[11px] text-[#2a2f40]">
+                        {m.name ?? shortenAddress(m.onChain.config.collateralMint.toBase58())}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-[#2a2f40]">
-                      {m.name ?? shortenAddress(m.onChain.config.collateralMint.toBase58())}
-                    </div>
+                    {(() => {
+                      const tier = getSlabTierFromAccounts(Number(m.onChain.params.maxAccounts));
+                      return (
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${tier.color}`}>
+                          {tier.label}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="text-right">
                     <span className="data-cell text-sm text-white">
