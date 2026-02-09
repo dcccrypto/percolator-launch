@@ -25,6 +25,8 @@ import {
 } from "@percolator/core";
 
 export interface SlabState {
+  /** The slab account address this provider is tracking */
+  slabAddress: string;
   raw: Uint8Array | null;
   header: SlabHeader | null;
   config: MarketConfig | null;
@@ -38,6 +40,7 @@ export interface SlabState {
 }
 
 const defaultState: SlabState = {
+  slabAddress: "",
   raw: null,
   header: null,
   config: null,
@@ -57,12 +60,12 @@ const POLL_INTERVAL_MS = 3000;
 
 export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({ children, slabAddress }) => {
   const { connection } = useConnection();
-  const [state, setState] = useState<SlabState>(defaultState);
+  const [state, setState] = useState<SlabState>({ ...defaultState, slabAddress });
   const wsActive = useRef(false);
 
   useEffect(() => {
     if (!slabAddress) {
-      setState((s) => ({ ...s, loading: false, error: "No slab address" }));
+      setState((s) => ({ ...s, slabAddress, loading: false, error: "No slab address" }));
       return;
     }
 
@@ -75,7 +78,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         const engine = parseEngine(data);
         const params = parseParams(data);
         const accounts = parseAllAccounts(data);
-        setState((s) => ({ raw: data, header, config, engine, params, accounts, loading: false, error: null, programId: owner ?? s.programId }));
+        setState((s) => ({ slabAddress, raw: data, header, config, engine, params, accounts, loading: false, error: null, programId: owner ?? s.programId }));
       } catch (e) {
         setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e.message : String(e) }));
       }

@@ -14,6 +14,7 @@ import { PriceChart } from "@/components/trade/PriceChart";
 import { TradeHistory } from "@/components/trade/TradeHistory";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { ShareButton } from "@/components/market/ShareCard";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 
@@ -87,25 +88,35 @@ function TradePageInner({ slab }: { slab: string }) {
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Left column */}
         <div className="space-y-4 lg:col-span-2">
-          <div className="overflow-hidden rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-            <PriceChart slabAddress={slab} />
-          </div>
-          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-            <TradeForm slabAddress={slab} />
-          </div>
-          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-            <PositionPanel slabAddress={slab} />
-          </div>
+          <ErrorBoundary label="PriceChart">
+            <div className="overflow-hidden rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+              <PriceChart slabAddress={slab} />
+            </div>
+          </ErrorBoundary>
+          <ErrorBoundary label="TradeForm">
+            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+              <TradeForm slabAddress={slab} />
+            </div>
+          </ErrorBoundary>
+          <ErrorBoundary label="PositionPanel">
+            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+              <PositionPanel slabAddress={slab} />
+            </div>
+          </ErrorBoundary>
         </div>
 
         {/* Right column */}
         <div className="space-y-4">
-          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-            <AccountsCard />
-          </div>
-          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-            <DepositWithdrawCard slabAddress={slab} />
-          </div>
+          <ErrorBoundary label="AccountsCard">
+            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+              <AccountsCard />
+            </div>
+          </ErrorBoundary>
+          <ErrorBoundary label="DepositWithdrawCard">
+            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+              <DepositWithdrawCard slabAddress={slab} />
+            </div>
+          </ErrorBoundary>
           <Collapsible title="engine health" defaultOpen={false} badge={health && <HealthBadge level={health.level} />}>
             <EngineHealthCard />
           </Collapsible>

@@ -186,32 +186,45 @@ const MarketCard: FC<{
         </div>
 
         {/* Actions */}
-        <div className="flex flex-wrap gap-2 border-t border-[#1a1a1f] p-5">
-          <button onClick={() => setShowOracleInput(true)} disabled={actions.loading === "setOracleAuthority"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
-            set oracle authority
-          </button>
-          <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
-            push price
-          </button>
-          <button onClick={() => setShowTopUpInput(true)} disabled={actions.loading === "topUpInsurance"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
-            top up insurance
-          </button>
-          {!insuranceMintExists && (
-            <button
-              onClick={() => handleAction("Create Insurance Mint", () => actions.createInsuranceMint(market))}
-              disabled={actions.loading === "createInsuranceMint"}
-              className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40"
-            >
-              {actions.loading === "createInsuranceMint" ? "creating..." : "create insurance mint"}
-            </button>
+        <div className="flex flex-wrap items-center gap-2 border-t border-[#1a1a1f] p-5">
+          <span className={`mr-1 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${
+            market.role === "admin"
+              ? "bg-[#7B61FF]/10 text-[#7B61FF]"
+              : market.role === "lp"
+                ? "bg-[#00FFB2]/10 text-[#00FFB2]"
+                : "bg-[#FFB800]/10 text-[#FFB800]"
+          }`}>
+            {market.role}
+          </span>
+          {market.role === "admin" && (
+            <>
+              <button onClick={() => setShowOracleInput(true)} disabled={actions.loading === "setOracleAuthority"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
+                set oracle authority
+              </button>
+              <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
+                push price
+              </button>
+              <button onClick={() => setShowTopUpInput(true)} disabled={actions.loading === "topUpInsurance"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
+                top up insurance
+              </button>
+              {!insuranceMintExists && (
+                <button
+                  onClick={() => handleAction("Create Insurance Mint", () => actions.createInsuranceMint(market))}
+                  disabled={actions.loading === "createInsuranceMint"}
+                  className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40"
+                >
+                  {actions.loading === "createInsuranceMint" ? "creating..." : "create insurance mint"}
+                </button>
+              )}
+              <button
+                onClick={() => setShowBurnConfirm(true)}
+                disabled={actions.loading === "renounceAdmin"}
+                className="text-xs text-[#FF4466]/70 hover:text-[#FF4466] transition-colors disabled:opacity-40"
+              >
+                burn admin key
+              </button>
+            </>
           )}
-          <button
-            onClick={() => setShowBurnConfirm(true)}
-            disabled={actions.loading === "renounceAdmin"}
-            className="text-xs text-[#FF4466]/70 hover:text-[#FF4466] transition-colors disabled:opacity-40"
-          >
-            burn admin key
-          </button>
           <Link href={`/trade/${slab}`} className="text-xs text-[#00FFB2] hover:opacity-80 transition-opacity">
             trade &rarr;
           </Link>
@@ -332,10 +345,19 @@ const MyMarketsPage: FC = () => {
       <main className="mx-auto max-w-5xl px-4 py-24 text-center">
         <div className="mx-auto max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
           <h1 className="text-xl font-bold text-white">nothing here yet.</h1>
-          <p className="mt-2 mb-6 text-sm text-[#71717a]">you haven&apos;t created any markets. go make something.</p>
-          <Link href="/create">
-            <GlowButton>launch a market</GlowButton>
-          </Link>
+          <p className="mt-2 mb-6 text-sm text-[#71717a]">
+            no markets created or traded on with this wallet.
+            <br />
+            create a market or open a position to see it here.
+          </p>
+          <div className="flex justify-center gap-3">
+            <Link href="/create">
+              <GlowButton>launch a market</GlowButton>
+            </Link>
+            <Link href="/markets">
+              <GlowButton variant="ghost">browse markets</GlowButton>
+            </Link>
+          </div>
         </div>
       </main>
     );

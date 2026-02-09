@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { useMarketAddress } from "@/hooks/useMarketAddress";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:3001";
 const RECONNECT_BASE_MS = 1000;
@@ -23,6 +22,9 @@ interface PriceState {
 /**
  * Real-time price hook — connects to the Percolator WebSocket price engine.
  * Falls back to Jupiter polling if WebSocket is unavailable.
+ *
+ * Gets the slab address from SlabProvider context (not query params)
+ * so it works on both /trade/[slab] and ?market= routes.
  */
 export function useLivePrice(): PriceState {
   const [state, setState] = useState<PriceState>({
@@ -35,8 +37,9 @@ export function useLivePrice(): PriceState {
     loading: true,
   });
 
-  const { config: mktConfig } = useSlabState();
-  const slabAddr = useMarketAddress() || null;
+  const { config: mktConfig, slabAddress } = useSlabState();
+  // Use the slab address from SlabProvider context — works for both /trade/[slab] and ?market= URLs
+  const slabAddr = slabAddress || null;
   const mint = mktConfig?.collateralMint?.toBase58() ?? null;
 
   const wsRef = useRef<WebSocket | null>(null);
