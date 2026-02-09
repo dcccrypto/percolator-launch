@@ -6,8 +6,10 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
   encodeTradeCpi,
   encodeKeeperCrank,
+  encodePushOraclePrice,
   ACCOUNTS_TRADE_CPI,
   ACCOUNTS_KEEPER_CRANK,
+  ACCOUNTS_PUSH_ORACLE_PRICE,
   buildAccountMetas,
   buildIx,
   deriveLpPda,
@@ -43,6 +45,33 @@ export function useTrade(slabAddress: string) {
         const oracleAccount = isHyperp ? slabPk : derivePythPushOraclePDA(feedHex)[0];
 
         const instructions = [];
+
+        // For admin oracle markets where user IS the oracle authority,
+        // push a fresh price before cranking (crank needs fresh oracle data)
+        const userIsOracleAuth = isHyperp && mktConfig.oracleAuthority.equals(wallet.publicKey);
+        if (userIsOracleAuth) {
+          // Fetch current price from backend or use last known
+          let priceE6 = mktConfig.authorityPriceE6 ?? 1_000_000n;
+          try {
+            const resp = await fetch(`https://percolator-api-production.up.railway.app/prices/markets`);
+            if (resp.ok) {
+              const prices = await resp.json();
+              const entry = prices[slabAddress];
+              if (entry?.priceE6) priceE6 = BigInt(entry.priceE6);
+            }
+          } catch { /* use existing price */ }
+          if (priceE6 <= 0n) priceE6 = 1_000_000n;
+
+          const pushIx = buildIx({
+            programId,
+            keys: buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [wallet.publicKey, slabPk]),
+            data: encodePushOraclePrice({
+              priceE6: priceE6,
+              timestamp: BigInt(Math.floor(Date.now() / 1000)),
+            }),
+          });
+          instructions.push(pushIx);
+        }
 
         // Always prepend a permissionless crank before trading
         // Market goes stale after 400 slots (~3 min) — each user tx refreshes it
