@@ -100,6 +100,19 @@ export class PriceEngine {
   }
 
   /**
+   * Get all latest prices across all subscribed markets.
+   */
+  getAllPrices(): Record<string, PriceTick> {
+    const result: Record<string, PriceTick> = {};
+    for (const [slab, history] of this.priceHistory) {
+      if (history.length > 0) {
+        result[slab] = history[history.length - 1];
+      }
+    }
+    return result;
+  }
+
+  /**
    * Get price history (last N ticks) for a slab.
    */
   getHistory(slabAddress: string): PriceTick[] {

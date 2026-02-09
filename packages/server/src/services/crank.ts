@@ -124,11 +124,18 @@ export class CrankService {
     const keypair = loadKeypair(config.crankKeypair);
     const crankPubkey = keypair.publicKey;
 
+    const MAX_CONSECUTIVE_FAILURES = 10;
+
     for (const [slabAddress, state] of this.markets) {
       // Only crank markets where we are the oracle authority
       const oracleAuth = state.market.config.oracleAuthority;
       if (!oracleAuth.equals(crankPubkey)) {
         continue; // Not our market — skip
+      }
+
+      // Skip markets that keep failing (re-check on rediscovery)
+      if (state.failureCount > MAX_CONSECUTIVE_FAILURES && state.successCount === 0) {
+        continue;
       }
 
       const ok = await this.crankMarket(slabAddress);

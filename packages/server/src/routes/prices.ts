@@ -8,6 +8,18 @@ export function priceRoutes(deps: {
 }): Hono {
   const app = new Hono();
 
+  // GET /prices/markets — list all markets with live prices
+  app.get("/prices/markets", (c) => {
+    const allPrices = deps.priceEngine.getAllPrices();
+    const markets = Object.entries(allPrices).map(([slab, price]) => ({
+      slabAddress: slab,
+      priceE6: price.priceE6.toString(),
+      source: price.source,
+      timestamp: price.timestamp,
+    }));
+    return c.json({ markets, count: markets.length });
+  });
+
   // GET /prices/:slab — current price + 24h stats
   app.get("/prices/:slab", (c) => {
     const slab = c.req.param("slab");
