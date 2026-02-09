@@ -3,6 +3,7 @@ name = "percolator-prog"
 version = "0.1.0"
 edition = "2021"
 publish = false
+repository = "https://github.com/dcccrypto/percolator-launch"
 
 [lib]
 crate-type = ["cdylib", "lib"]

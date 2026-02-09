@@ -1,0 +1,65 @@
+name: Verified Build (solana-verify)
+
+on:
+  push:
+    paths:
+      - 'program/**'
+      - 'percolator/**'
+      - 'Cargo.lock'
+      - '.github/workflows/verified-build.yml'
+  pull_request:
+    paths:
+      - 'program/**'
+      - 'percolator/**'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+jobs:
+  verified-build:
+    name: Solana Verified Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.85
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            program/target
+          key: ${{ runner.os }}-verified-build-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install Solana CLI v2.3.13
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v2.3.13/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install solana-verify
+        run: cargo install solana-verify
+
+      - name: Verified Build (full variant)
+        run: |
+          solana-verify build --library-name percolator_prog -- \
+            --manifest-path program/Cargo.toml
+
+      - name: Show build hash
+        run: |
+          echo "=== Executable hash ==="
+          solana-verify get-executable-hash program/target/deploy/percolator_prog.so
+          echo ""
+          echo "=== Binary size ==="
+          ls -lh program/target/deploy/percolator_prog.so
+
+      - name: Upload verified binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: percolator-verified-build
+          path: program/target/deploy/percolator_prog.so
+          retention-days: 90
