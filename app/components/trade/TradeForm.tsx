@@ -3,6 +3,7 @@
 import { FC, useState, useMemo, useCallback, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useTrade } from "@/hooks/useTrade";
+import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useEngineState } from "@/hooks/useEngineState";
@@ -49,6 +50,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [marginInput, setMarginInput] = useState("");
   const [leverage, setLeverage] = useState(1);
   const [lastSig, setLastSig] = useState<string | null>(null);
+  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "confirming">("idle");
+  const [humanError, setHumanError] = useState<string | null>(null);
 
   const lpIdx = useMemo(() => {
     const lp = accounts.find(({ account }) => account.kind === AccountKind.LP);
@@ -137,17 +140,22 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   async function handleTrade() {
     if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin) return;
+    setHumanError(null);
+    setTradePhase("submitting");
     try {
       const size = direction === "short" ? -positionSize : positionSize;
-      const sig = await trade({
-        lpIdx,
-        userIdx: userAccount.idx,
-        size,
-      });
+      const sig = await withTransientRetry(
+        async () => trade({ lpIdx, userIdx: userAccount!.idx, size }),
+        { maxRetries: 2, delayMs: 3000 },
+      );
+      setTradePhase("confirming");
       setLastSig(sig ?? null);
       setMarginInput("");
-    } catch {
-      // error is set by hook
+      setTimeout(() => setTradePhase("idle"), 2000);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setHumanError(humanizeError(msg));
+      setTradePhase("idle");
     }
   }
 
@@ -282,23 +290,35 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Submit */}
       <button
         onClick={handleTrade}
-        disabled={loading || !marginInput || positionSize <= 0n || exceedsMargin}
+        disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin}
         className={`w-full rounded-lg py-3 text-sm font-medium text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0c14] ${
           direction === "long"
             ? "bg-[#00FFB2] hover:bg-[#00e0a0] hover:shadow-lg hover:shadow-[#00FFB2]/20 focus-visible:ring-[#00FFB2]"
             : "bg-[#FF4466] hover:bg-[#FF4466] hover:shadow-lg hover:shadow-[#FF4466]/20 focus-visible:ring-[#FF4466]"
         }`}
       >
-        {loading
-          ? "Sending..."
-          : `${direction === "long" ? "Long" : "Short"} ${leverage}x`}
+        {tradePhase === "submitting" ? (
+          <span className="inline-flex items-center gap-2">
+            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            Submitting…
+          </span>
+        ) : tradePhase === "confirming" ? (
+          <span className="inline-flex items-center gap-2">
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+            Confirmed!
+          </span>
+        ) : (
+          `${direction === "long" ? "Long" : "Short"} ${leverage}x`
+        )}
       </button>
       <p className="mt-1.5 text-center text-[10px] text-[#3D4563]">
         Press Enter to submit
       </p>
 
-      {error && (
-        <p className="mt-2 text-xs text-[#FF4466]">{error}</p>
+      {humanError && (
+        <div className="mt-2 rounded-lg border border-[#FF4466]/20 bg-[#FF4466]/10 px-3 py-2">
+          <p className="text-xs text-[#FF4466]">{humanError}</p>
+        </div>
       )}
 
       {lastSig && (
