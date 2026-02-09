@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { PublicKey } from "@solana/web3.js";
+import { validateSlab } from "../middleware/validateSlab.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine, SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 import { getConnection } from "../utils/solana.js";
 import { config } from "../config.js";
@@ -29,7 +30,7 @@ export function marketRoutes(deps: MarketDeps): Hono {
   });
 
   // GET /markets/:slab — single market details
-  app.get("/markets/:slab", async (c) => {
+  app.get("/markets/:slab", validateSlab, async (c) => {
     const slab = c.req.param("slab");
     try {
       const connection = getConnection();

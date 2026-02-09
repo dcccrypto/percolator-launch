@@ -32,6 +32,7 @@ export class PriceEngine {
   private rpcMsgId = 1;
   private started = false;
   private pendingSubscriptions: string[] = [];
+  private pendingCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   private get wsUrl(): string {
     return config.rpcUrl.replace("https://", "wss://");
@@ -41,10 +42,24 @@ export class PriceEngine {
     if (this.started) return;
     this.started = true;
     this.connect();
+
+    // Periodically clean up stale pending subscription responses (older than 30s)
+    this.pendingCleanupTimer = setInterval(() => {
+      const cutoff = Date.now() - 30_000;
+      for (const [msgId, entry] of this._pendingSubResponses) {
+        if (entry.timestamp < cutoff) {
+          this._pendingSubResponses.delete(msgId);
+        }
+      }
+    }, 60_000);
   }
 
   stop(): void {
     this.started = false;
+    if (this.pendingCleanupTimer) {
+      clearInterval(this.pendingCleanupTimer);
+      this.pendingCleanupTimer = null;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

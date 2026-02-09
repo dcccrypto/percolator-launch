@@ -173,16 +173,12 @@ export class CrankService {
     let failed = 0;
     let skipped = 0;
 
-    const keypair = loadKeypair(config.crankKeypair);
-    const crankPubkey = keypair.publicKey;
     const MAX_CONSECUTIVE_FAILURES = 10;
 
     const toCrank: string[] = [];
 
+    // H5: Crank all discovered markets, not just admin-oracle ones
     for (const [slabAddress, state] of this.markets) {
-      const oracleAuth = state.market.config.oracleAuthority;
-      if (!oracleAuth.equals(crankPubkey)) continue;
-
       if (state.failureCount > MAX_CONSECUTIVE_FAILURES && state.successCount === 0) {
         skipped++;
         continue;

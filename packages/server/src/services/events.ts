@@ -34,3 +34,5 @@ class ServerEventBus extends EventEmitter {
 }
 
 export const eventBus = new ServerEventBus();
+// H7: Increase max listeners to handle many markets
+eventBus.setMaxListeners(100);

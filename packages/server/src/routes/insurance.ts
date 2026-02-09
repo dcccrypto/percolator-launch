@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { validateSlab } from "../middleware/validateSlab.js";
 import type { InsuranceLPService } from "../services/InsuranceLPService.js";
 
 interface InsuranceDeps {
@@ -9,7 +10,7 @@ export function insuranceRoutes(deps: InsuranceDeps): Hono {
   const app = new Hono();
 
   // GET /api/markets/:slab/insurance
-  app.get("/api/markets/:slab/insurance", async (c) => {
+  app.get("/api/markets/:slab/insurance", validateSlab, async (c) => {
     const slab = c.req.param("slab");
     const stats = deps.insuranceService.getStats(slab);
 
@@ -30,7 +31,7 @@ export function insuranceRoutes(deps: InsuranceDeps): Hono {
   });
 
   // GET /api/markets/:slab/insurance/events
-  app.get("/api/markets/:slab/insurance/events", async (c) => {
+  app.get("/api/markets/:slab/insurance/events", validateSlab, async (c) => {
     const slab = c.req.param("slab");
     const limit = Number(c.req.query("limit") ?? 50);
 

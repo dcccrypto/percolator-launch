@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { CrankService } from "../services/crank.js";
+import { validateSlab } from "../middleware/validateSlab.js";
 
 export function crankRoutes(deps: { crankService: CrankService }): Hono {
   const app = new Hono();
@@ -10,7 +11,7 @@ export function crankRoutes(deps: { crankService: CrankService }): Hono {
   });
 
   // POST /crank/:slab — trigger crank for specific market
-  app.post("/crank/:slab", async (c) => {
+  app.post("/crank/:slab", validateSlab, async (c) => {
     const slab = c.req.param("slab");
     const ok = await deps.crankService.crankMarket(slab);
     return c.json({ slabAddress: slab, success: ok });

@@ -1,33 +1,8 @@
 import { Connection, Keypair, Transaction, TransactionInstruction, SendOptions } from "@solana/web3.js";
+import bs58 from "bs58";
 import { acquireToken, getPrimaryConnection, getFallbackConnection, backoffMs } from "./rpc-client.js";
 
 export { getPrimaryConnection as getConnection, getFallbackConnection };
-
-/** Base58 alphabet */
-const B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-function base58Decode(str: string): Uint8Array {
-  const bytes: number[] = [];
-  for (const c of str) {
-    const idx = B58_ALPHABET.indexOf(c);
-    if (idx < 0) throw new Error(`Invalid base58 character: ${c}`);
-    let carry = idx;
-    for (let j = 0; j < bytes.length; j++) {
-      carry += bytes[j] * 58;
-      bytes[j] = carry & 0xff;
-      carry >>= 8;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
-  }
-  for (const c of str) {
-    if (c !== "1") break;
-    bytes.push(0);
-  }
-  return Uint8Array.from(bytes.reverse());
-}
 
 export function loadKeypair(raw: string): Keypair {
   const trimmed = raw.trim();
@@ -35,7 +10,7 @@ export function loadKeypair(raw: string): Keypair {
     const arr = JSON.parse(trimmed) as number[];
     return Keypair.fromSecretKey(Uint8Array.from(arr));
   }
-  return Keypair.fromSecretKey(base58Decode(trimmed));
+  return Keypair.fromSecretKey(bs58.decode(trimmed));
 }
 
 function is429(err: unknown): boolean {

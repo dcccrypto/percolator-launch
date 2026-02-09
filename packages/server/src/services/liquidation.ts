@@ -82,6 +82,22 @@ export class LiquidationService {
           if (notional === 0n) continue;
 
           const equity = account.capital + account.pnl;
+
+          // H4: If equity <= 0, definitely liquidatable (skip ratio calc)
+          if (equity <= 0n) {
+            candidates.push({
+              slabAddress,
+              accountIdx: i,
+              owner: account.owner.toBase58(),
+              positionSize: account.positionSize,
+              capital: account.capital,
+              pnl: account.pnl,
+              marginRatio: equity <= 0n ? 0 : -1,
+              maintenanceMarginBps,
+            });
+            continue;
+          }
+
           const marginRatioBps = equity * 10_000n / notional;
 
           // If margin ratio < maintenance margin, this account is liquidatable
