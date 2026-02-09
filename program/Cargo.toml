@@ -11,14 +11,16 @@ name = "percolator_prog"
 path = "src/percolator.rs"
 
 [features]
+default = []
+mainnet = []                    # Mainnet build — enables compile-time guards against test/devnet features
 no-entrypoint = []
 test-sbf = []
-devnet = []
+devnet = []                     # Relaxes oracle staleness/confidence checks — NEVER use with mainnet!
 test = ["percolator/test"]      # MAX_ACCOUNTS=64 (~0.17 SOL)
 small = ["percolator/small"]    # MAX_ACCOUNTS=256 (~0.68 SOL)
 medium = ["percolator/medium"]  # MAX_ACCOUNTS=1024 (~2.7 SOL)
-cu-audit = []  # Enable compute unit checkpoints for CU auditing
-unsafe_close = []  # Skip all validation in CloseSlab instruction
+cu-audit = []                   # Enable compute unit checkpoints for CU auditing
+unsafe_close = []               # TEST-ONLY: Skip all validation in CloseSlab instruction — NEVER use on mainnet!
 
 [dependencies]
 solana-program = "1.18"

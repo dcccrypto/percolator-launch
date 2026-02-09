@@ -3,6 +3,21 @@
 #![no_std]
 #![deny(unsafe_code)]
 
+// =============================================================================
+// COMPILE-TIME SAFETY GUARDS
+// =============================================================================
+// These guards prevent dangerous feature combinations from compiling.
+// The `mainnet` feature acts as a build-time assertion that no test/devnet
+// features are accidentally enabled in production builds.
+
+/// C2: unsafe_close skips ALL CloseSlab validation — test environments only!
+#[cfg(all(feature = "unsafe_close", feature = "mainnet"))]
+compile_error!("unsafe_close MUST NOT be enabled on mainnet builds!");
+
+/// H2: devnet disables oracle staleness/confidence checks — not safe for mainnet!
+#[cfg(all(feature = "devnet", feature = "mainnet"))]
+compile_error!("devnet feature MUST NOT be enabled on mainnet builds!");
+
 extern crate alloc;
 
 use solana_program::pubkey::Pubkey;
