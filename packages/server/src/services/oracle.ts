@@ -115,8 +115,16 @@ export class OracleService {
     // For USDC-margined markets, we'd need a separate indexMint field
     // Currently all percolator markets are coin-margined, so collateralMint is correct
     const mint = marketConfig.collateralMint.toBase58();
-    const priceEntry = await this.fetchPrice(mint, slabAddress);
-    if (!priceEntry) return false;
+    let priceEntry = await this.fetchPrice(mint, slabAddress);
+
+    // Fallback for devnet test tokens with no external price source:
+    // use the last on-chain authority price, or default to 1.0
+    if (!priceEntry) {
+      const onChainPrice = marketConfig.authorityPriceE6;
+      const fallbackE6 = onChainPrice > 0n ? onChainPrice : 1_000_000n;
+      priceEntry = { priceE6: fallbackE6, source: "fallback", timestamp: Date.now() };
+      console.log(`[OracleService] No external price for ${mint}, using fallback: ${fallbackE6}`);
+    }
 
     try {
       const connection = getConnection();
