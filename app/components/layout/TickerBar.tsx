@@ -4,16 +4,18 @@ import { FC } from "react";
 
 const PHRASES = [
   "don't trust, verify.",
-  "permissionless perps for any token.",
-  "your keys, your leveraged positions.",
-  "no governance. no whitelists. no waiting.",
-  "launch a market in one click.",
-  "fully on-chain. fully immutable.",
-  "burn the admin key. trust no one.",
+  "read the code before you ape.",
+  "check the slab. check the oracle. check everything.",
+  "open source. on-chain. auditable.",
+  "verify the program ID. always.",
+  "your collateral, your responsibility.",
+  "inspect every transaction before signing.",
+  "no admin keys on mainnet. verify it yourself.",
+  "dyor is not a meme — it's a lifestyle.",
+  "trust math, not promises.",
 ];
 
 export const TickerBar: FC = () => {
-  // Repeat phrases for seamless loop
   const content = [...PHRASES, ...PHRASES, ...PHRASES, ...PHRASES];
 
   return (
@@ -35,7 +37,7 @@ export const TickerBar: FC = () => {
 
       <style jsx>{`
         .ticker-scroll {
-          animation: ticker-slide 40s linear infinite;
+          animation: ticker-slide 50s linear infinite;
           width: max-content;
         }
         @keyframes ticker-slide {
