@@ -70,8 +70,8 @@ if (!SLAB_ADDRESS) {
 function loadKeypair(): Keypair {
   const paths = [
     process.env.DEPLOYER_KEYPAIR,
-    '/tmp/percolator-program.json',
     '/tmp/deployer.json',
+    '/tmp/percolator-program.json',
   ].filter(Boolean) as string[];
 
   for (const p of paths) {
