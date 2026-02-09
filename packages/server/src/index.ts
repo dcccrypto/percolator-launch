@@ -14,6 +14,7 @@ import { PriceEngine } from "./services/PriceEngine.js";
 import { LiquidationService } from "./services/liquidation.js";
 import { InsuranceLPService } from "./services/InsuranceLPService.js";
 import { insuranceRoutes } from "./routes/insurance.js";
+import { oracleRouterRoutes } from "./routes/oracle-router.js";
 
 // Services
 const oracleService = new OracleService();
@@ -33,6 +34,7 @@ app.route("/", marketRoutes({ crankService, lifecycleManager }));
 app.route("/", priceRoutes({ oracleService, priceEngine }));
 app.route("/", crankRoutes({ crankService }));
 app.route("/", insuranceRoutes({ insuranceService }));
+app.route("/", oracleRouterRoutes());
 
 // Root
 app.get("/", (c) => c.json({ name: "@percolator/server", version: "0.1.0" }));

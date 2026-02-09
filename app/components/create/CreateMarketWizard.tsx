@@ -9,6 +9,7 @@ import { useCreateMarket, type CreateMarketParams } from "@/hooks/useCreateMarke
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { usePythFeedSearch } from "@/hooks/usePythFeedSearch";
 import { useDexPoolSearch, type DexPoolResult } from "@/hooks/useDexPoolSearch";
+import { usePriceRouter, type PriceSource } from "@/hooks/usePriceRouter";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
@@ -145,6 +146,14 @@ const QuickLaunchPanel: FC<{
       symbol: c.symbol ?? "UNKNOWN",
       name: c.name ?? "Unknown Token",
       decimals: c.decimals ?? 6,
+      ...(enableVamm && {
+        vammParams: {
+          spreadBps: vammSpreadBps,
+          impactKBps: vammImpactKBps,
+          maxTotalBps: vammMaxTotalBps,
+          liquidityE6: vammLiquidityE6,
+        },
+      }),
     };
     create(params);
   };
@@ -455,7 +464,7 @@ export const CreateMarketWizard: FC = () => {
 
   const [wizardMode, setWizardMode] = useState<"quick" | "manual">("quick");
   const [mint, setMint] = useState("");
-  const [oracleMode, setOracleMode] = useState<"pyth" | "dex">("dex");
+  const [oracleMode, setOracleMode] = useState<"auto" | "pyth" | "dex">("auto");
   const [feedId, setFeedId] = useState("");
   const [selectedFeedName, setSelectedFeedName] = useState<string | null>(null);
   const [selectedDexPool, setSelectedDexPool] = useState<DexPoolResult | null>(null);
@@ -473,6 +482,13 @@ export const CreateMarketWizard: FC = () => {
 
   const [openStep, setOpenStep] = useState(1);
 
+  // vAMM state (manual wizard)
+  const [enableVammManual, setEnableVammManual] = useState(false);
+  const [vammSpreadBpsManual, setVammSpreadBpsManual] = useState(10);
+  const [vammImpactKBpsManual, setVammImpactKBpsManual] = useState(100);
+  const [vammMaxTotalBpsManual, setVammMaxTotalBpsManual] = useState(200);
+  const [vammLiquidityE6Manual, setVammLiquidityE6Manual] = useState("10000000");
+
   const mintValid = isValidBase58Pubkey(mint);
   const mintPk = useMemo(() => (mintValid ? new PublicKey(mint) : null), [mint, mintValid]);
   const tokenMeta = useTokenMeta(mintPk);
@@ -485,10 +501,37 @@ export const CreateMarketWizard: FC = () => {
   const dexSearchMint = oracleMode === "dex" && mintValid ? mint : null;
   const { pools: dexPools, loading: dexPoolsLoading } = useDexPoolSearch(dexSearchMint);
 
-  const dexPoolValid = oracleMode === "dex" && isValidBase58Pubkey(dexPoolAddress);
-  const feedValid = oracleMode === "dex" || isValidHex64(feedId);
-  const dexValid = oracleMode !== "dex" || dexPoolValid;
-  const step1Valid = mintValid && feedValid && dexValid;
+  // Smart Price Router — auto mode
+  const autoRouterMint = oracleMode === "auto" && mintValid ? mint : null;
+  const priceRouter = usePriceRouter(autoRouterMint);
+
+  // Auto-apply best source when resolved
+  useEffect(() => {
+    if (oracleMode !== "auto" || !priceRouter.bestSource) return;
+    const best = priceRouter.bestSource;
+    if (best.type === "pyth") {
+      setFeedId(best.address);
+      setSelectedFeedName(best.pairLabel || "Pyth Feed");
+    } else if (best.type === "dex") {
+      setDexPoolAddress(best.address);
+      setSelectedDexPool({
+        poolAddress: best.address,
+        dexId: best.dexId || "unknown",
+        pairLabel: best.pairLabel || "DEX Pool",
+        liquidityUsd: best.liquidity,
+        priceUsd: best.price,
+      });
+    }
+  }, [oracleMode, priceRouter.bestSource]);
+
+  const dexPoolValid = (oracleMode === "dex" || oracleMode === "auto") && isValidBase58Pubkey(dexPoolAddress);
+  const autoResolved = oracleMode === "auto" && priceRouter.bestSource !== null;
+  const autoOracleValid = oracleMode === "auto"
+    ? autoResolved && (priceRouter.bestSource!.type === "pyth" ? isValidHex64(feedId) : isValidBase58Pubkey(dexPoolAddress))
+    : true;
+  const feedValid = oracleMode === "dex" || oracleMode === "auto" || isValidHex64(feedId);
+  const dexValid = (oracleMode !== "dex" && oracleMode !== "auto") || dexPoolValid || (oracleMode === "auto" && priceRouter.bestSource?.type === "pyth");
+  const step1Valid = mintValid && (oracleMode === "auto" ? autoOracleValid : feedValid && dexValid);
 
   const maintenanceMarginBps = Math.floor(initialMarginBps / 2);
   const maxLeverage = Math.floor(10000 / initialMarginBps);
@@ -535,6 +578,17 @@ export const CreateMarketWizard: FC = () => {
   }, [connection, publicKey, mint, mintValid]);
 
   const getOracleFeedAndPrice = (): { oracleFeed: string; priceE6: bigint } => {
+    if (oracleMode === "auto" && priceRouter.bestSource) {
+      if (priceRouter.bestSource.type === "pyth") {
+        return { oracleFeed: feedId, priceE6: 0n };
+      }
+      // dex or jupiter — use pool address
+      const pk = new PublicKey(dexPoolAddress);
+      const hex = Array.from(pk.toBytes())
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      return { oracleFeed: hex, priceE6: 0n };
+    }
     if (oracleMode === "dex") {
       const pk = new PublicKey(dexPoolAddress);
       const hex = Array.from(pk.toBytes())
@@ -563,6 +617,14 @@ export const CreateMarketWizard: FC = () => {
       symbol: symbol || "UNKNOWN",
       name: tokenMeta?.name || "Unknown Token",
       decimals: decimals,
+      ...(enableVammManual && {
+        vammParams: {
+          spreadBps: vammSpreadBpsManual,
+          impactKBps: vammImpactKBpsManual,
+          maxTotalBps: vammMaxTotalBpsManual,
+          liquidityE6: vammLiquidityE6Manual,
+        },
+      }),
     };
     create(params);
   };
@@ -582,6 +644,14 @@ export const CreateMarketWizard: FC = () => {
       initialMarginBps,
       maxAccounts: selectedTier.maxAccounts,
       slabDataSize: selectedTier.dataSize,
+      ...(enableVammManual && {
+        vammParams: {
+          spreadBps: vammSpreadBpsManual,
+          impactKBps: vammImpactKBpsManual,
+          maxTotalBps: vammMaxTotalBpsManual,
+          liquidityE6: vammLiquidityE6Manual,
+        },
+      }),
     };
     create(params, state.step);
   };
@@ -716,10 +786,67 @@ export const CreateMarketWizard: FC = () => {
             <label className="block text-sm font-medium text-[#F0F4FF]">Oracle Mode</label>
             <FieldHint><strong>DEX Pool</strong> — uses an on-chain DEX pool as oracle. Works with any token that has a pool. <strong>Pyth</strong> — uses Pyth Network&apos;s decentralized price feeds for major assets.</FieldHint>
             <div className="mt-2 flex gap-2">
+              <button type="button" onClick={() => { setOracleMode("auto"); setFeedId(""); setSelectedFeedName(null); setDexPoolAddress(""); setSelectedDexPool(null); }} className={`rounded-lg px-4 py-2 text-sm font-medium ${oracleMode === "auto" ? "bg-[#00FFB2] text-[#06080d] font-bold" : "bg-white/[0.05] text-[#8B95B0] hover:bg-white/[0.03]"}`}>🔍 Auto</button>
               <button type="button" onClick={() => { setOracleMode("dex"); setFeedId(""); setSelectedFeedName(null); }} className={`rounded-lg px-4 py-2 text-sm font-medium ${oracleMode === "dex" ? "bg-[#00FFB2] text-[#06080d] font-bold" : "bg-white/[0.05] text-[#8B95B0] hover:bg-white/[0.03]"}`}>DEX Pool</button>
               <button type="button" onClick={() => { setOracleMode("pyth"); setDexPoolAddress(""); setSelectedDexPool(null); }} className={`rounded-lg px-4 py-2 text-sm font-medium ${oracleMode === "pyth" ? "bg-[#00FFB2] text-[#06080d] font-bold" : "bg-white/[0.05] text-[#8B95B0] hover:bg-white/[0.03]"}`}>Pyth Oracle</button>
             </div>
           </div>
+          {oracleMode === "auto" && (
+            <div className="space-y-2">
+              {priceRouter.loading && (
+                <div className="flex items-center gap-2 text-[#8B95B0]">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/[0.06] border-t-[#F0F4FF]" />
+                  <span className="text-xs">Finding best oracle source...</span>
+                </div>
+              )}
+              {priceRouter.error && (
+                <p className="text-xs text-red-400">Failed to resolve: {priceRouter.error}</p>
+              )}
+              {!priceRouter.loading && priceRouter.bestSource && (
+                <div className="space-y-2">
+                  <div className="rounded-lg bg-[#00FFB2]/[0.08] p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-medium uppercase tracking-wider text-[#00FFB2]">Recommended</span>
+                        <p className="text-sm font-medium text-[#F0F4FF] mt-0.5">{priceRouter.bestSource.pairLabel}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="rounded-full bg-[#00FFB2]/20 px-2 py-0.5 text-[10px] font-bold text-[#00FFB2] uppercase">{priceRouter.bestSource.type}</span>
+                        {priceRouter.bestSource.price > 0 && (
+                          <p className="text-xs text-[#8B95B0] mt-0.5">${priceRouter.bestSource.price.toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>
+                        )}
+                      </div>
+                    </div>
+                    {priceRouter.bestSource.liquidity > 0 && priceRouter.bestSource.liquidity !== Infinity && (
+                      <p className="text-[10px] text-[#5a6382] mt-1">${priceRouter.bestSource.liquidity.toLocaleString()} liquidity</p>
+                    )}
+                    <p className="text-[10px] text-[#5a6382]">Confidence: {priceRouter.bestSource.confidence}/100</p>
+                  </div>
+
+                  {priceRouter.allSources.length > 1 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-medium text-[#5a6382] uppercase tracking-wider">All sources found ({priceRouter.allSources.length})</p>
+                      {priceRouter.allSources.slice(1).map((src, i) => (
+                        <div key={i} className="flex items-center justify-between rounded-lg border border-white/[0.06] px-3 py-2 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#8B95B0]">{src.type}</span>
+                            <span className="text-[#F0F4FF]">{src.pairLabel}</span>
+                          </div>
+                          <div className="text-right text-[#5a6382]">
+                            {src.liquidity > 0 && src.liquidity !== Infinity && <span>${src.liquidity.toLocaleString()} liq</span>}
+                            {src.price > 0 && <span className="ml-2">${src.price.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!priceRouter.loading && !priceRouter.error && !priceRouter.bestSource && mintValid && (
+                <p className="text-xs text-amber-400">No oracle sources found. Try DEX Pool or Pyth mode manually.</p>
+              )}
+            </div>
+          )}
           {oracleMode === "pyth" && (
             <div>
               <label className="block text-sm font-medium text-[#F0F4FF]">Pyth Feed ID (hex, 64 chars)</label>
@@ -872,7 +999,7 @@ export const CreateMarketWizard: FC = () => {
           <table className="w-full text-sm">
             <tbody className="divide-y divide-white/[0.06]">
               <tr><td className="py-2 text-[#8B95B0]">Mint</td><td className="py-2 text-right text-[#F0F4FF]">{tokenMeta ? <span>{tokenMeta.name} ({tokenMeta.symbol})</span> : mintValid ? <span className="font-mono text-xs">{mint.slice(0, 12)}...</span> : "—"}</td></tr>
-              <tr><td className="py-2 text-[#8B95B0]">Oracle</td><td className="py-2 text-right text-[#F0F4FF]">{oracleMode === "dex" ? selectedDexPool ? `DEX — ${selectedDexPool.pairLabel} (${selectedDexPool.dexId})` : `DEX — ${dexPoolAddress.slice(0, 12)}...` : selectedFeedName ? `Pyth — ${selectedFeedName}` : `Pyth — ${feedId.slice(0, 12)}...`}</td></tr>
+              <tr><td className="py-2 text-[#8B95B0]">Oracle</td><td className="py-2 text-right text-[#F0F4FF]">{oracleMode === "auto" && priceRouter.bestSource ? `Auto — ${priceRouter.bestSource.pairLabel} (${priceRouter.bestSource.type})` : oracleMode === "dex" ? selectedDexPool ? `DEX — ${selectedDexPool.pairLabel} (${selectedDexPool.dexId})` : `DEX — ${dexPoolAddress.slice(0, 12)}...` : selectedFeedName ? `Pyth — ${selectedFeedName}` : `Pyth — ${feedId.slice(0, 12)}...`}</td></tr>
               <tr><td className="py-2 text-[#8B95B0]">Inverted</td><td className="py-2 text-right text-[#F0F4FF]">{invert ? "Yes" : "No"}</td></tr>
               <tr><td className="py-2 text-[#8B95B0]">Trading Fee</td><td className="py-2 text-right text-[#F0F4FF]">{tradingFeeBps} bps ({(tradingFeeBps / 100).toFixed(2)}%)</td></tr>
               <tr><td className="py-2 text-[#8B95B0]">Initial Margin</td><td className="py-2 text-right text-[#F0F4FF]">{initialMarginBps} bps ({maxLeverage}x max)</td></tr>
