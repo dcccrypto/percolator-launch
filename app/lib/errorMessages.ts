@@ -60,6 +60,8 @@ export function isTransientError(msg: string): boolean {
   const code = extractErrorCode(msg);
   if (code !== null && TRANSIENT_CODES.has(code)) return true;
   if (msg.includes("Blockhash not found")) return true;
+  if (msg.includes("block height exceeded")) return true;
+  if (msg.includes("has expired")) return true;
   return false;
 }
 
@@ -76,8 +78,8 @@ export function humanizeError(rawMsg: string): string {
   if (customIdx !== null && CUSTOM_ERROR_MAP[customIdx]) {
     return CUSTOM_ERROR_MAP[customIdx];
   }
-  if (rawMsg.includes("Blockhash not found")) {
-    return "Transaction expired. Please try again.";
+  if (rawMsg.includes("Blockhash not found") || rawMsg.includes("block height exceeded") || rawMsg.includes("has expired")) {
+    return "Transaction expired — network was slow. Try again, it usually works on the second attempt.";
   }
   if (rawMsg.includes("insufficient funds") || rawMsg.includes("Insufficient")) {
     return "Insufficient funds for this transaction.";
