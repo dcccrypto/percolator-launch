@@ -17,6 +17,20 @@ export function deriveVaultAuthority(
 }
 
 /**
+ * Derive insurance LP mint PDA.
+ * Seeds: ["ins_lp", slab_key]
+ */
+export function deriveInsuranceLpMint(
+  programId: PublicKey,
+  slab: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [textEncoder.encode("ins_lp"), slab.toBytes()],
+    programId
+  );
+}
+
+/**
  * Derive LP PDA for TradeCpi.
  * Seeds: ["lp", slab_key, lp_idx as u16 LE]
  */

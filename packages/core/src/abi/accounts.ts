@@ -270,6 +270,52 @@ export function buildAccountMetas(
   }));
 }
 
+/**
+ * CreateInsuranceMint: 9 accounts
+ * Creates SPL mint PDA for insurance LP tokens. Admin only, once per market.
+ */
+export const ACCOUNTS_CREATE_INSURANCE_MINT: readonly AccountSpec[] = [
+  { name: "admin", signer: true, writable: false },
+  { name: "slab", signer: false, writable: false },
+  { name: "insLpMint", signer: false, writable: true },
+  { name: "vaultAuthority", signer: false, writable: false },
+  { name: "collateralMint", signer: false, writable: false },
+  { name: "systemProgram", signer: false, writable: false },
+  { name: "tokenProgram", signer: false, writable: false },
+  { name: "rent", signer: false, writable: false },
+  { name: "payer", signer: true, writable: true },
+] as const;
+
+/**
+ * DepositInsuranceLP: 8 accounts
+ * Deposit collateral into insurance fund, receive LP tokens.
+ */
+export const ACCOUNTS_DEPOSIT_INSURANCE_LP: readonly AccountSpec[] = [
+  { name: "depositor", signer: true, writable: false },
+  { name: "slab", signer: false, writable: true },
+  { name: "depositorAta", signer: false, writable: true },
+  { name: "vault", signer: false, writable: true },
+  { name: "tokenProgram", signer: false, writable: false },
+  { name: "insLpMint", signer: false, writable: true },
+  { name: "depositorLpAta", signer: false, writable: true },
+  { name: "vaultAuthority", signer: false, writable: false },
+] as const;
+
+/**
+ * WithdrawInsuranceLP: 8 accounts
+ * Burn LP tokens and withdraw proportional share of insurance fund.
+ */
+export const ACCOUNTS_WITHDRAW_INSURANCE_LP: readonly AccountSpec[] = [
+  { name: "withdrawer", signer: true, writable: false },
+  { name: "slab", signer: false, writable: true },
+  { name: "withdrawerAta", signer: false, writable: true },
+  { name: "vault", signer: false, writable: true },
+  { name: "tokenProgram", signer: false, writable: false },
+  { name: "insLpMint", signer: false, writable: true },
+  { name: "withdrawerLpAta", signer: false, writable: true },
+  { name: "vaultAuthority", signer: false, writable: false },
+] as const;
+
 // ============================================================================
 // WELL-KNOWN PROGRAM/SYSVAR KEYS
 // ============================================================================

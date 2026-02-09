@@ -6,6 +6,7 @@ import { TradeForm } from "@/components/trade/TradeForm";
 import { PositionPanel } from "@/components/trade/PositionPanel";
 import { AccountsCard } from "@/components/trade/AccountsCard";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
+import { InsuranceLPPanel } from "@/components/trade/InsuranceLPPanel";
 import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
 import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { MarketBookCard } from "@/components/trade/MarketBookCard";
@@ -113,6 +114,7 @@ function TradePageInner({ slab }: { slab: string }) {
         <div className="space-y-4 sm:space-y-6">
           <AccountsCard />
           <DepositWithdrawCard slabAddress={slab} />
+          <InsuranceLPPanel />
           <Collapsible title="Engine Health" defaultOpen={false}>
             <EngineHealthCard />
           </Collapsible>

@@ -12,6 +12,8 @@ import { crankRoutes } from "./routes/crank.js";
 import { setupWebSocket } from "./routes/ws.js";
 import { PriceEngine } from "./services/PriceEngine.js";
 import { LiquidationService } from "./services/liquidation.js";
+import { InsuranceLPService } from "./services/InsuranceLPService.js";
+import { insuranceRoutes } from "./routes/insurance.js";
 
 // Services
 const oracleService = new OracleService();
@@ -19,6 +21,7 @@ const priceEngine = new PriceEngine();
 const crankService = new CrankService(oracleService);
 const liquidationService = new LiquidationService(oracleService);
 const lifecycleManager = new MarketLifecycleManager(crankService, oracleService);
+const insuranceService = new InsuranceLPService(crankService);
 
 // Hono app
 const app = new Hono();
@@ -29,6 +32,7 @@ app.route("/", healthRoutes({ crankService, liquidationService }));
 app.route("/", marketRoutes({ crankService, lifecycleManager }));
 app.route("/", priceRoutes({ oracleService, priceEngine }));
 app.route("/", crankRoutes({ crankService }));
+app.route("/", insuranceRoutes({ insuranceService }));
 
 // Root
 app.get("/", (c) => c.json({ name: "@percolator/server", version: "0.1.0" }));
@@ -62,6 +66,10 @@ if (config.crankKeypair) {
     // Start liquidation scanner
     liquidationService.start(() => crankService.getMarkets());
     console.log("🔍 Liquidation scanner started");
+
+    // Start insurance LP service
+    insuranceService.start();
+    console.log("🛡️  Insurance LP service started");
   }).catch((err) => {
     console.error("Failed to start crank service:", err);
   });

@@ -39,6 +39,9 @@ export const IX_TAG = {
   AdminForceClose: 21,
   UpdateRiskParams: 22,
   RenounceAdmin: 23,
+  CreateInsuranceMint: 24,
+  DepositInsuranceLP: 25,
+  WithdrawInsuranceLP: 26,
 } as const;
 
 /**
@@ -461,6 +464,38 @@ export function encodeUpdateRiskParams(args: UpdateRiskParamsArgs): Uint8Array {
  */
 export function encodeRenounceAdmin(): Uint8Array {
   return encU8(IX_TAG.RenounceAdmin);
+}
+
+/**
+ * CreateInsuranceMint instruction data (1 byte)
+ * Creates the SPL mint PDA for insurance LP tokens. Admin only, once per market.
+ */
+export function encodeCreateInsuranceMint(): Uint8Array {
+  return encU8(IX_TAG.CreateInsuranceMint);
+}
+
+/**
+ * DepositInsuranceLP instruction data (9 bytes)
+ * Deposit collateral into insurance fund, receive LP tokens proportional to share.
+ */
+export interface DepositInsuranceLPArgs {
+  amount: bigint | string;
+}
+
+export function encodeDepositInsuranceLP(args: DepositInsuranceLPArgs): Uint8Array {
+  return concatBytes(encU8(IX_TAG.DepositInsuranceLP), encU64(args.amount));
+}
+
+/**
+ * WithdrawInsuranceLP instruction data (9 bytes)
+ * Burn LP tokens and withdraw proportional share of insurance fund.
+ */
+export interface WithdrawInsuranceLPArgs {
+  lpAmount: bigint | string;
+}
+
+export function encodeWithdrawInsuranceLP(args: WithdrawInsuranceLPArgs): Uint8Array {
+  return concatBytes(encU8(IX_TAG.WithdrawInsuranceLP), encU64(args.lpAmount));
 }
 
 // ============================================================================

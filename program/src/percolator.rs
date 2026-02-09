@@ -999,6 +999,11 @@ pub mod error {
         InvalidTokenProgram,
         InvalidConfigParam,
         HyperpTradeNoCpiDisabled,
+        InsuranceMintAlreadyExists,
+        InsuranceMintNotCreated,
+        InsuranceBelowThreshold,
+        InsuranceZeroAmount,
+        InsuranceSupplyMismatch,
     }
 
     impl From<PercolatorError> for ProgramError {
@@ -1103,6 +1108,15 @@ pub mod ix {
         UpdateRiskParams { initial_margin_bps: u64, maintenance_margin_bps: u64 },
         /// Renounce admin: set admin to all zeros (irreversible). Admin only.
         RenounceAdmin,
+        /// Create the insurance LP SPL mint for this market. Admin only, once per market.
+        /// Mint PDA: ["ins_lp", slab_pubkey]. Authority: vault PDA.
+        CreateInsuranceMint,
+        /// Deposit collateral into insurance fund, receive LP tokens proportional to share.
+        /// Permissionless. LP tokens are freely transferable.
+        DepositInsuranceLP { amount: u64 },
+        /// Burn LP tokens and withdraw proportional share of insurance fund.
+        /// Cannot withdraw below risk_reduction_threshold.
+        WithdrawInsuranceLP { lp_amount: u64 },
     }
 
     impl Instruction {
@@ -1236,6 +1250,15 @@ pub mod ix {
                     Ok(Instruction::UpdateRiskParams { initial_margin_bps, maintenance_margin_bps })
                 },
                 23 => Ok(Instruction::RenounceAdmin),
+                24 => Ok(Instruction::CreateInsuranceMint),
+                25 => { // DepositInsuranceLP
+                    let amount = read_u64(&mut rest)?;
+                    Ok(Instruction::DepositInsuranceLP { amount })
+                },
+                26 => { // WithdrawInsuranceLP
+                    let lp_amount = read_u64(&mut rest)?;
+                    Ok(Instruction::WithdrawInsuranceLP { lp_amount })
+                },
                 _ => Err(ProgramError::InvalidInstructionData),
             }
         }
@@ -1368,6 +1391,10 @@ pub mod accounts {
 
     pub fn derive_vault_authority(program_id: &Pubkey, slab_key: &Pubkey) -> (Pubkey, u8) {
         Pubkey::find_program_address(&[b"vault", slab_key.as_ref()], program_id)
+    }
+
+    pub fn derive_insurance_lp_mint(program_id: &Pubkey, slab_key: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"ins_lp", slab_key.as_ref()], program_id)
     }
 }
 
@@ -2610,8 +2637,197 @@ pub mod collateral {
     }
 }
 
+// 9a. mod insurance_lp — SPL mint/burn helpers for insurance LP tokens
+pub mod insurance_lp {
+    #[allow(unused_imports)]
+    use alloc::format;
+    use solana_program::{
+        account_info::AccountInfo, program_error::ProgramError,
+        pubkey::Pubkey, system_instruction,
+    };
+
+    #[cfg(not(feature = "test"))]
+    use solana_program::program::{invoke, invoke_signed};
+    #[cfg(not(feature = "test"))]
+    use solana_program::sysvar::Sysvar;
+    use solana_program::program_pack::Pack;
+
+    /// Create the insurance LP mint account (PDA) and initialize it.
+    /// Mint authority = vault_authority PDA. Freeze authority = None.
+    #[allow(unused_variables)]
+    pub fn create_mint<'a>(
+        payer: &AccountInfo<'a>,
+        mint_account: &AccountInfo<'a>,
+        vault_authority: &AccountInfo<'a>,
+        system_program: &AccountInfo<'a>,
+        token_program: &AccountInfo<'a>,
+        rent_sysvar: &AccountInfo<'a>,
+        decimals: u8,
+        mint_seeds: &[&[u8]],
+    ) -> Result<(), ProgramError> {
+        #[cfg(not(feature = "test"))]
+        {
+            let space = spl_token::state::Mint::LEN;
+            let rent = solana_program::rent::Rent::get()?;
+            let lamports = rent.minimum_balance(space);
+
+            // Create account via CPI with PDA signing
+            let create_ix = system_instruction::create_account(
+                payer.key,
+                mint_account.key,
+                lamports,
+                space as u64,
+                &spl_token::ID,
+            );
+            invoke_signed(
+                &create_ix,
+                &[payer.clone(), mint_account.clone(), system_program.clone()],
+                &[mint_seeds],
+            )?;
+
+            // Initialize mint: authority = vault_authority PDA, freeze = None
+            let init_ix = spl_token::instruction::initialize_mint(
+                &spl_token::ID,
+                mint_account.key,
+                vault_authority.key,
+                None,
+                decimals,
+            )?;
+            invoke(
+                &init_ix,
+                &[mint_account.clone(), rent_sysvar.clone(), token_program.clone()],
+            )?;
+        }
+        #[cfg(feature = "test")]
+        {
+            // In test mode, initialize the mint data directly
+            use solana_program::program_pack::Pack;
+            use spl_token::state::Mint;
+            let mut data = mint_account.try_borrow_mut_data()?;
+            let mut mint_state = Mint::default();
+            mint_state.is_initialized = true;
+            mint_state.decimals = decimals;
+            mint_state.mint_authority = solana_program::program_option::COption::Some(*vault_authority.key);
+            mint_state.freeze_authority = solana_program::program_option::COption::None;
+            mint_state.supply = 0;
+            Mint::pack(mint_state, &mut data)?;
+        }
+        Ok(())
+    }
+
+    /// Mint LP tokens to a user's token account. Signed by vault_authority PDA.
+    #[allow(unused_variables)]
+    pub fn mint_to<'a>(
+        token_program: &AccountInfo<'a>,
+        mint: &AccountInfo<'a>,
+        destination: &AccountInfo<'a>,
+        authority: &AccountInfo<'a>,
+        amount: u64,
+        signer_seeds: &[&[&[u8]]],
+    ) -> Result<(), ProgramError> {
+        if amount == 0 { return Ok(()); }
+        #[cfg(not(feature = "test"))]
+        {
+            let ix = spl_token::instruction::mint_to(
+                token_program.key,
+                mint.key,
+                destination.key,
+                authority.key,
+                &[],
+                amount,
+            )?;
+            invoke_signed(&ix, &[mint.clone(), destination.clone(), authority.clone(), token_program.clone()], signer_seeds)
+        }
+        #[cfg(feature = "test")]
+        {
+            use solana_program::program_pack::Pack;
+            use spl_token::state::{Mint, Account as TokenAccount};
+
+            // Update mint supply
+            let mut mint_data = mint.try_borrow_mut_data()?;
+            let mut mint_state = Mint::unpack(&mint_data)?;
+            mint_state.supply = mint_state.supply.checked_add(amount)
+                .ok_or(ProgramError::InvalidAccountData)?;
+            Mint::pack(mint_state, &mut mint_data)?;
+
+            // Update destination balance
+            let mut dst_data = destination.try_borrow_mut_data()?;
+            let mut dst_state = TokenAccount::unpack(&dst_data)?;
+            dst_state.amount = dst_state.amount.checked_add(amount)
+                .ok_or(ProgramError::InvalidAccountData)?;
+            TokenAccount::pack(dst_state, &mut dst_data)?;
+            Ok(())
+        }
+    }
+
+    /// Burn LP tokens from a user's token account. User is the authority.
+    #[allow(unused_variables)]
+    pub fn burn<'a>(
+        token_program: &AccountInfo<'a>,
+        mint: &AccountInfo<'a>,
+        source: &AccountInfo<'a>,
+        authority: &AccountInfo<'a>,
+        amount: u64,
+    ) -> Result<(), ProgramError> {
+        if amount == 0 { return Ok(()); }
+        #[cfg(not(feature = "test"))]
+        {
+            let ix = spl_token::instruction::burn(
+                token_program.key,
+                source.key,
+                mint.key,
+                authority.key,
+                &[],
+                amount,
+            )?;
+            invoke(&ix, &[source.clone(), mint.clone(), authority.clone(), token_program.clone()])
+        }
+        #[cfg(feature = "test")]
+        {
+            use solana_program::program_pack::Pack;
+            use spl_token::state::{Mint, Account as TokenAccount};
+
+            // Update mint supply
+            let mut mint_data = mint.try_borrow_mut_data()?;
+            let mut mint_state = Mint::unpack(&mint_data)?;
+            mint_state.supply = mint_state.supply.checked_sub(amount)
+                .ok_or(ProgramError::InsufficientFunds)?;
+            Mint::pack(mint_state, &mut mint_data)?;
+
+            // Update source balance
+            let mut src_data = source.try_borrow_mut_data()?;
+            let mut src_state = TokenAccount::unpack(&src_data)?;
+            src_state.amount = src_state.amount.checked_sub(amount)
+                .ok_or(ProgramError::InsufficientFunds)?;
+            TokenAccount::pack(src_state, &mut src_data)?;
+            Ok(())
+        }
+    }
+
+    /// Read the current supply from an SPL mint account.
+    pub fn read_mint_supply(mint_account: &AccountInfo) -> Result<u64, ProgramError> {
+        use solana_program::program_pack::Pack;
+        let data = mint_account.try_borrow_data()?;
+        let mint = spl_token::state::Mint::unpack(&data)?;
+        if !mint.is_initialized {
+            return Err(ProgramError::UninitializedAccount);
+        }
+        Ok(mint.supply)
+    }
+
+    /// Read the decimals from an SPL mint account.
+    pub fn read_mint_decimals(mint_account: &AccountInfo) -> Result<u8, ProgramError> {
+        use solana_program::program_pack::Pack;
+        let data = mint_account.try_borrow_data()?;
+        let mint = spl_token::state::Mint::unpack(&data)?;
+        Ok(mint.decimals)
+    }
+}
+
 // 9. mod processor
 pub mod processor {
+    #[allow(unused_imports)]
+    use alloc::format;
     use solana_program::{
         account_info::AccountInfo, entrypoint::ProgramResult, pubkey::Pubkey,
         sysvar::{clock::Clock, Sysvar},
@@ -4342,6 +4558,316 @@ pub mod processor {
                 let mut new_header = header;
                 new_header.admin = [0u8; 32];
                 state::write_header(&mut data, &new_header);
+            }
+
+            Instruction::CreateInsuranceMint => {
+                // Create insurance LP mint for this market. Admin only, once per market.
+                // Accounts: [admin(signer), slab, ins_lp_mint(writable), vault_authority,
+                //            collateral_mint, system_program, token_program, rent, payer(signer+writable)]
+                accounts::expect_len(accounts, 9)?;
+                let a_admin = &accounts[0];
+                let a_slab = &accounts[1];
+                let a_ins_lp_mint = &accounts[2];
+                let a_vault_authority = &accounts[3];
+                let a_collateral_mint = &accounts[4];
+                let a_system = &accounts[5];
+                let a_token = &accounts[6];
+                let a_rent = &accounts[7];
+                let a_payer = &accounts[8];
+
+                accounts::expect_signer(a_admin)?;
+                accounts::expect_writable(a_ins_lp_mint)?;
+                accounts::expect_signer(a_payer)?;
+                accounts::expect_writable(a_payer)?;
+                verify_token_program(a_token)?;
+
+                let data = state::slab_data_mut(a_slab)?;
+                slab_guard(program_id, a_slab, &data)?;
+                require_initialized(&data)?;
+
+                let header = state::read_header(&data);
+                require_admin(header.admin, a_admin.key)?;
+
+                // Verify the ins_lp_mint PDA
+                let (expected_mint, mint_bump) = accounts::derive_insurance_lp_mint(program_id, a_slab.key);
+                accounts::expect_key(a_ins_lp_mint, &expected_mint)?;
+
+                // Verify vault authority PDA
+                let (expected_auth, _) = accounts::derive_vault_authority(program_id, a_slab.key);
+                accounts::expect_key(a_vault_authority, &expected_auth)?;
+
+                // Check mint doesn't already exist (data len == 0 means not yet created)
+                if a_ins_lp_mint.data_len() > 0 {
+                    return Err(PercolatorError::InsuranceMintAlreadyExists.into());
+                }
+
+                // Read collateral mint decimals
+                let decimals = crate::insurance_lp::read_mint_decimals(a_collateral_mint)?;
+
+                // Create and initialize the mint PDA
+                let slab_key_bytes = a_slab.key.as_ref();
+                let bump_arr: [u8; 1] = [mint_bump];
+                let mint_seeds: &[&[u8]] = &[b"ins_lp", slab_key_bytes, &bump_arr];
+
+                crate::insurance_lp::create_mint(
+                    a_payer,
+                    a_ins_lp_mint,
+                    a_vault_authority,
+                    a_system,
+                    a_token,
+                    a_rent,
+                    decimals,
+                    mint_seeds,
+                )?;
+
+                msg!("Insurance LP mint created");
+            }
+
+            Instruction::DepositInsuranceLP { amount } => {
+                // Deposit collateral into insurance fund, receive LP tokens.
+                // Accounts: [depositor(signer), slab(writable), depositor_ata(writable),
+                //            vault(writable), token_program, ins_lp_mint(writable),
+                //            depositor_lp_ata(writable), vault_authority]
+                accounts::expect_len(accounts, 8)?;
+                let a_depositor = &accounts[0];
+                let a_slab = &accounts[1];
+                let a_depositor_ata = &accounts[2];
+                let a_vault = &accounts[3];
+                let a_token = &accounts[4];
+                let a_ins_lp_mint = &accounts[5];
+                let a_depositor_lp_ata = &accounts[6];
+                let a_vault_authority = &accounts[7];
+
+                accounts::expect_signer(a_depositor)?;
+                accounts::expect_writable(a_slab)?;
+                accounts::expect_writable(a_depositor_ata)?;
+                accounts::expect_writable(a_vault)?;
+                accounts::expect_writable(a_ins_lp_mint)?;
+                accounts::expect_writable(a_depositor_lp_ata)?;
+                verify_token_program(a_token)?;
+
+                if amount == 0 {
+                    return Err(PercolatorError::InsuranceZeroAmount.into());
+                }
+
+                let mut data = state::slab_data_mut(a_slab)?;
+                slab_guard(program_id, a_slab, &data)?;
+                require_initialized(&data)?;
+
+                // Block deposits on resolved markets
+                if state::is_resolved(&data) {
+                    return Err(ProgramError::InvalidAccountData);
+                }
+
+                let config = state::read_config(&data);
+                let mint = Pubkey::new_from_array(config.collateral_mint);
+
+                // Verify vault
+                let (auth, vault_bump) = accounts::derive_vault_authority(program_id, a_slab.key);
+                verify_vault(a_vault, &auth, &mint, &Pubkey::new_from_array(config.vault_pubkey))?;
+                verify_token_account(a_depositor_ata, a_depositor.key, &mint)?;
+
+                // Verify insurance LP mint PDA
+                let (expected_lp_mint, _) = accounts::derive_insurance_lp_mint(program_id, a_slab.key);
+                accounts::expect_key(a_ins_lp_mint, &expected_lp_mint)?;
+
+                // Verify LP mint exists
+                if a_ins_lp_mint.data_len() == 0 {
+                    return Err(PercolatorError::InsuranceMintNotCreated.into());
+                }
+
+                // Verify vault authority PDA
+                accounts::expect_key(a_vault_authority, &auth)?;
+
+                // Read current insurance balance and LP supply BEFORE deposit
+                let engine = zc::engine_mut(&mut data)?;
+                let insurance_balance_before: u128 = engine.insurance_fund.balance.get();
+                let lp_supply = crate::insurance_lp::read_mint_supply(a_ins_lp_mint)?;
+
+                // Transfer collateral from depositor to vault
+                collateral::deposit(a_token, a_depositor_ata, a_vault, a_depositor, amount)?;
+
+                // Convert base tokens to units
+                let (units, dust) = crate::units::base_to_units(amount, config.unit_scale);
+
+                // Accumulate dust
+                let old_dust = state::read_dust_base(&data);
+                state::write_dust_base(&mut data, old_dust.saturating_add(dust));
+
+                // Calculate LP tokens to mint
+                let lp_tokens_to_mint: u64 = if lp_supply == 0 {
+                    // First deposit: 1:1 ratio (units of collateral = LP tokens)
+                    // Guard: if insurance already has balance but supply is 0, that means
+                    // admin topped up via TopUpInsurance before creating LP mint.
+                    // Still safe: first LP depositor gets tokens proportional to their deposit only.
+                    units
+                } else {
+                    if insurance_balance_before == 0 {
+                        // Shouldn't happen: supply > 0 but balance == 0 means fund was drained.
+                        // Reject to prevent division by zero and unfair minting.
+                        return Err(PercolatorError::InsuranceSupplyMismatch.into());
+                    }
+                    // Proportional: tokens = deposit_units * supply / balance
+                    // Use u128 for intermediate to prevent overflow
+                    let numerator = (units as u128)
+                        .checked_mul(lp_supply as u128)
+                        .ok_or(PercolatorError::EngineOverflow)?;
+                    let result = numerator / insurance_balance_before;
+                    // Round DOWN (depositor gets fewer tokens — pool is never underfunded)
+                    if result > u64::MAX as u128 {
+                        return Err(PercolatorError::EngineOverflow.into());
+                    }
+                    result as u64
+                };
+
+                if lp_tokens_to_mint == 0 {
+                    // Deposit too small to mint any LP tokens — reject to prevent loss
+                    return Err(PercolatorError::InsuranceZeroAmount.into());
+                }
+
+                // Top up insurance fund in engine
+                // Re-borrow engine after the collateral transfer
+                let engine = zc::engine_mut(&mut data)?;
+                engine.top_up_insurance_fund(units as u128).map_err(map_risk_error)?;
+
+                // Mint LP tokens to depositor
+                let seed1: &[u8] = b"vault";
+                let seed2: &[u8] = a_slab.key.as_ref();
+                let bump_arr: [u8; 1] = [vault_bump];
+                let seed3: &[u8] = &bump_arr;
+                let seeds: [&[u8]; 3] = [seed1, seed2, seed3];
+                let signer_seeds: [&[&[u8]]; 1] = [&seeds];
+
+                crate::insurance_lp::mint_to(
+                    a_token,
+                    a_ins_lp_mint,
+                    a_depositor_lp_ata,
+                    a_vault_authority,
+                    lp_tokens_to_mint,
+                    &signer_seeds,
+                )?;
+
+                msg!("Insurance LP deposit: {} tokens, {} LP minted", amount, lp_tokens_to_mint);
+            }
+
+            Instruction::WithdrawInsuranceLP { lp_amount } => {
+                // Burn LP tokens and withdraw proportional share of insurance fund.
+                // Accounts: [withdrawer(signer), slab(writable), withdrawer_ata(writable),
+                //            vault(writable), token_program, ins_lp_mint(writable),
+                //            withdrawer_lp_ata(writable), vault_authority]
+                accounts::expect_len(accounts, 8)?;
+                let a_withdrawer = &accounts[0];
+                let a_slab = &accounts[1];
+                let a_withdrawer_ata = &accounts[2];
+                let a_vault = &accounts[3];
+                let a_token = &accounts[4];
+                let a_ins_lp_mint = &accounts[5];
+                let a_withdrawer_lp_ata = &accounts[6];
+                let a_vault_authority = &accounts[7];
+
+                accounts::expect_signer(a_withdrawer)?;
+                accounts::expect_writable(a_slab)?;
+                accounts::expect_writable(a_withdrawer_ata)?;
+                accounts::expect_writable(a_vault)?;
+                accounts::expect_writable(a_ins_lp_mint)?;
+                accounts::expect_writable(a_withdrawer_lp_ata)?;
+                verify_token_program(a_token)?;
+
+                if lp_amount == 0 {
+                    return Err(PercolatorError::InsuranceZeroAmount.into());
+                }
+
+                let mut data = state::slab_data_mut(a_slab)?;
+                slab_guard(program_id, a_slab, &data)?;
+                require_initialized(&data)?;
+
+                let config = state::read_config(&data);
+                let mint = Pubkey::new_from_array(config.collateral_mint);
+
+                // Verify vault
+                let (auth, vault_bump) = accounts::derive_vault_authority(program_id, a_slab.key);
+                verify_vault(a_vault, &auth, &mint, &Pubkey::new_from_array(config.vault_pubkey))?;
+                verify_token_account(a_withdrawer_ata, a_withdrawer.key, &mint)?;
+
+                // Verify insurance LP mint PDA
+                let (expected_lp_mint, _) = accounts::derive_insurance_lp_mint(program_id, a_slab.key);
+                accounts::expect_key(a_ins_lp_mint, &expected_lp_mint)?;
+
+                if a_ins_lp_mint.data_len() == 0 {
+                    return Err(PercolatorError::InsuranceMintNotCreated.into());
+                }
+
+                // Verify vault authority
+                accounts::expect_key(a_vault_authority, &auth)?;
+
+                // Read current insurance balance and LP supply
+                let engine = zc::engine_mut(&mut data)?;
+                let insurance_balance: u128 = engine.insurance_fund.balance.get();
+                let lp_supply = crate::insurance_lp::read_mint_supply(a_ins_lp_mint)?;
+
+                if lp_supply == 0 || insurance_balance == 0 {
+                    return Err(PercolatorError::InsuranceSupplyMismatch.into());
+                }
+
+                // Calculate units to return: lp_amount * insurance_balance / lp_supply
+                // Round DOWN (user gets less — pool is never underfunded)
+                let numerator = (lp_amount as u128)
+                    .checked_mul(insurance_balance)
+                    .ok_or(PercolatorError::EngineOverflow)?;
+                let units_to_return = numerator / (lp_supply as u128);
+
+                if units_to_return == 0 {
+                    return Err(PercolatorError::InsuranceZeroAmount.into());
+                }
+
+                // Safety: cannot withdraw below risk_reduction_threshold
+                let remaining = insurance_balance.saturating_sub(units_to_return);
+                let threshold = engine.params.risk_reduction_threshold;
+                if remaining < threshold.get() {
+                    return Err(PercolatorError::InsuranceBelowThreshold.into());
+                }
+
+                // Convert units to base tokens
+                let units_u64 = if units_to_return > u64::MAX as u128 {
+                    return Err(PercolatorError::EngineOverflow.into());
+                } else {
+                    units_to_return as u64
+                };
+                let base_amount = crate::units::units_to_base_checked(units_u64, config.unit_scale)
+                    .ok_or(PercolatorError::EngineOverflow)?;
+
+                // Reduce insurance fund balance
+                engine.insurance_fund.balance = percolator::U128::new(
+                    insurance_balance.saturating_sub(units_to_return)
+                );
+
+                // Burn LP tokens from withdrawer (user signs as authority over their tokens)
+                crate::insurance_lp::burn(
+                    a_token,
+                    a_ins_lp_mint,
+                    a_withdrawer_lp_ata,
+                    a_withdrawer,
+                    lp_amount,
+                )?;
+
+                // Transfer collateral from vault to withdrawer
+                let seed1: &[u8] = b"vault";
+                let seed2: &[u8] = a_slab.key.as_ref();
+                let bump_arr: [u8; 1] = [vault_bump];
+                let seed3: &[u8] = &bump_arr;
+                let seeds: [&[u8]; 3] = [seed1, seed2, seed3];
+                let signer_seeds: [&[&[u8]]; 1] = [&seeds];
+
+                collateral::withdraw(
+                    a_token,
+                    a_vault,
+                    a_withdrawer_ata,
+                    a_vault_authority,
+                    base_amount,
+                    &signer_seeds,
+                )?;
+
+                msg!("Insurance LP withdraw: {} LP burned, {} tokens returned", lp_amount, base_amount);
             }
         }
         Ok(())

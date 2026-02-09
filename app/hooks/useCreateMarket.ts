@@ -17,6 +17,9 @@ import {
   encodeInitLP,
   encodeDepositCollateral,
   encodeTopUpInsurance,
+  encodeCreateInsuranceMint,
+  deriveInsuranceLpMint,
+  ACCOUNTS_CREATE_INSURANCE_MINT,
   encodeKeeperCrank,
   encodeSetOracleAuthority,
   encodePushOraclePrice,
@@ -80,6 +83,7 @@ const STEP_LABELS = [
   "Oracle setup & pre-LP crank...",
   "Initializing LP...",
   "Depositing collateral, insurance & final crank...",
+  "Creating insurance LP mint...",
 ];
 
 export function useCreateMarket() {
