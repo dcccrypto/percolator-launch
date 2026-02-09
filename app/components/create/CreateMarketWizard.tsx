@@ -12,6 +12,7 @@ import { useDexPoolSearch, type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { usePriceRouter, type PriceSource } from "@/hooks/usePriceRouter";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
+import { humanizeError } from "@/lib/errorMessages";
 import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 
 function isValidBase58Pubkey(s: string): boolean {
@@ -184,9 +185,12 @@ const QuickLaunchPanel: FC<{
               );
             })}
           </div>
+          {state.loading && (
+            <p className="mt-3 text-xs text-amber-400/80">approve quickly in your wallet — transactions expire in ~60 seconds</p>
+          )}
           {state.error && (
             <div className="mt-4 rounded-lg bg-red-900/20 p-3">
-              <p className="text-sm text-red-400">{state.error}</p>
+              <p className="text-sm text-red-400">{humanizeError(state.error)}</p>
               <div className="mt-3 flex gap-2">
                 <button onClick={reset} className="rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-[#F0F4FF] hover:bg-white/[0.03]">Start over</button>
               </div>
@@ -692,9 +696,12 @@ export const CreateMarketWizard: FC = () => {
               );
             })}
           </div>
+          {state.loading && (
+            <p className="mt-3 text-xs text-amber-400/80">approve quickly in your wallet — transactions expire in ~60 seconds</p>
+          )}
           {state.error && (
             <div className="mt-4 rounded-lg bg-red-900/20 p-3">
-              <p className="text-sm text-red-400">{state.error}</p>
+              <p className="text-sm text-red-400">{humanizeError(state.error)}</p>
               <div className="mt-3 flex gap-2">
                 <button onClick={handleRetry} className="rounded-lg bg-[#FF4466] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#FF4466]/80">Retry from step {state.step + 1}</button>
                 <button onClick={reset} className="rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-[#F0F4FF] hover:bg-white/[0.03]">Start over</button>

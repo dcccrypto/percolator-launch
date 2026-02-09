@@ -45,8 +45,8 @@ export async function sendTx({
         tx.add(ix);
       }
 
-      // Use finalized blockhash — longer validity window on slow devnet
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("finalized");
+      // confirmed = freshest blockhash = max validity (~150 blocks / ~60s)
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = wallet.publicKey;
 
@@ -54,9 +54,10 @@ export async function sendTx({
         tx.partialSign(...signers);
       }
 
+      // Wallet popup here — approve quickly! Every second counts toward the ~60s window.
       const signed = await wallet.signTransaction(tx);
 
-      // skipPreflight = faster submission, we handle errors on confirmation
+      // skipPreflight = faster submission (saves ~200ms round-trip)
       const signature = await connection.sendRawTransaction(signed.serialize(), {
         skipPreflight: true,
         maxRetries: 5,
