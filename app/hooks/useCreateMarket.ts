@@ -473,6 +473,35 @@ export function useCreateMarket() {
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
 
+        // Step 5: Create Insurance LP Mint (permissionless insurance deposits)
+        if (startStep <= 5) {
+          setState((s) => ({ ...s, step: 5, stepLabel: STEP_LABELS[5] }));
+
+          const [insLpMint] = deriveInsuranceLpMint(programId, slabPk);
+          const [vaultAuth] = deriveVaultAuthority(programId, slabPk);
+
+          const createMintData = encodeCreateInsuranceMint();
+          const createMintKeys = buildAccountMetas(ACCOUNTS_CREATE_INSURANCE_MINT, [
+            wallet.publicKey,          // admin (signer)
+            slabPk,                    // slab
+            insLpMint,                 // ins_lp_mint (writable, PDA)
+            vaultAuth,                 // vault_authority
+            params.mint,               // collateral_mint
+            SystemProgram.programId,   // system_program
+            WELL_KNOWN.tokenProgram,   // token_program
+            WELL_KNOWN.rent,           // rent
+            wallet.publicKey,          // payer (signer, writable)
+          ]);
+          const createMintIx = buildIx({ programId, keys: createMintKeys, data: createMintData });
+
+          const sig = await sendTx({
+            connection, wallet,
+            instructions: [createMintIx],
+            computeUnits: 200_000,
+          });
+          setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
+        }
+
         // Register market in Supabase so dashboard can see it
         try {
           await fetch("/api/markets", {
@@ -506,7 +535,7 @@ export function useCreateMarket() {
         setState((s) => ({
           ...s,
           loading: false,
-          step: 5,
+          step: 6,
           stepLabel: "Market created!",
         }));
       } catch (e) {

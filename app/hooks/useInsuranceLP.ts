@@ -4,9 +4,9 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import {
   PublicKey,
-  TransactionInstruction,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
+  TransactionInstruction,
 } from '@solana/web3.js';
 import {
   TOKEN_PROGRAM_ID,
@@ -17,16 +17,15 @@ import {
   encodeCreateInsuranceMint,
   encodeDepositInsuranceLP,
   encodeWithdrawInsuranceLP,
-  encodePushOraclePrice,
-  encodeKeeperCrank,
   deriveVaultAuthority,
   deriveInsuranceLpMint,
   buildAccountMetas,
+  buildIx,
   ACCOUNTS_CREATE_INSURANCE_MINT,
   ACCOUNTS_DEPOSIT_INSURANCE_LP,
   ACCOUNTS_WITHDRAW_INSURANCE_LP,
-  simulateOrSend,
 } from '@percolator/core';
+import { sendTx } from '../lib/tx';
 import { useSlabState, type SlabState } from '../components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
 
@@ -172,27 +171,24 @@ export function useInsuranceLP() {
       const [vaultAuth] = deriveVaultAuthority(progPubkey, slabPubkey);
       const collateralMint = slabState.config!.collateralMint;
 
-      const ix = new TransactionInstruction({
-        programId: progPubkey,
-        data: Buffer.from(encodeCreateInsuranceMint()),
-        keys: buildAccountMetas(ACCOUNTS_CREATE_INSURANCE_MINT, [
-          wallet.publicKey,      // admin (signer)
-          slabPubkey,            // slab
-          lpMintInfo.mintPda,    // ins_lp_mint (writable, PDA)
-          vaultAuth,             // vault_authority
-          collateralMint,        // collateral_mint
-          SystemProgram.programId, // system_program
-          TOKEN_PROGRAM_ID,      // token_program
-          SYSVAR_RENT_PUBKEY,    // rent
-          wallet.publicKey,      // payer (signer, writable)
-        ]),
-      });
+      const data = encodeCreateInsuranceMint();
+      const keys = buildAccountMetas(ACCOUNTS_CREATE_INSURANCE_MINT, [
+        wallet.publicKey,      // admin (signer)
+        slabPubkey,            // slab
+        lpMintInfo.mintPda,    // ins_lp_mint (writable, PDA)
+        vaultAuth,             // vault_authority
+        collateralMint,        // collateral_mint
+        SystemProgram.programId, // system_program
+        TOKEN_PROGRAM_ID,      // token_program
+        SYSVAR_RENT_PUBKEY,    // rent
+        wallet.publicKey,      // payer (signer, writable)
+      ]);
+      const ix = buildIx({ programId: progPubkey, keys, data });
 
-      const result = await simulateOrSend({
+      const result = await sendTx({
         connection,
-        wallet: wallet as any,
+        wallet,
         instructions: [ix],
-        simulate: false,
       });
 
       await refreshState();
@@ -242,28 +238,23 @@ export function useInsuranceLP() {
       }
 
       // Build deposit instruction
-      const depositIx = new TransactionInstruction({
-        programId: progPubkey,
-        data: Buffer.from(encodeDepositInsuranceLP({ amount: amount.toString() })),
-        keys: buildAccountMetas(ACCOUNTS_DEPOSIT_INSURANCE_LP, [
-          wallet.publicKey,    // depositor (signer)
-          slabPubkey,          // slab (writable)
-          userAta,             // depositor_ata (writable)
-          vault,               // vault (writable)
-          TOKEN_PROGRAM_ID,    // token_program
-          lpMintInfo.mintPda,  // ins_lp_mint (writable)
-          userLpAta,           // depositor_lp_ata (writable)
-          vaultAuth,           // vault_authority
-        ]),
-      });
+      const depositData = encodeDepositInsuranceLP({ amount: amount.toString() });
+      const depositKeys = buildAccountMetas(ACCOUNTS_DEPOSIT_INSURANCE_LP, [
+        wallet.publicKey,    // depositor (signer)
+        slabPubkey,          // slab (writable)
+        userAta,             // depositor_ata (writable)
+        vault,               // vault (writable)
+        TOKEN_PROGRAM_ID,    // token_program
+        lpMintInfo.mintPda,  // ins_lp_mint (writable)
+        userLpAta,           // depositor_lp_ata (writable)
+        vaultAuth,           // vault_authority
+      ]);
+      instructions.push(buildIx({ programId: progPubkey, keys: depositKeys, data: depositData }));
 
-      instructions.push(depositIx);
-
-      const result = await simulateOrSend({
+      const result = await sendTx({
         connection,
-        wallet: wallet as any,
+        wallet,
         instructions,
-        simulate: false,
       });
 
       await refreshState();
@@ -294,26 +285,23 @@ export function useInsuranceLP() {
       const userAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
       const userLpAta = await getAssociatedTokenAddress(lpMintInfo.mintPda, wallet.publicKey);
 
-      const withdrawIx = new TransactionInstruction({
-        programId: progPubkey,
-        data: Buffer.from(encodeWithdrawInsuranceLP({ lpAmount: lpAmount.toString() })),
-        keys: buildAccountMetas(ACCOUNTS_WITHDRAW_INSURANCE_LP, [
-          wallet.publicKey,    // withdrawer (signer)
-          slabPubkey,          // slab (writable)
-          userAta,             // withdrawer_ata (writable)
-          vault,               // vault (writable)
-          TOKEN_PROGRAM_ID,    // token_program
-          lpMintInfo.mintPda,  // ins_lp_mint (writable)
-          userLpAta,           // withdrawer_lp_ata (writable)
-          vaultAuth,           // vault_authority
-        ]),
-      });
+      const withdrawData = encodeWithdrawInsuranceLP({ lpAmount: lpAmount.toString() });
+      const withdrawKeys = buildAccountMetas(ACCOUNTS_WITHDRAW_INSURANCE_LP, [
+        wallet.publicKey,    // withdrawer (signer)
+        slabPubkey,          // slab (writable)
+        userAta,             // withdrawer_ata (writable)
+        vault,               // vault (writable)
+        TOKEN_PROGRAM_ID,    // token_program
+        lpMintInfo.mintPda,  // ins_lp_mint (writable)
+        userLpAta,           // withdrawer_lp_ata (writable)
+        vaultAuth,           // vault_authority
+      ]);
+      const withdrawIx = buildIx({ programId: progPubkey, keys: withdrawKeys, data: withdrawData });
 
-      const result = await simulateOrSend({
+      const result = await sendTx({
         connection,
-        wallet: wallet as any,
+        wallet,
         instructions: [withdrawIx],
-        simulate: false,
       });
 
       await refreshState();
