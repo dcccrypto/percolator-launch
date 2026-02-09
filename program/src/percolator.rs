@@ -4836,10 +4836,11 @@ pub mod processor {
                 let base_amount = crate::units::units_to_base_checked(units_u64, config.unit_scale)
                     .ok_or(PercolatorError::EngineOverflow)?;
 
-                // Reduce insurance fund balance
-                engine.insurance_fund.balance = percolator::U128::new(
-                    insurance_balance.saturating_sub(units_to_return)
-                );
+                // Reduce insurance fund balance (checked to prevent silent underflow)
+                let new_balance = insurance_balance
+                    .checked_sub(units_to_return)
+                    .ok_or(PercolatorError::EngineOverflow)?;
+                engine.insurance_fund.balance = percolator::U128::new(new_balance);
 
                 // Burn LP tokens from withdrawer (user signs as authority over their tokens)
                 crate::insurance_lp::burn(

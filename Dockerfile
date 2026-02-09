@@ -41,4 +41,6 @@ COPY --from=builder /app/packages/server/node_modules packages/server/node_modul
 
 EXPOSE 3001
 
+USER node
+
 CMD ["node", "packages/server/dist/index.js"]

@@ -47,6 +47,7 @@ export class CrankService {
   private readonly oracleService: OracleService;
   private lastCycleResult = { success: 0, failed: 0, skipped: 0 };
   private _isRunning = false;
+  private _cycling = false;
 
   constructor(oracleService: OracleService, intervalMs?: number) {
     this.oracleService = oracleService;
@@ -218,6 +219,8 @@ export class CrankService {
     });
 
     this.timer = setInterval(async () => {
+      if (this._cycling) return; // Prevent overlapping cycles
+      this._cycling = true;
       try {
         const markets = await this.discover();
         if (markets.length > 0) {
@@ -228,6 +231,8 @@ export class CrankService {
         }
       } catch (err) {
         console.error("[CrankService] Cycle error:", err);
+      } finally {
+        this._cycling = false;
       }
     }, this.intervalMs);
   }

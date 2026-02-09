@@ -36,7 +36,7 @@ import {
 import * as fs from "fs";
 
 // Config
-const RPC_URL = "https://devnet.helius-rpc.com/?api-key=e568033d-06d6-49d1-ba90-b3564c91851b";
+const RPC_URL = "https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}";
 const PROGRAM_ID = new PublicKey("8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL"); // small
 const MATCHER_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
 const CRANK_WALLET = new PublicKey("2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm");
