@@ -13,6 +13,8 @@ export const config = {
   supabaseUrl: process.env.SUPABASE_URL ?? "",
   supabaseKey: process.env.SUPABASE_KEY ?? "",
   heliusApiKey: process.env.HELIUS_API_KEY ?? "",
+  fallbackRpcUrl: process.env.FALLBACK_RPC_URL ?? "https://api.devnet.solana.com",
   port: Number(process.env.PORT ?? 3001),
   crankIntervalMs: Number(process.env.CRANK_INTERVAL_MS ?? 10_000),
+  crankInactiveIntervalMs: Number(process.env.CRANK_INACTIVE_INTERVAL_MS ?? 60_000),
 } as const;
