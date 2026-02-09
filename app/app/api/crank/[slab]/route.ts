@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth, UNAUTHORIZED } from "@/lib/api-auth";
 import {
   Connection,
   Keypair,
