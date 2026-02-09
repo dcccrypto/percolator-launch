@@ -124,7 +124,7 @@ export class LiquidationService {
     try {
       const connection = getConnection();
       const keypair = loadKeypair(config.crankKeypair);
-      const programId = new PublicKey(config.programId);
+      const programId = market.programId;
 
       // Build multi-instruction tx: push price → crank → liquidate
       const instructions = [];

@@ -33,10 +33,22 @@ export class CrankService {
 
   async discover(): Promise<DiscoveredMarket[]> {
     const connection = getConnection();
-    const programId = new PublicKey(config.programId);
-    console.log(`[CrankService] Discovering markets for program ${config.programId}...`);
-    const discovered = await discoverMarkets(connection, programId);
-    console.log(`[CrankService] Found ${discovered.length} markets`);
+    const programIds = config.allProgramIds;
+    console.log(`[CrankService] Discovering markets across ${programIds.length} programs...`);
+    const results = await Promise.all(
+      programIds.map(async (id) => {
+        try {
+          const found = await discoverMarkets(connection, new PublicKey(id));
+          console.log(`[CrankService] Program ${id}: ${found.length} markets`);
+          return found;
+        } catch (e) {
+          console.warn(`[CrankService] Failed to discover on ${id}:`, e);
+          return [] as DiscoveredMarket[];
+        }
+      })
+    );
+    const discovered = results.flat();
+    console.log(`[CrankService] Found ${discovered.length} markets total`);
 
     for (const market of discovered) {
       const key = market.slabAddress.toBase58();
@@ -71,12 +83,12 @@ export class CrankService {
     try {
       // For admin oracle markets, push price first
       if (this.isAdminOracle(market)) {
-        await this.oracleService.pushPrice(slabAddress, market.config);
+        await this.oracleService.pushPrice(slabAddress, market.config, market.programId);
       }
 
       const connection = getConnection();
       const keypair = loadKeypair(config.crankKeypair);
-      const programId = new PublicKey(config.programId);
+      const programId = market.programId;
 
       const data = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
 

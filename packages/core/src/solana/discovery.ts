@@ -14,6 +14,8 @@ import {
  */
 export interface DiscoveredMarket {
   slabAddress: PublicKey;
+  /** The program that owns this slab account */
+  programId: PublicKey;
   header: SlabHeader;
   config: MarketConfig;
   engine: EngineState;
@@ -195,7 +197,7 @@ export async function discoverMarkets(
       const engine = parseEngineLight(data);
       const params = parseParams(data);
 
-      markets.push({ slabAddress: pubkey, header, config, engine, params });
+      markets.push({ slabAddress: pubkey, programId, header, config, engine, params });
     } catch (err) {
       console.warn(
         `[discoverMarkets] Failed to parse account ${pubkey.toBase58()}:`,

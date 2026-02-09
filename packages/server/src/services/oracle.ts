@@ -106,7 +106,7 @@ export class OracleService {
   }
 
   /** Push oracle price on-chain for admin-oracle market */
-  async pushPrice(slabAddress: string, marketConfig: MarketConfig): Promise<boolean> {
+  async pushPrice(slabAddress: string, marketConfig: MarketConfig, marketProgramId?: PublicKey): Promise<boolean> {
     const now = Date.now();
     const lastPush = this.lastPushTime.get(slabAddress) ?? 0;
     if (now - lastPush < this.rateLimitMs) return false;
@@ -122,7 +122,7 @@ export class OracleService {
       const connection = getConnection();
       const keypair = loadKeypair(config.crankKeypair);
       const slabPubkey = new PublicKey(slabAddress);
-      const programId = new PublicKey(config.programId);
+      const programId = marketProgramId ?? new PublicKey(config.programId);
 
       const data = encodePushOraclePrice({
         priceE6: priceEntry.priceE6,
