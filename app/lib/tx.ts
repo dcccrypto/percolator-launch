@@ -12,14 +12,57 @@ export interface SendTxParams {
   maxRetries?: number;
 }
 
+const POLL_INTERVAL_MS = 2000;
+const MAX_POLL_TIME_MS = 90_000;
+
 /**
- * Send a transaction with automatic retry on blockhash expiry.
+ * Poll getSignatureStatuses until confirmed or timeout.
+ * More reliable than confirmTransaction which can falsely report expiry.
+ */
+async function pollConfirmation(
+  connection: Connection,
+  signature: string,
+): Promise<void> {
+  const start = Date.now();
+
+  while (Date.now() - start < MAX_POLL_TIME_MS) {
+    try {
+      const resp = await connection.getSignatureStatuses([signature], {
+        searchTransactionHistory: false,
+      });
+      const status = resp.value[0];
+
+      if (status) {
+        if (status.err) {
+          throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+        }
+        if (
+          status.confirmationStatus === "confirmed" ||
+          status.confirmationStatus === "finalized"
+        ) {
+          return; // Success!
+        }
+      }
+    } catch (e) {
+      // If it's our own "Transaction failed" error, rethrow
+      if (e instanceof Error && e.message.startsWith("Transaction failed:")) throw e;
+      // Otherwise RPC hiccup — keep polling
+    }
+
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+
+  throw new Error(
+    `Confirmation timeout (${MAX_POLL_TIME_MS / 1000}s) — tx may still land. Check explorer: ${signature}`
+  );
+}
+
+/**
+ * Send a transaction with polling-based confirmation.
  *
- * Optimized for devnet reliability:
- * - skipPreflight for faster submission
- * - Higher priority fee to get included faster
- * - Retries with fresh blockhash on expiry
- * - 90s confirmation timeout
+ * Uses getSignatureStatuses polling instead of confirmTransaction,
+ * which can falsely report "block height exceeded" when the tx
+ * actually landed on-chain.
  */
 export async function sendTx({
   connection,
@@ -39,14 +82,12 @@ export async function sendTx({
     try {
       const tx = new Transaction();
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
-      // Higher priority fee for devnet — helps get included when congested
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       for (const ix of instructions) {
         tx.add(ix);
       }
 
-      // confirmed = freshest blockhash = max validity (~150 blocks / ~60s)
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = wallet.publicKey;
 
@@ -54,22 +95,16 @@ export async function sendTx({
         tx.partialSign(...signers);
       }
 
-      // Wallet popup here — approve quickly! Every second counts toward the ~60s window.
       const signed = await wallet.signTransaction(tx);
 
-      // skipPreflight = faster submission (saves ~200ms round-trip)
       const signature = await connection.sendRawTransaction(signed.serialize(), {
         skipPreflight: true,
         maxRetries: 5,
       });
 
-      // Longer timeout for devnet — 90 seconds
-      await Promise.race([
-        connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed"),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Confirmation timeout (90s) — tx may still land. Check explorer: " + signature)), 90_000)
-        ),
-      ]);
+      // Poll for confirmation instead of using confirmTransaction
+      // (confirmTransaction falsely reports "block height exceeded" on devnet)
+      await pollConfirmation(connection, signature);
 
       return signature;
     } catch (e) {
@@ -82,7 +117,6 @@ export async function sendTx({
         msg.includes("has expired");
 
       if (isBlockhashExpired && attempt < maxRetries) {
-        // Wait then retry with fresh blockhash
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
