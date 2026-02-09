@@ -30,6 +30,15 @@ export default function CreatePage() {
         takes about 60 seconds and some sol.
       </p>
 
+      <div className="mt-4 rounded-[4px] border border-[#7B61FF]/20 bg-[#7B61FF]/[0.05] p-4">
+        <p className="text-xs font-medium text-[#7B61FF] mb-2" style={{ fontFamily: "var(--font-space-grotesk)" }}>how it works</p>
+        <div className="flex flex-col gap-1 text-xs text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+          <span><span className="text-[#00FFB2]">1.</span> paste any solana token address</span>
+          <span><span className="text-[#00FFB2]">2.</span> set leverage &amp; fees</span>
+          <span><span className="text-[#00FFB2]">3.</span> your market goes live instantly</span>
+        </div>
+      </div>
+
       <div className="mt-2 text-xs text-[#5a6382]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
         small: ~0.5 SOL &middot; medium: ~2 SOL &middot; large: ~7 SOL
       </div>

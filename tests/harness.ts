@@ -93,8 +93,8 @@ import {
 // ============================================================================
 
 export const RPC_URL =
-  process.env.SOLANA_RPC_URL ||
-  process.env.SOLANA_RPC_URL ?? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
+  process.env.SOLANA_RPC_URL ??
+  `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
 
 // Active devnet program
 export const PROGRAM_ID = new PublicKey(
@@ -104,7 +104,9 @@ export const PROGRAM_ID = new PublicKey(
 export const CRANK_NO_CALLER = 65535;
 
 // Slab size is fixed at 992,560 for the deployed program (MAX_ACCOUNTS=4096)
-export const SLAB_SIZE = 992_560;
+// Slab sizes by tier: Small=62808, Medium=248760, Large=992560
+// Default to small to conserve devnet SOL
+export const SLAB_SIZE = Number(process.env.SLAB_SIZE ?? 62_808);
 
 // Default test parameters
 export const DEFAULT_FEE_PAYMENT = "2000000"; // 2 tokens

@@ -4,7 +4,7 @@ import { FC, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
-import { type Network, getConfig, setNetwork } from "@/lib/config";
+import { type Network, getConfig } from "@/lib/config";
 
 const WalletMultiButton = dynamic(
   () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
@@ -67,17 +67,11 @@ export const Header: FC = () => {
 
         {/* Right */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setNetwork(network === "mainnet" ? "devnet" : "mainnet")}
-            className={[
-              "rounded-[4px] px-2.5 py-1 text-xs font-bold border transition-colors",
-              network === "devnet"
-                ? "bg-transparent text-[#FFB800] border-[#FFB800]/20 hover:border-[#FFB800]/40"
-                : "bg-transparent text-[#00FFB2] border-[#00FFB2]/20 hover:border-[#00FFB2]/40",
-            ].join(" ")}
-          >
-            {network === "devnet" ? "devnet" : "mainnet"}
-          </button>
+          {network === "devnet" && (
+            <span className="rounded-[4px] px-2.5 py-1 text-xs font-bold border bg-transparent text-[#FFB800] border-[#FFB800]/20 select-none">
+              devnet
+            </span>
+          )}
 
           <div className="h-5 w-px bg-[#1a1a1f]" />
           <WalletMultiButton />

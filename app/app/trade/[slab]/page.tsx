@@ -72,6 +72,16 @@ function TradePageInner({ slab }: { slab: string }) {
         </div>
       </div>
 
+      {/* Quick start guide */}
+      <div className="mb-4 rounded-[4px] border border-[#1a1a1f] bg-[#111113] px-4 py-2.5 flex items-center gap-6 text-xs text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+        <span className="text-[#3f3f46]">quick start:</span>
+        <span><span className="text-[#00FFB2]">1</span> connect wallet</span>
+        <span className="text-[#1a1a1f]">→</span>
+        <span><span className="text-[#00FFB2]">2</span> deposit collateral</span>
+        <span className="text-[#1a1a1f]">→</span>
+        <span><span className="text-[#00FFB2]">3</span> trade</span>
+      </div>
+
       {/* Main grid */}
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Left column */}

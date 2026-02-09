@@ -162,11 +162,13 @@ export default function MarketsPage() {
               </>
             ) : (
               <>
-                <h3 className="text-base font-semibold text-white">no markets yet. be the main character.</h3>
-                <div className="mt-4">
+                <div className="mb-4 text-4xl">🧪</div>
+                <h3 className="text-lg font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>no markets yet — be the first to create one</h3>
+                <p className="mt-2 text-sm text-[#71717a]">launch a perpetual futures market for any solana token in under 60 seconds.</p>
+                <div className="mt-5">
                   <Link href="/create">
                     <button className="rounded-[4px] bg-[#00FFB2] px-5 py-2.5 text-sm font-bold text-[#09090b] transition-opacity hover:opacity-85">
-                      launch first market
+                      + launch first market
                     </button>
                   </Link>
                 </div>
