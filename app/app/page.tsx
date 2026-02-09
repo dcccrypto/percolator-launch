@@ -18,6 +18,42 @@ if (typeof window !== "undefined") {
 
 const CA = "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump";
 
+/* ─── Icons ─── */
+function IconLock({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+function IconFlame({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+    </svg>
+  );
+}
+
+function IconChart({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+    </svg>
+  );
+}
+
+function IconZap({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
 /* ─── Floating Orbs ─── */
 function BackgroundOrbs() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -79,12 +115,14 @@ function HeroTitle() {
           <GradientText className="font-bold">Percolator</GradientText>
         </span>
       </h1>
-      <p className="hero-word mx-auto mb-3 max-w-lg text-lg font-medium text-[#8B95B0] opacity-0 md:text-xl">
-        Permissionless perpetual futures on Solana
+      <p className="hero-word mx-auto mb-3 max-w-2xl text-lg font-medium text-[#c4cbde] opacity-0 md:text-xl">
+        Launch perpetual futures markets for any Solana token.
+        <br className="hidden sm:block" />
+        No code. No permission. One click.
       </p>
-      <p className="hero-word mx-auto mb-8 max-w-xl text-sm text-[#3D4563] opacity-0">
-        Deploy a leveraged perp market for any SPL token in one click.
-        Up to 20× leverage. No governance. No permission.
+      <p className="hero-word mx-auto mb-8 max-w-xl text-sm text-[#5a6382] opacity-0">
+        Pick any SPL token, set your leverage and fees, deploy on-chain.
+        Anyone can trade it immediately. Built on toly&apos;s Percolator program.
       </p>
     </div>
   );
@@ -102,7 +140,6 @@ export default function Home() {
     setCfg({ programId: c.programId ?? "", network: c.network ?? "devnet" });
   }, []);
 
-  // Animate CTAs on mount
   useEffect(() => {
     if (!ctaRef.current) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -135,6 +172,10 @@ export default function Home() {
     loadStats();
   }, []);
 
+  const hasRealStats = stats.markets > 0;
+  const hasRealMarkets = featured.length > 0 && featured.some((m) => m.volume_24h > 0);
+  const isDevnet = cfg.network === "devnet";
+
   return (
     <div className="relative overflow-hidden">
       <BackgroundOrbs />
@@ -142,91 +183,95 @@ export default function Home() {
       {/* Hero */}
       <div className="relative mx-auto max-w-5xl px-4 pb-16 pt-24 md:pt-32">
         <div className="text-center">
-          {/* Live badge */}
-          <ScrollReveal delay={0}>
-            <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#00FFB2]/10 bg-[#00FFB2]/[0.05] px-4 py-1.5 text-[12px] font-medium text-[#00FFB2]">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00FFB2] opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#00FFB2]" />
-              </span>
-              Live on Solana
-            </div>
-          </ScrollReveal>
+          {/* Network badge */}
+          {isDevnet && (
+            <ScrollReveal delay={0}>
+              <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#FFB800]/10 bg-[#FFB800]/[0.05] px-4 py-1.5 text-[12px] font-medium text-[#FFB800]">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#FFB800] opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#FFB800]" />
+                </span>
+                Devnet
+              </div>
+            </ScrollReveal>
+          )}
 
           <HeroTitle />
 
           {/* CTAs */}
           <div ref={ctaRef} className="mb-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link href="/create">
-              <GlowButton size="lg">Launch a Market →</GlowButton>
+              <GlowButton size="lg">Launch a Market</GlowButton>
             </Link>
             <Link href="/markets">
               <GlowButton variant="secondary" size="lg">Browse Markets</GlowButton>
             </Link>
           </div>
-
-          {/* CA */}
-          <button
-            onClick={copyCA}
-            className="group mx-auto flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-2.5 backdrop-blur-sm transition-all hover:border-[#00FFB2]/20 hover:bg-white/[0.04]"
-          >
-            <span className="text-[10px] font-bold tracking-widest text-[#00FFB2]">CA</span>
-            <code className="font-[var(--font-jetbrains-mono)] text-[11px] text-[#3D4563] transition-colors group-hover:text-[#8B95B0]">
-              {CA}
-            </code>
-            <span className="rounded-md bg-[#00FFB2]/10 px-2 py-0.5 text-[10px] font-bold text-[#00FFB2] transition-all group-hover:bg-[#00FFB2]/20">
-              {copied ? "✓ Copied" : "Copy"}
-            </span>
-          </button>
         </div>
       </div>
 
-      {/* Stats */}
-      <ScrollReveal>
-        <div className="relative mx-auto max-w-5xl px-4 pb-20">
-          <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-xl">
-            {[
-              { label: "Markets", value: stats.markets, prefix: "", suffix: "", decimals: 0 },
-              { label: "24h Volume", value: stats.volume / 1000, prefix: "$", suffix: "K", decimals: 0 },
-              { label: "Insurance", value: stats.insurance / 1000, prefix: "$", suffix: "K", decimals: 0 },
-            ].map((s) => (
-              <div key={s.label} className="p-6 text-center md:p-8">
-                <div className="text-2xl font-bold text-white md:text-3xl" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                  {s.value ? (
-                    <AnimatedNumber value={s.value} prefix={s.prefix} suffix={s.suffix} decimals={s.decimals} />
-                  ) : (
-                    "—"
-                  )}
+      {/* Stats — only show if there's real data */}
+      {hasRealStats && (
+        <ScrollReveal>
+          <div className="relative mx-auto max-w-5xl px-4 pb-20">
+            <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-xl">
+              {[
+                { label: "Markets Live", value: stats.markets, prefix: "", suffix: "", decimals: 0 },
+                { label: "24h Volume", value: stats.volume / 1000, prefix: "$", suffix: "K", decimals: 0 },
+                { label: "Insurance Pool", value: stats.insurance / 1000, prefix: "$", suffix: "K", decimals: 0 },
+              ].map((s) => (
+                <div key={s.label} className="p-6 text-center md:p-8">
+                  <div className="text-2xl font-bold text-white md:text-3xl" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                    {s.value ? (
+                      <AnimatedNumber value={s.value} prefix={s.prefix} suffix={s.suffix} decimals={s.decimals} />
+                    ) : (
+                      "—"
+                    )}
+                  </div>
+                  <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.2em] text-[#3D4563]">{s.label}</p>
                 </div>
-                <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.2em] text-[#3D4563]">{s.label}</p>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      </ScrollReveal>
+        </ScrollReveal>
+      )}
 
       {/* How it works */}
-      <div className="relative mx-auto max-w-5xl px-4 pb-20">
+      <div className="relative mx-auto max-w-5xl px-4 pb-24">
         <ScrollReveal>
-          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.25em] text-[#00FFB2]/60">Protocol</div>
-          <h2 className="mb-10 text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-            Three steps. One click.
+          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.25em] text-[#00FFB2]/60">How it works</div>
+          <h2 className="mb-4 text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+            Three steps to a live market
           </h2>
+          <p className="mb-10 max-w-xl text-sm text-[#5a6382]">
+            No contracts to write. No team to convince. You go from idea to tradeable perp in under a minute.
+          </p>
         </ScrollReveal>
 
         <div className="grid gap-4 md:grid-cols-3">
           {[
-            { num: "01", title: "Pick Token", desc: "Paste any Solana token mint. Metadata and live price auto-fetched from Jupiter.", icon: "🎯" },
-            { num: "02", title: "Set Params", desc: "Max leverage (2-20×), trading fees, initial liquidity. Full control.", icon: "⚙️" },
-            { num: "03", title: "Deploy", desc: "Market goes live on-chain instantly. Share the link. Anyone can trade.", icon: "🚀" },
+            {
+              num: "01",
+              title: "Choose a token",
+              desc: "Paste any Solana token mint address. Percolator pulls the metadata, logo, and live price automatically via Jupiter.",
+            },
+            {
+              num: "02",
+              title: "Configure your market",
+              desc: "Set max leverage (2-20x), trading fees, and initial insurance deposit. You control the economics. Defaults work fine too.",
+            },
+            {
+              num: "03",
+              title: "Deploy on-chain",
+              desc: "One transaction. Market is live immediately. Share the link — anyone with a Solana wallet can open long or short positions.",
+            },
           ].map((item, i) => (
             <ScrollReveal key={item.num} delay={i * 0.15}>
               <GlassCard glow className="h-full">
-                <div className="mb-4 flex items-center justify-between">
-                  <span className="font-[var(--font-jetbrains-mono)] text-xs text-[#00FFB2]/40">{item.num}</span>
-                  <span className="text-2xl">{item.icon}</span>
+                <div className="mb-6">
+                  <span className="font-[var(--font-jetbrains-mono)] text-xs font-bold text-[#00FFB2]/40">{item.num}</span>
                 </div>
-                <h3 className="mb-2 text-lg font-bold text-white">{item.title}</h3>
+                <h3 className="mb-3 text-lg font-bold text-white">{item.title}</h3>
                 <p className="text-sm leading-relaxed text-[#8B95B0]">{item.desc}</p>
               </GlassCard>
             </ScrollReveal>
@@ -234,25 +279,51 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Features bento */}
-      <div className="relative mx-auto max-w-5xl px-4 pb-20">
+      {/* Features */}
+      <div className="relative mx-auto max-w-5xl px-4 pb-24">
         <ScrollReveal>
-          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.25em] text-[#7B61FF]/60">Features</div>
-          <h2 className="mb-10 text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-            Built different.
+          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.25em] text-[#7B61FF]/60">Why Percolator</div>
+          <h2 className="mb-4 text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+            What makes this different
           </h2>
+          <p className="mb-10 max-w-xl text-sm text-[#5a6382]">
+            Most perp DEXs pick which tokens to list. Here, you do.
+          </p>
         </ScrollReveal>
 
         <div className="grid gap-4 md:grid-cols-2">
           {[
-            { icon: "🔓", title: "Permissionless", desc: "No whitelisting. No governance. Anyone can deploy a market for any SPL token. Protocol is immutable.", accent: "#00FFB2" },
-            { icon: "🔥", title: "Deflationary", desc: "Every trade pays fees into the insurance fund. Admin keys can be burned — fees permanently locked.", accent: "#FF4466" },
-            { icon: "📊", title: "Real Leverage", desc: "Up to 20× on any token. Long or short with real on-chain settlement. Pure perpetual futures.", accent: "#7B61FF" },
-            { icon: "⚡", title: "Solana Speed", desc: "Sub-second execution. Negligible gas. Automated keepers. Oracle prices from Jupiter/DexScreener.", accent: "#FFB800" },
+            {
+              icon: <IconLock className="text-[#00FFB2]" />,
+              title: "Anyone can deploy a market",
+              desc: "No whitelisting, no governance votes, no waiting. Paste a token mint, click deploy. The protocol doesn't gate what gets listed — you decide.",
+              accent: "#00FFB2",
+            },
+            {
+              icon: <IconFlame className="text-[#FF4466]" />,
+              title: "Fees fund the insurance pool",
+              desc: "Every trade sends a cut to the market's insurance fund. This backs liquidations and keeps the market solvent. Admin keys can be burned to lock fees permanently.",
+              accent: "#FF4466",
+            },
+            {
+              icon: <IconChart className="text-[#7B61FF]" />,
+              title: "Up to 20x leverage, long or short",
+              desc: "Real on-chain perpetual futures with configurable leverage. Positions are settled against the insurance pool. No synthetic wrapping or off-chain matching.",
+              accent: "#7B61FF",
+            },
+            {
+              icon: <IconZap className="text-[#FFB800]" />,
+              title: "Solana-native performance",
+              desc: "Trades settle in under a second. Costs a fraction of a cent. Prices sourced from Jupiter and DexScreener oracles. Automated keepers handle liquidations.",
+              accent: "#FFB800",
+            },
           ].map((f, i) => (
             <ScrollReveal key={f.title} delay={i * 0.1}>
               <GlassCard hover glow={false} className="group h-full">
-                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.04] text-2xl transition-all duration-300 group-hover:scale-110 group-hover:bg-white/[0.08]" style={{ boxShadow: `0 0 20px ${f.accent}10` }}>
+                <div
+                  className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.04] transition-all duration-300 group-hover:scale-110 group-hover:bg-white/[0.08]"
+                  style={{ boxShadow: `0 0 20px ${f.accent}10` }}
+                >
                   {f.icon}
                 </div>
                 <h3 className="mb-2 text-base font-bold text-white">{f.title}</h3>
@@ -263,13 +334,13 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Featured markets */}
-      {featured.length > 0 && (
-        <div className="relative mx-auto max-w-5xl px-4 pb-20">
+      {/* Featured markets — only show if there are real markets with volume */}
+      {hasRealMarkets ? (
+        <div className="relative mx-auto max-w-5xl px-4 pb-24">
           <ScrollReveal>
-            <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.25em] text-[#00FFB2]/60">Active</div>
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.25em] text-[#00FFB2]/60">Markets</div>
             <h2 className="mb-8 text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-              Top Markets
+              Active markets
             </h2>
           </ScrollReveal>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -278,7 +349,7 @@ export default function Home() {
                 <Link href={`/trade/${m.slab_address}`}>
                   <GlassCard hover glow className="group cursor-pointer">
                     <div className="mb-2 text-base font-bold text-white transition-colors group-hover:text-[#00FFB2]">
-                      {m.symbol ? `${m.symbol}/USD` : `${m.slab_address.slice(0, 6)}…`}
+                      {m.symbol ? `${m.symbol}/USD` : `${m.slab_address.slice(0, 6)}...`}
                     </div>
                     <div className="font-[var(--font-jetbrains-mono)] text-xs text-[#3D4563]">
                       Vol: <span className="text-[#8B95B0]">{m.volume_24h >= 1000 ? `$${(m.volume_24h / 1000).toFixed(1)}K` : `$${m.volume_24h.toLocaleString()}`}</span>
@@ -292,6 +363,21 @@ export default function Home() {
             ))}
           </div>
         </div>
+      ) : (
+        <div className="relative mx-auto max-w-5xl px-4 pb-24">
+          <ScrollReveal>
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.25em] text-[#00FFB2]/60">Markets</div>
+            <h2 className="mb-4 text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+              Be the first to launch
+            </h2>
+            <p className="mb-8 text-sm text-[#5a6382]">
+              No markets deployed yet. Create the first perpetual futures market on Percolator.
+            </p>
+            <Link href="/create">
+              <GlowButton variant="secondary">Create a Market</GlowButton>
+            </Link>
+          </ScrollReveal>
+        </div>
       )}
 
       {/* Bottom CTA */}
@@ -301,37 +387,43 @@ export default function Home() {
             <h2 className="mb-4 text-4xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
               Ready to launch?
             </h2>
-            <p className="mb-8 text-[#8B95B0]">Deploy your own perpetual futures market in under 60 seconds.</p>
+            <p className="mb-8 text-[#8B95B0]">Deploy a perpetual futures market in under 60 seconds.</p>
             <Link href="/create">
-              <GlowButton size="lg">Launch a Market →</GlowButton>
+              <GlowButton size="lg">Launch a Market</GlowButton>
             </Link>
           </div>
         </div>
       </ScrollReveal>
 
-      {/* On-chain info */}
+      {/* Footer */}
       <div className="relative mx-auto max-w-5xl px-4 pb-8">
-        <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-[#3D4563]">
-          <span>
-            Program:{" "}
-            <a href={`https://explorer.solana.com/address/${cfg.programId}?cluster=${cfg.network}`} target="_blank" rel="noopener noreferrer" className="font-[var(--font-jetbrains-mono)] text-[#8B95B0] transition-colors hover:text-[#00FFB2]">
-              {cfg.programId ? `${cfg.programId.slice(0, 6)}…${cfg.programId.slice(-6)}` : "Loading..."}
+        <div className="flex flex-col items-center gap-4 border-t border-white/[0.04] pt-8">
+          {/* CA — subtle, not the main focus */}
+          <button
+            onClick={copyCA}
+            className="group flex items-center gap-2 text-[11px] text-[#3D4563] transition-colors hover:text-[#5a6382]"
+          >
+            <span className="font-bold tracking-wider text-[#00FFB2]/40">CA</span>
+            <code className="font-[var(--font-jetbrains-mono)]">
+              {CA.slice(0, 8)}...{CA.slice(-6)}
+            </code>
+            <span className="text-[#00FFB2]/40 transition-colors group-hover:text-[#00FFB2]">
+              {copied ? "copied" : "copy"}
+            </span>
+          </button>
+
+          {/* Links */}
+          <div className="flex flex-wrap items-center justify-center gap-6 text-[11px] text-[#3D4563]">
+            <a href={`https://explorer.solana.com/address/${cfg.programId}?cluster=${cfg.network}`} target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#8B95B0]">
+              Program: <span className="font-[var(--font-jetbrains-mono)]">{cfg.programId ? `${cfg.programId.slice(0, 6)}...${cfg.programId.slice(-4)}` : "..."}</span>
             </a>
-          </span>
-          <span className="text-[#1a2040]">|</span>
-          <span>
-            Token:{" "}
-            <a href={`https://solscan.io/token/${CA}`} target="_blank" rel="noopener noreferrer" className="font-[var(--font-jetbrains-mono)] text-[#8B95B0] transition-colors hover:text-[#00FFB2]">
-              {CA.slice(0, 6)}…{CA.slice(-4)}
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#8B95B0]">
+              GitHub
             </a>
-          </span>
-          <span className="text-[#1a2040]">|</span>
-          <span>
-            Built on{" "}
-            <a href="https://x.com/aaboroday" target="_blank" rel="noopener noreferrer" className="text-[#8B95B0] transition-colors hover:text-[#00FFB2]">
-              toly&apos;s Percolator
+            <a href="https://x.com/aaboroday" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-[#8B95B0]">
+              Built on toly&apos;s Percolator
             </a>
-          </span>
+          </div>
         </div>
       </div>
     </div>
