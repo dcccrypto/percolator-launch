@@ -13,23 +13,25 @@ import { MarketBookCard } from "@/components/trade/MarketBookCard";
 import { PriceChart } from "@/components/trade/PriceChart";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { ShareButton } from "@/components/market/ShareCard";
-import { GlassCard } from "@/components/ui/GlassCard";
 import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 
-function Collapsible({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <GlassCard padding="none" hover={false}>
+    <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-[#8B95B0] transition-colors hover:text-[#F0F4FF] md:hidden"
+        className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-[#71717a] transition-colors hover:text-[#fafafa]"
       >
-        {title}
-        <span className={`text-xs text-[#3D4563] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▼</span>
+        <span className="flex items-center gap-2">
+          {title}
+          {badge}
+        </span>
+        <span className={`text-xs text-[#3f3f46] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>v</span>
       </button>
-      <div className={`${open ? "block" : "hidden"} md:block`}>{children}</div>
-    </GlassCard>
+      <div className={open ? "block" : "hidden"}>{children}</div>
+    </div>
   );
 }
 
@@ -37,31 +39,24 @@ function TradePageInner({ slab }: { slab: string }) {
   const { engine } = useSlabState();
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
-  const containerRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
 
-  // Page entrance animation
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!pageRef.current) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    const panels = containerRef.current.querySelectorAll(".trade-panel");
-    gsap.fromTo(
-      panels,
-      { opacity: 0, y: 20 },
-      { opacity: 1, y: 0, duration: 0.5, stagger: 0.08, ease: "power3.out", delay: 0.1 }
-    );
+    gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
   }, []);
 
   return (
-    <div ref={containerRef} className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-8">
+    <div ref={pageRef} className="mx-auto max-w-7xl px-4 py-6 opacity-0">
       {/* Header */}
-      <div className="trade-panel mb-4 flex flex-wrap items-center gap-3 sm:mb-6 sm:gap-4">
+      <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-white sm:text-2xl" style={{ fontFamily: "var(--font-space-grotesk)" }}>Trade</h1>
-          <p className="truncate font-[var(--font-jetbrains-mono)] text-[10px] text-[#3D4563] sm:text-xs">{slab}</p>
+          <h1 className="text-xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>trade</h1>
+          <p className="truncate text-[11px] text-[#3f3f46]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{slab}</p>
         </div>
-        {health && <HealthBadge level={health.level} />}
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-4">
+          {health && <HealthBadge level={health.level} />}
           <ShareButton
             slabAddress={slab}
             marketName="TOKEN"
@@ -69,8 +64,7 @@ function TradePageInner({ slab }: { slab: string }) {
           />
           {priceUsd != null && (
             <div className="text-right">
-              <div className="text-[10px] text-[#3D4563] sm:text-xs">Jupiter Price</div>
-              <div className="font-[var(--font-jetbrains-mono)] text-base font-bold text-white sm:text-lg">
+              <div className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                 ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}
               </div>
             </div>
@@ -79,50 +73,40 @@ function TradePageInner({ slab }: { slab: string }) {
       </div>
 
       {/* Main grid */}
-      <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         {/* Left column */}
-        <div className="space-y-4 sm:space-y-5 lg:col-span-2">
-          <GlassCard padding="none" hover={false} className="trade-panel overflow-hidden">
+        <div className="space-y-4 lg:col-span-2">
+          <div className="overflow-hidden rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
             <PriceChart slabAddress={slab} />
-          </GlassCard>
-          <GlassCard padding="none" hover={false} className="trade-panel">
+          </div>
+          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
             <TradeForm slabAddress={slab} />
-          </GlassCard>
-          <div className="trade-panel">
-            <GlassCard padding="none" hover={false}>
-              <PositionPanel slabAddress={slab} />
-            </GlassCard>
+          </div>
+          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+            <PositionPanel slabAddress={slab} />
           </div>
         </div>
 
         {/* Right column */}
-        <div className="space-y-4 sm:space-y-5">
-          <div className="trade-panel">
-            <GlassCard padding="none" hover={false}>
-              <AccountsCard />
-            </GlassCard>
+        <div className="space-y-4">
+          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+            <AccountsCard />
           </div>
-          <div className="trade-panel">
-            <GlassCard padding="none" hover={false}>
-              <DepositWithdrawCard slabAddress={slab} />
-            </GlassCard>
+          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+            <DepositWithdrawCard slabAddress={slab} />
           </div>
-          <div className="trade-panel">
-            <Collapsible title="Engine Health" defaultOpen={false}>
-              <EngineHealthCard />
-            </Collapsible>
-          </div>
-          <div className="trade-panel">
-            <GlassCard padding="none" hover={false}>
-              <MarketStatsCard />
-            </GlassCard>
+          <Collapsible title="engine health" defaultOpen={false} badge={health && <HealthBadge level={health.level} />}>
+            <EngineHealthCard />
+          </Collapsible>
+          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+            <MarketStatsCard />
           </div>
         </div>
       </div>
 
       {/* Full-width */}
-      <div className="trade-panel mt-4 sm:mt-5">
-        <Collapsible title="Market Book" defaultOpen={false}>
+      <div className="mt-4">
+        <Collapsible title="market book" defaultOpen={false}>
           <MarketBookCard />
         </Collapsible>
       </div>
