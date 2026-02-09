@@ -53,7 +53,10 @@ export default function MarketsPage() {
   // Page fade in
   useEffect(() => {
     if (!pageRef.current) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      pageRef.current.style.opacity = "1";
+      return;
+    }
     gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
   }, []);
 
@@ -94,7 +97,7 @@ export default function MarketsPage() {
   const loading = discoveryLoading || supabaseLoading;
 
   return (
-    <div ref={pageRef} className="min-h-[calc(100vh-48px)] opacity-0">
+    <div ref={pageRef} className="min-h-[calc(100vh-48px)] gsap-fade">
       <div className="mx-auto max-w-5xl px-4 py-10">
         {/* Header */}
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">

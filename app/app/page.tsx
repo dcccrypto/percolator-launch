@@ -23,7 +23,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!pageRef.current) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      pageRef.current.style.opacity = "1";
+      return;
+    }
     gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
   }, []);
 
@@ -59,7 +62,7 @@ export default function Home() {
   const hasMarkets = featured.length > 0 && featured.some((m) => m.volume_24h > 0);
 
   return (
-    <div ref={pageRef} className="opacity-0">
+    <div ref={pageRef} className="gsap-fade">
       {/* Hero */}
       <div className="mx-auto max-w-3xl px-4 pt-32 pb-20 md:pt-44 md:pb-28">
         <h1

@@ -17,12 +17,15 @@ export default function CreatePage() {
 
   useEffect(() => {
     if (!pageRef.current) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      pageRef.current.style.opacity = "1";
+      return;
+    }
     gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
   }, []);
 
   return (
-    <div ref={pageRef} className="mx-auto max-w-3xl px-4 py-10 opacity-0">
+    <div ref={pageRef} className="mx-auto max-w-3xl px-4 py-10 gsap-fade">
       <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
         launch a market
       </h1>

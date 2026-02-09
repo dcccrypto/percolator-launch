@@ -45,12 +45,15 @@ function TradePageInner({ slab }: { slab: string }) {
 
   useEffect(() => {
     if (!pageRef.current) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      pageRef.current.style.opacity = "1";
+      return;
+    }
     gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
   }, []);
 
   return (
-    <div ref={pageRef} className="mx-auto max-w-7xl px-4 py-6 opacity-0">
+    <div ref={pageRef} className="mx-auto max-w-7xl px-4 py-6 gsap-fade">
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="min-w-0">

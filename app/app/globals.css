@@ -30,6 +30,21 @@ body {
 }
 
 /* ─── Shimmer (simplified) ─── */
+/* ─── GSAP fade-in fallback ─── */
+/* Pages start with opacity-0 for GSAP animation. This ensures they become
+   visible even if GSAP fails to load, JS is slow, or reduced-motion is on. */
+.gsap-fade {
+  opacity: 0;
+  animation: gsap-fallback 0s ease forwards;
+  animation-delay: 0.4s; /* give GSAP 400ms to take over, then force visible */
+}
+
+@keyframes gsap-fallback {
+  to { opacity: 1; }
+}
+
+/* If GSAP ran successfully, it sets inline opacity — the animation is overridden */
+
 @keyframes shimmer {
   0% { opacity: 0.5; }
   50% { opacity: 1; }
