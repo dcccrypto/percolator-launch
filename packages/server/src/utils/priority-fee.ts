@@ -10,7 +10,8 @@ interface PriorityFeeResponse {
 export async function estimatePriorityFee(accountKeys: string[] = []): Promise<number> {
   try {
     await acquireToken();
-    const url = `https://mainnet.helius-rpc.com/?api-key=${config.heliusApiKey}`;
+    // H6: Use configured RPC, not hardcoded mainnet
+    const url = config.rpcUrl;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

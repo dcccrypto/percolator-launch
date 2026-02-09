@@ -4,6 +4,10 @@ import type { OracleService } from "../services/oracle.js";
 import type { PriceEngine } from "../services/PriceEngine.js";
 import { eventBus } from "../services/events.js";
 
+// H2: Configurable limits
+const MAX_WS_CONNECTIONS = Number(process.env.MAX_WS_CONNECTIONS ?? 500);
+const MAX_BUFFER_BYTES = 64 * 1024; // 64KB
+
 interface WsClient {
   ws: WebSocket;
   subscriptions: Set<string>;
@@ -15,10 +19,11 @@ export function setupWebSocket(
   priceEngine?: PriceEngine,
 ): WebSocketServer {
   const wss = new WebSocketServer({ server });
-  const clients: WsClient[] = [];
+  // H2: Use Set for O(1) removal
+  const clients = new Set<WsClient>();
 
   // Broadcast price updates to subscribed clients
-  eventBus.on("price.updated", (payload) => {
+  eventBus.on("price.updated", (payload: any) => {
     const msg = JSON.stringify({
       type: "price.updated",
       slabAddress: payload.slabAddress,
@@ -29,16 +34,25 @@ export function setupWebSocket(
     for (const client of clients) {
       if (
         client.ws.readyState === WebSocket.OPEN &&
-        (client.subscriptions.has(payload.slabAddress) || client.subscriptions.has("*"))
+        client.subscriptions.has(payload.slabAddress) // H2: removed default "*" — must explicitly subscribe
       ) {
+        // H2: Check bufferedAmount before sending
+        if (client.ws.bufferedAmount > MAX_BUFFER_BYTES) continue;
         client.ws.send(msg);
       }
     }
   });
 
   wss.on("connection", (ws) => {
-    const client: WsClient = { ws, subscriptions: new Set(["*"]) };
-    clients.push(client);
+    // H2: Reject if at max connections
+    if (clients.size >= MAX_WS_CONNECTIONS) {
+      ws.close(1013, "Max connections reached");
+      return;
+    }
+
+    // H2: No default "*" subscription — clients must explicitly subscribe
+    const client: WsClient = { ws, subscriptions: new Set() };
+    clients.add(client);
 
     ws.send(JSON.stringify({ type: "connected", message: "Percolator WebSocket connected" }));
 
@@ -48,26 +62,28 @@ export function setupWebSocket(
         if (msg.type === "subscribe" && msg.slabAddress) {
           client.subscriptions.add(msg.slabAddress);
 
-          // Also subscribe PriceEngine to this slab for Helius real-time updates
           if (priceEngine) {
             priceEngine.subscribeToSlab(msg.slabAddress);
           }
 
           ws.send(JSON.stringify({ type: "subscribed", slabAddress: msg.slabAddress }));
 
-          // Send current price if available (try PriceEngine first)
+          // Send current price if available
           const enginePrice = priceEngine?.getLatestPrice(msg.slabAddress);
           const oraclePrice = oracleService.getCurrentPrice(msg.slabAddress);
           const price = enginePrice ?? oraclePrice;
           if (price) {
-            ws.send(
-              JSON.stringify({
-                type: "price.updated",
-                slabAddress: msg.slabAddress,
-                data: { priceE6: price.priceE6.toString(), source: price.source },
-                timestamp: price.timestamp,
-              }),
-            );
+            // H2: Check buffer before sending
+            if (ws.bufferedAmount <= MAX_BUFFER_BYTES) {
+              ws.send(
+                JSON.stringify({
+                  type: "price.updated",
+                  slabAddress: msg.slabAddress,
+                  data: { priceE6: price.priceE6.toString(), source: price.source },
+                  timestamp: price.timestamp,
+                }),
+              );
+            }
           }
         } else if (msg.type === "unsubscribe" && msg.slabAddress) {
           client.subscriptions.delete(msg.slabAddress);
@@ -79,8 +95,8 @@ export function setupWebSocket(
     });
 
     ws.on("close", () => {
-      const idx = clients.indexOf(client);
-      if (idx >= 0) clients.splice(idx, 1);
+      // H2: O(1) removal with Set
+      clients.delete(client);
     });
   });
 

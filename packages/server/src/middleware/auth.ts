@@ -9,7 +9,6 @@ export function requireApiKey() {
   return async (c: Context, next: Next) => {
     const apiAuthKey = process.env.API_AUTH_KEY;
     if (!apiAuthKey) {
-      // Dev mode — no auth required
       return next();
     }
     const provided = c.req.header("x-api-key");

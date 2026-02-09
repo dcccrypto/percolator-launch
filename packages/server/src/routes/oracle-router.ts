@@ -17,9 +17,15 @@ export function oracleRouterRoutes(): Hono {
       return c.json({ error: "Invalid mint address" }, 400);
     }
 
+    // Evict expired entries on every read
+    const now = Date.now();
+    for (const [key, entry] of cache) {
+      if (now >= entry.expiresAt) cache.delete(key);
+    }
+
     // Check cache
     const cached = cache.get(mint);
-    if (cached && Date.now() < cached.expiresAt) {
+    if (cached && now < cached.expiresAt) {
       return c.json({ ...cached.result, cached: true });
     }
 
@@ -28,14 +34,6 @@ export function oracleRouterRoutes(): Hono {
 
       // Cache the result
       cache.set(mint, { result, expiresAt: Date.now() + CACHE_TTL_MS });
-
-      // Evict old entries if cache grows too large
-      if (cache.size > 500) {
-        const now = Date.now();
-        for (const [key, entry] of cache) {
-          if (now >= entry.expiresAt) cache.delete(key);
-        }
-      }
 
       return c.json({ ...result, cached: false });
     } catch (err: any) {

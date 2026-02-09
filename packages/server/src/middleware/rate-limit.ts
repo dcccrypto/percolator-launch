@@ -1,11 +1,5 @@
 import type { Context, Next } from "hono";
 
-/**
- * H1: Simple in-memory rate limiter.
- * Read endpoints: 60 req/min per IP.
- * Write endpoints: 10 req/min per IP.
- */
-
 interface RateBucket {
   count: number;
   resetAt: number;
@@ -13,12 +7,10 @@ interface RateBucket {
 
 const readBuckets = new Map<string, RateBucket>();
 const writeBuckets = new Map<string, RateBucket>();
-
 const WINDOW_MS = 60_000;
 const READ_LIMIT = 60;
 const WRITE_LIMIT = 10;
 
-// Cleanup stale buckets every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of readBuckets) if (v.resetAt <= now) readBuckets.delete(k);
@@ -42,8 +34,7 @@ function checkLimit(buckets: Map<string, RateBucket>, ip: string, limit: number)
 
 export function readRateLimit() {
   return async (c: Context, next: Next) => {
-    const ip = getClientIp(c);
-    if (!checkLimit(readBuckets, ip, READ_LIMIT)) {
+    if (!checkLimit(readBuckets, getClientIp(c), READ_LIMIT)) {
       return c.json({ error: "Rate limit exceeded" }, 429);
     }
     return next();
@@ -52,8 +43,7 @@ export function readRateLimit() {
 
 export function writeRateLimit() {
   return async (c: Context, next: Next) => {
-    const ip = getClientIp(c);
-    if (!checkLimit(writeBuckets, ip, WRITE_LIMIT)) {
+    if (!checkLimit(writeBuckets, getClientIp(c), WRITE_LIMIT)) {
       return c.json({ error: "Rate limit exceeded" }, 429);
     }
     return next();

@@ -85,4 +85,24 @@ if (config.crankKeypair) {
   console.warn("⚠️  CRANK_KEYPAIR not set — crank service disabled");
 }
 
+// Graceful shutdown
+async function shutdown(signal: string) {
+  console.log(`${signal} received, shutting down...`);
+  try {
+    priceEngine.stop();
+    crankService.stop();
+    liquidationService.stop();
+    insuranceService.stop();
+    if (server && typeof (server as any).close === "function") {
+      (server as any).close();
+    }
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+  }
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
 export { app };
