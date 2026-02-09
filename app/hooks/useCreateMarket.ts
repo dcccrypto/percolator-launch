@@ -47,6 +47,13 @@ const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
 const ALL_ZEROS_FEED = "0".repeat(64);
 const MATCHER_CTX_SIZE = 320; // Minimum context size for percolator matcher
 
+export interface VammParams {
+  spreadBps: number;
+  impactKBps: number;
+  maxTotalBps: number;
+  liquidityE6: string;
+}
+
 export interface CreateMarketParams {
   mint: PublicKey;
   initialPriceE6: bigint;
@@ -66,6 +73,8 @@ export interface CreateMarketParams {
   name?: string;
   /** Token decimals */
   decimals?: number;
+  /** vAMM configuration — if provided, uses custom params instead of defaults */
+  vammParams?: VammParams;
 }
 
 export interface CreateMarketState {
@@ -361,15 +370,17 @@ export function useCreateMarket() {
           });
 
           // 2. Initialize vAMM matcher (Tag 2, 66 bytes)
+          // Use custom vAMM params if provided, otherwise defaults
+          const vp = params.vammParams;
           const vammData = new Uint8Array(66);
           const vammDv = new DataView(vammData.buffer);
           let off = 0;
           vammData[off] = 2; off += 1;             // Tag 2 = InitVamm
           vammData[off] = 0; off += 1;             // mode 0 = passive
-          vammDv.setUint32(off, 50, true); off += 4;   // tradingFeeBps
-          vammDv.setUint32(off, 50, true); off += 4;   // baseSpreadBps
-          vammDv.setUint32(off, 200, true); off += 4;  // maxTotalBps
-          vammDv.setUint32(off, 0, true); off += 4;    // impactKBps
+          vammDv.setUint32(off, vp?.spreadBps ?? 50, true); off += 4;   // tradingFeeBps
+          vammDv.setUint32(off, vp?.spreadBps ?? 50, true); off += 4;   // baseSpreadBps
+          vammDv.setUint32(off, vp?.maxTotalBps ?? 200, true); off += 4;  // maxTotalBps
+          vammDv.setUint32(off, vp?.impactKBps ?? 0, true); off += 4;    // impactKBps
           vammDv.setBigUint64(off, 10_000_000_000_000n, true); off += 8;
           vammDv.setBigUint64(off, 0n, true); off += 8;
           vammDv.setBigUint64(off, 1_000_000_000_000n, true); off += 8;

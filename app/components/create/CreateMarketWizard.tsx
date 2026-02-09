@@ -145,6 +145,14 @@ const QuickLaunchPanel: FC<{
       symbol: c.symbol ?? "UNKNOWN",
       name: c.name ?? "Unknown Token",
       decimals: c.decimals ?? 6,
+      ...(enableVamm && {
+        vammParams: {
+          spreadBps: vammSpreadBps,
+          impactKBps: vammImpactKBps,
+          maxTotalBps: vammMaxTotalBps,
+          liquidityE6: vammLiquidityE6,
+        },
+      }),
     };
     create(params);
   };
@@ -473,6 +481,13 @@ export const CreateMarketWizard: FC = () => {
 
   const [openStep, setOpenStep] = useState(1);
 
+  // vAMM state (manual wizard)
+  const [enableVammManual, setEnableVammManual] = useState(false);
+  const [vammSpreadBpsManual, setVammSpreadBpsManual] = useState(10);
+  const [vammImpactKBpsManual, setVammImpactKBpsManual] = useState(100);
+  const [vammMaxTotalBpsManual, setVammMaxTotalBpsManual] = useState(200);
+  const [vammLiquidityE6Manual, setVammLiquidityE6Manual] = useState("10000000");
+
   const mintValid = isValidBase58Pubkey(mint);
   const mintPk = useMemo(() => (mintValid ? new PublicKey(mint) : null), [mint, mintValid]);
   const tokenMeta = useTokenMeta(mintPk);
@@ -563,6 +578,14 @@ export const CreateMarketWizard: FC = () => {
       symbol: symbol || "UNKNOWN",
       name: tokenMeta?.name || "Unknown Token",
       decimals: decimals,
+      ...(enableVammManual && {
+        vammParams: {
+          spreadBps: vammSpreadBpsManual,
+          impactKBps: vammImpactKBpsManual,
+          maxTotalBps: vammMaxTotalBpsManual,
+          liquidityE6: vammLiquidityE6Manual,
+        },
+      }),
     };
     create(params);
   };
@@ -582,6 +605,14 @@ export const CreateMarketWizard: FC = () => {
       initialMarginBps,
       maxAccounts: selectedTier.maxAccounts,
       slabDataSize: selectedTier.dataSize,
+      ...(enableVammManual && {
+        vammParams: {
+          spreadBps: vammSpreadBpsManual,
+          impactKBps: vammImpactKBpsManual,
+          maxTotalBps: vammMaxTotalBpsManual,
+          liquidityE6: vammLiquidityE6Manual,
+        },
+      }),
     };
     create(params, state.step);
   };
