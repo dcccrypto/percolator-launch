@@ -7,32 +7,45 @@ const CA = "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump";
 
 export const Footer: FC = () => {
   return (
-    <footer className="border-t border-[#1a1d2a] bg-[#080a0f]">
-      <div className="mx-auto max-w-[1800px] px-4 py-8">
-        <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
+    <footer className="relative border-t border-white/[0.04] bg-[#06080d]">
+      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#00FFB2]/10 to-transparent" />
+
+      <div className="mx-auto max-w-7xl px-4 py-10">
+        <div className="flex flex-col items-center justify-between gap-8 sm:flex-row">
           {/* Left */}
           <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-2 text-sm font-bold text-white">
-              <div className="relative flex h-5 w-5 items-center justify-center">
-                <div className="absolute inset-0 rounded bg-[#00d4aa] opacity-20 blur-sm" />
-                <span className="relative text-[10px] font-black text-[#00d4aa]">⬡</span>
+            <Link href="/" className="group flex items-center gap-2 text-sm font-bold text-white transition-all">
+              <div className="relative flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-[#00FFB2] to-[#00d4aa] transition-all group-hover:shadow-[0_0_15px_rgba(0,255,178,0.3)]">
+                <span className="text-[9px] font-black text-[#06080d]">P</span>
               </div>
               Percolator
             </Link>
-            <span className="text-[11px] text-[#2a2f40]">Permissionless perps on Solana</span>
+            <span className="text-[11px] text-[#3D4563]">Permissionless perps on Solana</span>
           </div>
 
           {/* Center links */}
-          <div className="flex items-center gap-4 text-[11px]">
-            <Link href="/create" className="text-[#4a5068] transition-colors hover:text-white">Launch</Link>
-            <Link href="/markets" className="text-[#4a5068] transition-colors hover:text-white">Markets</Link>
-            <a href="https://x.com/i/communities/1980346190404415886" target="_blank" rel="noopener noreferrer" className="text-[#4a5068] transition-colors hover:text-white">X Community</a>
-            <a href="https://github.com/dcccrypto/percolator-launch" target="_blank" rel="noopener noreferrer" className="text-[#4a5068] transition-colors hover:text-white">GitHub</a>
-            <a href={`https://solscan.io/token/${CA}`} target="_blank" rel="noopener noreferrer" className="text-[#4a5068] transition-colors hover:text-white">Solscan</a>
+          <div className="flex items-center gap-6 text-[12px]">
+            {[
+              { href: "/create", label: "Launch", ext: false },
+              { href: "/markets", label: "Markets", ext: false },
+              { href: "https://x.com/i/communities/1980346190404415886", label: "X Community", ext: true },
+              { href: "https://github.com/dcccrypto/percolator-launch", label: "GitHub", ext: true },
+              { href: `https://solscan.io/token/${CA}`, label: "Solscan", ext: true },
+            ].map((link) =>
+              link.ext ? (
+                <a key={link.label} href={link.href} target="_blank" rel="noopener noreferrer" className="text-[#3D4563] transition-all duration-200 hover:text-[#00FFB2]">
+                  {link.label}
+                </a>
+              ) : (
+                <Link key={link.label} href={link.href} className="text-[#3D4563] transition-all duration-200 hover:text-[#00FFB2]">
+                  {link.label}
+                </Link>
+              )
+            )}
           </div>
 
           {/* Right: CA */}
-          <div className="data-cell text-[10px] text-[#1a1d2a]">{CA}</div>
+          <div className="font-[var(--font-jetbrains-mono)] text-[10px] text-[#1a2040] select-all">{CA}</div>
         </div>
       </div>
     </footer>
