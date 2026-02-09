@@ -238,7 +238,7 @@ export class PriceEngine {
 
     const msgId = this.rpcMsgId++;
     // Store pending mapping: msgId -> slabAddress (resolved in handleMessage)
-    this._pendingSubResponses.set(msgId, slabAddress);
+    this._pendingSubResponses.set(msgId, { slabAddress, timestamp: Date.now() });
 
     this.ws.send(JSON.stringify({
       jsonrpc: "2.0",
@@ -251,19 +251,19 @@ export class PriceEngine {
     }));
   }
 
-  private _pendingSubResponses = new Map<number, string>();
+  private _pendingSubResponses = new Map<number, { slabAddress: string; timestamp: number }>();
 
   private handleMessage(msg: Record<string, unknown>): void {
     // Subscription response: { id, result: subscriptionId }
     if (msg.id !== undefined && msg.result !== undefined) {
       const msgId = msg.id as number;
       const subId = msg.result as number;
-      const slabAddress = this._pendingSubResponses.get(msgId);
-      if (slabAddress) {
+      const pending = this._pendingSubResponses.get(msgId);
+      if (pending) {
         this._pendingSubResponses.delete(msgId);
-        this.subscriptionIds.set(subId, slabAddress);
-        this.slabToSubId.set(slabAddress, subId);
-        console.log(`[PriceEngine] Subscribed to ${slabAddress} (sub=${subId})`);
+        this.subscriptionIds.set(subId, pending.slabAddress);
+        this.slabToSubId.set(pending.slabAddress, subId);
+        console.log(`[PriceEngine] Subscribed to ${pending.slabAddress} (sub=${subId})`);
       }
       return;
     }
