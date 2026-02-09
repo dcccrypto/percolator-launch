@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth, UNAUTHORIZED } from "@/lib/api-auth";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getServiceClient } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
@@ -20,6 +21,7 @@ export async function GET() {
 
 // POST /api/markets — register a new market after deployment
 export async function POST(req: NextRequest) {
+  if (!requireAuth(req)) return UNAUTHORIZED;
   const body = await req.json();
 
   const {

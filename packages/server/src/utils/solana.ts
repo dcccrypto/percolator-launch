@@ -1,14 +1,7 @@
 import { Connection, Keypair, Transaction, TransactionInstruction, SendOptions } from "@solana/web3.js";
-import { config } from "../config.js";
+import { acquireToken, getPrimaryConnection, getFallbackConnection, backoffMs } from "./rpc-client.js";
 
-let _connection: Connection | null = null;
-
-export function getConnection(): Connection {
-  if (!_connection) {
-    _connection = new Connection(config.rpcUrl, "confirmed");
-  }
-  return _connection;
-}
+export { getPrimaryConnection as getConnection, getFallbackConnection };
 
 /** Base58 alphabet */
 const B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -45,6 +38,14 @@ export function loadKeypair(raw: string): Keypair {
   return Keypair.fromSecretKey(base58Decode(trimmed));
 }
 
+function is429(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return msg.includes("429") || msg.includes("too many requests") || msg.includes("rate limit");
+  }
+  return false;
+}
+
 export async function sendWithRetry(
   connection: Connection,
   ix: TransactionInstruction,
@@ -54,6 +55,7 @@ export async function sendWithRetry(
   let lastErr: unknown;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
+      await acquireToken();
       const tx = new Transaction().add(ix);
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
@@ -61,12 +63,17 @@ export async function sendWithRetry(
       tx.sign(...signers);
 
       const opts: SendOptions = { skipPreflight: false, preflightCommitment: "confirmed" };
+      await acquireToken();
       const sig = await connection.sendRawTransaction(tx.serialize(), opts);
+      await acquireToken();
       await connection.confirmTransaction(sig, "confirmed");
       return sig;
     } catch (err) {
       lastErr = err;
-      const delay = Math.min(1000 * 2 ** attempt, 8000);
+      const delay = is429(err)
+        ? backoffMs(attempt, 2000, 30_000)
+        : Math.min(1000 * 2 ** attempt, 8000);
+      console.warn(`[sendWithRetry] Attempt ${attempt + 1}/${maxRetries} failed, retrying in ${Math.round(delay)}ms`);
       await new Promise((r) => setTimeout(r, delay));
     }
   }

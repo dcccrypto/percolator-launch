@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { acquireToken } from "./rpc-client.js";
 
 interface PriorityFeeResponse {
   result?: {
@@ -8,6 +9,7 @@ interface PriorityFeeResponse {
 
 export async function estimatePriorityFee(accountKeys: string[] = []): Promise<number> {
   try {
+    await acquireToken();
     const url = `https://mainnet.helius-rpc.com/?api-key=${config.heliusApiKey}`;
     const res = await fetch(url, {
       method: "POST",

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth, UNAUTHORIZED } from "@/lib/api-auth";
 import { getServiceClient } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
@@ -7,6 +8,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ slab: string }> }
 ) {
+  if (!requireAuth(req)) return UNAUTHORIZED;
   const { slab } = await params;
 
   // Simple API key auth for services

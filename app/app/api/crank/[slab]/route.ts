@@ -98,6 +98,7 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ slab: string }> },
 ) {
+  if (!requireAuth(req)) return UNAUTHORIZED;
   const { slab: slabStr } = await params;
 
   const payer = getKeypair();
