@@ -1,0 +1,58 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'packages/**'
+
+jobs:
+  typecheck:
+    name: TypeScript Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install root deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install app deps
+        run: cd app && pnpm install --frozen-lockfile
+
+      - name: TypeScript check
+        run: npx tsc --noEmit -p app/tsconfig.json
+
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install root deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install app deps
+        run: cd app && pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: cd app && npx next lint --quiet
+        continue-on-error: true  # Don't block PRs on lint warnings initially
