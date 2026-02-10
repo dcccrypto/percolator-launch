@@ -52,7 +52,9 @@ export class OracleService {
 
       const pair = json.pairs?.[0];
       if (!pair?.priceUsd) return null;
-      return BigInt(Math.round(parseFloat(pair.priceUsd) * 1_000_000));
+      const parsed = parseFloat(pair.priceUsd);
+      if (!isFinite(parsed) || parsed <= 0) return null;
+      return BigInt(Math.round(parsed * 1_000_000));
     } catch {
       return null;
     }
@@ -65,7 +67,9 @@ export class OracleService {
       const json = (await res.json()) as JupiterResponse;
       const priceStr = json.data?.[mint]?.price;
       if (!priceStr) return null;
-      return BigInt(Math.round(parseFloat(priceStr) * 1_000_000));
+      const parsed = parseFloat(priceStr);
+      if (!isFinite(parsed) || parsed <= 0) return null;
+      return BigInt(Math.round(parsed * 1_000_000));
     } catch {
       return null;
     }

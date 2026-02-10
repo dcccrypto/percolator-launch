@@ -622,6 +622,8 @@ export function computeVammQuote(
   if (isLong) {
     return (oraclePriceE6 * (BPS_DENOM + totalBps)) / BPS_DENOM;
   } else {
+    // Prevent underflow: if totalBps >= BPS_DENOM, price would go negative
+    if (totalBps >= BPS_DENOM) return 1n; // minimum 1 micro-dollar
     return (oraclePriceE6 * (BPS_DENOM - totalBps)) / BPS_DENOM;
   }
 }

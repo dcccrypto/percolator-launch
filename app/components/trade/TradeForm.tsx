@@ -95,7 +95,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     (pct: number) => {
       if (capital <= 0n) return;
       const amount = (capital * BigInt(pct)) / 100n;
-      setMarginInput((amount / 1_000_000n).toString());
+      // Format with full decimal precision to avoid truncation
+      setMarginInput(formatPerc(amount));
     },
     [capital]
   );
@@ -274,7 +275,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           />
           <button
             onClick={() => {
-              if (capital > 0n) setMarginInput((capital / 1_000_000n).toString());
+              if (capital > 0n) setMarginInput(formatPerc(capital));
             }}
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-[var(--accent-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/20"
           >

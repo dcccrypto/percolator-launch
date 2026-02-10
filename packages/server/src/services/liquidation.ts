@@ -76,12 +76,21 @@ export class LiquidationService {
           if (account.kind !== 0) continue;  // 0 = User
           if (account.positionSize === 0n) continue;  // No position
 
-          // Calculate margin health
-          // Margin ratio = (capital + pnl) / |positionSize * price / 1e6|
+          // Calculate margin health using mark-to-market PnL (not stale on-chain pnl)
+          // On-chain pnl is only updated during cranks; between cranks it can be stale
           const notional = absBI(account.positionSize) * price / 1_000_000n;
           if (notional === 0n) continue;
 
-          const equity = account.capital + account.pnl;
+          // Compute mark PnL: (oracle - entry) * |pos| / oracle for longs
+          const entryPrice = account.entryPrice;
+          let markPnl = 0n;
+          if (entryPrice > 0n && price > 0n) {
+            const diff = account.positionSize > 0n
+              ? price - entryPrice
+              : entryPrice - price;
+            markPnl = (diff * absBI(account.positionSize)) / price;
+          }
+          const equity = account.capital + markPnl;
 
           // H4: If equity <= 0, definitely liquidatable (skip ratio calc)
           if (equity <= 0n) {
@@ -91,8 +100,8 @@ export class LiquidationService {
               owner: account.owner.toBase58(),
               positionSize: account.positionSize,
               capital: account.capital,
-              pnl: account.pnl,
-              marginRatio: equity <= 0n ? 0 : -1,
+              pnl: markPnl,
+              marginRatio: 0,
               maintenanceMarginBps,
             });
             continue;
@@ -108,7 +117,7 @@ export class LiquidationService {
               owner: account.owner.toBase58(),
               positionSize: account.positionSize,
               capital: account.capital,
-              pnl: account.pnl,
+              pnl: markPnl,
               marginRatio: Number(marginRatioBps) / 100,
               maintenanceMarginBps,
             });
