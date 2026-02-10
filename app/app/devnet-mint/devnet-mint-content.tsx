@@ -282,43 +282,47 @@ const DevnetMintContent: FC = () => {
   }, [publicKey, signTransaction, existingMint, mintMoreAmount, recipient, refreshBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cardClass =
-    "rounded-sm bg-[var(--panel-bg)] border border-[var(--border)] p-6";
+    "bg-[var(--panel-bg)] border border-[var(--border)] p-6";
   const btnPrimary =
-    "rounded-sm bg-[var(--long)] px-5 py-2.5 text-sm font-semibold text-white transition-all duration-150 hover:bg-[var(--long)]/80 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none";
+    "border border-[var(--accent)]/40 text-[var(--accent)] bg-transparent px-5 py-2.5 text-sm font-semibold transition-all duration-200 hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.08] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100";
   const inputClass =
-    "w-full rounded-sm bg-[var(--panel-bg)] border border-[var(--border)] px-3 py-2 text-sm text-white placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none transition-shadow duration-200";
+    "w-full bg-[var(--panel-bg)] border border-[var(--border)] px-3 py-2 text-sm text-white placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none transition-shadow duration-200";
 
   /* ---- Loading skeleton while wallet connects ---- */
   if (!connected) {
     return (
-      <div className="min-h-screen bg-[var(--panel-bg)] px-4 py-12">
-        <div className="mx-auto max-w-xl space-y-6">
-          <div className="text-center">
-            <h1 className="text-3xl font-extrabold text-white">
-              Devnet Token Factory
-            </h1>
-            <p className="mt-2 text-sm text-[var(--text-secondary)]">
-              Create SPL tokens on devnet for testing with the launch wizard
-            </p>
+      <div className="min-h-[calc(100vh-48px)] relative">
+        <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+        <div className="relative mx-auto max-w-4xl px-4 py-10">
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+            // faucet
           </div>
+          <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <span className="font-normal text-white/50">Devnet </span>Token Factory
+          </h1>
+          <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">
+            Create SPL tokens on devnet for testing with the launch wizard.
+          </p>
 
-          {/* Step 1 - Connect Wallet (always visible) */}
-          <ScrollReveal delay={0}>
-            <div className={cardClass}>
-              <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-                Step 1 · Connect Wallet
-              </h2>
-              <p className="text-sm text-[var(--warning)]">
-                Connect your wallet using the button in the header
-              </p>
-            </div>
-          </ScrollReveal>
+          <div className="max-w-xl space-y-6">
+            {/* Step 1 - Connect Wallet (always visible) */}
+            <ScrollReveal delay={0}>
+              <div className={cardClass}>
+                <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">
+                  Step 1 · Connect Wallet
+                </h2>
+                <p className="text-sm text-[var(--warning)]">
+                  Connect your wallet using the button in the header
+                </p>
+              </div>
+            </ScrollReveal>
 
-          {/* Shimmer skeleton placeholders for remaining steps */}
-          <ShimmerSkeleton className="h-[88px]" />
-          <ShimmerSkeleton className="h-[200px]" />
-          <ShimmerSkeleton className="h-[100px]" />
-          <ShimmerSkeleton className="h-[220px]" />
+            {/* Shimmer skeleton placeholders for remaining steps */}
+            <ShimmerSkeleton className="h-[88px]" />
+            <ShimmerSkeleton className="h-[200px]" />
+            <ShimmerSkeleton className="h-[100px]" />
+            <ShimmerSkeleton className="h-[220px]" />
+          </div>
         </div>
       </div>
     );
@@ -328,23 +332,23 @@ const DevnetMintContent: FC = () => {
   const stepCards = [
     // Step 1 - Wallet
     <div key="step1" className={cardClass}>
-      <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)]">
+      <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">
         Step 1 · Connect Wallet
       </h2>
-      <p className="text-sm text-[var(--long)]">
+      <p className="text-sm text-[var(--accent)]">
         Connected: <span className="font-mono text-xs">{publicKey?.toBase58()}</span>
       </p>
     </div>,
 
     // Step 2 - Airdrop
     <div key="step2" className={cardClass}>
-      <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)]">
+      <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">
         Step 2 · Devnet SOL
       </h2>
       <div className="flex items-center justify-between">
         <span className="text-sm text-white">
           Balance:{" "}
-          <span className="font-mono text-[var(--long)]">
+          <span className="font-mono text-[var(--accent)]">
             {balance !== null ? `${balance.toFixed(4)} SOL` : "…"}
           </span>
         </span>
@@ -356,7 +360,7 @@ const DevnetMintContent: FC = () => {
 
     // Step 3 - Config
     <div key="step3" className={cardClass}>
-      <h2 className="mb-4 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)]">
+      <h2 className="mb-4 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">
         Step 3 · Token Config
       </h2>
       <div className="space-y-3">
@@ -416,7 +420,7 @@ const DevnetMintContent: FC = () => {
 
     // Step 4 - Create
     <div key="step4" className={cardClass}>
-      <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)]">
+      <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">
         Step 4 · Create &amp; Mint
       </h2>
       <button
@@ -430,7 +434,7 @@ const DevnetMintContent: FC = () => {
 
     // Mint More - existing token
     <div key="mintmore" className={cardClass}>
-      <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)]">
+      <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">
         Mint More (Existing Token)
       </h2>
       <p className="mb-3 text-xs text-[var(--text-muted)]">Already deployed a market? Mint more of the same token to your wallet.</p>
@@ -466,16 +470,24 @@ const DevnetMintContent: FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-[var(--panel-bg)] px-4 py-12">
-      <div className="mx-auto max-w-xl space-y-6">
-        <div className="text-center">
-          <h1 className="text-3xl font-extrabold text-white">
-            Devnet Token Factory
-          </h1>
-          <p className="mt-2 text-sm text-[var(--text-secondary)]">
-            Create SPL tokens on devnet for testing with the launch wizard
-          </p>
-        </div>
+    <div className="min-h-[calc(100vh-48px)] relative">
+      <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+      <div className="relative mx-auto max-w-4xl px-4 py-10">
+        <ScrollReveal>
+          <div className="mb-8">
+            <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+              // faucet
+            </div>
+            <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+              <span className="font-normal text-white/50">Devnet </span>Token Factory
+            </h1>
+            <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
+              Create SPL tokens on devnet for testing with the launch wizard.
+            </p>
+          </div>
+        </ScrollReveal>
+
+      <div className="max-w-xl space-y-6">
 
         {/* Step cards with staggered scroll reveals */}
         {stepCards.map((card, i) => (
@@ -493,7 +505,7 @@ const DevnetMintContent: FC = () => {
         {mintAddress && (
           <div
             ref={successCardRef}
-            className={`${cardClass} border-[var(--long)]/30`}
+            className={`${cardClass} border-[var(--accent)]/30`}
             style={prefersReducedMotion ? undefined : { opacity: 0 }}
           >
             <div className="mb-3 flex items-center gap-2">
@@ -503,7 +515,7 @@ const DevnetMintContent: FC = () => {
                   style={{ backgroundColor: mintColor }}
                 />
               )}
-              <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--long)]">
+              <h2 className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--accent)]">
                 {tokenName} ({tokenSymbol}) Created
               </h2>
             </div>
@@ -522,12 +534,13 @@ const DevnetMintContent: FC = () => {
               href={`https://explorer.solana.com/address/${mintAddress}?cluster=devnet`}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-3 inline-block text-sm text-[var(--long)] underline hover:text-[var(--long)]/80"
+              className="mt-3 inline-block text-sm text-[var(--accent)] underline hover:text-[var(--accent)]/80"
             >
               View on Solana Explorer
             </a>
           </div>
         )}
+      </div>
       </div>
     </div>
   );
