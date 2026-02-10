@@ -4,22 +4,60 @@ import { FC, useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { isMockSlab, getMockPriceHistory } from "@/lib/mock-trade-data";
 
 interface PricePoint {
   price_e6: number;
   timestamp: number;
 }
 
+const DEFAULT_W = 600;
+const H = 200;
+const PAD = { top: 16, bottom: 20, left: 8, right: 8 };
+const CHART_H = H - PAD.top - PAD.bottom;
+
+function fmtPrice(p: number) {
+  return p < 0.01 ? p.toFixed(6) : p < 1 ? p.toFixed(4) : p.toFixed(2);
+}
+
 export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { config, engine } = useSlabState();
+  const { config } = useSlabState();
   const [prices, setPrices] = useState<PricePoint[]>([]);
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const polylineRef = useRef<SVGPolylineElement>(null);
   const polygonRef = useRef<SVGPolygonElement>(null);
   const prefersReduced = usePrefersReducedMotion();
 
-  // Accumulate prices from on-chain slab state (polled every 3s by SlabProvider)
+  // --- Dynamic width via callback ref (fires when chart div mounts) ---
+  const [W, setW] = useState(DEFAULT_W);
+  const CHART_W = W - PAD.left - PAD.right;
+  const roRef = useRef<ResizeObserver | null>(null);
+  const chartWrapCallback = useCallback((node: HTMLDivElement | null) => {
+    if (roRef.current) { roRef.current.disconnect(); roRef.current = null; }
+    if (!node) return;
+    const w = node.clientWidth;
+    if (w > 0) setW(w);
+    const ro = new ResizeObserver(entries => {
+      const cw = entries[0]?.contentRect.width;
+      if (cw && cw > 0) setW(cw);
+    });
+    ro.observe(node);
+    roRef.current = ro;
+  }, []);
+
+  // --- Crosshair refs (direct DOM manipulation, zero re-renders) ---
+  const crosshairRef = useRef<SVGGElement>(null);
+  const crossVLineRef = useRef<SVGLineElement>(null);
+  const crossHLineRef = useRef<SVGLineElement>(null);
+  const crossOuterRef = useRef<SVGCircleElement>(null);
+  const crossInnerRef = useRef<SVGCircleElement>(null);
+  const crossTimeBgRef = useRef<SVGRectElement>(null);
+  const crossTimeTextRef = useRef<SVGTextElement>(null);
+  const hoverPriceRef = useRef<HTMLSpanElement>(null);
+  const hoverDateRef = useRef<HTMLDivElement>(null);
+  const svgRectRef = useRef<DOMRect | null>(null);
+
+  // Accumulate prices from on-chain slab state
   const lastPriceRef = useRef<number>(0);
   useEffect(() => {
     if (!config) return;
@@ -29,13 +67,18 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const now = Math.floor(Date.now() / 1000);
     setPrices(prev => {
       const next = [...prev, { price_e6: priceE6, timestamp: now }];
-      // Keep last 500 points
       return next.slice(-500);
     });
   }, [config]);
 
-  // Also try to load from API (if any history exists)
+  // Load from API or mock data
   useEffect(() => {
+    if (isMockSlab(slabAddress)) {
+      const mockPrices = getMockPriceHistory(slabAddress);
+      if (mockPrices.length > 0) setPrices(mockPrices);
+      return;
+    }
+
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     fetch(`/api/markets/${slabAddress}/prices?since=${since}&limit=500`)
       .then((r) => r.json())
@@ -46,7 +89,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         }));
         if (apiPrices.length > 0) {
           setPrices(prev => {
-            // Merge API + live, deduplicate by timestamp
             const merged = [...apiPrices, ...prev];
             const seen = new Set<number>();
             return merged.filter(p => {
@@ -60,54 +102,51 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       .catch(() => {});
   }, [slabAddress]);
 
-  const { points, minP, maxP, curPrice, high, low, isUp, minT, maxT } = useMemo(() => {
+  const { points, minP, maxP, curPrice, high, low, isUp, minT, maxT, vals, times } = useMemo(() => {
     if (prices.length === 0)
-      return { points: "", minP: 0, maxP: 0, curPrice: 0, high: 0, low: 0, isUp: true, minT: 0, maxT: 0 };
+      return { points: "", minP: 0, maxP: 0, curPrice: 0, high: 0, low: 0, isUp: true, minT: 0, maxT: 0, vals: [] as number[], times: [] as number[] };
 
-    const vals = prices.map((p) => p.price_e6 / 1e6);
-    const times = prices.map((p) => p.timestamp);
-    const mn = Math.min(...vals);
-    const mx = Math.max(...vals);
-    const tMin = Math.min(...times);
-    const tMax = Math.max(...times);
-    const range = mx - mn || 0.001;  // Small range for flat prices
+    const v = prices.map((p) => p.price_e6 / 1e6);
+    const t = prices.map((p) => p.timestamp);
+    const mn = Math.min(...v);
+    const mx = Math.max(...v);
+    const tMin = Math.min(...t);
+    const tMax = Math.max(...t);
+    const range = mx - mn || 0.001;
     const tRange = tMax - tMin || 1;
-
-    const W = 600;
-    const H = 160;
-    const pad = { top: 10, bottom: 30, left: 0, right: 0 };
-    const chartW = W - pad.left - pad.right;
-    const chartH = H - pad.top - pad.bottom;
 
     const pts = prices
       .map((p, i) => {
-        const x = pad.left + ((times[i] - tMin) / tRange) * chartW;
-        const y = pad.top + (1 - (vals[i] - mn) / range) * chartH;
+        const x = PAD.left + ((t[i] - tMin) / tRange) * CHART_W;
+        const y = PAD.top + (1 - (v[i] - mn) / range) * CHART_H;
         return `${x},${y}`;
       })
       .join(" ");
 
     return {
       points: pts,
-      minP: mn,
-      maxP: mx,
-      curPrice: vals[vals.length - 1],
-      high: mx,
-      low: mn,
-      isUp: vals[vals.length - 1] >= vals[0],
-      minT: tMin,
-      maxT: tMax,
+      minP: mn, maxP: mx,
+      curPrice: v[v.length - 1],
+      high: mx, low: mn,
+      isUp: v[v.length - 1] >= v[0],
+      minT: tMin, maxT: tMax,
+      vals: v, times: t,
     };
-  }, [prices]);
+  }, [prices, W]);
 
-  // Line draw animation via GSAP stroke-dashoffset
+  // Sync computed data to ref so imperative mouse handler reads latest values
+  const dataRef = useRef({ vals: [] as number[], times: [] as number[], minP: 0, maxP: 0, minT: 0, maxT: 0, curPrice: 0, isUp: true });
+  useEffect(() => {
+    dataRef.current = { vals, times, minP, maxP, minT, maxT, curPrice, isUp };
+  }, [vals, times, minP, maxP, minT, maxT, curPrice, isUp]);
+
+  // Line draw animation
   useEffect(() => {
     const line = polylineRef.current;
     const fill = polygonRef.current;
     if (!line || !fill || !points) return;
 
     if (prefersReduced) {
-      // No animation: show everything immediately
       line.style.strokeDasharray = "none";
       line.style.strokeDashoffset = "0";
       fill.style.opacity = "1";
@@ -115,35 +154,120 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
 
     const totalLength = line.getTotalLength();
-    // Set up the dash for the draw effect
     line.style.strokeDasharray = `${totalLength}`;
     line.style.strokeDashoffset = `${totalLength}`;
-    // Hide gradient fill initially
     fill.style.opacity = "0";
 
-    // Animate the line drawing
     gsap.to(line, {
       strokeDashoffset: 0,
       duration: 1,
       ease: "power2.out",
       onComplete: () => {
-        // Fade in gradient fill after line finishes drawing
-        gsap.to(fill, {
-          opacity: 1,
-          duration: 0.5,
-          ease: "power2.out",
-        });
+        gsap.to(fill, { opacity: 1, duration: 0.5, ease: "power2.out" });
       },
     });
   }, [points, prefersReduced]);
 
+  // --- Mouse handlers (direct DOM manipulation, no React state/re-render) ---
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    if (!svgRef.current || prices.length === 0) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const idx = Math.min(Math.max(Math.round(x * (prices.length - 1)), 0), prices.length - 1);
-    setHoveredIdx(idx);
-  }, [prices.length]);
+    const svg = svgRef.current;
+    if (!svg) return;
+    const d = dataRef.current;
+    if (d.vals.length === 0) return;
+
+    if (!svgRectRef.current) svgRectRef.current = svg.getBoundingClientRect();
+    const rect = svgRectRef.current;
+
+    const svgX = (e.clientX - rect.left) / rect.width * W;
+    const clampedX = Math.max(PAD.left, Math.min(W - PAD.right, svgX));
+    const pct = (svgX - PAD.left) / CHART_W;
+    const idx = Math.min(Math.max(Math.round(pct * (d.vals.length - 1)), 0), d.vals.length - 1);
+
+    const tRange = d.maxT - d.minT || 1;
+    const pRange = d.maxP - d.minP || 0.001;
+    const hoverX = PAD.left + ((d.times[idx] - d.minT) / tRange) * CHART_W;
+    const hoverY = PAD.top + (1 - (d.vals[idx] - d.minP) / pRange) * CHART_H;
+    const clr = d.isUp ? "#14F195" : "#FF3B5C";
+
+    // Show crosshair
+    crosshairRef.current?.setAttribute("display", "");
+
+    const vLine = crossVLineRef.current;
+    if (vLine) { vLine.setAttribute("x1", String(clampedX)); vLine.setAttribute("x2", String(clampedX)); }
+
+    const hLine = crossHLineRef.current;
+    if (hLine) { hLine.setAttribute("y1", String(hoverY)); hLine.setAttribute("y2", String(hoverY)); }
+
+    const outer = crossOuterRef.current;
+    if (outer) { outer.setAttribute("cx", String(hoverX)); outer.setAttribute("cy", String(hoverY)); outer.setAttribute("stroke", clr); }
+
+    const inner = crossInnerRef.current;
+    if (inner) { inner.setAttribute("cx", String(hoverX)); inner.setAttribute("cy", String(hoverY)); inner.setAttribute("fill", clr); }
+
+    const timeBg = crossTimeBgRef.current;
+    if (timeBg) timeBg.setAttribute("x", String(clampedX - 24));
+
+    const timeText = crossTimeTextRef.current;
+    if (timeText) {
+      timeText.setAttribute("x", String(clampedX));
+      const date = new Date(d.times[idx] * 1000);
+      timeText.textContent = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    // Update HTML hover displays
+    if (hoverPriceRef.current) {
+      hoverPriceRef.current.textContent = `$${fmtPrice(d.vals[idx])}`;
+      hoverPriceRef.current.style.color = clr;
+    }
+    if (hoverDateRef.current) {
+      const date = new Date(d.times[idx] * 1000);
+      hoverDateRef.current.textContent = date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+  }, [W, CHART_W]);
+
+  const handleMouseLeave = useCallback(() => {
+    crosshairRef.current?.setAttribute("display", "none");
+    svgRectRef.current = null;
+    const d = dataRef.current;
+    const clr = d.isUp ? "#14F195" : "#FF3B5C";
+    if (hoverPriceRef.current) {
+      hoverPriceRef.current.textContent = `$${fmtPrice(d.curPrice)}`;
+      hoverPriceRef.current.style.color = clr;
+    }
+    if (hoverDateRef.current) hoverDateRef.current.textContent = "\u00A0";
+  }, []);
+
+  // Invalidate cached SVG rect on resize
+  useEffect(() => { svgRectRef.current = null; }, [W]);
+
+  // Y-axis labels — must be before early return to keep hook order stable
+  const yLabels = useMemo(() => {
+    if (minP === maxP) return [];
+    const labels: { y: number; label: string }[] = [];
+    const count = 4;
+    for (let i = 0; i <= count; i++) {
+      const price = maxP - ((maxP - minP) * i) / count;
+      const y = PAD.top + (i / count) * CHART_H;
+      labels.push({ y, label: `$${fmtPrice(price)}` });
+    }
+    return labels;
+  }, [minP, maxP]);
+
+  // X-axis time labels
+  const timeLabels = useMemo(() => {
+    if (minT === maxT) return [];
+    const labels: { x: number; label: string }[] = [];
+    const count = 5;
+    for (let i = 0; i <= count; i++) {
+      const t = minT + ((maxT - minT) * i) / count;
+      const d = new Date(t * 1000);
+      labels.push({
+        x: PAD.left + (i / count) * CHART_W,
+        label: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      });
+    }
+    return labels;
+  }, [minT, maxT, W]);
 
   // Show current price even with just 1 data point
   const currentPrice = config
@@ -155,7 +279,7 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="flex h-[200px] flex-col items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
         {currentPrice > 0 ? (
           <>
-            <div className="text-2xl font-bold text-white">${currentPrice < 0.01 ? currentPrice.toFixed(6) : currentPrice.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-[var(--text)]">${currentPrice < 0.01 ? currentPrice.toFixed(6) : currentPrice.toFixed(2)}</div>
             <div className="mt-1 text-xs text-[var(--text-muted)]">Price chart building... (updates with each trade)</div>
           </>
         ) : (
@@ -169,25 +293,11 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   const color = isUp ? "#14F195" : "#FF3B5C";
-  const hoveredPrice = hoveredIdx !== null ? prices[hoveredIdx].price_e6 / 1e6 : null;
-  const hoveredTime = hoveredIdx !== null ? new Date(prices[hoveredIdx].timestamp * 1000) : null;
 
-  const fmtPrice = (p: number) => (p < 0.01 ? p.toFixed(6) : p < 1 ? p.toFixed(4) : p.toFixed(2));
-
-  const timeLabels = useMemo(() => {
-    if (minT === maxT) return [];
-    const labels: { x: number; label: string }[] = [];
-    const count = 5;
-    for (let i = 0; i <= count; i++) {
-      const t = minT + ((maxT - minT) * i) / count;
-      const d = new Date(t * 1000);
-      labels.push({
-        x: (i / count) * 100,
-        label: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      });
-    }
-    return labels;
-  }, [minT, maxT]);
+  // Current price Y position for dashed line
+  const curPriceY = minP !== maxP
+    ? PAD.top + (1 - (curPrice - minP) / (maxP - minP)) * CHART_H
+    : null;
 
   return (
     <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-3">
@@ -195,67 +305,118 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <span className="text-[var(--text-secondary)]">Price</span>
         <div className="flex gap-3">
           <span className="text-[var(--text-muted)]">
-            H: <span className="text-white">${fmtPrice(high)}</span>
+            24h High <span className="font-bold text-[var(--text)]">${fmtPrice(high)}</span>
           </span>
           <span className="text-[var(--text-muted)]">
-            L: <span className="text-white">${fmtPrice(low)}</span>
+            24h Low <span className="font-bold text-[var(--text)]">${fmtPrice(low)}</span>
           </span>
-          <span style={{ color }}>
-            ${fmtPrice(hoveredPrice ?? curPrice)}
+          <span ref={hoverPriceRef} className="font-bold" style={{ color }}>
+            ${fmtPrice(curPrice)}
           </span>
         </div>
       </div>
-      {hoveredTime && (
-        <div className="mb-1 text-right text-[10px] text-[var(--text-muted)]">
-          {hoveredTime.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-        </div>
-      )}
-      <svg
-        ref={svgRef}
-        viewBox="0 0 600 160"
-        className="w-full"
-        style={{ height: 160 }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoveredIdx(null)}
-      >
-        <defs>
-          <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <polygon
-          ref={polygonRef}
-          points={`${points} 600,130 0,130`}
-          fill="url(#chartGrad)"
-          style={{ opacity: prefersReduced ? 1 : 0 }}
-        />
-        <polyline
-          ref={polylineRef}
-          points={points}
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-        />
-        {prices.length > 0 && (() => {
-          const lastPts = points.split(" ");
-          const last = lastPts[lastPts.length - 1];
-          const [cx, cy] = last.split(",");
-          return (
-            <circle
-              cx={cx}
-              cy={cy}
-              r="3"
-              fill={color}
-              className="animate-[pulse-glow_2s_ease-in-out_infinite]"
+      <div ref={hoverDateRef} className="mb-1 h-4 text-right text-[10px] text-[var(--text-muted)]">
+        {"\u00A0"}
+      </div>
+      <div ref={chartWrapCallback}>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          className="w-full"
+          style={{ height: 200 }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
+          <defs>
+            <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
+          {/* Horizontal grid lines */}
+          {yLabels.map((yl, i) => (
+            <line key={`grid-${i}`} x1={PAD.left} y1={yl.y} x2={W - PAD.right} y2={yl.y} style={{ stroke: "var(--border-subtle)" }} strokeWidth="1" />
+          ))}
+
+          {/* Y-axis labels — overlaid inside chart */}
+          {yLabels.map((yl, i) => (
+            <text key={`ylabel-${i}`} x={PAD.left + 4} y={yl.y - 4} textAnchor="start" style={{ fill: "var(--text-dim)" }} fontSize="9">{yl.label}</text>
+          ))}
+
+          {/* Current price dashed line */}
+          {curPriceY !== null && (
+            <>
+              <line x1={PAD.left} y1={curPriceY} x2={W - PAD.right} y2={curPriceY} stroke={color} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
+              <rect x={W - PAD.right - 52} y={curPriceY - 8} width={50} height={16} rx="2" fill={color} opacity="0.2" />
+              <text x={W - PAD.right - 4} y={curPriceY + 3} textAnchor="end" fill={color} fontSize="9" fontWeight="bold">${fmtPrice(curPrice)}</text>
+            </>
+          )}
+
+          {/* Area fill */}
+          <polygon
+            ref={polygonRef}
+            points={`${PAD.left},${PAD.top + CHART_H} ${points} ${W - PAD.right},${PAD.top + CHART_H}`}
+            fill="url(#chartGrad)"
+            style={{ opacity: prefersReduced ? 1 : 0 }}
+          />
+
+          {/* Price line */}
+          <polyline
+            ref={polylineRef}
+            points={points}
+            fill="none"
+            stroke={color}
+            strokeWidth="2"
+          />
+
+          {/* Pulse dot at last price */}
+          {prices.length > 0 && (() => {
+            const lastPts = points.split(" ");
+            const last = lastPts[lastPts.length - 1];
+            const [cx, cy] = last.split(",");
+            return (
+              <circle
+                cx={cx}
+                cy={cy}
+                r="3"
+                fill={color}
+                className="animate-[pulse-glow_2s_ease-in-out_infinite]"
+              />
+            );
+          })()}
+
+          {/* Crosshair — always rendered, toggled via display attr */}
+          <g ref={crosshairRef} display="none">
+            <line
+              ref={crossVLineRef}
+              x1="0" y1={PAD.top} x2="0" y2={PAD.top + CHART_H}
+              style={{ stroke: "var(--accent)" }} strokeWidth="1" opacity="0.3"
             />
-          );
-        })()}
-      </svg>
-      <div className="relative mt-1 flex justify-between text-[10px] text-[var(--text-muted)]">
-        {timeLabels.map((tl, i) => (
-          <span key={i}>{tl.label}</span>
-        ))}
+            <line
+              ref={crossHLineRef}
+              x1={PAD.left} y1="0" x2={W - PAD.right} y2="0"
+              style={{ stroke: "var(--accent)" }} strokeWidth="1" strokeDasharray="3 3" opacity="0.3"
+            />
+            <circle ref={crossOuterRef} cx="0" cy="0" r="4" fill="none" strokeWidth="2" />
+            <circle ref={crossInnerRef} cx="0" cy="0" r="2" />
+            <rect
+              ref={crossTimeBgRef}
+              x="0" y={PAD.top + CHART_H + 2} width={48} height={14} rx="2"
+              style={{ fill: "var(--accent)" }} opacity="0.15"
+            />
+            <text
+              ref={crossTimeTextRef}
+              x="0" y={PAD.top + CHART_H + 12} textAnchor="middle"
+              style={{ fill: "var(--accent)" }} fontSize="8"
+            />
+          </g>
+
+          {/* X-axis labels */}
+          {timeLabels.map((tl, i) => (
+            <text key={`time-${i}`} x={tl.x} y={H - 4} textAnchor="middle" style={{ fill: "var(--text-dim)" }} fontSize="9">{tl.label}</text>
+          ))}
+        </svg>
       </div>
     </div>
   );

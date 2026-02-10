@@ -24,6 +24,7 @@ import {
   type RiskParams,
   type Account,
 } from "@percolator/core";
+import { isMockSlab, getMockSlabState } from "@/lib/mock-trade-data";
 
 export interface SlabState {
   /** The slab account address this provider is tracking */
@@ -69,6 +70,26 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
   useEffect(() => {
     if (!slabAddress) {
       setState((s) => ({ ...s, slabAddress, loading: false, error: "No slab address" }));
+      return;
+    }
+
+    // Mock data mode — use synthetic data for design testing
+    if (isMockSlab(slabAddress)) {
+      const mock = getMockSlabState(slabAddress);
+      if (mock) {
+        setState({
+          slabAddress,
+          raw: null,
+          header: mock.header,
+          config: mock.config,
+          engine: mock.engine,
+          params: mock.params,
+          accounts: mock.accounts,
+          loading: false,
+          error: null,
+          programId: null,
+        });
+      }
       return;
     }
 
