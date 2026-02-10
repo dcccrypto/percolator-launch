@@ -352,7 +352,7 @@ const ENGINE_ACCOUNTS_OFF = 9136;       // accounts offset for 4096 variant
 function slabLayout(maxAccounts: number) {
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
-  const postBitmap = 24; // last_crank_slot(8) + current_slot(8) + padding(8)
+  const postBitmap = 24; // num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) + pad(6)
   const nextFreeBytes = maxAccounts * 2;
   // Align to 16 bytes for Account (u128 fields)
   const preAccountsLen = 408 + bitmapBytes + postBitmap + nextFreeBytes;
@@ -523,7 +523,7 @@ function readU128LE(buf: Uint8Array, offset: number): bigint {
  */
 export function parseParams(data: Uint8Array): RiskParams {
   const base = ENGINE_OFF + ENGINE_PARAMS_OFF;
-  if (data.length < base + 160) {  // RiskParams is 160 bytes with repr(C) padding
+  if (data.length < base + 144) {  // RiskParams is 144 bytes (5×u64 + 4×u128 + 3×u64 + 1×u128)
     throw new Error("Slab data too short for RiskParams");
   }
 
