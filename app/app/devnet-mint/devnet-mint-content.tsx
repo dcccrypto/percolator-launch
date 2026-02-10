@@ -234,9 +234,35 @@ const DevnetMintContent: FC = () => {
   const [existingMint, setExistingMint] = useState("");
   const [mintMoreAmount, setMintMoreAmount] = useState("100000");
   const [mintingMore, setMintingMore] = useState(false);
+  const [mintAuthError, setMintAuthError] = useState<string | null>(null);
+
+  // Check mint authority when user pastes an address
+  useEffect(() => {
+    setMintAuthError(null);
+    if (!existingMint || existingMint.length < 32 || !publicKey) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const mintPk = new PublicKey(existingMint);
+        const mintInfo = await connection.getParsedAccountInfo(mintPk);
+        if (!mintInfo.value) { if (!cancelled) setMintAuthError("Mint not found on devnet"); return; }
+        const parsed = (mintInfo.value.data as any)?.parsed;
+        if (!parsed || parsed.type !== "mint") { if (!cancelled) setMintAuthError("Not a valid SPL token mint"); return; }
+        const authority = parsed.info.mintAuthority;
+        if (!authority) {
+          if (!cancelled) setMintAuthError("This token has no mint authority (supply is fixed)");
+        } else if (authority !== publicKey.toBase58()) {
+          if (!cancelled) setMintAuthError(`You're not the mint authority. Only ${authority.slice(0, 8)}... can mint more. Create your own token above instead.`);
+        }
+      } catch {
+        if (!cancelled) setMintAuthError("Invalid address");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [existingMint, publicKey, connection]);
 
   const handleMintMore = useCallback(async () => {
-    if (!publicKey || !signTransaction || !existingMint) return;
+    if (!publicKey || !signTransaction || !existingMint || mintAuthError) return;
     setMintingMore(true);
     setStatus("Minting more tokens…");
     try {
@@ -467,10 +493,13 @@ const DevnetMintContent: FC = () => {
             className={inputClass}
           />
         </div>
+        {mintAuthError && (
+          <p className="text-[11px] text-[var(--short)]">{mintAuthError}</p>
+        )}
         <button
           className={`${btnPrimary} w-full`}
           onClick={handleMintMore}
-          disabled={mintingMore || !existingMint || !mintMoreAmount}
+          disabled={mintingMore || !existingMint || !mintMoreAmount || !!mintAuthError}
         >
           {mintingMore ? "Minting…" : `Mint ${Number(mintMoreAmount).toLocaleString()} More Tokens`}
         </button>

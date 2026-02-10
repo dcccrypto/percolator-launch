@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useDexPoolSearch, type DexPoolResult } from "./useDexPoolSearch";
+import { fetchTokenMeta } from "@/lib/tokenMeta";
 
 export interface QuickLaunchConfig {
   mint: string;
@@ -38,7 +39,8 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   const [error, setError] = useState<string | null>(null);
   const [tokenMeta, setTokenMeta] = useState<{ name: string; symbol: string; decimals: number } | null>(null);
 
-  // Fetch on-chain token metadata
+  // Fetch on-chain token metadata using shared fetchTokenMeta
+  // (checks cache → well-known → Metaplex on-chain → Jupiter, in that order)
   useEffect(() => {
     setTokenMeta(null);
     setError(null);
@@ -50,25 +52,9 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
     (async () => {
       try {
         const mintPk = new PublicKey(mint);
-        const info = await connection.getParsedAccountInfo(mintPk);
-        if (!info.value) throw new Error("Mint not found");
-        const parsed = (info.value.data as any)?.parsed;
-        if (!parsed || parsed.type !== "mint") throw new Error("Not a valid SPL token mint");
-
-        // Try Jupiter for symbol/name
-        let symbol = mint.slice(0, 4).toUpperCase();
-        let name = `Token ${mint.slice(0, 6)}`;
-        try {
-          const resp = await fetch(`https://tokens.jup.ag/token/${mint}`);
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data.symbol) symbol = data.symbol;
-            if (data.name) name = data.name;
-          }
-        } catch { /* use defaults */ }
-
+        const meta = await fetchTokenMeta(connection, mintPk);
         if (!cancelled) {
-          setTokenMeta({ name, symbol, decimals: parsed.info.decimals });
+          setTokenMeta({ name: meta.name, symbol: meta.symbol, decimals: meta.decimals });
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Invalid mint");

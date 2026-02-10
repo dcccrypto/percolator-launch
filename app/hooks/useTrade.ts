@@ -36,6 +36,24 @@ export function useTrade(slabAddress: string) {
         const lpAccount = accounts.find((a) => a.idx === params.lpIdx);
         if (!lpAccount) throw new Error(`LP at index ${params.lpIdx} not found`);
 
+        // Validate matcher context account exists on-chain before trading
+        // If it doesn't exist, the program CPI will fail with a confusing error
+        const matcherCtxKey = lpAccount.account.matcherContext;
+        if (matcherCtxKey.equals(PublicKey.default)) {
+          throw new Error("This market has no vAMM liquidity provider. Trading is not available.");
+        }
+        try {
+          const ctxInfo = await connection.getAccountInfo(matcherCtxKey);
+          if (!ctxInfo) {
+            throw new Error(
+              "Matcher context account not found on-chain. The market's vAMM may need to be re-initialized. Try creating a new market."
+            );
+          }
+        } catch (e) {
+          if (e instanceof Error && e.message.includes("Matcher context")) throw e;
+          // RPC error — let the transaction attempt and fail with actual error
+        }
+
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
         const [lpPda] = deriveLpPda(programId, slabPk, params.lpIdx);
