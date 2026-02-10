@@ -23,7 +23,8 @@ interface MarketCrankState {
   isActive: boolean;
 }
 
-/** Process items in batches with delay between batches */
+/** Process items in batches with delay between batches.
+ *  Each item is wrapped in try/catch so one failure doesn't kill the batch. */
 async function processBatched<T>(
   items: T[],
   batchSize: number,
@@ -32,7 +33,13 @@ async function processBatched<T>(
 ): Promise<void> {
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
-    await Promise.all(batch.map(fn));
+    await Promise.all(batch.map(async (item) => {
+      try {
+        await fn(item);
+      } catch (err) {
+        console.error(`[processBatched] Item failed:`, err);
+      }
+    }));
     if (i + batchSize < items.length) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
@@ -195,6 +202,10 @@ export class CrankService {
       }
 
       toCrank.push(slabAddress);
+    }
+
+    if (toCrank.length !== this.markets.size - skipped) {
+      console.warn(`[CrankService] crankAll: markets=${this.markets.size} toCrank=${toCrank.length} skipped=${skipped} (mismatch)`);
     }
 
     // Process in batches of 3 with 2s gaps between batches

@@ -6,7 +6,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatTokenAmount, formatUsd, formatPnl, shortenAddress } from "@/lib/format";
-import { AccountKind } from "@percolator/core";
+import { AccountKind, computeMarkPnl } from "@percolator/core";
 
 type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl" | "capital" | "margin";
 type SortDir = "asc" | "desc";
@@ -38,14 +38,6 @@ function computeLiqPrice(entryPrice: bigint, capital: bigint, positionSize: bigi
   } else {
     return BigInt(Math.round(Number(entryPrice) + adjusted));
   }
-}
-
-function computeMarginPct(capital: bigint, positionSize: bigint, priceE6: bigint): number {
-  if (positionSize === 0n || priceE6 === 0n) return 100;
-  const absPos = positionSize < 0n ? -positionSize : positionSize;
-  const notional = Number(absPos) * Number(priceE6) / 1e6;
-  if (notional === 0) return 100;
-  return (Number(capital) / notional) * 100;
 }
 
 /** Compact number: 1234567 → "1.23M", 12345 → "12.3K", 123 → "123" */
@@ -103,8 +95,16 @@ export const AccountsCard: FC = () => {
           liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
         }
       }
-      const marginPct = computeMarginPct(account.capital, account.positionSize, oraclePrice);
-      return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize, entryPrice: account.entryPrice, liqPrice, liqHealthPct, pnl: account.pnl, capital: account.capital, marginPct };
+      // Compute PnL from current price (not stale on-chain pnl)
+      const computedPnl = account.positionSize !== 0n && oraclePrice > 0n
+        ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePrice)
+        : account.pnl;
+      // Margin uses equity (capital + pnl) for accurate health
+      const equity = account.capital + computedPnl;
+      const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
+      const notional = Number(absPos) * Number(oraclePrice) / 1e6;
+      const marginPct = notional > 0 ? (Number(equity) / notional) * 100 : 100;
+      return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize, entryPrice: account.entryPrice, liqPrice, liqHealthPct, pnl: computedPnl, capital: account.capital, marginPct };
     });
   }, [accounts, maintBps, oraclePrice]);
 

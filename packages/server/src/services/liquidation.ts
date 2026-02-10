@@ -151,8 +151,9 @@ export class LiquidationService {
       const isAllZeros = feedHex === "0".repeat(64);
       const oracleAccount = isAllZeros ? slabAddress : derivePythPushOraclePDA(feedHex)[0];
 
-      // 1. Push oracle price (if admin oracle)
-      if (isAdminOracle) {
+      // 1. Push oracle price only if crank wallet IS the oracle authority
+      // (user-owned oracle markets skip the push — user pushes manually)
+      if (isAdminOracle && market.config.oracleAuthority.equals(keypair.publicKey)) {
         const mint = market.config.collateralMint.toBase58();
         const priceEntry = await this.oracleService.fetchPrice(mint, slabAddress.toBase58());
         if (priceEntry) {
