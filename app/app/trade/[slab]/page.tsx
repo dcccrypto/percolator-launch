@@ -18,6 +18,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { InfoBanner } from "@/components/ui/InfoBanner";
 
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -80,6 +81,13 @@ function TradePageInner({ slab }: { slab: string }) {
           )}
         </div>
       </div>
+
+      {/* Admin oracle banner */}
+      {config?.indexFeedId && config.indexFeedId.toBytes().every((b: number) => b === 0) && (
+        <div className="mb-4">
+          <InfoBanner variant="warning">Admin Oracle — prices are pushed manually by the market creator</InfoBanner>
+        </div>
+      )}
 
       {/* Quick start guide */}
       <div className="mb-4 rounded-[4px] border border-[#1a1a1f] bg-[#111113] px-4 py-2.5 flex items-center gap-6 text-xs text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>

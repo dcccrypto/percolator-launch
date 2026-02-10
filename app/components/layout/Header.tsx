@@ -18,6 +18,7 @@ const navLinks = [
   { href: "/create", label: "Create" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/my-markets", label: "Admin" },
+  { href: "/guide", label: "Guide" },
 ];
 
 export const Header: FC = () => {

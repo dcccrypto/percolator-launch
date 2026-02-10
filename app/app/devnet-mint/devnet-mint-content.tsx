@@ -19,6 +19,10 @@ import {
   createAssociatedTokenAccountInstruction,
   createMintToInstruction,
 } from "@solana/spl-token";
+import {
+  createCreateMetadataAccountV3Instruction,
+  PROGRAM_ID as TOKEN_METADATA_PROGRAM_ID,
+} from "@metaplex-foundation/mpl-token-metadata";
 import gsap from "gsap";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
@@ -41,6 +45,9 @@ const DevnetMintContent: FC = () => {
   const [loading, setLoading] = useState(false);
   const [airdropping, setAirdropping] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [tokenName, setTokenName] = useState("Test Token");
+  const [tokenSymbol, setTokenSymbol] = useState("TEST");
+  const [mintColor, setMintColor] = useState<string | null>(null);
 
   const connection = useMemo(() => new Connection(DEVNET_RPC, "confirmed"), []);
 
@@ -90,7 +97,18 @@ const DevnetMintContent: FC = () => {
     setStatus("Requesting 2 SOL airdrop…");
     try {
       const sig = await connection.requestAirdrop(publicKey, 2 * LAMPORTS_PER_SOL);
-      await connection.confirmTransaction(sig, "confirmed");
+      // Poll for confirmation using getSignatureStatuses (more reliable than confirmTransaction)
+      const startTime = Date.now();
+      const TIMEOUT_MS = 60_000;
+      while (Date.now() - startTime < TIMEOUT_MS) {
+        const { value } = await connection.getSignatureStatuses([sig]);
+        const status = value?.[0];
+        if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") {
+          if (status.err) throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+          break;
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
       setStatus("Airdrop successful!");
       await refreshBalance();
     } catch (e: unknown) {
@@ -141,8 +159,19 @@ const DevnetMintContent: FC = () => {
         createMintToInstruction(mintKeypair.publicKey, ata, publicKey, rawSupply)
       );
 
-      // Get fresh blockhash with lastValidBlockHeight for proper confirmation
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      // Add Metaplex metadata
+      const [metadataPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mintKeypair.publicKey.toBuffer()],
+        TOKEN_METADATA_PROGRAM_ID
+      );
+      const metadataIx = createCreateMetadataAccountV3Instruction(
+        { metadata: metadataPDA, mint: mintKeypair.publicKey, mintAuthority: publicKey, payer: publicKey, updateAuthority: publicKey },
+        { createMetadataAccountArgsV3: { data: { name: tokenName, symbol: tokenSymbol, uri: "", sellerFeeBasisPoints: 0, creators: null, collection: null, uses: null }, isMutable: true, collectionDetails: null } }
+      );
+      tx.add(metadataIx);
+
+      // Get fresh blockhash
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.feePayer = publicKey;
       tx.recentBlockhash = blockhash;
 
@@ -153,14 +182,27 @@ const DevnetMintContent: FC = () => {
       if (!signTransaction) throw new Error("Wallet does not support signTransaction");
       const signed = await signTransaction(tx);
       const sig = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
+        skipPreflight: true,
       });
       setStatus(`Tx sent: ${sig.slice(0, 12)}… Confirming…`);
-      await connection.confirmTransaction(
-        { signature: sig, blockhash, lastValidBlockHeight },
-        "confirmed"
-      );
+
+      // Poll for confirmation using getSignatureStatuses (more reliable than confirmTransaction)
+      const startTime = Date.now();
+      const TIMEOUT_MS = 60_000;
+      while (Date.now() - startTime < TIMEOUT_MS) {
+        const { value } = await connection.getSignatureStatuses([sig]);
+        const status = value?.[0];
+        if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") {
+          if (status.err) throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+          break;
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      // Generate deterministic color from mint address
+      const colorHash = mintKeypair.publicKey.toBuffer().slice(0, 3);
+      const color = `#${colorHash[0].toString(16).padStart(2,'0')}${colorHash[1].toString(16).padStart(2,'0')}${colorHash[2].toString(16).padStart(2,'0')}`;
+      setMintColor(color);
 
       setMintAddress(mintKeypair.publicKey.toBase58());
       setStatus("Done! Token created and minted.");
@@ -170,7 +212,7 @@ const DevnetMintContent: FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [publicKey, signTransaction, recipient, decimals, supply, refreshBalance]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [publicKey, signTransaction, recipient, decimals, supply, tokenName, tokenSymbol, refreshBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const copyMint = () => {
     if (mintAddress) {
@@ -211,15 +253,25 @@ const DevnetMintContent: FC = () => {
       const rawAmount = BigInt(mintMoreAmount) * BigInt(10 ** dec);
       tx.add(createMintToInstruction(mintPk, ata, publicKey, rawAmount));
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
       tx.feePayer = publicKey;
       tx.recentBlockhash = blockhash;
       const signed = await signTransaction(tx);
       const sig = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
+        skipPreflight: true,
       });
-      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      // Poll for confirmation using getSignatureStatuses (more reliable than confirmTransaction)
+      const startTimeMM = Date.now();
+      const TIMEOUT_MS_MM = 60_000;
+      while (Date.now() - startTimeMM < TIMEOUT_MS_MM) {
+        const { value } = await connection.getSignatureStatuses([sig]);
+        const status = value?.[0];
+        if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") {
+          if (status.err) throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+          break;
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
       setStatus(`Minted ${Number(mintMoreAmount).toLocaleString()} more tokens! Tx: ${sig.slice(0, 12)}…`);
       await refreshBalance();
     } catch (e: unknown) {
@@ -330,6 +382,26 @@ const DevnetMintContent: FC = () => {
             />
           </div>
         </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="mb-1 block text-xs text-[var(--text-secondary)]">Token Name</label>
+            <input
+              type="text"
+              value={tokenName}
+              onChange={(e) => setTokenName(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div className="flex-1">
+            <label className="mb-1 block text-xs text-[var(--text-secondary)]">Symbol</label>
+            <input
+              type="text"
+              value={tokenSymbol}
+              onChange={(e) => setTokenSymbol(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+        </div>
         <div>
           <label className="mb-1 block text-xs text-[var(--text-secondary)]">Recipient Address</label>
           <input
@@ -424,9 +496,17 @@ const DevnetMintContent: FC = () => {
             className={`${cardClass} border-[var(--long)]/30`}
             style={prefersReducedMotion ? undefined : { opacity: 0 }}
           >
-            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-[var(--long)]">
-              Token Created
-            </h2>
+            <div className="mb-3 flex items-center gap-2">
+              {mintColor && (
+                <span
+                  className="inline-block h-6 w-6 rounded-full border border-[var(--border)]"
+                  style={{ backgroundColor: mintColor }}
+                />
+              )}
+              <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--long)]">
+                {tokenName} ({tokenSymbol}) Created
+              </h2>
+            </div>
             <div className="flex items-center gap-2">
               <code className="flex-1 overflow-hidden text-ellipsis rounded bg-[var(--panel-bg)] px-3 py-2 text-xs text-white">
                 {mintAddress}

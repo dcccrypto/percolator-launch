@@ -13,6 +13,7 @@ import { usePriceRouter, type PriceSource } from "@/hooks/usePriceRouter";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
+import { InfoBanner } from "@/components/ui/InfoBanner";
 
 function isValidBase58Pubkey(s: string): boolean {
   try {
@@ -651,6 +652,7 @@ export const CreateMarketWizard: FC = () => {
                   <p className="mt-1 text-[10px] text-[var(--text-muted)]">Your balance: <span className="font-medium text-[var(--text)]">{formatHumanAmount(tokenBalance, tokenMeta.decimals)} {tokenMeta.symbol}</span></p>
                 )}
               </div>
+              <InfoBanner>On devnet, select Admin Oracle to push prices manually. On mainnet, use Pyth or DexScreener for live feeds.</InfoBanner>
               <div>
                 <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]">Oracle Mode</label>
                 <FieldHint>How the market gets price data.</FieldHint>
@@ -789,6 +791,7 @@ export const CreateMarketWizard: FC = () => {
           {/* Step 2: Risk Parameters */}
           <StepSection open={openStep === 2} onToggle={() => toggleStep(2)} title="Risk Parameters" stepNum={2} valid={visitedSteps.has(2) && step2Valid}>
             <div className="space-y-4">
+              <InfoBanner>Small tier: ~0.44 SOL rent on devnet. On mainnet: ~$65 for small, ~$260 for medium.</InfoBanner>
               <div>
                 <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] mb-2">Market Capacity</label>
                 <FieldHint>Trader slots. Larger = more traders but higher rent.</FieldHint>

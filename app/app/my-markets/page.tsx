@@ -214,7 +214,7 @@ const MarketCard: FC<{
                 set oracle authority
               </button>
               {isOracleAuthority ? (
-                <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
+                <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40" title="On devnet, you push prices manually. On mainnet, prices come from live oracle feeds automatically.">
                   push price
                 </button>
               ) : crankIsAuthority ? (
