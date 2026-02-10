@@ -119,7 +119,7 @@ export default function GuidePage() {
 
       {/* Oracle Modes */}
       <Section tag="oracles" title="Oracle Modes">
-        <div className="space-y-px">
+        <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
           {[
             {
               mode: "Admin Oracle",
@@ -140,7 +140,7 @@ export default function GuidePage() {
               desc: "Auto-detected for tokens with DEX pools (PumpSwap, Raydium, Meteora). No configuration needed — the pool address is used as the price source.",
             },
           ].map((item) => (
-            <div key={item.mode} className={`${cardClass} p-5 flex items-start gap-4`}>
+            <div key={item.mode} className="bg-[var(--panel-bg)] p-5 flex items-start gap-4">
               <div
                 className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full"
                 style={{ backgroundColor: item.color }}
@@ -195,7 +195,7 @@ export default function GuidePage() {
 
       {/* Getting Started */}
       <Section tag="quickstart" title="Getting Started on Devnet">
-        <div className="space-y-px">
+        <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
           {[
             { step: "01", title: "Connect Phantom", desc: "Open Phantom wallet settings and switch network to Devnet." },
             { step: "02", title: "Get Test SOL", desc: "Use the Solana faucet or run 'solana airdrop 2' in your terminal to get free devnet SOL." },
@@ -204,7 +204,7 @@ export default function GuidePage() {
             { step: "05", title: "Push Oracle Prices", desc: "Go to /my-markets. Click 'push price' on your market to set the oracle price manually." },
             { step: "06", title: "Open Trades", desc: "Navigate to the trade page, deposit collateral, and open your first leveraged position." },
           ].map((item) => (
-            <div key={item.step} className={`${cardClass} flex items-start gap-4 p-5 transition-colors hover:bg-[var(--bg-elevated)]`}>
+            <div key={item.step} className="bg-[var(--panel-bg)] flex items-start gap-4 p-5 transition-colors hover:bg-[var(--bg-elevated)]">
               <span
                 className="flex h-7 w-7 flex-shrink-0 items-center justify-center border border-[var(--accent)]/20 bg-[var(--accent)]/[0.04] text-[11px] font-bold text-[var(--accent)]"
               >
@@ -221,7 +221,7 @@ export default function GuidePage() {
 
       {/* FAQ */}
       <Section tag="faq" title="Frequently Asked Questions">
-        <div className="space-y-px">
+        <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
           {[
             {
               q: "What happens if the oracle price is not updated?",
@@ -248,7 +248,7 @@ export default function GuidePage() {
               a: "Click the network badge in the header to toggle. Your wallet must also be set to the matching network in its settings.",
             },
           ].map((item) => (
-            <details key={item.q} className={`${cardClass} group`}>
+            <details key={item.q} className="bg-[var(--panel-bg)] group">
               <summary className="cursor-pointer px-5 py-4 text-[13px] font-medium text-white transition-colors hover:bg-[var(--bg-elevated)] list-none flex items-center justify-between">
                 {item.q}
                 <svg className="h-3 w-3 text-[var(--text-muted)] transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -268,7 +268,7 @@ export default function GuidePage() {
         <div className="flex justify-center gap-3">
           <Link
             href="/create"
-            className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-6 py-3 text-[12px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.15]"
+            className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-6 py-3 text-[12px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hud-btn-corners hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.15]"
           >
             Launch a Market
           </Link>

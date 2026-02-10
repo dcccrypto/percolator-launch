@@ -19,7 +19,7 @@ export const EngineHealthCard: FC = () => {
 
   if (loading || !engine) {
     return (
-      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+      <div className="p-5">
         <p className="text-sm text-[var(--text-secondary)]">{loading ? "Loading..." : "No engine"}</p>
       </div>
     );
@@ -49,7 +49,7 @@ export const EngineHealthCard: FC = () => {
   ];
 
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+    <div className="p-5">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Engine Health</h3>
         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${HEALTH_COLORS[health.level]}${health.level === "warning" || health.level === "caution" ? " animate-pulse" : ""}`}>

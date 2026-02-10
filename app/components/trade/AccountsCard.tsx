@@ -124,23 +124,44 @@ export const AccountsCard: FC = () => {
 
   const isOpenLike = tab === "open" || tab === "leaderboard";
 
+  function sortIndicator(key: SortKey) {
+    if (sortKey !== key) return null;
+    return <span className="ml-0.5 text-[var(--accent)]">{sortDir === "asc" ? "\u25B4" : "\u25BE"}</span>;
+  }
+
   const SortHeader: FC<{ label: string; sKey: SortKey; align?: "left" | "right" }> = ({ label, sKey, align = "right" }) => (
-    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none pb-2 font-medium transition-colors duration-150 ${align === "left" ? "text-left" : "text-right"} hover:text-[var(--text-secondary)]`}>
-      {label}
-      {sortKey === sKey ? <span className="ml-0.5 text-[var(--accent)] inline-block transition-transform duration-200 scale-110">{sortDir === "asc" ? "↑" : "↓"}</span> : <span className="ml-0.5 text-[var(--border)] inline-block transition-transform duration-200 scale-100">↕</span>}
+    <th
+      onClick={() => toggleSort(sKey)}
+      className={`cursor-pointer select-none whitespace-nowrap px-3 py-2.5 font-medium transition-colors duration-150 hover:text-[var(--text-secondary)] ${align === "left" ? "text-left" : "text-right"}`}
+    >
+      {label}{sortIndicator(sKey)}
     </th>
   );
 
   function liqBarColor(pct: number): string {
     if (pct >= 70) return "bg-[var(--long)]";
     if (pct >= 40) return "bg-[var(--warning)]";
-    if (pct >= 20) return "bg-[var(--warning)]";
     return "bg-[var(--short)]";
+  }
+
+  function fmtPrice(e6: bigint): string {
+    const v = Number(e6) / 1_000_000;
+    if (v === 0) return "\u2014";
+    if (v < 0.01) return `$${v.toFixed(6)}`;
+    if (v < 1) return `$${v.toFixed(4)}`;
+    return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function fmtPnl(raw: bigint): string {
+    const v = Number(raw) / 1_000_000;
+    const sign = v > 0 ? "+" : "";
+    if (Math.abs(v) < 0.01 && v !== 0) return `${sign}${v.toFixed(4)}`;
+    return `${sign}${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
   return (
     <div className="p-4">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-4 flex items-center gap-2">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`rounded-sm px-2.5 py-1 text-[11px] font-medium transition-all ${
@@ -149,70 +170,74 @@ export const AccountsCard: FC = () => {
             {t.label} <span className="text-[var(--text-muted)]">({t.count})</span>
           </button>
         ))}
-        <span className="ml-auto data-cell text-[10px] text-[var(--text-muted)]">{accounts.length} total</span>
+        <span className="ml-auto text-[10px] text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>{accounts.length} total</span>
       </div>
 
       {sortedRows.length === 0 ? (
-        <p className="py-4 text-center text-sm text-[var(--text-secondary)]">
+        <p className="py-6 text-center text-sm text-[var(--text-secondary)]">
           {tab === "open" ? "No open positions" : tab === "idle" ? "No idle accounts" : "No data"}
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-[11px]">
+        <div className="overflow-x-auto -mx-4">
+          <table className="w-full min-w-[600px] text-[11px]" style={{ fontFamily: "var(--font-mono)" }}>
             <thead>
-              <tr className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+              <tr className="border-b border-[var(--border)] text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
                 <SortHeader label="#" sKey="idx" align="left" />
                 <SortHeader label="Owner" sKey="owner" align="left" />
                 {isOpenLike && <SortHeader label="Side" sKey="direction" align="left" />}
-                {isOpenLike && <SortHeader label="Position" sKey="position" />}
+                {isOpenLike && <SortHeader label="Size" sKey="position" />}
                 {isOpenLike && <SortHeader label="Entry" sKey="entry" />}
-                {isOpenLike && <SortHeader label="Liq" sKey="liqPrice" />}
+                {isOpenLike && <SortHeader label="Liq Price" sKey="liqPrice" />}
                 <SortHeader label="PnL" sKey="pnl" />
                 <SortHeader label="Capital" sKey="capital" />
                 {isOpenLike && <SortHeader label="Margin" sKey="margin" />}
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border)]">
+            <tbody>
               {sortedRows.map((row, i) => {
                 const absPos = row.positionSize < 0n ? -row.positionSize : row.positionSize;
                 return (
-                  <tr key={row.idx} className="hover:bg-[var(--accent)]/[0.06] transition-colors duration-150">
-                    <td className="py-1.5 text-[var(--text-muted)]">{i + 1}</td>
-                    <td className="data-cell py-1.5 text-[var(--text-secondary)]">{shortenAddress(row.owner)}</td>
+                  <tr key={row.idx} className="border-b border-[var(--border)]/50 transition-colors duration-150 hover:bg-[var(--accent)]/[0.04]">
+                    <td className="px-3 py-2.5 text-[var(--text-dim)]">{i + 1}</td>
+                    <td className="px-3 py-2.5 text-[var(--text-secondary)]">{shortenAddress(row.owner)}</td>
                     {isOpenLike && (
-                      <td className="py-1.5">
-                        {row.direction === "IDLE" ? <span className="text-[var(--text-muted)]">—</span> : (
-                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
-                            row.direction === "LONG" ? "bg-[var(--long)]/10 text-[var(--long)]" : "bg-[var(--short)]/10 text-[var(--short)]"
+                      <td className="px-3 py-2.5">
+                        {row.direction === "IDLE" ? <span className="text-[var(--text-muted)]">\u2014</span> : (
+                          <span className={`text-[10px] font-semibold ${
+                            row.direction === "LONG" ? "text-[var(--long)]" : "text-[var(--short)]"
                           }`}>{row.direction}</span>
                         )}
                       </td>
                     )}
                     {isOpenLike && (
-                      <td className={`data-cell py-1.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-muted)]"}`}>
-                        {row.positionSize !== 0n ? formatTokenAmount(absPos) : "—"}
+                      <td className="px-3 py-2.5 text-right text-[var(--text)]">
+                        {row.positionSize !== 0n ? formatTokenAmount(absPos) : "\u2014"}
                       </td>
                     )}
-                    {isOpenLike && <td className="data-cell py-1.5 text-right text-[var(--text)]">{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "—"}</td>}
                     {isOpenLike && (
-                      <td className="py-1.5 text-right">
+                      <td className="px-3 py-2.5 text-right text-[var(--text)]">
+                        {row.entryPrice > 0n ? fmtPrice(row.entryPrice) : "\u2014"}
+                      </td>
+                    )}
+                    {isOpenLike && (
+                      <td className="px-3 py-2.5 text-right">
                         {row.positionSize !== 0n ? (
-                          <div className="flex items-center justify-end gap-1">
-                            <span className="data-cell text-[var(--text)]">{formatUsd(row.liqPrice)}</span>
-                            <div className="h-1 w-8 rounded-full bg-[var(--bg-surface)]">
-                              <div className={`h-1 rounded-full ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(4, row.liqHealthPct)}%` }} />
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="text-[var(--text-secondary)]">{fmtPrice(row.liqPrice)}</span>
+                            <div className="h-1.5 w-10 rounded-full bg-[var(--bg-surface)]">
+                              <div className={`h-1.5 rounded-full ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
                             </div>
                           </div>
-                        ) : "—"}
+                        ) : "\u2014"}
                       </td>
                     )}
-                    <td className={`data-cell py-1.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-muted)]"}`}>
-                      {formatPnl(row.pnl)}
+                    <td className={`px-3 py-2.5 text-right font-medium ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-muted)]"}`}>
+                      {fmtPnl(row.pnl)}
                     </td>
-                    <td className="data-cell py-1.5 text-right text-[var(--text)]">{formatTokenAmount(row.capital)}</td>
+                    <td className="px-3 py-2.5 text-right text-[var(--text)]">{formatTokenAmount(row.capital)}</td>
                     {isOpenLike && (
-                      <td className={`data-cell py-1.5 text-right ${row.marginPct > 50 ? "text-[var(--long)]" : row.marginPct > 20 ? "text-[var(--warning)]" : "text-[var(--short)]"}`}>
-                        {row.positionSize !== 0n ? `${row.marginPct.toFixed(1)}%` : "—"}
+                      <td className={`px-3 py-2.5 text-right ${row.marginPct > 50 ? "text-[var(--long)]" : row.marginPct > 20 ? "text-[var(--warning)]" : "text-[var(--short)]"}`}>
+                        {row.positionSize !== 0n ? `${row.marginPct.toFixed(1)}%` : "\u2014"}
                       </td>
                     )}
                   </tr>

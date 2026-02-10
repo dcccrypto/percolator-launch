@@ -40,6 +40,35 @@ interface MergedMarket {
   supabase: MarketWithStats | null;
 }
 
+/* ─── Mock markets for local design testing ─── */
+function mockEngine(oi: bigint, capital: bigint, insurance: bigint) {
+  return { totalOpenInterest: oi, cTot: capital, insuranceFund: { balance: insurance } } as unknown as DiscoveredMarket["engine"];
+}
+function mockMarket(
+  slab: string, mint: string, symbol: string, name: string,
+  leverage: number, admin: boolean, price: number, vol24h: number,
+  oi: bigint, capital: bigint, insurance: bigint,
+): MergedMarket {
+  return {
+    slabAddress: slab, mintAddress: mint, symbol, name,
+    maxLeverage: leverage, isAdminOracle: admin,
+    onChain: { engine: mockEngine(oi, capital, insurance) } as DiscoveredMarket,
+    supabase: { last_price: price, volume_24h: vol24h } as MarketWithStats,
+  };
+}
+const MOCK_MARKETS: MergedMarket[] = [
+  mockMarket("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "So11111111111111111111111111111111111111112", "SOL", "Solana", 20, false, 148.52, 2_340_000, 85_000_000_000n, 120_000_000_000n, 15_000_000_000n),
+  mockMarket("9mRGKzEEQBus4bZ1YKg4tVEMx7fPYEBV5Pz9bGJjp7Cr", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "USDC", "USD Coin", 10, false, 1.00, 890_000, 42_000_000_000n, 80_000_000_000n, 10_000_000_000n),
+  mockMarket("4nF7d2Z3oF8bTKwhat9k8xsR1TLAo9U7Bd2Rk3pYJne5", "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", "WIF", "dogwifhat", 20, false, 0.847, 1_120_000, 65_000_000_000n, 90_000_000_000n, 8_000_000_000n),
+  mockMarket("B8mnfpCEt2z3SMz4giHGPNMB3DzBAJEYrPq9Uhnj4zXh", "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", "JUP", "Jupiter", 10, false, 0.624, 540_000, 30_000_000_000n, 55_000_000_000n, 6_000_000_000n),
+  mockMarket("HN7cABqLq46Es1jh92hQnvWo6BuZPdSmTQ5P2NMeVRgr", "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "BONK", "Bonk", 5, true, 0.0000182, 320_000, 18_000_000_000n, 40_000_000_000n, 5_000_000_000n),
+  mockMarket("FMJ1DFWV96VKb5z8hnRp5LJaP7RPAywUbioiRvLqZafV", "RaydiumPoolxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "RAY", "Raydium", 10, false, 2.18, 410_000, 22_000_000_000n, 45_000_000_000n, 4_000_000_000n),
+  mockMarket("3Kat5BEzHTZmJYBR1QnP4FCn2jJRYkSgnTMGV4cANQrM", "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE", "ORCA", "Orca", 10, false, 3.42, 180_000, 12_000_000_000n, 28_000_000_000n, 3_000_000_000n),
+  mockMarket("5F2nFaJfVoR91EVBTzkg9hEb8w2jhaQD65FKmjfwUzSN", "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", "mSOL", "Marinade SOL", 15, false, 162.10, 670_000, 50_000_000_000n, 70_000_000_000n, 9_000_000_000n),
+  mockMarket("ArK3jGAHqPxTEHsMgrLwRbKMzH4DS7nVPEfkjxhpb9fn", "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", "WETH", "Wrapped Ether", 20, false, 3_241.88, 1_870_000, 78_000_000_000n, 110_000_000_000n, 12_000_000_000n),
+  mockMarket("2qVfA7g3bKfc7WJBb6RvTa5rJFmB8itu4C88Rdg1xN8z", "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", "PYTH", "Pyth Network", 10, true, 0.312, 95_000, 5_000_000_000n, 12_000_000_000n, 1_200_000_000n),
+];
+
 export default function MarketsPage() {
   const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();
   const [supabaseMarkets, setSupabaseMarkets] = useState<MarketWithStats[]>([]);
@@ -71,8 +100,11 @@ export default function MarketsPage() {
     });
   }, [discovered, supabaseMarkets]);
 
+  // Use mock data when no real markets are discovered (local design testing)
+  const effectiveMarkets = merged.length > 0 ? merged : MOCK_MARKETS;
+
   const filtered = useMemo(() => {
-    let list = merged;
+    let list = effectiveMarkets;
     // Text search — matches symbol, name, slab address, OR mint address
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -108,7 +140,7 @@ export default function MarketsPage() {
       }
     });
     return list;
-  }, [merged, search, sortBy, leverageFilter, oracleFilter]);
+  }, [effectiveMarkets, search, sortBy, leverageFilter, oracleFilter]);
 
   const loading = discoveryLoading || supabaseLoading;
 

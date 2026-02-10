@@ -31,6 +31,7 @@ export function GlowButton({
     ].join(" "),
     secondary: [
       "border border-[var(--border)] text-[var(--text-secondary)] bg-transparent font-medium",
+      "hud-btn-corners",
       "hover:border-[var(--accent)]/40 hover:text-[var(--text)]",
       "active:scale-[0.98]",
     ].join(" "),

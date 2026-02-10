@@ -63,7 +63,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
         <button
           onClick={async () => { try { const sig = await initUser(); setLastSig(sig ?? null); } catch {} }}
           disabled={initLoading}
-          className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
+          className="w-full rounded-sm border border-[var(--accent)]/40 bg-transparent py-2.5 text-sm font-semibold text-[var(--accent)] hud-btn-corners transition-all duration-200 hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.08] active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none"
         >
           {initLoading ? "Creating..." : "Create Account"}
         </button>
@@ -120,7 +120,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
       <button
         onClick={handleSubmit}
         disabled={loading || !amount}
-        className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hud-btn-corners hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Sending..." : mode === "deposit" ? "Deposit" : "Withdraw"}
       </button>

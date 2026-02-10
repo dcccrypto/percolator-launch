@@ -11,13 +11,29 @@ interface ShareCardProps {
   change24h?: number;
 }
 
+const DOMAIN = "percolatorlaunch.com";
+
+function buildTradeUrl(slab: string) {
+  return `https://${DOMAIN}/trade/${slab}`;
+}
+
+function buildXShareText(marketName: string, fmtPrice: string, changeStr: string, tradeUrl: string) {
+  const lines = [
+    `Just opened a position on $${marketName} perps at $${fmtPrice}${changeStr ? ` (${changeStr})` : ""}`,
+    "",
+    `Trade it yourself on`,
+    tradeUrl,
+  ];
+  return lines.join("\n");
+}
+
 export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, change24h }) => {
   const [copied, setCopied] = useState(false);
 
   const priceNum = Number(price) / 1e6;
   const fmtPrice = priceNum < 0.01 ? priceNum.toFixed(6) : priceNum < 1 ? priceNum.toFixed(4) : priceNum.toFixed(2);
   const changeStr = change24h != null ? `${change24h >= 0 ? "+" : ""}${change24h.toFixed(2)}%` : "";
-  const tradeUrl = `https://percolator-launch.vercel.app/trade/${slabAddress}`;
+  const tradeUrl = buildTradeUrl(slabAddress);
 
   const copyLink = async () => {
     await navigator.clipboard.writeText(tradeUrl);
@@ -26,20 +42,20 @@ export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, 
   };
 
   const shareOnX = () => {
-    const text = `Trading ${marketName} perps on Viper $${fmtPrice}${changeStr ? ` | ${changeStr}` : ""} | ${tradeUrl}`;
+    const text = buildXShareText(marketName, fmtPrice, changeStr, tradeUrl);
     window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, "_blank");
   };
 
   return (
     <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-4">
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-lg font-bold text-white">{marketName}</span>
-        <span className="text-xs text-[var(--text-muted)]">PERP</span>
+        <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{marketName}</span>
+        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">PERP</span>
       </div>
       <div className="mb-3 flex items-baseline gap-3">
-        <span className="font-mono text-xl text-white">${fmtPrice}</span>
+        <span className="text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>${fmtPrice}</span>
         {change24h != null && (
-          <span className={`text-sm font-medium ${change24h >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
+          <span className={`text-xs font-medium ${change24h >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
             {changeStr}
           </span>
         )}
@@ -47,13 +63,13 @@ export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, 
       <div className="flex gap-2">
         <button
           onClick={copyLink}
-          className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-transform hover:bg-[var(--border)] hover:scale-[1.02] active:scale-[0.98]"
+          className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-all duration-150 hover:border-[var(--accent)]/30 hover:text-[var(--text)] active:scale-[0.98]"
         >
           {copied ? "Copied" : "Copy Link"}
         </button>
         <button
           onClick={shareOnX}
-          className="flex-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white transition-transform hover:bg-[var(--accent)]/80 hover:scale-[1.02] active:scale-[0.98]"
+          className="flex-1 rounded-sm border border-[var(--accent)]/40 bg-transparent px-3 py-1.5 text-xs font-semibold text-[var(--accent)] transition-all duration-150 hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.08] active:scale-[0.98]"
         >
           Share on X
         </button>
@@ -66,6 +82,7 @@ export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, 
 export const ShareButton: FC<Omit<ShareCardProps, "change24h"> & { change24h?: number }> = (props) => {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
 
   useEffect(() => {
@@ -78,22 +95,31 @@ export const ShareButton: FC<Omit<ShareCardProps, "change24h"> & { change24h?: n
     }
   }, [open, prefersReduced]);
 
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div ref={wrapperRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--border)]"
+        className="rounded-sm border border-[var(--border)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-all duration-150 hover:border-[var(--accent)]/30 hover:text-[var(--text)]"
         title="Share"
       >
         Share
       </button>
       {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div ref={dropdownRef} className="absolute right-0 top-full z-50 mt-1 w-64">
-            <ShareCard {...props} />
-          </div>
-        </>
+        <div ref={dropdownRef} className="absolute left-0 top-full z-50 mt-2 w-72">
+          <ShareCard {...props} />
+        </div>
       )}
     </div>
   );
