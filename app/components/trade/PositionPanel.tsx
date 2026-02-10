@@ -31,6 +31,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
+  const decimals = tokenMeta?.decimals ?? 6;
   const [closeSig, setCloseSig] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -177,7 +178,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <div className="text-right">
                   <span className={`font-mono text-sm font-bold ${pnlColor}`}>
                     {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
-                    {formatTokenAmount(abs(pnlTokens))} {symbol}
+                    {formatTokenAmount(abs(pnlTokens), decimals)} {symbol}
                   </span>
                   {pnlUsd !== null && (
                     <span className={`ml-1.5 font-mono text-xs ${pnlColor}`}>
@@ -226,7 +227,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div className="flex items-center justify-between">
               <span className="text-xs text-[var(--text-secondary)]">Size</span>
               <span className="font-mono text-sm text-[var(--text)]">
-                {formatTokenAmount(absPosition)} {symbol}
+                {formatTokenAmount(absPosition, decimals)} {symbol}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -274,13 +275,13 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               >
                 <p className="text-xs text-[var(--text-secondary)]">
                   Close {isLong ? "LONG" : "SHORT"}{" "}
-                  {formatTokenAmount(absPosition)} {symbol}?
+                  {formatTokenAmount(absPosition, decimals)} {symbol}?
                 </p>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-[var(--text-secondary)]">Est. PnL</span>
                   <span className={`font-mono font-medium ${pnlColor}`}>
                     {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
-                    {formatTokenAmount(abs(pnlTokens))} {symbol}
+                    {formatTokenAmount(abs(pnlTokens), decimals)} {symbol}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
@@ -295,6 +296,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                             ? account.capital - abs(pnlTokens)
                             : 0n
                           : account.capital,
+                      decimals,
                     )}{" "}
                     {symbol}
                   </span>

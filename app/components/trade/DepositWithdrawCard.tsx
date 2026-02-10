@@ -29,6 +29,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const [amount, setAmount] = useState("");
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<bigint | null>(null);
+  const decimals = tokenMeta?.decimals ?? 6;
 
   // Fetch wallet token balance
   useEffect(() => {
@@ -65,7 +66,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
         <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Create Account</h3>
         {walletBalance !== null && (
           <p className="mb-2 text-xs text-[var(--text-muted)]">
-            Wallet: {formatTokenAmount(walletBalance)} {symbol}
+            Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}
           </p>
         )}
         {!hasTokens && (
@@ -90,7 +91,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
               disabled={initLoading}
               className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
             >
-              {initLoading ? "Creating..." : `Create Account (deposit ${formatTokenAmount(suggestedDeposit)} ${symbol})`}
+              {initLoading ? "Creating..." : `Create Account (deposit ${formatTokenAmount(suggestedDeposit, decimals)} ${symbol})`}
             </button>
           </>
         ) : (
@@ -118,7 +119,6 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const error = mode === "deposit" ? depositError : withdrawError;
 
   // Validation
-  const decimals = tokenMeta?.decimals ?? 6;
   const parsedAmount = amount ? parseHumanAmount(amount, decimals) : 0n;
   const isOverWithdraw = mode === "withdraw" && parsedAmount > 0n && parsedAmount > capital;
   const isOverDeposit = mode === "deposit" && parsedAmount > 0n && walletBalance !== null && parsedAmount > walletBalance;
@@ -148,9 +148,9 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   return (
     <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
       <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Deposit / Withdraw</h3>
-      <p className="mb-1 text-lg font-bold text-[var(--text)]">{formatTokenAmount(capital)} <span className="text-sm font-normal text-[var(--text-secondary)]">{symbol}</span></p>
+      <p className="mb-1 text-lg font-bold text-[var(--text)]">{formatTokenAmount(capital, decimals)} <span className="text-sm font-normal text-[var(--text-secondary)]">{symbol}</span></p>
       {walletBalance !== null && (
-        <p className="mb-3 text-xs text-[var(--text-muted)]">Wallet: {formatTokenAmount(walletBalance)} {symbol}</p>
+        <p className="mb-3 text-xs text-[var(--text-muted)]">Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}</p>
       )}
 
       <div className="mb-3 flex gap-1.5">
@@ -170,7 +170,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           {mode === "withdraw" && capital > 0n && (
             <button
               type="button"
-              onClick={() => setAmount(formatTokenAmount(capital))}
+              onClick={() => setAmount(formatTokenAmount(capital, decimals))}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
               Max
@@ -179,7 +179,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           {mode === "deposit" && walletBalance !== null && walletBalance > 0n && (
             <button
               type="button"
-              onClick={() => setAmount(formatTokenAmount(walletBalance))}
+              onClick={() => setAmount(formatTokenAmount(walletBalance, decimals))}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
               Max
