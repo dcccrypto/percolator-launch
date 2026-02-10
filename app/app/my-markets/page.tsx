@@ -3,7 +3,7 @@
 import { FC, useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import gsap from "gsap";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useMyMarkets, type MyMarket } from "@/hooks/useMyMarkets";
 import { useAdminActions } from "@/hooks/useAdminActions";
@@ -117,6 +117,7 @@ const MarketCard: FC<{
 }> = ({ market, insuranceMintExists }) => {
   const { toast } = useToast();
   const actions = useAdminActions();
+  const wallet = useWallet();
   const cfg = getConfig();
 
   const slab = market.slabAddress.toBase58();
@@ -130,6 +131,8 @@ const MarketCard: FC<{
   const oraclePrice = market.config.authorityPriceE6;
   const oracleAuthority = market.config.oracleAuthority.toBase58();
   const hasOracleAuthority = oracleAuthority !== PublicKey.default.toBase58();
+  const isOracleAuthority = wallet.publicKey?.toBase58() === oracleAuthority;
+  const crankIsAuthority = oracleAuthority === cfg.crankWallet;
 
   const [showBurnConfirm, setShowBurnConfirm] = useState(false);
   const [showOracleInput, setShowOracleInput] = useState(false);
@@ -201,9 +204,19 @@ const MarketCard: FC<{
               <button onClick={() => setShowOracleInput(true)} disabled={actions.loading === "setOracleAuthority"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
                 set oracle authority
               </button>
-              <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
-                push price
-              </button>
+              {isOracleAuthority ? (
+                <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
+                  push price
+                </button>
+              ) : crankIsAuthority ? (
+                <span className="text-xs text-[#3f3f46]" title={`Oracle authority: crank (${shortAddr(oracleAuthority)})`}>
+                  price: auto (crank)
+                </span>
+              ) : hasOracleAuthority ? (
+                <span className="text-xs text-[#3f3f46]" title={`Oracle authority: ${oracleAuthority}`}>
+                  price: delegated
+                </span>
+              ) : null}
               <button onClick={() => setShowTopUpInput(true)} disabled={actions.loading === "topUpInsurance"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
                 top up insurance
               </button>
