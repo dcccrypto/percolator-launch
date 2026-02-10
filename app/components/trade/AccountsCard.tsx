@@ -6,9 +6,9 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatTokenAmount, formatUsd, formatPnl, shortenAddress } from "@/lib/format";
-import { AccountKind } from "@percolator/core";
+import { AccountKind, computeMarkPnl, computeLiqPrice } from "@percolator/core";
 
-type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl";
+type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl" | "capital" | "margin";
 type SortDir = "asc" | "desc";
 type Tab = "open" | "idle" | "leaderboard";
 
@@ -23,23 +23,7 @@ interface AccountRow {
   liqHealthPct: number;
   pnl: bigint;
   capital: bigint;
-}
-
-function computeLiqPrice(entryPrice: bigint, capital: bigint, positionSize: bigint, maintenanceMarginBps: bigint): bigint {
-  if (positionSize === 0n || entryPrice === 0n) return 0n;
-  const absPos = positionSize < 0n ? -positionSize : positionSize;
-  const maintBps = Number(maintenanceMarginBps);
-  const capitalPerUnit = Number(capital) * 1e6 / Number(absPos);
-  if (positionSize > 0n) {
-    const adjusted = capitalPerUnit * 10000 / (10000 + maintBps);
-    const liq = Number(entryPrice) - adjusted;
-    return liq > 0 ? BigInt(Math.round(liq)) : 0n;
-  } else {
-    const denom = 10000 - maintBps;
-    if (denom <= 0) return 0n;
-    const adjusted = capitalPerUnit * 10000 / denom;
-    return BigInt(Math.round(Number(entryPrice) + adjusted));
-  }
+  marginPct: number;
 }
 
 export const AccountsCard: FC = () => {
@@ -57,6 +41,7 @@ export const AccountsCard: FC = () => {
   const rows: AccountRow[] = useMemo(() => {
     return accounts.map(({ idx, account }) => {
       const direction: "LONG" | "SHORT" | "IDLE" = account.positionSize > 0n ? "LONG" : account.positionSize < 0n ? "SHORT" : "IDLE";
+      // Use core library's pure BigInt computeLiqPrice (no Number() precision loss)
       const liqPrice = computeLiqPrice(account.entryPrice, account.capital, account.positionSize, maintBps);
       let liqHealthPct = 100;
       if (account.positionSize !== 0n && liqPrice > 0n && oraclePrice > 0n) {
@@ -70,7 +55,16 @@ export const AccountsCard: FC = () => {
           liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
         }
       }
-      return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize, entryPrice: account.entryPrice, liqPrice, liqHealthPct, pnl: account.pnl, capital: account.capital };
+      // Live PnL from current oracle price (not stale on-chain pnl)
+      const computedPnl = account.positionSize !== 0n && oraclePrice > 0n
+        ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePrice)
+        : account.pnl;
+      // Margin uses equity (capital + pnl) for accurate health
+      const equity = account.capital + computedPnl;
+      const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
+      const notional = Number(absPos) * Number(oraclePrice) / 1e6;
+      const marginPct = notional > 0 ? (Number(equity) / notional) * 100 : 100;
+      return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize, entryPrice: account.entryPrice, liqPrice, liqHealthPct, pnl: computedPnl, capital: account.capital, marginPct };
     });
   }, [accounts, maintBps, oraclePrice]);
 
@@ -95,6 +89,8 @@ export const AccountsCard: FC = () => {
         case "entry": return Number(a.entryPrice - b.entryPrice) * dir;
         case "liqPrice": return Number(a.liqPrice - b.liqPrice) * dir;
         case "pnl": return Number(a.pnl - b.pnl) * dir;
+        case "capital": return Number(a.capital - b.capital) * dir;
+        case "margin": return (a.marginPct - b.marginPct) * dir;
         default: return 0;
       }
     });
@@ -154,6 +150,8 @@ export const AccountsCard: FC = () => {
                 {isOpenLike && <SortHeader label="Entry" sKey="entry" />}
                 {isOpenLike && <SortHeader label="Liq Price" sKey="liqPrice" />}
                 <SortHeader label="PnL" sKey="pnl" />
+                <SortHeader label="Capital" sKey="capital" />
+                {isOpenLike && <SortHeader label="Margin" sKey="margin" />}
               </tr>
             </thead>
             <tbody>
@@ -193,6 +191,12 @@ export const AccountsCard: FC = () => {
                     <td className={`whitespace-nowrap px-3 py-2.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
                       {formatPnl(row.pnl)}
                     </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]">{formatTokenAmount(row.capital)}</td>
+                    {isOpenLike && (
+                      <td className={`whitespace-nowrap px-3 py-2.5 text-right ${row.marginPct > 50 ? "text-[var(--long)]" : row.marginPct > 20 ? "text-[var(--warning)]" : "text-[var(--short)]"}`}>
+                        {row.positionSize !== 0n ? `${row.marginPct.toFixed(1)}%` : "-"}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
