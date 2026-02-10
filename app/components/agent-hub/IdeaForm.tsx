@@ -47,12 +47,12 @@ export default function IdeaForm() {
 
   return (
     <section className="w-full max-w-4xl mx-auto px-4 mb-16">
-      <h2 className="text-sm font-mono text-[#00FFB2] mb-3 uppercase tracking-widest">
+      <h2 className="text-sm font-mono text-[var(--long)] mb-3 uppercase tracking-widest">
         &gt; submit idea
       </h2>
       <form
         onSubmit={submit}
-        className="rounded-2xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-xl p-6 space-y-4"
+        className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-6 space-y-4"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <input
@@ -62,7 +62,7 @@ export default function IdeaForm() {
             onChange={(e) => setHandle(e.target.value)}
             maxLength={30}
             required
-            className="bg-white/[0.05] border border-white/[0.06] rounded-lg px-4 py-2.5 text-[#F0F4FF] placeholder-[#5a6382] outline-none focus:border-[#00FFB2]/40 transition-colors"
+            className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-sm px-4 py-2.5 text-[var(--text)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--long)]/40 transition-colors"
           />
           <input
             type="text"
@@ -70,7 +70,7 @@ export default function IdeaForm() {
             value={contact}
             onChange={(e) => setContact(e.target.value)}
             maxLength={100}
-            className="bg-white/[0.05] border border-white/[0.06] rounded-lg px-4 py-2.5 text-[#F0F4FF] placeholder-[#5a6382] outline-none focus:border-[#00FFB2]/40 transition-colors"
+            className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-sm px-4 py-2.5 text-[var(--text)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--long)]/40 transition-colors"
           />
         </div>
         <textarea
@@ -80,23 +80,23 @@ export default function IdeaForm() {
           maxLength={500}
           required
           rows={3}
-          className="w-full bg-white/[0.05] border border-white/[0.06] rounded-lg px-4 py-2.5 text-[#F0F4FF] placeholder-[#5a6382] outline-none focus:border-[#00FFB2]/40 transition-colors resize-none"
+          className="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-sm px-4 py-2.5 text-[var(--text)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--long)]/40 transition-colors resize-none"
         />
         <div className="flex items-center gap-3">
           <button
             type="submit"
             disabled={status === "sending"}
-            className="bg-[#00FFB2] text-[#06080d] font-bold rounded-xl px-6 py-2.5 hover:brightness-110 disabled:opacity-50 transition-all"
+            className="bg-[var(--long)] text-[var(--bg)] font-bold rounded-sm px-6 py-2.5 hover:brightness-110 disabled:opacity-50 transition-all"
           >
             {status === "sending" ? "Submitting..." : "Submit"}
           </button>
           {status === "sent" && (
-            <span className="text-[#00FFB2] text-sm font-mono">
+            <span className="text-[var(--long)] text-sm font-mono">
               ✓ idea submitted
             </span>
           )}
           {status === "error" && (
-            <span className="text-red-400 text-sm font-mono">{errorMsg}</span>
+            <span className="text-[var(--short)] text-sm font-mono">{errorMsg}</span>
           )}
         </div>
       </form>

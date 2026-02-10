@@ -18,8 +18,8 @@ export const MarketStatsCard: FC = () => {
 
   if (loading || !engine || !config || !params) {
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-5">
-        <p className="text-sm text-[#71717a]">{loading ? "Loading..." : "Market not loaded"}</p>
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+        <p className="text-sm text-[var(--text-secondary)]">{loading ? "Loading..." : "Market not loaded"}</p>
       </div>
     );
   }
@@ -34,13 +34,13 @@ export const MarketStatsCard: FC = () => {
   ];
 
   return (
-    <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-5">
-      <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[#71717a]">Market Stats</h3>
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+      <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Market Stats</h3>
       <div className="grid grid-cols-3 gap-4">
         {stats.map((s) => (
-          <div key={s.label}>
-            <p className="text-[10px] uppercase text-[#52525b]">{s.label}</p>
-            <p className="text-sm font-medium text-[#e4e4e7]">{s.value}</p>
+          <div key={s.label} className="rounded-sm p-2 transition-colors duration-150 hover:bg-[var(--accent)]/[0.06]">
+            <p className="text-[10px] uppercase text-[var(--text-muted)]">{s.label}</p>
+            <p className="text-sm font-medium text-[var(--text)]">{s.value}</p>
           </div>
         ))}
       </div>

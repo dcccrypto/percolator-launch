@@ -6,21 +6,26 @@ interface GlassCardProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   glow?: boolean;
   hover?: boolean;
+  accent?: boolean;
   padding?: "none" | "sm" | "md" | "lg";
 }
 
 const paddingMap = { none: "", sm: "p-4", md: "p-6", lg: "p-8" };
 
 export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
-  ({ children, glow = false, hover = true, padding = "md", className = "", ...props }, ref) => {
+  ({ children, glow = false, hover = true, accent = false, padding = "md", className = "", ...props }, ref) => {
     return (
       <div
         ref={ref}
         className={[
-          "rounded-[4px]",
-          "border border-[#1a1a1f]",
-          "bg-[#111113]",
-          hover ? "transition-colors duration-200 hover:bg-[#161618]" : "",
+          "rounded-sm",
+          "border border-[var(--border)]",
+          "bg-[var(--panel-bg)]",
+          "hud-corners",
+          hover
+            ? "transition-all duration-200 hover:border-[var(--accent)]/20"
+            : "",
+          accent ? "accent-top overflow-hidden" : "",
           paddingMap[padding],
           className,
         ].filter(Boolean).join(" ")}

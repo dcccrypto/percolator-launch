@@ -7,10 +7,10 @@ import { computeMarketHealth } from "@/lib/health";
 import { formatTokenAmount, formatSlotAge } from "@/lib/format";
 
 const HEALTH_COLORS: Record<string, string> = {
-  healthy: "bg-[#00FFB2]/[0.1] text-[#00FFB2]",
-  caution: "bg-[#FFB800]/[0.1] text-[#FFB800]",
-  warning: "bg-[#FF4466]/[0.1] text-[#FF4466]",
-  empty: "bg-[#1a1a2e] text-[#71717a]",
+  healthy: "bg-[var(--long)]/10 text-[var(--long)]",
+  caution: "bg-[var(--warning)]/10 text-[var(--warning)]",
+  warning: "bg-[var(--short)]/10 text-[var(--short)]",
+  empty: "bg-[var(--bg-surface)] text-[var(--text-secondary)]",
 };
 
 export const EngineHealthCard: FC = () => {
@@ -19,8 +19,8 @@ export const EngineHealthCard: FC = () => {
 
   if (loading || !engine) {
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-5">
-        <p className="text-sm text-[#71717a]">{loading ? "Loading..." : "No engine"}</p>
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+        <p className="text-sm text-[var(--text-secondary)]">{loading ? "Loading..." : "No engine"}</p>
       </div>
     );
   }
@@ -49,18 +49,18 @@ export const EngineHealthCard: FC = () => {
   ];
 
   return (
-    <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-5">
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-xs font-medium uppercase tracking-wider text-[#71717a]">Engine Health</h3>
-        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${HEALTH_COLORS[health.level]}`}>
+        <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Engine Health</h3>
+        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${HEALTH_COLORS[health.level]}${health.level === "warning" || health.level === "caution" ? " animate-pulse" : ""}`}>
           {health.label}
         </span>
       </div>
       <div className="grid grid-cols-3 gap-x-4 gap-y-3">
         {metrics.map((m) => (
-          <div key={m.label}>
-            <p className="text-[10px] uppercase text-[#52525b]">{m.label}</p>
-            <p className="font-mono text-xs text-[#e4e4e7]">{m.value}</p>
+          <div key={m.label} className="rounded-sm p-2 transition-colors duration-150 hover:bg-[var(--accent)]/[0.06]">
+            <p className="text-[10px] uppercase text-[var(--text-muted)]">{m.label}</p>
+            <p className="font-mono text-xs text-[var(--text)]">{m.value}</p>
           </div>
         ))}
       </div>

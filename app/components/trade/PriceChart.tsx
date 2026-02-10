@@ -2,6 +2,8 @@
 
 import { FC, useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import gsap from "gsap";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 interface PricePoint {
   price_e6: number;
@@ -13,6 +15,9 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [prices, setPrices] = useState<PricePoint[]>([]);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const polylineRef = useRef<SVGPolylineElement>(null);
+  const polygonRef = useRef<SVGPolygonElement>(null);
+  const prefersReduced = usePrefersReducedMotion();
 
   // Accumulate prices from on-chain slab state (polled every 3s by SlabProvider)
   const lastPriceRef = useRef<number>(0);
@@ -95,6 +100,43 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     };
   }, [prices]);
 
+  // Line draw animation via GSAP stroke-dashoffset
+  useEffect(() => {
+    const line = polylineRef.current;
+    const fill = polygonRef.current;
+    if (!line || !fill || !points) return;
+
+    if (prefersReduced) {
+      // No animation: show everything immediately
+      line.style.strokeDasharray = "none";
+      line.style.strokeDashoffset = "0";
+      fill.style.opacity = "1";
+      return;
+    }
+
+    const totalLength = line.getTotalLength();
+    // Set up the dash for the draw effect
+    line.style.strokeDasharray = `${totalLength}`;
+    line.style.strokeDashoffset = `${totalLength}`;
+    // Hide gradient fill initially
+    fill.style.opacity = "0";
+
+    // Animate the line drawing
+    gsap.to(line, {
+      strokeDashoffset: 0,
+      duration: 1,
+      ease: "power2.out",
+      onComplete: () => {
+        // Fade in gradient fill after line finishes drawing
+        gsap.to(fill, {
+          opacity: 1,
+          duration: 0.5,
+          ease: "power2.out",
+        });
+      },
+    });
+  }, [points, prefersReduced]);
+
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (!svgRef.current || prices.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
@@ -110,23 +152,23 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (prices.length < 2) {
     return (
-      <div className="flex h-[200px] flex-col items-center justify-center rounded-lg border border-white/[0.06] bg-[#0d1117]">
+      <div className="flex h-[200px] flex-col items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
         {currentPrice > 0 ? (
           <>
             <div className="text-2xl font-bold text-white">${currentPrice < 0.01 ? currentPrice.toFixed(6) : currentPrice.toFixed(2)}</div>
-            <div className="mt-1 text-xs text-[#5a6382]">Price chart building... (updates with each trade)</div>
+            <div className="mt-1 text-xs text-[var(--text-muted)]">Price chart building... (updates with each trade)</div>
           </>
         ) : (
           <>
-            <div className="text-sm text-[#5a6382]">No price data yet</div>
-            <div className="mt-1 text-xs text-[#3D4563]">Prices will appear after the first trade on this market.</div>
+            <div className="text-sm text-[var(--text-muted)]">No price data yet</div>
+            <div className="mt-1 text-xs text-[var(--text-muted)]">Prices will appear after the first trade on this market.</div>
           </>
         )}
       </div>
     );
   }
 
-  const color = isUp ? "#10b981" : "#ef4444";
+  const color = isUp ? "#14F195" : "#FF3B5C";
   const hoveredPrice = hoveredIdx !== null ? prices[hoveredIdx].price_e6 / 1e6 : null;
   const hoveredTime = hoveredIdx !== null ? new Date(prices[hoveredIdx].timestamp * 1000) : null;
 
@@ -148,14 +190,14 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }, [minT, maxT]);
 
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-[#0d1117] p-3">
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-3">
       <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="text-[#8B95B0]">Price</span>
+        <span className="text-[var(--text-secondary)]">Price</span>
         <div className="flex gap-3">
-          <span className="text-[#5a6382]">
+          <span className="text-[var(--text-muted)]">
             H: <span className="text-white">${fmtPrice(high)}</span>
           </span>
-          <span className="text-[#5a6382]">
+          <span className="text-[var(--text-muted)]">
             L: <span className="text-white">${fmtPrice(low)}</span>
           </span>
           <span style={{ color }}>
@@ -164,7 +206,7 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       </div>
       {hoveredTime && (
-        <div className="mb-1 text-right text-[10px] text-[#5a6382]">
+        <div className="mb-1 text-right text-[10px] text-[var(--text-muted)]">
           {hoveredTime.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </div>
       )}
@@ -183,18 +225,34 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </linearGradient>
         </defs>
         <polygon
+          ref={polygonRef}
           points={`${points} 600,130 0,130`}
           fill="url(#chartGrad)"
+          style={{ opacity: prefersReduced ? 1 : 0 }}
         />
-        <polyline points={points} fill="none" stroke={color} strokeWidth="2" />
+        <polyline
+          ref={polylineRef}
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        />
         {prices.length > 0 && (() => {
           const lastPts = points.split(" ");
           const last = lastPts[lastPts.length - 1];
           const [cx, cy] = last.split(",");
-          return <circle cx={cx} cy={cy} r="3" fill={color} />;
+          return (
+            <circle
+              cx={cx}
+              cy={cy}
+              r="3"
+              fill={color}
+              className="animate-[pulse-glow_2s_ease-in-out_infinite]"
+            />
+          );
         })()}
       </svg>
-      <div className="relative mt-1 flex justify-between text-[10px] text-[#3D4563]">
+      <div className="relative mt-1 flex justify-between text-[10px] text-[var(--text-muted)]">
         {timeLabels.map((tl, i) => (
           <span key={i}>{tl.label}</span>
         ))}

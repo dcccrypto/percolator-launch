@@ -28,8 +28,8 @@ export const MarketBrowser: FC = () => {
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-8 text-center shadow-sm">
-        <p className="text-[#71717a]">Discovering markets...</p>
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-8 text-center shadow-sm">
+        <p className="text-[var(--text-secondary)]">Discovering markets...</p>
       </div>
     );
   }
@@ -39,26 +39,26 @@ export const MarketBrowser: FC = () => {
       ? "Set the NEXT_PUBLIC_PROGRAM_ID environment variable to your Percolator program address."
       : error;
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-8 text-center shadow-sm">
-        <p className="text-[#FF4466]">Error: {helpMsg}</p>
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-8 text-center shadow-sm">
+        <p className="text-[var(--short)]">Error: {helpMsg}</p>
       </div>
     );
   }
 
   if (markets.length === 0) {
     return (
-      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-8 text-center shadow-sm">
-        <p className="text-[#71717a]">No markets found</p>
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-8 text-center shadow-sm">
+        <p className="text-[var(--text-secondary)]">No markets found</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] shadow-sm">
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-[#1e1e2e] text-xs uppercase text-[#71717a]">
+            <tr className="border-b border-[var(--border)] text-xs uppercase text-[var(--text-secondary)]">
               <th className="px-4 py-3 font-medium">Market</th>
               <th className="px-4 py-3 font-medium">Collateral</th>
               <th className="px-4 py-3 font-medium">Oracle</th>
@@ -69,7 +69,7 @@ export const MarketBrowser: FC = () => {
               <th className="px-4 py-3 font-medium" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#1e1e2e]/50">
+          <tbody className="divide-y divide-[var(--border-subtle)]">
             {[...markets].sort((a, b) => {
               const order: Record<string, number> = { healthy: 0, caution: 1, warning: 2, empty: 3 };
               return (order[computeMarketHealth(a.engine).level] ?? 4) -
@@ -82,17 +82,17 @@ export const MarketBrowser: FC = () => {
               const decimals = meta?.decimals ?? 6;
 
               return (
-                <tr key={slab} className="hover:bg-[#1a1a2e]">
+                <tr key={slab} className="hover:bg-[var(--accent)]/[0.04]">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-[#e4e4e7]">{symbol}/USD PERP</div>
-                    <div className="font-mono text-xs text-[#52525b]">{shortenAddress(slab, 6)}</div>
+                    <div className="font-medium text-[var(--text)]">{symbol}/USD PERP</div>
+                    <div className="font-mono text-xs text-[var(--text-muted)]">{shortenAddress(slab, 6)}</div>
                   </td>
                   <td className="px-4 py-3">
                     <a
                       href={`https://solscan.io/token/${mintBase58}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm font-medium text-[#00FFB2] hover:underline"
+                      className="text-sm font-medium text-[var(--accent)] hover:underline"
                     >
                       {symbol}
                     </a>
@@ -101,29 +101,29 @@ export const MarketBrowser: FC = () => {
                     <span
                       className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
                         isAdminOracle(m)
-                          ? "bg-amber-900/40 text-amber-400"
-                          : "bg-[#00FFB2]/[0.08] text-[#00FFB2]"
+                          ? "bg-[var(--warning)]/20 text-[var(--warning)]"
+                          : "bg-[var(--long)]/[0.08] text-[var(--long)]"
                       }`}
                     >
                       {isAdminOracle(m) ? "Admin" : "Pyth"}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-[#e4e4e7]">
+                  <td className="px-4 py-3 text-right text-[var(--text)]">
                     {formatTokenAmount(m.engine.totalOpenInterest, decimals)} {symbol}
                   </td>
-                  <td className="px-4 py-3 text-right text-[#e4e4e7]">
+                  <td className="px-4 py-3 text-right text-[var(--text)]">
                     {formatTokenAmount(m.engine.insuranceFund.balance, decimals)} {symbol}
                   </td>
                   <td className="px-4 py-3">
                     <HealthBadge level={computeMarketHealth(m.engine).level} />
                   </td>
-                  <td className="px-4 py-3 text-right text-[#e4e4e7]">
+                  <td className="px-4 py-3 text-right text-[var(--text)]">
                     {m.engine.numUsedAccounts}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link
                       href={`/trade?market=${slab}`}
-                      className="rounded-lg bg-[#00FFB2] px-3 py-1.5 text-xs font-medium text-[#06080d] transition-colors hover:bg-[#00FFB2]/80"
+                      className="rounded-sm border border-[var(--accent)]/40 text-[var(--accent)] bg-transparent px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--accent)]/[0.08] hover:border-[var(--accent)]/70"
                     >
                       Trade
                     </Link>

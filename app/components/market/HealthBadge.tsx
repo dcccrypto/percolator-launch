@@ -3,10 +3,10 @@ import type { HealthLevel } from "@/lib/health";
 import { Tooltip } from "@/components/ui/Tooltip";
 
 const STYLES: Record<HealthLevel, string> = {
-  healthy: "bg-[#00e68a]/10 text-[#00e68a] ring-1 ring-[#00e68a]/20",
-  caution: "bg-[#ffaa00]/10 text-[#ffaa00] ring-1 ring-[#ffaa00]/20",
-  warning: "bg-[#ff4d6a]/10 text-[#ff4d6a] ring-1 ring-[#ff4d6a]/20",
-  empty: "bg-white/[0.06] text-[#8B95B0]",
+  healthy: "bg-[var(--long)]/10 text-[var(--long)] ring-1 ring-[var(--long)]/20",
+  caution: "bg-[var(--warning)]/10 text-[var(--warning)] ring-1 ring-[var(--warning)]/20",
+  warning: "bg-[var(--short)]/10 text-[var(--short)] ring-1 ring-[var(--short)]/20",
+  empty: "bg-[var(--bg-surface)] text-[var(--text-secondary)]",
 };
 
 const LABELS: Record<HealthLevel, string> = {
@@ -25,7 +25,7 @@ const TOOLTIPS: Record<HealthLevel, string> = {
 
 export const HealthBadge: FC<{ level: HealthLevel }> = ({ level }) => (
   <Tooltip text={TOOLTIPS[level]}>
-    <span className={`inline-block rounded-md px-1.5 py-0.5 text-[10px] font-bold ${STYLES[level]}`}>
+    <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-bold ${STYLES[level]}${level === "warning" || level === "caution" ? " animate-pulse" : ""}`}>
       {LABELS[level]}
     </span>
   </Tooltip>

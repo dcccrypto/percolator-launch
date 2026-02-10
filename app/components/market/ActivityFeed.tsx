@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import gsap from "gsap";
 import { supabase } from "@/lib/supabase";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 interface ActivityItem {
   id: string;
@@ -13,19 +16,19 @@ interface ActivityItem {
 
 function eventIcon(type: ActivityItem["eventType"]): string {
   switch (type) {
-    case "new_market": return "🚀";
-    case "trade": return "📈";
-    case "large_trade": return "🐋";
-    case "liquidation": return "💀";
+    case "new_market": return "NEW";
+    case "trade": return "TRD";
+    case "large_trade": return "BIG";
+    case "liquidation": return "LIQ";
   }
 }
 
 function eventColor(type: ActivityItem["eventType"]): string {
   switch (type) {
-    case "new_market": return "text-[#00FFB2]";
-    case "trade": return "text-[#00FFB2]";
-    case "large_trade": return "text-[#FFB800]";
-    case "liquidation": return "text-[#FF4466]";
+    case "new_market": return "text-[var(--long)]";
+    case "trade": return "text-[var(--long)]";
+    case "large_trade": return "text-[var(--warning)]";
+    case "liquidation": return "text-[var(--short)]";
   }
 }
 
@@ -46,6 +49,8 @@ function timeAgo(ts: string): string {
 export function ActivityFeed() {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const prefersReduced = usePrefersReducedMotion();
 
   useEffect(() => {
     async function load() {
@@ -107,11 +112,22 @@ export function ActivityFeed() {
     load();
   }, []);
 
+  useEffect(() => {
+    if (!loading && items.length > 0 && containerRef.current && !prefersReduced) {
+      const children = containerRef.current.children;
+      gsap.fromTo(
+        children,
+        { opacity: 0, y: 10 },
+        { opacity: 1, y: 0, stagger: 0.05, duration: 0.3, ease: "power2.out" },
+      );
+    }
+  }, [items, loading, prefersReduced]);
+
   if (loading) {
     return (
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-14 animate-pulse rounded-lg border border-white/[0.06] bg-white/[0.05]" />
+          <ShimmerSkeleton key={i} className="h-14" />
         ))}
       </div>
     );
@@ -119,29 +135,29 @@ export function ActivityFeed() {
 
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.05] p-8 text-center">
-        <p className="text-sm text-[#5a6382]">No recent activity yet.</p>
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-8 text-center">
+        <p className="text-sm text-[var(--text-muted)]">No recent activity yet.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div ref={containerRef} className="space-y-2">
       {items.map((item) => (
         <div
           key={item.id}
-          className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.05] px-4 py-3"
+          className="flex items-center gap-3 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] hover:bg-[var(--accent)]/[0.06] transition-colors duration-150 px-4 py-3"
         >
-          <span className="text-lg">{eventIcon(item.eventType)}</span>
+          <span className={`text-[10px] font-bold uppercase ${eventColor(item.eventType)}`}>{eventIcon(item.eventType)}</span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className={`text-sm font-semibold ${eventColor(item.eventType)}`}>
                 {item.market}
               </span>
-              <span className="text-sm text-[#c4cbde]">{item.details}</span>
+              <span className="text-sm text-[var(--text-secondary)]">{item.details}</span>
             </div>
           </div>
-          <span className="whitespace-nowrap text-xs text-[#5a6382]">{timeAgo(item.timestamp)}</span>
+          <span className="whitespace-nowrap text-xs text-[var(--text-muted)]">{timeAgo(item.timestamp)}</span>
         </div>
       ))}
     </div>
