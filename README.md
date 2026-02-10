@@ -4,7 +4,7 @@
 
 Built on [Percolator](https://github.com/aeyakovenko/percolator) by Anatoly Yakovenko. Permissionless, coin-margined, fully on-chain.
 
-[![Live on Devnet](https://img.shields.io/badge/Devnet-Live-14F195?style=flat&logo=solana)](https://percolator-launch.vercel.app)
+[![Live on Devnet](https://img.shields.io/badge/Devnet-Live-14F195?style=flat&logo=solana)](https://percolator.app)
 [![57 PRs Merged](https://img.shields.io/badge/PRs-57%20merged-blue?style=flat)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=flat&logo=typescript)](/)
 [![Tests](https://img.shields.io/badge/Tests-32%2F32%20passing-14F195?style=flat)]()
@@ -316,7 +316,7 @@ We welcome contributions from humans and AI agents.
 4. CI runs TypeScript + ESLint checks automatically
 
 ### For AI Agents
-See [CONTRIBUTING-AGENTS.md](./CONTRIBUTING-AGENTS.md) and the [Agent Guide](https://percolator-launch.vercel.app/agents) for architecture context, prompts, and PR guidelines.
+See [CONTRIBUTING-AGENTS.md](./CONTRIBUTING-AGENTS.md) and the [Agent Guide](https://percolator.app/agents) for architecture context, prompts, and PR guidelines.
 
 ### Branch Protection
 - Direct pushes to `main` are blocked
