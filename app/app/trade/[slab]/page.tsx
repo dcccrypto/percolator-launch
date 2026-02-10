@@ -83,7 +83,7 @@ function TradePageInner({ slab }: { slab: string }) {
       </div>
 
       {/* Admin oracle banner */}
-      {config?.indexFeedId && config.indexFeedId.toBytes().every((b: number) => b === 0) && (
+      {config?.indexFeedId && config.indexFeedId.toBase58() === "11111111111111111111111111111111" && (
         <div className="mb-4">
           <InfoBanner variant="warning">Admin Oracle — prices are pushed manually by the market creator</InfoBanner>
         </div>
