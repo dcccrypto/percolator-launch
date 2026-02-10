@@ -56,17 +56,56 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   }
 
   if (!userAccount) {
+    const hasTokens = walletBalance !== null && walletBalance > 0n;
+    const suggestedDeposit = walletBalance !== null && walletBalance > 0n
+      ? walletBalance > 10_000_000n ? 10_000_000n : walletBalance
+      : 0n;
     return (
       <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
         <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Create Account</h3>
-        <p className="mb-3 text-xs text-[var(--text-secondary)]">Create an account to start trading.</p>
-        <button
-          onClick={async () => { try { const sig = await initUser(); setLastSig(sig ?? null); } catch {} }}
-          disabled={initLoading}
-          className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
-        >
-          {initLoading ? "Creating..." : "Create Account"}
-        </button>
+        {walletBalance !== null && (
+          <p className="mb-2 text-xs text-[var(--text-muted)]">
+            Wallet: {formatTokenAmount(walletBalance)} {symbol}
+          </p>
+        )}
+        {!hasTokens && (
+          <div className="mb-3 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-3">
+            <p className="text-[11px] text-[var(--warning)]">
+              You need {symbol} tokens to trade this market.{" "}
+              {mktConfig?.collateralMint && (
+                <a href="/devnet-mint" className="underline underline-offset-2 hover:text-[var(--warning)]/80">
+                  Mint some from the faucet →
+                </a>
+              )}
+            </p>
+          </div>
+        )}
+        {hasTokens ? (
+          <>
+            <p className="mb-3 text-xs text-[var(--text-secondary)]">
+              Create an account with an initial deposit to start trading.
+            </p>
+            <button
+              onClick={async () => { try { const sig = await initUser(suggestedDeposit); setLastSig(sig ?? null); } catch {} }}
+              disabled={initLoading}
+              className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
+            >
+              {initLoading ? "Creating..." : `Create Account (deposit ${formatTokenAmount(suggestedDeposit)} ${symbol})`}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="mb-3 text-xs text-[var(--text-secondary)]">
+              Get tokens first, then create your account.
+            </p>
+            <button
+              disabled
+              className="w-full rounded-sm bg-[var(--bg-surface)] py-2.5 text-sm font-medium text-[var(--text-muted)] cursor-not-allowed opacity-50"
+            >
+              Create Account
+            </button>
+          </>
+        )}
         {initError && <p className="mt-2 text-xs text-[var(--short)]">{initError}</p>}
         {lastSig && <p className="mt-2 text-xs text-[var(--text-muted)]">Tx: {lastSig.slice(0, 12)}...</p>}
       </div>

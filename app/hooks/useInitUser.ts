@@ -27,7 +27,7 @@ export function useInitUser(slabAddress: string) {
   const [error, setError] = useState<string | null>(null);
 
   const initUser = useCallback(
-    async (feePayment: bigint = 1_000_000n) => {
+    async (feePayment: bigint = 0n) => {
       setLoading(true);
       setError(null);
       try {

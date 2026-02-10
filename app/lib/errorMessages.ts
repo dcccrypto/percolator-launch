@@ -4,7 +4,7 @@
  */
 const ERROR_CODE_MAP: Record<number, string> = {
   0: "Invalid market magic — data corrupted.",
-  1: "Invalid version — program/data version mismatch.",
+  1: "Version mismatch or insufficient token balance. If creating an account, make sure you have tokens.",
   2: "Market already initialized.",
   3: "Market not initialized.",
   4: "Invalid slab data length — corrupted market.",
@@ -104,8 +104,9 @@ export function humanizeError(rawMsg: string): string {
     return "Transaction expired — network was slow. Try again, it usually works on the second attempt.";
   }
   if (rawMsg.includes("insufficient funds") || rawMsg.includes("Insufficient")) {
-    return "Insufficient funds for this transaction.";
+    return "Insufficient token balance. Deposit or mint tokens first.";
   }
+  // Error code 1 can be either PercolatorError::InvalidVersion OR SPL Token InsufficientFunds from CPI
   if (rawMsg.includes("User rejected")) {
     return "Transaction cancelled.";
   }
