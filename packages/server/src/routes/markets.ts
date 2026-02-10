@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { PublicKey } from "@solana/web3.js";
 import { validateSlab } from "../middleware/validateSlab.js";
+import { requireApiKey } from "../middleware/auth.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine, SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 import { getConnection } from "../utils/solana.js";
 import { config } from "../config.js";
@@ -67,7 +68,7 @@ export function marketRoutes(deps: MarketDeps): Hono {
   });
 
   // POST /markets — register an existing market (verified on-chain)
-  app.post("/markets", async (c) => {
+  app.post("/markets", requireApiKey(), async (c) => {
     const body = await c.req.json<{ slabAddress: string; metadata?: Record<string, unknown> }>();
 
     // Bug 15: Validate input
@@ -107,7 +108,7 @@ export function marketRoutes(deps: MarketDeps): Hono {
   // POST /markets/launch — one-click launch
   // Input: { mint: string, slabTier?: "micro"|"small"|"medium"|"large", options?: LaunchOptions }
   // Returns market config for frontend tx execution, or discovered market if already created
-  app.post("/markets/launch", async (c) => {
+  app.post("/markets/launch", requireApiKey(), async (c) => {
     const body = await c.req.json<{
       mint: string;
       slabTier?: SlabTierKey;

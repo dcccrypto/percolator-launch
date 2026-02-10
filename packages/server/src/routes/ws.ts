@@ -7,6 +7,7 @@ import { eventBus } from "../services/events.js";
 // H2: Configurable limits
 const MAX_WS_CONNECTIONS = Number(process.env.MAX_WS_CONNECTIONS ?? 500);
 const MAX_BUFFER_BYTES = 64 * 1024; // 64KB
+const MAX_SUBSCRIPTIONS_PER_CLIENT = 50; // Prevent Helius WS subscription exhaustion
 
 interface WsClient {
   ws: WebSocket;
@@ -60,6 +61,11 @@ export function setupWebSocket(
       try {
         const msg = JSON.parse(raw.toString()) as { type: string; slabAddress?: string };
         if (msg.type === "subscribe" && msg.slabAddress) {
+          // Cap subscriptions per client to prevent Helius WS exhaustion
+          if (client.subscriptions.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) {
+            ws.send(JSON.stringify({ type: "error", message: `Max ${MAX_SUBSCRIPTIONS_PER_CLIENT} subscriptions per connection` }));
+            return;
+          }
           client.subscriptions.add(msg.slabAddress);
 
           if (priceEngine) {
