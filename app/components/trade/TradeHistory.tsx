@@ -1,16 +1,18 @@
 "use client";
 
 import { FC, useEffect, useState, useCallback } from "react";
-import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
+import { formatTokenAmount } from "@/lib/format";
+import { explorerTxUrl } from "@/lib/config";
 
 interface Trade {
   id: string;
+  slab_address: string;
   side: "long" | "short";
   size: number;
-  price_e6: number;
+  price: number;
   fee: number;
   trader: string;
-  tx_signature: string;
+  tx_signature: string | null;
   created_at: string;
 }
 
@@ -92,7 +94,7 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             {trades.map((trade) => (
               <a
                 key={trade.id}
-                href={trade.tx_signature ? `https://explorer.solana.com/tx/${trade.tx_signature}?cluster=devnet` : "#"}
+                href={trade.tx_signature ? explorerTxUrl(trade.tx_signature) : "#"}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="grid grid-cols-4 gap-2 py-1.5 text-xs hover:bg-white/[0.02] transition-colors rounded-sm cursor-pointer"
@@ -109,7 +111,7 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   {trade.size != null ? formatTokenAmount(BigInt(Math.round(Math.abs(trade.size)))) : "—"}
                 </div>
                 <div className="text-right text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                  {trade.price_e6 != null ? formatPriceE6(BigInt(Math.round(trade.price_e6))) : "—"}
+                  {trade.price != null ? `$${Number(trade.price).toFixed(2)}` : "—"}
                 </div>
               </a>
             ))}

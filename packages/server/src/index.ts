@@ -13,6 +13,7 @@ import { setupWebSocket } from "./routes/ws.js";
 import { PriceEngine } from "./services/PriceEngine.js";
 import { LiquidationService } from "./services/liquidation.js";
 import { InsuranceLPService } from "./services/InsuranceLPService.js";
+import { TradeIndexer } from "./services/TradeIndexer.js";
 import { insuranceRoutes } from "./routes/insurance.js";
 import { oracleRouterRoutes } from "./routes/oracle-router.js";
 
@@ -23,6 +24,7 @@ const crankService = new CrankService(oracleService);
 const liquidationService = new LiquidationService(oracleService);
 const lifecycleManager = new MarketLifecycleManager(crankService, oracleService);
 const insuranceService = new InsuranceLPService(crankService);
+const tradeIndexer = new TradeIndexer();
 
 // Hono app
 const app = new Hono();
@@ -78,6 +80,10 @@ if (config.crankKeypair) {
     // Start insurance LP service
     insuranceService.start();
     console.log("🛡️  Insurance LP service started");
+
+    // Start trade indexer
+    tradeIndexer.start();
+    console.log("📊 Trade indexer started");
   }).catch((err) => {
     console.error("Failed to start crank service:", err);
   });
@@ -93,6 +99,7 @@ async function shutdown(signal: string) {
     crankService.stop();
     liquidationService.stop();
     insuranceService.stop();
+    tradeIndexer.stop();
     if (server && typeof (server as any).close === "function") {
       (server as any).close();
     }
