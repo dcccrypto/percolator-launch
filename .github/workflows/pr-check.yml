@@ -29,6 +29,9 @@ jobs:
       - name: Install app deps
         run: cd app && pnpm install --frozen-lockfile
 
+      - name: Build core package
+        run: cd packages/core && pnpm run build
+
       - name: TypeScript check
         run: cd app && npx tsc --noEmit
 
