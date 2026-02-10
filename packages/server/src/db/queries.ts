@@ -22,11 +22,13 @@ export interface MarketStatsRow {
 export interface TradeRow {
   id: string;
   slab_address: string;
-  user: string;
-  direction: string;
-  size_e6: string;
-  price_e6: string;
-  timestamp: string;
+  trader: string;
+  side: "long" | "short";
+  size: number;
+  price: number;
+  fee: number;
+  tx_signature: string | null;
+  created_at: string;
 }
 
 export interface OraclePriceRow {
@@ -59,9 +61,19 @@ export async function upsertMarketStats(stats: Partial<MarketStatsRow> & { slab_
   if (error) throw error;
 }
 
-export async function insertTrade(trade: Omit<TradeRow, "id">): Promise<void> {
+export async function insertTrade(trade: Omit<TradeRow, "id" | "created_at">): Promise<void> {
   const { error } = await getSupabase().from("trades").insert(trade);
   if (error) throw error;
+}
+
+export async function tradeExistsBySignature(txSignature: string): Promise<boolean> {
+  const { data, error } = await getSupabase()
+    .from("trades")
+    .select("id")
+    .eq("tx_signature", txSignature)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
 }
 
 export async function insertOraclePrice(price: OraclePriceRow): Promise<void> {

@@ -4,6 +4,10 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:3001";
+const WS_URL_IS_DEFAULT = !process.env.NEXT_PUBLIC_WS_URL;
+if (WS_URL_IS_DEFAULT && typeof window !== "undefined") {
+  console.warn("[useLivePrice] NEXT_PUBLIC_WS_URL not set — falling back to ws://localhost:3001. Set this env var in production.");
+}
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 const POLL_FALLBACK_MS = 10_000;

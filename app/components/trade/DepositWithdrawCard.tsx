@@ -1,8 +1,10 @@
 "use client";
 import { explorerTxUrl } from "@/lib/config";
 
-import { FC, useState } from "react";
+import { FC, useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useDeposit } from "@/hooks/useDeposit";
 import { useWithdraw } from "@/hooks/useWithdraw";
@@ -13,7 +15,8 @@ import { parseHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
 
 export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { connected } = useWallet();
+  const { connected, publicKey } = useWallet();
+  const { connection } = useConnection();
   const userAccount = useUserAccount();
   const { deposit, loading: depositLoading, error: depositError } = useDeposit(slabAddress);
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
@@ -25,6 +28,23 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
   const [amount, setAmount] = useState("");
   const [lastSig, setLastSig] = useState<string | null>(null);
+  const [walletBalance, setWalletBalance] = useState<bigint | null>(null);
+
+  // Fetch wallet token balance
+  useEffect(() => {
+    if (!publicKey || !mktConfig?.collateralMint) { setWalletBalance(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
+        const info = await connection.getTokenAccountBalance(ata);
+        if (!cancelled && info.value.amount) {
+          setWalletBalance(BigInt(info.value.amount));
+        }
+      } catch { if (!cancelled) setWalletBalance(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [publicKey, mktConfig?.collateralMint, connection, lastSig]);
 
   if (!connected) {
     return (
@@ -77,7 +97,10 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   return (
     <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
       <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Deposit / Withdraw</h3>
-      <p className="mb-3 text-lg font-bold text-[var(--text)]">{formatTokenAmount(capital)} <span className="text-sm font-normal text-[var(--text-secondary)]">{symbol}</span></p>
+      <p className="mb-1 text-lg font-bold text-[var(--text)]">{formatTokenAmount(capital)} <span className="text-sm font-normal text-[var(--text-secondary)]">{symbol}</span></p>
+      {walletBalance !== null && (
+        <p className="mb-3 text-xs text-[var(--text-muted)]">Wallet: {formatTokenAmount(walletBalance)} {symbol}</p>
+      )}
 
       <div className="mb-3 flex gap-1.5">
         <button onClick={() => setMode("deposit")} className={`flex-1 rounded-sm py-1.5 text-xs font-medium ${mode === "deposit" ? "bg-[var(--long)] text-white shadow-sm" : "bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--border)]"}`}>Deposit</button>

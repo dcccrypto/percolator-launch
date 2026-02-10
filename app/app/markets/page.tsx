@@ -7,7 +7,7 @@ import { computeMarketHealth } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
 import type { MarketWithStats } from "@/lib/supabase";
-import { supabase } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
 import type { DiscoveredMarket } from "@percolator/core";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
@@ -43,7 +43,7 @@ export default function MarketsPage() {
 
   useEffect(() => {
     async function load() {
-      const { data } = await supabase.from("markets_with_stats").select("*");
+      const { data } = await getSupabase().from("markets_with_stats").select("*");
       setSupabaseMarkets(data || []);
       setSupabaseLoading(false);
     }
@@ -176,15 +176,15 @@ export default function MarketsPage() {
               )}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-sm border border-[var(--border)] hud-corners">
+            <div className="overflow-x-auto rounded-sm border border-[var(--border)] hud-corners">
               {/* Header row */}
-              <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+              <div className="grid min-w-[640px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
                 <div>token</div>
                 <div className="text-right">price</div>
                 <div className="text-right">OI</div>
                 <div className="text-right">volume</div>
-                <div className="text-right">insurance</div>
-                <div className="text-right">max lev</div>
+                <div className="text-right hidden sm:block">insurance</div>
+                <div className="text-right hidden sm:block">max lev</div>
                 <div className="text-right">health</div>
               </div>
 
@@ -202,7 +202,7 @@ export default function MarketsPage() {
                     key={m.slabAddress}
                     href={`/trade/${m.slabAddress}`}
                     className={[
-                      "grid grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 items-center px-4 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.04] hover:border-l-2 hover:border-l-[var(--accent)]/30",
+                      "grid min-w-[640px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 items-center px-4 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.04] hover:border-l-2 hover:border-l-[var(--accent)]/30",
                       i > 0 ? "border-t border-[var(--border)]" : "",
                     ].join(" ")}
                   >
@@ -222,7 +222,7 @@ export default function MarketsPage() {
                       </span>
                     </div>
                     <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiTokens}</div>
-                    <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{capitalTokens}</div>
+                    <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{m.supabase?.volume_24h ? formatNum(m.supabase.volume_24h) : "\u2014"}</div>
                     <div className="text-right text-sm text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceTokens}</div>
                     <div className="text-right text-sm text-[var(--text-secondary)]">{maxLev}x</div>
                     <div className="text-right"><HealthBadge level={health.level} /></div>

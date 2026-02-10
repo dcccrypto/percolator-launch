@@ -7,6 +7,8 @@ import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
+import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
+import { PublicKey } from "@solana/web3.js";
 
 const WalletMultiButton = dynamic(
   () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
@@ -22,6 +24,10 @@ function formatPnl(pnl: bigint, decimals = 6): string {
 export default function PortfolioPage() {
   const { connected } = useWallet();
   const { positions, totalPnl, totalDeposited, loading } = usePortfolio();
+
+  // Resolve collateral mint addresses to token symbols
+  const collateralMints = positions.map((pos) => pos.market.config.collateralMint);
+  const tokenMetaMap = useMultiTokenMeta(collateralMints);
 
   if (!connected) {
     return (
@@ -125,8 +131,9 @@ export default function PortfolioPage() {
                   >
                     <div>
                       <span className="text-sm font-semibold text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                        {pos.slabAddress.slice(0, 8)}&hellip;
+                        {tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.symbol ?? pos.slabAddress.slice(0, 8) + "\u2026"}/USD
                       </span>
+                      <span className="block text-[10px] text-[var(--text-dim)]">{pos.slabAddress.slice(0, 8)}&hellip;</span>
                     </div>
                     <div className="text-center">
                       <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${

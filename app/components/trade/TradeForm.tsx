@@ -353,7 +353,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Submit */}
       <button
         onClick={handleTrade}
-        disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin}
+        disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive}
         className={`w-full rounded-sm py-3 text-sm font-medium text-white transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 disabled:active:scale-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] ${
           direction === "long"
             ? "bg-[var(--long)] hover:brightness-110 focus-visible:ring-[var(--long)]"

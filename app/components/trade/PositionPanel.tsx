@@ -65,8 +65,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const onChainPriceE6 = config?.lastEffectivePriceE6 ?? 0n;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6;
 
-  const entryPriceE6 =
-    account.reservedPnl > 0n ? account.reservedPnl : account.entryPrice;
+  const entryPriceE6 = account.entryPrice;
 
   // --- PnL via trading.ts utilities ---
   const pnlTokens = computeMarkPnl(
