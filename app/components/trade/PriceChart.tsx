@@ -11,10 +11,9 @@ interface PricePoint {
   timestamp: number;
 }
 
-const W = 600;
+const DEFAULT_W = 600;
 const H = 200;
 const PAD = { top: 16, bottom: 20, left: 8, right: 8 };
-const CHART_W = W - PAD.left - PAD.right;
 const CHART_H = H - PAD.top - PAD.bottom;
 
 function fmtPrice(p: number) {
@@ -24,12 +23,39 @@ function fmtPrice(p: number) {
 export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { config } = useSlabState();
   const [prices, setPrices] = useState<PricePoint[]>([]);
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const [mouseX, setMouseX] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const polylineRef = useRef<SVGPolylineElement>(null);
   const polygonRef = useRef<SVGPolygonElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+
+  // --- Dynamic width via callback ref (fires when chart div mounts) ---
+  const [W, setW] = useState(DEFAULT_W);
+  const CHART_W = W - PAD.left - PAD.right;
+  const roRef = useRef<ResizeObserver | null>(null);
+  const chartWrapCallback = useCallback((node: HTMLDivElement | null) => {
+    if (roRef.current) { roRef.current.disconnect(); roRef.current = null; }
+    if (!node) return;
+    const w = node.clientWidth;
+    if (w > 0) setW(w);
+    const ro = new ResizeObserver(entries => {
+      const cw = entries[0]?.contentRect.width;
+      if (cw && cw > 0) setW(cw);
+    });
+    ro.observe(node);
+    roRef.current = ro;
+  }, []);
+
+  // --- Crosshair refs (direct DOM manipulation, zero re-renders) ---
+  const crosshairRef = useRef<SVGGElement>(null);
+  const crossVLineRef = useRef<SVGLineElement>(null);
+  const crossHLineRef = useRef<SVGLineElement>(null);
+  const crossOuterRef = useRef<SVGCircleElement>(null);
+  const crossInnerRef = useRef<SVGCircleElement>(null);
+  const crossTimeBgRef = useRef<SVGRectElement>(null);
+  const crossTimeTextRef = useRef<SVGTextElement>(null);
+  const hoverPriceRef = useRef<HTMLSpanElement>(null);
+  const hoverDateRef = useRef<HTMLDivElement>(null);
+  const svgRectRef = useRef<DOMRect | null>(null);
 
   // Accumulate prices from on-chain slab state
   const lastPriceRef = useRef<number>(0);
@@ -99,18 +125,20 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
     return {
       points: pts,
-      minP: mn,
-      maxP: mx,
+      minP: mn, maxP: mx,
       curPrice: v[v.length - 1],
-      high: mx,
-      low: mn,
+      high: mx, low: mn,
       isUp: v[v.length - 1] >= v[0],
-      minT: tMin,
-      maxT: tMax,
-      vals: v,
-      times: t,
+      minT: tMin, maxT: tMax,
+      vals: v, times: t,
     };
-  }, [prices]);
+  }, [prices, W]);
+
+  // Sync computed data to ref so imperative mouse handler reads latest values
+  const dataRef = useRef({ vals: [] as number[], times: [] as number[], minP: 0, maxP: 0, minT: 0, maxT: 0, curPrice: 0, isUp: true });
+  useEffect(() => {
+    dataRef.current = { vals, times, minP, maxP, minT, maxT, curPrice, isUp };
+  }, [vals, times, minP, maxP, minT, maxT, curPrice, isUp]);
 
   // Line draw animation
   useEffect(() => {
@@ -140,16 +168,77 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     });
   }, [points, prefersReduced]);
 
+  // --- Mouse handlers (direct DOM manipulation, no React state/re-render) ---
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    if (!svgRef.current || prices.length === 0) return;
-    const rect = svgRef.current.getBoundingClientRect();
+    const svg = svgRef.current;
+    if (!svg) return;
+    const d = dataRef.current;
+    if (d.vals.length === 0) return;
+
+    if (!svgRectRef.current) svgRectRef.current = svg.getBoundingClientRect();
+    const rect = svgRectRef.current;
+
     const svgX = (e.clientX - rect.left) / rect.width * W;
-    setMouseX(Math.max(PAD.left, Math.min(W - PAD.right, svgX)));
-    const chartX = svgX - PAD.left;
-    const pct = chartX / CHART_W;
-    const idx = Math.min(Math.max(Math.round(pct * (prices.length - 1)), 0), prices.length - 1);
-    setHoveredIdx(idx);
-  }, [prices.length]);
+    const clampedX = Math.max(PAD.left, Math.min(W - PAD.right, svgX));
+    const pct = (svgX - PAD.left) / CHART_W;
+    const idx = Math.min(Math.max(Math.round(pct * (d.vals.length - 1)), 0), d.vals.length - 1);
+
+    const tRange = d.maxT - d.minT || 1;
+    const pRange = d.maxP - d.minP || 0.001;
+    const hoverX = PAD.left + ((d.times[idx] - d.minT) / tRange) * CHART_W;
+    const hoverY = PAD.top + (1 - (d.vals[idx] - d.minP) / pRange) * CHART_H;
+    const clr = d.isUp ? "#14F195" : "#FF3B5C";
+
+    // Show crosshair
+    crosshairRef.current?.setAttribute("display", "");
+
+    const vLine = crossVLineRef.current;
+    if (vLine) { vLine.setAttribute("x1", String(clampedX)); vLine.setAttribute("x2", String(clampedX)); }
+
+    const hLine = crossHLineRef.current;
+    if (hLine) { hLine.setAttribute("y1", String(hoverY)); hLine.setAttribute("y2", String(hoverY)); }
+
+    const outer = crossOuterRef.current;
+    if (outer) { outer.setAttribute("cx", String(hoverX)); outer.setAttribute("cy", String(hoverY)); outer.setAttribute("stroke", clr); }
+
+    const inner = crossInnerRef.current;
+    if (inner) { inner.setAttribute("cx", String(hoverX)); inner.setAttribute("cy", String(hoverY)); inner.setAttribute("fill", clr); }
+
+    const timeBg = crossTimeBgRef.current;
+    if (timeBg) timeBg.setAttribute("x", String(clampedX - 24));
+
+    const timeText = crossTimeTextRef.current;
+    if (timeText) {
+      timeText.setAttribute("x", String(clampedX));
+      const date = new Date(d.times[idx] * 1000);
+      timeText.textContent = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    // Update HTML hover displays
+    if (hoverPriceRef.current) {
+      hoverPriceRef.current.textContent = `$${fmtPrice(d.vals[idx])}`;
+      hoverPriceRef.current.style.color = clr;
+    }
+    if (hoverDateRef.current) {
+      const date = new Date(d.times[idx] * 1000);
+      hoverDateRef.current.textContent = date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+  }, [W, CHART_W]);
+
+  const handleMouseLeave = useCallback(() => {
+    crosshairRef.current?.setAttribute("display", "none");
+    svgRectRef.current = null;
+    const d = dataRef.current;
+    const clr = d.isUp ? "#14F195" : "#FF3B5C";
+    if (hoverPriceRef.current) {
+      hoverPriceRef.current.textContent = `$${fmtPrice(d.curPrice)}`;
+      hoverPriceRef.current.style.color = clr;
+    }
+    if (hoverDateRef.current) hoverDateRef.current.textContent = "\u00A0";
+  }, []);
+
+  // Invalidate cached SVG rect on resize
+  useEffect(() => { svgRectRef.current = null; }, [W]);
 
   // Y-axis labels — must be before early return to keep hook order stable
   const yLabels = useMemo(() => {
@@ -178,7 +267,7 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       });
     }
     return labels;
-  }, [minT, maxT]);
+  }, [minT, maxT, W]);
 
   // Show current price even with just 1 data point
   const currentPrice = config
@@ -204,16 +293,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   const color = isUp ? "#14F195" : "#FF3B5C";
-  const hoveredPrice = hoveredIdx !== null ? prices[hoveredIdx].price_e6 / 1e6 : null;
-  const hoveredTime = hoveredIdx !== null ? new Date(prices[hoveredIdx].timestamp * 1000) : null;
-
-  // Hover crosshair position
-  const hoverX = hoveredIdx !== null && times.length > 0 && minT !== maxT
-    ? PAD.left + ((times[hoveredIdx] - minT) / (maxT - minT)) * CHART_W
-    : null;
-  const hoverY = hoveredIdx !== null && vals.length > 0 && minP !== maxP
-    ? PAD.top + (1 - (vals[hoveredIdx] - minP) / (maxP - minP)) * CHART_H
-    : null;
 
   // Current price Y position for dashed line
   const curPriceY = minP !== maxP
@@ -231,106 +310,114 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <span className="text-[var(--text-muted)]">
             24h Low <span className="font-bold text-[var(--text)]">${fmtPrice(low)}</span>
           </span>
-          <span className="font-bold" style={{ color }}>
-            ${fmtPrice(hoveredPrice ?? curPrice)}
+          <span ref={hoverPriceRef} className="font-bold" style={{ color }}>
+            ${fmtPrice(curPrice)}
           </span>
         </div>
       </div>
-      {hoveredTime && (
-        <div className="mb-1 text-right text-[10px] text-[var(--text-muted)]">
-          {hoveredTime.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-        </div>
-      )}
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        style={{ height: 200 }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => { setHoveredIdx(null); setMouseX(null); }}
-      >
-        <defs>
-          <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
+      <div ref={hoverDateRef} className="mb-1 h-4 text-right text-[10px] text-[var(--text-muted)]">
+        {"\u00A0"}
+      </div>
+      <div ref={chartWrapCallback}>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          className="w-full"
+          style={{ height: 200 }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
+          <defs>
+            <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
 
-        {/* Horizontal grid lines */}
-        {yLabels.map((yl, i) => (
-          <line key={`grid-${i}`} x1={PAD.left} y1={yl.y} x2={W - PAD.right} y2={yl.y} style={{ stroke: "var(--border-subtle)" }} strokeWidth="1" />
-        ))}
+          {/* Horizontal grid lines */}
+          {yLabels.map((yl, i) => (
+            <line key={`grid-${i}`} x1={PAD.left} y1={yl.y} x2={W - PAD.right} y2={yl.y} style={{ stroke: "var(--border-subtle)" }} strokeWidth="1" />
+          ))}
 
-        {/* Y-axis labels — overlaid inside chart */}
-        {yLabels.map((yl, i) => (
-          <text key={`ylabel-${i}`} x={PAD.left + 4} y={yl.y - 4} textAnchor="start" style={{ fill: "var(--text-dim)" }} fontSize="9">{yl.label}</text>
-        ))}
+          {/* Y-axis labels — overlaid inside chart */}
+          {yLabels.map((yl, i) => (
+            <text key={`ylabel-${i}`} x={PAD.left + 4} y={yl.y - 4} textAnchor="start" style={{ fill: "var(--text-dim)" }} fontSize="9">{yl.label}</text>
+          ))}
 
-        {/* Current price dashed line */}
-        {curPriceY !== null && (
-          <>
-            <line x1={PAD.left} y1={curPriceY} x2={W - PAD.right} y2={curPriceY} stroke={color} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
-            <rect x={W - PAD.right - 52} y={curPriceY - 8} width={50} height={16} rx="2" fill={color} opacity="0.2" />
-            <text x={W - PAD.right - 4} y={curPriceY + 3} textAnchor="end" fill={color} fontSize="9" fontWeight="bold">${fmtPrice(curPrice)}</text>
-          </>
-        )}
+          {/* Current price dashed line */}
+          {curPriceY !== null && (
+            <>
+              <line x1={PAD.left} y1={curPriceY} x2={W - PAD.right} y2={curPriceY} stroke={color} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
+              <rect x={W - PAD.right - 52} y={curPriceY - 8} width={50} height={16} rx="2" fill={color} opacity="0.2" />
+              <text x={W - PAD.right - 4} y={curPriceY + 3} textAnchor="end" fill={color} fontSize="9" fontWeight="bold">${fmtPrice(curPrice)}</text>
+            </>
+          )}
 
-        {/* Area fill */}
-        <polygon
-          ref={polygonRef}
-          points={`${PAD.left},${PAD.top + CHART_H} ${points} ${W - PAD.right},${PAD.top + CHART_H}`}
-          fill="url(#chartGrad)"
-          style={{ opacity: prefersReduced ? 1 : 0 }}
-        />
+          {/* Area fill */}
+          <polygon
+            ref={polygonRef}
+            points={`${PAD.left},${PAD.top + CHART_H} ${points} ${W - PAD.right},${PAD.top + CHART_H}`}
+            fill="url(#chartGrad)"
+            style={{ opacity: prefersReduced ? 1 : 0 }}
+          />
 
-        {/* Price line */}
-        <polyline
-          ref={polylineRef}
-          points={points}
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-        />
+          {/* Price line */}
+          <polyline
+            ref={polylineRef}
+            points={points}
+            fill="none"
+            stroke={color}
+            strokeWidth="2"
+          />
 
-        {/* Pulse dot at last price */}
-        {prices.length > 0 && (() => {
-          const lastPts = points.split(" ");
-          const last = lastPts[lastPts.length - 1];
-          const [cx, cy] = last.split(",");
-          return (
-            <circle
-              cx={cx}
-              cy={cy}
-              r="3"
-              fill={color}
-              className="animate-[pulse-glow_2s_ease-in-out_infinite]"
+          {/* Pulse dot at last price */}
+          {prices.length > 0 && (() => {
+            const lastPts = points.split(" ");
+            const last = lastPts[lastPts.length - 1];
+            const [cx, cy] = last.split(",");
+            return (
+              <circle
+                cx={cx}
+                cy={cy}
+                r="3"
+                fill={color}
+                className="animate-[pulse-glow_2s_ease-in-out_infinite]"
+              />
+            );
+          })()}
+
+          {/* Crosshair — always rendered, toggled via display attr */}
+          <g ref={crosshairRef} display="none">
+            <line
+              ref={crossVLineRef}
+              x1="0" y1={PAD.top} x2="0" y2={PAD.top + CHART_H}
+              style={{ stroke: "var(--accent)" }} strokeWidth="1" opacity="0.3"
             />
-          );
-        })()}
+            <line
+              ref={crossHLineRef}
+              x1={PAD.left} y1="0" x2={W - PAD.right} y2="0"
+              style={{ stroke: "var(--accent)" }} strokeWidth="1" strokeDasharray="3 3" opacity="0.3"
+            />
+            <circle ref={crossOuterRef} cx="0" cy="0" r="4" fill="none" strokeWidth="2" />
+            <circle ref={crossInnerRef} cx="0" cy="0" r="2" />
+            <rect
+              ref={crossTimeBgRef}
+              x="0" y={PAD.top + CHART_H + 2} width={48} height={14} rx="2"
+              style={{ fill: "var(--accent)" }} opacity="0.15"
+            />
+            <text
+              ref={crossTimeTextRef}
+              x="0" y={PAD.top + CHART_H + 12} textAnchor="middle"
+              style={{ fill: "var(--accent)" }} fontSize="8"
+            />
+          </g>
 
-        {/* Hover crosshair — vertical line follows cursor, dot snaps to data */}
-        {mouseX !== null && hoverX !== null && hoverY !== null && (
-          <>
-            <line x1={mouseX} y1={PAD.top} x2={mouseX} y2={PAD.top + CHART_H} style={{ stroke: "var(--accent)" }} strokeWidth="1" opacity="0.3" />
-            <line x1={PAD.left} y1={hoverY} x2={W - PAD.right} y2={hoverY} style={{ stroke: "var(--accent)" }} strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
-            <circle cx={hoverX} cy={hoverY} r="4" fill="none" stroke={color} strokeWidth="2" />
-            <circle cx={hoverX} cy={hoverY} r="2" fill={color} />
-            {hoveredTime && (
-              <>
-                <rect x={mouseX - 24} y={PAD.top + CHART_H + 2} width={48} height={14} rx="2" style={{ fill: "var(--accent)" }} opacity="0.15" />
-                <text x={mouseX} y={PAD.top + CHART_H + 12} textAnchor="middle" style={{ fill: "var(--accent)" }} fontSize="8">
-                  {hoveredTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </text>
-              </>
-            )}
-          </>
-        )}
-
-        {/* X-axis labels */}
-        {timeLabels.map((tl, i) => (
-          <text key={`time-${i}`} x={tl.x} y={H - 4} textAnchor="middle" style={{ fill: "var(--text-dim)" }} fontSize="9">{tl.label}</text>
-        ))}
-      </svg>
+          {/* X-axis labels */}
+          {timeLabels.map((tl, i) => (
+            <text key={`time-${i}`} x={tl.x} y={H - 4} textAnchor="middle" style={{ fill: "var(--text-dim)" }} fontSize="9">{tl.label}</text>
+          ))}
+        </svg>
+      </div>
     </div>
   );
 };

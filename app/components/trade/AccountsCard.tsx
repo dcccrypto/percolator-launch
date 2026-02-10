@@ -111,8 +111,8 @@ export const AccountsCard: FC = () => {
 
   const isOpenLike = tab === "open" || tab === "leaderboard";
 
-  const SortHeader: FC<{ label: string; sKey: SortKey; align?: "left" | "right" }> = ({ label, sKey, align = "right" }) => (
-    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none whitespace-nowrap px-2 pb-3 font-medium ${align === "left" ? "text-left" : "text-right"} hover:text-[var(--text-secondary)]`}>
+  const SortHeader: FC<{ label: string; sKey: SortKey; align?: "left" | "right"; className?: string }> = ({ label, sKey, align = "right", className = "" }) => (
+    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none whitespace-nowrap px-3 py-2.5 font-medium ${align === "left" ? "text-left" : "text-right"} hover:text-[var(--text-secondary)] ${className}`}>
       {label}
       {sortKey === sKey ? <span className="ml-0.5 text-[var(--long)]">{sortDir === "asc" ? "^" : "v"}</span> : ""}
     </th>
@@ -144,7 +144,7 @@ export const AccountsCard: FC = () => {
         </p>
       ) : (
         <div className="max-h-[420px] overflow-y-auto overflow-x-auto">
-          <table className="w-full text-[11px]">
+          <table className="min-w-full text-[11px]">
             <thead className="sticky top-0 z-10 bg-[var(--panel-bg)]">
               <tr className="border-b border-[var(--border)] text-[9px] uppercase tracking-wider text-[var(--text-dim)]">
                 <SortHeader label="#" sKey="idx" align="left" />
@@ -152,7 +152,7 @@ export const AccountsCard: FC = () => {
                 {isOpenLike && <SortHeader label="Side" sKey="direction" align="left" />}
                 {isOpenLike && <SortHeader label="Size" sKey="position" />}
                 {isOpenLike && <SortHeader label="Entry" sKey="entry" />}
-                {isOpenLike && <SortHeader label="Liq" sKey="liqPrice" />}
+                {isOpenLike && <SortHeader label="Liq Price" sKey="liqPrice" />}
                 <SortHeader label="PnL" sKey="pnl" />
               </tr>
             </thead>
@@ -161,10 +161,10 @@ export const AccountsCard: FC = () => {
                 const absPos = row.positionSize < 0n ? -row.positionSize : row.positionSize;
                 return (
                   <tr key={row.idx} className="border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-elevated)]">
-                    <td className="whitespace-nowrap px-2 py-4 text-[var(--text-dim)]">{i + 1}</td>
-                    <td className="whitespace-nowrap px-2 py-4 text-left text-[var(--text-secondary)]">{shortenAddress(row.owner)}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-left text-[var(--text-dim)]">{i + 1}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-left text-[var(--text-secondary)]">{shortenAddress(row.owner)}</td>
                     {isOpenLike && (
-                      <td className="whitespace-nowrap px-2 py-4 text-left">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-left">
                         {row.direction === "IDLE" ? <span className="text-[var(--text-dim)]">-</span> : (
                           <span className={`text-[10px] font-bold ${
                             row.direction === "LONG" ? "text-[var(--long)]" : "text-[var(--short)]"
@@ -173,24 +173,24 @@ export const AccountsCard: FC = () => {
                       </td>
                     )}
                     {isOpenLike && (
-                      <td className={`whitespace-nowrap px-2 py-4 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
+                      <td className={`whitespace-nowrap px-3 py-2.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
                         {row.positionSize !== 0n ? formatTokenAmount(absPos) : "-"}
                       </td>
                     )}
-                    {isOpenLike && <td className="whitespace-nowrap px-2 py-4 text-right text-[var(--text)]">{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
+                    {isOpenLike && <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]">{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
                     {isOpenLike && (
-                      <td className="whitespace-nowrap px-2 py-4 text-right">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right">
                         {row.positionSize !== 0n ? (
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
                             <span className="text-[var(--text)]">{formatUsd(row.liqPrice)}</span>
-                            <div className="h-2 w-10 rounded-full bg-[var(--border)]">
-                              <div className={`h-2 rounded-full ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
+                            <div className="h-1.5 w-10 shrink-0 rounded-full bg-[var(--border)]">
+                              <div className={`h-1.5 rounded-full ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
                             </div>
                           </div>
                         ) : "-"}
                       </td>
                     )}
-                    <td className={`whitespace-nowrap px-2 py-4 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
+                    <td className={`whitespace-nowrap px-3 py-2.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
                       {formatPnl(row.pnl)}
                     </td>
                   </tr>

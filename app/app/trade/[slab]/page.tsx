@@ -142,11 +142,11 @@ function TradePageInner({ slab }: { slab: string }) {
 
         {/* Right column */}
         <div className="space-y-4">
-          <ErrorBoundary label="AccountsCard">
-            <AccountsCard />
-          </ErrorBoundary>
           <ErrorBoundary label="DepositWithdrawCard">
             <DepositWithdrawCard slabAddress={slab} />
+          </ErrorBoundary>
+          <ErrorBoundary label="AccountsCard">
+            <AccountsCard />
           </ErrorBoundary>
           <ErrorBoundary label="EngineHealthCard">
             <Collapsible title="engine health" defaultOpen={false} badge={health && <HealthBadge level={health.level} />}>
