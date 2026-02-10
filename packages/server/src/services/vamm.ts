@@ -50,7 +50,7 @@ export class VammService {
    */
   start(intervalMs = 30_000): void {
     // Listen for market creation events
-    eventBus.on("market:created", (data: { slabAddress: string }) => {
+    eventBus.on("market.created", (data: { slabAddress: string }) => {
       this.trackMarket({
         slabAddress: data.slabAddress,
         matcherProgramId: MATCHER_PROGRAM_ID,
@@ -99,7 +99,7 @@ export class VammService {
         // Emit alerts for unhealthy LPs
         for (const lp of status) {
           if (!lp.healthy) {
-            eventBus.emit("vamm:lp_unhealthy", {
+            eventBus.emit("vamm.lp_unhealthy", {
               slabAddress: slabAddr,
               lpIdx: lp.lpIdx,
               reason: lp.reason,

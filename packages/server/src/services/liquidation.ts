@@ -5,6 +5,7 @@ import {
   parseEngine,
   parseParams,
   parseAccount,
+  parseUsedIndices,
   detectLayout,
   buildAccountMetas,
   buildIx,
@@ -62,13 +63,16 @@ export class LiquidationService {
       if (!layout) return [];
 
       const candidates: LiquidationCandidate[] = [];
-      const numAccounts = engine.numUsedAccounts;
       const maintenanceMarginBps = params.maintenanceMarginBps;
       const price = cfg.authorityPriceE6;
 
       if (price === 0n) return []; // No price set
 
-      for (let i = 0; i < numAccounts; i++) {
+      // Use bitmap to find actually-used account indices (not sequential iteration)
+      // The bitmap can be sparse — e.g., accounts at indices 0, 5, 100
+      const usedIndices = parseUsedIndices(data);
+
+      for (const i of usedIndices) {
         try {
           const account = parseAccount(data, i);
 
@@ -198,8 +202,10 @@ export class LiquidationService {
         const freshParams = parseParams(freshData);
         const freshCfg = parseConfig(freshData);
 
-        if (accountIdx >= freshEngine.numUsedAccounts) {
-          console.warn(`[LiquidationService] Race condition: accountIdx ${accountIdx} no longer valid on ${slabAddress.toBase58()}, skipping`);
+        // Use bitmap to verify account is still active (not sequential numUsedAccounts)
+        const freshUsed = parseUsedIndices(freshData);
+        if (!freshUsed.includes(accountIdx)) {
+          console.warn(`[LiquidationService] Race condition: accountIdx ${accountIdx} no longer in bitmap on ${slabAddress.toBase58()}, skipping`);
           return null;
         }
 

@@ -3,10 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:3001";
-const WS_URL_IS_DEFAULT = !process.env.NEXT_PUBLIC_WS_URL;
-if (WS_URL_IS_DEFAULT && typeof window !== "undefined") {
-  console.warn("[useLivePrice] NEXT_PUBLIC_WS_URL not set — falling back to ws://localhost:3001. Set this env var in production.");
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "";
+if (!WS_URL && typeof window !== "undefined") {
+  console.warn("[useLivePrice] NEXT_PUBLIC_WS_URL not set — WebSocket price streaming disabled. Set this env var in production.");
 }
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
@@ -101,6 +100,8 @@ export function useLivePrice(): PriceState {
 
     function connect() {
       if (!mountedRef.current) return;
+      // Skip WebSocket if URL not configured
+      if (!WS_URL) return;
       // Close any existing connection to prevent zombie WS
       if (wsRef.current) {
         try { wsRef.current.close(); } catch { /* ignore */ }

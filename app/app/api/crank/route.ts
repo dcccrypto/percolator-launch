@@ -125,7 +125,16 @@ export async function GET() {
 /**
  * POST /api/crank — crank ALL discovered markets (batch)
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
+  // Auth check — prevent anyone from draining crank wallet SOL
+  const apiKey = process.env.INDEXER_API_KEY;
+  if (apiKey) {
+    const provided = req.headers.get("x-api-key");
+    if (!provided || provided !== apiKey) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+  }
+
   const payer = getKeypair();
   if (!payer) {
     return NextResponse.json(

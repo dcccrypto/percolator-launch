@@ -46,6 +46,8 @@ export function computeLiqPrice(
     const liq = entryPrice - adjusted;
     return liq > 0n ? liq : 0n;
   } else {
+    // Guard: if maintenanceMarginBps >= 10000 (100%), position is effectively unliquidatable
+    if (maintenanceMarginBps >= 10000n) return entryPrice;
     const adjusted = (capitalPerUnitE6 * 10000n) / (10000n - maintenanceMarginBps);
     return entryPrice + adjusted;
   }

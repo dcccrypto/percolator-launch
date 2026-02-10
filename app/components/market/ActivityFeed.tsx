@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import gsap from "gsap";
-import { supabase } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
@@ -58,7 +58,7 @@ export function ActivityFeed() {
 
       // Fetch recent markets (new listings)
       try {
-        const { data: markets } = await supabase
+        const { data: markets } = await getSupabase()
           .from("markets")
           .select("slab_address, symbol, name, created_at")
           .order("created_at", { ascending: false })
@@ -79,7 +79,7 @@ export function ActivityFeed() {
 
       // Fetch recent trades
       try {
-        const { data: trades } = await supabase
+        const { data: trades } = await getSupabase()
           .from("trades")
           .select("id, slab_address, side, size, price, created_at, tx_sig")
           .order("created_at", { ascending: false })

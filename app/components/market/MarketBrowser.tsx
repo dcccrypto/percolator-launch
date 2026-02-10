@@ -122,7 +122,7 @@ export const MarketBrowser: FC = () => {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link
-                      href={`/trade?market=${slab}`}
+                      href={`/trade/${slab}`}
                       className="rounded-sm border border-[var(--accent)]/40 text-[var(--accent)] bg-transparent px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--accent)]/[0.08] hover:border-[var(--accent)]/70"
                     >
                       Trade
