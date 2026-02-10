@@ -70,8 +70,10 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     }
 
     const slabPk = new PublicKey(slabAddress);
+    let cancelled = false;
 
     function parseSlab(data: Uint8Array, owner?: PublicKey) {
+      if (cancelled) return;
       try {
         const header = parseHeader(data);
         const config = parseConfig(data);
@@ -87,6 +89,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     let subId: number | undefined;
     try {
       subId = connection.onAccountChange(slabPk, (info) => {
+        if (cancelled) return;
         wsActive.current = true;
         parseSlab(new Uint8Array(info.data), info.owner);
       });
@@ -94,20 +97,29 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
 
     let timer: ReturnType<typeof setInterval> | undefined;
     async function poll() {
-      // Always poll — WebSocket can silently disconnect on devnet
-      // If WS is active, it updates more frequently anyway
+      if (cancelled) return;
       try {
         const info = await connection.getAccountInfo(slabPk);
-        if (info) parseSlab(new Uint8Array(info.data), info.owner);
+        if (info && !cancelled) parseSlab(new Uint8Array(info.data), info.owner);
       } catch { /* ignore */ }
     }
 
-    poll();
-    timer = setInterval(poll, POLL_INTERVAL_MS);
+    // Adaptive polling: 30s when WS active, 3s when not
+    function schedulePoll() {
+      if (cancelled) return;
+      const interval = wsActive.current ? 30_000 : POLL_INTERVAL_MS;
+      timer = setTimeout(() => {
+        poll().then(schedulePoll);
+      }, interval);
+    }
+
+    poll().then(schedulePoll);
 
     return () => {
+      cancelled = true;
+      wsActive.current = false;
       if (subId !== undefined) connection.removeAccountChangeListener(subId);
-      if (timer) clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
   }, [connection, slabAddress]);
 

@@ -19,8 +19,11 @@ interface MarketCrankState {
   lastCrankTime: number;
   successCount: number;
   failureCount: number;
+  consecutiveFailures: number;
   /** Considered active if it has had at least one successful crank */
   isActive: boolean;
+  /** Number of consecutive discoveries where this market was missing */
+  missingDiscoveryCount: number;
 }
 
 /** Process items in batches with delay between batches.
@@ -87,18 +90,35 @@ export class CrankService {
     const discovered = results.flat();
     console.log(`[CrankService] Found ${discovered.length} markets total`);
 
+    const discoveredKeys = new Set<string>();
     for (const market of discovered) {
       const key = market.slabAddress.toBase58();
+      discoveredKeys.add(key);
       if (!this.markets.has(key)) {
         this.markets.set(key, {
           market,
           lastCrankTime: 0,
           successCount: 0,
           failureCount: 0,
-          isActive: true, // assume active until proven otherwise
+          consecutiveFailures: 0,
+          isActive: true,
+          missingDiscoveryCount: 0,
         });
       } else {
-        this.markets.get(key)!.market = market;
+        const state = this.markets.get(key)!;
+        state.market = market;
+        state.missingDiscoveryCount = 0;
+      }
+    }
+
+    // Bug 17: Track markets missing from discovery, remove after 3 consecutive misses
+    for (const [key, state] of this.markets) {
+      if (!discoveredKeys.has(key)) {
+        state.missingDiscoveryCount++;
+        if (state.missingDiscoveryCount >= 3) {
+          console.warn(`[CrankService] Removing dead market ${key} (missing from ${state.missingDiscoveryCount} consecutive discoveries)`);
+          this.markets.delete(key);
+        }
       }
     }
 
@@ -161,6 +181,7 @@ export class CrankService {
 
       state.lastCrankTime = Date.now();
       state.successCount++;
+      state.consecutiveFailures = 0;
       state.isActive = true;
       if (state.failureCount > 0) state.failureCount = 0;
 
@@ -168,8 +189,9 @@ export class CrankService {
       return true;
     } catch (err) {
       state.failureCount++;
-      // After 5 consecutive failures with no successes, mark inactive
-      if (state.failureCount >= 5 && state.successCount === 0) {
+      state.consecutiveFailures++;
+      // Mark inactive after 10 consecutive failures regardless of lifetime success
+      if (state.consecutiveFailures >= 10) {
         state.isActive = false;
       }
       eventBus.publish("crank.failure", slabAddress, {

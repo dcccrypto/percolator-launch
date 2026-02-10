@@ -21,7 +21,12 @@ const dexScreenerCache = new Map<string, { data: DexScreenerResponse; fetchedAt:
 const DEX_SCREENER_CACHE_TTL_MS = 10_000;
 
 interface DexScreenerResponse {
-  pairs?: Array<{ priceUsd?: string }>;
+  pairs?: Array<{ priceUsd?: string; liquidity?: { usd?: number } }>;
+}
+
+function sortPairsByLiquidity(pairs: DexScreenerResponse["pairs"]): DexScreenerResponse["pairs"] {
+  if (!pairs) return pairs;
+  return [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
 }
 
 interface JupiterResponse {
@@ -41,7 +46,7 @@ export class OracleService {
       // Check cache first
       const cached = dexScreenerCache.get(mint);
       if (cached && Date.now() - cached.fetchedAt < DEX_SCREENER_CACHE_TTL_MS) {
-        const pair = cached.data.pairs?.[0];
+        const pair = sortPairsByLiquidity(cached.data.pairs)?.[0];
         if (!pair?.priceUsd) return null;
         const p = parseFloat(pair.priceUsd);
         if (!isFinite(p) || p <= 0) return null;
@@ -52,7 +57,7 @@ export class OracleService {
       const json = (await res.json()) as DexScreenerResponse;
       dexScreenerCache.set(mint, { data: json, fetchedAt: Date.now() });
 
-      const pair = json.pairs?.[0];
+      const pair = sortPairsByLiquidity(json.pairs)?.[0];
       if (!pair?.priceUsd) return null;
       const parsed = parseFloat(pair.priceUsd);
       if (!isFinite(parsed) || parsed <= 0) return null;

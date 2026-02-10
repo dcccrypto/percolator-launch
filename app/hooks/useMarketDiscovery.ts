@@ -55,7 +55,14 @@ export function useMarketDiscovery() {
     }
 
     load();
-    return () => { cancelled = true; };
+
+    // Refetch every 30 seconds
+    const interval = setInterval(load, 30_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [connection]);
 
   return { markets, loading, error };

@@ -53,7 +53,12 @@ export function useMyMarkets() {
     }
 
     const walletStr = publicKey.toBase58();
-    const adminAddrs = new Set(adminMarkets.map((m) => m.slabAddress.toBase58()));
+    // Derive admin addresses directly to avoid dep on adminMarkets (infinite loop risk)
+    const adminAddrs = new Set(
+      markets
+        .filter((m) => m.header.admin.toBase58() === walletStr)
+        .map((m) => m.slabAddress.toBase58())
+    );
     const nonAdminMarkets = markets.filter((m) => !adminAddrs.has(m.slabAddress.toBase58()));
 
     // Only check a limited number to avoid hammering RPC
@@ -115,7 +120,7 @@ export function useMyMarkets() {
 
     checkAccounts();
     return () => { cancelled = true; };
-  }, [publicKey, markets, discoveryLoading, adminMarkets, connection]);
+  }, [publicKey, markets, discoveryLoading, connection]);
 
   // Merge admin + traded markets (admin first)
   const myMarkets = useMemo(() => {

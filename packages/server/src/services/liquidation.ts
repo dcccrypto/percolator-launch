@@ -191,27 +191,79 @@ export class LiquidationService {
       ]);
       instructions.push(buildIx({ programId, keys: liqKeys, data: liqData }));
 
-      // Send all in one tx
-      // Note: sendWithRetry only takes a single IX, so we need to build the full tx
-      const { Transaction } = await import("@solana/web3.js");
-      const tx = new Transaction();
-      for (const ix of instructions) {
-        tx.add(ix);
+      // Bug 3: Re-read slab data and verify account before submitting
+      {
+        const freshData = await fetchSlab(connection, slabAddress);
+        const freshEngine = parseEngine(freshData);
+        const freshParams = parseParams(freshData);
+        const freshCfg = parseConfig(freshData);
+
+        if (accountIdx >= freshEngine.numUsedAccounts) {
+          console.warn(`[LiquidationService] Race condition: accountIdx ${accountIdx} no longer valid on ${slabAddress.toBase58()}, skipping`);
+          return null;
+        }
+
+        const freshAccount = parseAccount(freshData, accountIdx);
+        const expectedOwner = (await fetchSlab(connection, slabAddress), freshAccount.owner.toBase58());
+
+        // Verify still undercollateralized
+        if (freshAccount.kind !== 0 || freshAccount.positionSize === 0n) {
+          console.warn(`[LiquidationService] Race condition: account ${accountIdx} on ${slabAddress.toBase58()} no longer active, skipping`);
+          return null;
+        }
+
+        const freshPrice = freshCfg.authorityPriceE6;
+        if (freshPrice > 0n) {
+          const notional = absBI(freshAccount.positionSize) * freshPrice / 1_000_000n;
+          if (notional > 0n) {
+            const equity = freshAccount.capital + freshAccount.pnl;
+            if (equity > 0n) {
+              const marginRatioBps = equity * 10_000n / notional;
+              if (marginRatioBps >= freshParams.maintenanceMarginBps) {
+                console.warn(`[LiquidationService] Race condition: account ${accountIdx} on ${slabAddress.toBase58()} no longer undercollateralized (margin: ${marginRatioBps} bps), skipping`);
+                return null;
+              }
+            }
+          }
+        }
       }
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = keypair.publicKey;
-      tx.sign(keypair);
-      const sig = await connection.sendRawTransaction(tx.serialize(), {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
-      });
-      await connection.confirmTransaction(sig, "confirmed");
+
+      // Send all in one tx with retry (Bug 7+8+9)
+      const { Transaction } = await import("@solana/web3.js");
+      const MAX_RETRIES = 2;
+      let sig: string | null = null;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const tx = new Transaction();
+          for (const ix of instructions) {
+            tx.add(ix);
+          }
+          const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = keypair.publicKey;
+          tx.sign(keypair);
+          const txSig = await connection.sendRawTransaction(tx.serialize(), {
+            skipPreflight: false,
+            preflightCommitment: "confirmed",
+          });
+          await connection.confirmTransaction({ signature: txSig, blockhash, lastValidBlockHeight }, "confirmed");
+          sig = txSig;
+          break;
+        } catch (retryErr) {
+          const errMsg = retryErr instanceof Error ? retryErr.message.toLowerCase() : String(retryErr).toLowerCase();
+          const isNetworkError = errMsg.includes("timeout") || errMsg.includes("socket") || errMsg.includes("econnrefused") || errMsg.includes("429") || errMsg.includes("block height exceeded");
+          if (!isNetworkError || attempt >= MAX_RETRIES) {
+            throw retryErr;
+          }
+          console.warn(`[LiquidationService] Attempt ${attempt + 1} failed with network error, retrying...`);
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
 
       this.liquidationCount++;
       eventBus.publish("liquidation.success", slabAddress.toBase58(), {
         accountIdx,
-        signature: sig,
+        signature: sig!,
       });
       console.log(`[LiquidationService] Liquidated account ${accountIdx} on ${slabAddress.toBase58()}: ${sig}`);
       return sig;

@@ -65,8 +65,9 @@ export function useLivePrice(): PriceState {
   const pollTimer = useRef<ReturnType<typeof setInterval>>(undefined);
   const wsConnected = useRef(false);
 
-  // Jupiter polling fallback
-  const pollJupiter = useCallback(async () => {
+  // Jupiter polling fallback — use ref to avoid being a dep of the WS effect
+  const pollJupiterRef = useRef<() => Promise<void>>(async () => {});
+  pollJupiterRef.current = async () => {
     if (!mint || wsConnected.current) return;
     try {
       const url = `https://api.jup.ag/price/v2?ids=${mint}`;
@@ -87,7 +88,7 @@ export function useLivePrice(): PriceState {
     } catch {
       // keep last known
     }
-  }, [mint]);
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -184,15 +185,10 @@ export function useLivePrice(): PriceState {
       })
       .catch(() => {});
 
-    // Jupiter polling fallback
-    pollJupiter();
-    pollTimer.current = setInterval(pollJupiter, POLL_FALLBACK_MS);
-
     return () => {
       mountedRef.current = false;
       wsConnected.current = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (pollTimer.current) clearInterval(pollTimer.current);
       if (wsRef.current) {
         // Unsubscribe before closing to clean up server-side state
         try {
@@ -204,7 +200,17 @@ export function useLivePrice(): PriceState {
         wsRef.current = null;
       }
     };
-  }, [slabAddr, pollJupiter]);
+  }, [slabAddr]);
+
+  // Separate effect for Jupiter polling fallback — avoids causing WS reconnects
+  useEffect(() => {
+    if (!slabAddr || !mint) return;
+    pollJupiterRef.current();
+    pollTimer.current = setInterval(() => pollJupiterRef.current(), POLL_FALLBACK_MS);
+    return () => {
+      if (pollTimer.current) clearInterval(pollTimer.current);
+    };
+  }, [slabAddr, mint]);
 
   return state;
 }

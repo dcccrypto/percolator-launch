@@ -362,15 +362,17 @@ const MyMarketsPage: FC = () => {
     if (!myMarkets.length) return;
     let cancelled = false;
     async function check() {
+      const pdas = myMarkets.map((m) => ({
+        key: m.slabAddress.toBase58(),
+        pda: deriveInsuranceLpMint(m.programId, m.slabAddress)[0],
+      }));
+      const results = await Promise.allSettled(
+        pdas.map((p) => connection.getAccountInfo(p.pda))
+      );
       const map: Record<string, boolean> = {};
-      for (const m of myMarkets) {
-        const [mintPda] = deriveInsuranceLpMint(m.programId, m.slabAddress);
-        try {
-          const info = await connection.getAccountInfo(mintPda);
-          map[m.slabAddress.toBase58()] = info !== null && info.data.length > 0;
-        } catch {
-          map[m.slabAddress.toBase58()] = false;
-        }
+      for (let i = 0; i < pdas.length; i++) {
+        const result = results[i];
+        map[pdas[i].key] = result.status === "fulfilled" && result.value !== null && result.value.data.length > 0;
       }
       if (!cancelled) setInsuranceMintMap(map);
     }

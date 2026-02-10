@@ -32,7 +32,7 @@ export async function sendWithRetry(
     try {
       await acquireToken();
       const tx = new Transaction().add(ix);
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = signers[0].publicKey;
       tx.sign(...signers);
@@ -41,7 +41,7 @@ export async function sendWithRetry(
       await acquireToken();
       const sig = await connection.sendRawTransaction(tx.serialize(), opts);
       await acquireToken();
-      await connection.confirmTransaction(sig, "confirmed");
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
       return sig;
     } catch (err) {
       lastErr = err;
