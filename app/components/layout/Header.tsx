@@ -138,11 +138,12 @@ export const Header: FC = () => {
           <button
             ref={badgeRef}
             onClick={handleNetworkSwitch}
+            disabled
             className={[
-              "rounded-sm px-2 py-1 text-[11px] font-semibold uppercase tracking-wider border transition-all duration-200",
+              "rounded-sm px-2 py-1 text-[11px] font-semibold uppercase tracking-wider border transition-all duration-200 cursor-not-allowed opacity-60",
               network === "devnet"
-                ? "text-[var(--warning)]/80 border-[var(--warning)]/15 hover:border-[var(--warning)]/30 bg-[var(--warning)]/[0.04]"
-                : "text-[var(--accent)]/80 border-[var(--accent)]/15 hover:border-[var(--accent)]/30 bg-[var(--accent)]/[0.04]",
+                ? "text-[var(--warning)]/80 border-[var(--warning)]/15 bg-[var(--warning)]/[0.04]"
+                : "text-[var(--accent)]/80 border-[var(--accent)]/15 bg-[var(--accent)]/[0.04]",
             ].join(" ")}
           >
             {network}
