@@ -158,6 +158,19 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
       {walletBalance !== null && (
         <p className="mb-3 text-xs text-[var(--text-muted)]">Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}</p>
       )}
+      {mode === "deposit" && walletBalance !== null && walletBalance === 0n && mktConfig?.collateralMint && (
+        <div className="mb-3 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
+          <p className="text-[11px] text-[var(--warning)]">
+            Wallet has 0 {symbol}. You may have a different token with the same name.{" "}
+            <a href={`/devnet-mint`} className="underline underline-offset-2 hover:text-[var(--warning)]/80">
+              Mint more →
+            </a>
+          </p>
+          <p className="mt-1 text-[10px] text-[var(--text-muted)] font-mono break-all">
+            Mint: {mktConfig.collateralMint.toBase58()}
+          </p>
+        </div>
+      )}
 
       <div className="mb-3 flex gap-1.5">
         <button onClick={() => setMode("deposit")} className={`flex-1 rounded-sm py-1.5 text-xs font-medium ${mode === "deposit" ? "bg-[var(--long)] text-white shadow-sm" : "bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--border)]"}`}>Deposit</button>
