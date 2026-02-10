@@ -72,7 +72,7 @@ function addSecurityHeaders(response: NextResponse) {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
-    "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://price.jup.ag https://*.helius-rpc.com",
+    "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://price.jup.ag https://api.jup.ag https://tokens.jup.ag https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app",
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",

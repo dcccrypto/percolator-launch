@@ -254,6 +254,17 @@ export class PriceEngine {
   private _pendingSubResponses = new Map<number, { slabAddress: string; timestamp: number }>();
 
   private handleMessage(msg: Record<string, unknown>): void {
+    // Subscription error response: { id, error: {...} }
+    if (msg.id !== undefined && msg.error !== undefined) {
+      const msgId = msg.id as number;
+      const pending = this._pendingSubResponses.get(msgId);
+      if (pending) {
+        this._pendingSubResponses.delete(msgId);
+        console.error(`[PriceEngine] Subscription failed for ${pending.slabAddress}:`, msg.error);
+      }
+      return;
+    }
+
     // Subscription response: { id, result: subscriptionId }
     if (msg.id !== undefined && msg.result !== undefined) {
       const msgId = msg.id as number;

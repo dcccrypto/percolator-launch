@@ -188,6 +188,12 @@ export function useLivePrice(): PriceState {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (pollTimer.current) clearInterval(pollTimer.current);
       if (wsRef.current) {
+        // Unsubscribe before closing to clean up server-side state
+        try {
+          if (wsRef.current.readyState === WebSocket.OPEN && slabAddr) {
+            wsRef.current.send(JSON.stringify({ type: "unsubscribe", slabAddress: slabAddr }));
+          }
+        } catch { /* ignore */ }
         wsRef.current.close();
         wsRef.current = null;
       }

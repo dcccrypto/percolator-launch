@@ -39,12 +39,15 @@ export function computeLiqPrice(
   const absPos = positionSize < 0n ? -positionSize : positionSize;
   const maintBps = Number(maintenanceMarginBps);
   const capitalPerUnit = (Number(capital) * 1e6) / Number(absPos);
-  const adjusted = (capitalPerUnit * 10000) / (10000 + maintBps);
 
   if (positionSize > 0n) {
+    // Long: liq when price drops. Adjust for maintenance margin requirement.
+    const adjusted = (capitalPerUnit * 10000) / (10000 + maintBps);
     const liq = Number(entryPrice) - adjusted;
     return liq > 0 ? BigInt(Math.round(liq)) : 0n;
   } else {
+    // Short: liq when price rises. For shorts, maintenance margin reduces the buffer.
+    const adjusted = (capitalPerUnit * 10000) / (10000 - maintBps);
     return BigInt(Math.round(Number(entryPrice) + adjusted));
   }
 }
