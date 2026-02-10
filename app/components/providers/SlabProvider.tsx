@@ -100,8 +100,12 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       if (cancelled) return;
       try {
         const info = await connection.getAccountInfo(slabPk);
-        if (info && !cancelled) parseSlab(new Uint8Array(info.data), info.owner);
-      } catch { /* ignore */ }
+        if (info) {
+          parseSlab(new Uint8Array(info.data), info.owner);
+        }
+      } catch {
+        // RPC failure — will retry on next poll
+      }
     }
 
     // Adaptive polling: 30s when WS active, 3s when not

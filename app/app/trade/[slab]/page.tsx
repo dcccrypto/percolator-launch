@@ -23,16 +23,17 @@ import { InfoBanner } from "@/components/ui/InfoBanner";
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-[#71717a] transition-colors hover:text-[#fafafa]"
+        className="flex w-full items-center justify-between px-5 py-4 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-muted)] transition-colors hover:text-[var(--text)]"
+        style={{ fontFamily: "var(--font-jetbrains-mono)" }}
       >
         <span className="flex items-center gap-2">
           {title}
           {badge}
         </span>
-        <span className={`text-xs text-[#3f3f46] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>v</span>
+        <span className={`text-[10px] text-[var(--text-muted)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>&#9660;</span>
       </button>
       <div className={open ? "block" : "hidden"}>{children}</div>
     </div>
@@ -42,7 +43,8 @@ function Collapsible({ title, defaultOpen = true, badge, children }: { title: st
 function TradePageInner({ slab }: { slab: string }) {
   const { engine, config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
-  const { priceUsd: livePriceUsd } = useLivePrice();
+  const { priceUsd: livePriceUsd, change24h } = useLivePrice();
+  const symbol = tokenMeta?.symbol ?? null;
   const onChainPrice = config?.lastEffectivePriceE6 ?? config?.authorityPriceE6 ?? null;
   const priceUsd = livePriceUsd ?? (onChainPrice ? Number(onChainPrice) / 1e6 : null);
   const health = engine ? computeMarketHealth(engine) : null;
@@ -78,7 +80,7 @@ function TradePageInner({ slab }: { slab: string }) {
           {health && <HealthBadge level={health.level} />}
           <ShareButton
             slabAddress={slab}
-            marketName={tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN")}
+            marketName={symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN")}
             price={BigInt(Math.round((priceUsd ?? 0) * 1e6))}
           />
         </div>
@@ -106,17 +108,15 @@ function TradePageInner({ slab }: { slab: string }) {
         {/* Left column */}
         <div className="space-y-4 lg:col-span-2">
           <ErrorBoundary label="PriceChart">
-            <div className="overflow-hidden rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+            <div className="overflow-hidden rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
               <PriceChart slabAddress={slab} />
             </div>
           </ErrorBoundary>
           <ErrorBoundary label="TradeForm">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-              <TradeForm slabAddress={slab} />
-            </div>
+            <TradeForm slabAddress={slab} />
           </ErrorBoundary>
           <ErrorBoundary label="PositionPanel">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+            <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
               <PositionPanel slabAddress={slab} />
             </div>
           </ErrorBoundary>
@@ -125,14 +125,12 @@ function TradePageInner({ slab }: { slab: string }) {
         {/* Right column */}
         <div className="space-y-4">
           <ErrorBoundary label="AccountsCard">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+            <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
               <AccountsCard />
             </div>
           </ErrorBoundary>
           <ErrorBoundary label="DepositWithdrawCard">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-              <DepositWithdrawCard slabAddress={slab} />
-            </div>
+            <DepositWithdrawCard slabAddress={slab} />
           </ErrorBoundary>
           <ErrorBoundary label="EngineHealthCard">
             <Collapsible title="engine health" defaultOpen={false} badge={health && <HealthBadge level={health.level} />}>
@@ -140,7 +138,7 @@ function TradePageInner({ slab }: { slab: string }) {
             </Collapsible>
           </ErrorBoundary>
           <ErrorBoundary label="MarketStatsCard">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+            <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
               <MarketStatsCard />
             </div>
           </ErrorBoundary>

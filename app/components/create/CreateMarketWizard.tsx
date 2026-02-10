@@ -40,7 +40,7 @@ interface StepProps {
 }
 
 const StepSection: FC<StepProps> = ({ open, onToggle, title, stepNum, valid, children }) => (
-  <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
+  <div className="bg-[var(--panel-bg)]">
     <button
       type="button"
       onClick={onToggle}
@@ -80,7 +80,7 @@ const inputClassMono = `${inputClass} font-mono`;
 const inputClassError = "mt-1 w-full border border-[var(--short)]/40 bg-[var(--short)]/[0.04] px-3 py-2.5 text-[12px] text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--short)]/60 focus:outline-none font-mono";
 
 const btnPrimary = "w-full border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] py-3 text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hud-btn-corners hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.15] press disabled:cursor-not-allowed disabled:border-[var(--border)] disabled:bg-transparent disabled:text-[var(--text-dim)] disabled:opacity-50";
-const btnSecondary = "border border-[var(--border)] bg-transparent px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)]";
+const btnSecondary = "border border-[var(--border)] bg-transparent px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all hud-btn-corners hover:border-[var(--accent)]/30 hover:text-[var(--text)]";
 
 /** Quick Launch sub-component */
 const QuickLaunchPanel: FC<{
@@ -639,7 +639,7 @@ export const CreateMarketWizard: FC = () => {
       {wizardMode === "quick" && <QuickLaunchPanel onFallbackToManual={handleFallbackToManual} />}
 
       {wizardMode === "manual" && (
-        <div className="space-y-px">
+        <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
           {/* Step 1: Token & Oracle */}
           <StepSection open={openStep === 1} onToggle={() => toggleStep(1)} title="Token & Oracle" stepNum={1} valid={visitedSteps.has(1) && step1Valid}>
             <div className="space-y-4">

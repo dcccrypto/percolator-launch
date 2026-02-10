@@ -45,7 +45,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (!userAccount) {
     return (
-      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-6">
+      <div className="p-6">
         <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
           Position
         </h3>

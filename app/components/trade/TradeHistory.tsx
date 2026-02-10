@@ -49,10 +49,9 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   if (loading) {
     return (
       <div className="p-5">
-        <h3 className="mb-3 text-sm font-medium text-[#71717a]">Recent Trades</h3>
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-8 animate-pulse rounded bg-white/[0.03]" />
+            <div key={i} className="h-8 animate-pulse rounded bg-[var(--bg-surface)]" />
           ))}
         </div>
       </div>
@@ -62,29 +61,27 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   if (error) {
     return (
       <div className="p-5">
-        <h3 className="mb-3 text-sm font-medium text-[#71717a]">Recent Trades</h3>
-        <p className="text-xs text-[#3f3f46]">{error}</p>
+        <p className="text-xs text-[var(--text-muted)]">{error}</p>
       </div>
     );
   }
 
   return (
     <div className="p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-medium text-[#71717a]">Recent Trades</h3>
+      <div className="mb-3 flex items-center justify-end">
         <button
           onClick={fetchTrades}
-          className="text-[10px] text-[#3f3f46] hover:text-[#71717a] transition-colors"
+          className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
         >
           refresh
         </button>
       </div>
 
       {trades.length === 0 ? (
-        <p className="text-xs text-[#3f3f46] py-4 text-center">No trades yet</p>
+        <p className="text-xs text-[var(--text-muted)] py-4 text-center">No trades yet</p>
       ) : (
         <div className="overflow-hidden">
-          <div className="grid grid-cols-4 gap-2 pb-2 text-[9px] font-medium uppercase tracking-wider text-[#3f3f46]">
+          <div className="grid grid-cols-4 gap-2 pb-2 text-[9px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
             <div>Time</div>
             <div>Side</div>
             <div className="text-right">Size</div>
@@ -97,20 +94,20 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 href={trade.tx_signature ? explorerTxUrl(trade.tx_signature) : "#"}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="grid grid-cols-4 gap-2 py-1.5 text-xs hover:bg-white/[0.02] transition-colors rounded-sm cursor-pointer"
+                className="grid grid-cols-4 gap-2 py-1.5 text-xs hover:bg-[var(--border)]/20 transition-colors rounded-sm cursor-pointer"
               >
-                <div className="text-[#3f3f46]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                <div className="text-[var(--text-muted)]">
                   {formatTime(trade.created_at)}
                 </div>
                 <div>
-                  <span className={trade.side === "long" ? "text-[#00FFB2]" : "text-[#FF4466]"}>
+                  <span className={trade.side === "long" ? "text-[var(--long)]" : "text-[var(--short)]"}>
                     {trade.side?.toUpperCase() ?? "—"}
                   </span>
                 </div>
                 <div className="text-right text-[#fafafa]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                   {trade.size != null ? formatTokenAmount(BigInt(Math.round(Math.abs(Number(trade.size) || 0)))) : "—"}
                 </div>
-                <div className="text-right text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                <div className="text-right text-[var(--text-secondary)]">
                   {trade.price != null ? `$${Number(trade.price).toFixed(2)}` : "—"}
                 </div>
               </a>

@@ -139,7 +139,7 @@ export function InsuranceLPPanel() {
         <button
           onClick={handleCreateMint}
           disabled={loading}
-          className="w-full py-2 px-4 bg-[var(--accent)] hover:bg-[var(--accent-muted)] disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] text-white text-sm font-medium rounded-sm transition-colors hover:scale-[1.01] active:scale-[0.99] transition-transform mb-3"
+          className="w-full py-2 px-4 bg-[var(--accent)] hover:bg-[var(--accent-muted)] disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] text-white text-sm font-medium rounded-sm transition-colors hud-btn-corners hover:scale-[1.01] active:scale-[0.99] transition-transform mb-3"
         >
           {loading ? 'Creating...' : 'Create Insurance LP Mint'}
         </button>
@@ -216,7 +216,7 @@ export function InsuranceLPPanel() {
           <button
             onClick={mode === 'deposit' ? handleDeposit : handleWithdraw}
             disabled={loading || !amount || parseFloat(amount) <= 0}
-            className={`w-full py-2 px-4 text-white text-sm font-medium rounded-sm transition-colors hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] ${
+            className={`w-full py-2 px-4 text-white text-sm font-medium rounded-sm transition-colors hud-btn-corners hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] ${
               mode === 'deposit'
                 ? 'bg-[var(--accent)] hover:bg-[var(--accent-muted)] text-white'
                 : 'bg-[var(--short)] hover:bg-[var(--short)]/80'
