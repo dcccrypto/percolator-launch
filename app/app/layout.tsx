@@ -1,3 +1,4 @@
+import "@/lib/polyfills";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Space_Grotesk, JetBrains_Mono, Inter_Tight, Outfit } from "next/font/google";

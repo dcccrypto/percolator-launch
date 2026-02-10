@@ -7,6 +7,21 @@ const nextConfig: NextConfig = {
       buffer: "buffer",
     },
   },
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      // Polyfill bn.js and buffer for @solana/web3.js in browser
+      // Without this, some users see "can't access property BN, t is undefined"
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        crypto: false,
+        stream: false,
+        fs: false,
+        path: false,
+        os: false,
+      };
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
