@@ -62,7 +62,7 @@ export function ActivityFeed() {
           .from("markets")
           .select("slab_address, symbol, name, created_at")
           .order("created_at", { ascending: false })
-          .limit(5);
+          .limit(5) as { data: Array<{ slab_address: string; symbol: string | null; name: string | null; created_at: string }> | null };
 
         if (markets) {
           for (const m of markets) {
@@ -83,7 +83,7 @@ export function ActivityFeed() {
           .from("trades")
           .select("id, slab_address, side, size, price, created_at, tx_sig")
           .order("created_at", { ascending: false })
-          .limit(10);
+          .limit(10) as { data: Array<{ id: string; slab_address: string; side: string; size: string; price: string; created_at: string; tx_sig: string }> | null };
 
         if (trades) {
           for (const t of trades) {
