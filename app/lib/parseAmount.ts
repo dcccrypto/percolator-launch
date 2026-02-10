@@ -31,12 +31,12 @@ export function formatHumanAmount(raw: bigint, decimals: number): string {
   const remainder = abs % divisor;
 
   if (remainder === 0n) {
-    const w = whole.toLocaleString();
+    const w = whole.toString();
     return negative ? `-${w}` : w;
   }
 
   // Pad fraction to `decimals` digits, then strip trailing zeros
   const fracStr = remainder.toString().padStart(decimals, "0").replace(/0+$/, "");
-  const w = whole.toLocaleString();
+  const w = whole.toString();
   return `${negative ? "-" : ""}${w}.${fracStr}`;
 }
