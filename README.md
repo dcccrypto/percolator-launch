@@ -384,9 +384,9 @@ Full error enum: [`packages/core/src/abi/errors.ts`](./packages/core/src/abi/err
 
 | Tier | Max Accounts | Slab Size | Rent | Program ID |
 |------|-------------|-----------|------|------------|
-| Small | 256 | 62,808 bytes | ~0.5 SOL | `8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL` |
-| Medium | 1024 | 249,480 bytes | ~1.8 SOL | `9RKMpUGWemamrMg75zLgjYPmjWGzfah7wf9rgVrTddnT` |
-| Large | 4096 | 992,560 bytes | ~6.9 SOL | `58XqjfaeBVcJBrK6mdY51SaeEW1UFmFX9sVimxpryFEu` |
+| Small | 256 | 62,808 bytes | ~0.5 SOL | `FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD` |
+| Medium | 1024 | 249,480 bytes | ~1.8 SOL | `FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn` |
+| Large | 4096 | 992,560 bytes | ~6.9 SOL | `g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in` |
 
 **Matcher (vAMM):** `4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy`
 

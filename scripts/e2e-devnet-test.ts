@@ -62,7 +62,7 @@ import {
 } from "@percolator/core";
 
 const RPC = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
-const PROGRAM_ID = new PublicKey("8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL");
+const PROGRAM_ID = new PublicKey("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
 const MATCHER_PROGRAM_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
 const MATCHER_CTX_SIZE = 320;
 
