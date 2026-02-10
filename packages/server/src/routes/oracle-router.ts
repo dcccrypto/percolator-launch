@@ -4,6 +4,7 @@ import { resolvePrice, type PriceRouterResult } from "@percolator/core";
 // Simple in-memory cache: mint → { result, expiresAt }
 const cache = new Map<string, { result: PriceRouterResult; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 500;
 
 export function oracleRouterRoutes(): Hono {
   const app = new Hono();
@@ -32,7 +33,12 @@ export function oracleRouterRoutes(): Hono {
     try {
       const result = await resolvePrice(mint);
 
-      // Cache the result
+      // Cache the result (with max size enforcement)
+      if (cache.size >= MAX_CACHE_SIZE) {
+        // Delete oldest entry
+        const oldestKey = cache.keys().next().value;
+        if (oldestKey) cache.delete(oldestKey);
+      }
       cache.set(mint, { result, expiresAt: Date.now() + CACHE_TTL_MS });
 
       return c.json({ ...result, cached: false });

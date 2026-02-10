@@ -162,19 +162,21 @@ export async function discoverMarkets(
   programId: PublicKey,
 ): Promise<DiscoveredMarket[]> {
   // Query all known slab sizes in parallel to discover markets of any tier
-  let rawAccounts: { pubkey: PublicKey; account: { data: Buffer | Uint8Array } }[] = [];
+  // Track which tier each account belongs to for correct offset computation
+  const ALL_TIERS = Object.values(SLAB_TIERS);
+  let rawAccounts: { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number }[] = [];
   try {
-    const queries = ALL_SLAB_SIZES.map(size =>
+    const queries = ALL_TIERS.map(tier =>
       connection.getProgramAccounts(programId, {
-        filters: [{ dataSize: size }],
+        filters: [{ dataSize: tier.dataSize }],
         dataSlice: { offset: 0, length: HEADER_SLICE_LENGTH },
-      })
+      }).then(results => results.map(entry => ({ ...entry, maxAccounts: tier.maxAccounts })))
     );
     const results = await Promise.allSettled(queries);
     for (const result of results) {
       if (result.status === "fulfilled") {
         for (const entry of result.value) {
-          rawAccounts.push(entry as { pubkey: PublicKey; account: { data: Buffer | Uint8Array } });
+          rawAccounts.push(entry as { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number });
         }
       }
     }
@@ -194,13 +196,13 @@ export async function discoverMarkets(
       ],
       dataSlice: { offset: 0, length: HEADER_SLICE_LENGTH },
     });
-    rawAccounts = [...fallback] as { pubkey: PublicKey; account: { data: Buffer | Uint8Array } }[];
+    rawAccounts = [...fallback].map(e => ({ ...e, maxAccounts: 4096 })) as { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number }[];
   }
   const accounts = rawAccounts;
 
   const markets: DiscoveredMarket[] = [];
 
-  for (const { pubkey, account } of accounts) {
+  for (const { pubkey, account, maxAccounts } of accounts) {
     const data = new Uint8Array(account.data);
 
     let valid = true;
@@ -215,7 +217,7 @@ export async function discoverMarkets(
     try {
       const header = parseHeader(data);
       const config = parseConfig(data);
-      const engine = parseEngineLight(data);
+      const engine = parseEngineLight(data, maxAccounts);
       const params = parseParams(data);
 
       markets.push({ slabAddress: pubkey, programId, header, config, engine, params });

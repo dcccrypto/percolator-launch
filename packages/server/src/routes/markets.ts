@@ -70,6 +70,16 @@ export function marketRoutes(deps: MarketDeps): Hono {
   app.post("/markets", async (c) => {
     const body = await c.req.json<{ slabAddress: string; metadata?: Record<string, unknown> }>();
 
+    // Bug 15: Validate input
+    if (!body.slabAddress || typeof body.slabAddress !== "string") {
+      return c.json({ error: "Missing or invalid slabAddress" }, 400);
+    }
+    try {
+      new PublicKey(body.slabAddress);
+    } catch {
+      return c.json({ error: "slabAddress is not a valid base58 PublicKey" }, 400);
+    }
+
     // Verify slab exists on-chain and is owned by our program
     try {
       const connection = getConnection();
@@ -78,11 +88,15 @@ export function marketRoutes(deps: MarketDeps): Hono {
       if (!accountInfo) {
         return c.json({ error: "Slab account does not exist on-chain" }, 400);
       }
-      const programId = new PublicKey(config.programId);
-      if (!accountInfo.owner.equals(programId)) {
+      // Bug 14: Check against ALL program IDs
+      const isOwnedByProgram = config.allProgramIds.some(
+        (id: string) => accountInfo.owner.equals(new PublicKey(id))
+      );
+      if (!isOwnedByProgram) {
         return c.json({ error: "Slab account not owned by percolator program" }, 400);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("not owned")) throw err;
       return c.json({ error: "Failed to verify slab on-chain" }, 400);
     }
 

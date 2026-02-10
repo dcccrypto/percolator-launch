@@ -28,6 +28,11 @@ export function computeMarkPnl(
 
 /**
  * Compute liquidation price given entry, capital, position and maintenance margin.
+ *
+ * NOTE: Uses Number() for intermediate math, which is safe for IEEE-754 doubles
+ * up to 2^53 (~9.007 × 10^15). With 6-decimal token amounts this covers balances
+ * up to ~9 billion tokens — acceptable for client-side estimation. For on-chain
+ * critical paths, use pure bigint arithmetic instead.
  */
 export function computeLiqPrice(
   entryPrice: bigint,

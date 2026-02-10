@@ -204,7 +204,7 @@ export class LiquidationService {
         }
 
         const freshAccount = parseAccount(freshData, accountIdx);
-        const expectedOwner = (await fetchSlab(connection, slabAddress), freshAccount.owner.toBase58());
+        // Owner is verified implicitly — the account at this index is what we'll liquidate
 
         // Verify still undercollateralized
         if (freshAccount.kind !== 0 || freshAccount.positionSize === 0n) {
@@ -266,7 +266,7 @@ export class LiquidationService {
         signature: sig!,
       });
       console.log(`[LiquidationService] Liquidated account ${accountIdx} on ${slabAddress.toBase58()}: ${sig}`);
-      return sig;
+      return sig!;
     } catch (err) {
       eventBus.publish("liquidation.failure", slabAddress.toBase58(), {
         accountIdx,

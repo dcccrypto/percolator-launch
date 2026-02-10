@@ -213,7 +213,7 @@ export class CrankService {
 
     // H5: Crank all discovered markets, not just admin-oracle ones
     for (const [slabAddress, state] of this.markets) {
-      if (state.failureCount > MAX_CONSECUTIVE_FAILURES && state.successCount === 0) {
+      if (state.consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
         skipped++;
         continue;
       }

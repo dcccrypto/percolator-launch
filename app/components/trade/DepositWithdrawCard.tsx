@@ -113,13 +113,25 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   }
 
   const capital = userAccount.account.capital;
+  const positionSize = userAccount.account.positionSize ?? 0n;
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
 
+  // Validation
+  const decimals = tokenMeta?.decimals ?? 6;
+  const parsedAmount = amount ? parseHumanAmount(amount, decimals) : 0n;
+  const isOverWithdraw = mode === "withdraw" && parsedAmount > 0n && parsedAmount > capital;
+  const isOverDeposit = mode === "deposit" && parsedAmount > 0n && walletBalance !== null && parsedAmount > walletBalance;
+  const validationError = isOverWithdraw
+    ? "Insufficient capital"
+    : isOverDeposit
+    ? "Insufficient wallet balance"
+    : null;
+  const hasOpenPosition = positionSize !== 0n;
+
   async function handleSubmit() {
-    if (!amount || !userAccount) return;
+    if (!amount || !userAccount || validationError) return;
     try {
-      const decimals = tokenMeta?.decimals ?? 6;
       const amtNative = parseHumanAmount(amount, decimals);
       if (amtNative <= 0n) return;
       let sig: string | undefined;
@@ -147,21 +159,50 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
       </div>
 
       <div className="mb-3">
-        <input
-          type="text"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-          placeholder={`Amount (${symbol})`}
-          className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
-        />
+        <div className="relative">
+          <input
+            type="text"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            placeholder={`Amount (${symbol})`}
+            className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 pr-14 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
+          />
+          {mode === "withdraw" && capital > 0n && (
+            <button
+              type="button"
+              onClick={() => setAmount(formatTokenAmount(capital))}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
+            >
+              Max
+            </button>
+          )}
+          {mode === "deposit" && walletBalance !== null && walletBalance > 0n && (
+            <button
+              type="button"
+              onClick={() => setAmount(formatTokenAmount(walletBalance))}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
+            >
+              Max
+            </button>
+          )}
+        </div>
+        {validationError && (
+          <p className="mt-1 text-[11px] text-[var(--short)]">{validationError}</p>
+        )}
       </div>
+
+      {mode === "withdraw" && hasOpenPosition && (
+        <div className="mb-3 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
+          <p className="text-[11px] text-[var(--warning)]">⚠ Warning: Withdrawing margin with an open position may trigger liquidation</p>
+        </div>
+      )}
 
       <button
         onClick={handleSubmit}
-        disabled={loading || !amount}
+        disabled={loading || !amount || !!validationError}
         className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {loading ? "Sending..." : mode === "deposit" ? "Deposit" : "Withdraw"}
+        {loading ? "Sending..." : validationError ? validationError : mode === "deposit" ? "Deposit" : "Withdraw"}
       </button>
 
       {error && <p className="mt-2 text-xs text-[var(--short)]">{error}</p>}
