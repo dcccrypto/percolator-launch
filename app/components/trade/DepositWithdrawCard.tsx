@@ -18,7 +18,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const { deposit, loading: depositLoading, error: depositError } = useDeposit(slabAddress);
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
-  const { config: mktConfig } = useSlabState();
+  const { config: mktConfig, refresh } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
@@ -38,17 +38,40 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   if (!userAccount) {
     return (
       <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-5">
-        <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-[#71717a]">Create Account</h3>
-        <p className="mb-3 text-xs text-[#71717a]">Create an account to start trading.</p>
+        <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-[#71717a]">Create Account & Deposit</h3>
+        <p className="mb-3 text-xs text-[#71717a]">Enter your initial deposit to create an account and start trading.</p>
+        <div className="mb-3">
+          <input
+            type="text"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            placeholder={`Initial deposit (${symbol})`}
+            className="w-full rounded-lg border border-white/[0.06] bg-white/[0.05] px-3 py-2 text-sm text-[#e4e4e7] placeholder-[#52525b] focus:border-[#00FFB2]/40 focus:outline-none focus:ring-1 focus:ring-[#00FFB2]/20"
+          />
+        </div>
         <button
-          onClick={async () => { try { const sig = await initUser(); setLastSig(sig ?? null); } catch {} }}
-          disabled={initLoading}
-          className="w-full rounded-lg bg-[#00FFB2] py-2.5 text-sm font-medium text-[#06080d] hover:bg-[#00FFB2]/80 disabled:opacity-50"
+          onClick={async () => {
+            try {
+              const decimals = tokenMeta?.decimals ?? 6;
+              const depositAmt = parseHumanAmount(amount || "0", decimals);
+              // feePayment = deposit amount — account starts with real capital
+              // Minimum 10,000 base units to survive crank GC
+              const fee = depositAmt > 0n ? depositAmt : 10_000n;
+              const sig = await initUser(fee);
+              setLastSig(sig ?? null);
+              setAmount("");
+              // Force refresh slab data so useUserAccount picks up the new account
+              setTimeout(() => refresh(), 1000);
+            } catch {}
+          }}
+          disabled={initLoading || !amount}
+          className="w-full rounded-lg bg-[#00FFB2] py-2.5 text-sm font-medium text-[#06080d] hover:bg-[#00FFB2]/80 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {initLoading ? "Creating..." : "Create Account"}
+          {initLoading ? "Creating..." : "Create Account & Deposit"}
         </button>
+        <p className="mt-2 text-[10px] text-[#52525b]">Your deposit becomes your trading collateral. Accounts with no capital are recycled.</p>
         {initError && <p className="mt-2 text-xs text-[#FF4466]">{initError}</p>}
-        {lastSig && <p className="mt-2 text-xs text-[#52525b]">Tx: {lastSig.slice(0, 12)}...</p>}
+        {lastSig && <p className="mt-2 text-xs text-[#52525b]">Tx: <a href={`${explorerTxUrl(lastSig)}`} target="_blank" rel="noopener noreferrer" className="text-[#00FFB2] hover:underline">{lastSig.slice(0, 12)}...</a></p>}
       </div>
     );
   }
@@ -71,6 +94,8 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
       }
       setLastSig(sig ?? null);
       setAmount("");
+      // Force refresh slab data after deposit/withdraw
+      setTimeout(() => refresh(), 1000);
     } catch {}
   }
 
