@@ -79,6 +79,7 @@ export async function sendTx({
   }
 
   let lastError: Error | null = null;
+  let lastSignature: string | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {

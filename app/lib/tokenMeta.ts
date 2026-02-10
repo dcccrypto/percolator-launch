@@ -8,6 +8,12 @@ export interface TokenMeta {
 
 const cache = new Map<string, TokenMeta>();
 
+/** Strip unsafe characters from token metadata strings */
+function sanitizeTokenString(input: string, maxLen: number): string {
+  // Allow alphanumeric, spaces, dashes, dots, underscores, parentheses, $, #, &
+  return input.replace(/[^a-zA-Z0-9 \-._()$#&]/g, "").trim().slice(0, maxLen);
+}
+
 /** Well-known tokens that don't need a Jupiter lookup. */
 const KNOWN_TOKENS: Record<string, { symbol: string; name: string }> = {
   A16Gd8AfaPnG6rohE6iPFDf6mr9gk519d6aMUJAperc: { symbol: "PERC", name: "Percolator" },
@@ -78,6 +84,10 @@ export async function fetchTokenMeta(
       }
     }
   }
+
+  // R2-S14: Sanitize metadata — strip unsafe characters, limit length
+  symbol = sanitizeTokenString(symbol, 16);
+  name = sanitizeTokenString(name, 32);
 
   const meta: TokenMeta = { decimals, symbol, name };
   cache.set(key, meta);

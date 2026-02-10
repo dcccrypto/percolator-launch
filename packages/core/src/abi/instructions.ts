@@ -444,8 +444,12 @@ export function encodeAdminForceClose(args: AdminForceCloseArgs): Uint8Array {
 }
 
 /**
- * UpdateRiskParams instruction data (17 bytes)
+ * UpdateRiskParams instruction data (17 or 25 bytes)
  * Update initial and maintenance margin BPS (admin only).
+ *
+ * R2-S13: The Rust program uses `data.len() >= 25` to detect the optional
+ * tradingFeeBps field, so variable-length encoding is safe. When tradingFeeBps
+ * is omitted, the data is 17 bytes (tag + 2×u64). When included, 25 bytes.
  */
 export interface UpdateRiskParamsArgs {
   initialMarginBps: bigint | string;

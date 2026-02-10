@@ -9,6 +9,10 @@ export function requireApiKey() {
   return async (c: Context, next: Next) => {
     const apiAuthKey = process.env.API_AUTH_KEY;
     if (!apiAuthKey) {
+      // R2-S9: In production, reject all requests if auth key is not configured
+      if (process.env.NODE_ENV === "production") {
+        return c.json({ error: "Server misconfigured — auth key not set" }, 500);
+      }
       return next();
     }
     const provided = c.req.header("x-api-key");
