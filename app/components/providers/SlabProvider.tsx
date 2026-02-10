@@ -4,7 +4,6 @@ import {
   FC,
   ReactNode,
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useState,
@@ -38,8 +37,6 @@ export interface SlabState {
   error: string | null;
   /** The on-chain program that owns this slab account */
   programId: PublicKey | null;
-  /** Force re-fetch slab data (call after tx that mutates slab) */
-  refresh: () => void;
 }
 
 const defaultState: SlabState = {
@@ -53,7 +50,6 @@ const defaultState: SlabState = {
   loading: true,
   error: null,
   programId: null,
-  refresh: () => {},
 };
 
 const SlabContext = createContext<SlabState>(defaultState);
@@ -66,23 +62,6 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
   const { connection } = useConnection();
   const [state, setState] = useState<SlabState>({ ...defaultState, slabAddress });
   const wsActive = useRef(false);
-  const slabPkRef = useRef<PublicKey | null>(null);
-
-  const forcePoll = useCallback(async () => {
-    if (!slabPkRef.current) return;
-    try {
-      const info = await connection.getAccountInfo(slabPkRef.current);
-      if (info) {
-        const data = new Uint8Array(info.data);
-        const header = parseHeader(data);
-        const config = parseConfig(data);
-        const engine = parseEngine(data);
-        const params = parseParams(data);
-        const accounts = parseAllAccounts(data);
-        setState((s) => ({ slabAddress, raw: data, header, config, engine, params, accounts, loading: false, error: null, programId: info.owner ?? s.programId, refresh: s.refresh }));
-      }
-    } catch { /* ignore */ }
-  }, [connection, slabAddress]);
 
   useEffect(() => {
     if (!slabAddress) {
@@ -91,7 +70,6 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     }
 
     const slabPk = new PublicKey(slabAddress);
-    slabPkRef.current = slabPk;
 
     function parseSlab(data: Uint8Array, owner?: PublicKey) {
       try {
@@ -100,7 +78,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         const engine = parseEngine(data);
         const params = parseParams(data);
         const accounts = parseAllAccounts(data);
-        setState((s) => ({ slabAddress, raw: data, header, config, engine, params, accounts, loading: false, error: null, programId: owner ?? s.programId, refresh: s.refresh }));
+        setState((s) => ({ slabAddress, raw: data, header, config, engine, params, accounts, loading: false, error: null, programId: owner ?? s.programId }));
       } catch (e) {
         setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e.message : String(e) }));
       }
@@ -123,9 +101,6 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       } catch { /* ignore */ }
     }
 
-    // Set refresh function in initial state
-    setState((s) => ({ ...s, refresh: forcePoll }));
-
     poll();
     timer = setInterval(poll, POLL_INTERVAL_MS);
 
@@ -133,7 +108,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       if (subId !== undefined) connection.removeAccountChangeListener(subId);
       if (timer) clearInterval(timer);
     };
-  }, [connection, slabAddress, forcePoll]);
+  }, [connection, slabAddress]);
 
   return <SlabContext.Provider value={state}>{children}</SlabContext.Provider>;
 };
