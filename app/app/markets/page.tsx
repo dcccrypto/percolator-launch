@@ -106,8 +106,8 @@ export default function MarketsPage() {
     });
   }, [discovered, supabaseMarkets]);
 
-  // Use mock data when no real markets are discovered (local design testing)
-  const effectiveMarkets = merged.length > 0 ? merged : MOCK_MARKETS;
+  // Only show mock data in development (never in production)
+  const effectiveMarkets = merged.length > 0 ? merged : (process.env.NODE_ENV === "development" ? MOCK_MARKETS : []);
 
   const filtered = useMemo(() => {
     let list = effectiveMarkets;
@@ -135,7 +135,7 @@ export default function MarketsPage() {
     list = [...list].sort((a, b) => {
       switch (sortBy) {
         case "volume": return (b.supabase?.volume_24h ?? 0) - (a.supabase?.volume_24h ?? 0);
-        case "oi": return b.onChain.engine.totalOpenInterest > a.onChain.engine.totalOpenInterest ? -1 : b.onChain.engine.totalOpenInterest < a.onChain.engine.totalOpenInterest ? 1 : 0;
+        case "oi": return b.onChain.engine.totalOpenInterest > a.onChain.engine.totalOpenInterest ? 1 : b.onChain.engine.totalOpenInterest < a.onChain.engine.totalOpenInterest ? -1 : 0;
         case "health": {
           const ha = computeMarketHealth(a.onChain.engine);
           const hb = computeMarketHealth(b.onChain.engine);

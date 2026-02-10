@@ -114,21 +114,25 @@ export default function Home() {
 
   useEffect(() => {
     async function loadStats() {
-      const { data } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, last_price, open_interest") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; last_price: number | null; open_interest: number | null }[] | null };
-      if (data) {
-        setStats({
-          markets: data.length,
-          volume: data.reduce((s, m) => s + (m.volume_24h || 0), 0),
-          insurance: data.reduce((s, m) => s + (m.insurance_balance || 0), 0),
-        });
-        const sorted = [...data].sort((a, b) => (b.volume_24h || 0) - (a.volume_24h || 0)).slice(0, 5);
-        setFeatured(sorted.map((m) => ({
-          slab_address: m.slab_address,
-          symbol: m.symbol,
-          volume_24h: m.volume_24h || 0,
-          last_price: m.last_price,
-          open_interest: m.open_interest || 0,
-        })));
+      try {
+        const { data } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, last_price, open_interest") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; last_price: number | null; open_interest: number | null }[] | null };
+        if (data) {
+          setStats({
+            markets: data.length,
+            volume: data.reduce((s, m) => s + (m.volume_24h || 0), 0),
+            insurance: data.reduce((s, m) => s + (m.insurance_balance || 0), 0),
+          });
+          const sorted = [...data].sort((a, b) => (b.volume_24h || 0) - (a.volume_24h || 0)).slice(0, 5);
+          setFeatured(sorted.map((m) => ({
+            slab_address: m.slab_address,
+            symbol: m.symbol,
+            volume_24h: m.volume_24h || 0,
+            last_price: m.last_price,
+            open_interest: m.open_interest || 0,
+          })));
+        }
+      } catch (err) {
+        console.error("Failed to load market stats:", err);
       }
     }
     loadStats();

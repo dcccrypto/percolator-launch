@@ -153,7 +153,9 @@ function TradePageInner({ slab }: { slab: string }) {
               <EngineHealthCard />
             </Collapsible>
           </ErrorBoundary>
-          <MarketStatsCard />
+          <ErrorBoundary label="MarketStatsCard">
+            <MarketStatsCard />
+          </ErrorBoundary>
           <ErrorBoundary label="TradeHistory">
             <Collapsible title="recent trades" defaultOpen={true}>
               <TradeHistory slabAddress={slab} />

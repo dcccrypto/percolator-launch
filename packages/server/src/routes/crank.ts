@@ -11,17 +11,18 @@ export function crankRoutes(deps: { crankService: CrankService }): Hono {
     return c.json(deps.crankService.getStatus());
   });
 
+  // POST /crank/all — trigger crank for all markets (auth required)
+  // Must be registered BEFORE /:slab to avoid "all" matching as a slab address
+  app.post("/crank/all", requireApiKey(), async (c) => {
+    const result = await deps.crankService.crankAll();
+    return c.json(result);
+  });
+
   // POST /crank/:slab — trigger crank for specific market (auth required)
   app.post("/crank/:slab", requireApiKey(), validateSlab, async (c) => {
     const slab = c.req.param("slab");
     const ok = await deps.crankService.crankMarket(slab);
     return c.json({ slabAddress: slab, success: ok });
-  });
-
-  // POST /crank/all — trigger crank for all markets (auth required)
-  app.post("/crank/all", requireApiKey(), async (c) => {
-    const result = await deps.crankService.crankAll();
-    return c.json(result);
   });
 
   return app;
