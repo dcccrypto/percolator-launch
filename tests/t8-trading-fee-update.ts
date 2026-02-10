@@ -45,7 +45,7 @@ import {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const RPC_URL = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
-const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID ?? "8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL");
+const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID ?? "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
 const SLAB_SIZE = Number(process.env.SLAB_SIZE ?? 62_808);
 
 interface TestResult { name: string; passed: boolean; error?: string; duration: number }

@@ -24,15 +24,15 @@ const CONFIGS = {
   },
   devnet: {
     rpcUrl: `https://devnet.helius-rpc.com/?api-key=${process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? ""}`,
-    programId: "8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL",
+    programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
     matcherProgramId: "4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy",
     crankWallet: "2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm",
     explorerUrl: "https://explorer.solana.com",
     // Multiple program deployments for different slab sizes
     programsBySlabTier: {
-      small: "8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL",   // 256 slots
-      medium: "9RKMpUGWemamrMg75zLgjYPmjWGzfah7wf9rgVrTddnT",  // 1024 slots
-      large: "58XqjfaeBVcJBrK6mdY51SaeEW1UFmFX9sVimxpryFEu",   // 4096 slots
+      small: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",   // 256 slots
+      medium: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",  // 1024 slots
+      large: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",   // 4096 slots
     } as Record<string, string>,
   },
 } as const;

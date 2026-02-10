@@ -2,12 +2,12 @@ import "dotenv/config";
 
 export const config = {
   rpcUrl: process.env.RPC_URL ?? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`,
-  programId: process.env.PROGRAM_ID ?? "8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL",
+  programId: process.env.PROGRAM_ID ?? "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
   /** Comma-separated list of all program IDs to scan for markets */
   allProgramIds: (process.env.ALL_PROGRAM_IDS ?? [
-    "8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL",
-    "9RKMpUGWemamrMg75zLgjYPmjWGzfah7wf9rgVrTddnT",
-    "58XqjfaeBVcJBrK6mdY51SaeEW1UFmFX9sVimxpryFEu",
+    "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
+    "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
+    "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
   ].join(",")).split(",").filter(Boolean),
   crankKeypair: process.env.CRANK_KEYPAIR ?? "",
   supabaseUrl: process.env.SUPABASE_URL ?? "",

@@ -57,9 +57,9 @@ const MATCHER_PROGRAM_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChp
 const MATCHER_CTX_SIZE = 320;
 
 const TIERS = [
-  { name: "Small",  programId: "8n1YAoHzZAAz2JkgASr7Yk9dokptDa9VzjbsRadu3MhL", maxAccounts: 256,  dataSize: 62_808 },
-  { name: "Medium", programId: "9RKMpUGWemamrMg75zLgjYPmjWGzfah7wf9rgVrTddnT", maxAccounts: 1024, dataSize: 248_760 },
-  { name: "Large",  programId: "58XqjfaeBVcJBrK6mdY51SaeEW1UFmFX9sVimxpryFEu", maxAccounts: 4096, dataSize: 992_568 },
+  { name: "Small",  programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD", maxAccounts: 256,  dataSize: 62_808 },
+  { name: "Medium", programId: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn", maxAccounts: 1024, dataSize: 248_760 },
+  { name: "Large",  programId: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in", maxAccounts: 4096, dataSize: 992_568 },
 ];
 
 const conn = new Connection(RPC, "confirmed");
