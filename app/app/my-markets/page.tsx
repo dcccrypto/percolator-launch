@@ -133,6 +133,8 @@ const MarketCard: FC<{
   const hasOracleAuthority = oracleAuthority !== PublicKey.default.toBase58();
   const isOracleAuthority = wallet.publicKey?.toBase58() === oracleAuthority;
   const crankIsAuthority = cfg.crankWallet ? oracleAuthority === cfg.crankWallet : false;
+  const riskThreshold = market.params?.riskReductionThreshold ?? 0n;
+  const riskGateActive = riskThreshold > 0n && vault <= riskThreshold;
 
   const [showBurnConfirm, setShowBurnConfirm] = useState(false);
   const [showOracleInput, setShowOracleInput] = useState(false);
@@ -225,6 +227,15 @@ const MarketCard: FC<{
               <button onClick={() => setShowTopUpInput(true)} disabled={actions.loading === "topUpInsurance"} className="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors disabled:opacity-40">
                 top up insurance
               </button>
+              {riskGateActive && (
+                <button
+                  onClick={() => handleAction("Reset Risk Gate", () => actions.resetRiskGate(market))}
+                  disabled={actions.loading === "resetRiskGate"}
+                  className="text-xs text-[#FFB800] hover:text-[#FFD700] transition-colors disabled:opacity-40 animate-pulse"
+                >
+                  {actions.loading === "resetRiskGate" ? "resetting..." : "reset risk gate"}
+                </button>
+              )}
               {!insuranceMintExists && (
                 <button
                   onClick={() => handleAction("Create Insurance Mint", () => actions.createInsuranceMint(market))}

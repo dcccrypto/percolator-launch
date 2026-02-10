@@ -42,12 +42,17 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { connected } = useWallet();
   const userAccount = useUserAccount();
   const { trade, loading, error } = useTrade(slabAddress);
-  const { params } = useEngineState();
+  const { engine, params } = useEngineState();
   const { accounts, config: mktConfig } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
   const symbol = tokenMeta?.symbol ?? "Token";
   const prefersReduced = usePrefersReducedMotion();
+
+  // Risk reduction gate detection
+  const riskThreshold = params?.riskReductionThreshold ?? 0n;
+  const vaultBalance = engine?.vault ?? 0n;
+  const riskGateActive = riskThreshold > 0n && vaultBalance <= riskThreshold;
 
   const [direction, setDirection] = useState<"long" | "short">("long");
   const [marginInput, setMarginInput] = useState("");
@@ -196,6 +201,17 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
         Trade
       </h3>
+
+      {/* Risk gate warning */}
+      {riskGateActive && (
+        <div className="mb-4 rounded-sm border border-[var(--warning)]/30 bg-[var(--warning)]/10 p-3">
+          <p className="text-xs font-medium text-[var(--warning)]">Risk Reduction Mode</p>
+          <p className="mt-1 text-[10px] text-[var(--warning)]/70">
+            This market is in de-risking mode. Only closing trades are allowed right now.
+            The market admin can reset this from My Markets.
+          </p>
+        </div>
+      )}
 
       {/* Direction toggle */}
       <div className="mb-4 flex gap-2">
