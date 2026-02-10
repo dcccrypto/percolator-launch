@@ -462,19 +462,10 @@ export function useCreateMarket() {
           ]);
           finalInstructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
 
-          // LAST: Delegate oracle authority to crank wallet
-          // SetOracleAuthority clears authority_price_e6 to 0 — must be absolute last
-          if (isAdminOracle) {
-            const cfg = getConfig();
-            const oracleAuthority = cfg.crankWallet
-              ? new PublicKey(cfg.crankWallet)
-              : wallet.publicKey;
-            const setAuthToCrankData = encodeSetOracleAuthority({ newAuthority: oracleAuthority });
-            const setAuthToCrankKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_AUTHORITY, [
-              wallet.publicKey, slabPk,
-            ]);
-            finalInstructions.push(buildIx({ programId, keys: setAuthToCrankKeys, data: setAuthToCrankData }));
-          }
+          // NOTE: For admin oracle markets, user STAYS as oracle authority.
+          // This lets the admin push prices from the My Markets UI.
+          // The crank service handles price push failures gracefully (non-fatal).
+          // Admin can delegate to crank later via "Delegate to Crank" button.
 
           const sig = await sendTx({
             connection, wallet,

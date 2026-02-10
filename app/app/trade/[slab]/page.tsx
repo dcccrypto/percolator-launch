@@ -41,7 +41,9 @@ function Collapsible({ title, defaultOpen = true, badge, children }: { title: st
 function TradePageInner({ slab }: { slab: string }) {
   const { engine, config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
-  const { priceUsd } = useLivePrice();
+  const { priceUsd: livePriceUsd } = useLivePrice();
+  const onChainPrice = config?.lastEffectivePriceE6 ?? config?.authorityPriceE6 ?? null;
+  const priceUsd = livePriceUsd ?? (onChainPrice ? Number(onChainPrice) / 1e6 : null);
   const health = engine ? computeMarketHealth(engine) : null;
   const pageRef = useRef<HTMLDivElement>(null);
 

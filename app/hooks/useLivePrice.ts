@@ -42,6 +42,18 @@ export function useLivePrice(): PriceState {
   const slabAddr = slabAddress || null;
   const mint = mktConfig?.collateralMint?.toBase58() ?? null;
 
+  // Seed from on-chain slab data when no live price yet
+  useEffect(() => {
+    if (!mktConfig) return;
+    const onChainE6 = mktConfig.authorityPriceE6 ?? mktConfig.lastEffectivePriceE6 ?? 0n;
+    if (onChainE6 === 0n) return;
+    setState((prev) => {
+      if (prev.price !== null) return prev;
+      const usd = Number(onChainE6) / 1_000_000;
+      return { ...prev, price: usd, priceUsd: usd, priceE6: onChainE6, loading: false };
+    });
+  }, [mktConfig]);
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectDelay = useRef(RECONNECT_BASE_MS);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);

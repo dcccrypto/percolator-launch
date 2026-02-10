@@ -119,7 +119,12 @@ export class CrankService {
 
     try {
       if (this.isAdminOracle(market)) {
-        await this.oracleService.pushPrice(slabAddress, market.config, market.programId);
+        try {
+          await this.oracleService.pushPrice(slabAddress, market.config, market.programId);
+        } catch (priceErr) {
+          // Non-fatal: oracle authority may be the market admin, not the crank.
+          console.warn(`[CrankService] Price push skipped for ${slabAddress}:`, priceErr instanceof Error ? priceErr.message : String(priceErr));
+        }
       }
 
       const connection = getConnection();
