@@ -358,7 +358,7 @@ const CreationProgress: FC<{
   onReset: () => void;
   onRetry?: () => void;
 }> = ({ state, onReset, onRetry }) => {
-  const labels = ["Create slab account", "Initialize market & vault", "Oracle setup & crank", "Initialize LP", "Deposit, insurance & finalize"];
+  const labels = ["Create slab account", "Initialize market & vault", "Oracle setup & crank", "Initialize LP", "Deposit, insurance & finalize", "Insurance LP mint"];
 
   return (
     <div className="p-6 space-y-4">
@@ -367,9 +367,9 @@ const CreationProgress: FC<{
           Creating Market
         </h2>
         <div className="space-y-2.5">
-          {[0, 1, 2, 3, 4].map((i) => {
+          {[0, 1, 2, 3, 4, 5].map((i) => {
             let status: "pending" | "active" | "done" | "error" = "pending";
-            if (state.step > i || state.step === 5) status = "done";
+            if (state.step > i || state.step >= 6) status = "done";
             else if (state.step === i && state.loading) status = "active";
             else if (state.step === i && state.error) status = "error";
             return (
@@ -417,7 +417,7 @@ const CreationProgress: FC<{
           </div>
         )}
 
-        {state.step === 5 && state.slabAddress && (
+        {state.step >= 6 && state.slabAddress && (
           <div className="mt-6 border border-[var(--accent)]/20 bg-[var(--accent)]/[0.04] p-6 text-center">
             <h3 className="mb-1 text-[15px] font-bold text-white">Market is Live</h3>
             <p className="mb-1 text-[12px] text-[var(--text-secondary)]">Your perpetual futures market has been deployed.</p>
