@@ -17,6 +17,7 @@ import { ShareButton } from "@/components/market/ShareCard";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -38,7 +39,8 @@ function Collapsible({ title, defaultOpen = true, badge, children }: { title: st
 }
 
 function TradePageInner({ slab }: { slab: string }) {
-  const { engine } = useSlabState();
+  const { engine, config } = useSlabState();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
   const pageRef = useRef<HTMLDivElement>(null);
@@ -64,7 +66,7 @@ function TradePageInner({ slab }: { slab: string }) {
           {health && <HealthBadge level={health.level} />}
           <ShareButton
             slabAddress={slab}
-            marketName="TOKEN"
+            marketName={tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN")}
             price={BigInt(Math.round((priceUsd ?? 0) * 1e6))}
           />
           {priceUsd != null && (

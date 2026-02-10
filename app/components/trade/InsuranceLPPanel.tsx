@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { useInsuranceLP } from '../../hooks/useInsuranceLP';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useSlabState } from '../providers/SlabProvider';
+import { useTokenMeta } from '../../hooks/useTokenMeta';
 
-function formatSol(lamports: bigint): string {
+function formatCollateral(lamports: bigint): string {
   const sol = Number(lamports) / 1e9;
   if (sol === 0) return '0';
   if (sol < 0.001) return '<0.001';
@@ -20,6 +21,8 @@ function formatRate(rateE6: bigint): string {
 export function InsuranceLPPanel() {
   const { publicKey } = useWallet();
   const slabState = useSlabState();
+  const tokenMeta = useTokenMeta(slabState?.config?.collateralMint ?? null);
+  const tokenSymbol = tokenMeta?.symbol ?? 'Token';
   const { state, loading, error, createMint, deposit, withdraw } = useInsuranceLP();
   const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [amount, setAmount] = useState('');
@@ -101,15 +104,15 @@ export function InsuranceLPPanel() {
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div>
           <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Pool Size</p>
-          <p className="text-sm font-mono text-[#F0F4FF]">{formatSol(state.insuranceBalance)} SOL</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.insuranceBalance)} {tokenSymbol}</p>
         </div>
         <div>
           <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">LP Supply</p>
-          <p className="text-sm font-mono text-[#F0F4FF]">{formatSol(state.lpSupply)}</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.lpSupply)}</p>
         </div>
         <div>
           <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Rate</p>
-          <p className="text-sm font-mono text-[#F0F4FF]">{formatRate(state.redemptionRateE6)} SOL/LP</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatRate(state.redemptionRateE6)} {tokenSymbol}/LP</p>
         </div>
         <div>
           <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Your Share</p>
@@ -125,11 +128,11 @@ export function InsuranceLPPanel() {
           <div className="flex justify-between items-center">
             <div>
               <p className="text-[10px] text-[#5a6382] uppercase">Your LP Tokens</p>
-              <p className="text-sm font-mono text-[#F0F4FF]">{formatSol(state.userLpBalance)}</p>
+              <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.userLpBalance)}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] text-[#5a6382] uppercase">Redeemable</p>
-              <p className="text-sm font-mono text-[#00FFB2]">{formatSol(state.userRedeemableValue)} SOL</p>
+              <p className="text-sm font-mono text-[#00FFB2]">{formatCollateral(state.userRedeemableValue)} {tokenSymbol}</p>
             </div>
           </div>
         </div>
@@ -186,7 +189,7 @@ export function InsuranceLPPanel() {
               type="number"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder={mode === 'deposit' ? 'Amount (SOL)' : 'LP tokens'}
+              placeholder={mode === 'deposit' ? `Amount (${tokenSymbol})` : 'LP tokens'}
               className="w-full bg-white/[0.05] border border-white/[0.08] rounded px-3 py-2 text-sm text-[#F0F4FF] font-mono placeholder:text-[#3D4563] focus:outline-none focus:border-white/[0.12]"
               min="0"
               step="0.001"
@@ -204,12 +207,12 @@ export function InsuranceLPPanel() {
           {/* Preview */}
           {previewTokens !== null && mode === 'deposit' && (
             <p className="text-xs text-[#5a6382] mb-3">
-              You receive: <span className="text-[#c4cbde] font-mono">~{formatSol(previewTokens)}</span> LP tokens
+              You receive: <span className="text-[#c4cbde] font-mono">~{formatCollateral(previewTokens)}</span> LP tokens
             </p>
           )}
           {previewCollateral !== null && mode === 'withdraw' && (
             <p className="text-xs text-[#5a6382] mb-3">
-              You receive: <span className="text-[#c4cbde] font-mono">~{formatSol(previewCollateral)}</span> SOL
+              You receive: <span className="text-[#c4cbde] font-mono">~{formatCollateral(previewCollateral)}</span> {tokenSymbol}
             </p>
           )}
 

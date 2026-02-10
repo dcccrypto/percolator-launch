@@ -24,11 +24,13 @@ async function pollConfirmation(
   signature: string,
 ): Promise<void> {
   const start = Date.now();
+  let pollCount = 0;
 
   while (Date.now() - start < MAX_POLL_TIME_MS) {
+    pollCount++;
     try {
       const resp = await connection.getSignatureStatuses([signature], {
-        searchTransactionHistory: false,
+        searchTransactionHistory: pollCount > 5,
       });
       const status = resp.value[0];
 

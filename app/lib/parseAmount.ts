@@ -6,10 +6,15 @@ export function parseHumanAmount(input: string, decimals: number): bigint {
   const trimmed = input.trim();
   if (!trimmed || trimmed === ".") return 0n;
 
-  const parts = trimmed.split(".");
+  const negative = trimmed.startsWith("-");
+  const abs = negative ? trimmed.slice(1) : trimmed;
+  if (!abs || abs === ".") return 0n;
+
+  const parts = abs.split(".");
   const whole = parts[0] || "0";
   const frac = (parts[1] || "").padEnd(decimals, "0").slice(0, decimals);
-  return BigInt(whole) * BigInt(10 ** decimals) + BigInt(frac);
+  const result = BigInt(whole) * BigInt(10 ** decimals) + BigInt(frac);
+  return negative ? -result : result;
 }
 
 /**

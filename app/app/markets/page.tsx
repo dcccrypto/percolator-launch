@@ -88,6 +88,7 @@ export default function MarketsPage() {
           const order: Record<string, number> = { healthy: 0, caution: 1, warning: 2, empty: 3 };
           return (order[ha.level] ?? 5) - (order[hb.level] ?? 5);
         }
+        case "recent": return Number(b.onChain.engine.lastCrankSlot - a.onChain.engine.lastCrankSlot);
         default: return 0;
       }
     });

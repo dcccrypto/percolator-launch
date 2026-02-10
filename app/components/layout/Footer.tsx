@@ -1,8 +1,6 @@
 "use client";
 
 import { FC } from "react";
-import { getConfig } from "@/lib/config";
-
 export const Footer: FC = () => {
   return (
     <footer className="border-t border-[#1a1a1f] py-6">
