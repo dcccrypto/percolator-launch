@@ -48,6 +48,7 @@ const DevnetMintContent: FC = () => {
   const [tokenName, setTokenName] = useState("Test Token");
   const [tokenSymbol, setTokenSymbol] = useState("TEST");
   const [mintColor, setMintColor] = useState<string | null>(null);
+  const [lastTxSig, setLastTxSig] = useState<string | null>(null);
 
   const connection = useMemo(() => new Connection(DEVNET_RPC, "confirmed"), []);
 
@@ -126,6 +127,12 @@ const DevnetMintContent: FC = () => {
     setMintAddress(null);
 
     try {
+      // Check SOL balance before attempting — prevents silent freeze on empty wallets
+      const walletBalance = await connection.getBalance(publicKey);
+      if (walletBalance < 0.01 * LAMPORTS_PER_SOL) {
+        throw new Error("Not enough SOL. You need at least 0.01 SOL to create a mint. Use the airdrop button above.");
+      }
+
       const mintKeypair = Keypair.generate();
       const recipientPubkey = new PublicKey(recipient);
       const lamports = await getMinimumBalanceForRentExemptMint(connection);
@@ -205,6 +212,7 @@ const DevnetMintContent: FC = () => {
       setMintColor(color);
 
       setMintAddress(mintKeypair.publicKey.toBase58());
+      setLastTxSig(sig);
       setStatus("Done! Token created and minted.");
       await refreshBalance();
     } catch (e: unknown) {
@@ -272,7 +280,8 @@ const DevnetMintContent: FC = () => {
         }
         await new Promise(r => setTimeout(r, 2000));
       }
-      setStatus(`Minted ${Number(mintMoreAmount).toLocaleString()} more tokens! Tx: ${sig.slice(0, 12)}…`);
+      setLastTxSig(sig);
+      setStatus(`Minted ${Number(mintMoreAmount).toLocaleString()} more tokens!`);
       await refreshBalance();
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -498,7 +507,22 @@ const DevnetMintContent: FC = () => {
 
         {/* Status */}
         {status && (
-          <p className="text-center text-sm text-[var(--text-secondary)]">{status}</p>
+          <p className="text-center text-sm text-[var(--text-secondary)]">
+            {status}
+            {lastTxSig && !status.startsWith("Error") && (
+              <>
+                {" "}
+                <a
+                  href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--accent)] hover:underline break-all"
+                >
+                  View tx →
+                </a>
+              </>
+            )}
+          </p>
         )}
 
         {/* Result - GSAP scale-in animation */}
