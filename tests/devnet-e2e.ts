@@ -249,7 +249,7 @@ async function main() {
 
   console.log("\n=== ALL TESTS PASSED ===");
   console.log(`Market: ${slabKeypair.publicKey.toBase58()}`);
-  console.log(`Trade page: https://percolator-launch.vercel.app/trade/${slabKeypair.publicKey.toBase58()}`);
+  console.log(`Trade page: https://percolator.app/trade/${slabKeypair.publicKey.toBase58()}`);
 }
 
 main().catch(err => {

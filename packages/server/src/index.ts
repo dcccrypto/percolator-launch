@@ -29,7 +29,7 @@ const tradeIndexer = new TradeIndexer();
 // Hono app
 const app = new Hono();
 // C1: CORS lockdown — only allow configured origins
-const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "https://percolator-launch.vercel.app,http://localhost:3000").split(",").map(s => s.trim()).filter(Boolean);
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "https://percolator.app,http://localhost:3000").split(",").map(s => s.trim()).filter(Boolean);
 app.use("*", cors({
   origin: allowedOrigins,
   allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],

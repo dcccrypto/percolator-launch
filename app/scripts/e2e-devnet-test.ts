@@ -332,7 +332,7 @@ async function main() {
   console.log(`   Vault: ${vaultAta.toBase58()}`);
   console.log(`   Matcher ctx: ${matcherCtxKp.publicKey.toBase58()}`);
   console.log(`   LP PDA: ${lpPda.toBase58()}`);
-  console.log(`\n   Trade URL: https://percolator-launch.vercel.app/trade/${slabKp.publicKey.toBase58()}`);
+  console.log(`\n   Trade URL: https://percolator.app/trade/${slabKp.publicKey.toBase58()}`);
 }
 
 main().catch((e) => {
