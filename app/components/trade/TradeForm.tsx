@@ -23,7 +23,7 @@ function formatPerc(native: bigint): string {
   const abs = native < 0n ? -native : native;
   const whole = abs / 1_000_000n;
   const frac = (abs % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
-  const w = whole.toLocaleString();
+  const w = whole.toString(); // NOT toLocaleString — commas break BigInt() parsing downstream
   return frac ? `${w}.${frac}` : w;
 }
 

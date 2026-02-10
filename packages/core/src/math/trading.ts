@@ -47,7 +47,9 @@ export function computeLiqPrice(
     return liq > 0 ? BigInt(Math.round(liq)) : 0n;
   } else {
     // Short: liq when price rises. For shorts, maintenance margin reduces the buffer.
-    const adjusted = (capitalPerUnit * 10000) / (10000 - maintBps);
+    const denom = 10000 - maintBps;
+    if (denom <= 0) return 0n; // Guard: maintBps >= 100% means no valid liq price
+    const adjusted = (capitalPerUnit * 10000) / denom;
     return BigInt(Math.round(Number(entryPrice) + adjusted));
   }
 }

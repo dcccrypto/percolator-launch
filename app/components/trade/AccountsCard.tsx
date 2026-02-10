@@ -31,11 +31,14 @@ function computeLiqPrice(entryPrice: bigint, capital: bigint, positionSize: bigi
   const absPos = positionSize < 0n ? -positionSize : positionSize;
   const maintBps = Number(maintenanceMarginBps);
   const capitalPerUnit = Number(capital) * 1e6 / Number(absPos);
-  const adjusted = capitalPerUnit * 10000 / (10000 + maintBps);
   if (positionSize > 0n) {
+    const adjusted = capitalPerUnit * 10000 / (10000 + maintBps);
     const liq = Number(entryPrice) - adjusted;
     return liq > 0 ? BigInt(Math.round(liq)) : 0n;
   } else {
+    const denom = 10000 - maintBps;
+    if (denom <= 0) return 0n;
+    const adjusted = capitalPerUnit * 10000 / denom;
     return BigInt(Math.round(Number(entryPrice) + adjusted));
   }
 }
