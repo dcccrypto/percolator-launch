@@ -5,7 +5,7 @@ export function formatTokenAmount(raw: bigint, decimals: number = 6): string {
   const whole = abs / divisor;
   const frac = abs % divisor;
   const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
-  const formatted = fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString();
+  const formatted = fracStr ? `${whole.toString()}.${fracStr}` : whole.toString();
   return negative ? `-${formatted}` : formatted;
 }
 
@@ -41,7 +41,7 @@ export function formatI128Amount(raw: bigint, decimals: number = 6): string {
   const abs = negative ? -raw : raw;
   const divisor = BigInt(10 ** decimals);
   const whole = abs / divisor;
-  const formatted = whole.toLocaleString();
+  const formatted = whole.toString();
   return negative ? `-${formatted}` : formatted;
 }
 
@@ -53,7 +53,7 @@ export function formatPnl(raw: bigint, decimals: number = 6): string {
   const whole = abs / divisor;
   const frac = abs % divisor;
   const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
-  const num = fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString();
+  const num = fracStr ? `${whole.toString()}.${fracStr}` : whole.toString();
   if (negative) return `-${num}`;
   if (raw > 0n) return `+${num}`;
   return num;

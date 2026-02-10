@@ -11,6 +11,7 @@ export function parseHumanAmount(input: string, decimals: number): bigint {
   if (!abs || abs === ".") return 0n;
 
   const parts = abs.split(".");
+  if (parts.length > 2) return 0n; // reject "1.2.3"
   const whole = parts[0] || "0";
   const frac = (parts[1] || "").padEnd(decimals, "0").slice(0, decimals);
   const result = BigInt(whole) * BigInt(10 ** decimals) + BigInt(frac);
@@ -31,12 +32,12 @@ export function formatHumanAmount(raw: bigint, decimals: number): string {
   const remainder = abs % divisor;
 
   if (remainder === 0n) {
-    const w = whole.toLocaleString();
+    const w = whole.toString();
     return negative ? `-${w}` : w;
   }
 
   // Pad fraction to `decimals` digits, then strip trailing zeros
   const fracStr = remainder.toString().padStart(decimals, "0").replace(/0+$/, "");
-  const w = whole.toLocaleString();
+  const w = whole.toString();
   return `${negative ? "-" : ""}${w}.${fracStr}`;
 }

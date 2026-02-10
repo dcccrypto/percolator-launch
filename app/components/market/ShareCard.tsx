@@ -33,7 +33,7 @@ export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, 
   const priceNum = Number(price) / 1e6;
   const fmtPrice = priceNum < 0.01 ? priceNum.toFixed(6) : priceNum < 1 ? priceNum.toFixed(4) : priceNum.toFixed(2);
   const changeStr = change24h != null ? `${change24h >= 0 ? "+" : ""}${change24h.toFixed(2)}%` : "";
-  const tradeUrl = buildTradeUrl(slabAddress);
+  const tradeUrl = `https://percolator.app/trade/${slabAddress}`;
 
   const copyLink = async () => {
     await navigator.clipboard.writeText(tradeUrl);

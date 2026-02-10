@@ -80,9 +80,15 @@ export default function MarketsPage() {
 
   useEffect(() => {
     async function load() {
-      const { data } = await getSupabase().from("markets_with_stats").select("*");
-      setSupabaseMarkets(data || []);
-      setSupabaseLoading(false);
+      try {
+        const { data } = await getSupabase().from("markets_with_stats").select("*");
+        setSupabaseMarkets(data || []);
+      } catch (e) {
+        console.error("[Markets] Supabase fetch failed:", e);
+        setSupabaseMarkets([]);
+      } finally {
+        setSupabaseLoading(false);
+      }
     }
     load();
   }, []);
@@ -129,7 +135,7 @@ export default function MarketsPage() {
     list = [...list].sort((a, b) => {
       switch (sortBy) {
         case "volume": return (b.supabase?.volume_24h ?? 0) - (a.supabase?.volume_24h ?? 0);
-        case "oi": return Number(b.onChain.engine.totalOpenInterest - a.onChain.engine.totalOpenInterest);
+        case "oi": return b.onChain.engine.totalOpenInterest > a.onChain.engine.totalOpenInterest ? -1 : b.onChain.engine.totalOpenInterest < a.onChain.engine.totalOpenInterest ? 1 : 0;
         case "health": {
           const ha = computeMarketHealth(a.onChain.engine);
           const hb = computeMarketHealth(b.onChain.engine);
@@ -238,7 +244,7 @@ export default function MarketsPage() {
               {([
                 { key: "all" as OracleFilter, label: "all oracles" },
                 { key: "live" as OracleFilter, label: "live feed" },
-                { key: "admin" as OracleFilter, label: "admin" },
+                { key: "admin" as OracleFilter, label: "manual" },
               ]).map((opt) => (
                 <button
                   key={opt.key}
@@ -332,7 +338,7 @@ export default function MarketsPage() {
                           {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
                         </span>
                         {m.isAdminOracle && (
-                          <span className="border border-[var(--warning)]/30 bg-[var(--warning)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--warning)]">admin</span>
+                          <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
                         )}
                       </div>
                       <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>

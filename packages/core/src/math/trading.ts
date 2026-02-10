@@ -28,6 +28,7 @@ export function computeMarkPnl(
 
 /**
  * Compute liquidation price given entry, capital, position and maintenance margin.
+ * Uses pure BigInt arithmetic for precision (no Number() truncation).
  */
 export function computeLiqPrice(
   entryPrice: bigint,
@@ -37,15 +38,18 @@ export function computeLiqPrice(
 ): bigint {
   if (positionSize === 0n || entryPrice === 0n) return 0n;
   const absPos = positionSize < 0n ? -positionSize : positionSize;
-  const maintBps = Number(maintenanceMarginBps);
-  const capitalPerUnit = (Number(capital) * 1e6) / Number(absPos);
-  const adjusted = (capitalPerUnit * 10000) / (10000 + maintBps);
+  // capitalPerUnit scaled by 1e6 for precision
+  const capitalPerUnitE6 = (capital * 1_000_000n) / absPos;
 
   if (positionSize > 0n) {
-    const liq = Number(entryPrice) - adjusted;
-    return liq > 0 ? BigInt(Math.round(liq)) : 0n;
+    const adjusted = (capitalPerUnitE6 * 10000n) / (10000n + maintenanceMarginBps);
+    const liq = entryPrice - adjusted;
+    return liq > 0n ? liq : 0n;
   } else {
-    return BigInt(Math.round(Number(entryPrice) + adjusted));
+    // Guard: if maintenanceMarginBps >= 10000 (100%), position is effectively unliquidatable
+    if (maintenanceMarginBps >= 10000n) return entryPrice;
+    const adjusted = (capitalPerUnitE6 * 10000n) / (10000n - maintenanceMarginBps);
+    return entryPrice + adjusted;
   }
 }
 

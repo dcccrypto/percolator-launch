@@ -5,6 +5,7 @@ import {
   parseEngine,
   parseParams,
   parseAccount,
+  parseUsedIndices,
   detectLayout,
   buildAccountMetas,
   buildIx,
@@ -62,13 +63,16 @@ export class LiquidationService {
       if (!layout) return [];
 
       const candidates: LiquidationCandidate[] = [];
-      const numAccounts = engine.numUsedAccounts;
       const maintenanceMarginBps = params.maintenanceMarginBps;
       const price = cfg.authorityPriceE6;
 
       if (price === 0n) return []; // No price set
 
-      for (let i = 0; i < numAccounts; i++) {
+      // Use bitmap to find actually-used account indices (not sequential iteration)
+      // The bitmap can be sparse — e.g., accounts at indices 0, 5, 100
+      const usedIndices = parseUsedIndices(data);
+
+      for (const i of usedIndices) {
         try {
           const account = parseAccount(data, i);
 
@@ -76,12 +80,21 @@ export class LiquidationService {
           if (account.kind !== 0) continue;  // 0 = User
           if (account.positionSize === 0n) continue;  // No position
 
-          // Calculate margin health
-          // Margin ratio = (capital + pnl) / |positionSize * price / 1e6|
+          // Calculate margin health using mark-to-market PnL (not stale on-chain pnl)
+          // On-chain pnl is only updated during cranks; between cranks it can be stale
           const notional = absBI(account.positionSize) * price / 1_000_000n;
           if (notional === 0n) continue;
 
-          const equity = account.capital + account.pnl;
+          // Compute mark PnL from live price instead of stale on-chain pnl
+          const entryPrice = account.entryPrice;
+          let markPnl = 0n;
+          if (entryPrice > 0n && price > 0n) {
+            const diff = account.positionSize > 0n
+              ? price - entryPrice    // long: profit when price goes up
+              : entryPrice - price;   // short: profit when price goes down
+            markPnl = (diff * absBI(account.positionSize)) / price;
+          }
+          const equity = account.capital + markPnl;
 
           // H4: If equity <= 0, definitely liquidatable (skip ratio calc)
           if (equity <= 0n) {
@@ -91,7 +104,7 @@ export class LiquidationService {
               owner: account.owner.toBase58(),
               positionSize: account.positionSize,
               capital: account.capital,
-              pnl: account.pnl,
+              pnl: markPnl,
               marginRatio: equity <= 0n ? 0 : -1,
               maintenanceMarginBps,
             });
@@ -108,7 +121,7 @@ export class LiquidationService {
               owner: account.owner.toBase58(),
               positionSize: account.positionSize,
               capital: account.capital,
-              pnl: account.pnl,
+              pnl: markPnl,
               marginRatio: Number(marginRatioBps) / 100,
               maintenanceMarginBps,
             });
@@ -151,8 +164,9 @@ export class LiquidationService {
       const isAllZeros = feedHex === "0".repeat(64);
       const oracleAccount = isAllZeros ? slabAddress : derivePythPushOraclePDA(feedHex)[0];
 
-      // 1. Push oracle price (if admin oracle)
-      if (isAdminOracle) {
+      // 1. Push oracle price only if crank wallet IS the oracle authority
+      // (user-owned oracle markets skip the push — user pushes manually)
+      if (isAdminOracle && market.config.oracleAuthority.equals(keypair.publicKey)) {
         const mint = market.config.collateralMint.toBase58();
         const priceEntry = await this.oracleService.fetchPrice(mint, slabAddress.toBase58());
         if (priceEntry) {
@@ -181,30 +195,93 @@ export class LiquidationService {
       ]);
       instructions.push(buildIx({ programId, keys: liqKeys, data: liqData }));
 
-      // Send all in one tx
-      // Note: sendWithRetry only takes a single IX, so we need to build the full tx
-      const { Transaction } = await import("@solana/web3.js");
-      const tx = new Transaction();
-      for (const ix of instructions) {
-        tx.add(ix);
+      // Bug 3: Re-read slab data and verify account before submitting
+      {
+        const freshData = await fetchSlab(connection, slabAddress);
+        const freshEngine = parseEngine(freshData);
+        const freshParams = parseParams(freshData);
+        const freshCfg = parseConfig(freshData);
+
+        // Use bitmap to verify account is still active (not sequential numUsedAccounts)
+        const freshUsed = parseUsedIndices(freshData);
+        if (!freshUsed.includes(accountIdx)) {
+          console.warn(`[LiquidationService] Race condition: accountIdx ${accountIdx} no longer in bitmap on ${slabAddress.toBase58()}, skipping`);
+          return null;
+        }
+
+        const freshAccount = parseAccount(freshData, accountIdx);
+        // Owner is verified implicitly — the account at this index is what we'll liquidate
+
+        // Verify still undercollateralized
+        if (freshAccount.kind !== 0 || freshAccount.positionSize === 0n) {
+          console.warn(`[LiquidationService] Race condition: account ${accountIdx} on ${slabAddress.toBase58()} no longer active, skipping`);
+          return null;
+        }
+
+        const freshPrice = freshCfg.authorityPriceE6;
+        if (freshPrice > 0n) {
+          const notional = absBI(freshAccount.positionSize) * freshPrice / 1_000_000n;
+          if (notional > 0n) {
+            // Use mark-to-market PnL for re-verification
+            const freshEntry = freshAccount.entryPrice;
+            let freshMarkPnl = 0n;
+            if (freshEntry > 0n && freshPrice > 0n) {
+              const diff = freshAccount.positionSize > 0n
+                ? freshPrice - freshEntry
+                : freshEntry - freshPrice;
+              freshMarkPnl = (diff * absBI(freshAccount.positionSize)) / freshPrice;
+            }
+            const equity = freshAccount.capital + freshMarkPnl;
+            if (equity > 0n) {
+              const marginRatioBps = equity * 10_000n / notional;
+              if (marginRatioBps >= freshParams.maintenanceMarginBps) {
+                console.warn(`[LiquidationService] Race condition: account ${accountIdx} on ${slabAddress.toBase58()} no longer undercollateralized (margin: ${marginRatioBps} bps), skipping`);
+                return null;
+              }
+            }
+          }
+        }
       }
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = keypair.publicKey;
-      tx.sign(keypair);
-      const sig = await connection.sendRawTransaction(tx.serialize(), {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
-      });
-      await connection.confirmTransaction(sig, "confirmed");
+
+      // Send all in one tx with retry (Bug 7+8+9)
+      const { Transaction } = await import("@solana/web3.js");
+      const MAX_RETRIES = 2;
+      let sig: string | null = null;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const tx = new Transaction();
+          for (const ix of instructions) {
+            tx.add(ix);
+          }
+          const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = keypair.publicKey;
+          tx.sign(keypair);
+          const txSig = await connection.sendRawTransaction(tx.serialize(), {
+            skipPreflight: false,
+            preflightCommitment: "confirmed",
+          });
+          await connection.confirmTransaction({ signature: txSig, blockhash, lastValidBlockHeight }, "confirmed");
+          sig = txSig;
+          break;
+        } catch (retryErr) {
+          const errMsg = retryErr instanceof Error ? retryErr.message.toLowerCase() : String(retryErr).toLowerCase();
+          const isNetworkError = errMsg.includes("timeout") || errMsg.includes("socket") || errMsg.includes("econnrefused") || errMsg.includes("429") || errMsg.includes("block height exceeded");
+          if (!isNetworkError || attempt >= MAX_RETRIES) {
+            throw retryErr;
+          }
+          console.warn(`[LiquidationService] Attempt ${attempt + 1} failed with network error, retrying...`);
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
 
       this.liquidationCount++;
       eventBus.publish("liquidation.success", slabAddress.toBase58(), {
         accountIdx,
-        signature: sig,
+        signature: sig!,
       });
       console.log(`[LiquidationService] Liquidated account ${accountIdx} on ${slabAddress.toBase58()}: ${sig}`);
-      return sig;
+      return sig!;
     } catch (err) {
       eventBus.publish("liquidation.failure", slabAddress.toBase58(), {
         accountIdx,

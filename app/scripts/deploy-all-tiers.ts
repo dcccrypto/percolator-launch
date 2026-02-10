@@ -320,7 +320,7 @@ async function deployMarket(tier: typeof TIERS[0], mintPk: PublicKey, payerAta: 
     vault: vaultAta.toBase58(),
     matcherCtx: matcherCtxKp.publicKey.toBase58(),
     lpPda: lpPda.toBase58(),
-    url: `https://percolator-launch.vercel.app/trade/${slabKp.publicKey.toBase58()}`,
+    url: `https://percolator.app/trade/${slabKp.publicKey.toBase58()}`,
   };
 }
 

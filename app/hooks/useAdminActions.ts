@@ -7,6 +7,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   encodeSetOracleAuthority,
   encodePushOraclePrice,
+  encodeSetOraclePriceCap,
   encodeTopUpInsurance,
   encodeRenounceAdmin,
   encodeCreateInsuranceMint,
@@ -58,14 +59,31 @@ export function useAdminActions() {
       if (!wallet.publicKey || !wallet.signTransaction) throw new Error("Wallet not connected");
       setLoading("pushPrice");
       try {
+        const instructions = [];
         const now = Math.floor(Date.now() / 1000);
-        const data = encodePushOraclePrice({ priceE6, timestamp: now.toString() });
-        const keys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
+
+        // First: disable the price cap so the price can jump directly to target
+        // (SetOraclePriceCap uses same accounts as SetOracleAuthority — admin + slab)
+        const capData = encodeSetOraclePriceCap({ maxChangeE2bps: 0n });
+        const capKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_AUTHORITY, [
           wallet.publicKey,
           market.slabAddress,
         ]);
-        const ix = buildIx({ programId: market.programId, keys, data });
-        return await sendTx({ connection, wallet, instructions: [ix] });
+        instructions.push(buildIx({ programId: market.programId, keys: capKeys, data: capData }));
+
+        // Then: push the actual target price
+        const pushData = encodePushOraclePrice({ priceE6, timestamp: now.toString() });
+        const pushKeys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
+          wallet.publicKey,
+          market.slabAddress,
+        ]);
+        instructions.push(buildIx({ programId: market.programId, keys: pushKeys, data: pushData }));
+
+        // Finally: re-enable the price cap (1% = 10000 e2bps)
+        const reCapData = encodeSetOraclePriceCap({ maxChangeE2bps: BigInt(10_000) });
+        instructions.push(buildIx({ programId: market.programId, keys: capKeys, data: reCapData }));
+
+        return await sendTx({ connection, wallet, instructions, computeUnits: 400_000 });
       } finally {
         setLoading(null);
       }

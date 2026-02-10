@@ -79,6 +79,7 @@ export async function sendTx({
   }
 
   let lastError: Error | null = null;
+  let lastSignature: string | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -99,16 +100,16 @@ export async function sendTx({
 
       const signed = await wallet.signTransaction(tx);
 
-      const signature = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: true,
+      lastSignature = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: false,
         maxRetries: 5,
       });
 
       // Poll for confirmation instead of using confirmTransaction
       // (confirmTransaction falsely reports "block height exceeded" on devnet)
-      await pollConfirmation(connection, signature);
+      await pollConfirmation(connection, lastSignature);
 
-      return signature;
+      return lastSignature;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       lastError = e instanceof Error ? e : new Error(msg);
@@ -119,6 +120,25 @@ export async function sendTx({
         msg.includes("has expired");
 
       if (isBlockhashExpired && attempt < maxRetries) {
+        // R2-S7: Before retrying, check if the original tx actually landed
+        if (lastSignature) {
+          try {
+            const statusResp = await connection.getSignatureStatuses([lastSignature], {
+              searchTransactionHistory: true,
+            });
+            const prevStatus = statusResp.value[0];
+            if (
+              prevStatus &&
+              !prevStatus.err &&
+              (prevStatus.confirmationStatus === "confirmed" ||
+                prevStatus.confirmationStatus === "finalized")
+            ) {
+              return lastSignature; // Already landed — no retry needed
+            }
+          } catch {
+            // RPC error checking status — proceed with retry
+          }
+        }
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       }

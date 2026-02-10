@@ -33,7 +33,7 @@ export function insuranceRoutes(deps: InsuranceDeps): Hono {
   // GET /api/markets/:slab/insurance/events
   app.get("/api/markets/:slab/insurance/events", validateSlab, async (c) => {
     const slab = c.req.param("slab");
-    const limit = Number(c.req.query("limit") ?? 50);
+    const limit = Math.min(Math.max(1, Number(c.req.query("limit") ?? 50)), 200);
 
     try {
       const events = await deps.insuranceService.getEvents(slab, limit);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, UNAUTHORIZED } from "@/lib/api-auth";
 import { Connection, PublicKey } from "@solana/web3.js";
+import { parseHeader } from "@percolator/core";
 import { getServiceClient } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,19 @@ export async function POST(req: NextRequest) {
     if (tiers) Object.values(tiers).forEach((id) => validPrograms.add(id));
     if (!validPrograms.has(accountInfo.owner.toBase58())) {
       return NextResponse.json({ error: "Slab account not owned by a known percolator program" }, { status: 400 });
+    }
+
+    // R2-S8: Verify deployer matches the on-chain admin
+    try {
+      const header = parseHeader(accountInfo.data);
+      if (header.admin.toBase58() !== deployer) {
+        return NextResponse.json(
+          { error: "Deployer does not match slab admin" },
+          { status: 403 },
+        );
+      }
+    } catch {
+      return NextResponse.json({ error: "Failed to parse slab header" }, { status: 400 });
     }
   } catch (err) {
     return NextResponse.json({ error: "Failed to verify slab on-chain" }, { status: 400 });

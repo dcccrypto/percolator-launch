@@ -540,6 +540,14 @@ export const CreateMarketWizard: FC = () => {
   }, [connection, publicKey, mint, mintValid]);
 
   const getOracleFeedAndPrice = (): { oracleFeed: string; priceE6: bigint } => {
+    // For admin/manual oracle modes, derive a real initial price from the detected pool
+    // so the oracle isn't stuck at 0 (price cap at 10000bps from 0 = forever 0).
+    const detectPrice = (): bigint => {
+      if (selectedDexPool?.priceUsd) return BigInt(Math.round(selectedDexPool.priceUsd * 1_000_000));
+      if (priceRouter.bestSource?.price) return BigInt(Math.round(priceRouter.bestSource.price * 1_000_000));
+      return 1_000_000n; // fallback: $1
+    };
+
     if (oracleMode === "auto" && priceRouter.bestSource) {
       if (priceRouter.bestSource.type === "pyth") return { oracleFeed: feedId, priceE6: 0n };
       const pk = new PublicKey(dexPoolAddress);
@@ -551,7 +559,8 @@ export const CreateMarketWizard: FC = () => {
       const hex = Array.from(pk.toBytes()).map((b) => b.toString(16).padStart(2, "0")).join("");
       return { oracleFeed: hex, priceE6: 0n };
     }
-    return { oracleFeed: feedId, priceE6: 0n };
+    // Pyth or admin oracle — for admin oracle the price must be non-zero
+    return { oracleFeed: feedId, priceE6: detectPrice() };
   };
 
   const handleCreate = () => {
@@ -575,6 +584,7 @@ export const CreateMarketWizard: FC = () => {
       mint: new PublicKey(mint), initialPriceE6: priceE6, lpCollateral: parseHumanAmount(lpCollateral, decimals),
       insuranceAmount: parseHumanAmount(insuranceAmount, decimals), oracleFeed, invert, tradingFeeBps, initialMarginBps,
       maxAccounts: selectedTier.maxAccounts, slabDataSize: selectedTier.dataSize,
+      symbol: symbol || "UNKNOWN", name: tokenMeta?.name || "Unknown Token", decimals,
       ...(enableVammManual && { vammParams: { spreadBps: vammSpreadBpsManual, impactKBps: vammImpactKBpsManual, maxTotalBps: vammMaxTotalBpsManual, liquidityE6: vammLiquidityE6Manual } }),
     }, state.step);
   };

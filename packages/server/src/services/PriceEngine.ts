@@ -190,8 +190,14 @@ export class PriceEngine {
       console.log("[PriceEngine] Connected to Helius WebSocket");
       this.reconnectDelay = 1000;
 
+      // Clear stale subscription mappings from previous connection
+      const existingSlabs = [...this.slabToSubId.keys()];
+      this.subscriptionIds.clear();
+      this.slabToSubId.clear();
+      this._pendingSubResponses.clear();
+
       // Re-subscribe existing slabs
-      for (const slabAddress of this.slabToSubId.keys()) {
+      for (const slabAddress of existingSlabs) {
         this.sendSubscribe(slabAddress);
       }
 
@@ -254,6 +260,17 @@ export class PriceEngine {
   private _pendingSubResponses = new Map<number, { slabAddress: string; timestamp: number }>();
 
   private handleMessage(msg: Record<string, unknown>): void {
+    // Subscription error response: { id, error: {...} }
+    if (msg.id !== undefined && msg.error !== undefined) {
+      const msgId = msg.id as number;
+      const pending = this._pendingSubResponses.get(msgId);
+      if (pending) {
+        this._pendingSubResponses.delete(msgId);
+        console.error(`[PriceEngine] Subscription failed for ${pending.slabAddress}:`, msg.error);
+      }
+      return;
+    }
+
     // Subscription response: { id, result: subscriptionId }
     if (msg.id !== undefined && msg.result !== undefined) {
       const msgId = msg.id as number;

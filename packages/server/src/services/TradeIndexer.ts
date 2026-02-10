@@ -27,22 +27,28 @@ export class TradeIndexer {
   private _running = false;
   private pendingSlabs = new Set<string>();
   private processTimer: ReturnType<typeof setTimeout> | null = null;
+  private crankListener: ((payload: { slabAddress: string }) => void) | null = null;
 
   start(): void {
     if (this._running) return;
     this._running = true;
 
     // Listen for successful cranks
-    eventBus.on("crank.success", (payload) => {
+    this.crankListener = (payload) => {
       this.pendingSlabs.add(payload.slabAddress);
       this.scheduleProcess();
-    });
+    };
+    eventBus.on("crank.success", this.crankListener);
 
     console.log("[TradeIndexer] Started — listening for crank.success events");
   }
 
   stop(): void {
     this._running = false;
+    if (this.crankListener) {
+      eventBus.off("crank.success", this.crankListener);
+      this.crankListener = null;
+    }
     if (this.processTimer) {
       clearTimeout(this.processTimer);
       this.processTimer = null;
@@ -189,7 +195,7 @@ export class TradeIndexer {
         slab_address: slabAddress,
         trader,
         side,
-        size: Number(sizeValue),
+        size: sizeValue.toString(), // Keep full precision (i128 on-chain)
         price,
         fee,
         tx_signature: signature,

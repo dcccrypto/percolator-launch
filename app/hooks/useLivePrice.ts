@@ -3,10 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:3001";
-const WS_URL_IS_DEFAULT = !process.env.NEXT_PUBLIC_WS_URL;
-if (WS_URL_IS_DEFAULT && typeof window !== "undefined") {
-  console.warn("[useLivePrice] NEXT_PUBLIC_WS_URL not set — falling back to ws://localhost:3001. Set this env var in production.");
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "";
+if (!WS_URL && typeof window !== "undefined") {
+  console.warn("[useLivePrice] NEXT_PUBLIC_WS_URL not set — WebSocket price streaming disabled. Set this env var in production.");
 }
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
@@ -65,8 +64,9 @@ export function useLivePrice(): PriceState {
   const pollTimer = useRef<ReturnType<typeof setInterval>>(undefined);
   const wsConnected = useRef(false);
 
-  // Jupiter polling fallback
-  const pollJupiter = useCallback(async () => {
+  // Jupiter polling fallback — use ref to avoid being a dep of the WS effect
+  const pollJupiterRef = useRef<() => Promise<void>>(async () => {});
+  pollJupiterRef.current = async () => {
     if (!mint || wsConnected.current) return;
     try {
       const url = `https://api.jup.ag/price/v2?ids=${mint}`;
@@ -87,11 +87,12 @@ export function useLivePrice(): PriceState {
     } catch {
       // keep last known
     }
-  }, [mint]);
+  };
 
   useEffect(() => {
     mountedRef.current = true;
-    setState((prev) => ({ ...prev, loading: true }));
+    // Only set loading if we don't already have a price
+    setState((prev) => prev.price !== null ? prev : { ...prev, loading: true });
 
     if (!slabAddr) return;
 
@@ -99,6 +100,13 @@ export function useLivePrice(): PriceState {
 
     function connect() {
       if (!mountedRef.current) return;
+      // Skip WebSocket if URL not configured
+      if (!WS_URL) return;
+      // Close any existing connection to prevent zombie WS
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch { /* ignore */ }
+        wsRef.current = null;
+      }
       try {
         ws = new WebSocket(WS_URL);
         wsRef.current = ws;
@@ -178,21 +186,32 @@ export function useLivePrice(): PriceState {
       })
       .catch(() => {});
 
-    // Jupiter polling fallback
-    pollJupiter();
-    pollTimer.current = setInterval(pollJupiter, POLL_FALLBACK_MS);
-
     return () => {
       mountedRef.current = false;
       wsConnected.current = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (pollTimer.current) clearInterval(pollTimer.current);
       if (wsRef.current) {
+        // Unsubscribe before closing to clean up server-side state
+        try {
+          if (wsRef.current.readyState === WebSocket.OPEN && slabAddr) {
+            wsRef.current.send(JSON.stringify({ type: "unsubscribe", slabAddress: slabAddr }));
+          }
+        } catch { /* ignore */ }
         wsRef.current.close();
         wsRef.current = null;
       }
     };
-  }, [slabAddr, pollJupiter]);
+  }, [slabAddr]);
+
+  // Separate effect for Jupiter polling fallback — avoids causing WS reconnects
+  useEffect(() => {
+    if (!slabAddr || !mint) return;
+    pollJupiterRef.current();
+    pollTimer.current = setInterval(() => pollJupiterRef.current(), POLL_FALLBACK_MS);
+    return () => {
+      if (pollTimer.current) clearInterval(pollTimer.current);
+    };
+  }, [slabAddr, mint]);
 
   return state;
 }

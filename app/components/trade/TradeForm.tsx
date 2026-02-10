@@ -19,19 +19,21 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 const LEVERAGE_PRESETS = [1, 2, 3, 5, 10];
 const MARGIN_PRESETS = [25, 50, 75, 100];
 
-function formatPerc(native: bigint): string {
+function formatPerc(native: bigint, decimals = 6): string {
   const abs = native < 0n ? -native : native;
-  const whole = abs / 1_000_000n;
-  const frac = (abs % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
-  const w = whole.toLocaleString();
+  const base = 10n ** BigInt(decimals);
+  const whole = abs / base;
+  const frac = (abs % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  const w = whole.toString();
   return frac ? `${w}.${frac}` : w;
 }
 
-function parsePercToNative(input: string): bigint {
+function parsePercToNative(input: string, decimals = 6): bigint {
   const parts = input.split(".");
+  if (parts.length > 2) return 0n; // reject "1.2.3"
   const whole = parts[0] || "0";
-  const frac = (parts[1] || "").padEnd(6, "0").slice(0, 6);
-  return BigInt(whole) * 1_000_000n + BigInt(frac);
+  const frac = (parts[1] || "").padEnd(decimals, "0").slice(0, decimals);
+  return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac);
 }
 
 function abs(n: bigint): bigint {
@@ -47,6 +49,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
   const symbol = tokenMeta?.symbol ?? "Token";
+  const decimals = tokenMeta?.decimals ?? 6;
   const prefersReduced = usePrefersReducedMotion();
 
   // Risk reduction gate detection
@@ -87,7 +90,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const existingPosition = userAccount ? userAccount.account.positionSize : 0n;
   const hasPosition = existingPosition !== 0n;
 
-  const marginNative = marginInput ? parsePercToNative(marginInput) : 0n;
+  const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
   const positionSize = marginNative * BigInt(leverage);
   const exceedsMargin = marginNative > 0n && marginNative > capital;
 
@@ -95,7 +98,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     (pct: number) => {
       if (capital <= 0n) return;
       const amount = (capital * BigInt(pct)) / 100n;
-      setMarginInput((amount / 1_000_000n).toString());
+      setMarginInput(formatPerc(amount, decimals));
     },
     [capital]
   );
@@ -166,7 +169,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <p className="font-medium">Position open</p>
           <p className="mt-1 text-xs text-[var(--warning)]/60">
             You have an open {existingPosition > 0n ? "LONG" : "SHORT"} of{" "}
-            {formatPerc(abs(existingPosition))} {symbol}.
+            {formatPerc(abs(existingPosition), decimals)} {symbol}.
             Close your position before opening a new one.
           </p>
         </div>
@@ -254,7 +257,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div className="mb-1 flex items-center justify-between">
           <label className="text-xs text-[var(--text-secondary)]">Margin ({symbol})<InfoIcon tooltip="The amount of collateral you're putting up for this trade. If your position loses more than your margin, you get liquidated." /></label>
           <span className="text-xs text-[var(--text-secondary)]">
-            Balance: <span className="text-[var(--text-secondary)]">{formatPerc(capital)}</span>
+            Balance: <span className="text-[var(--text-secondary)]">{formatPerc(capital, decimals)}</span>
           </span>
         </div>
         <div className="relative">
@@ -274,7 +277,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           />
           <button
             onClick={() => {
-              if (capital > 0n) setMarginInput((capital / 1_000_000n).toString());
+              if (capital > 0n) setMarginInput(formatPerc(capital, decimals));
             }}
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-[var(--accent-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/20"
           >
@@ -283,7 +286,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
         {exceedsMargin && (
           <p className="mt-1 text-xs text-[var(--short)]">
-            Exceeds balance ({formatPerc(capital)} {symbol})
+            Exceeds balance ({formatPerc(capital, decimals)} {symbol})
           </p>
         )}
       </div>
@@ -315,7 +318,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           value={leverage}
           onChange={(e) => setLeverage(Number(e.target.value))}
           style={{
-            background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${((leverage - 1) / (maxLeverage - 1)) * 100}%, rgba(255,255,255,0.05) ${((leverage - 1) / (maxLeverage - 1)) * 100}%, rgba(255,255,255,0.05) 100%)`,
+            background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100}%, rgba(255,255,255,0.05) ${maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100}%, rgba(255,255,255,0.05) 100%)`,
           }}
           className="mb-2 h-1.5 w-full cursor-pointer appearance-none rounded-full accent-[var(--accent)] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--accent)]"
         />

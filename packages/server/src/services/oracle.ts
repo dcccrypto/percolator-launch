@@ -21,7 +21,12 @@ const dexScreenerCache = new Map<string, { data: DexScreenerResponse; fetchedAt:
 const DEX_SCREENER_CACHE_TTL_MS = 10_000;
 
 interface DexScreenerResponse {
-  pairs?: Array<{ priceUsd?: string }>;
+  pairs?: Array<{ priceUsd?: string; liquidity?: { usd?: number } }>;
+}
+
+function sortPairsByLiquidity(pairs: DexScreenerResponse["pairs"]): DexScreenerResponse["pairs"] {
+  if (!pairs) return pairs;
+  return [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
 }
 
 interface JupiterResponse {
@@ -41,18 +46,22 @@ export class OracleService {
       // Check cache first
       const cached = dexScreenerCache.get(mint);
       if (cached && Date.now() - cached.fetchedAt < DEX_SCREENER_CACHE_TTL_MS) {
-        const pair = cached.data.pairs?.[0];
+        const pair = sortPairsByLiquidity(cached.data.pairs)?.[0];
         if (!pair?.priceUsd) return null;
-        return BigInt(Math.round(parseFloat(pair.priceUsd) * 1_000_000));
+        const p = parseFloat(pair.priceUsd);
+        if (!isFinite(p) || p <= 0) return null;
+        return BigInt(Math.round(p * 1_000_000));
       }
 
       const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
       const json = (await res.json()) as DexScreenerResponse;
       dexScreenerCache.set(mint, { data: json, fetchedAt: Date.now() });
 
-      const pair = json.pairs?.[0];
+      const pair = sortPairsByLiquidity(json.pairs)?.[0];
       if (!pair?.priceUsd) return null;
-      return BigInt(Math.round(parseFloat(pair.priceUsd) * 1_000_000));
+      const parsed = parseFloat(pair.priceUsd);
+      if (!isFinite(parsed) || parsed <= 0) return null;
+      return BigInt(Math.round(parsed * 1_000_000));
     } catch {
       return null;
     }
@@ -65,7 +74,9 @@ export class OracleService {
       const json = (await res.json()) as JupiterResponse;
       const priceStr = json.data?.[mint]?.price;
       if (!priceStr) return null;
-      return BigInt(Math.round(parseFloat(priceStr) * 1_000_000));
+      const parsed = parseFloat(priceStr);
+      if (!isFinite(parsed) || parsed <= 0) return null;
+      return BigInt(Math.round(parsed * 1_000_000));
     } catch {
       return null;
     }
@@ -84,9 +95,33 @@ export class OracleService {
     if (priceE6 === null) {
       const history = this.priceHistory.get(slabAddress);
       if (history && history.length > 0) {
-        return { ...history[history.length - 1], source: "cached" };
+        const last = history[history.length - 1];
+        // Reject stale cached prices (>60s) to prevent bad liquidations
+        if (Date.now() - last.timestamp > 60_000) {
+          console.warn(`[OracleService] Cached price for ${mint} is stale (${Math.round((Date.now() - last.timestamp) / 1000)}s old), rejecting`);
+          return null;
+        }
+        return { ...last, source: "cached" };
       }
       return null;
+    }
+
+    // R2-S4: Deviation check — reject if >30% change from last known price
+    const history = this.priceHistory.get(slabAddress);
+    if (history && history.length > 0) {
+      const lastPrice = history[history.length - 1].priceE6;
+      if (lastPrice > 0n) {
+        const deviation = priceE6 > lastPrice
+          ? Number((priceE6 - lastPrice) * 100n / lastPrice)
+          : Number((lastPrice - priceE6) * 100n / lastPrice);
+        if (deviation > 30) {
+          console.warn(
+            `[OracleService] Price deviation ${deviation}% exceeds 30% threshold for ${mint} ` +
+            `(last=${lastPrice}, new=${priceE6}, source=${source}). Skipping.`
+          );
+          return null;
+        }
+      }
     }
 
     const entry: PriceEntry = { priceE6, source, timestamp: Date.now() };
@@ -136,9 +171,13 @@ export class OracleService {
     // use the last on-chain authority price, or default to 1.0
     if (!priceEntry) {
       const onChainPrice = marketConfig.authorityPriceE6;
-      const fallbackE6 = onChainPrice > 0n ? onChainPrice : 1_000_000n;
-      priceEntry = { priceE6: fallbackE6, source: "fallback", timestamp: Date.now() };
-      console.log(`[OracleService] No external price for ${mint}, using fallback: ${fallbackE6}`);
+      if (onChainPrice > 0n) {
+        priceEntry = { priceE6: onChainPrice, source: "on-chain", timestamp: Date.now() };
+        console.log(`[OracleService] No external price for ${mint}, using on-chain: ${onChainPrice}`);
+      } else {
+        console.warn(`[OracleService] No price source for ${mint}, skipping`);
+        return false; // Don't push a guessed price
+      }
     }
 
     try {

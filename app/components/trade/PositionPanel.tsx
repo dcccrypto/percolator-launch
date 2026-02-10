@@ -103,10 +103,30 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const pnlBarWidth = Math.min(100, Math.max(0, Math.abs(roe)));
 
+  // Margin health: how far we are from liquidation.
+  // 100% = at entry (max health), 0% = at liq price (liquidatable)
   let marginHealthStr = "N/A";
-  if (hasPosition && absPosition > 0n) {
-    const healthPct = Number((account.capital * 100n) / absPosition);
-    marginHealthStr = `${healthPct.toFixed(1)}%`;
+  let marginHealthPct = 100;
+  if (hasPosition && absPosition > 0n && currentPriceE6 > 0n) {
+    if (liqPriceE6 > 0n) {
+      // Edge case: when liqPriceE6 === currentPriceE6, dist=0 so marginHealthPct=0%
+      // which is correct — position is at liquidation price.
+      if (isLong) {
+        const range = Number(entryPriceE6 - liqPriceE6);
+        const dist = Number(currentPriceE6 - liqPriceE6);
+        marginHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
+      } else {
+        const range = Number(liqPriceE6 - entryPriceE6);
+        const dist = Number(liqPriceE6 - currentPriceE6);
+        marginHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
+      }
+    } else {
+      // Fallback: equity-based margin ratio
+      const notional = Number(absPosition) * Number(currentPriceE6) / 1e6;
+      const equity = Number(account.capital) + Number(pnlTokens);
+      marginHealthPct = notional > 0 ? Math.max(0, (equity / notional) * 100) : 0;
+    }
+    marginHealthStr = `${marginHealthPct.toFixed(1)}%`;
   }
 
   async function handleClose() {
@@ -229,7 +249,11 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-[var(--text-secondary)]">Margin Health</span>
-              <span className="font-mono text-sm text-[var(--text-secondary)]">
+              <span className={`font-mono text-sm ${
+                marginHealthPct <= 0 ? "text-[var(--short)]" :
+                marginHealthPct < 30 ? "text-[var(--warning)]" :
+                "text-[var(--text-secondary)]"
+              }`}>
                 {marginHealthStr}
               </span>
             </div>

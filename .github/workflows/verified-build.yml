@@ -41,8 +41,20 @@ jobs:
           sh -c "$(curl -sSfL https://release.anza.xyz/v2.3.13/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
       - name: Install solana-verify
         run: cargo install solana-verify
+
+      - name: Downgrade Cargo.lock to v3 for solana-verify Docker compatibility
+        run: |
+          # solana-verify's Docker image ships an older Cargo that can't parse lockfile v4.
+          # v3 format is identical to v4 except for the version header — safe to downgrade.
+          if head -3 program/Cargo.lock | grep -q 'version = 4'; then
+            sed -i 's/^version = 4$/version = 3/' program/Cargo.lock
+            echo "Downgraded program/Cargo.lock from v4 to v3"
+          fi
 
       - name: Verified Build (full variant)
         run: |

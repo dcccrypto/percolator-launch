@@ -1,19 +1,35 @@
+"use client";
+
 import { useEffect, useState } from "react";
-import { supabase, type MarketWithStats } from "@/lib/supabase";
+import { getSupabase, type MarketWithStats } from "@/lib/supabase";
 
 export function useMarketInfo(slabAddress: string) {
   const [market, setMarket] = useState<MarketWithStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
+    const supabase = getSupabase();
     async function load() {
-      const { data } = await supabase
-        .from("markets_with_stats")
-        .select("*")
-        .eq("slab_address", slabAddress)
-        .single();
-      setMarket(data);
-      setLoading(false);
+      try {
+        const { data, error: dbError } = await supabase
+          .from("markets_with_stats")
+          .select("*")
+          .eq("slab_address", slabAddress)
+          .single();
+        if (dbError) {
+          setError(dbError.message);
+        } else {
+          setMarket(data);
+          setError(null);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load market");
+      } finally {
+        setLoading(false);
+      }
     }
     load();
 
@@ -33,5 +49,5 @@ export function useMarketInfo(slabAddress: string) {
     return () => { supabase.removeChannel(channel); };
   }, [slabAddress]);
 
-  return { market, loading };
+  return { market, loading, error };
 }

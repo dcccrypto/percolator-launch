@@ -125,7 +125,16 @@ export async function GET() {
 /**
  * POST /api/crank — crank ALL discovered markets (batch)
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
+  // Auth check — prevent anyone from draining crank wallet SOL
+  const apiKey = process.env.INDEXER_API_KEY;
+  if (apiKey) {
+    const provided = req.headers.get("x-api-key");
+    if (!provided || provided !== apiKey) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+  }
+
   const payer = getKeypair();
   if (!payer) {
     return NextResponse.json(
@@ -180,18 +189,23 @@ async function crankSingleMarket(
   let oracleAccount: PublicKey;
 
   if (isAdminOracle(market.config.indexFeedId)) {
-    const price = await fetchDexScreenerPrice(market.config.collateralMint.toBase58());
-    const priceE6 = Math.max(Math.round(price * 1_000_000), 1);
-    const ts = Math.floor(Date.now() / 1000);
+    if (!market.config.oracleAuthority.equals(payer.publicKey)) {
+      // R2-S3: Not the oracle authority — skip price push
+      oracleAccount = slabPk;
+    } else {
+      const price = await fetchDexScreenerPrice(market.config.collateralMint.toBase58());
+      const priceE6 = Math.max(Math.round(price * 1_000_000), 1);
+      const ts = Math.floor(Date.now() / 1000);
 
-    const pushData = encodePushOraclePrice({
-      priceE6: priceE6.toString(),
-      timestamp: ts.toString(),
-    });
-    const pushKeys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [payer.publicKey, slabPk]);
-    tx.add(buildIx({ programId, keys: pushKeys, data: pushData }));
+      const pushData = encodePushOraclePrice({
+        priceE6: priceE6.toString(),
+        timestamp: ts.toString(),
+      });
+      const pushKeys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [payer.publicKey, slabPk]);
+      tx.add(buildIx({ programId, keys: pushKeys, data: pushData }));
 
-    oracleAccount = slabPk;
+      oracleAccount = slabPk;
+    }
   } else {
     const feedIdHex = Buffer.from(market.config.indexFeedId.toBytes()).toString("hex");
     const [pythPDA] = derivePythPushOraclePDA(feedIdHex);

@@ -9,6 +9,9 @@ import {
   type RiskParams,
 } from "./slab.js";
 
+/** Bitmap offset within engine struct */
+const ENGINE_BITMAP_OFF = 408;
+
 /**
  * A discovered Percolator market from on-chain program accounts.
  */
@@ -45,12 +48,20 @@ export const SLAB_TIERS = {
 
 export type SlabTierKey = keyof typeof SLAB_TIERS;
 
-/** Calculate slab data size for arbitrary account count */
+/** Calculate slab data size for arbitrary account count.
+ * Layout: HEADER(72) + CONFIG(320) + ENGINE_FIXED(408) + bitmap(ceil(N/64)*8)
+ *         + post_bitmap(24) + next_free(N*2) + padding_to_16 + ACCOUNTS(N*240)
+ * Must match the on-chain program's SLAB_LEN exactly.
+ */
 export function slabDataSize(maxAccounts: number): number {
-  const FIXED_OVERHEAD = 8624;
+  const ENGINE_OFF_LOCAL = 392; // 72 + 320
   const ACCOUNT_SIZE = 240;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
-  return FIXED_OVERHEAD + bitmapBytes + maxAccounts * ACCOUNT_SIZE;
+  const postBitmap = 24; // num_used(2) + pad(6) + next_account_id(8) + free_head(2) + pad(6)
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = 408 + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOff = Math.ceil(preAccountsLen / 16) * 16;
+  return ENGINE_OFF_LOCAL + accountsOff + maxAccounts * ACCOUNT_SIZE;
 }
 
 /** All known slab data sizes for discovery */
@@ -92,13 +103,23 @@ function readI128LE(buf: Uint8Array, offset: number): bigint {
 
 /**
  * Light engine parser that works with partial slab data (dataSlice, no accounts array).
+ * @param maxAccounts — the tier's max accounts (256/1024/4096) to compute correct bitmap offsets
  */
-function parseEngineLight(data: Uint8Array): EngineState {
+function parseEngineLight(data: Uint8Array, maxAccounts: number = 4096): EngineState {
   const base = ENGINE_OFF;
-  const minLen = base + 936;
+  const minLen = base + ENGINE_BITMAP_OFF; // need at least fixed engine fields
   if (data.length < minLen) {
     throw new Error(`Slab data too short for engine light parse: ${data.length} < ${minLen}`);
   }
+
+  // Compute tier-dependent offsets for numUsedAccounts and nextAccountId
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const numUsedOff = ENGINE_BITMAP_OFF + bitmapWords * 8; // u16 right after bitmap
+  const nextAccountIdOff = Math.ceil((numUsedOff + 2) / 8) * 8; // u64, 8-byte aligned
+
+  // Check if the partial slice is long enough to read these fields
+  const canReadNumUsed = data.length >= base + numUsedOff + 2;
+  const canReadNextId = data.length >= base + nextAccountIdOff + 8;
 
   return {
     vault: readU128LE(data, base + 0),
@@ -127,8 +148,8 @@ function parseEngineLight(data: Uint8Array): EngineState {
     lpSumAbs: readU128LE(data, base + 360),
     lpMaxAbs: readU128LE(data, base + 376),
     lpMaxAbsSweep: readU128LE(data, base + 392),
-    numUsedAccounts: readU16LE(data, base + 920),
-    nextAccountId: readU64LE(data, base + 928),
+    numUsedAccounts: canReadNumUsed ? readU16LE(data, base + numUsedOff) : 0,
+    nextAccountId: canReadNextId ? readU64LE(data, base + nextAccountIdOff) : 0n,
   };
 }
 
@@ -141,19 +162,21 @@ export async function discoverMarkets(
   programId: PublicKey,
 ): Promise<DiscoveredMarket[]> {
   // Query all known slab sizes in parallel to discover markets of any tier
-  let rawAccounts: { pubkey: PublicKey; account: { data: Buffer | Uint8Array } }[] = [];
+  // Track which tier each account belongs to for correct offset computation
+  const ALL_TIERS = Object.values(SLAB_TIERS);
+  let rawAccounts: { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number }[] = [];
   try {
-    const queries = ALL_SLAB_SIZES.map(size =>
+    const queries = ALL_TIERS.map(tier =>
       connection.getProgramAccounts(programId, {
-        filters: [{ dataSize: size }],
+        filters: [{ dataSize: tier.dataSize }],
         dataSlice: { offset: 0, length: HEADER_SLICE_LENGTH },
-      })
+      }).then(results => results.map(entry => ({ ...entry, maxAccounts: tier.maxAccounts })))
     );
     const results = await Promise.allSettled(queries);
     for (const result of results) {
       if (result.status === "fulfilled") {
         for (const entry of result.value) {
-          rawAccounts.push(entry as { pubkey: PublicKey; account: { data: Buffer | Uint8Array } });
+          rawAccounts.push(entry as { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number });
         }
       }
     }
@@ -173,13 +196,13 @@ export async function discoverMarkets(
       ],
       dataSlice: { offset: 0, length: HEADER_SLICE_LENGTH },
     });
-    rawAccounts = [...fallback] as { pubkey: PublicKey; account: { data: Buffer | Uint8Array } }[];
+    rawAccounts = [...fallback].map(e => ({ ...e, maxAccounts: 4096 })) as { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number }[];
   }
   const accounts = rawAccounts;
 
   const markets: DiscoveredMarket[] = [];
 
-  for (const { pubkey, account } of accounts) {
+  for (const { pubkey, account, maxAccounts } of accounts) {
     const data = new Uint8Array(account.data);
 
     let valid = true;
@@ -194,7 +217,7 @@ export async function discoverMarkets(
     try {
       const header = parseHeader(data);
       const config = parseConfig(data);
-      const engine = parseEngineLight(data);
+      const engine = parseEngineLight(data, maxAccounts);
       const params = parseParams(data);
 
       markets.push({ slabAddress: pubkey, programId, header, config, engine, params });

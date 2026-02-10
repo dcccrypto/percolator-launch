@@ -21,7 +21,7 @@ export interface PriceRouterState {
   error: string | null;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4400";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 /**
  * Auto-discover the best oracle source for a given token mint.
@@ -49,6 +49,9 @@ export function usePriceRouter(mintAddress: string | null): PriceRouterState {
 
     (async () => {
       try {
+        if (!API_BASE) {
+          throw new Error("NEXT_PUBLIC_API_URL not configured");
+        }
         const resp = await fetch(`${API_BASE}/oracle/resolve/${mintAddress}`, {
           signal: controller.signal,
         });
