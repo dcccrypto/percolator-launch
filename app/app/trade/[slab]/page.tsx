@@ -60,25 +60,27 @@ function TradePageInner({ slab }: { slab: string }) {
   return (
     <div ref={pageRef} className="mx-auto max-w-7xl px-4 py-6 gsap-fade">
       {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>trade</h1>
-          <p className="truncate text-[11px] text-[#3f3f46]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{slab}</p>
+      <div className="mb-6 space-y-3">
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>trade</h1>
+            <p className="truncate text-[11px] text-[#3f3f46] max-w-[180px] sm:max-w-none" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{slab}</p>
+          </div>
+          {priceUsd != null && (
+            <div className="shrink-0 text-right">
+              <div className="text-2xl font-bold text-white sm:text-3xl" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}
+              </div>
+            </div>
+          )}
         </div>
-        <div className="ml-auto flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {health && <HealthBadge level={health.level} />}
           <ShareButton
             slabAddress={slab}
             marketName={tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN")}
             price={BigInt(Math.round((priceUsd ?? 0) * 1e6))}
           />
-          {priceUsd != null && (
-            <div className="text-right">
-              <div className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -90,13 +92,13 @@ function TradePageInner({ slab }: { slab: string }) {
       )}
 
       {/* Quick start guide */}
-      <div className="mb-4 rounded-[4px] border border-[#1a1a1f] bg-[#111113] px-4 py-2.5 flex items-center gap-6 text-xs text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+      <div className="mb-4 rounded-[4px] border border-[#1a1a1f] bg-[#111113] px-4 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
         <span className="text-[#3f3f46]">quick start:</span>
-        <span><span className="text-[#00FFB2]">1</span> connect wallet</span>
-        <span className="text-[#1a1a1f]">→</span>
-        <span><span className="text-[#00FFB2]">2</span> deposit collateral</span>
-        <span className="text-[#1a1a1f]">→</span>
-        <span><span className="text-[#00FFB2]">3</span> trade</span>
+        <span className="whitespace-nowrap"><span className="text-[#00FFB2]">1</span> connect wallet</span>
+        <span className="hidden sm:inline text-[#1a1a1f]">&rarr;</span>
+        <span className="whitespace-nowrap"><span className="text-[#00FFB2]">2</span> deposit collateral</span>
+        <span className="hidden sm:inline text-[#1a1a1f]">&rarr;</span>
+        <span className="whitespace-nowrap"><span className="text-[#00FFB2]">3</span> trade</span>
       </div>
 
       {/* Main grid */}

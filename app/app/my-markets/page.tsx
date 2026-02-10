@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/useToast";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { GlowButton } from "@/components/ui/GlowButton";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { getConfig, explorerAccountUrl } from "@/lib/config";
 import { deriveInsuranceLpMint } from "@percolator/core";
 
@@ -327,13 +328,18 @@ const MarketCard: FC<{
 
 /* loading skeleton */
 const LoadingSkeleton: FC = () => (
-  <main className="mx-auto max-w-5xl px-4 py-12">
-    <ShimmerSkeleton className="mb-8 h-9 w-48" />
-    <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-      {[1, 2, 3].map((i) => <ShimmerSkeleton key={i} className="h-20" />)}
-    </div>
-    {[1, 2].map((i) => <ShimmerSkeleton key={i} className="mb-4 h-64" />)}
-  </main>
+  <div className="min-h-[calc(100vh-48px)] relative">
+    <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+    <main className="relative mx-auto max-w-4xl px-4 py-10">
+      <ShimmerSkeleton className="mb-2 h-3 w-16" />
+      <ShimmerSkeleton className="mb-2 h-7 w-48" />
+      <ShimmerSkeleton className="mb-8 h-4 w-64" />
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[1, 2, 3].map((i) => <ShimmerSkeleton key={i} className="h-20" />)}
+      </div>
+      {[1, 2].map((i) => <ShimmerSkeleton key={i} className="mb-4 h-64" />)}
+    </main>
+  </div>
 );
 
 /* main page */
@@ -374,12 +380,21 @@ const MyMarketsPage: FC = () => {
 
   if (!connected) {
     return (
-      <main className="mx-auto max-w-5xl px-4 py-24 text-center">
-        <div className="mx-auto max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
-          <h1 className="text-xl font-bold text-white">your markets</h1>
-          <p className="mt-2 text-sm text-[#71717a]">connect your wallet to see what you&apos;ve built.</p>
-        </div>
-      </main>
+      <div className="min-h-[calc(100vh-48px)] relative">
+        <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+        <main className="relative mx-auto max-w-4xl px-4 py-10">
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+            // admin
+          </div>
+          <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <span className="font-normal text-white/50">Your </span>Markets
+          </h1>
+          <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">manage what you&apos;ve built.</p>
+          <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
+            <p className="text-[13px] text-[var(--text-secondary)]">connect your wallet to see your markets</p>
+          </div>
+        </main>
+      </div>
     );
   }
 
@@ -387,35 +402,53 @@ const MyMarketsPage: FC = () => {
 
   if (error) {
     return (
-      <main className="mx-auto max-w-5xl px-4 py-24 text-center">
-        <div className="mx-auto max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
-          <h1 className="text-xl font-bold text-white">something broke.</h1>
-          <p className="mt-2 text-sm text-[#FF4466]">{error}</p>
-        </div>
-      </main>
+      <div className="min-h-[calc(100vh-48px)] relative">
+        <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+        <main className="relative mx-auto max-w-4xl px-4 py-10">
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+            // admin
+          </div>
+          <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <span className="font-normal text-white/50">Your </span>Markets
+          </h1>
+          <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">manage what you&apos;ve built.</p>
+          <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
+            <p className="text-[13px] text-[var(--short)]">{error}</p>
+          </div>
+        </main>
+      </div>
     );
   }
 
   if (myMarkets.length === 0) {
     return (
-      <main className="mx-auto max-w-5xl px-4 py-24 text-center">
-        <div className="mx-auto max-w-md rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
-          <h1 className="text-xl font-bold text-white">nothing here yet.</h1>
-          <p className="mt-2 mb-6 text-sm text-[#71717a]">
-            no markets created or traded on with this wallet.
-            <br />
-            create a market or open a position to see it here.
-          </p>
-          <div className="flex justify-center gap-3">
-            <Link href="/create">
-              <GlowButton>launch a market</GlowButton>
-            </Link>
-            <Link href="/markets">
-              <GlowButton variant="ghost">browse markets</GlowButton>
-            </Link>
+      <div className="min-h-[calc(100vh-48px)] relative">
+        <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+        <main className="relative mx-auto max-w-4xl px-4 py-10">
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+            // admin
           </div>
-        </div>
-      </main>
+          <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <span className="font-normal text-white/50">Your </span>Markets
+          </h1>
+          <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">manage what you&apos;ve built.</p>
+          <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
+            <p className="mb-4 text-[13px] text-[var(--text-secondary)]">
+              no markets created or traded on with this wallet.
+              <br />
+              create a market or open a position to see it here.
+            </p>
+            <div className="flex justify-center gap-3">
+              <Link href="/create">
+                <GlowButton>launch a market</GlowButton>
+              </Link>
+              <Link href="/markets">
+                <GlowButton variant="ghost">browse markets</GlowButton>
+              </Link>
+            </div>
+          </div>
+        </main>
+      </div>
     );
   }
 
@@ -424,16 +457,25 @@ const MyMarketsPage: FC = () => {
   const totalInsurance = myMarkets.reduce((acc, m) => acc + m.engine.insuranceFund.balance, 0n);
 
   return (
-    <main ref={pageRef} className="mx-auto max-w-5xl px-4 py-10 gsap-fade">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>your markets</h1>
-          <p className="mt-1 text-sm text-[#71717a]">manage what you&apos;ve built.</p>
+    <div className="min-h-[calc(100vh-48px)] relative">
+      <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+    <main ref={pageRef} className="relative mx-auto max-w-4xl px-4 py-10 gsap-fade">
+      <ScrollReveal>
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+              // admin
+            </div>
+            <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+              <span className="font-normal text-white/50">Your </span>Markets
+            </h1>
+            <p className="mt-2 text-[13px] text-[var(--text-secondary)]">manage what you&apos;ve built.</p>
+          </div>
+          <Link href="/create">
+            <GlowButton size="sm">+ new market</GlowButton>
+          </Link>
         </div>
-        <Link href="/create">
-          <GlowButton size="sm">+ new market</GlowButton>
-        </Link>
-      </div>
+      </ScrollReveal>
 
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
@@ -458,6 +500,7 @@ const MyMarketsPage: FC = () => {
         ))}
       </div>
     </main>
+    </div>
   );
 };
 

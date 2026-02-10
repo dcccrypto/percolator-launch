@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ScrollReveal } from "@/components/ui/ScrollReveal";
 
 const sectionHeader = "mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60";
 const sectionTitle = "text-lg font-semibold tracking-[-0.01em] text-white sm:text-xl";
@@ -22,22 +23,26 @@ function Section({ tag, title, children }: { tag: string; title: string; childre
 
 export default function GuidePage() {
   return (
-    <main className="mx-auto max-w-[900px] px-6 py-12 space-y-16">
-      {/* Hero */}
-      <div className="text-center space-y-3">
-        <div className="text-[10px] font-medium uppercase tracking-[0.3em] text-[var(--accent)]/50">
-          // documentation
+    <div className="min-h-[calc(100vh-48px)] relative">
+      <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+    <main className="relative mx-auto max-w-4xl px-4 py-10 space-y-16">
+      {/* Header */}
+      <ScrollReveal>
+        <div className="mb-8">
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+            // documentation
+          </div>
+          <h1
+            className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl"
+            style={{ fontFamily: "var(--font-heading)" }}
+          >
+            <span className="font-normal text-white/50">Percolator </span>Guide
+          </h1>
+          <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
+            Everything you need to know about launching and trading perpetual futures markets on Solana.
+          </p>
         </div>
-        <h1
-          className="text-2xl font-bold tracking-[-0.02em] text-white sm:text-3xl"
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          Percolator Guide
-        </h1>
-        <p className="mx-auto max-w-lg text-[13px] leading-relaxed text-[var(--text-secondary)]">
-          Everything you need to know about launching and trading perpetual futures markets on Solana.
-        </p>
-      </div>
+      </ScrollReveal>
 
       {/* What is Percolator */}
       <Section tag="overview" title="What is Percolator?">
@@ -276,5 +281,6 @@ export default function GuidePage() {
         </div>
       </div>
     </main>
+    </div>
   );
 }
