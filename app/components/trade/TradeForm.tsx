@@ -185,6 +185,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setTimeout(() => setTradePhase("idle"), 2000);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.error("[TradeForm] raw error:", msg);
       setHumanError(humanizeError(msg));
       setTradePhase("idle");
     }

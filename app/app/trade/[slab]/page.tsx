@@ -124,23 +124,31 @@ function TradePageInner({ slab }: { slab: string }) {
               <DepositWithdrawCard slabAddress={slab} />
             </div>
           </ErrorBoundary>
-          <Collapsible title="engine health" defaultOpen={false} badge={health && <HealthBadge level={health.level} />}>
-            <EngineHealthCard />
-          </Collapsible>
-          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-            <MarketStatsCard />
-          </div>
-          <Collapsible title="recent trades" defaultOpen={true}>
-            <TradeHistory slabAddress={slab} />
-          </Collapsible>
+          <ErrorBoundary label="EngineHealthCard">
+            <Collapsible title="engine health" defaultOpen={false} badge={health && <HealthBadge level={health.level} />}>
+              <EngineHealthCard />
+            </Collapsible>
+          </ErrorBoundary>
+          <ErrorBoundary label="MarketStatsCard">
+            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+              <MarketStatsCard />
+            </div>
+          </ErrorBoundary>
+          <ErrorBoundary label="TradeHistory">
+            <Collapsible title="recent trades" defaultOpen={true}>
+              <TradeHistory slabAddress={slab} />
+            </Collapsible>
+          </ErrorBoundary>
         </div>
       </div>
 
       {/* Full-width */}
       <div className="mt-4">
-        <Collapsible title="market book" defaultOpen={false}>
-          <MarketBookCard />
-        </Collapsible>
+        <ErrorBoundary label="MarketBookCard">
+          <Collapsible title="market book" defaultOpen={false}>
+            <MarketBookCard />
+          </Collapsible>
+        </ErrorBoundary>
       </div>
     </div>
   );

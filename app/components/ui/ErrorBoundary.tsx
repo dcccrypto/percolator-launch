@@ -36,7 +36,9 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) return this.props.fallback;
       return (
         <div className="rounded-[4px] border border-[#FF4466]/20 bg-[#FF4466]/5 p-6 text-center">
-          <p className="text-sm font-medium text-[#FF4466]">something broke.</p>
+          <p className="text-sm font-medium text-[#FF4466]">
+            something broke{this.props.label ? ` in ${this.props.label}` : ""}.
+          </p>
           <p className="mt-1 text-xs text-[#71717a]">
             {this.state.error?.message ?? "Unknown error"}
           </p>

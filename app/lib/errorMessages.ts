@@ -1,46 +1,52 @@
-/** Solana program error code → human-readable message */
+/**
+ * Percolator program error codes (Custom(N)) → human-readable messages.
+ * Maps directly to the PercolatorError enum in program/src/percolator.rs.
+ */
 const ERROR_CODE_MAP: Record<number, string> = {
-  0x4: "Market data is invalid or corrupted.",
-  0xc: "Price feed is stale — the oracle hasn't updated recently. Try again in a moment.",
-  0xd: "Insufficient balance — deposit more collateral.",
-  0xe: "Position would be undercollateralized at this size.",
-  0xf: "Unauthorized — you don't have permission for this action.",
+  0: "Invalid market magic — data corrupted.",
+  1: "Invalid version — program/data version mismatch.",
+  2: "Market already initialized.",
+  3: "Market not initialized.",
+  4: "Invalid slab data length — corrupted market.",
+  5: "Invalid oracle key.",
+  6: "Oracle price is stale — push a fresh price first.",
+  7: "Oracle confidence interval too wide.",
+  8: "Invalid vault token account.",
+  9: "Invalid mint account.",
+  10: "Missing required signer.",
+  11: "Account must be writable.",
+  12: "Oracle is invalid — no price available.",
+  13: "Insufficient balance — deposit more collateral.",
+  14: "Position would be undercollateralized at this size. Try a smaller amount or deposit more collateral.",
+  15: "Unauthorized — you don't have permission for this action.",
+  16: "Invalid matching engine — LP matcher mismatch.",
+  17: "PnL not yet warmed up — crank the market a few more times.",
+  18: "Math overflow in engine calculation.",
+  19: "Account not found in this market.",
+  20: "Not an LP account — invalid account kind.",
+  21: "Position size mismatch — trade conflict.",
+  22: "Risk reduction only mode — market is de-risking, only closing trades allowed.",
+  23: "Account kind mismatch.",
+  24: "Invalid token account.",
+  25: "Invalid token program.",
+  26: "Invalid configuration parameter.",
+  27: "TradeNoCpi disabled in Hyperp mode — use TradeCpi instead.",
+  28: "Insurance LP mint already exists.",
+  29: "Insurance LP mint not created yet.",
+  30: "Insurance fund below minimum threshold.",
+  31: "Insurance deposit/withdrawal amount must be > 0.",
+  32: "Insurance LP supply mismatch.",
 };
 
-/** Anchor / program Custom(N) errors — instruction-specific */
-const CUSTOM_ERROR_MAP: Record<number, string> = {
-  0: "Generic program error.",
-  1: "Invalid instruction data.",
-  2: "Invalid account data.",
-  3: "Account not initialized.",
-  4: "Account already initialized.",
-  5: "Signer required but missing.",
-  6: "Not enough accounts provided.",
-  7: "Account type mismatch.",
-  8: "Math overflow in calculation.",
-  9: "Invalid market state.",
-  10: "Market is paused — trading temporarily disabled.",
-  11: "Market is settling — no new trades allowed.",
-  12: "Oracle price is stale.",
-  13: "Insufficient collateral.",
-  14: "Position too large for current liquidity.",
-  15: "Invalid leverage — exceeds maximum allowed.",
-  16: "Position does not exist.",
-  17: "Cannot close — pending settlement.",
-  18: "Funding rate calculation error.",
-  19: "Invalid fee configuration.",
-  20: "LP pool imbalanced — try a smaller size.",
-  21: "Keeper crank required first.",
-  22: "Invalid oracle account.",
-  23: "Price deviation too high — oracle price differs significantly from last trade.",
-  24: "Cooldown active — wait before trading again.",
-  25: "Account is frozen by admin.",
-  26: "Invalid slab configuration.",
-};
+/** Legacy Anchor error map (unused but kept for compatibility) */
+const CUSTOM_ERROR_MAP: Record<number, string> = {};
 
 function extractErrorCode(msg: string): number | null {
   const m = msg.match(/(?:custom program error|Error Code)[:\s]+0x([0-9a-fA-F]+)/i);
   if (m) return parseInt(m[1], 16);
+  // Match JSON format from getSignatureStatuses: {"Custom":14}
+  const mJson = msg.match(/"Custom"\s*:\s*(\d+)/);
+  if (mJson) return parseInt(mJson[1], 10);
   const m2 = msg.match(/Custom\((\d+)\)/);
   if (m2) return parseInt(m2[1], 10) + 6000; // Anchor offset
   const m3 = msg.match(/\b0x([0-9a-fA-F]+)\b/);
@@ -51,10 +57,14 @@ function extractErrorCode(msg: string): number | null {
 function extractCustomIndex(msg: string): number | null {
   const m = msg.match(/Custom\((\d+)\)/);
   if (m) return parseInt(m[1], 10);
+  // Also match JSON format: "Custom":14
+  const mJson = msg.match(/"Custom"\s*:\s*(\d+)/);
+  if (mJson) return parseInt(mJson[1], 10);
   return null;
 }
 
-const TRANSIENT_CODES = new Set([0xc]);
+// Transient = worth auto-retrying (oracle stale, blockhash expiry)
+const TRANSIENT_CODES = new Set([6, 12]); // OracleStale=6, OracleInvalid=12
 
 export function isTransientError(msg: string): boolean {
   const code = extractErrorCode(msg);
@@ -66,13 +76,24 @@ export function isTransientError(msg: string): boolean {
 }
 
 export function isOracleStaleError(msg: string): boolean {
-  return extractErrorCode(msg) === 0xc;
+  const code = extractErrorCode(msg);
+  return code === 6 || code === 12; // OracleStale or OracleInvalid
 }
 
 export function humanizeError(rawMsg: string): string {
+  // Log for debugging (only in browser)
+  if (typeof window !== "undefined") {
+    console.warn("[humanizeError] raw:", rawMsg);
+  }
+
   const code = extractErrorCode(rawMsg);
   if (code !== null && ERROR_CODE_MAP[code]) {
-    return ERROR_CODE_MAP[code];
+    // Also extract which instruction failed for context
+    const ixMatch = rawMsg.match(/"InstructionError"\s*:\s*\[\s*(\d+)/);
+    const ixIdx = ixMatch ? parseInt(ixMatch[1], 10) : null;
+    const ixLabels = ["compute budget", "priority fee", "oracle push", "crank", "trade"];
+    const ixHint = ixIdx !== null && ixIdx < ixLabels.length ? ` (in ${ixLabels[ixIdx]})` : "";
+    return ERROR_CODE_MAP[code] + ixHint;
   }
   const customIdx = extractCustomIndex(rawMsg);
   if (customIdx !== null && CUSTOM_ERROR_MAP[customIdx]) {
@@ -90,7 +111,16 @@ export function humanizeError(rawMsg: string): string {
   if (rawMsg.includes("timeout") || rawMsg.includes("Timeout")) {
     return "Transaction timed out. It may still confirm — check your wallet.";
   }
-  return "Transaction failed. Please try again.";
+  // If we have a raw error code that wasn't recognized, show it
+  if (rawMsg.includes("custom program error")) {
+    return `Program error: ${rawMsg.replace(/.*custom program error:\s*/i, "").slice(0, 60)}`;
+  }
+  if (rawMsg.includes("Custom(")) {
+    return `Program error: ${rawMsg.match(/Custom\(\d+\)/)?.[0] ?? rawMsg.slice(0, 60)}`;
+  }
+  // Keep last 80 chars of the raw message for debugging
+  const trimmed = rawMsg.length > 80 ? "..." + rawMsg.slice(-80) : rawMsg;
+  return `Transaction failed: ${trimmed}`;
 }
 
 export async function withTransientRetry<T>(
