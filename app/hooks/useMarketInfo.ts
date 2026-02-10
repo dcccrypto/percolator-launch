@@ -9,6 +9,8 @@ export function useMarketInfo(slabAddress: string) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     const supabase = getSupabase();
     async function load() {
       try {
@@ -32,7 +34,7 @@ export function useMarketInfo(slabAddress: string) {
     load();
 
     // Subscribe to stat updates
-    const channel = getSupabase()
+    const channel = supabase
       .channel(`market-${slabAddress}`)
       .on("postgres_changes", {
         event: "UPDATE",
@@ -44,7 +46,7 @@ export function useMarketInfo(slabAddress: string) {
       })
       .subscribe();
 
-    return () => { getSupabase().removeChannel(channel); };
+    return () => { supabase.removeChannel(channel); };
   }, [slabAddress]);
 
   return { market, loading, error };
