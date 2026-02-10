@@ -6,11 +6,11 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { useSlabState } from '../providers/SlabProvider';
 import { useTokenMeta } from '../../hooks/useTokenMeta';
 
-function formatCollateral(lamports: bigint): string {
-  const sol = Number(lamports) / 1e9;
-  if (sol === 0) return '0';
-  if (sol < 0.001) return '<0.001';
-  return sol.toLocaleString(undefined, { maximumFractionDigits: 4 });
+function formatCollateral(lamports: bigint, decimals: number = 9): string {
+  const amount = Number(lamports) / 10 ** decimals;
+  if (amount === 0) return '0';
+  if (amount < 0.001) return '<0.001';
+  return amount.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
 function formatRate(rateE6: bigint): string {
@@ -23,6 +23,7 @@ export function InsuranceLPPanel() {
   const slabState = useSlabState();
   const tokenMeta = useTokenMeta(slabState?.config?.collateralMint ?? null);
   const tokenSymbol = tokenMeta?.symbol ?? 'Token';
+  const tokenDecimals = tokenMeta?.decimals ?? 9;
   const { state, loading, error, createMint, deposit, withdraw } = useInsuranceLP();
   const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [amount, setAmount] = useState('');
@@ -35,7 +36,7 @@ export function InsuranceLPPanel() {
     if (!amount) return;
     setTxStatus('Depositing...');
     try {
-      const lamports = BigInt(Math.floor(parseFloat(amount) * 1e9));
+      const lamports = BigInt(Math.floor(parseFloat(amount) * 10 ** tokenDecimals));
       await deposit(lamports);
       setTxStatus('Deposit successful!');
       setAmount('');
@@ -49,7 +50,7 @@ export function InsuranceLPPanel() {
     if (!amount) return;
     setTxStatus('Withdrawing...');
     try {
-      const lpTokens = BigInt(Math.floor(parseFloat(amount) * 1e9));
+      const lpTokens = BigInt(Math.floor(parseFloat(amount) * 10 ** tokenDecimals));
       await withdraw(lpTokens);
       setTxStatus('Withdrawal successful!');
       setAmount('');
@@ -73,7 +74,7 @@ export function InsuranceLPPanel() {
   // Preview calculation
   const previewTokens = (() => {
     if (!amount || mode !== 'deposit') return null;
-    const lamports = BigInt(Math.floor(parseFloat(amount) * 1e9));
+    const lamports = BigInt(Math.floor(parseFloat(amount) * 10 ** tokenDecimals));
     if (lamports <= 0n) return null;
     if (state.lpSupply === 0n) return lamports; // 1:1
     if (state.insuranceBalance === 0n) return null;
@@ -82,7 +83,7 @@ export function InsuranceLPPanel() {
 
   const previewCollateral = (() => {
     if (!amount || mode !== 'withdraw') return null;
-    const lpTokens = BigInt(Math.floor(parseFloat(amount) * 1e9));
+    const lpTokens = BigInt(Math.floor(parseFloat(amount) * 10 ** tokenDecimals));
     if (lpTokens <= 0n) return null;
     if (state.lpSupply === 0n) return null;
     return (lpTokens * state.insuranceBalance) / state.lpSupply;
@@ -104,11 +105,11 @@ export function InsuranceLPPanel() {
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div>
           <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Pool Size</p>
-          <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.insuranceBalance)} {tokenSymbol}</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.insuranceBalance, tokenDecimals)} {tokenSymbol}</p>
         </div>
         <div>
           <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">LP Supply</p>
-          <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.lpSupply)}</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.lpSupply, tokenDecimals)}</p>
         </div>
         <div>
           <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Rate</p>
@@ -128,11 +129,11 @@ export function InsuranceLPPanel() {
           <div className="flex justify-between items-center">
             <div>
               <p className="text-[10px] text-[#5a6382] uppercase">Your LP Tokens</p>
-              <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.userLpBalance)}</p>
+              <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.userLpBalance, tokenDecimals)}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] text-[#5a6382] uppercase">Redeemable</p>
-              <p className="text-sm font-mono text-[#00FFB2]">{formatCollateral(state.userRedeemableValue)} {tokenSymbol}</p>
+              <p className="text-sm font-mono text-[#00FFB2]">{formatCollateral(state.userRedeemableValue, tokenDecimals)} {tokenSymbol}</p>
             </div>
           </div>
         </div>
@@ -196,7 +197,7 @@ export function InsuranceLPPanel() {
             />
             {mode === 'withdraw' && state.userLpBalance > 0n && (
               <button
-                onClick={() => setAmount((Number(state.userLpBalance) / 1e9).toString())}
+                onClick={() => setAmount(((Number(state.userLpBalance) / 10 ** tokenDecimals)).toString())}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[#00FFB2] hover:text-[#00FFB2]/80"
               >
                 MAX
@@ -207,12 +208,12 @@ export function InsuranceLPPanel() {
           {/* Preview */}
           {previewTokens !== null && mode === 'deposit' && (
             <p className="text-xs text-[#5a6382] mb-3">
-              You receive: <span className="text-[#c4cbde] font-mono">~{formatCollateral(previewTokens)}</span> LP tokens
+              You receive: <span className="text-[#c4cbde] font-mono">~{formatCollateral(previewTokens, tokenDecimals)}</span> LP tokens
             </p>
           )}
           {previewCollateral !== null && mode === 'withdraw' && (
             <p className="text-xs text-[#5a6382] mb-3">
-              You receive: <span className="text-[#c4cbde] font-mono">~{formatCollateral(previewCollateral)}</span> {tokenSymbol}
+              You receive: <span className="text-[#c4cbde] font-mono">~{formatCollateral(previewCollateral, tokenDecimals)}</span> {tokenSymbol}
             </p>
           )}
 

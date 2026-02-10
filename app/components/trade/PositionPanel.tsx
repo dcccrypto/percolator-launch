@@ -294,7 +294,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <button
                   onClick={handleClose}
                   disabled={closeLoading}
-                  className="flex-1 rounded-lg bg-[#FF4466] py-2 text-xs font-medium text-white transition-colors hover:bg-[#FF4466] disabled:opacity-50"
+                  className="flex-1 rounded-lg bg-[#FF4466] py-2 text-xs font-medium text-white transition-colors hover:bg-[#FF3355] disabled:opacity-50"
                 >
                   {closeLoading ? "Closing..." : "Confirm Close"}
                 </button>

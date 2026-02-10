@@ -101,7 +101,7 @@ export function MusicPlayer() {
   return (
     <div
       ref={containerRef}
-      className="fixed bottom-3 right-3 z-[90] sm:bottom-5 sm:right-5"
+      className="fixed bottom-3 right-3 z-[90] sm:bottom-5 sm:right-5 gsap-fade"
       style={{ opacity: 0 }}
     >
       <audio
