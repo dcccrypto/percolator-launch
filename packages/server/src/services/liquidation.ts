@@ -81,13 +81,13 @@ export class LiquidationService {
           const notional = absBI(account.positionSize) * price / 1_000_000n;
           if (notional === 0n) continue;
 
-          // Compute mark PnL: (oracle - entry) * |pos| / oracle for longs
+          // Compute mark PnL from live price instead of stale on-chain pnl
           const entryPrice = account.entryPrice;
           let markPnl = 0n;
           if (entryPrice > 0n && price > 0n) {
             const diff = account.positionSize > 0n
-              ? price - entryPrice
-              : entryPrice - price;
+              ? price - entryPrice    // long: profit when price goes up
+              : entryPrice - price;   // short: profit when price goes down
             markPnl = (diff * absBI(account.positionSize)) / price;
           }
           const equity = account.capital + markPnl;
@@ -101,7 +101,7 @@ export class LiquidationService {
               positionSize: account.positionSize,
               capital: account.capital,
               pnl: markPnl,
-              marginRatio: 0,
+              marginRatio: equity <= 0n ? 0 : -1,
               maintenanceMarginBps,
             });
             continue;
@@ -216,7 +216,16 @@ export class LiquidationService {
         if (freshPrice > 0n) {
           const notional = absBI(freshAccount.positionSize) * freshPrice / 1_000_000n;
           if (notional > 0n) {
-            const equity = freshAccount.capital + freshAccount.pnl;
+            // Use mark-to-market PnL for re-verification
+            const freshEntry = freshAccount.entryPrice;
+            let freshMarkPnl = 0n;
+            if (freshEntry > 0n && freshPrice > 0n) {
+              const diff = freshAccount.positionSize > 0n
+                ? freshPrice - freshEntry
+                : freshEntry - freshPrice;
+              freshMarkPnl = (diff * absBI(freshAccount.positionSize)) / freshPrice;
+            }
+            const equity = freshAccount.capital + freshMarkPnl;
             if (equity > 0n) {
               const marginRatioBps = equity * 10_000n / notional;
               if (marginRatioBps >= freshParams.maintenanceMarginBps) {

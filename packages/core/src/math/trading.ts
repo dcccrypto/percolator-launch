@@ -28,11 +28,7 @@ export function computeMarkPnl(
 
 /**
  * Compute liquidation price given entry, capital, position and maintenance margin.
- *
- * NOTE: Uses Number() for intermediate math, which is safe for IEEE-754 doubles
- * up to 2^53 (~9.007 × 10^15). With 6-decimal token amounts this covers balances
- * up to ~9 billion tokens — acceptable for client-side estimation. For on-chain
- * critical paths, use pure bigint arithmetic instead.
+ * Uses pure BigInt arithmetic for precision (no Number() truncation).
  */
 export function computeLiqPrice(
   entryPrice: bigint,
@@ -42,20 +38,16 @@ export function computeLiqPrice(
 ): bigint {
   if (positionSize === 0n || entryPrice === 0n) return 0n;
   const absPos = positionSize < 0n ? -positionSize : positionSize;
-  const maintBps = Number(maintenanceMarginBps);
-  const capitalPerUnit = (Number(capital) * 1e6) / Number(absPos);
+  // capitalPerUnit scaled by 1e6 for precision
+  const capitalPerUnitE6 = (capital * 1_000_000n) / absPos;
 
   if (positionSize > 0n) {
-    // Long: liq when price drops. Adjust for maintenance margin requirement.
-    const adjusted = (capitalPerUnit * 10000) / (10000 + maintBps);
-    const liq = Number(entryPrice) - adjusted;
-    return liq > 0 ? BigInt(Math.round(liq)) : 0n;
+    const adjusted = (capitalPerUnitE6 * 10000n) / (10000n + maintenanceMarginBps);
+    const liq = entryPrice - adjusted;
+    return liq > 0n ? liq : 0n;
   } else {
-    // Short: liq when price rises. For shorts, maintenance margin reduces the buffer.
-    const denom = 10000 - maintBps;
-    if (denom <= 0) return 0n; // Guard: maintBps >= 100% means no valid liq price
-    const adjusted = (capitalPerUnit * 10000) / denom;
-    return BigInt(Math.round(Number(entryPrice) + adjusted));
+    const adjusted = (capitalPerUnitE6 * 10000n) / (10000n - maintenanceMarginBps);
+    return entryPrice + adjusted;
   }
 }
 

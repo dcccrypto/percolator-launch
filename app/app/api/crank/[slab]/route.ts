@@ -142,22 +142,27 @@ export async function POST(
     let oracleAccount: PublicKey;
 
     if (isAdminOracle(config.indexFeedId)) {
-      // Admin oracle: push price first
-      const price = await fetchDexScreenerPrice(config.collateralMint.toBase58());
-      const priceE6 = Math.max(Math.round(price * 1_000_000), 1);
-      const ts = Math.floor(Date.now() / 1000);
+      // Admin oracle: push price first (only if we are the oracle authority)
+      if (!config.oracleAuthority.equals(payer.publicKey)) {
+        // R2-S3: Not the oracle authority — skip price push, use slab as oracle account
+        oracleAccount = slabPk;
+      } else {
+        const price = await fetchDexScreenerPrice(config.collateralMint.toBase58());
+        const priceE6 = Math.max(Math.round(price * 1_000_000), 1);
+        const ts = Math.floor(Date.now() / 1000);
 
-      const pushData = encodePushOraclePrice({
-        priceE6: priceE6.toString(),
-        timestamp: ts.toString(),
-      });
-      const pushKeys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
-        payer.publicKey,
-        slabPk,
-      ]);
-      tx.add(buildIx({ programId, keys: pushKeys, data: pushData }));
+        const pushData = encodePushOraclePrice({
+          priceE6: priceE6.toString(),
+          timestamp: ts.toString(),
+        });
+        const pushKeys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
+          payer.publicKey,
+          slabPk,
+        ]);
+        tx.add(buildIx({ programId, keys: pushKeys, data: pushData }));
 
-      oracleAccount = slabPk; // self-referential for admin oracle
+        oracleAccount = slabPk; // self-referential for admin oracle
+      }
     } else {
       // Pyth oracle
       const feedIdHex = Buffer.from(config.indexFeedId.toBytes()).toString("hex");

@@ -15,18 +15,7 @@ export function getSupabase() {
 }
 
 /** @deprecated Use getSupabase() instead */
-export const supabase = (() => {
-  // Only eagerly create on client side where env vars are always available
-  if (typeof window !== "undefined") {
-    return createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-  }
-  // Server-side: return a dummy that will be replaced at runtime
-  // API routes should use getSupabase() or getServiceClient()
-  return null as unknown as ReturnType<typeof createClient>;
-})();
+export const supabase = null as unknown as ReturnType<typeof createClient>;
 
 // Server-side (service role, bypasses RLS)
 export function getServiceClient() {

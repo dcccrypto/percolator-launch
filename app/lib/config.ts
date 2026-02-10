@@ -1,3 +1,9 @@
+/**
+ * ⚠️  SECURITY WARNING — NEXT_PUBLIC_HELIUS_API_KEY
+ * The Helius RPC API key is exposed in the client bundle via the NEXT_PUBLIC_ prefix.
+ * This is acceptable for devnet but MUST be replaced with a server-side RPC proxy
+ * (e.g. /api/rpc) before mainnet launch. See SECURITY.md for details.
+ */
 export type Network = "mainnet" | "devnet";
 
 function getNetwork(): Network {
@@ -50,8 +56,9 @@ export function setNetwork(network: Network) {
   }
 }
 
-// For backward compat
-export const config = getConfig();
+// For backward compat — consumers should call getConfig() directly
+// Removed eager eval: `export const config = getConfig()` broke SSG/SSR
+// when localStorage or env vars weren't available at module load time.
 
 /** Backend API URL — reads NEXT_PUBLIC_BACKEND_URL with Railway production as fallback */
 export function getBackendUrl(): string {

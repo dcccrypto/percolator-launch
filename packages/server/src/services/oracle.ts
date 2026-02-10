@@ -106,6 +106,24 @@ export class OracleService {
       return null;
     }
 
+    // R2-S4: Deviation check — reject if >30% change from last known price
+    const history = this.priceHistory.get(slabAddress);
+    if (history && history.length > 0) {
+      const lastPrice = history[history.length - 1].priceE6;
+      if (lastPrice > 0n) {
+        const deviation = priceE6 > lastPrice
+          ? Number((priceE6 - lastPrice) * 100n / lastPrice)
+          : Number((lastPrice - priceE6) * 100n / lastPrice);
+        if (deviation > 30) {
+          console.warn(
+            `[OracleService] Price deviation ${deviation}% exceeds 30% threshold for ${mint} ` +
+            `(last=${lastPrice}, new=${priceE6}, source=${source}). Skipping.`
+          );
+          return null;
+        }
+      }
+    }
+
     const entry: PriceEntry = { priceE6, source, timestamp: Date.now() };
     this.recordPrice(slabAddress, entry);
     return entry;
@@ -153,9 +171,13 @@ export class OracleService {
     // use the last on-chain authority price, or default to 1.0
     if (!priceEntry) {
       const onChainPrice = marketConfig.authorityPriceE6;
-      const fallbackE6 = onChainPrice > 0n ? onChainPrice : 1_000_000n;
-      priceEntry = { priceE6: fallbackE6, source: "fallback", timestamp: Date.now() };
-      console.log(`[OracleService] No external price for ${mint}, using fallback: ${fallbackE6}`);
+      if (onChainPrice > 0n) {
+        priceEntry = { priceE6: onChainPrice, source: "on-chain", timestamp: Date.now() };
+        console.log(`[OracleService] No external price for ${mint}, using on-chain: ${onChainPrice}`);
+      } else {
+        console.warn(`[OracleService] No price source for ${mint}, skipping`);
+        return false; // Don't push a guessed price
+      }
     }
 
     try {

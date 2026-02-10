@@ -108,7 +108,7 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   </span>
                 </div>
                 <div className="text-right text-[#fafafa]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                  {trade.size != null ? formatTokenAmount(BigInt(Math.round(Math.abs(trade.size)))) : "—"}
+                  {trade.size != null ? formatTokenAmount(BigInt(Math.round(Math.abs(Number(trade.size) || 0)))) : "—"}
                 </div>
                 <div className="text-right text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                   {trade.price != null ? `$${Number(trade.price).toFixed(2)}` : "—"}

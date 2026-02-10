@@ -109,6 +109,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   let marginHealthPct = 100;
   if (hasPosition && absPosition > 0n && currentPriceE6 > 0n) {
     if (liqPriceE6 > 0n) {
+      // Edge case: when liqPriceE6 === currentPriceE6, dist=0 so marginHealthPct=0%
+      // which is correct — position is at liquidation price.
       if (isLong) {
         const range = Number(entryPriceE6 - liqPriceE6);
         const dist = Number(currentPriceE6 - liqPriceE6);

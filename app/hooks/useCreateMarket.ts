@@ -40,7 +40,7 @@ import {
   derivePythPushOraclePDA,
 } from "@percolator/core";
 import { sendTx } from "@/lib/tx";
-import { config, getConfig } from "@/lib/config";
+import { getConfig } from "@/lib/config";
 
 import { SLAB_TIERS, slabDataSize, deriveLpPda } from "@percolator/core";
 const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
@@ -346,10 +346,18 @@ export function useCreateMarket() {
           const userAta = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
           const matcherProgramId = new PublicKey(getConfig().matcherProgramId);
 
+          // Check if LP is already initialized for this slab — skip step 3 if so
+          const lpIdx = 0;
+          const [lpPdaCheck] = deriveLpPda(programId, slabPk, lpIdx);
+          const existingLp = await connection.getAccountInfo(lpPdaCheck);
+          if (existingLp && existingLp.data.length > 0) {
+            // LP already initialized — skip to avoid orphaned matcher context
+            setState((s) => ({ ...s, step: 4, stepLabel: STEP_LABELS[4] }));
+          } else {
+
           const matcherCtxKp = Keypair.generate();
           const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(MATCHER_CTX_SIZE);
 
-          const lpIdx = 0;
           const [lpPda] = deriveLpPda(programId, slabPk, lpIdx);
 
           // 1. Create matcher context account (skip if already exists)
@@ -372,11 +380,11 @@ export function useCreateMarket() {
           let off = 0;
           vammData[off] = 2; off += 1;             // Tag 2 = InitVamm
           vammData[off] = 0; off += 1;             // mode 0 = passive
-          vammDv.setUint32(off, vp?.spreadBps ?? 50, true); off += 4;   // tradingFeeBps
+          vammDv.setUint32(off, params.tradingFeeBps, true); off += 4;   // tradingFeeBps
           vammDv.setUint32(off, vp?.spreadBps ?? 50, true); off += 4;   // baseSpreadBps
           vammDv.setUint32(off, vp?.maxTotalBps ?? 200, true); off += 4;  // maxTotalBps
           vammDv.setUint32(off, vp?.impactKBps ?? 0, true); off += 4;    // impactKBps
-          vammDv.setBigUint64(off, 10_000_000_000_000n, true); off += 8;
+          vammDv.setBigUint64(off, BigInt(vp?.liquidityE6 ?? "10000000000000"), true); off += 8;
           vammDv.setBigUint64(off, 0n, true); off += 8;
           vammDv.setBigUint64(off, 1_000_000_000_000n, true); off += 8;
           vammDv.setBigUint64(off, 0n, true); off += 8;
@@ -415,6 +423,7 @@ export function useCreateMarket() {
             signers: lpSigners,
           });
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
+          } // end else (LP not yet initialized)
         }
 
         // Step 4: DepositCollateral + TopUpInsurance + Final Crank (merged)
