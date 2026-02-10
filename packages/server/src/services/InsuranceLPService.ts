@@ -1,4 +1,5 @@
 import { getSupabase } from "../db/client.js";
+import { config } from "../config.js";
 import type { CrankService } from "./crank.js";
 
 const POLL_INTERVAL_MS = 30_000;
@@ -32,6 +33,10 @@ export class InsuranceLPService {
 
   start(): void {
     if (this.timer) return;
+    if (!config.supabaseUrl || !config.supabaseKey) {
+      console.warn("[InsuranceLPService] SUPABASE_URL/KEY not set — service disabled");
+      return;
+    }
     this.poll().catch((e) => console.error("[InsuranceLPService] initial poll error:", e));
     this.timer = setInterval(() => {
       this.poll().catch((e) => console.error("[InsuranceLPService] poll error:", e));
