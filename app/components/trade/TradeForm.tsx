@@ -68,10 +68,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const shortBtnRef = useRef<HTMLButtonElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
 
-  const lpIdx = useMemo(() => {
-    const lp = accounts.find(({ account }) => account.kind === AccountKind.LP);
-    return lp?.idx ?? 0;
+  const lpEntry = useMemo(() => {
+    return accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null;
   }, [accounts]);
+  const lpIdx = lpEntry?.idx ?? 0;
+  const hasValidLP = lpEntry !== null;
 
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const maintenanceMarginBps = params?.maintenanceMarginBps ?? 500n;
@@ -154,6 +155,16 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="rounded-sm bg-[var(--panel-bg)] border border-[var(--border)] p-6 text-center">
         <p className="text-[var(--text-secondary)]">
           No trading account yet. Use the <strong className="text-[var(--text)]">Create Account</strong> button in the Deposit panel on the right to get started.
+        </p>
+      </div>
+    );
+  }
+
+  if (!hasValidLP) {
+    return (
+      <div className="rounded-sm bg-[var(--panel-bg)] border border-[var(--border)] p-6 text-center">
+        <p className="text-[var(--text-secondary)]">
+          No liquidity provider found for this market. Trading is not available until an LP initializes a vAMM.
         </p>
       </div>
     );

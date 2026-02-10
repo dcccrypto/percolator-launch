@@ -1,7 +1,7 @@
 "use client";
 import { explorerTxUrl } from "@/lib/config";
 
-import { FC, useState, useEffect } from "react";
+import { FC, useState, useEffect, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -29,11 +29,13 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const [amount, setAmount] = useState("");
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<bigint | null>(null);
-  const decimals = tokenMeta?.decimals ?? 6;
-
-  // Fetch wallet token balance
+  // Track raw BigInt when MAX is used — avoids format→parse round-trip precision issues
+  const maxRawRef = useRef<bigint | null>(null);
+  // On-chain decimals from getTokenAccountBalance — ground truth, avoids tokenMeta race
+  const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
+  const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
   useEffect(() => {
-    if (!publicKey || !mktConfig?.collateralMint) { setWalletBalance(null); return; }
+    if (!publicKey || !mktConfig?.collateralMint) { setWalletBalance(null); setOnChainDecimals(null); return; }
     let cancelled = false;
     (async () => {
       try {
@@ -41,8 +43,11 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
         const info = await connection.getTokenAccountBalance(ata);
         if (!cancelled && info.value.amount) {
           setWalletBalance(BigInt(info.value.amount));
+          if (info.value.decimals !== undefined) {
+            setOnChainDecimals(info.value.decimals);
+          }
         }
-      } catch { if (!cancelled) setWalletBalance(null); }
+      } catch { if (!cancelled) { setWalletBalance(null); setOnChainDecimals(null); } }
     })();
     return () => { cancelled = true; };
   }, [publicKey, mktConfig?.collateralMint, connection, lastSig]);
@@ -118,8 +123,8 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
 
-  // Validation
-  const parsedAmount = amount ? parseHumanAmount(amount, decimals) : 0n;
+  // Validation — use raw BigInt when MAX was clicked to avoid format→parse precision issues
+  const parsedAmount = maxRawRef.current ?? (amount ? parseHumanAmount(amount, decimals) : 0n);
   const isOverWithdraw = mode === "withdraw" && parsedAmount > 0n && parsedAmount > capital;
   const isOverDeposit = mode === "deposit" && parsedAmount > 0n && walletBalance !== null && parsedAmount > walletBalance;
   const validationError = isOverWithdraw
@@ -132,7 +137,8 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   async function handleSubmit() {
     if (!amount || !userAccount || validationError) return;
     try {
-      const amtNative = parseHumanAmount(amount, decimals);
+      // Use raw BigInt directly when MAX was clicked
+      const amtNative = maxRawRef.current ?? parseHumanAmount(amount, decimals);
       if (amtNative <= 0n) return;
       let sig: string | undefined;
       if (mode === "deposit") {
@@ -163,14 +169,14 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           <input
             type="text"
             value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            onChange={(e) => { maxRawRef.current = null; setAmount(e.target.value.replace(/[^0-9.]/g, "")); }}
             placeholder={`Amount (${symbol})`}
             className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 pr-14 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
           />
           {mode === "withdraw" && capital > 0n && (
             <button
               type="button"
-              onClick={() => setAmount(formatTokenAmount(capital, decimals))}
+              onClick={() => { maxRawRef.current = capital; setAmount(formatTokenAmount(capital, decimals)); }}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
               Max
@@ -179,7 +185,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           {mode === "deposit" && walletBalance !== null && walletBalance > 0n && (
             <button
               type="button"
-              onClick={() => setAmount(formatTokenAmount(walletBalance, decimals))}
+              onClick={() => { maxRawRef.current = walletBalance; setAmount(formatTokenAmount(walletBalance, decimals)); }}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
               Max
