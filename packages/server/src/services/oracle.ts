@@ -43,7 +43,9 @@ export class OracleService {
       if (cached && Date.now() - cached.fetchedAt < DEX_SCREENER_CACHE_TTL_MS) {
         const pair = cached.data.pairs?.[0];
         if (!pair?.priceUsd) return null;
-        return BigInt(Math.round(parseFloat(pair.priceUsd) * 1_000_000));
+        const p = parseFloat(pair.priceUsd);
+        if (!isFinite(p) || p <= 0) return null;
+        return BigInt(Math.round(p * 1_000_000));
       }
 
       const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
