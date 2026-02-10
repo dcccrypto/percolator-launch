@@ -172,7 +172,7 @@ export const AccountsCard: FC = () => {
                 {isOpenLike && <SortHeader label="Margin" sKey="margin" />}
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/[0.04]/30">
+            <tbody className="divide-y divide-white/[0.04]">
               {sortedRows.map((row, i) => {
                 const absPos = row.positionSize < 0n ? -row.positionSize : row.positionSize;
                 return (

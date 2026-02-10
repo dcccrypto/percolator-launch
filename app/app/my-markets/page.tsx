@@ -247,7 +247,7 @@ const MarketCard: FC<{
         description="enter the price in USD (e.g. 1.50)."
         placeholder="1.00"
         confirmLabel="push price"
-        onConfirm={(v) => { setShowPriceInput(false); const priceE6 = Math.round(parseFloat(v) * 1e6).toString(); handleAction("Push Price", () => actions.pushPrice(market, priceE6)); }}
+        onConfirm={(v) => { setShowPriceInput(false); const parsed = parseFloat(v); if (isNaN(parsed) || parsed <= 0) return; const priceE6 = Math.round(parsed * 1e6).toString(); handleAction("Push Price", () => actions.pushPrice(market, priceE6)); }}
         onCancel={() => setShowPriceInput(false)}
       />
       <InputDialog
@@ -256,7 +256,7 @@ const MarketCard: FC<{
         description="enter the amount of collateral tokens to add."
         placeholder="100"
         confirmLabel="top up"
-        onConfirm={(v) => { setShowTopUpInput(false); const amount = BigInt(Math.round(parseFloat(v) * 1e6)); handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount)); }}
+        onConfirm={(v) => { setShowTopUpInput(false); const parsed = parseFloat(v); if (isNaN(parsed) || parsed <= 0) return; const amount = BigInt(Math.round(parsed * 1e6)); handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount)); }}
         onCancel={() => setShowTopUpInput(false)}
       />
       <ConfirmDialog

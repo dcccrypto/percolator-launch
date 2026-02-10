@@ -94,7 +94,8 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
 
     let timer: ReturnType<typeof setInterval> | undefined;
     async function poll() {
-      if (wsActive.current) return;
+      // Always poll — WebSocket can silently disconnect on devnet
+      // If WS is active, it updates more frequently anyway
       try {
         const info = await connection.getAccountInfo(slabPk);
         if (info) parseSlab(new Uint8Array(info.data), info.owner);

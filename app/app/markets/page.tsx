@@ -185,7 +185,7 @@ export default function MarketsPage() {
               <div className="col-span-2">token</div>
               <div className="text-right">price</div>
               <div className="text-right">OI</div>
-              <div className="text-right">volume</div>
+              <div className="text-right">capital</div>
               <div className="text-right">insurance</div>
               <div className="text-right">max lev</div>
               <div className="text-right">health</div>

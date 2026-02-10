@@ -121,7 +121,7 @@ export function InsuranceLPPanel() {
 
       {/* User Position */}
       {state.userLpBalance > 0n && (
-        <div className="bg-white/[0.05]/50 rounded p-3 mb-4 border border-white/[0.08]/50">
+        <div className="bg-white/[0.05] rounded p-3 mb-4 border border-white/[0.08]">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-[10px] text-[#5a6382] uppercase">Your LP Tokens</p>

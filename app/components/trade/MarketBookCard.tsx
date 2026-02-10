@@ -81,7 +81,7 @@ export const MarketBookCard: FC = () => {
           {lps.map(({ idx, account }, i) => {
             const pct = maxLpCapital > 0n ? Number(account.capital * 100n / maxLpCapital) : 0;
             return (
-              <div key={idx} className="flex items-center border-t border-white/[0.06]/30 py-1.5 text-[11px]">
+              <div key={idx} className="flex items-center border-t border-white/[0.06] py-1.5 text-[11px]">
                 <span className="w-6 text-[#3D4563]">{i + 1}</span>
                 <span className="data-cell flex-1 text-[#8B95B0]">{shortenAddress(account.owner.toBase58())}</span>
                 <span className="data-cell w-24 text-right text-[#F0F4FF]">{formatTokenAmount(account.capital)}</span>

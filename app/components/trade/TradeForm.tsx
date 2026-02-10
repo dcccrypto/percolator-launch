@@ -83,7 +83,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     (pct: number) => {
       if (capital <= 0n) return;
       const amount = (capital * BigInt(pct)) / 100n;
-      setMarginInput((amount / 1_000_000n).toString());
+      setMarginInput(formatPerc(amount));
     },
     [capital]
   );
@@ -171,7 +171,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           onClick={() => setDirection("long")}
           className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-all duration-150 ${
             direction === "long"
-              ? "bg-[#00FFB2] text-white shadow-lg shadow-[#00FFB2]/20"
+              ? "bg-[#00FFB2] text-[#06080d] shadow-lg shadow-[#00FFB2]/20"
               : "bg-white/5 text-[#8B95B0] hover:bg-white/[0.06] hover:text-[#F0F4FF]"
           }`}
         >
@@ -214,7 +214,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           />
           <button
             onClick={() => {
-              if (capital > 0n) setMarginInput((capital / 1_000_000n).toString());
+              if (capital > 0n) setMarginInput(formatPerc(capital));
             }}
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-[#7B61FF]/20 px-2 py-0.5 text-xs font-medium text-[#7B61FF] transition-colors hover:bg-[#7B61FF]/30"
           >
