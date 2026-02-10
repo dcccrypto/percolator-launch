@@ -62,7 +62,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
               setAmount("");
             } catch { /* error shown via initError */ }
           }}
-          disabled={initLoading || !amount}
+          disabled={initLoading || !amount || amount === "0" || amount === "0."}
           className="w-full rounded-lg bg-[#00FFB2] py-2.5 text-sm font-medium text-[#06080d] hover:bg-[#00FFB2]/80 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {initLoading ? "Creating..." : "Create Account & Deposit"}

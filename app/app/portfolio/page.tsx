@@ -102,7 +102,7 @@ export default function PortfolioPage() {
                   key={`${pos.slabAddress}-${i}`}
                   href={`/trade/${pos.slabAddress}`}
                   className={`grid grid-cols-6 gap-4 px-4 py-3 transition-all hover:bg-[#131620] ${
-                    i > 0 ? "border-t border-white/[0.06]/50" : ""
+                    i > 0 ? "border-t border-white/[0.06]" : ""
                   } bg-white/[0.03]`}
                 >
                   <div>
