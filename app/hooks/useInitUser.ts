@@ -4,6 +4,11 @@ import { useCallback, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
+  createAssociatedTokenAccountInstruction,
+  getAssociatedTokenAddress,
+  getAccount,
+} from "@solana/spl-token";
+import {
   encodeInitUser,
   ACCOUNTS_INIT_USER,
   buildAccountMetas,
@@ -31,6 +36,21 @@ export function useInitUser(slabAddress: string) {
         const slabPk = new PublicKey(slabAddress);
         const userAta = await getAta(wallet.publicKey, mktConfig.collateralMint);
 
+        // Check if ATA exists — create it first if not (prevents error 24)
+        const instructions = [];
+        try {
+          await getAccount(connection, userAta);
+        } catch {
+          // ATA doesn't exist — create it
+          const createAtaIx = createAssociatedTokenAccountInstruction(
+            wallet.publicKey,     // payer
+            userAta,              // ata
+            wallet.publicKey,     // owner
+            mktConfig.collateralMint, // mint
+          );
+          instructions.push(createAtaIx);
+        }
+
         const ix = buildIx({
           programId,
           keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
@@ -38,7 +58,8 @@ export function useInitUser(slabAddress: string) {
           ]),
           data: encodeInitUser({ feePayment: feePayment.toString() }),
         });
-        return await sendTx({ connection, wallet, instructions: [ix] });
+        instructions.push(ix);
+        return await sendTx({ connection, wallet, instructions });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         throw e;

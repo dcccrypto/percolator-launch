@@ -206,7 +206,7 @@ export default function MarketsPage() {
               {([
                 { key: "all" as OracleFilter, label: "all oracles" },
                 { key: "live" as OracleFilter, label: "live feed" },
-                { key: "admin" as OracleFilter, label: "admin" },
+                { key: "admin" as OracleFilter, label: "manual" },
               ]).map((opt) => (
                 <button
                   key={opt.key}
@@ -300,7 +300,7 @@ export default function MarketsPage() {
                           {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
                         </span>
                         {m.isAdminOracle && (
-                          <span className="border border-[var(--warning)]/30 bg-[var(--warning)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--warning)]">admin</span>
+                          <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
                         )}
                       </div>
                       <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
