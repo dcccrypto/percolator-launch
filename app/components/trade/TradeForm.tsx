@@ -29,6 +29,7 @@ function formatPerc(native: bigint): string {
 
 function parsePercToNative(input: string): bigint {
   const parts = input.split(".");
+  if (parts.length > 2) return 0n; // reject "1.2.3"
   const whole = parts[0] || "0";
   const frac = (parts[1] || "").padEnd(6, "0").slice(0, 6);
   return BigInt(whole) * 1_000_000n + BigInt(frac);

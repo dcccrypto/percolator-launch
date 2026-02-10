@@ -335,8 +335,8 @@ export function encodeUpdateConfig(args: UpdateConfigArgs): Uint8Array {
     encU64(args.fundingHorizonSlots),
     encU64(args.fundingKBps),
     encU128(args.fundingInvScaleNotionalE6),
-    encU64(args.fundingMaxPremiumBps),
-    encU64(args.fundingMaxBpsPerSlot),
+    encI64(args.fundingMaxPremiumBps),  // Rust: i64 (can be negative)
+    encI64(args.fundingMaxBpsPerSlot),  // Rust: i64 (can be negative)
     encU128(args.threshFloor),
     encU64(args.threshRiskBps),
     encU64(args.threshUpdateIntervalSlots),

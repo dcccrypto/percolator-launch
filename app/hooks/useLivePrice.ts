@@ -91,7 +91,8 @@ export function useLivePrice(): PriceState {
 
   useEffect(() => {
     mountedRef.current = true;
-    setState((prev) => ({ ...prev, loading: true }));
+    // Only set loading if we don't already have a price
+    setState((prev) => prev.price !== null ? prev : { ...prev, loading: true });
 
     if (!slabAddr) return;
 
@@ -99,6 +100,11 @@ export function useLivePrice(): PriceState {
 
     function connect() {
       if (!mountedRef.current) return;
+      // Close any existing connection to prevent zombie WS
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch { /* ignore */ }
+        wsRef.current = null;
+      }
       try {
         ws = new WebSocket(WS_URL);
         wsRef.current = ws;

@@ -6,7 +6,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatTokenAmount, formatUsd, formatPnl, shortenAddress } from "@/lib/format";
-import { AccountKind, computeMarkPnl } from "@percolator/core";
+import { AccountKind, computeMarkPnl, computeLiqPrice } from "@percolator/core";
 
 type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl" | "capital" | "margin";
 type SortDir = "asc" | "desc";
@@ -26,22 +26,7 @@ interface AccountRow {
   marginPct: number;
 }
 
-function computeLiqPrice(entryPrice: bigint, capital: bigint, positionSize: bigint, maintenanceMarginBps: bigint): bigint {
-  if (positionSize === 0n || entryPrice === 0n) return 0n;
-  const absPos = positionSize < 0n ? -positionSize : positionSize;
-  const maintBps = Number(maintenanceMarginBps);
-  const capitalPerUnit = Number(capital) * 1e6 / Number(absPos);
-  if (positionSize > 0n) {
-    const adjusted = capitalPerUnit * 10000 / (10000 + maintBps);
-    const liq = Number(entryPrice) - adjusted;
-    return liq > 0 ? BigInt(Math.round(liq)) : 0n;
-  } else {
-    const denom = 10000 - maintBps;
-    if (denom <= 0) return 0n;
-    const adjusted = capitalPerUnit * 10000 / denom;
-    return BigInt(Math.round(Number(entryPrice) + adjusted));
-  }
-}
+// computeLiqPrice imported from @percolator/core (single source of truth)
 
 /** Compact number: 1234567 → "1.23M", 12345 → "12.3K", 123 → "123" */
 function compactNum(n: bigint): string {

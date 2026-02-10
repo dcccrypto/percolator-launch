@@ -189,7 +189,7 @@ export class TradeIndexer {
         slab_address: slabAddress,
         trader,
         side,
-        size: Number(sizeValue),
+        size: sizeValue.toString(), // Keep full precision (i128 on-chain)
         price,
         fee,
         tx_signature: signature,

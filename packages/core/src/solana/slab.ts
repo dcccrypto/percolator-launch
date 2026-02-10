@@ -188,13 +188,13 @@ export function parseConfig(data: Uint8Array): MarketConfig {
   const fundingKBps = readU64LE(data, off);
   off += 8;
 
-  const fundingInvScaleNotionalE6 = readI128LE(data, off);
+  const fundingInvScaleNotionalE6 = readU128LE(data, off); // Rust: u128
   off += 16;
 
-  const fundingMaxPremiumBps = readU64LE(data, off);
+  const fundingMaxPremiumBps = readI64LE(data, off); // Rust: i64
   off += 8;
 
-  const fundingMaxBpsPerSlot = readU64LE(data, off);
+  const fundingMaxBpsPerSlot = readI64LE(data, off); // Rust: i64
   off += 8;
 
   // Threshold parameters

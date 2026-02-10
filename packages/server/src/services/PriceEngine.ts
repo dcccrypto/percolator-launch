@@ -190,8 +190,14 @@ export class PriceEngine {
       console.log("[PriceEngine] Connected to Helius WebSocket");
       this.reconnectDelay = 1000;
 
+      // Clear stale subscription mappings from previous connection
+      const existingSlabs = [...this.slabToSubId.keys()];
+      this.subscriptionIds.clear();
+      this.slabToSubId.clear();
+      this._pendingSubResponses.clear();
+
       // Re-subscribe existing slabs
-      for (const slabAddress of this.slabToSubId.keys()) {
+      for (const slabAddress of existingSlabs) {
         this.sendSubscribe(slabAddress);
       }
 

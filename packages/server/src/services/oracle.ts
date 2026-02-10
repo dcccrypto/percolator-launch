@@ -90,7 +90,13 @@ export class OracleService {
     if (priceE6 === null) {
       const history = this.priceHistory.get(slabAddress);
       if (history && history.length > 0) {
-        return { ...history[history.length - 1], source: "cached" };
+        const last = history[history.length - 1];
+        // Reject stale cached prices (>60s) to prevent bad liquidations
+        if (Date.now() - last.timestamp > 60_000) {
+          console.warn(`[OracleService] Cached price for ${mint} is stale (${Math.round((Date.now() - last.timestamp) / 1000)}s old), rejecting`);
+          return null;
+        }
+        return { ...last, source: "cached" };
       }
       return null;
     }

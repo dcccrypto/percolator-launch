@@ -24,7 +24,7 @@ export interface TradeRow {
   slab_address: string;
   trader: string;
   side: "long" | "short";
-  size: number;
+  size: number | string; // string for full BigInt precision (i128 on-chain)
   price: number;
   fee: number;
   tx_signature: string | null;

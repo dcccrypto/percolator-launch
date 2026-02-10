@@ -51,9 +51,15 @@ export default function MarketsPage() {
 
   useEffect(() => {
     async function load() {
-      const { data } = await getSupabase().from("markets_with_stats").select("*");
-      setSupabaseMarkets(data || []);
-      setSupabaseLoading(false);
+      try {
+        const { data } = await getSupabase().from("markets_with_stats").select("*");
+        setSupabaseMarkets(data || []);
+      } catch (e) {
+        console.error("[Markets] Supabase fetch failed:", e);
+        setSupabaseMarkets([]);
+      } finally {
+        setSupabaseLoading(false);
+      }
     }
     load();
   }, []);

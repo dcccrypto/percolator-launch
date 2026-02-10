@@ -189,7 +189,7 @@ const MarketCard: FC<{
             { label: "last crank", value: timeAgo(lastCrank, currentSlot) },
             { label: "staleness", value: `${staleness} slots` },
             { label: "oracle authority", value: hasOracleAuthority ? shortAddr(oracleAuthority) : "none" },
-            { label: "active accounts", value: market.engine.numUsedAccounts.toString() },
+            { label: "active accounts", value: market.engine?.numUsedAccounts?.toString() ?? "0" },
           ].map((s) => (
             <div key={s.label} className="border-t border-[#1a1a1f] p-4">
               <p className="text-[10px] uppercase tracking-wider text-[#3f3f46]">{s.label}</p>

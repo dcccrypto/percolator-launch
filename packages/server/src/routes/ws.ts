@@ -18,7 +18,7 @@ export function setupWebSocket(
   oracleService: OracleService,
   priceEngine?: PriceEngine,
 ): WebSocketServer {
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ server, maxPayload: 4096 });
   // H2: Use Set for O(1) removal
   const clients = new Set<WsClient>();
 
