@@ -101,7 +101,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const amount = (capital * BigInt(pct)) / 100n;
       setMarginInput(formatPerc(amount, decimals));
     },
-    [capital]
+    [capital, decimals]
   );
 
   // Direction toggle GSAP bounce
@@ -128,19 +128,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     );
   }, [humanError, prefersReduced]);
 
-  // Keyboard shortcut
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
-        const active = document.activeElement;
-        if (active && (active.tagName === "INPUT" || active.tagName === "BUTTON")) {
-          return;
-        }
-      }
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, []);
+  // Keyboard shortcut — removed dead no-op handler (was never wired to handleTrade)
 
   if (!connected) {
     return (
@@ -367,7 +355,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Submit */}
       <button
         onClick={handleTrade}
-        disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive}
+        disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused}
         className={`w-full rounded-sm py-3 text-sm font-medium text-white transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 disabled:active:scale-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] ${
           direction === "long"
             ? "bg-[var(--long)] hover:brightness-110 focus-visible:ring-[var(--long)]"

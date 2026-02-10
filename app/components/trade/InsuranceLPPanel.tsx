@@ -5,12 +5,15 @@ import { useInsuranceLP } from '../../hooks/useInsuranceLP';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useSlabState } from '../providers/SlabProvider';
 import { useTokenMeta } from '../../hooks/useTokenMeta';
+import { formatTokenAmount } from '../../lib/format';
+import { parseHumanAmount } from '../../lib/parseAmount';
 
-function formatCollateral(lamports: bigint, decimals: number = 9): string {
-  const amount = Number(lamports) / 10 ** decimals;
-  if (amount === 0) return '0';
-  if (amount < 0.001) return '<0.001';
-  return amount.toLocaleString(undefined, { maximumFractionDigits: 4 });
+function formatCollateral(lamports: bigint, decimals: number = 6): string {
+  if (lamports === 0n) return '0';
+  const formatted = formatTokenAmount(lamports, decimals);
+  const num = parseFloat(formatted);
+  if (num < 0.001 && num > 0) return '<0.001';
+  return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
 function formatRate(rateE6: bigint): string {
@@ -23,7 +26,7 @@ export function InsuranceLPPanel() {
   const slabState = useSlabState();
   const tokenMeta = useTokenMeta(slabState?.config?.collateralMint ?? null);
   const tokenSymbol = tokenMeta?.symbol ?? 'Token';
-  const tokenDecimals = tokenMeta?.decimals ?? 9;
+  const tokenDecimals = tokenMeta?.decimals ?? 6;
   const { state, loading, error, createMint, deposit, withdraw } = useInsuranceLP();
   const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [amount, setAmount] = useState('');
@@ -36,7 +39,7 @@ export function InsuranceLPPanel() {
     if (!amount) return;
     setTxStatus('Depositing...');
     try {
-      const lamports = BigInt(Math.floor(parseFloat(amount) * 10 ** tokenDecimals));
+      const lamports = parseHumanAmount(amount, tokenDecimals);
       await deposit(lamports);
       setTxStatus('Deposit successful!');
       setAmount('');
@@ -50,7 +53,7 @@ export function InsuranceLPPanel() {
     if (!amount) return;
     setTxStatus('Withdrawing...');
     try {
-      const lpTokens = BigInt(Math.floor(parseFloat(amount) * 10 ** tokenDecimals));
+      const lpTokens = parseHumanAmount(amount, tokenDecimals);
       await withdraw(lpTokens);
       setTxStatus('Withdrawal successful!');
       setAmount('');
@@ -71,22 +74,26 @@ export function InsuranceLPPanel() {
     }
   };
 
-  // Preview calculation
+  // Preview calculation — use parseHumanAmount for precision
   const previewTokens = (() => {
     if (!amount || mode !== 'deposit') return null;
-    const lamports = BigInt(Math.floor(parseFloat(amount) * 10 ** tokenDecimals));
-    if (lamports <= 0n) return null;
-    if (state.lpSupply === 0n) return lamports; // 1:1
-    if (state.insuranceBalance === 0n) return null;
-    return (lamports * state.lpSupply) / state.insuranceBalance;
+    try {
+      const lamports = parseHumanAmount(amount, tokenDecimals);
+      if (lamports <= 0n) return null;
+      if (state.lpSupply === 0n) return lamports; // 1:1
+      if (state.insuranceBalance === 0n) return null;
+      return (lamports * state.lpSupply) / state.insuranceBalance;
+    } catch { return null; }
   })();
 
   const previewCollateral = (() => {
     if (!amount || mode !== 'withdraw') return null;
-    const lpTokens = BigInt(Math.floor(parseFloat(amount) * 10 ** tokenDecimals));
-    if (lpTokens <= 0n) return null;
-    if (state.lpSupply === 0n) return null;
-    return (lpTokens * state.insuranceBalance) / state.lpSupply;
+    try {
+      const lpTokens = parseHumanAmount(amount, tokenDecimals);
+      if (lpTokens <= 0n) return null;
+      if (state.lpSupply === 0n) return null;
+      return (lpTokens * state.insuranceBalance) / state.lpSupply;
+    } catch { return null; }
   })();
 
   return (
@@ -197,8 +204,8 @@ export function InsuranceLPPanel() {
             />
             {mode === 'withdraw' && state.userLpBalance > 0n && (
               <button
-                onClick={() => setAmount(((Number(state.userLpBalance) / 10 ** tokenDecimals)).toString())}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[#00FFB2] hover:text-[#00FFB2]/80"
+                onClick={() => setAmount(formatTokenAmount(state.userLpBalance, tokenDecimals))}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--long)] hover:text-[var(--long)]/80"
               >
                 MAX
               </button>

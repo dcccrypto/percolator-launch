@@ -29,7 +29,7 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 const DEVNET_RPC = `https://devnet.helius-rpc.com/?api-key=${process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? ""}`;
-const DEFAULT_RECIPIENT = "HoibauLv7EPDTr3oCAwE1UETuUio6w8DZjKM5AoTWsUM";
+const DEFAULT_RECIPIENT = "";
 
 const DevnetMintContent: FC = () => {
   const { publicKey, signTransaction, connected } = useWallet();
@@ -52,9 +52,9 @@ const DevnetMintContent: FC = () => {
 
   const connection = useMemo(() => new Connection(DEVNET_RPC, "confirmed"), []);
 
-  // Set recipient to connected wallet if available
+  // Set recipient to connected wallet if no custom address entered
   useEffect(() => {
-    if (publicKey && recipient === DEFAULT_RECIPIENT) {
+    if (publicKey && (!recipient || recipient === DEFAULT_RECIPIENT)) {
       setRecipient(publicKey.toBase58());
     }
   }, [publicKey]); // eslint-disable-line react-hooks/exhaustive-deps

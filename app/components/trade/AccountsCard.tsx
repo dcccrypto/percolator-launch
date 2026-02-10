@@ -70,7 +70,7 @@ export const AccountsCard: FC = () => {
 
   const openPositions = useMemo(() => rows.filter((r) => r.direction !== "IDLE"), [rows]);
   const idleAccounts = useMemo(() => rows.filter((r) => r.direction === "IDLE"), [rows]);
-  const leaderboard = useMemo(() => [...openPositions].sort((a, b) => Number(b.pnl) - Number(a.pnl)), [openPositions]);
+  const leaderboard = useMemo(() => [...openPositions].sort((a, b) => b.pnl > a.pnl ? 1 : b.pnl < a.pnl ? -1 : 0), [openPositions]);
 
   const toggleSort = useCallback((key: SortKey) => {
     setSortKey((prev) => { if (prev === key) { setSortDir((d) => d === "asc" ? "desc" : "asc"); return key; } setSortDir("desc"); return key; });
@@ -80,16 +80,18 @@ export const AccountsCard: FC = () => {
     const base = tab === "open" ? openPositions : tab === "idle" ? idleAccounts : leaderboard;
     const sorted = [...base];
     const dir = sortDir === "asc" ? 1 : -1;
+    // Use BigInt-safe comparator to avoid Number() overflow for large values
+    const cmpBig = (x: bigint, y: bigint): number => x > y ? 1 : x < y ? -1 : 0;
     sorted.sort((a, b) => {
       switch (sortKey) {
         case "idx": return (a.idx - b.idx) * dir;
         case "owner": return a.owner.localeCompare(b.owner) * dir;
         case "direction": return a.direction.localeCompare(b.direction) * dir;
-        case "position": return Number(a.positionSize - b.positionSize) * dir;
-        case "entry": return Number(a.entryPrice - b.entryPrice) * dir;
-        case "liqPrice": return Number(a.liqPrice - b.liqPrice) * dir;
-        case "pnl": return Number(a.pnl - b.pnl) * dir;
-        case "capital": return Number(a.capital - b.capital) * dir;
+        case "position": return cmpBig(a.positionSize, b.positionSize) * dir;
+        case "entry": return cmpBig(a.entryPrice, b.entryPrice) * dir;
+        case "liqPrice": return cmpBig(a.liqPrice, b.liqPrice) * dir;
+        case "pnl": return cmpBig(a.pnl, b.pnl) * dir;
+        case "capital": return cmpBig(a.capital, b.capital) * dir;
         case "margin": return (a.marginPct - b.marginPct) * dir;
         default: return 0;
       }

@@ -53,7 +53,11 @@ export const OrderConfirm: FC<OrderConfirmProps> = ({
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="flex-1 rounded-sm bg-[var(--long)] py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--long)]/80 disabled:opacity-50"
+            className={`flex-1 rounded-sm py-2 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
+              direction === "long"
+                ? "bg-[var(--long)] hover:bg-[var(--long)]/80"
+                : "bg-[var(--short)] hover:bg-[var(--short)]/80"
+            }`}
           >
             {loading ? "Sending..." : "Confirm"}
           </button>

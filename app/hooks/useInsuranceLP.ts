@@ -69,6 +69,9 @@ export function useInsuranceLP() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Stabilize wallet.publicKey reference — PublicKey is not referentially stable
+  const walletPubkeyStr = wallet.publicKey?.toBase58() ?? null;
+
   // Derive the insurance LP mint PDA
   const lpMintInfo = useMemo(() => {
     if (!slabAddress || !programId) return null;
@@ -103,12 +106,13 @@ export function useInsuranceLP() {
         const mint = unpackMint(lpMintInfo.mintPda, mintInfo);
         lpSupply = mint.supply;
 
-        // Get user's LP token balance
-        if (wallet.publicKey) {
+        // Get user's LP token balance — use stabilized string to avoid re-render loops
+        if (walletPubkeyStr) {
           try {
+            const walletPk = new PublicKey(walletPubkeyStr);
             const userLpAta = await getAssociatedTokenAddress(
               lpMintInfo.mintPda,
-              wallet.publicKey
+              walletPk
             );
             const ataInfo = await connection.getAccountInfo(userLpAta);
             if (ataInfo) {
@@ -148,7 +152,7 @@ export function useInsuranceLP() {
     } catch (err) {
       console.error('Failed to refresh insurance LP state:', err);
     }
-  }, [slabState, lpMintInfo, connection, wallet.publicKey]);
+  }, [slabState, lpMintInfo, connection, walletPubkeyStr]);
 
   // Auto-refresh every 10s
   useEffect(() => {

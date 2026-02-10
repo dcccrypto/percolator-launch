@@ -70,12 +70,14 @@ export const Header: FC = () => {
     }
   }, [mobileOpen, prefersReduced]);
 
-  // Network badge pulse
+  // Network badge pulse — reload required for wallet adapter RPC change
   const handleNetworkSwitch = () => {
     setNetwork(network === "mainnet" ? "devnet" : "mainnet");
     if (badgeRef.current && !prefersReduced) {
       gsap.fromTo(badgeRef.current, { scale: 1.15 }, { scale: 1, duration: 0.4, ease: "elastic.out(1, 0.5)" });
     }
+    // RPC endpoint must reload for wallet adapter to pick up new network
+    window.location.reload();
   };
 
   return (

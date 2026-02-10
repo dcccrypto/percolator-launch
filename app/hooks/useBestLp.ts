@@ -63,11 +63,12 @@ export function useBestLp() {
 
       if (quotes.length === 0) return null;
 
-      // Sort by best price for direction
+      // Sort by best price for direction — use BigInt-safe comparison
+      const cmp = (x: bigint, y: bigint) => x > y ? 1 : x < y ? -1 : 0;
       if (isLong) {
-        quotes.sort((a, b) => Number(a.execPriceE6 - b.execPriceE6));
+        quotes.sort((a, b) => cmp(a.execPriceE6, b.execPriceE6));
       } else {
-        quotes.sort((a, b) => Number(b.execPriceE6 - a.execPriceE6));
+        quotes.sort((a, b) => cmp(b.execPriceE6, a.execPriceE6));
       }
 
       return quotes[0];

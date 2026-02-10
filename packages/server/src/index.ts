@@ -16,6 +16,7 @@ import { InsuranceLPService } from "./services/InsuranceLPService.js";
 import { TradeIndexer } from "./services/TradeIndexer.js";
 import { insuranceRoutes } from "./routes/insurance.js";
 import { oracleRouterRoutes } from "./routes/oracle-router.js";
+import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
 
 // Services
 const oracleService = new OracleService();
@@ -35,6 +36,14 @@ app.use("*", cors({
   allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowHeaders: ["Content-Type", "x-api-key"],
 }));
+
+// Global rate limiting — read for GET, write for POST/PUT/DELETE
+app.use("*", async (c, next) => {
+  if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") {
+    return readRateLimit()(c, next);
+  }
+  return writeRateLimit()(c, next);
+});
 
 // Mount routes
 app.route("/", healthRoutes({ crankService, liquidationService }));

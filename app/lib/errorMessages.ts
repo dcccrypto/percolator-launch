@@ -48,8 +48,9 @@ function extractErrorCode(msg: string): number | null {
   // Match JSON format from getSignatureStatuses: {"Custom":14}
   const mJson = msg.match(/"Custom"\s*:\s*(\d+)/);
   if (mJson) return parseInt(mJson[1], 10);
+  // Percolator is NOT Anchor — no +6000 offset. Custom(N) maps directly to ERROR_CODE_MAP.
   const m2 = msg.match(/Custom\((\d+)\)/);
-  if (m2) return parseInt(m2[1], 10) + 6000; // Anchor offset
+  if (m2) return parseInt(m2[1], 10);
   const m3 = msg.match(/\b0x([0-9a-fA-F]+)\b/);
   if (m3) return parseInt(m3[1], 16);
   return null;

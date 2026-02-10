@@ -226,7 +226,7 @@ export function useCreateMarket() {
             maintenanceMarginBps: (initialMarginBps / 2n).toString(),
             initialMarginBps: initialMarginBps.toString(),
             tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
-            maxAccounts: (params.maxAccounts ?? 4096).toString(),
+            maxAccounts: (params.maxAccounts ?? 256).toString(),
             newAccountFee: "1000000",
             riskReductionThreshold: "0",
             maintenanceFeePerSlot: "0",
