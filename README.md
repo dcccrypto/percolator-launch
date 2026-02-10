@@ -4,7 +4,7 @@
 
 Built on [Percolator](https://github.com/aeyakovenko/percolator) by Anatoly Yakovenko. Permissionless, coin-margined, fully on-chain.
 
-[![Live on Devnet](https://img.shields.io/badge/Devnet-Live-14F195?style=flat&logo=solana)](https://percolator.app)
+[![Live on Devnet](https://img.shields.io/badge/Devnet-Live-14F195?style=flat&logo=solana)](https://percolatorlaunch.com)
 [![PRs Merged](https://img.shields.io/badge/PRs-66%20merged-blue?style=flat)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=flat&logo=typescript)](/)
 [![Tests](https://img.shields.io/badge/Tests-32%2F32%20passing-14F195?style=flat)]()
@@ -567,7 +567,7 @@ solana airdrop 2 --url devnet
 | `API_AUTH_KEY` | No | — | API key for mutations (if unset, all requests allowed) |
 | `SUPABASE_URL` | No | — | Supabase project URL (for trade indexer) |
 | `SUPABASE_KEY` | No | — | Supabase service role key |
-| `ALLOWED_ORIGINS` | No | `https://percolator.app,http://localhost:3000` | CORS allowlist |
+| `ALLOWED_ORIGINS` | No | `https://percolatorlaunch.com,http://localhost:3000` | CORS allowlist |
 | `PORT` | No | `3001` | Server listen port |
 | `CRANK_INTERVAL_MS` | No | `10000` | Crank cycle interval (ms) |
 | `CRANK_INACTIVE_INTERVAL_MS` | No | `60000` | Interval for markets with no activity |
@@ -650,7 +650,7 @@ We welcome contributions from both humans and AI agents.
 5. CI runs TypeScript + ESLint checks automatically
 
 ### For AI Agents
-See [CONTRIBUTING-AGENTS.md](./CONTRIBUTING-AGENTS.md) and the [Agent Guide](https://percolator.app/agents) for:
+See [CONTRIBUTING-AGENTS.md](./CONTRIBUTING-AGENTS.md) and the [Agent Guide](https://percolatorlaunch.com/agents) for:
 - Architecture overview and file map
 - Example prompts for common tasks
 - PR guidelines and code style
