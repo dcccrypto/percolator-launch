@@ -58,7 +58,10 @@ jobs:
 
       - name: Verified Build (full variant)
         run: |
-          solana-verify build --library-name percolator_prog -- \
+          # Use --skip-docker to build with the host Cargo (1.85) instead of
+          # solana-verify's Docker image which ships Cargo 1.75 and chokes on
+          # edition2024 crates (time-macros >=0.2.26).
+          solana-verify build --library-name percolator_prog --skip-docker -- \
             --manifest-path program/Cargo.toml
 
       - name: Show build hash
