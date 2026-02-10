@@ -47,22 +47,10 @@ jobs:
       - name: Install solana-verify
         run: cargo install solana-verify
 
-      - name: Downgrade Cargo.lock to v3 for solana-verify Docker compatibility
+      - name: Build program with cargo-build-sbf
         run: |
-          # solana-verify's Docker image ships an older Cargo that can't parse lockfile v4.
-          # v3 format is identical to v4 except for the version header — safe to downgrade.
-          if head -3 program/Cargo.lock | grep -q 'version = 4'; then
-            sed -i 's/^version = 4$/version = 3/' program/Cargo.lock
-            echo "Downgraded program/Cargo.lock from v4 to v3"
-          fi
-
-      - name: Verified Build (full variant)
-        run: |
-          # Use --skip-docker to build with the host Cargo (1.85) instead of
-          # solana-verify's Docker image which ships Cargo 1.75 and chokes on
-          # edition2024 crates (time-macros >=0.2.26).
-          solana-verify build --library-name percolator_prog --skip-docker -- \
-            --manifest-path program/Cargo.toml
+          cd program
+          cargo build-sbf --manifest-path Cargo.toml
 
       - name: Show build hash
         run: |
