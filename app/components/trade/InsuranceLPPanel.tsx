@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { useInsuranceLP } from '../../hooks/useInsuranceLP';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useSlabState } from '../providers/SlabProvider';
+import { useTokenMeta } from '../../hooks/useTokenMeta';
 
-function formatSol(lamports: bigint): string {
+function formatCollateral(lamports: bigint): string {
   const sol = Number(lamports) / 1e9;
   if (sol === 0) return '0';
   if (sol < 0.001) return '<0.001';
@@ -20,6 +21,8 @@ function formatRate(rateE6: bigint): string {
 export function InsuranceLPPanel() {
   const { publicKey } = useWallet();
   const slabState = useSlabState();
+  const tokenMeta = useTokenMeta(slabState?.config?.collateralMint ?? null);
+  const tokenSymbol = tokenMeta?.symbol ?? 'Token';
   const { state, loading, error, createMint, deposit, withdraw } = useInsuranceLP();
   const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [amount, setAmount] = useState('');
@@ -86,11 +89,12 @@ export function InsuranceLPPanel() {
   })();
 
   return (
-    <div className="bg-[var(--panel-bg)] border border-[var(--border)] rounded-sm p-4">
+    <div className="bg-white/[0.03] border border-white/[0.06] rounded-lg p-4">
       <div className="flex items-center gap-2 mb-4">
-        <h3 className="text-sm font-semibold text-[var(--text)]">Insurance Pool</h3>
+        <span className="text-lg">🛡️</span>
+        <h3 className="text-sm font-semibold text-[#F0F4FF]">Insurance Pool</h3>
         {state.mintExists && (
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-[var(--long)]/10 text-[var(--long)] rounded-sm border border-[var(--long)]/20">
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-[#00FFB2]/10 text-[#00FFB2] rounded border border-[#00FFB2]/20">
             LIVE
           </span>
         )}
@@ -99,36 +103,36 @@ export function InsuranceLPPanel() {
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div>
-          <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Pool Size</p>
-          <p className="text-sm font-mono text-[var(--text)]">{formatSol(state.insuranceBalance)} SOL</p>
+          <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Pool Size</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.insuranceBalance)} {tokenSymbol}</p>
         </div>
         <div>
-          <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">LP Supply</p>
-          <p className="text-sm font-mono text-[var(--text)]">{formatSol(state.lpSupply)}</p>
+          <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">LP Supply</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.lpSupply)}</p>
         </div>
         <div>
-          <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Rate</p>
-          <p className="text-sm font-mono text-[var(--text)]">{formatRate(state.redemptionRateE6)} SOL/LP</p>
+          <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Rate</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">{formatRate(state.redemptionRateE6)} {tokenSymbol}/LP</p>
         </div>
         <div>
-          <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Your Share</p>
-          <p className="text-sm font-mono text-[var(--text)]">
-            {state.userSharePct > 0 ? `${state.userSharePct.toFixed(1)}%` : '\u2014'}
+          <p className="text-[10px] text-[#5a6382] uppercase tracking-wider">Your Share</p>
+          <p className="text-sm font-mono text-[#F0F4FF]">
+            {state.userSharePct > 0 ? `${state.userSharePct.toFixed(1)}%` : '—'}
           </p>
         </div>
       </div>
 
       {/* User Position */}
       {state.userLpBalance > 0n && (
-        <div className="bg-[var(--bg-surface)] rounded-sm p-3 mb-4 border border-[var(--border)]">
+        <div className="bg-white/[0.05] rounded p-3 mb-4 border border-white/[0.08]">
           <div className="flex justify-between items-center">
             <div>
-              <p className="text-[10px] text-[var(--text-muted)] uppercase">Your LP Tokens</p>
-              <p className="text-sm font-mono text-[var(--text)]">{formatSol(state.userLpBalance)}</p>
+              <p className="text-[10px] text-[#5a6382] uppercase">Your LP Tokens</p>
+              <p className="text-sm font-mono text-[#F0F4FF]">{formatCollateral(state.userLpBalance)}</p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] text-[var(--text-muted)] uppercase">Redeemable</p>
-              <p className="text-sm font-mono text-[var(--long)]">{formatSol(state.userRedeemableValue)} SOL</p>
+              <p className="text-[10px] text-[#5a6382] uppercase">Redeemable</p>
+              <p className="text-sm font-mono text-[#00FFB2]">{formatCollateral(state.userRedeemableValue)} {tokenSymbol}</p>
             </div>
           </div>
         </div>
@@ -139,7 +143,7 @@ export function InsuranceLPPanel() {
         <button
           onClick={handleCreateMint}
           disabled={loading}
-          className="w-full py-2 px-4 bg-[var(--accent)] hover:bg-[var(--accent-muted)] disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] text-white text-sm font-medium rounded-sm transition-colors hud-btn-corners hover:scale-[1.01] active:scale-[0.99] transition-transform mb-3"
+          className="w-full py-2 px-4 bg-[#00FFB2] hover:bg-[#00FFB2]/80 disabled:bg-white/[0.05] disabled:text-[#5a6382] text-[#06080d] text-sm font-medium rounded transition-colors mb-3"
         >
           {loading ? 'Creating...' : 'Create Insurance LP Mint'}
         </button>
@@ -147,7 +151,7 @@ export function InsuranceLPPanel() {
 
       {/* Not created yet */}
       {!state.mintExists && !isAdmin && (
-        <p className="text-xs text-[var(--text-muted)] text-center py-2">
+        <p className="text-xs text-[#5a6382] text-center py-2">
           Insurance LP not yet enabled for this market
         </p>
       )}
@@ -156,23 +160,23 @@ export function InsuranceLPPanel() {
       {state.mintExists && publicKey && (
         <>
           {/* Tab Switcher */}
-          <div className="flex gap-1 mb-3 bg-[var(--bg-surface)] rounded-sm p-0.5">
+          <div className="flex gap-1 mb-3 bg-white/[0.05] rounded p-0.5">
             <button
               onClick={() => { setMode('deposit'); setAmount(''); }}
-              className={`flex-1 py-1.5 text-xs font-medium rounded-sm transition-colors ${
+              className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
                 mode === 'deposit'
-                  ? 'bg-[var(--accent)] text-white shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
+                  ? 'bg-[#00FFB2] text-[#06080d]'
+                  : 'text-[#8B95B0] hover:text-[#F0F4FF]'
               }`}
             >
               Deposit
             </button>
             <button
               onClick={() => { setMode('withdraw'); setAmount(''); }}
-              className={`flex-1 py-1.5 text-xs font-medium rounded-sm transition-colors ${
+              className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
                 mode === 'withdraw'
-                  ? 'bg-[var(--short)] text-white shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
+                  ? 'bg-[#FF4466] text-white'
+                  : 'text-[#8B95B0] hover:text-[#F0F4FF]'
               }`}
             >
               Withdraw
@@ -185,15 +189,15 @@ export function InsuranceLPPanel() {
               type="number"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder={mode === 'deposit' ? 'Amount (SOL)' : 'LP tokens'}
-              className="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-sm px-3 py-2 text-sm text-[var(--text)] font-mono placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]/40"
+              placeholder={mode === 'deposit' ? `Amount (${tokenSymbol})` : 'LP tokens'}
+              className="w-full bg-white/[0.05] border border-white/[0.08] rounded px-3 py-2 text-sm text-[#F0F4FF] font-mono placeholder:text-[#3D4563] focus:outline-none focus:border-white/[0.12]"
               min="0"
               step="0.001"
             />
             {mode === 'withdraw' && state.userLpBalance > 0n && (
               <button
                 onClick={() => setAmount((Number(state.userLpBalance) / 1e9).toString())}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--accent)] hover:text-[var(--accent-muted)]"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[#00FFB2] hover:text-[#00FFB2]/80"
               >
                 MAX
               </button>
@@ -202,13 +206,13 @@ export function InsuranceLPPanel() {
 
           {/* Preview */}
           {previewTokens !== null && mode === 'deposit' && (
-            <p className="text-xs text-[var(--text-muted)] mb-3">
-              You receive: <span className="text-[var(--text-secondary)] font-mono">~{formatSol(previewTokens)}</span> LP tokens
+            <p className="text-xs text-[#5a6382] mb-3">
+              You receive: <span className="text-[#c4cbde] font-mono">~{formatCollateral(previewTokens)}</span> LP tokens
             </p>
           )}
           {previewCollateral !== null && mode === 'withdraw' && (
-            <p className="text-xs text-[var(--text-muted)] mb-3">
-              You receive: <span className="text-[var(--text-secondary)] font-mono">~{formatSol(previewCollateral)}</span> SOL
+            <p className="text-xs text-[#5a6382] mb-3">
+              You receive: <span className="text-[#c4cbde] font-mono">~{formatCollateral(previewCollateral)}</span> {tokenSymbol}
             </p>
           )}
 
@@ -216,10 +220,10 @@ export function InsuranceLPPanel() {
           <button
             onClick={mode === 'deposit' ? handleDeposit : handleWithdraw}
             disabled={loading || !amount || parseFloat(amount) <= 0}
-            className={`w-full py-2 px-4 text-white text-sm font-medium rounded-sm transition-colors hud-btn-corners hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] ${
+            className={`w-full py-2 px-4 text-white text-sm font-medium rounded transition-colors disabled:bg-white/[0.05] disabled:text-[#5a6382] ${
               mode === 'deposit'
-                ? 'bg-[var(--accent)] hover:bg-[var(--accent-muted)] text-white'
-                : 'bg-[var(--short)] hover:bg-[var(--short)]/80'
+                ? 'bg-[#00FFB2] hover:bg-[#00FFB2]/80 text-[#06080d]'
+                : 'bg-[#FF4466] hover:bg-[#FF4466]/80'
             }`}
           >
             {loading
@@ -235,7 +239,7 @@ export function InsuranceLPPanel() {
       {/* Status */}
       {(txStatus || error) && (
         <p className={`text-xs mt-2 ${
-          (txStatus || error || '').includes('Error') ? 'text-[var(--short)]' : 'text-[var(--long)]'
+          (txStatus || error || '').includes('Error') ? 'text-[#FF4466]' : 'text-[#00FFB2]'
         }`}>
           {txStatus || error}
         </p>

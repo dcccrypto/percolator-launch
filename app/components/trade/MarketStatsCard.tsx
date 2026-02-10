@@ -18,7 +18,7 @@ export const MarketStatsCard: FC = () => {
 
   if (loading || !engine || !config || !params) {
     return (
-      <div className="p-5">
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
         <p className="text-sm text-[var(--text-secondary)]">{loading ? "Loading..." : "Market not loaded"}</p>
       </div>
     );
@@ -34,7 +34,7 @@ export const MarketStatsCard: FC = () => {
   ];
 
   return (
-    <div className="p-5">
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
       <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Market Stats</h3>
       <div className="grid grid-cols-3 gap-4">
         {stats.map((s) => (

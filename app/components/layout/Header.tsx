@@ -95,11 +95,11 @@ export const Header: FC = () => {
             href="/"
             className="group flex items-center gap-2"
           >
-            <span
-              className="text-[13px] font-bold uppercase tracking-[0.15em] text-white"
-            >
-              percolator
-            </span>
+            <img
+              src="/images/logo.png"
+              alt="Percolator"
+              className="h-4 w-auto"
+            />
           </Link>
 
           <nav className="hidden items-center gap-0.5 md:flex">
