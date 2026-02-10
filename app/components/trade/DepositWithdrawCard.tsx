@@ -18,7 +18,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const { deposit, loading: depositLoading, error: depositError } = useDeposit(slabAddress);
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
-  const { config: mktConfig, refresh } = useSlabState();
+  const { config: mktConfig } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
@@ -55,14 +55,12 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
               const decimals = tokenMeta?.decimals ?? 6;
               const depositAmt = parseHumanAmount(amount || "0", decimals);
               // feePayment = deposit amount — account starts with real capital
-              // Minimum 10,000 base units to survive crank GC
+              // so the crank GC won't remove it
               const fee = depositAmt > 0n ? depositAmt : 10_000n;
               const sig = await initUser(fee);
               setLastSig(sig ?? null);
               setAmount("");
-              // Force refresh slab data so useUserAccount picks up the new account
-              setTimeout(() => refresh(), 1000);
-            } catch {}
+            } catch { /* error shown via initError */ }
           }}
           disabled={initLoading || !amount}
           className="w-full rounded-lg bg-[#00FFB2] py-2.5 text-sm font-medium text-[#06080d] hover:bg-[#00FFB2]/80 disabled:cursor-not-allowed disabled:opacity-50"
@@ -70,8 +68,12 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           {initLoading ? "Creating..." : "Create Account & Deposit"}
         </button>
         <p className="mt-2 text-[10px] text-[#52525b]">Your deposit becomes your trading collateral. Accounts with no capital are recycled.</p>
-        {initError && <p className="mt-2 text-xs text-[#FF4466]">{initError}</p>}
-        {lastSig && <p className="mt-2 text-xs text-[#52525b]">Tx: <a href={`${explorerTxUrl(lastSig)}`} target="_blank" rel="noopener noreferrer" className="text-[#00FFB2] hover:underline">{lastSig.slice(0, 12)}...</a></p>}
+        {initError && <p className="mt-2 text-xs text-[#FF4466]">{String(initError)}</p>}
+        {lastSig && (
+          <p className="mt-2 text-xs text-[#52525b]">
+            Tx: <a href={explorerTxUrl(lastSig)} target="_blank" rel="noopener noreferrer" className="text-[#00FFB2] hover:underline">{lastSig.slice(0, 12)}...</a>
+          </p>
+        )}
       </div>
     );
   }
@@ -94,9 +96,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
       }
       setLastSig(sig ?? null);
       setAmount("");
-      // Force refresh slab data after deposit/withdraw
-      setTimeout(() => refresh(), 1000);
-    } catch {}
+    } catch { /* error shown via hook error state */ }
   }
 
   return (
@@ -127,8 +127,12 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
         {loading ? "Sending..." : mode === "deposit" ? "Deposit" : "Withdraw"}
       </button>
 
-      {error && <p className="mt-2 text-xs text-[#FF4466]">{error}</p>}
-      {lastSig && <p className="mt-2 text-xs text-[#52525b]">Tx: <a href={`${explorerTxUrl(lastSig)}`} target="_blank" rel="noopener noreferrer" className="text-[#00FFB2] hover:underline">{lastSig.slice(0, 12)}...</a></p>}
+      {error && <p className="mt-2 text-xs text-[#FF4466]">{String(error)}</p>}
+      {lastSig && (
+        <p className="mt-2 text-xs text-[#52525b]">
+          Tx: <a href={explorerTxUrl(lastSig)} target="_blank" rel="noopener noreferrer" className="text-[#00FFB2] hover:underline">{lastSig.slice(0, 12)}...</a>
+        </p>
+      )}
     </div>
   );
 };
