@@ -22,19 +22,44 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-[#71717a] transition-colors hover:text-[#fafafa]"
+        className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
       >
         <span className="flex items-center gap-2">
           {title}
           {badge}
         </span>
-        <span className={`text-xs text-[#3f3f46] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>v</span>
+        <span className={`text-[10px] text-[var(--text-dim)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>v</span>
       </button>
       <div className={open ? "block" : "hidden"}>{children}</div>
     </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className="ml-1.5 inline-flex items-center text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"
+      title="Copy address"
+    >
+      {copied ? (
+        <svg className="h-3 w-3 text-[var(--long)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -44,6 +69,9 @@ function TradePageInner({ slab }: { slab: string }) {
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
   const pageRef = useRef<HTMLDivElement>(null);
+
+  const symbol = tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN");
+  const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
   useEffect(() => {
     if (!pageRef.current) return;
@@ -57,36 +85,44 @@ function TradePageInner({ slab }: { slab: string }) {
   return (
     <div ref={pageRef} className="mx-auto max-w-7xl px-4 py-6 gsap-fade">
       {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>trade</h1>
-          <p className="truncate text-[11px] text-[#3f3f46]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{slab}</p>
+          <p className="mb-1 text-[11px] font-medium uppercase tracking-widest text-[var(--accent)]">// TRADE</p>
+          <h1 className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+            {symbol}/USD <span className="text-base font-normal text-[var(--text-muted)]">PERP</span>
+          </h1>
+          <div className="mt-1.5 flex items-center gap-3">
+            <span className="flex items-center text-[11px] text-[var(--text-dim)]">
+              {shortAddress}
+              <CopyButton text={slab} />
+            </span>
+            {health && <HealthBadge level={health.level} />}
+            <ShareButton
+              slabAddress={slab}
+              marketName={symbol}
+              price={BigInt(Math.round((priceUsd ?? 0) * 1e6))}
+            />
+          </div>
         </div>
-        <div className="ml-auto flex items-center gap-4">
-          {health && <HealthBadge level={health.level} />}
-          <ShareButton
-            slabAddress={slab}
-            marketName={tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN")}
-            price={BigInt(Math.round((priceUsd ?? 0) * 1e6))}
-          />
-          {priceUsd != null && (
-            <div className="text-right">
-              <div className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}
-              </div>
+        {priceUsd != null && (
+          <div className="text-right">
+            <div className="text-3xl font-bold text-[var(--text)]">
+              ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Quick start guide */}
-      <div className="mb-4 rounded-[4px] border border-[#1a1a1f] bg-[#111113] px-4 py-2.5 flex items-center gap-6 text-xs text-[#71717a]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-        <span className="text-[#3f3f46]">quick start:</span>
-        <span><span className="text-[#00FFB2]">1</span> connect wallet</span>
-        <span className="text-[#1a1a1f]">→</span>
-        <span><span className="text-[#00FFB2]">2</span> deposit collateral</span>
-        <span className="text-[#1a1a1f]">→</span>
-        <span><span className="text-[#00FFB2]">3</span> trade</span>
+      <div className="mb-4 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2.5 flex items-center gap-4 text-xs text-[var(--text-secondary)]">
+        <span className="text-[var(--text-dim)]">quick start:</span>
+        <span><span className="text-[var(--long)]">1</span> connect wallet</span>
+        <span className="text-[var(--text-dim)]">&rarr;</span>
+        <span><span className="text-[var(--long)]">2</span> create account</span>
+        <span className="text-[var(--text-dim)]">&rarr;</span>
+        <span><span className="text-[var(--long)]">3</span> deposit collateral</span>
+        <span className="text-[var(--text-dim)]">&rarr;</span>
+        <span><span className="text-[var(--long)]">4</span> trade</span>
       </div>
 
       {/* Main grid */}
@@ -94,42 +130,30 @@ function TradePageInner({ slab }: { slab: string }) {
         {/* Left column */}
         <div className="space-y-4 lg:col-span-2">
           <ErrorBoundary label="PriceChart">
-            <div className="overflow-hidden rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-              <PriceChart slabAddress={slab} />
-            </div>
+            <PriceChart slabAddress={slab} />
           </ErrorBoundary>
           <ErrorBoundary label="TradeForm">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-              <TradeForm slabAddress={slab} />
-            </div>
+            <TradeForm slabAddress={slab} />
           </ErrorBoundary>
           <ErrorBoundary label="PositionPanel">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-              <PositionPanel slabAddress={slab} />
-            </div>
+            <PositionPanel slabAddress={slab} />
           </ErrorBoundary>
         </div>
 
         {/* Right column */}
         <div className="space-y-4">
           <ErrorBoundary label="AccountsCard">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-              <AccountsCard />
-            </div>
+            <AccountsCard />
           </ErrorBoundary>
           <ErrorBoundary label="DepositWithdrawCard">
-            <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-              <DepositWithdrawCard slabAddress={slab} />
-            </div>
+            <DepositWithdrawCard slabAddress={slab} />
           </ErrorBoundary>
           <ErrorBoundary label="EngineHealthCard">
             <Collapsible title="engine health" defaultOpen={false} badge={health && <HealthBadge level={health.level} />}>
               <EngineHealthCard />
             </Collapsible>
           </ErrorBoundary>
-          <div className="rounded-[4px] border border-[#1a1a1f] bg-[#111113]">
-            <MarketStatsCard />
-          </div>
+          <MarketStatsCard />
           <ErrorBoundary label="TradeHistory">
             <Collapsible title="recent trades" defaultOpen={true}>
               <TradeHistory slabAddress={slab} />

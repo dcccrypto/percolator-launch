@@ -42,14 +42,14 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (!userAccount) {
     return (
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-6 shadow-sm">
-        <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
+      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+        <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
           Position
         </h3>
         <div className="space-y-3">
-          <div className="h-4 w-24 animate-pulse rounded bg-white/5" />
-          <div className="h-4 w-32 animate-pulse rounded bg-white/5" />
-          <div className="h-4 w-20 animate-pulse rounded bg-white/5" />
+          <div className="h-3 w-24 rounded-sm bg-[var(--border)]" />
+          <div className="h-3 w-32 rounded-sm bg-[var(--border)]" />
+          <div className="h-3 w-20 rounded-sm bg-[var(--border)]" />
         </div>
       </div>
     );
@@ -64,7 +64,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const entryPriceE6 = account.entryPrice;
 
-  // --- PnL via trading.ts utilities ---
   const pnlTokens = computeMarkPnl(
     account.positionSize,
     entryPriceE6,
@@ -74,7 +73,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     priceUsd !== null ? (Number(pnlTokens) / 1e6) * priceUsd : null;
   const roe = computePnlPercent(pnlTokens, account.capital);
 
-  // --- Liquidation price ---
   const maintenanceBps = params?.maintenanceMarginBps ?? 100n;
   const liqPriceE6 = computeLiqPrice(
     entryPriceE6,
@@ -83,20 +81,19 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     maintenanceBps,
   );
 
-  // --- Colours ---
   const pnlColor =
     pnlTokens === 0n
-      ? "text-[#8B95B0]"
+      ? "text-[var(--text-muted)]"
       : pnlTokens > 0n
-        ? "text-[#00FFB2]"
-        : "text-[#FF4466]";
+        ? "text-[var(--long)]"
+        : "text-[var(--short)]";
 
   const pnlBgColor =
     pnlTokens === 0n
-      ? "bg-white/5"
+      ? "bg-[var(--border-subtle)]"
       : pnlTokens > 0n
-        ? "bg-[#00FFB2]/10"
-        : "bg-[#FF4466]/10";
+        ? "bg-[var(--long)]/10"
+        : "bg-[var(--short)]/10";
 
   const pnlBarWidth = Math.min(100, Math.max(0, Math.abs(roe)));
 
@@ -109,9 +106,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   async function handleClose() {
     if (!userAccount || !hasPosition) return;
     try {
-      // IMPORTANT: Fetch fresh slab data to get the CURRENT on-chain position
-      // The prepended crank in useTrade can change position size (funding/settlement)
-      // Using stale UI data can cause the close to overshoot and flip the position
       let freshPositionSize = account.positionSize;
       try {
         const { fetchSlab, parseAccount } = await import("@percolator/core");
@@ -119,12 +113,10 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         const freshAccount = parseAccount(freshData, userAccount.idx);
         freshPositionSize = freshAccount.positionSize;
       } catch {
-        // Fall back to UI state if fresh fetch fails
         console.warn("Could not fetch fresh position — using cached state");
       }
 
       if (freshPositionSize === 0n) {
-        // Position already closed (e.g., liquidated)
         setShowConfirm(false);
         return;
       }
@@ -146,34 +138,29 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-6 shadow-sm">
-      <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-[#8B95B0]">
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
+      <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
         Position
       </h3>
 
       {!hasPosition ? (
         <div className="flex flex-col items-center py-6 text-center">
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/5">
-            <svg className="h-6 w-6 text-[#3D4563]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-            </svg>
-          </div>
-          <p className="text-sm font-medium text-[#8B95B0]">No open position</p>
-          <p className="mt-1 text-xs text-[#3D4563]">Open a trade to see your position here</p>
+          <p className="text-sm text-[var(--text-muted)]">No open position</p>
+          <p className="mt-1 text-xs text-[var(--text-dim)]">Open a trade to see your position here</p>
         </div>
       ) : (
         <div className="space-y-3">
           {/* PnL highlight bar */}
-          <div className={`rounded-lg ${pnlBgColor} p-3`}>
+          <div className={`rounded-sm ${pnlBgColor} p-3`}>
             <div className="flex items-center justify-between">
-              <span className="text-xs text-[#8B95B0]">Unrealized PnL</span>
+              <span className="text-xs text-[var(--text-muted)]">Unrealized PnL</span>
               <div className="text-right">
-                <span className={`font-mono text-sm font-bold ${pnlColor}`}>
+                <span className={`text-sm font-bold ${pnlColor}`}>
                   {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
                   {formatTokenAmount(abs(pnlTokens))} {symbol}
                 </span>
                 {pnlUsd !== null && (
-                  <span className={`ml-1.5 font-mono text-xs ${pnlColor}`}>
+                  <span className={`ml-1.5 text-xs ${pnlColor}`}>
                     ({pnlUsd >= 0 ? "+" : ""}$
                     {Math.abs(pnlUsd).toLocaleString(undefined, {
                       minimumFractionDigits: 2,
@@ -184,19 +171,18 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 )}
               </div>
             </div>
-            {/* PnL bar */}
-            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
+            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
-                  pnlTokens >= 0n ? "bg-[#00FFB2]" : "bg-[#FF4466]"
+                  pnlTokens >= 0n ? "bg-[var(--long)]" : "bg-[var(--short)]"
                 }`}
                 style={{ width: `${pnlBarWidth}%` }}
               />
             </div>
-            <div className="mt-1 flex justify-between text-[10px] text-[#3D4563]">
+            <div className="mt-1 flex justify-between text-[10px] text-[var(--text-dim)]">
               <span>
-                PnL%:{" "}
-                <span className={`font-mono ${pnlColor}`}>
+                ROE:{" "}
+                <span className={pnlColor}>
                   {roe >= 0 ? "+" : ""}
                   {roe.toFixed(2)}%
                 </span>
@@ -206,42 +192,38 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
           {/* Position details */}
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#8B95B0]">Direction</span>
-            <span
-              className={`text-sm font-medium ${
-                isLong ? "text-[#00FFB2]" : "text-[#FF4466]"
-              }`}
-            >
+            <span className="text-xs text-[var(--text-muted)]">Direction</span>
+            <span className={`text-sm font-medium ${isLong ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
               {isLong ? "LONG" : "SHORT"}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#8B95B0]">Size</span>
-            <span className="font-mono text-sm text-[#F0F4FF]">
+            <span className="text-xs text-[var(--text-muted)]">Size</span>
+            <span className="text-sm text-[var(--text)]">
               {formatTokenAmount(absPosition)} {symbol}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#8B95B0]">Entry Price</span>
-            <span className="font-mono text-sm text-[#F0F4FF]">
+            <span className="text-xs text-[var(--text-muted)]">Entry Price</span>
+            <span className="text-sm text-[var(--text)]">
               {formatUsd(entryPriceE6)}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#8B95B0]">Market Price</span>
-            <span className="font-mono text-sm text-[#F0F4FF]">
+            <span className="text-xs text-[var(--text-muted)]">Market Price</span>
+            <span className="text-sm text-[var(--text)]">
               {formatUsd(currentPriceE6)}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#8B95B0]">Liq. Price</span>
-            <span className="font-mono text-sm text-amber-400">
-              {liqPriceE6 > 0n ? formatUsd(liqPriceE6) : "—"}
+            <span className="text-xs text-[var(--text-muted)]">Liq. Price</span>
+            <span className="text-sm text-[var(--warning)]">
+              {liqPriceE6 > 0n ? formatUsd(liqPriceE6) : "-"}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#8B95B0]">Margin Health</span>
-            <span className="font-mono text-sm text-[#8B95B0]">
+            <span className="text-xs text-[var(--text-muted)]">Margin Health</span>
+            <span className="text-sm text-[var(--text-secondary)]">
               {marginHealthStr}
             </span>
           </div>
@@ -251,26 +233,26 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <button
               onClick={() => setShowConfirm(true)}
               disabled={closeLoading}
-              className="mt-2 w-full rounded-lg border border-[#FF4466]/30 bg-[#FF4466]/10 py-2.5 text-sm font-medium text-[#FF4466] transition-all duration-150 hover:bg-[#FF4466]/20 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[#FF4466]/30"
+              className="mt-2 w-full rounded-sm border border-[var(--short)]/30 py-2.5 text-sm font-medium text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Close Position
             </button>
           ) : (
-            <div className="mt-2 space-y-2 rounded-lg border border-[#FF4466]/30 bg-red-900/10 p-3">
-              <p className="text-xs text-[#8B95B0]">
+            <div className="mt-2 space-y-2 rounded-sm border border-[var(--short)]/30 p-3">
+              <p className="text-xs text-[var(--text-muted)]">
                 Close {isLong ? "LONG" : "SHORT"}{" "}
                 {formatTokenAmount(absPosition)} {symbol}?
               </p>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[#8B95B0]">Est. PnL</span>
-                <span className={`font-mono font-medium ${pnlColor}`}>
+                <span className="text-[var(--text-muted)]">Est. PnL</span>
+                <span className={`font-medium ${pnlColor}`}>
                   {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
                   {formatTokenAmount(abs(pnlTokens))} {symbol}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[#8B95B0]">You&apos;ll receive</span>
-                <span className="font-mono font-medium text-[#F0F4FF]">
+                <span className="text-[var(--text-muted)]">You&apos;ll receive</span>
+                <span className="font-medium text-[var(--text)]">
                   ~
                   {formatTokenAmount(
                     pnlTokens > 0n
@@ -287,14 +269,14 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowConfirm(false)}
-                  className="flex-1 rounded-lg border border-white/[0.06] bg-white/5 py-2 text-xs font-medium text-[#8B95B0] transition-colors hover:bg-white/[0.06]"
+                  className="flex-1 rounded-sm border border-[var(--border)] py-2 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)]"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleClose}
                   disabled={closeLoading}
-                  className="flex-1 rounded-lg bg-[#FF4466] py-2 text-xs font-medium text-white transition-colors hover:bg-[#FF3355] disabled:opacity-50"
+                  className="flex-1 rounded-sm bg-[var(--short)] py-2 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
                 >
                   {closeLoading ? "Closing..." : "Confirm Close"}
                 </button>
@@ -303,19 +285,19 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           )}
 
           {closeError && (
-            <div className="rounded-lg border border-[#FF4466]/20 bg-[#FF4466]/10 px-3 py-2">
-              <p className="text-xs text-[#FF4466]">{humanizeError(closeError)}</p>
+            <div className="rounded-sm border border-[var(--short)]/20 bg-[var(--short)]/10 px-3 py-2">
+              <p className="text-xs text-[var(--short)]">{humanizeError(closeError)}</p>
             </div>
           )}
 
           {closeSig && (
-            <p className="text-xs text-[#8B95B0]">
+            <p className="text-xs text-[var(--text-muted)]">
               Closed:{" "}
               <a
                 href={`${explorerTxUrl(closeSig)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[#7B61FF] hover:underline"
+                className="text-[var(--accent)] hover:underline"
               >
                 {closeSig.slice(0, 16)}...
               </a>

@@ -40,7 +40,13 @@ export function isMockSlab(address: string): boolean {
 }
 
 export function getMockSymbol(address: string): string | null {
-  return MOCK_MAP[address]?.symbol ?? null;
+  // Check by slab address first
+  if (address in MOCK_MAP) return MOCK_MAP[address].symbol;
+  // Check by mint address
+  for (const m of Object.values(MOCK_MAP)) {
+    if (m.mint === address) return m.symbol;
+  }
+  return null;
 }
 
 export function getMockSlabState(address: string) {

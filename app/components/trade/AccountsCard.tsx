@@ -8,7 +8,7 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatTokenAmount, formatUsd, formatPnl, shortenAddress } from "@/lib/format";
 import { AccountKind } from "@percolator/core";
 
-type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "cost" | "pnl" | "capital" | "margin";
+type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl";
 type SortDir = "asc" | "desc";
 type Tab = "open" | "idle" | "leaderboard";
 
@@ -21,10 +21,8 @@ interface AccountRow {
   entryPrice: bigint;
   liqPrice: bigint;
   liqHealthPct: number;
-  cost: bigint;
   pnl: bigint;
   capital: bigint;
-  marginPct: number;
 }
 
 function computeLiqPrice(entryPrice: bigint, capital: bigint, positionSize: bigint, maintenanceMarginBps: bigint): bigint {
@@ -33,25 +31,15 @@ function computeLiqPrice(entryPrice: bigint, capital: bigint, positionSize: bigi
   const maintBps = Number(maintenanceMarginBps);
   const capitalPerUnit = Number(capital) * 1e6 / Number(absPos);
   if (positionSize > 0n) {
-    // Long: liq when price drops — margin threshold on the downside
     const adjusted = capitalPerUnit * 10000 / (10000 + maintBps);
     const liq = Number(entryPrice) - adjusted;
     return liq > 0 ? BigInt(Math.round(liq)) : 0n;
   } else {
-    // Short: liq when price rises — use (10000 - maintBps) per core library
     const denom = 10000 - maintBps;
     if (denom <= 0) return 0n;
     const adjusted = capitalPerUnit * 10000 / denom;
     return BigInt(Math.round(Number(entryPrice) + adjusted));
   }
-}
-
-function computeMarginPct(capital: bigint, positionSize: bigint, priceE6: bigint): number {
-  if (positionSize === 0n || priceE6 === 0n) return 100;
-  const absPos = positionSize < 0n ? -positionSize : positionSize;
-  const notional = Number(absPos) * Number(priceE6) / 1e6;
-  if (notional === 0) return 100;
-  return (Number(capital) / notional) * 100;
 }
 
 export const AccountsCard: FC = () => {
@@ -82,10 +70,7 @@ export const AccountsCard: FC = () => {
           liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
         }
       }
-      const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
-      const cost = absPos * account.entryPrice / 1_000_000n;
-      const marginPct = computeMarginPct(account.capital, account.positionSize, oraclePrice);
-      return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize, entryPrice: account.entryPrice, liqPrice, liqHealthPct, cost, pnl: account.pnl, capital: account.capital, marginPct };
+      return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize, entryPrice: account.entryPrice, liqPrice, liqHealthPct, pnl: account.pnl, capital: account.capital };
     });
   }, [accounts, maintBps, oraclePrice]);
 
@@ -109,17 +94,14 @@ export const AccountsCard: FC = () => {
         case "position": return Number(a.positionSize - b.positionSize) * dir;
         case "entry": return Number(a.entryPrice - b.entryPrice) * dir;
         case "liqPrice": return Number(a.liqPrice - b.liqPrice) * dir;
-        case "cost": return Number(a.cost - b.cost) * dir;
         case "pnl": return Number(a.pnl - b.pnl) * dir;
-        case "capital": return Number(a.capital - b.capital) * dir;
-        case "margin": return (a.marginPct - b.marginPct) * dir;
         default: return 0;
       }
     });
     return sorted;
   }, [tab, openPositions, idleAccounts, leaderboard, sortKey, sortDir]);
 
-  if (loading) return <div className="p-4"><p className="text-sm text-[#8B95B0]">Loading…</p></div>;
+  if (loading) return <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-4"><p className="text-xs text-[var(--text-muted)]">Loading...</p></div>;
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: "open", label: "Open", count: openPositions.length },
@@ -130,96 +112,87 @@ export const AccountsCard: FC = () => {
   const isOpenLike = tab === "open" || tab === "leaderboard";
 
   const SortHeader: FC<{ label: string; sKey: SortKey; align?: "left" | "right" }> = ({ label, sKey, align = "right" }) => (
-    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none pb-2 font-medium ${align === "left" ? "text-left" : "text-right"} hover:text-[#8B95B0]`}>
+    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none whitespace-nowrap px-2 pb-3 font-medium ${align === "left" ? "text-left" : "text-right"} hover:text-[var(--text-secondary)]`}>
       {label}
-      {sortKey === sKey ? <span className="ml-0.5 text-[#00FFB2]">{sortDir === "asc" ? "↑" : "↓"}</span> : <span className="ml-0.5 text-[#1a1d2a]">↕</span>}
+      {sortKey === sKey ? <span className="ml-0.5 text-[var(--long)]">{sortDir === "asc" ? "^" : "v"}</span> : ""}
     </th>
   );
 
   function liqBarColor(pct: number): string {
-    if (pct >= 70) return "bg-[#00e68a]";
-    if (pct >= 40) return "bg-[#ffaa00]";
-    if (pct >= 20) return "bg-[#ff8800]";
-    return "bg-[#ff4d6a]";
+    if (pct >= 70) return "bg-[var(--long)]";
+    if (pct >= 40) return "bg-[var(--warning)]";
+    return "bg-[var(--short)]";
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-3 flex items-center gap-2">
+    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-4">
+      <div className="mb-3 flex items-center gap-1.5">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
-              tab === t.key ? "bg-white/[0.06] text-white" : "text-[#8B95B0] hover:text-[#8B95B0]"
+            className={`rounded-sm px-2.5 py-1 text-[11px] font-medium transition-all ${
+              tab === t.key ? "border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             }`}>
-            {t.label} <span className="text-[#3D4563]">({t.count})</span>
+            {t.label} ({t.count})
           </button>
         ))}
-        <span className="ml-auto data-cell text-[10px] text-[#3D4563]">{accounts.length} total</span>
+        <span className="ml-auto text-[10px] text-[var(--text-dim)]">{accounts.length} total</span>
       </div>
 
       {sortedRows.length === 0 ? (
-        <p className="py-4 text-center text-sm text-[#8B95B0]">
+        <p className="py-6 text-center text-xs text-[var(--text-muted)]">
           {tab === "open" ? "No open positions" : tab === "idle" ? "No idle accounts" : "No data"}
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="max-h-[420px] overflow-y-auto overflow-x-auto">
           <table className="w-full text-[11px]">
-            <thead>
-              <tr className="text-[9px] uppercase tracking-wider text-[#3D4563]">
+            <thead className="sticky top-0 z-10 bg-[var(--panel-bg)]">
+              <tr className="border-b border-[var(--border)] text-[9px] uppercase tracking-wider text-[var(--text-dim)]">
                 <SortHeader label="#" sKey="idx" align="left" />
                 <SortHeader label="Owner" sKey="owner" align="left" />
                 {isOpenLike && <SortHeader label="Side" sKey="direction" align="left" />}
-                {isOpenLike && <SortHeader label="Position" sKey="position" />}
+                {isOpenLike && <SortHeader label="Size" sKey="position" />}
                 {isOpenLike && <SortHeader label="Entry" sKey="entry" />}
                 {isOpenLike && <SortHeader label="Liq" sKey="liqPrice" />}
                 <SortHeader label="PnL" sKey="pnl" />
-                <SortHeader label="Capital" sKey="capital" />
-                {isOpenLike && <SortHeader label="Margin" sKey="margin" />}
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/[0.04]">
+            <tbody>
               {sortedRows.map((row, i) => {
                 const absPos = row.positionSize < 0n ? -row.positionSize : row.positionSize;
                 return (
-                  <tr key={row.idx} className="hover:bg-white/[0.04]">
-                    <td className="py-1.5 text-[#3D4563]">{i + 1}</td>
-                    <td className="data-cell py-1.5 text-[#8B95B0]">{shortenAddress(row.owner)}</td>
+                  <tr key={row.idx} className="border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-elevated)]">
+                    <td className="whitespace-nowrap px-2 py-4 text-[var(--text-dim)]">{i + 1}</td>
+                    <td className="whitespace-nowrap px-2 py-4 text-left text-[var(--text-secondary)]">{shortenAddress(row.owner)}</td>
                     {isOpenLike && (
-                      <td className="py-1.5">
-                        {row.direction === "IDLE" ? <span className="text-[#3D4563]">—</span> : (
-                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
-                            row.direction === "LONG" ? "bg-[#00e68a]/10 text-[#00e68a]" : "bg-[#ff4d6a]/10 text-[#ff4d6a]"
+                      <td className="whitespace-nowrap px-2 py-4 text-left">
+                        {row.direction === "IDLE" ? <span className="text-[var(--text-dim)]">-</span> : (
+                          <span className={`text-[10px] font-bold ${
+                            row.direction === "LONG" ? "text-[var(--long)]" : "text-[var(--short)]"
                           }`}>{row.direction}</span>
                         )}
                       </td>
                     )}
                     {isOpenLike && (
-                      <td className={`data-cell py-1.5 text-right ${row.positionSize > 0n ? "text-[#00e68a]" : row.positionSize < 0n ? "text-[#ff4d6a]" : "text-[#3D4563]"}`}>
-                        {row.positionSize !== 0n ? formatTokenAmount(absPos) : "—"}
+                      <td className={`whitespace-nowrap px-2 py-4 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
+                        {row.positionSize !== 0n ? formatTokenAmount(absPos) : "-"}
                       </td>
                     )}
-                    {isOpenLike && <td className="data-cell py-1.5 text-right text-[#F0F4FF]">{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "—"}</td>}
+                    {isOpenLike && <td className="whitespace-nowrap px-2 py-4 text-right text-[var(--text)]">{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
                     {isOpenLike && (
-                      <td className="py-1.5 text-right">
+                      <td className="whitespace-nowrap px-2 py-4 text-right">
                         {row.positionSize !== 0n ? (
-                          <div className="flex items-center justify-end gap-1">
-                            <span className="data-cell text-[#F0F4FF]">{formatUsd(row.liqPrice)}</span>
-                            <div className="h-1 w-8 rounded-full bg-white/[0.06]">
-                              <div className={`h-1 rounded-full ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(4, row.liqHealthPct)}%` }} />
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="text-[var(--text)]">{formatUsd(row.liqPrice)}</span>
+                            <div className="h-2 w-10 rounded-full bg-[var(--border)]">
+                              <div className={`h-2 rounded-full ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
                             </div>
                           </div>
-                        ) : "—"}
+                        ) : "-"}
                       </td>
                     )}
-                    <td className={`data-cell py-1.5 text-right ${row.pnl > 0n ? "text-[#00e68a]" : row.pnl < 0n ? "text-[#ff4d6a]" : "text-[#3D4563]"}`}>
+                    <td className={`whitespace-nowrap px-2 py-4 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
                       {formatPnl(row.pnl)}
                     </td>
-                    <td className="data-cell py-1.5 text-right text-[#F0F4FF]">{formatTokenAmount(row.capital)}</td>
-                    {isOpenLike && (
-                      <td className={`data-cell py-1.5 text-right ${row.marginPct > 50 ? "text-[#00e68a]" : row.marginPct > 20 ? "text-[#ffaa00]" : "text-[#ff4d6a]"}`}>
-                        {row.positionSize !== 0n ? `${row.marginPct.toFixed(1)}%` : "—"}
-                      </td>
-                    )}
                   </tr>
                 );
               })}
