@@ -87,6 +87,7 @@ const QuickLaunchPanel: FC<{
   onFallbackToManual: (mint: string, pool: DexPoolResult | null) => void;
 }> = ({ onFallbackToManual }) => {
   const { publicKey } = useWallet();
+  const { connection } = useConnection();
   const { state, create, reset } = useCreateMarket();
   const [quickMint, setQuickMint] = useState("");
   const [quickSlabTier, setQuickSlabTier] = useState<SlabTierKey>("small");
@@ -96,7 +97,29 @@ const QuickLaunchPanel: FC<{
   const [lpCollateral, setLpCollateral] = useState<string | null>(null);
   const [insuranceAmount, setInsuranceAmount] = useState("100");
   const [manualPrice, setManualPrice] = useState("1.000000");
+  const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
   const quickLaunch = useQuickLaunch(quickMint.length >= 32 ? quickMint : null);
+
+  // Check wallet token balance when mint is set
+  const quickMintValid = quickMint.length >= 32 && isValidBase58Pubkey(quickMint);
+  useEffect(() => {
+    if (!publicKey || !quickMintValid) { setTokenBalance(null); return; }
+    let cancelled = false;
+    setBalanceLoading(true);
+    (async () => {
+      try {
+        const pk = new PublicKey(quickMint);
+        const ata = await getAssociatedTokenAddress(pk, publicKey);
+        const account = await getAccount(connection, ata);
+        if (!cancelled) setTokenBalance(account.amount);
+      } catch { if (!cancelled) setTokenBalance(0n); }
+      finally { if (!cancelled) setBalanceLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [connection, publicKey, quickMint, quickMintValid]);
+
+  const hasTokens = tokenBalance !== null && tokenBalance > 0n;
 
   useEffect(() => {
     if (quickLaunch.config) {
@@ -342,9 +365,27 @@ const QuickLaunchPanel: FC<{
             </span>
           </div>
 
+          {/* Token balance info */}
+          {quickMintValid && !balanceLoading && tokenBalance !== null && quickLaunch.config && (
+            <div className={`border p-3 ${hasTokens ? "border-[var(--border)] bg-[var(--bg)]" : "border-[var(--short)]/30 bg-[var(--short)]/[0.04]"}`}>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Your balance: <span className={`font-semibold ${hasTokens ? "text-[var(--text)]" : "text-[var(--short)]"}`}>{formatHumanAmount(tokenBalance, quickLaunch.config.decimals)} {quickLaunch.config.symbol}</span>
+              </p>
+              {!hasTokens && (
+                <p className="mt-1 text-[11px] text-[var(--short)]">
+                  You need tokens to create a market (LP collateral + insurance).{" "}
+                  <Link href="/devnet-mint" className="underline hover:text-[var(--accent)]">Mint tokens on the faucet</Link>
+                </p>
+              )}
+            </div>
+          )}
+          {balanceLoading && quickMintValid && (
+            <p className="text-[10px] text-[var(--text-dim)]">Checking wallet balance...</p>
+          )}
+
           {/* Launch button */}
-          <button onClick={handleQuickCreate} disabled={!publicKey || !quickLaunch.config} className={btnPrimary}>
-            {!publicKey ? "Connect Wallet to Launch" : "Launch Market"}
+          <button onClick={handleQuickCreate} disabled={!publicKey || !quickLaunch.config || !hasTokens} className={btnPrimary}>
+            {!publicKey ? "Connect Wallet to Launch" : !hasTokens ? "No Tokens — Mint First" : "Launch Market"}
           </button>
         </>
       )}
@@ -516,7 +557,8 @@ export const CreateMarketWizard: FC = () => {
   const lpValid = lpCollateral !== "" && !isNaN(Number(lpCollateral)) && Number(lpCollateral) > 0;
   const insValid = insuranceAmount !== "" && !isNaN(Number(insuranceAmount)) && Number(insuranceAmount) > 0;
   const step3Valid = lpValid && insValid;
-  const allValid = step1Valid && step2Valid && step3Valid;
+  const hasManualTokens = tokenBalance !== null && tokenBalance > 0n;
+  const allValid = step1Valid && step2Valid && step3Valid && hasManualTokens;
 
   const lpNative = useMemo(() => { try { return lpValid ? parseHumanAmount(lpCollateral, decimals) : 0n; } catch { return 0n; } }, [lpCollateral, decimals, lpValid]);
   const insNative = useMemo(() => { try { return insValid ? parseHumanAmount(insuranceAmount, decimals) : 0n; } catch { return 0n; } }, [insuranceAmount, decimals, insValid]);
@@ -659,7 +701,13 @@ export const CreateMarketWizard: FC = () => {
                 )}
                 {balanceLoading && mintValid && <p className="mt-1 text-[10px] text-[var(--text-dim)]">Loading balance...</p>}
                 {tokenBalance !== null && tokenMeta && (
-                  <p className="mt-1 text-[10px] text-[var(--text-muted)]">Your balance: <span className="font-medium text-[var(--text)]">{formatHumanAmount(tokenBalance, tokenMeta.decimals)} {tokenMeta.symbol}</span></p>
+                  <p className="mt-1 text-[10px] text-[var(--text-muted)]">Your balance: <span className={`font-medium ${hasManualTokens ? "text-[var(--text)]" : "text-[var(--short)]"}`}>{formatHumanAmount(tokenBalance, tokenMeta.decimals)} {tokenMeta.symbol}</span></p>
+                )}
+                {!balanceLoading && tokenBalance !== null && !hasManualTokens && mintValid && (
+                  <p className="mt-1 text-[10px] text-[var(--short)]">
+                    You need tokens to create a market.{" "}
+                    <Link href="/devnet-mint" className="underline hover:text-[var(--accent)]">Mint on faucet</Link>
+                  </p>
                 )}
               </div>
               <InfoBanner>On devnet, select Admin Oracle to push prices manually. On mainnet, use Pyth or DexScreener for live feeds.</InfoBanner>
@@ -886,7 +934,12 @@ export const CreateMarketWizard: FC = () => {
                 <span className="text-[13px] font-bold text-[var(--text)]">~{slabTier === "small" ? "0.5" : slabTier === "medium" ? "1.8" : "7.0"} SOL</span>
               </div>
               {!publicKey && <p className="text-[11px] text-[var(--warning)]">Connect your wallet to create a market.</p>}
-              <button onClick={handleCreate} disabled={!allValid || !publicKey} className={btnPrimary}>Create Market</button>
+              {publicKey && !hasManualTokens && mintValid && !balanceLoading && (
+                <p className="text-[11px] text-[var(--short)]">You need tokens for this mint to create a market. <Link href="/devnet-mint" className="underline hover:text-[var(--accent)]">Mint on faucet</Link></p>
+              )}
+              <button onClick={handleCreate} disabled={!allValid || !publicKey} className={btnPrimary}>
+                {!publicKey ? "Connect Wallet" : !hasManualTokens && mintValid ? "No Tokens — Mint First" : "Create Market"}
+              </button>
             </div>
           </StepSection>
         </div>
