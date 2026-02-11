@@ -138,6 +138,7 @@ const MarketCard: FC<{
   const riskGateActive = riskThreshold > 0n && vault <= riskThreshold;
 
   const [showBurnConfirm, setShowBurnConfirm] = useState(false);
+  const [burnConfirmText, setBurnConfirmText] = useState("");
   const [showOracleInput, setShowOracleInput] = useState(false);
   const [showPriceInput, setShowPriceInput] = useState(false);
   const [showTopUpInput, setShowTopUpInput] = useState(false);
@@ -313,15 +314,42 @@ const MarketCard: FC<{
         onConfirm={(v) => { setShowTopUpInput(false); const parsed = parseFloat(v); if (isNaN(parsed) || parsed <= 0) return; const amount = BigInt(Math.round(parsed * 1e6)); handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount)); }}
         onCancel={() => setShowTopUpInput(false)}
       />
-      <ConfirmDialog
-        open={showBurnConfirm}
-        title="burn admin key"
-        description="this is permanent. like, actually permanent. you will never be able to update config, set oracle, or perform any admin actions on this market again."
-        confirmLabel="burn it"
-        danger
-        onConfirm={() => { setShowBurnConfirm(false); handleAction("Burn Admin Key", () => actions.renounceAdmin(market)); }}
-        onCancel={() => setShowBurnConfirm(false)}
-      />
+      {/* Burn admin key - requires typing BURN to confirm */}
+      {showBurnConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="mx-4 max-w-md w-full rounded-[4px] border border-[#1a1a1f] bg-[#111113] p-8">
+            <h3 className="text-lg font-bold text-white">burn admin key</h3>
+            <p className="mt-2 text-sm text-[#71717a]">
+              This is permanent and irreversible. You will never be able to update config, set oracle, or perform any admin actions on this market again.
+            </p>
+            <p className="mt-4 text-sm font-semibold text-[#FF4466]">
+              Type "BURN" to confirm:
+            </p>
+            <input
+              value={burnConfirmText}
+              onChange={(e) => setBurnConfirmText(e.target.value)}
+              placeholder="BURN"
+              className="mt-2 w-full rounded-[4px] border border-[#1a1a1f] bg-[#09090b] px-4 py-2.5 text-sm text-white placeholder-[#3f3f46] outline-none focus:border-[#3f3f46]"
+            />
+            <div className="mt-4 flex gap-3">
+              <GlowButton variant="ghost" size="sm" onClick={() => { setShowBurnConfirm(false); setBurnConfirmText(""); }}>cancel</GlowButton>
+              <GlowButton
+                variant="secondary"
+                size="sm"
+                disabled={burnConfirmText !== "BURN"}
+                onClick={() => { 
+                  setShowBurnConfirm(false); 
+                  setBurnConfirmText("");
+                  handleAction("Burn Admin Key", () => actions.renounceAdmin(market)); 
+                }}
+                className="!border-[#FF4466]/30 !text-[#FF4466] hover:!bg-[#FF4466]/10 disabled:opacity-40"
+              >
+                burn it
+              </GlowButton>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

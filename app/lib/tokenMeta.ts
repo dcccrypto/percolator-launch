@@ -55,10 +55,32 @@ export async function fetchTokenMeta(
       const metadataAccount = await connection.getAccountInfo(metadataPDA);
       if (metadataAccount?.data) {
         const data = metadataAccount.data;
+        const MAX_NAME_LEN = 256;
+        const MAX_SYM_LEN = 32;
+        
+        // Check minimum buffer size for name length field
+        if (data.length < 69) {
+          throw new Error("Buffer too small for name length");
+        }
+        
         const nameLen = data.readUInt32LE(65);
+        if (nameLen > MAX_NAME_LEN || data.length < 69 + nameLen) {
+          throw new Error("Invalid name length or buffer too small");
+        }
+        
         const nameRaw = data.slice(69, 69 + nameLen).toString("utf8").replace(/\0/g, "").trim();
         const symOffset = 69 + nameLen;
+        
+        // Check buffer size for symbol length field
+        if (data.length < symOffset + 4) {
+          throw new Error("Buffer too small for symbol length");
+        }
+        
         const symLen = data.readUInt32LE(symOffset);
+        if (symLen > MAX_SYM_LEN || data.length < symOffset + 4 + symLen) {
+          throw new Error("Invalid symbol length or buffer too small");
+        }
+        
         const symRaw = data.slice(symOffset + 4, symOffset + 4 + symLen).toString("utf8").replace(/\0/g, "").trim();
         if (nameRaw && symRaw) {
           symbol = symRaw;

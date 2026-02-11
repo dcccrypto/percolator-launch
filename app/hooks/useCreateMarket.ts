@@ -527,7 +527,7 @@ export function useCreateMarket() {
               deployer: wallet.publicKey.toBase58(),
               oracle_authority: isAdminOracle ? wallet.publicKey.toBase58() : null,
               initial_price_e6: params.initialPriceE6.toString(),
-              max_leverage: Math.floor(10000 / Number(params.initialMarginBps)),
+              max_leverage: params.initialMarginBps > 0 ? Math.floor(10000 / Number(params.initialMarginBps)) : 1,
               trading_fee_bps: Number(params.tradingFeeBps),
               lp_collateral: params.lpCollateral.toString(),
             }),

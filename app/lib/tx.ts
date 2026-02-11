@@ -14,6 +14,7 @@ export interface SendTxParams {
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_TIME_MS = 90_000;
+const PRIORITY_FEE = Number(process.env.NEXT_PUBLIC_PRIORITY_FEE ?? 100_000);
 
 /**
  * Poll getSignatureStatuses until confirmed or timeout.
@@ -85,7 +86,7 @@ export async function sendTx({
     try {
       const tx = new Transaction();
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
-      tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
+      tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
       for (const ix of instructions) {
         tx.add(ix);
       }
