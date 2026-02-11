@@ -1,6 +1,9 @@
 import { getSupabase } from "../db/client.js";
 import { config } from "../config.js";
 import type { CrankService } from "./crank.js";
+import { getConnection } from "../utils/solana.js";
+import { deriveInsuranceLpMint } from "@percolator/core";
+import { PublicKey } from "@solana/web3.js";
 
 const POLL_INTERVAL_MS = 30_000;
 const MS_PER_DAY = 86_400_000;
@@ -57,16 +60,27 @@ export class InsuranceLPService {
 
   private async poll(): Promise<void> {
     const markets = this.crankService.getMarkets();
+    const connection = getConnection();
 
     for (const [slab, state] of markets.entries()) {
       try {
-        // TODO: Insurance balance should come from engine.insurance (the on-chain insurance fund field).
-        // TODO: LP supply should come from the insurance LP mint supply (SPL token via getTokenSupply).
-        // engine.vault is total vault balance (not insurance) and engine.totalOpenInterest is OI (not LP supply).
-        // Using 0 as default until correct fields are wired in.
         const engine = state.market.engine;
-        const insuranceBalance = 0;
-        const lpSupply = 0;
+        
+        // Get real insurance balance from on-chain engine state
+        const insuranceBalance = Number(engine.insuranceFund.balance);
+
+        // Derive LP mint PDA and fetch supply
+        const slabPubkey = new PublicKey(slab);
+        const [lpMint] = deriveInsuranceLpMint(new PublicKey(config.programId), slabPubkey);
+        
+        let lpSupply = 0;
+        try {
+          const mintInfo = await connection.getTokenSupply(lpMint);
+          lpSupply = Number(mintInfo.value.amount);
+        } catch (err) {
+          // LP mint might not exist yet if no LPs have deposited
+          console.warn(`[InsuranceLPService] LP mint not found for ${slab}:`, err);
+        }
 
         const redemptionRateE6 =
           lpSupply > 0 ? Math.floor((insuranceBalance * 1_000_000) / lpSupply) : 1_000_000;
