@@ -85,11 +85,12 @@ const btnSecondary = "border border-[var(--border)] bg-transparent px-4 py-2 tex
 /** Quick Launch sub-component */
 const QuickLaunchPanel: FC<{
   onFallbackToManual: (mint: string, pool: DexPoolResult | null) => void;
-}> = ({ onFallbackToManual }) => {
+  initialMint?: string;
+}> = ({ onFallbackToManual, initialMint }) => {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
   const { state, create, reset } = useCreateMarket();
-  const [quickMint, setQuickMint] = useState("");
+  const [quickMint, setQuickMint] = useState(initialMint ?? "");
   const [quickSlabTier, setQuickSlabTier] = useState<SlabTierKey>("small");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [tradingFeeBps, setTradingFeeBps] = useState<number | null>(null);
@@ -486,7 +487,7 @@ const CreationProgress: FC<{
 };
 
 /* ─── Main Wizard ─── */
-export const CreateMarketWizard: FC = () => {
+export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }) => {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
   const { state, create, reset } = useCreateMarket();
@@ -678,7 +679,7 @@ export const CreateMarketWizard: FC = () => {
         ))}
       </div>
 
-      {wizardMode === "quick" && <QuickLaunchPanel onFallbackToManual={handleFallbackToManual} />}
+      {wizardMode === "quick" && <QuickLaunchPanel onFallbackToManual={handleFallbackToManual} initialMint={initialMint} />}
 
       {wizardMode === "manual" && (
         <div className="border border-[var(--border)] divide-y divide-[var(--border)]">

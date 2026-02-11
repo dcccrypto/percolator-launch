@@ -1,6 +1,7 @@
 "use client";
 
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { CreateMarketWizard } from "@/components/create/CreateMarketWizard";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
@@ -12,6 +13,8 @@ const WalletMultiButton = dynamic(
 
 export default function CreatePage() {
   const { connected } = useWallet();
+  const searchParams = useSearchParams();
+  const initialMint = searchParams.get("mint") ?? undefined;
 
   return (
     <div className="min-h-[calc(100vh-48px)] relative">
@@ -61,7 +64,7 @@ export default function CreatePage() {
         {/* Main wizard container */}
         <ScrollReveal delay={0.1}>
           <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
-            <CreateMarketWizard />
+            <CreateMarketWizard initialMint={initialMint} />
           </div>
         </ScrollReveal>
       </div>
