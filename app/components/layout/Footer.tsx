@@ -51,7 +51,7 @@ export const Footer: FC = () => {
             </a>
             <span className="h-3 w-px bg-[var(--border)]" />
             <a
-              href="https://x.com/aaboroday"
+              href="https://x.com/Percolator_ct"
               target="_blank"
               rel="noopener noreferrer"
               className="transition-colors hover:text-[var(--text-secondary)]"
