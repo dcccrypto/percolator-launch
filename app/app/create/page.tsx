@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -11,7 +12,8 @@ const WalletMultiButton = dynamic(
   { ssr: false }
 );
 
-export default function CreatePage() {
+/** Inner component that reads search params (needs Suspense boundary) */
+function CreatePageInner() {
   const { connected } = useWallet();
   const searchParams = useSearchParams();
   const initialMint = searchParams.get("mint") ?? undefined;
@@ -69,5 +71,14 @@ export default function CreatePage() {
         </ScrollReveal>
       </div>
     </div>
+  );
+}
+
+/** Page wrapper with Suspense for useSearchParams */
+export default function CreatePage() {
+  return (
+    <Suspense>
+      <CreatePageInner />
+    </Suspense>
   );
 }
