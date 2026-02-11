@@ -8,7 +8,7 @@ interface Trade {
   id: string;
   side: "long" | "short";
   size: number | string;
-  price_e6: number | string;
+  price: number | string;  // DB column is `price` (NUMERIC), not `price_e6`
   fee: number;
   trader: string;
   tx_signature: string;
@@ -120,7 +120,7 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   {trade.size != null ? formatTokenAmount(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size)))) : "—"}
                 </div>
                 <div className="text-right text-[var(--text-muted)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                  {trade.price_e6 != null ? formatPriceE6(toBigInt(trade.price_e6)) : "—"}
+                  {trade.price != null ? formatPriceE6(BigInt(Math.round(Number(trade.price) * 1e6))) : "—"}
                 </div>
               </a>
             ))}
