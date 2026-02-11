@@ -8,11 +8,15 @@ import { eventBus } from "../services/events.js";
 const MAX_WS_CONNECTIONS = Number(process.env.MAX_WS_CONNECTIONS ?? 500);
 const MAX_BUFFER_BYTES = 64 * 1024; // 64KB
 const MAX_SUBSCRIPTIONS_PER_CLIENT = 50; // Prevent Helius WS subscription exhaustion
+const MAX_GLOBAL_SUBSCRIPTIONS = 1000; // Global subscription cap to prevent DoS
 
 interface WsClient {
   ws: WebSocket;
   subscriptions: Set<string>;
 }
+
+// Track global subscription count across all clients
+let globalSubscriptionCount = 0;
 
 export function setupWebSocket(
   server: Server,
@@ -61,12 +65,20 @@ export function setupWebSocket(
       try {
         const msg = JSON.parse(raw.toString()) as { type: string; slabAddress?: string };
         if (msg.type === "subscribe" && msg.slabAddress) {
+          // Cap global subscriptions to prevent DoS
+          if (globalSubscriptionCount >= MAX_GLOBAL_SUBSCRIPTIONS) {
+            ws.send(JSON.stringify({ type: "error", message: `Server subscription limit reached (${MAX_GLOBAL_SUBSCRIPTIONS})` }));
+            return;
+          }
+          
           // Cap subscriptions per client to prevent Helius WS exhaustion
           if (client.subscriptions.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) {
             ws.send(JSON.stringify({ type: "error", message: `Max ${MAX_SUBSCRIPTIONS_PER_CLIENT} subscriptions per connection` }));
             return;
           }
+          
           client.subscriptions.add(msg.slabAddress);
+          globalSubscriptionCount++;
 
           if (priceEngine) {
             priceEngine.subscribeToSlab(msg.slabAddress);
@@ -92,7 +104,9 @@ export function setupWebSocket(
             }
           }
         } else if (msg.type === "unsubscribe" && msg.slabAddress) {
-          client.subscriptions.delete(msg.slabAddress);
+          if (client.subscriptions.delete(msg.slabAddress)) {
+            globalSubscriptionCount--;
+          }
           ws.send(JSON.stringify({ type: "unsubscribed", slabAddress: msg.slabAddress }));
         }
       } catch {
@@ -102,6 +116,8 @@ export function setupWebSocket(
 
     ws.on("close", () => {
       // H2: O(1) removal with Set
+      // Decrement global subscription count for all client subscriptions
+      globalSubscriptionCount -= client.subscriptions.size;
       clients.delete(client);
     });
   });

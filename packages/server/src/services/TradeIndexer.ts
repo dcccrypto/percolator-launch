@@ -191,6 +191,34 @@ export class TradeIndexer {
       const exists = await tradeExistsBySignature(signature);
       if (exists) return; // Already indexed (a tx can only have one trade instruction we care about per slab)
 
+      // Validate inputs before database insertion to prevent SQL injection
+      const base58PubkeyRegex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+      const base58SigRegex = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+      
+      if (!base58PubkeyRegex.test(trader)) {
+        console.warn(`[TradeIndexer] Invalid trader pubkey format: ${trader.slice(0, 12)}... - skipping insert`);
+        return;
+      }
+      
+      if (!base58SigRegex.test(signature)) {
+        console.warn(`[TradeIndexer] Invalid signature format: ${signature.slice(0, 12)}... - skipping insert`);
+        return;
+      }
+      
+      // Validate size is within i128 range
+      try {
+        const parsedSize = BigInt(sizeValue.toString());
+        const i128Max = (1n << 127n) - 1n;
+        const i128Min = -(1n << 127n);
+        if (parsedSize > i128Max || parsedSize < i128Min) {
+          console.warn(`[TradeIndexer] Size out of i128 range: ${parsedSize} - skipping insert`);
+          return;
+        }
+      } catch (err) {
+        console.warn(`[TradeIndexer] Invalid size format: ${sizeValue.toString()} - skipping insert`);
+        return;
+      }
+
       await insertTrade({
         slab_address: slabAddress,
         trader,

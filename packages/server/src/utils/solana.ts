@@ -30,6 +30,12 @@ export async function pollSignatureStatus(
   signature: string,
   timeoutMs = 60_000,
 ): Promise<void> {
+  // Validate signature format before polling to avoid wasting RPC calls
+  const base58SigRegex = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+  if (!base58SigRegex.test(signature)) {
+    throw new Error(`Invalid signature format: ${signature}`);
+  }
+  
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     await acquireToken();

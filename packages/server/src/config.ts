@@ -1,5 +1,10 @@
 import "dotenv/config";
 
+// Validate RPC_URL in production
+if (process.env.NODE_ENV === "production" && !process.env.RPC_URL) {
+  throw new Error("RPC_URL must be explicitly set in production environment. Cannot fall back to devnet.");
+}
+
 export const config = {
   rpcUrl: process.env.RPC_URL ?? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`,
   programId: process.env.PROGRAM_ID ?? "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
