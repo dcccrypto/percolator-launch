@@ -51,9 +51,10 @@ export function usePortfolio(): PortfolioData {
 
     let cancelled = false;
     const cfg = getConfig();
-    const programIds = new Set<string>([cfg.programId]);
+    const programIds = new Set<string>();
+    if (cfg.programId) programIds.add(cfg.programId);
     const byTier = (cfg as any).programsBySlabTier as Record<string, string> | undefined;
-    if (byTier) Object.values(byTier).forEach((id) => programIds.add(id));
+    if (byTier) Object.values(byTier).forEach((id) => { if (id) programIds.add(id); });
     const pkStr = publicKey.toBase58();
 
     async function load() {

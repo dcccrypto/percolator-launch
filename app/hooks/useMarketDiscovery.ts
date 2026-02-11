@@ -9,12 +9,13 @@ import { getConfig } from "@/lib/config";
 /** Get all unique program IDs to scan (default + all slab tier programs) */
 function getAllProgramIds(): PublicKey[] {
   const cfg = getConfig();
-  const ids = new Set<string>([cfg.programId]);
+  const ids = new Set<string>();
+  if (cfg.programId) ids.add(cfg.programId);
   const byTier = (cfg as any).programsBySlabTier as Record<string, string> | undefined;
   if (byTier) {
-    Object.values(byTier).forEach((id) => ids.add(id));
+    Object.values(byTier).forEach((id) => { if (id) ids.add(id); });
   }
-  return [...ids].map((id) => new PublicKey(id));
+  return [...ids].filter(Boolean).map((id) => new PublicKey(id));
 }
 
 /**

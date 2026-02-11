@@ -11,7 +11,10 @@ function getNetwork(): Network {
     const override = localStorage.getItem("percolator-network") as Network | null;
     if (override === "mainnet" || override === "devnet") return override;
   }
-  return (process.env.NEXT_PUBLIC_DEFAULT_NETWORK as Network) ?? "devnet";
+  // Trim env var to handle trailing whitespace/newlines (Vercel env var copy-paste issue)
+  const envNet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
+  if (envNet === "mainnet" || envNet === "devnet") return envNet;
+  return "devnet";
 }
 
 const CONFIGS = {
