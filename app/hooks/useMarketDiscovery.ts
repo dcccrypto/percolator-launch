@@ -3,15 +3,7 @@
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection } from "@solana/wallet-adapter-react";
-import {
-  discoverMarkets,
-  fetchSlab,
-  parseHeader,
-  parseConfig,
-  parseEngine,
-  parseParams,
-  type DiscoveredMarket,
-} from "@percolator/core";
+import { discoverMarkets, type DiscoveredMarket } from "@percolator/core";
 import { getConfig } from "@/lib/config";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_WS_URL?.replace("wss://", "https://").replace("ws://", "http://") ?? "";
@@ -27,30 +19,86 @@ function getAllProgramIds(): PublicKey[] {
   return [...ids].map((id) => new PublicKey(id));
 }
 
+/** Backend API market shape */
+interface ApiMarket {
+  slabAddress: string;
+  programId: string;
+  admin: string;
+  resolved: boolean;
+  mint: string;
+  vault: string;
+  oracleAuthority: string;
+  indexFeedId: string;
+  authorityPriceE6: string;
+  lastEffectivePriceE6: string;
+  totalOpenInterest: string;
+  cTot: string;
+  insuranceFundBalance: string;
+  numUsedAccounts: number;
+  lastCrankSlot: string;
+  initialMarginBps: string;
+  maintenanceMarginBps: string;
+}
+
 /**
- * Try fetching market list from backend API first (fast, no RPC rate limits).
- * Returns slab addresses that the backend has discovered.
+ * Convert backend API market to DiscoveredMarket shape for compatibility
+ * with existing frontend components.
  */
-async function fetchBackendMarketAddrs(): Promise<string[] | null> {
+function apiToDiscovered(m: ApiMarket): DiscoveredMarket {
+  return {
+    slabAddress: new PublicKey(m.slabAddress),
+    programId: new PublicKey(m.programId),
+    header: {
+      magic: 0n,
+      version: 0,
+      admin: new PublicKey(m.admin),
+      resolved: m.resolved,
+    },
+    config: {
+      collateralMint: new PublicKey(m.mint),
+      vaultPubkey: new PublicKey(m.vault),
+      oracleAuthority: new PublicKey(m.oracleAuthority),
+      indexFeedId: new PublicKey(m.indexFeedId),
+      authorityPriceE6: BigInt(m.authorityPriceE6),
+      lastEffectivePriceE6: BigInt(m.lastEffectivePriceE6),
+    },
+    engine: {
+      vault: BigInt(m.cTot),
+      totalOpenInterest: BigInt(m.totalOpenInterest),
+      cTot: BigInt(m.cTot),
+      numUsedAccounts: m.numUsedAccounts,
+      lastCrankSlot: BigInt(m.lastCrankSlot),
+      insuranceFund: { balance: BigInt(m.insuranceFundBalance) },
+    },
+    params: {
+      initialMarginBps: BigInt(m.initialMarginBps),
+      maintenanceMarginBps: BigInt(m.maintenanceMarginBps),
+    },
+  } as unknown as DiscoveredMarket;
+}
+
+/**
+ * Fetch full market data from backend API (no RPC calls needed).
+ */
+async function fetchMarketsFromApi(): Promise<DiscoveredMarket[] | null> {
   if (!BACKEND_URL) return null;
   try {
     const res = await fetch(`${BACKEND_URL}/markets`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const data = await res.json();
-    const markets = data.markets as Array<{ slabAddress: string }>;
-    return markets.map((m) => m.slabAddress);
+    const markets = (data.markets ?? []) as ApiMarket[];
+    return markets.map(apiToDiscovered);
   } catch {
     return null;
   }
 }
 
 /**
- * Discovers all Percolator markets across all known program deployments.
+ * Discovers all Percolator markets.
  *
  * Strategy:
- * 1. Ask backend API which slabs exist (fast, no rate limits)
- * 2. Fetch each slab individually via getAccountInfo (cheap, not rate-limited)
- * 3. Fallback: full getProgramAccounts scan (sequential with delays)
+ * 1. Fetch full market data from backend API (fast, no RPC calls)
+ * 2. Fallback: direct RPC discovery via getProgramAccounts (sequential with delays)
  */
 export function useMarketDiscovery() {
   const { connection } = useConnection();
@@ -70,45 +118,22 @@ export function useMarketDiscovery() {
 
     async function load() {
       try {
-        let discovered: DiscoveredMarket[] = [];
+        // Strategy 1: Full market data from backend API (no RPC needed)
+        let discovered = await fetchMarketsFromApi();
 
-        // Strategy 1: Backend API → individual slab fetches
-        const backendAddrs = await fetchBackendMarketAddrs();
-        if (backendAddrs && backendAddrs.length > 0) {
-          const results = await Promise.allSettled(
-            backendAddrs.map(async (addr) => {
-              const pubkey = new PublicKey(addr);
-              const info = await connection.getAccountInfo(pubkey);
-              if (!info) return null;
-              const data = Buffer.from(info.data);
-              return {
-                slabAddress: pubkey,
-                programId: info.owner,
-                header: parseHeader(data),
-                config: parseConfig(data),
-                engine: parseEngine(data),
-                params: parseParams(data),
-              } as DiscoveredMarket;
-            })
-          );
-          discovered = results
-            .filter((r): r is PromiseFulfilledResult<DiscoveredMarket | null> => r.status === "fulfilled")
-            .map((r) => r.value)
-            .filter((v): v is DiscoveredMarket => v !== null);
-        }
-
-        // Strategy 2: Fallback to full discovery if backend returned nothing
-        if (discovered.length === 0) {
+        // Strategy 2: Fallback to direct RPC discovery (sequential)
+        if (!discovered || discovered.length === 0) {
+          const allFound: DiscoveredMarket[] = [];
           for (const pid of programIds) {
             try {
               const found = await discoverMarkets(connection, pid);
-              discovered.push(...found);
+              allFound.push(...found);
             } catch {
               // Silently skip — may be rate limited
             }
-            // Delay between programs to avoid 429
             await new Promise((r) => setTimeout(r, 1_500));
           }
+          discovered = allFound;
         }
 
         if (!cancelled) {
@@ -125,14 +150,8 @@ export function useMarketDiscovery() {
     }
 
     load();
-
-    // Refetch every 30 seconds
     const interval = setInterval(load, 30_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+    return () => { cancelled = true; clearInterval(interval); };
   }, [connection]);
 
   return { markets, loading, error };

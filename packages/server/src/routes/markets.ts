@@ -16,17 +16,34 @@ interface MarketDeps {
 export function marketRoutes(deps: MarketDeps): Hono {
   const app = new Hono();
 
-  // GET /markets — list all discovered markets with stats
+  // GET /markets — list all discovered markets with full on-chain data
   app.get("/markets", (c) => {
     const markets = deps.crankService.getMarkets();
-    const result = Array.from(markets.entries()).map(([key, state]) => ({
-      slabAddress: key,
-      admin: state.market.header.admin.toBase58(),
-      mint: state.market.config.collateralMint.toBase58(),
-      lastCrankTime: state.lastCrankTime,
-      successCount: state.successCount,
-      failureCount: state.failureCount,
-    }));
+    const result = Array.from(markets.entries()).map(([key, state]) => {
+      const m = state.market;
+      return {
+        slabAddress: key,
+        programId: m.programId.toBase58(),
+        admin: m.header.admin.toBase58(),
+        resolved: m.header.resolved,
+        mint: m.config.collateralMint.toBase58(),
+        vault: m.config.vaultPubkey.toBase58(),
+        oracleAuthority: m.config.oracleAuthority.toBase58(),
+        indexFeedId: m.config.indexFeedId.toBase58(),
+        authorityPriceE6: m.config.authorityPriceE6.toString(),
+        lastEffectivePriceE6: m.config.lastEffectivePriceE6.toString(),
+        totalOpenInterest: m.engine.totalOpenInterest.toString(),
+        cTot: m.engine.cTot.toString(),
+        insuranceFundBalance: m.engine.insuranceFund?.balance?.toString() ?? "0",
+        numUsedAccounts: m.engine.numUsedAccounts,
+        lastCrankSlot: m.engine.lastCrankSlot.toString(),
+        initialMarginBps: m.params.initialMarginBps.toString(),
+        maintenanceMarginBps: m.params.maintenanceMarginBps.toString(),
+        lastCrankTime: state.lastCrankTime,
+        successCount: state.successCount,
+        failureCount: state.failureCount,
+      };
+    });
     return c.json({ markets: result });
   });
 
