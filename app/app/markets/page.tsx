@@ -8,8 +8,10 @@ import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
 import type { MarketWithStats } from "@/lib/supabase";
 import { getSupabase } from "@/lib/supabase";
+import { fetchTokenMeta, type TokenMeta } from "@/lib/tokenMeta";
 import type { DiscoveredMarket } from "@percolator/core";
 import { PublicKey } from "@solana/web3.js";
+import { useConnection } from "@solana/wallet-adapter-react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
@@ -70,9 +72,11 @@ const MOCK_MARKETS: MergedMarket[] = [
 ];
 
 export default function MarketsPage() {
+  const { connection } = useConnection();
   const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();
   const [supabaseMarkets, setSupabaseMarkets] = useState<MarketWithStats[]>([]);
   const [supabaseLoading, setSupabaseLoading] = useState(true);
+  const [tokenMetas, setTokenMetas] = useState<Map<string, TokenMeta>>(new Map());
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("volume");
   const [leverageFilter, setLeverageFilter] = useState<LeverageFilter>("all");
@@ -93,6 +97,37 @@ export default function MarketsPage() {
     load();
   }, []);
 
+  // Fetch on-chain token metadata for mints not in Supabase
+  useEffect(() => {
+    if (discovered.length === 0) return;
+    const sbMints = new Set(supabaseMarkets.map((m) => m.slab_address));
+    const mintsToFetch = discovered
+      .filter((d) => !sbMints.has(d.slabAddress.toBase58()))
+      .map((d) => d.config.collateralMint);
+
+    if (mintsToFetch.length === 0) return;
+
+    let cancelled = false;
+    Promise.all(
+      mintsToFetch.map(async (mint) => {
+        try {
+          const meta = await fetchTokenMeta(connection, mint);
+          return meta ? { mint: mint.toBase58(), meta } : null;
+        } catch {
+          return null;
+        }
+      })
+    ).then((results) => {
+      if (cancelled) return;
+      const newMap = new Map(tokenMetas);
+      for (const r of results) {
+        if (r) newMap.set(r.mint, r.meta);
+      }
+      setTokenMetas(newMap);
+    });
+    return () => { cancelled = true; };
+  }, [discovered, supabaseMarkets, connection]);
+
   const merged = useMemo<MergedMarket[]>(() => {
     const sbMap = new Map<string, MarketWithStats>();
     for (const m of supabaseMarkets) sbMap.set(m.slab_address, m);
@@ -100,11 +135,21 @@ export default function MarketsPage() {
       const addr = d.slabAddress.toBase58();
       const mint = d.config.collateralMint.toBase58();
       const sb = sbMap.get(addr) ?? null;
+      const meta = tokenMetas.get(mint);
       const maxLev = d.params.initialMarginBps > 0n ? Math.floor(10000 / Number(d.params.initialMarginBps)) : 0;
       const isAdminOracle = d.config.indexFeedId.equals(PublicKey.default);
-      return { slabAddress: addr, mintAddress: mint, symbol: sb?.symbol ?? null, name: sb?.name ?? null, maxLeverage: maxLev, isAdminOracle, onChain: d, supabase: sb };
+      return {
+        slabAddress: addr,
+        mintAddress: mint,
+        symbol: sb?.symbol ?? meta?.symbol ?? null,
+        name: sb?.name ?? meta?.name ?? null,
+        maxLeverage: maxLev,
+        isAdminOracle,
+        onChain: d,
+        supabase: sb,
+      };
     });
-  }, [discovered, supabaseMarkets]);
+  }, [discovered, supabaseMarkets, tokenMetas]);
 
   // Only show mock data in development (never in production)
   const effectiveMarkets = merged.length > 0 ? merged : (process.env.NODE_ENV === "development" ? MOCK_MARKETS : []);
