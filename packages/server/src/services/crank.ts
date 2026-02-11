@@ -54,8 +54,10 @@ export class CrankService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly intervalMs: number;
   private readonly inactiveIntervalMs: number;
+  private readonly discoveryIntervalMs: number;
   private readonly oracleService: OracleService;
   private lastCycleResult = { success: 0, failed: 0, skipped: 0 };
+  private lastDiscoveryTime = 0;
   private _isRunning = false;
   private _cycling = false;
 
@@ -63,6 +65,7 @@ export class CrankService {
     this.oracleService = oracleService;
     this.intervalMs = intervalMs ?? config.crankIntervalMs;
     this.inactiveIntervalMs = config.crankInactiveIntervalMs;
+    this.discoveryIntervalMs = config.discoveryIntervalMs;
   }
 
   get isRunning(): boolean {
@@ -72,21 +75,25 @@ export class CrankService {
   async discover(): Promise<DiscoveredMarket[]> {
     const programIds = config.allProgramIds;
     console.log(`[CrankService] Discovering markets across ${programIds.length} programs...`);
-    // Use fallback RPC for discovery (Helius may rate-limit getProgramAccounts)
+    // Use fallback RPC for discovery (Helius rate-limits getProgramAccounts)
+    // Sequential calls with delay to avoid 429 from public RPC
     const discoveryConn = getFallbackConnection();
-    const results = await Promise.all(
-      programIds.map(async (id) => {
-        try {
-          const found = await discoverMarkets(discoveryConn, new PublicKey(id));
-          console.log(`[CrankService] Program ${id}: ${found.length} markets`);
-          return found;
-        } catch (e) {
-          console.warn(`[CrankService] Failed to discover on ${id}:`, e);
-          return [] as DiscoveredMarket[];
-        }
-      })
-    );
-    const discovered = results.flat();
+    const allFound: DiscoveredMarket[] = [];
+    for (const id of programIds) {
+      try {
+        const found = await discoverMarkets(discoveryConn, new PublicKey(id));
+        console.log(`[CrankService] Program ${id}: ${found.length} markets`);
+        allFound.push(...found);
+      } catch (e) {
+        console.warn(`[CrankService] Failed to discover on ${id}:`, e);
+      }
+      // 2s delay between programs to avoid rate limits
+      if (programIds.indexOf(id) < programIds.length - 1) {
+        await new Promise((r) => setTimeout(r, 2_000));
+      }
+    }
+    const discovered = allFound;
+    this.lastDiscoveryTime = Date.now();
     console.log(`[CrankService] Found ${discovered.length} markets total`);
 
     const discoveredKeys = new Set<string>();
@@ -255,8 +262,13 @@ export class CrankService {
       if (this._cycling) return; // Prevent overlapping cycles
       this._cycling = true;
       try {
-        const markets = await this.discover();
-        if (markets.length > 0) {
+        // Only rediscover periodically (default 5min) to avoid RPC rate limits
+        const needsDiscovery = this.markets.size === 0 ||
+          (Date.now() - this.lastDiscoveryTime >= this.discoveryIntervalMs);
+        if (needsDiscovery) {
+          await this.discover();
+        }
+        if (this.markets.size > 0) {
           const result = await this.crankAll();
           if (result.failed > 0) {
             console.warn(`[CrankService] Crank cycle: ${result.success} ok, ${result.failed} failed, ${result.skipped} skipped`);
