@@ -4,9 +4,7 @@ import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { discoverMarkets, type DiscoveredMarket } from "@percolator/core";
-import { getConfig } from "@/lib/config";
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_WS_URL?.replace("wss://", "https://").replace("ws://", "http://") ?? "";
+import { getConfig, getBackendUrl } from "@/lib/config";
 
 /** Get all unique program IDs to scan (default + all slab tier programs) */
 function getAllProgramIds(): PublicKey[] {
@@ -81,9 +79,10 @@ function apiToDiscovered(m: ApiMarket): DiscoveredMarket {
  * Fetch full market data from backend API (no RPC calls needed).
  */
 async function fetchMarketsFromApi(): Promise<DiscoveredMarket[] | null> {
-  if (!BACKEND_URL) return null;
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) return null;
   try {
-    const res = await fetch(`${BACKEND_URL}/markets`, { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(`${backendUrl}/markets`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const data = await res.json();
     const markets = (data.markets ?? []) as ApiMarket[];
