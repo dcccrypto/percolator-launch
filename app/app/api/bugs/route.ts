@@ -25,7 +25,7 @@ export async function GET() {
   try {
     const sb = getServiceClient();
     const { data, error } = await (sb.from as any)(TABLE)
-      .select("id, twitter_handle, title, description, severity, page, wallet_address, status, created_at")
+      .select("id, twitter_handle, title, description, severity, page, bounty_wallet, transaction_wallet, page_url, status, created_at")
       .order("created_at", { ascending: false })
       .limit(50);
 
@@ -64,7 +64,9 @@ export async function POST(req: NextRequest) {
     const steps_to_reproduce = sanitize(String(body.steps_to_reproduce ?? ""));
     const expected_behavior = sanitize(String(body.expected_behavior ?? ""));
     const actual_behavior = sanitize(String(body.actual_behavior ?? ""));
-    const wallet_address = body.wallet_address ? sanitize(String(body.wallet_address)) : null;
+    const bounty_wallet = body.bounty_wallet ? sanitize(String(body.bounty_wallet)) : null;
+    const transaction_wallet = body.transaction_wallet ? sanitize(String(body.transaction_wallet)) : null;
+    const page_url = body.page_url ? sanitize(String(body.page_url)) : null;
     const browser = body.browser ? sanitize(String(body.browser)) : null;
 
     if (!twitter_handle || twitter_handle.length > 30) {
@@ -102,7 +104,9 @@ export async function POST(req: NextRequest) {
       steps_to_reproduce: steps_to_reproduce || null,
       expected_behavior: expected_behavior || null,
       actual_behavior: actual_behavior || null,
-      wallet_address,
+      bounty_wallet,
+      transaction_wallet,
+      page_url: page_url || null,
       browser,
       ip,
     });
