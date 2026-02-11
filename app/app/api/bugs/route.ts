@@ -113,6 +113,39 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error;
 
+    // Post to Discord #bug-reports channel
+    const discordWebhook = process.env.DISCORD_BUG_WEBHOOK_URL;
+    if (discordWebhook) {
+      const severityColors: Record<string, number> = {
+        critical: 0xFF4466,
+        high: 0xFF6B35,
+        medium: 0xFFB800,
+        low: 0x71717A,
+      };
+      const fields = [
+        { name: "Severity", value: severity.toUpperCase(), inline: true },
+        ...(page ? [{ name: "Page", value: page, inline: true }] : []),
+        ...(page_url ? [{ name: "URL", value: page_url, inline: false }] : []),
+        { name: "Description", value: description.slice(0, 1024), inline: false },
+        ...(steps_to_reproduce ? [{ name: "Steps to Reproduce", value: steps_to_reproduce.slice(0, 1024), inline: false }] : []),
+        ...(transaction_wallet ? [{ name: "Transaction Wallet", value: `\`${transaction_wallet}\``, inline: false }] : []),
+      ];
+
+      fetch(discordWebhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          embeds: [{
+            title: `🐛 ${title}`,
+            color: severityColors[severity] ?? 0xFFB800,
+            fields,
+            footer: { text: `Reported by @${twitter_handle}${browser ? ` · ${browser}` : ""}` },
+            timestamp: new Date().toISOString(),
+          }],
+        }),
+      }).catch((e) => console.error("Discord webhook error:", e));
+    }
+
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch (err) {
     console.error("POST /api/bugs error:", err);
