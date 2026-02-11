@@ -41,7 +41,9 @@ export default function ReportBugPage() {
     steps_to_reproduce: "",
     expected_behavior: "",
     actual_behavior: "",
-    wallet_address: "",
+    bounty_wallet: "",
+    transaction_wallet: "",
+    page_url: "",
     browser: "",
   });
 
@@ -113,7 +115,9 @@ export default function ReportBugPage() {
                     steps_to_reproduce: "",
                     expected_behavior: "",
                     actual_behavior: "",
-                    wallet_address: "",
+                    bounty_wallet: "",
+                    transaction_wallet: "",
+                    page_url: "",
                     browser: "",
                   });
                 }}
@@ -191,29 +195,40 @@ export default function ReportBugPage() {
               </div>
               <p className="mt-1 text-[10px] text-[var(--text-dim)]">So we can follow up with you</p>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className={labelStyle}>Wallet Address</label>
-                <input
-                  type="text"
-                  placeholder="Optional — your Solana wallet"
-                  value={form.wallet_address}
-                  onChange={(e) => update("wallet_address", e.target.value)}
-                  maxLength={50}
-                  className={inputStyle}
-                />
-              </div>
-              <div>
-                <label className={labelStyle}>Browser</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Chrome 120, Safari, Brave"
-                  value={form.browser}
-                  onChange={(e) => update("browser", e.target.value)}
-                  maxLength={50}
-                  className={inputStyle}
-                />
-              </div>
+            <div>
+              <label className={labelStyle}>Bounty Wallet Address</label>
+              <input
+                type="text"
+                placeholder="Your Solana wallet to receive bounty payment if accepted"
+                value={form.bounty_wallet}
+                onChange={(e) => update("bounty_wallet", e.target.value)}
+                maxLength={50}
+                className={inputStyle}
+              />
+              <p className="mt-1 text-[10px] text-[var(--text-dim)]">If your report is accepted, the bounty will be sent to this wallet</p>
+            </div>
+            <div>
+              <label className={labelStyle}>Transaction Wallet</label>
+              <input
+                type="text"
+                placeholder="The wallet you were using when the bug occurred"
+                value={form.transaction_wallet}
+                onChange={(e) => update("transaction_wallet", e.target.value)}
+                maxLength={50}
+                className={inputStyle}
+              />
+              <p className="mt-1 text-[10px] text-[var(--text-dim)]">Helps us trace the on-chain activity related to the bug</p>
+            </div>
+            <div>
+              <label className={labelStyle}>Browser</label>
+              <input
+                type="text"
+                placeholder="e.g. Chrome 120, Safari, Brave"
+                value={form.browser}
+                onChange={(e) => update("browser", e.target.value)}
+                maxLength={50}
+                className={inputStyle}
+              />
             </div>
           </div>
         </div>
@@ -305,6 +320,18 @@ export default function ReportBugPage() {
             The more detail here, the faster we can fix it.
           </p>
           <div className="space-y-4">
+            <div>
+              <label className={labelStyle}>Page URL / Link</label>
+              <input
+                type="text"
+                placeholder="e.g. https://percolatorlaunch.com/trade/8n1YAo... or /markets"
+                value={form.page_url}
+                onChange={(e) => update("page_url", e.target.value)}
+                maxLength={500}
+                className={inputStyle}
+              />
+              <p className="mt-1 text-[10px] text-[var(--text-dim)]">Paste the URL of the page where the bug happened — market page, trade page, tx link, etc.</p>
+            </div>
             <div>
               <label className={labelStyle}>Steps to Reproduce</label>
               <textarea
