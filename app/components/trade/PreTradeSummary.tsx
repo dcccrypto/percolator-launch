@@ -22,7 +22,7 @@ interface PreTradeSummaryProps {
 function SummaryRow({
   label,
   value,
-  valueClass = "text-[#F0F4FF]",
+  valueClass = "text-[var(--text)]",
 }: {
   label: string;
   value: string;
@@ -30,7 +30,7 @@ function SummaryRow({
 }) {
   return (
     <div className="flex items-center justify-between py-1">
-      <span className="text-[#5a6382]">{label}</span>
+      <span className="text-[var(--text-muted)]">{label}</span>
       <span className={`font-mono font-medium ${valueClass}`}>{value}</span>
     </div>
   );
@@ -64,17 +64,17 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
   return (
     <div className="mb-4 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3.5 py-3 text-xs backdrop-blur-sm">
       <div className="mb-2 flex items-center gap-2">
-        <div className={`h-1.5 w-1.5 rounded-full ${isLong ? "bg-[#00FFB2]" : "bg-red-500"}`} />
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-[#5a6382]">
+        <div className={`h-1.5 w-1.5 rounded-full ${isLong ? "bg-[var(--long)]" : "bg-[var(--short)]"}`} />
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">
           Order Summary
         </span>
       </div>
 
-      <div className="space-y-0.5 divide-y divide-[#1e2433]/50">
+      <div className="space-y-0.5 divide-y divide-[var(--border)]/50">
         <SummaryRow
           label="Direction"
           value={`${isLong ? "Long" : "Short"} ${leverage}x`}
-          valueClass={isLong ? "text-[#00FFB2]" : "text-red-400"}
+          valueClass={isLong ? "text-[var(--long)]" : "text-[var(--short)]"}
         />
         <SummaryRow label="Est. Entry Price" value={formatUsd(estEntry)} />
         <SummaryRow
@@ -84,7 +84,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         <SummaryRow
           label="Trading Fee"
           value={`${formatTokenAmount(fee)} ${symbol}`}
-          valueClass="text-[#8B95B0]"
+          valueClass="text-[var(--text-secondary)]"
         />
         <SummaryRow
           label="Margin Required"
@@ -93,7 +93,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         <SummaryRow
           label="Est. Liq Price"
           value={formatUsd(liqPrice)}
-          valueClass={isLong ? "text-red-400" : "text-[#00FFB2]"}
+          valueClass={isLong ? "text-[var(--short)]" : "text-[var(--long)]"}
         />
       </div>
     </div>
