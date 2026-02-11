@@ -21,6 +21,29 @@ function is429(err: unknown): boolean {
   return false;
 }
 
+/**
+ * Poll getSignatureStatuses until confirmed or timeout.
+ * More reliable than confirmTransaction which can falsely report expiry on devnet.
+ */
+export async function pollSignatureStatus(
+  connection: Connection,
+  signature: string,
+  timeoutMs = 60_000,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await acquireToken();
+    const resp = await connection.getSignatureStatuses([signature], { searchTransactionHistory: true });
+    const status = resp.value[0];
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") {
+      if (status.err) throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error(`Transaction ${signature} not confirmed after ${timeoutMs}ms`);
+}
+
 export async function sendWithRetry(
   connection: Connection,
   ix: TransactionInstruction,
@@ -40,8 +63,10 @@ export async function sendWithRetry(
       const opts: SendOptions = { skipPreflight: false, preflightCommitment: "confirmed" };
       await acquireToken();
       const sig = await connection.sendRawTransaction(tx.serialize(), opts);
-      await acquireToken();
-      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      
+      // Use getSignatureStatuses polling instead of confirmTransaction
+      // (confirmTransaction can falsely report "block height exceeded" on devnet)
+      await pollSignatureStatus(connection, sig);
       return sig;
     } catch (err) {
       lastErr = err;

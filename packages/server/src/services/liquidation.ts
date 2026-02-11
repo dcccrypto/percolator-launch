@@ -19,7 +19,7 @@ import {
   type DiscoveredMarket,
 } from "@percolator/core";
 import { config } from "../config.js";
-import { getConnection, loadKeypair, sendWithRetry } from "../utils/solana.js";
+import { getConnection, loadKeypair, sendWithRetry, pollSignatureStatus } from "../utils/solana.js";
 import { eventBus } from "./events.js";
 import { OracleService } from "./oracle.js";
 
@@ -261,7 +261,9 @@ export class LiquidationService {
             skipPreflight: false,
             preflightCommitment: "confirmed",
           });
-          await connection.confirmTransaction({ signature: txSig, blockhash, lastValidBlockHeight }, "confirmed");
+          // Use getSignatureStatuses polling instead of confirmTransaction
+          // (confirmTransaction can falsely report "block height exceeded" on devnet)
+          await pollSignatureStatus(connection, txSig);
           sig = txSig;
           break;
         } catch (retryErr) {
