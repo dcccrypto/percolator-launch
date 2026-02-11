@@ -9,7 +9,7 @@ import {
   type DiscoveredMarket,
 } from "@percolator/core";
 import { config } from "../config.js";
-import { getConnection, loadKeypair, sendWithRetry } from "../utils/solana.js";
+import { getConnection, getFallbackConnection, loadKeypair, sendWithRetry } from "../utils/solana.js";
 import { rateLimitedCall } from "../utils/rpc-client.js";
 import { eventBus } from "./events.js";
 import { OracleService } from "./oracle.js";
@@ -72,13 +72,12 @@ export class CrankService {
   async discover(): Promise<DiscoveredMarket[]> {
     const programIds = config.allProgramIds;
     console.log(`[CrankService] Discovering markets across ${programIds.length} programs...`);
+    // Use fallback RPC for discovery (Helius may rate-limit getProgramAccounts)
+    const discoveryConn = getFallbackConnection();
     const results = await Promise.all(
       programIds.map(async (id) => {
         try {
-          const found = await rateLimitedCall(
-            (conn) => discoverMarkets(conn, new PublicKey(id)),
-            { readOnly: true },
-          );
+          const found = await discoverMarkets(discoveryConn, new PublicKey(id));
           console.log(`[CrankService] Program ${id}: ${found.length} markets`);
           return found;
         } catch (e) {
