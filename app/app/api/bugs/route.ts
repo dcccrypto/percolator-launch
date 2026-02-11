@@ -131,19 +131,23 @@ export async function POST(req: NextRequest) {
         ...(transaction_wallet ? [{ name: "Transaction Wallet", value: `\`${transaction_wallet}\``, inline: false }] : []),
       ];
 
-      fetch(discordWebhook, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          embeds: [{
-            title: `🐛 ${title}`,
-            color: severityColors[severity] ?? 0xFFB800,
-            fields,
-            footer: { text: `Reported by @${twitter_handle}${browser ? ` · ${browser}` : ""}` },
-            timestamp: new Date().toISOString(),
-          }],
-        }),
-      }).catch((e) => console.error("Discord webhook error:", e));
+      try {
+        await fetch(discordWebhook, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            embeds: [{
+              title: `🐛 ${title}`,
+              color: severityColors[severity] ?? 0xFFB800,
+              fields,
+              footer: { text: `Reported by @${twitter_handle}${browser ? ` · ${browser}` : ""}` },
+              timestamp: new Date().toISOString(),
+            }],
+          }),
+        });
+      } catch (e) {
+        console.error("Discord webhook error:", e);
+      }
     }
 
     return NextResponse.json({ ok: true }, { status: 201 });
