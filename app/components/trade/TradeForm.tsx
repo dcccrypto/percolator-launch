@@ -77,7 +77,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const maintenanceMarginBps = params?.maintenanceMarginBps ?? 500n;
   const tradingFeeBps = params?.tradingFeeBps ?? 30n;
-  const maxLeverage = Number(10000n / initialMarginBps);
+  const maxLeverage = initialMarginBps > 0n ? Number(10000n / initialMarginBps) : 1;
 
   const availableLeverage = useMemo(() => {
     const arr = LEVERAGE_PRESETS.filter((l) => l <= maxLeverage);

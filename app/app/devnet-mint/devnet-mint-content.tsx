@@ -107,14 +107,19 @@ const DevnetMintContent: FC = () => {
       const sig = await airdropConnection.requestAirdrop(publicKey, 2 * LAMPORTS_PER_SOL);
       const startTime = Date.now();
       const TIMEOUT_MS = 60_000;
+      let confirmed = false;
       while (Date.now() - startTime < TIMEOUT_MS) {
         const { value } = await airdropConnection.getSignatureStatuses([sig]);
         const s = value?.[0];
         if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") {
           if (s.err) throw new Error(`Transaction failed: ${JSON.stringify(s.err)}`);
+          confirmed = true;
           break;
         }
         await new Promise(r => setTimeout(r, 2000));
+      }
+      if (!confirmed) {
+        throw new Error("Transaction confirmation timeout after 60s");
       }
       setAirdropStatus("Airdrop successful!");
       setAirdropFailed(false);
