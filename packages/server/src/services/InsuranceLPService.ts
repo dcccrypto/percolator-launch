@@ -69,9 +69,9 @@ export class InsuranceLPService {
         // Get real insurance balance from on-chain engine state
         const insuranceBalance = Number(engine.insuranceFund.balance);
 
-        // Derive LP mint PDA and fetch supply
+        // Derive LP mint PDA and fetch supply (use per-market programId for multi-program support)
         const slabPubkey = new PublicKey(slab);
-        const [lpMint] = deriveInsuranceLpMint(new PublicKey(config.programId), slabPubkey);
+        const [lpMint] = deriveInsuranceLpMint(state.market.programId, slabPubkey);
         
         let lpSupply = 0;
         try {
