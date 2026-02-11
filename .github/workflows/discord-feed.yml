@@ -1,0 +1,130 @@
+name: Discord Feed
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, closed, merged]
+  issues:
+    types: [opened, closed]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Push notification
+        if: github.event_name == 'push'
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          COMMITS="${{ github.event.commits[0].message }}"
+          AUTHOR="${{ github.event.head_commit.author.username }}"
+          COMPARE="${{ github.event.compare }}"
+          COMMIT_COUNT=$(echo '${{ toJson(github.event.commits) }}' | jq length)
+          SHORT_SHA=$(echo "${{ github.event.after }}" | cut -c1-7)
+          
+          # Truncate commit message
+          MSG=$(echo "$COMMITS" | head -1 | cut -c1-80)
+          
+          curl -s -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"color\": 5025616,
+                \"author\": {
+                  \"name\": \"${AUTHOR}\",
+                  \"icon_url\": \"https://github.com/${AUTHOR}.png?size=32\"
+                },
+                \"description\": \"[\`${SHORT_SHA}\`](${COMPARE}) ${MSG}\",
+                \"footer\": {
+                  \"text\": \"${COMMIT_COUNT} commit(s) to main\"
+                }
+              }]
+            }"
+
+      - name: PR notification
+        if: github.event_name == 'pull_request'
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          ACTION="${{ github.event.action }}"
+          MERGED="${{ github.event.pull_request.merged }}"
+          PR_NUM="${{ github.event.pull_request.number }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+          ADDS="${{ github.event.pull_request.additions }}"
+          DELS="${{ github.event.pull_request.deletions }}"
+          FILES="${{ github.event.pull_request.changed_files }}"
+          
+          if [ "$ACTION" = "opened" ]; then
+            COLOR=3447003
+            ICON="🔵"
+            STATUS="opened"
+          elif [ "$ACTION" = "closed" ] && [ "$MERGED" = "true" ]; then
+            COLOR=5025616
+            ICON="🟣"
+            STATUS="merged"
+          elif [ "$ACTION" = "closed" ]; then
+            COLOR=10038562
+            ICON="⚫"
+            STATUS="closed"
+          else
+            exit 0
+          fi
+          
+          # Truncate title
+          TITLE=$(echo "$PR_TITLE" | cut -c1-80)
+          
+          curl -s -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"color\": ${COLOR},
+                \"author\": {
+                  \"name\": \"${AUTHOR}\",
+                  \"icon_url\": \"https://github.com/${AUTHOR}.png?size=32\"
+                },
+                \"description\": \"${ICON} [#${PR_NUM}](${PR_URL}) ${TITLE}\n+${ADDS} -${DELS} across ${FILES} files\",
+                \"footer\": {
+                  \"text\": \"PR ${STATUS}\"
+                }
+              }]
+            }"
+
+      - name: Issue notification
+        if: github.event_name == 'issues'
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          ACTION="${{ github.event.action }}"
+          ISSUE_NUM="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_URL="${{ github.event.issue.html_url }}"
+          AUTHOR="${{ github.event.issue.user.login }}"
+          
+          if [ "$ACTION" = "opened" ]; then
+            COLOR=15105570
+            STATUS="opened"
+          else
+            COLOR=8421504
+            STATUS="closed"
+          fi
+          
+          TITLE=$(echo "$ISSUE_TITLE" | cut -c1-80)
+          
+          curl -s -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"color\": ${COLOR},
+                \"author\": {
+                  \"name\": \"${AUTHOR}\",
+                  \"icon_url\": \"https://github.com/${AUTHOR}.png?size=32\"
+                },
+                \"description\": \"📋 [#${ISSUE_NUM}](${ISSUE_URL}) ${TITLE}\",
+                \"footer\": {
+                  \"text\": \"Issue ${STATUS}\"
+                }
+              }]
+            }"
