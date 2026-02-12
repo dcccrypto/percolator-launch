@@ -376,7 +376,7 @@ const DevnetMintContent: FC = () => {
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
       <div className="relative mx-auto max-w-4xl px-4 py-10">
         <ScrollReveal>
-          <div className="mb-8">
+          <div className="mb-8 text-center">
             <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// faucet</div>
             <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
               <span className="font-normal text-white/50">Devnet </span>Token Factory
