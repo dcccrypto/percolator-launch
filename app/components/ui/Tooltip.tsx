@@ -18,9 +18,21 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
   const prefersReduced = usePrefersReducedMotion();
 
   useEffect(() => {
-    if (show && triggerRef.current) {
+    if (show && triggerRef.current && tooltipRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
-      setPosition(rect.top < 80 ? "bottom" : "top");
+      const pos = rect.top < 80 ? "bottom" : "top";
+      setPosition(pos);
+      const el = tooltipRef.current;
+      const left = Math.max(8, Math.min(window.innerWidth - 264, rect.left + rect.width / 2 - 128));
+      if (pos === "top") {
+        el.style.top = `${rect.top - 8}px`;
+        el.style.left = `${left}px`;
+        el.style.transform = "translateY(-100%)";
+      } else {
+        el.style.top = `${rect.bottom + 8}px`;
+        el.style.left = `${left}px`;
+        el.style.transform = "translateY(0)";
+      }
     }
   }, [show]);
 
@@ -66,11 +78,7 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
       {children}
       <span
         ref={tooltipRef}
-        className={`absolute z-50 w-64 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)] shadow-xl ${
-          position === "top"
-            ? "bottom-full left-1/2 mb-2 -translate-x-1/2"
-            : "top-full left-1/2 mt-2 -translate-x-1/2"
-        }`}
+        className="fixed z-[9999] w-64 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)] shadow-xl pointer-events-none"
         style={{ visibility: "hidden", opacity: 0 }}
       >
         {text}
