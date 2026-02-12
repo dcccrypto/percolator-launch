@@ -172,7 +172,7 @@ describe('CrankService Unit Tests', () => {
     it('should process market config with non-default oracle authority', async () => {
       const mockMarket = createMockMarket({
         config: {
-          oracleAuthority: new PublicKey('Oracle111111111111111111111111111111111'),
+          oracleAuthority: createTestPublicKey('Oracle1'),
         } as any,
       });
 
