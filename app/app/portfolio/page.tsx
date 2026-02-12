@@ -15,9 +15,11 @@ const WalletMultiButton = dynamic(
   { ssr: false }
 );
 
-function formatPnl(pnl: bigint, decimals = 6): string {
-  const isNeg = pnl < 0n;
-  const abs = isNeg ? -pnl : pnl;
+function formatPnl(pnl: bigint | undefined | null, decimals = 6): string {
+  // P-HIGH-1: Add null coalescing for pnl
+  const safePnl = pnl ?? 0n;
+  const isNeg = safePnl < 0n;
+  const abs = isNeg ? -safePnl : safePnl;
   return `${isNeg ? "-" : "+"}${formatTokenAmount(abs, decimals)}`;
 }
 

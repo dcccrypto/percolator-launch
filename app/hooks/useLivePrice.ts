@@ -186,6 +186,9 @@ export function useLivePrice(): PriceState {
       })
       .catch(() => {});
 
+    // M3: Capture slabAddr at subscription time for cleanup
+    const capturedSlabAddr = slabAddr;
+    
     return () => {
       mountedRef.current = false;
       wsConnected.current = false;
@@ -193,8 +196,8 @@ export function useLivePrice(): PriceState {
       if (wsRef.current) {
         // Unsubscribe before closing to clean up server-side state
         try {
-          if (wsRef.current.readyState === WebSocket.OPEN && slabAddr) {
-            wsRef.current.send(JSON.stringify({ type: "unsubscribe", slabAddress: slabAddr }));
+          if (wsRef.current.readyState === WebSocket.OPEN && capturedSlabAddr) {
+            wsRef.current.send(JSON.stringify({ type: "unsubscribe", slabAddress: capturedSlabAddr }));
           }
         } catch { /* ignore */ }
         wsRef.current.close();

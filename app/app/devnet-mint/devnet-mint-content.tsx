@@ -53,6 +53,8 @@ const DevnetMintContent: FC = () => {
   const [tokenSymbol, setTokenSymbol] = useState("TEST");
   const [mintColor, setMintColor] = useState<string | null>(null);
   const [lastTxSig, setLastTxSig] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [symbolError, setSymbolError] = useState<string | null>(null);
 
   // Mint More state
   const [existingMint, setExistingMint] = useState("");
@@ -60,6 +62,7 @@ const DevnetMintContent: FC = () => {
   const [mintingMore, setMintingMore] = useState(false);
   const [mintMoreStatus, setMintMoreStatus] = useState<string | null>(null);
   const [mintAuthError, setMintAuthError] = useState<string | null>(null);
+  const [checkingMintAuth, setCheckingMintAuth] = useState(false);
 
   const connection = useMemo(() => new Connection(HELIUS_RPC, "confirmed"), []);
   const airdropConnection = useMemo(() => new Connection(PUBLIC_DEVNET_RPC, "confirmed"), []);
@@ -140,6 +143,39 @@ const DevnetMintContent: FC = () => {
   // Create mint + mint tokens
   const handleCreateAndMint = useCallback(async () => {
     if (!publicKey || !signTransaction) return;
+    
+    // P-MED-9: Validate token name and symbol
+    setNameError(null);
+    setSymbolError(null);
+    
+    const trimmedName = tokenName.trim();
+    const trimmedSymbol = tokenSymbol.trim();
+    
+    if (trimmedName.length === 0) {
+      setNameError("Token name cannot be empty");
+      return;
+    }
+    if (trimmedName.length < 2) {
+      setNameError("Token name must be at least 2 characters");
+      return;
+    }
+    if (trimmedSymbol.length === 0) {
+      setSymbolError("Token symbol cannot be empty");
+      return;
+    }
+    if (trimmedSymbol.length < 2) {
+      setSymbolError("Token symbol must be at least 2 characters");
+      return;
+    }
+    if (!/^[A-Za-z0-9\s\-_]+$/.test(trimmedName)) {
+      setNameError("Token name can only contain letters, numbers, spaces, hyphens, and underscores");
+      return;
+    }
+    if (!/^[A-Z0-9]+$/.test(trimmedSymbol)) {
+      setSymbolError("Token symbol can only contain uppercase letters and numbers");
+      return;
+    }
+    
     setLoading(true);
     setCreateStatus("Creating mint account...");
     setMintAddress(null);
@@ -405,11 +441,23 @@ const DevnetMintContent: FC = () => {
                 <div className="flex gap-3">
                   <div className="flex-1">
                     <label className="mb-1 block text-xs text-[var(--text-secondary)]">Token Name</label>
-                    <input type="text" value={tokenName} onChange={(e) => setTokenName(e.target.value)} className={inputClass} />
+                    <input 
+                      type="text" 
+                      value={tokenName} 
+                      onChange={(e) => { setTokenName(e.target.value); setNameError(null); }} 
+                      className={`${inputClass} ${nameError ? "border-[var(--short)]" : ""}`}
+                    />
+                    {nameError && <p className="mt-1 text-xs text-[var(--short)]">{nameError}</p>}
                   </div>
                   <div className="flex-1">
                     <label className="mb-1 block text-xs text-[var(--text-secondary)]">Symbol</label>
-                    <input type="text" value={tokenSymbol} onChange={(e) => setTokenSymbol(e.target.value)} className={inputClass} />
+                    <input 
+                      type="text" 
+                      value={tokenSymbol} 
+                      onChange={(e) => { setTokenSymbol(e.target.value.toUpperCase()); setSymbolError(null); }} 
+                      className={`${inputClass} ${symbolError ? "border-[var(--short)]" : ""}`}
+                    />
+                    {symbolError && <p className="mt-1 text-xs text-[var(--short)]">{symbolError}</p>}
                   </div>
                 </div>
                 <div className="flex gap-3">

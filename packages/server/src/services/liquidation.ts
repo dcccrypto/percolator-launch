@@ -103,7 +103,21 @@ export class LiquidationService {
             const diff = account.positionSize > 0n
               ? price - entryPrice    // long: profit when price goes up
               : entryPrice - price;   // short: profit when price goes down
-            markPnl = (diff * absBI(account.positionSize)) / price;
+            
+            // BH5: Overflow protection - check bounds before multiplication
+            const MAX_SAFE_BIGINT = 9007199254740991n; // Number.MAX_SAFE_INTEGER
+            const absPosSize = absBI(account.positionSize);
+            
+            // Check if multiplication would overflow
+            if (diff > 0n && absPosSize > MAX_SAFE_BIGINT / diff) {
+              console.warn(`[LiquidationService] PnL calculation overflow for account ${i} in ${slabAddress}`);
+              markPnl = diff > 0n ? MAX_SAFE_BIGINT : -MAX_SAFE_BIGINT;
+            } else if (diff < 0n && absPosSize > MAX_SAFE_BIGINT / -diff) {
+              console.warn(`[LiquidationService] PnL calculation overflow for account ${i} in ${slabAddress}`);
+              markPnl = -MAX_SAFE_BIGINT;
+            } else {
+              markPnl = (diff * absPosSize) / price;
+            }
           }
           const equity = account.capital + markPnl;
 
