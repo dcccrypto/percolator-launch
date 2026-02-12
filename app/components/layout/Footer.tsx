@@ -31,7 +31,7 @@ export const Footer: FC = () => {
           </div>
 
           {/* Center - links */}
-          <div className="flex items-center gap-5 text-[11px] text-[var(--text-muted)]">
+          <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-5 text-[11px] text-[var(--text-muted)]">
             <button
               onClick={copyCA}
               className="group flex items-center gap-1.5 transition-colors hover:text-[var(--text-secondary)]"
@@ -87,7 +87,7 @@ export const Footer: FC = () => {
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
-              report bug
+              report&nbsp;bug
             </Link>
           </div>
 
