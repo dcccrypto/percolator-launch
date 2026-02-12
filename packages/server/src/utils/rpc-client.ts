@@ -6,6 +6,29 @@ const REFILL_INTERVAL_MS = 1_000;
 let tokens = MAX_TOKENS;
 let lastRefill = Date.now();
 
+// BM3: Sliding window rate limiter to prevent burst DoS
+const SLIDING_WINDOW_MS = 10_000; // 10 second window
+const MAX_REQUESTS_PER_WINDOW = 100; // Max 100 requests per 10s
+const requestTimestamps: number[] = [];
+
+function checkSlidingWindow(): boolean {
+  const now = Date.now();
+  const windowStart = now - SLIDING_WINDOW_MS;
+  
+  // Remove old timestamps outside the window
+  while (requestTimestamps.length > 0 && requestTimestamps[0]! < windowStart) {
+    requestTimestamps.shift();
+  }
+  
+  // Check if we're within burst limit
+  if (requestTimestamps.length >= MAX_REQUESTS_PER_WINDOW) {
+    return false; // Rate limit exceeded
+  }
+  
+  requestTimestamps.push(now);
+  return true;
+}
+
 function refillTokens(): void {
   const now = Date.now();
   const elapsed = now - lastRefill;
@@ -20,7 +43,7 @@ const waitQueue: Array<() => void> = [];
 
 function drainQueue(): void {
   refillTokens();
-  while (waitQueue.length > 0 && tokens > 0) {
+  while (waitQueue.length > 0 && tokens > 0 && checkSlidingWindow()) {
     tokens--;
     const resolve = waitQueue.shift()!;
     resolve();
@@ -31,7 +54,7 @@ setInterval(drainQueue, 100);
 
 export async function acquireToken(): Promise<void> {
   refillTokens();
-  if (tokens > 0) { tokens--; return; }
+  if (tokens > 0 && checkSlidingWindow()) { tokens--; return; }
   return new Promise<void>((resolve) => { waitQueue.push(resolve); });
 }
 
