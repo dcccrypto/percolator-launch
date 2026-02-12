@@ -1,12 +1,6 @@
 @import "tailwindcss";
 
-/* Strip double borders when components are inside tabs/collapsibles */
-.strip-inner-borders > * > div,
-.strip-inner-borders > div > div {
-  border: none !important;
-  border-radius: 0 !important;
-  background-color: transparent !important;
-}
+/* stripped — borders handled per-component */
 
 :root {
   /* ─── Solana Terminal Palette ─── */

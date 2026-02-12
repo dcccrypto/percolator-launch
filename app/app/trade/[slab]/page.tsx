@@ -36,7 +36,7 @@ function Collapsible({ title, defaultOpen = true, badge, children }: { title: st
         </span>
         <span className={`text-[10px] text-[var(--text-dim)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▾</span>
       </button>
-      <div className={`strip-inner-borders ${open ? "block" : "hidden"}`}>{children}</div>
+      <div className={open ? "block" : "hidden"}>{children}</div>
     </div>
   );
 }
@@ -45,22 +45,22 @@ function Tabs({ tabs, children }: { tabs: string[]; children: React.ReactNode[] 
   const [active, setActive] = useState(0);
   return (
     <div>
-      <div className="flex border-b border-[var(--border)]">
+      <div className="flex rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-1 py-1 gap-1">
         {tabs.map((label, i) => (
           <button
             key={label}
             onClick={() => setActive(i)}
-            className={`px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider transition-colors ${
+            className={`px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider rounded-sm transition-colors ${
               active === i
-                ? "border-b-2 border-[var(--accent)] text-[var(--accent)]"
-                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-white/[0.03]"
             }`}
           >
             {label}
           </button>
         ))}
       </div>
-      <div className="strip-inner-borders">{children[active]}</div>
+      <div className="mt-2">{children[active]}</div>
     </div>
   );
 }
@@ -225,13 +225,11 @@ function TradePageInner({ slab }: { slab: string }) {
         </ErrorBoundary>
 
         {/* Bottom tabs: Stats | Trades | Book */}
-        <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
-          <Tabs tabs={["Stats", "Trades", "Book"]}>
-            <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
-            <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
-            <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
-          </Tabs>
-        </div>
+        <Tabs tabs={["Stats", "Trades", "Book"]}>
+          <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
+          <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
+          <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
+        </Tabs>
       </div>
 
       {/* ════════════════════════════════════════════════════════
@@ -247,13 +245,11 @@ function TradePageInner({ slab }: { slab: string }) {
           </ErrorBoundary>
 
           {/* Position / Account / Deposit — tabbed */}
-          <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
-            <Tabs tabs={["Position", "Account", "Deposit"]}>
-              <ErrorBoundary label="PositionPanel"><PositionPanel slabAddress={slab} /></ErrorBoundary>
-              <ErrorBoundary label="AccountsCard"><AccountsCard /></ErrorBoundary>
-              <ErrorBoundary label="DepositWithdrawCard"><DepositWithdrawCard slabAddress={slab} /></ErrorBoundary>
-            </Tabs>
-          </div>
+          <Tabs tabs={["Position", "Account", "Deposit"]}>
+            <ErrorBoundary label="PositionPanel"><PositionPanel slabAddress={slab} /></ErrorBoundary>
+            <ErrorBoundary label="AccountsCard"><AccountsCard /></ErrorBoundary>
+            <ErrorBoundary label="DepositWithdrawCard"><DepositWithdrawCard slabAddress={slab} /></ErrorBoundary>
+          </Tabs>
 
           {/* Trade history — compact */}
           <ErrorBoundary label="TradeHistory">
@@ -273,14 +269,12 @@ function TradePageInner({ slab }: { slab: string }) {
           </div>
 
           {/* Market info tabs */}
-          <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
-            <Tabs tabs={["Stats", "Trades", "Health", "Book"]}>
-              <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
-              <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
-              <ErrorBoundary label="EngineHealthCard"><EngineHealthCard /></ErrorBoundary>
-              <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
-            </Tabs>
-          </div>
+          <Tabs tabs={["Stats", "Trades", "Health", "Book"]}>
+            <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
+            <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
+            <ErrorBoundary label="EngineHealthCard"><EngineHealthCard /></ErrorBoundary>
+            <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
+          </Tabs>
         </div>
       </div>
     </div>
