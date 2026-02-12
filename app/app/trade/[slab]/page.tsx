@@ -20,21 +20,47 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
 
+/* ── Reusable tiny components ─────────────────────────────── */
+
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
+        className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
       >
         <span className="flex items-center gap-2">
           {title}
           {badge}
         </span>
-        <span className={`text-[10px] text-[var(--text-dim)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>v</span>
+        <span className={`text-[10px] text-[var(--text-dim)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▾</span>
       </button>
       <div className={open ? "block" : "hidden"}>{children}</div>
+    </div>
+  );
+}
+
+function Tabs({ tabs, children }: { tabs: string[]; children: React.ReactNode[] }) {
+  const [active, setActive] = useState(0);
+  return (
+    <div>
+      <div className="flex border-b border-[var(--border)]">
+        {tabs.map((label, i) => (
+          <button
+            key={label}
+            onClick={() => setActive(i)}
+            className={`px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider transition-colors ${
+              active === i
+                ? "border-b-2 border-[var(--accent)] text-[var(--accent)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-0">{children[active]}</div>
     </div>
   );
 }
@@ -66,6 +92,8 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/* ── Main inner page ──────────────────────────────────────── */
+
 function TradePageInner({ slab }: { slab: string }) {
   const { engine, config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
@@ -75,6 +103,10 @@ function TradePageInner({ slab }: { slab: string }) {
 
   const symbol = tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN");
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
+
+  const priceDisplay = priceUsd != null
+    ? `$${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}`
+    : null;
 
   useEffect(() => {
     if (!pageRef.current) return;
@@ -86,15 +118,31 @@ function TradePageInner({ slab }: { slab: string }) {
   }, []);
 
   return (
-    <div ref={pageRef} className="mx-auto max-w-7xl px-4 py-6 gsap-fade">
-      {/* Header */}
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <div ref={pageRef} className="mx-auto max-w-7xl overflow-x-hidden gsap-fade">
+
+      {/* ── MOBILE: Sticky header ── */}
+      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">
         <div className="min-w-0">
-          <p className="mb-1 text-[11px] font-medium uppercase tracking-widest text-[var(--accent)]">// TRADE</p>
-          <h1 className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-            {symbol}/USD <span className="text-base font-normal text-[var(--text-muted)]">PERP</span>
+          <h1 className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+            {symbol}/USD <span className="text-xs font-normal text-[var(--text-muted)]">PERP</span>
           </h1>
-          <div className="mt-1.5 flex items-center gap-3">
+        </div>
+        <div className="flex items-center gap-2">
+          {health && <HealthBadge level={health.level} />}
+          {priceDisplay && (
+            <span className="text-sm font-bold text-[var(--text)]">{priceDisplay}</span>
+          )}
+        </div>
+      </div>
+
+      {/* ── DESKTOP: Full header ── */}
+      <div className="hidden lg:flex items-start justify-between px-4 py-3 gap-3">
+        <div className="min-w-0">
+          <p className="mb-0.5 text-[10px] font-medium uppercase tracking-widest text-[var(--accent)]">// TRADE</p>
+          <h1 className="text-xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+            {symbol}/USD <span className="text-sm font-normal text-[var(--text-muted)]">PERP</span>
+          </h1>
+          <div className="mt-1 flex items-center gap-3">
             <span className="flex items-center text-[11px] text-[var(--text-dim)]">
               {shortAddress}
               <CopyButton text={slab} />
@@ -107,17 +155,15 @@ function TradePageInner({ slab }: { slab: string }) {
             />
           </div>
         </div>
-        {priceUsd != null && (
+        {priceDisplay && (
           <div className="text-right">
-            <div className="text-3xl font-bold text-[var(--text)]">
-              ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}
-            </div>
+            <div className="text-2xl font-bold text-[var(--text)]">{priceDisplay}</div>
           </div>
         )}
       </div>
 
-      {/* Quick start guide */}
-      <div className="mb-4 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2.5 flex items-center gap-4 text-xs text-[var(--text-secondary)]">
+      {/* ── Quick start guide — desktop only ── */}
+      <div className="hidden md:flex mx-4 mb-3 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-2 items-center gap-4 text-xs text-[var(--text-secondary)]">
         <span className="text-[var(--text-dim)]">quick start:</span>
         <span><span className="text-[var(--long)]">1</span> connect wallet</span>
         <span className="text-[var(--text-dim)]">&rarr;</span>
@@ -128,52 +174,103 @@ function TradePageInner({ slab }: { slab: string }) {
         <span><span className="text-[var(--long)]">4</span> trade</span>
       </div>
 
-      {/* Main grid */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Left column */}
-        <div className="space-y-4 lg:col-span-2">
-          <ErrorBoundary label="PriceChart">
+      {/* ════════════════════════════════════════════════════════
+          MOBILE LAYOUT  (< lg)
+          Single column, everything stacked
+          ════════════════════════════════════════════════════════ */}
+      <div className="flex flex-col gap-2 px-3 pb-4 lg:hidden">
+        {/* Chart */}
+        <ErrorBoundary label="PriceChart">
+          <div className="[&>div]:!h-[200px]">
             <PriceChart slabAddress={slab} />
-          </ErrorBoundary>
-          <ErrorBoundary label="TradeForm">
-            <TradeForm slabAddress={slab} />
-          </ErrorBoundary>
-          <ErrorBoundary label="PositionPanel">
-            <PositionPanel slabAddress={slab} />
-          </ErrorBoundary>
-        </div>
+          </div>
+        </ErrorBoundary>
 
-        {/* Right column */}
-        <div className="space-y-4">
-          <ErrorBoundary label="DepositWithdrawCard">
+        {/* Trade form */}
+        <ErrorBoundary label="TradeForm">
+          <TradeForm slabAddress={slab} />
+        </ErrorBoundary>
+
+        {/* Position — collapsible */}
+        <ErrorBoundary label="PositionPanel">
+          <Collapsible title="Position" defaultOpen={true}>
+            <PositionPanel slabAddress={slab} />
+          </Collapsible>
+        </ErrorBoundary>
+
+        {/* Account / Deposit — collapsible */}
+        <ErrorBoundary label="DepositWithdrawCard">
+          <Collapsible title="Deposit / Withdraw" defaultOpen={false}>
             <DepositWithdrawCard slabAddress={slab} />
-          </ErrorBoundary>
-          <ErrorBoundary label="AccountsCard">
+          </Collapsible>
+        </ErrorBoundary>
+
+        <ErrorBoundary label="AccountsCard">
+          <Collapsible title="Account" defaultOpen={false}>
             <AccountsCard />
+          </Collapsible>
+        </ErrorBoundary>
+
+        {/* Bottom tabs: Stats | Trades | Book */}
+        <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
+          <Tabs tabs={["Stats", "Trades", "Book"]}>
+            <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
+            <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
+            <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
+          </Tabs>
+        </div>
+      </div>
+
+      {/* ════════════════════════════════════════════════════════
+          DESKTOP LAYOUT  (≥ lg / 1024px)
+          Two columns: left ~68%, right ~32%
+          ════════════════════════════════════════════════════════ */}
+      <div className="hidden lg:grid grid-cols-[1fr_340px] gap-3 px-4 pb-4">
+        {/* ── Left column ── */}
+        <div className="min-w-0 space-y-3">
+          {/* Chart */}
+          <ErrorBoundary label="PriceChart">
+            <div className="[&>div]:!h-[400px]">
+              <PriceChart slabAddress={slab} />
+            </div>
           </ErrorBoundary>
-          <ErrorBoundary label="EngineHealthCard">
-            <Collapsible title="engine health" defaultOpen={false} badge={health && <HealthBadge level={health.level} />}>
-              <EngineHealthCard />
-            </Collapsible>
-          </ErrorBoundary>
-          <ErrorBoundary label="MarketStatsCard">
-            <MarketStatsCard />
-          </ErrorBoundary>
+
+          {/* Position / Account / Deposit — tabbed */}
+          <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
+            <Tabs tabs={["Position", "Account", "Deposit"]}>
+              <ErrorBoundary label="PositionPanel"><PositionPanel slabAddress={slab} /></ErrorBoundary>
+              <ErrorBoundary label="AccountsCard"><AccountsCard /></ErrorBoundary>
+              <ErrorBoundary label="DepositWithdrawCard"><DepositWithdrawCard slabAddress={slab} /></ErrorBoundary>
+            </Tabs>
+          </div>
+
+          {/* Trade history — compact */}
           <ErrorBoundary label="TradeHistory">
-            <Collapsible title="recent trades" defaultOpen={true}>
+            <Collapsible title="Recent Trades" defaultOpen={true}>
               <TradeHistory slabAddress={slab} />
             </Collapsible>
           </ErrorBoundary>
         </div>
-      </div>
 
-      {/* Full-width */}
-      <div className="mt-4">
-        <ErrorBoundary label="MarketBookCard">
-          <Collapsible title="market book" defaultOpen={false}>
-            <MarketBookCard />
-          </Collapsible>
-        </ErrorBoundary>
+        {/* ── Right column ── */}
+        <div className="min-w-0 space-y-3">
+          {/* Trade form — sticky */}
+          <div className="sticky top-0 z-20">
+            <ErrorBoundary label="TradeForm">
+              <TradeForm slabAddress={slab} />
+            </ErrorBoundary>
+          </div>
+
+          {/* Market info tabs */}
+          <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
+            <Tabs tabs={["Stats", "Trades", "Health", "Book"]}>
+              <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
+              <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
+              <ErrorBoundary label="EngineHealthCard"><EngineHealthCard /></ErrorBoundary>
+              <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
+            </Tabs>
+          </div>
+        </div>
       </div>
     </div>
   );
