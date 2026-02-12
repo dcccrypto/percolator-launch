@@ -34,9 +34,7 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const [amount, setAmount] = useState("");
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<bigint | null>(mockMode ? 500_000_000n : null);
-  // Track raw BigInt when MAX is used — avoids format→parse round-trip precision issues
   const maxRawRef = useRef<bigint | null>(null);
-  // On-chain decimals from getTokenAccountBalance — ground truth, avoids tokenMeta race
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
   useEffect(() => {
@@ -59,9 +57,8 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
 
   if (!connected) {
     return (
-      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
-        <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Deposit / Withdraw</h3>
-        <p className="text-sm text-[var(--text-muted)]">Connect wallet</p>
+      <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <p className="text-[11px] text-[var(--text-muted)]">Connect wallet</p>
       </div>
     );
   }
@@ -72,16 +69,16 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
       ? walletBalance > 10_000_000n ? 10_000_000n : walletBalance
       : 0n;
     return (
-      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
-        <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Create Account</h3>
+      <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <p className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Create Account</p>
         {walletBalance !== null && (
-          <p className="mb-2 text-xs text-[var(--text-muted)]">
+          <p className="mb-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
             Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}
           </p>
         )}
         {!hasTokens && (
-          <div className="mb-3 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-3">
-            <p className="text-[11px] text-[var(--warning)]">
+          <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
+            <p className="text-[10px] text-[var(--warning)]">
               You need {symbol} tokens to trade this market.{" "}
               {mktConfig?.collateralMint && (
                 <a href="/devnet-mint" className="underline underline-offset-2 hover:text-[var(--warning)]/80">
@@ -93,32 +90,32 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
         )}
         {hasTokens ? (
           <>
-            <p className="mb-3 text-xs text-[var(--text-secondary)]">
+            <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
               Create an account with an initial deposit to start trading.
             </p>
             <button
               onClick={async () => { try { const sig = await initUser(suggestedDeposit); setLastSig(sig ?? null); } catch {} }}
               disabled={initLoading}
-              className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
+              className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
             >
               {initLoading ? "Creating..." : `Create Account (deposit ${formatTokenAmount(suggestedDeposit, decimals)} ${symbol})`}
             </button>
           </>
         ) : (
           <>
-            <p className="mb-3 text-xs text-[var(--text-secondary)]">
+            <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
               Get tokens first, then create your account.
             </p>
             <button
               disabled
-              className="w-full rounded-sm bg-[var(--bg-surface)] py-2.5 text-sm font-medium text-[var(--text-muted)] cursor-not-allowed opacity-50"
+              className="w-full rounded-none bg-[var(--bg-surface)] py-2 text-[10px] font-medium text-[var(--text-muted)] cursor-not-allowed opacity-50"
             >
               Create Account
             </button>
           </>
         )}
-        {initError && <p className="mt-2 text-xs text-[var(--short)]">{initError}</p>}
-        {lastSig && <p className="mt-2 text-xs text-[var(--text-muted)]">Tx: {lastSig.slice(0, 12)}...</p>}
+        {initError && <p className="mt-2 text-[10px] text-[var(--short)]">{initError}</p>}
+        {lastSig && <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>Tx: {lastSig.slice(0, 12)}...</p>}
       </div>
     );
   }
@@ -128,7 +125,6 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
 
-  // Validation — use raw BigInt when MAX was clicked to avoid format→parse precision issues
   const parsedAmount = maxRawRef.current ?? (amount ? parseHumanAmount(amount, decimals) : 0n);
   const isOverWithdraw = mode === "withdraw" && parsedAmount > 0n && parsedAmount > capital;
   const isOverDeposit = mode === "deposit" && parsedAmount > 0n && walletBalance !== null && parsedAmount > walletBalance;
@@ -143,7 +139,6 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
     if (!amount || !userAccount || validationError) return;
     if (mockMode) { setAmount(""); return; }
     try {
-      // Use raw BigInt directly when MAX was clicked
       const amtNative = maxRawRef.current ?? parseHumanAmount(amount, decimals);
       if (amtNative <= 0n) return;
       let sig: string | undefined;
@@ -158,38 +153,36 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
   }
 
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
-      <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]">Deposit / Withdraw</h3>
-      <p className="mb-1 text-lg font-bold text-[var(--text)]">{formatTokenAmount(capital, decimals)} <span className="text-sm font-normal text-[var(--text-secondary)]">{symbol}</span></p>
+    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+      <p className="mb-1 text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(capital, decimals)} <span className="text-xs font-normal text-[var(--text-secondary)]">{symbol}</span></p>
       {walletBalance !== null && (
-        <p className="mb-3 text-xs text-[var(--text-muted)]">Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}</p>
+        <p className="mb-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}</p>
       )}
       {mode === "deposit" && walletBalance !== null && walletBalance === 0n && mktConfig?.collateralMint && (
-        <div className="mb-3 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
-          <p className="text-[11px] text-[var(--warning)]">
+        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
+          <p className="text-[10px] text-[var(--warning)]">
             Wallet has 0 {symbol}. You may have a different token with the same name.{" "}
             <a href={`/devnet-mint`} className="underline underline-offset-2 hover:text-[var(--warning)]/80">
               Mint more →
             </a>
           </p>
-          <p className="mt-1 text-[10px] text-[var(--text-muted)] font-mono break-all">
+          <p className="mt-1 text-[9px] text-[var(--text-dim)] break-all" style={{ fontFamily: "var(--font-mono)" }}>
             Mint: {mktConfig.collateralMint.toBase58()}
           </p>
         </div>
       )}
 
-      <div className="mb-3 flex gap-1.5">
-        <button onClick={() => setMode("deposit")} className={`flex-1 rounded-sm py-1.5 text-xs font-medium ${mode === "deposit" ? "bg-[var(--long)] text-white shadow-sm" : "bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--border)]"}`}>Deposit</button>
-        <button onClick={() => setMode("withdraw")} className={`flex-1 rounded-sm py-1.5 text-xs font-medium ${mode === "withdraw" ? "bg-[var(--warning)] text-white shadow-sm" : "bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--border)]"}`}>Withdraw</button>
+      <div className="mb-2 flex gap-1">
+        <button onClick={() => setMode("deposit")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "deposit" ? "bg-[var(--long)] text-white" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Deposit</button>
+        <button onClick={() => setMode("withdraw")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "withdraw" ? "bg-[var(--warning)] text-white" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Withdraw</button>
       </div>
 
-      <div className="mb-3">
+      <div className="mb-2">
         <div className="relative">
           <input
             type="text"
             value={amount}
             onChange={(e) => { 
-              // C1: Only clear maxRawRef if value actually changed
               const newValue = e.target.value.replace(/[^0-9.]/g, "");
               if (newValue !== amount) {
                 maxRawRef.current = null;
@@ -197,13 +190,14 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
               setAmount(newValue);
             }}
             placeholder={`Amount (${symbol})`}
-            className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 pr-14 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
+            style={{ fontFamily: "var(--font-mono)" }}
+            className="w-full rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-3 py-2 pr-14 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
           />
           {mode === "withdraw" && capital > 0n && (
             <button
               type="button"
               onClick={() => { maxRawRef.current = capital; setAmount(formatTokenAmount(capital, decimals)); }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-none px-2 py-0.5 text-[9px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
               Max
             </button>
@@ -212,33 +206,33 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
             <button
               type="button"
               onClick={() => { maxRawRef.current = walletBalance; setAmount(formatTokenAmount(walletBalance, decimals)); }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-none px-2 py-0.5 text-[9px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
               Max
             </button>
           )}
         </div>
         {validationError && (
-          <p className="mt-1 text-[11px] text-[var(--short)]">{validationError}</p>
+          <p className="mt-1 text-[10px] text-[var(--short)]">{validationError}</p>
         )}
       </div>
 
       {mode === "withdraw" && hasOpenPosition && (
-        <div className="mb-3 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
-          <p className="text-[11px] text-[var(--warning)]">⚠ Warning: Withdrawing margin with an open position may trigger liquidation</p>
+        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
+          <p className="text-[10px] text-[var(--warning)]">⚠ Withdrawing margin with an open position may trigger liquidation</p>
         </div>
       )}
 
       <button
         onClick={handleSubmit}
         disabled={loading || !amount || !!validationError}
-        className="w-full rounded-sm bg-[var(--accent)] py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Sending..." : validationError ? validationError : mode === "deposit" ? "Deposit" : "Withdraw"}
       </button>
 
-      {error && <p className="mt-2 text-xs text-[var(--short)]">{error}</p>}
-      {lastSig && <p className="mt-2 text-xs text-[var(--text-muted)]">Tx: <a href={`${explorerTxUrl(lastSig)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">{lastSig.slice(0, 12)}...</a></p>}
+      {error && <p className="mt-2 text-[10px] text-[var(--short)]">{error}</p>}
+      {lastSig && <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>Tx: <a href={`${explorerTxUrl(lastSig)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">{lastSig.slice(0, 12)}...</a></p>}
     </div>
   );
 };

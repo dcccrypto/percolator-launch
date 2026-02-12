@@ -41,7 +41,6 @@ export const AccountsCard: FC = () => {
   const rows: AccountRow[] = useMemo(() => {
     return accounts.map(({ idx, account }) => {
       const direction: "LONG" | "SHORT" | "IDLE" = account.positionSize > 0n ? "LONG" : account.positionSize < 0n ? "SHORT" : "IDLE";
-      // Use core library's pure BigInt computeLiqPrice (no Number() precision loss)
       const liqPrice = computeLiqPrice(account.entryPrice, account.capital, account.positionSize, maintBps);
       let liqHealthPct = 100;
       if (account.positionSize !== 0n && liqPrice > 0n && oraclePrice > 0n) {
@@ -55,12 +54,9 @@ export const AccountsCard: FC = () => {
           liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
         }
       }
-      // Live PnL from current oracle price (not stale on-chain pnl)
       const computedPnl = account.positionSize !== 0n && oraclePrice > 0n
         ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePrice)
         : account.pnl;
-      // H2: Margin uses liquidation health distance (mark-based) instead of oracle-based calculation
-      // Use liqHealthPct which already accounts for mark price and slippage
       const marginPct = liqHealthPct;
       return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize, entryPrice: account.entryPrice, liqPrice, liqHealthPct, pnl: computedPnl, capital: account.capital, marginPct };
     });
@@ -78,7 +74,6 @@ export const AccountsCard: FC = () => {
     const base = tab === "open" ? openPositions : tab === "idle" ? idleAccounts : leaderboard;
     const sorted = [...base];
     const dir = sortDir === "asc" ? 1 : -1;
-    // Use BigInt-safe comparator to avoid Number() overflow for large values
     const cmpBig = (x: bigint, y: bigint): number => x > y ? 1 : x < y ? -1 : 0;
     sorted.sort((a, b) => {
       switch (sortKey) {
@@ -97,7 +92,7 @@ export const AccountsCard: FC = () => {
     return sorted;
   }, [tab, openPositions, idleAccounts, leaderboard, sortKey, sortDir]);
 
-  if (loading) return <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-4"><p className="text-xs text-[var(--text-muted)]">Loading...</p></div>;
+  if (loading) return <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3"><p className="text-[10px] text-[var(--text-muted)]">Loading...</p></div>;
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: "open", label: "Open", count: openPositions.length },
@@ -108,7 +103,7 @@ export const AccountsCard: FC = () => {
   const isOpenLike = tab === "open" || tab === "leaderboard";
 
   const SortHeader: FC<{ label: string; sKey: SortKey; align?: "left" | "right"; className?: string }> = ({ label, sKey, align = "right", className = "" }) => (
-    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none whitespace-nowrap px-3 py-2.5 font-medium ${align === "left" ? "text-left" : "text-right"} hover:text-[var(--text-secondary)] ${className}`}>
+    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none whitespace-nowrap px-2 py-1.5 font-medium ${align === "left" ? "text-left" : "text-right"} hover:text-[var(--text-secondary)] ${className}`}>
       {label}
       {sortKey === sKey ? <span className="ml-0.5 text-[var(--long)]">{sortDir === "asc" ? "^" : "v"}</span> : ""}
     </th>
@@ -121,28 +116,28 @@ export const AccountsCard: FC = () => {
   }
 
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-4">
-      <div className="mb-3 flex items-center gap-1.5">
+    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+      <div className="mb-2 flex items-center gap-1">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`rounded-sm px-2.5 py-1 text-[11px] font-medium transition-all ${
-              tab === t.key ? "border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+            className={`rounded-none px-2 py-1 text-[9px] font-medium uppercase tracking-[0.15em] transition-all ${
+              tab === t.key ? "border-b border-[var(--accent)] text-[var(--accent)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             }`}>
             {t.label} ({t.count})
           </button>
         ))}
-        <span className="ml-auto text-[10px] text-[var(--text-dim)]">{accounts.length} total</span>
+        <span className="ml-auto text-[9px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{accounts.length} total</span>
       </div>
 
       {sortedRows.length === 0 ? (
-        <p className="py-6 text-center text-xs text-[var(--text-muted)]">
+        <p className="py-4 text-center text-[10px] text-[var(--text-muted)]">
           {tab === "open" ? "No open positions" : tab === "idle" ? "No idle accounts" : "No data"}
         </p>
       ) : (
         <div className="max-h-[420px] overflow-y-auto overflow-x-auto">
-          <table className="min-w-full text-[11px]">
-            <thead className="sticky top-0 z-10 bg-[var(--panel-bg)]">
-              <tr className="border-b border-[var(--border)] text-[9px] uppercase tracking-wider text-[var(--text-dim)]">
+          <table className="min-w-full text-[10px]">
+            <thead className="sticky top-0 z-10 bg-[var(--bg)]/95">
+              <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
                 <SortHeader label="#" sKey="idx" align="left" />
                 <SortHeader label="Owner" sKey="owner" align="left" />
                 {isOpenLike && <SortHeader label="Side" sKey="direction" align="left" />}
@@ -158,42 +153,42 @@ export const AccountsCard: FC = () => {
               {sortedRows.map((row, i) => {
                 const absPos = row.positionSize < 0n ? -row.positionSize : row.positionSize;
                 return (
-                  <tr key={row.idx} className="border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-elevated)]">
-                    <td className="whitespace-nowrap px-3 py-2.5 text-left text-[var(--text-dim)]">{i + 1}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-left text-[var(--text-secondary)]">{shortenAddress(row.owner)}</td>
+                  <tr key={row.idx} className="border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03]">
+                    <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{i + 1}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>{shortenAddress(row.owner)}</td>
                     {isOpenLike && (
-                      <td className="whitespace-nowrap px-3 py-2.5 text-left">
+                      <td className="whitespace-nowrap px-2 py-1.5 text-left">
                         {row.direction === "IDLE" ? <span className="text-[var(--text-dim)]">-</span> : (
-                          <span className={`text-[10px] font-bold ${
+                          <span className={`text-[9px] font-bold ${
                             row.direction === "LONG" ? "text-[var(--long)]" : "text-[var(--short)]"
                           }`}>{row.direction}</span>
                         )}
                       </td>
                     )}
                     {isOpenLike && (
-                      <td className={`whitespace-nowrap px-3 py-2.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
+                      <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
                         {row.positionSize !== 0n ? formatTokenAmount(absPos) : "-"}
                       </td>
                     )}
-                    {isOpenLike && <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]">{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
+                    {isOpenLike && <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
                     {isOpenLike && (
-                      <td className="whitespace-nowrap px-3 py-2.5 text-right">
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right">
                         {row.positionSize !== 0n ? (
-                          <div className="flex items-center justify-end gap-1.5">
-                            <span className="text-[var(--text)]">{formatUsd(row.liqPrice)}</span>
-                            <div className="h-1.5 w-10 shrink-0 rounded-full bg-[var(--border)]">
-                              <div className={`h-1.5 rounded-full ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
+                          <div className="flex items-center justify-end gap-1">
+                            <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsd(row.liqPrice)}</span>
+                            <div className="h-1 w-8 shrink-0 bg-[var(--border)]/50">
+                              <div className={`h-1 ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
                             </div>
                           </div>
                         ) : "-"}
                       </td>
                     )}
-                    <td className={`whitespace-nowrap px-3 py-2.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`}>
+                    <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
                       {formatPnl(row.pnl)}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]">{formatTokenAmount(row.capital)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(row.capital)}</td>
                     {isOpenLike && (
-                      <td className={`whitespace-nowrap px-3 py-2.5 text-right ${row.marginPct > 50 ? "text-[var(--long)]" : row.marginPct > 20 ? "text-[var(--warning)]" : "text-[var(--short)]"}`}>
+                      <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.marginPct > 50 ? "text-[var(--long)]" : row.marginPct > 20 ? "text-[var(--warning)]" : "text-[var(--short)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
                         {row.positionSize !== 0n ? `${row.marginPct.toFixed(1)}%` : "-"}
                       </td>
                     )}

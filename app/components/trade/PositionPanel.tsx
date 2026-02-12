@@ -38,7 +38,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const symbol = tokenMeta?.symbol ?? "Token";
   const [closeSig, setCloseSig] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
-  // C2: Track fresh account data for preview
   const [freshPreviewData, setFreshPreviewData] = useState<{
     capital: bigint;
     positionSize: bigint;
@@ -52,14 +51,11 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (!userAccount) {
     return (
-      <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
-        <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
-          Position
-        </h3>
-        <div className="space-y-3">
-          <div className="h-3 w-24 rounded-sm bg-[var(--border)]" />
-          <div className="h-3 w-32 rounded-sm bg-[var(--border)]" />
-          <div className="h-3 w-20 rounded-sm bg-[var(--border)]" />
+      <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <div className="space-y-2">
+          <div className="h-2 w-24 bg-[var(--border)]/50" />
+          <div className="h-2 w-32 bg-[var(--border)]/50" />
+          <div className="h-2 w-20 bg-[var(--border)]/50" />
         </div>
       </div>
     );
@@ -74,7 +70,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const entryPriceE6 = account.entryPrice;
 
-  // C2: Use fresh preview data when available (during close confirmation)
   const displayData = freshPreviewData ?? {
     capital: account.capital,
     positionSize: account.positionSize,
@@ -105,13 +100,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         ? "text-[var(--long)]"
         : "text-[var(--short)]";
 
-  const pnlBgColor =
-    pnlTokens === 0n
-      ? "bg-[var(--border-subtle)]"
-      : pnlTokens > 0n
-        ? "bg-[var(--long)]/10"
-        : "bg-[var(--short)]/10";
-
   const pnlBarWidth = Math.min(100, Math.max(0, Math.abs(roe)));
 
   let marginHealthStr = "N/A";
@@ -134,7 +122,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         freshPositionSize = freshAccount.positionSize;
         freshCapital = freshAccount.capital;
         freshEntryPrice = freshAccount.entryPrice;
-        // C2: Store fresh data for preview
         setFreshPreviewData({
           capital: freshCapital,
           positionSize: freshPositionSize,
@@ -167,29 +154,26 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-5">
-      <h3 className="mb-4 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
-        Position
-      </h3>
+    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
 
       {!hasPosition ? (
-        <div className="flex flex-col items-center py-6 text-center">
-          <p className="text-sm text-[var(--text-muted)]">No open position</p>
-          <p className="mt-1 text-xs text-[var(--text-dim)]">Open a trade to see your position here</p>
+        <div className="flex flex-col items-center py-4 text-center">
+          <p className="text-[11px] text-[var(--text-muted)]">No open position</p>
+          <p className="mt-1 text-[10px] text-[var(--text-dim)]">Open a trade to see your position here</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {/* PnL highlight bar */}
-          <div className={`rounded-sm ${pnlBgColor} p-3`}>
+        <div>
+          {/* PnL highlight */}
+          <div className={`rounded-none border-l-2 ${pnlTokens >= 0n ? "border-l-[var(--long)]" : "border-l-[var(--short)]"} bg-[var(--bg)] p-2.5 mb-2`}>
             <div className="flex items-center justify-between">
-              <span className="text-xs text-[var(--text-muted)]">Unrealized PnL</span>
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Unrealized PnL</span>
               <div className="text-right">
-                <span className={`text-sm font-bold ${pnlColor}`}>
+                <span className={`text-sm font-bold ${pnlColor}`} style={{ fontFamily: "var(--font-mono)" }}>
                   {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
                   {formatTokenAmount(abs(pnlTokens))} {symbol}
                 </span>
                 {pnlUsd !== null && (
-                  <span className={`ml-1.5 text-xs ${pnlColor}`}>
+                  <span className={`ml-1.5 text-[10px] ${pnlColor}`} style={{ fontFamily: "var(--font-mono)" }}>
                     ({pnlUsd >= 0 ? "+" : ""}$
                     {Math.abs(pnlUsd).toLocaleString(undefined, {
                       minimumFractionDigits: 2,
@@ -200,61 +184,61 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 )}
               </div>
             </div>
-            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
+            <div className="mt-1.5 h-[2px] w-full overflow-hidden bg-[var(--border)]/50">
               <div
-                className={`h-full rounded-full transition-all duration-500 ${
+                className={`h-full transition-all duration-500 ${
                   pnlTokens >= 0n ? "bg-[var(--long)]" : "bg-[var(--short)]"
                 }`}
                 style={{ width: `${pnlBarWidth}%` }}
               />
             </div>
-            <div className="mt-1 flex justify-between text-[10px] text-[var(--text-dim)]">
-              <span>
-                ROE:{" "}
-                <span className={pnlColor}>
-                  {roe >= 0 ? "+" : ""}
-                  {roe.toFixed(2)}%
-                </span>
+            <div className="mt-1 text-[9px] text-[var(--text-dim)]">
+              ROE:{" "}
+              <span className={pnlColor} style={{ fontFamily: "var(--font-mono)" }}>
+                {roe >= 0 ? "+" : ""}
+                {roe.toFixed(2)}%
               </span>
             </div>
           </div>
 
-          {/* Position details */}
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[var(--text-muted)]">Direction</span>
-            <span className={`text-sm font-medium ${isLong ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
-              {isLong ? "LONG" : "SHORT"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[var(--text-muted)]">Size</span>
-            <span className="text-sm text-[var(--text)]">
-              {formatTokenAmount(absPosition)} {symbol}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[var(--text-muted)]">Entry Price</span>
-            <span className="text-sm text-[var(--text)]">
-              {formatUsd(entryPriceE6)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[var(--text-muted)]">Market Price</span>
-            <span className="text-sm text-[var(--text)]">
-              {formatUsd(currentPriceE6)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[var(--text-muted)]">Liq. Price</span>
-            <span className="text-sm text-[var(--warning)]">
-              {liqPriceE6 > 0n ? formatUsd(liqPriceE6) : "-"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[var(--text-muted)]">Margin Health</span>
-            <span className="text-sm text-[var(--text-secondary)]">
-              {marginHealthStr}
-            </span>
+          {/* Position details — spreadsheet rows */}
+          <div className="divide-y divide-[var(--border)]/30">
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Direction</span>
+              <span className={`text-[11px] font-medium ${isLong ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
+                {isLong ? "LONG" : "SHORT"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Size</span>
+              <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+                {formatTokenAmount(absPosition)} {symbol}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Entry Price</span>
+              <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+                {formatUsd(entryPriceE6)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Market Price</span>
+              <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+                {formatUsd(currentPriceE6)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Liq. Price</span>
+              <span className="text-[11px] text-[var(--warning)]" style={{ fontFamily: "var(--font-mono)" }}>
+                {liqPriceE6 > 0n ? formatUsd(liqPriceE6) : "-"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Margin Health</span>
+              <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+                {marginHealthStr}
+              </span>
+            </div>
           </div>
 
           {/* Close button with confirmation */}
@@ -262,50 +246,52 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <button
               onClick={() => setShowConfirm(true)}
               disabled={closeLoading}
-              className="mt-2 w-full rounded-sm border border-[var(--short)]/30 py-2.5 text-sm font-medium text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-2 w-full rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Close Position
             </button>
           ) : (
-            <div className="mt-2 space-y-2 rounded-sm border border-[var(--short)]/30 p-3">
-              <p className="text-xs text-[var(--text-muted)]">
+            <div className="mt-2 rounded-none border border-[var(--short)]/30 p-2.5">
+              <p className="text-[10px] text-[var(--text-muted)]">
                 Close {isLong ? "LONG" : "SHORT"}{" "}
-                {formatTokenAmount(absPosition)} {symbol}?
+                <span style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(absPosition)}</span> {symbol}?
               </p>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[var(--text-muted)]">Est. PnL</span>
-                <span className={`font-medium ${pnlColor}`}>
-                  {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
-                  {formatTokenAmount(abs(pnlTokens))} {symbol}
-                </span>
+              <div className="mt-1.5 divide-y divide-[var(--border)]/20">
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Est. PnL</span>
+                  <span className={`text-[10px] font-medium ${pnlColor}`} style={{ fontFamily: "var(--font-mono)" }}>
+                    {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
+                    {formatTokenAmount(abs(pnlTokens))} {symbol}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">You&apos;ll receive</span>
+                  <span className="text-[10px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+                    ~
+                    {formatTokenAmount(
+                      pnlTokens > 0n
+                        ? displayData.capital + pnlTokens
+                        : pnlTokens < 0n
+                          ? displayData.capital > abs(pnlTokens)
+                            ? displayData.capital - abs(pnlTokens)
+                            : 0n
+                          : displayData.capital,
+                    )}{" "}
+                    {symbol}
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[var(--text-muted)]">You&apos;ll receive</span>
-                <span className="font-medium text-[var(--text)]">
-                  ~
-                  {formatTokenAmount(
-                    pnlTokens > 0n
-                      ? displayData.capital + pnlTokens
-                      : pnlTokens < 0n
-                        ? displayData.capital > abs(pnlTokens)
-                          ? displayData.capital - abs(pnlTokens)
-                          : 0n
-                        : displayData.capital,
-                  )}{" "}
-                  {symbol}
-                </span>
-              </div>
-              <div className="flex gap-2">
+              <div className="mt-2 flex gap-1">
                 <button
                   onClick={() => setShowConfirm(false)}
-                  className="flex-1 rounded-sm border border-[var(--border)] py-2 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)]"
+                  className="flex-1 rounded-none border border-[var(--border)]/50 py-1.5 text-[10px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)]"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleClose}
                   disabled={closeLoading}
-                  className="flex-1 rounded-sm bg-[var(--short)] py-2 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+                  className="flex-1 rounded-none bg-[var(--short)] py-1.5 text-[10px] font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
                 >
                   {closeLoading ? "Closing..." : "Confirm Close"}
                 </button>
@@ -314,13 +300,13 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           )}
 
           {closeError && (
-            <div className="rounded-sm border border-[var(--short)]/20 bg-[var(--short)]/10 px-3 py-2">
-              <p className="text-xs text-[var(--short)]">{humanizeError(closeError)}</p>
+            <div className="mt-2 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
+              <p className="text-[10px] text-[var(--short)]">{humanizeError(closeError)}</p>
             </div>
           )}
 
           {closeSig && (
-            <p className="text-xs text-[var(--text-muted)]">
+            <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
               Closed:{" "}
               <a
                 href={`${explorerTxUrl(closeSig)}`}

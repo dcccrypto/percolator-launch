@@ -28,7 +28,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const polygonRef = useRef<SVGPolygonElement>(null);
   const prefersReduced = usePrefersReducedMotion();
 
-  // --- Dynamic width via callback ref (fires when chart div mounts) ---
   const [W, setW] = useState(DEFAULT_W);
   const CHART_W = W - PAD.left - PAD.right;
   const roRef = useRef<ResizeObserver | null>(null);
@@ -45,7 +44,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     roRef.current = ro;
   }, []);
 
-  // --- Crosshair refs (direct DOM manipulation, zero re-renders) ---
   const crosshairRef = useRef<SVGGElement>(null);
   const crossVLineRef = useRef<SVGLineElement>(null);
   const crossHLineRef = useRef<SVGLineElement>(null);
@@ -57,7 +55,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const hoverDateRef = useRef<HTMLDivElement>(null);
   const svgRectRef = useRef<DOMRect | null>(null);
 
-  // Accumulate prices from on-chain slab state
   const lastPriceRef = useRef<number>(0);
   useEffect(() => {
     if (!config) return;
@@ -71,7 +68,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     });
   }, [config]);
 
-  // Load from API or mock data
   useEffect(() => {
     if (isMockSlab(slabAddress)) {
       const mockPrices = getMockPriceHistory(slabAddress);
@@ -134,13 +130,11 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     };
   }, [prices, W]);
 
-  // Sync computed data to ref so imperative mouse handler reads latest values
   const dataRef = useRef({ vals: [] as number[], times: [] as number[], minP: 0, maxP: 0, minT: 0, maxT: 0, curPrice: 0, isUp: true });
   useEffect(() => {
     dataRef.current = { vals, times, minP, maxP, minT, maxT, curPrice, isUp };
   }, [vals, times, minP, maxP, minT, maxT, curPrice, isUp]);
 
-  // Line draw animation
   useEffect(() => {
     const line = polylineRef.current;
     const fill = polygonRef.current;
@@ -168,7 +162,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     });
   }, [points, prefersReduced]);
 
-  // --- Mouse handlers (direct DOM manipulation, no React state/re-render) ---
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -189,7 +182,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const hoverY = PAD.top + (1 - (d.vals[idx] - d.minP) / pRange) * CHART_H;
     const clr = d.isUp ? "#14F195" : "#FF3B5C";
 
-    // Show crosshair
     crosshairRef.current?.setAttribute("display", "");
 
     const vLine = crossVLineRef.current;
@@ -214,7 +206,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       timeText.textContent = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
 
-    // Update HTML hover displays
     if (hoverPriceRef.current) {
       hoverPriceRef.current.textContent = `$${fmtPrice(d.vals[idx])}`;
       hoverPriceRef.current.style.color = clr;
@@ -237,10 +228,8 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (hoverDateRef.current) hoverDateRef.current.textContent = "\u00A0";
   }, []);
 
-  // Invalidate cached SVG rect on resize
   useEffect(() => { svgRectRef.current = null; }, [W]);
 
-  // Y-axis labels — must be before early return to keep hook order stable
   const yLabels = useMemo(() => {
     if (minP === maxP) return [];
     const labels: { y: number; label: string }[] = [];
@@ -253,7 +242,6 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     return labels;
   }, [minP, maxP]);
 
-  // X-axis time labels
   const timeLabels = useMemo(() => {
     if (minT === maxT) return [];
     const labels: { x: number; label: string }[] = [];
@@ -269,23 +257,22 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     return labels;
   }, [minT, maxT, W]);
 
-  // Show current price even with just 1 data point
   const currentPrice = config
     ? Number(config.authorityPriceE6 ?? config.lastEffectivePriceE6 ?? 0) / 1e6
     : 0;
 
   if (prices.length < 2) {
     return (
-      <div className="flex h-[200px] flex-col items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
+      <div className="flex h-[200px] flex-col items-center justify-center rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 relative">
         {currentPrice > 0 ? (
           <>
-            <div className="text-2xl font-bold text-[var(--text)]">${currentPrice < 0.01 ? currentPrice.toFixed(6) : currentPrice.toFixed(2)}</div>
-            <div className="mt-1 text-xs text-[var(--text-muted)]">Price chart building... (updates with each trade)</div>
+            <div className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>${currentPrice < 0.01 ? currentPrice.toFixed(6) : currentPrice.toFixed(2)}</div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Price chart building...</div>
           </>
         ) : (
           <>
-            <div className="text-sm text-[var(--text-muted)]">No price data yet</div>
-            <div className="mt-1 text-xs text-[var(--text-muted)]">Prices will appear after the first trade on this market.</div>
+            <div className="text-[11px] text-[var(--text-muted)]">No price data yet</div>
+            <div className="mt-1 text-[10px] text-[var(--text-dim)]">Prices will appear after the first trade.</div>
           </>
         )}
       </div>
@@ -294,28 +281,27 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const color = isUp ? "#14F195" : "#FF3B5C";
 
-  // Current price Y position for dashed line
   const curPriceY = minP !== maxP
     ? PAD.top + (1 - (curPrice - minP) / (maxP - minP)) * CHART_H
     : null;
 
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-3">
-      <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="text-[var(--text-secondary)]">Price</span>
+    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">
+      <div className="mb-1 flex items-center justify-between text-[10px]">
+        <span className="uppercase tracking-[0.15em] text-[var(--text-dim)]">Price</span>
         <div className="flex gap-3">
-          <span className="text-[var(--text-muted)]">
-            24h High <span className="font-bold text-[var(--text)]">${fmtPrice(high)}</span>
+          <span className="text-[var(--text-dim)]">
+            H <span className="font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>${fmtPrice(high)}</span>
           </span>
-          <span className="text-[var(--text-muted)]">
-            24h Low <span className="font-bold text-[var(--text)]">${fmtPrice(low)}</span>
+          <span className="text-[var(--text-dim)]">
+            L <span className="font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>${fmtPrice(low)}</span>
           </span>
-          <span ref={hoverPriceRef} className="font-bold" style={{ color }}>
+          <span ref={hoverPriceRef} className="font-bold" style={{ color, fontFamily: "var(--font-mono)" }}>
             ${fmtPrice(curPrice)}
           </span>
         </div>
       </div>
-      <div ref={hoverDateRef} className="mb-1 h-4 text-right text-[10px] text-[var(--text-muted)]">
+      <div ref={hoverDateRef} className="mb-0.5 h-3 text-right text-[9px] text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
         {"\u00A0"}
       </div>
       <div ref={chartWrapCallback}>
@@ -329,31 +315,27 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         >
           <defs>
             <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+              <stop offset="0%" stopColor={color} stopOpacity="0.15" />
               <stop offset="100%" stopColor={color} stopOpacity="0" />
             </linearGradient>
           </defs>
 
-          {/* Horizontal grid lines */}
           {yLabels.map((yl, i) => (
             <line key={`grid-${i}`} x1={PAD.left} y1={yl.y} x2={W - PAD.right} y2={yl.y} style={{ stroke: "var(--border-subtle)" }} strokeWidth="1" />
           ))}
 
-          {/* Y-axis labels — overlaid inside chart */}
           {yLabels.map((yl, i) => (
-            <text key={`ylabel-${i}`} x={PAD.left + 4} y={yl.y - 4} textAnchor="start" style={{ fill: "var(--text-dim)" }} fontSize="9">{yl.label}</text>
+            <text key={`ylabel-${i}`} x={PAD.left + 4} y={yl.y - 4} textAnchor="start" style={{ fill: "var(--text-dim)", fontFamily: "var(--font-mono)" }} fontSize="8">{yl.label}</text>
           ))}
 
-          {/* Current price dashed line */}
           {curPriceY !== null && (
             <>
-              <line x1={PAD.left} y1={curPriceY} x2={W - PAD.right} y2={curPriceY} stroke={color} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
-              <rect x={W - PAD.right - 52} y={curPriceY - 8} width={50} height={16} rx="2" fill={color} opacity="0.2" />
-              <text x={W - PAD.right - 4} y={curPriceY + 3} textAnchor="end" fill={color} fontSize="9" fontWeight="bold">${fmtPrice(curPrice)}</text>
+              <line x1={PAD.left} y1={curPriceY} x2={W - PAD.right} y2={curPriceY} stroke={color} strokeWidth="1" strokeDasharray="4 3" opacity="0.4" />
+              <rect x={W - PAD.right - 52} y={curPriceY - 8} width={50} height={16} fill={color} opacity="0.15" />
+              <text x={W - PAD.right - 4} y={curPriceY + 3} textAnchor="end" fill={color} fontSize="8" fontWeight="bold" style={{ fontFamily: "var(--font-mono)" }}>${fmtPrice(curPrice)}</text>
             </>
           )}
 
-          {/* Area fill */}
           <polygon
             ref={polygonRef}
             points={`${PAD.left},${PAD.top + CHART_H} ${points} ${W - PAD.right},${PAD.top + CHART_H}`}
@@ -361,16 +343,14 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             style={{ opacity: prefersReduced ? 1 : 0 }}
           />
 
-          {/* Price line */}
           <polyline
             ref={polylineRef}
             points={points}
             fill="none"
             stroke={color}
-            strokeWidth="2"
+            strokeWidth="1.5"
           />
 
-          {/* Pulse dot at last price */}
           {prices.length > 0 && (() => {
             const lastPts = points.split(" ");
             const last = lastPts[lastPts.length - 1];
@@ -379,14 +359,13 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <circle
                 cx={cx}
                 cy={cy}
-                r="3"
+                r="2.5"
                 fill={color}
                 className="animate-[pulse-glow_2s_ease-in-out_infinite]"
               />
             );
           })()}
 
-          {/* Crosshair — always rendered, toggled via display attr */}
           <g ref={crosshairRef} display="none">
             <line
               ref={crossVLineRef}
@@ -398,23 +377,22 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               x1={PAD.left} y1="0" x2={W - PAD.right} y2="0"
               style={{ stroke: "var(--accent)" }} strokeWidth="1" strokeDasharray="3 3" opacity="0.3"
             />
-            <circle ref={crossOuterRef} cx="0" cy="0" r="4" fill="none" strokeWidth="2" />
-            <circle ref={crossInnerRef} cx="0" cy="0" r="2" />
+            <circle ref={crossOuterRef} cx="0" cy="0" r="3.5" fill="none" strokeWidth="1.5" />
+            <circle ref={crossInnerRef} cx="0" cy="0" r="1.5" />
             <rect
               ref={crossTimeBgRef}
-              x="0" y={PAD.top + CHART_H + 2} width={48} height={14} rx="2"
+              x="0" y={PAD.top + CHART_H + 2} width={48} height={14}
               style={{ fill: "var(--accent)" }} opacity="0.15"
             />
             <text
               ref={crossTimeTextRef}
               x="0" y={PAD.top + CHART_H + 12} textAnchor="middle"
-              style={{ fill: "var(--accent)" }} fontSize="8"
+              style={{ fill: "var(--accent)", fontFamily: "var(--font-mono)" }} fontSize="8"
             />
           </g>
 
-          {/* X-axis labels */}
           {timeLabels.map((tl, i) => (
-            <text key={`time-${i}`} x={tl.x} y={H - 4} textAnchor="middle" style={{ fill: "var(--text-dim)" }} fontSize="9">{tl.label}</text>
+            <text key={`time-${i}`} x={tl.x} y={H - 4} textAnchor="middle" style={{ fill: "var(--text-dim)", fontFamily: "var(--font-mono)" }} fontSize="8">{tl.label}</text>
           ))}
         </svg>
       </div>

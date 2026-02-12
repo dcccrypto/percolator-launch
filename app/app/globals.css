@@ -521,8 +521,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   border: 1px solid rgba(153, 69, 255, 0.3) !important;
   position: relative !important;
   white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
+  overflow: visible !important;
   max-width: 160px !important;
 }
 @media (max-width: 380px) {

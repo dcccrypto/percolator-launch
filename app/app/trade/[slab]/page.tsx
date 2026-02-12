@@ -25,16 +25,16 @@ import { useToast } from "@/hooks/useToast";
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]">
+    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
+        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)] transition-colors hover:text-[var(--text-secondary)]"
       >
         <span className="flex items-center gap-2">
           {title}
           {badge}
         </span>
-        <span className={`text-[10px] text-[var(--text-dim)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▾</span>
+        <span className={`text-[9px] text-[var(--text-dim)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▾</span>
       </button>
       <div className={open ? "block" : "hidden"}>{children}</div>
     </div>
@@ -45,22 +45,22 @@ function Tabs({ tabs, children }: { tabs: string[]; children: React.ReactNode[] 
   const [active, setActive] = useState(0);
   return (
     <div>
-      <div className="flex rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-1 py-1 gap-1">
+      <div className="flex border-b border-[var(--border)]/50 bg-transparent">
         {tabs.map((label, i) => (
           <button
             key={label}
             onClick={() => setActive(i)}
-            className={`px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider rounded-sm transition-colors ${
+            className={`px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.15em] transition-colors border-b-2 ${
               active === i
-                ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-white/[0.03]"
+                ? "border-[var(--accent)] text-[var(--accent)]"
+                : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border)]"
             }`}
           >
             {label}
           </button>
         ))}
       </div>
-      <div className="mt-2">{children[active]}</div>
+      <div className="mt-1">{children[active]}</div>
     </div>
   );
 }
@@ -121,22 +121,22 @@ function TradePageInner({ slab }: { slab: string }) {
     <div ref={pageRef} className="mx-auto max-w-7xl overflow-x-hidden gsap-fade">
 
       {/* ── MOBILE: Sticky header ── */}
-      <div className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">
+      <div className="sticky top-0 z-30 border-b border-[var(--border)]/50 bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">
         <div className="flex items-center justify-between">
           <div className="min-w-0">
             <h1 className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-              {symbol}/USD <span className="text-xs font-normal text-[var(--text-muted)]">PERP</span>
+              {symbol}/USD <span className="text-[10px] font-normal uppercase tracking-[0.15em] text-[var(--text-muted)]">PERP</span>
             </h1>
           </div>
           <div className="flex items-center gap-2">
             {health && <HealthBadge level={health.level} />}
             {priceDisplay && (
-              <span className="text-sm font-bold text-[var(--text)]">{priceDisplay}</span>
+              <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
             )}
           </div>
         </div>
         <div className="mt-1 flex items-center gap-2">
-          <span className="flex items-center text-[10px] text-[var(--text-dim)]">
+          <span className="flex items-center text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
             {shortAddress}
             <CopyButton text={slab} />
           </span>
@@ -149,14 +149,14 @@ function TradePageInner({ slab }: { slab: string }) {
       </div>
 
       {/* ── DESKTOP: Full header ── */}
-      <div className="hidden lg:flex items-start justify-between px-4 py-3 gap-3">
+      <div className="hidden lg:flex items-start justify-between px-4 py-2 gap-3 border-b border-[var(--border)]/30">
         <div className="min-w-0">
-          <p className="mb-0.5 text-[10px] font-medium uppercase tracking-widest text-[var(--accent)]">// TRADE</p>
-          <h1 className="text-xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-            {symbol}/USD <span className="text-sm font-normal text-[var(--text-muted)]">PERP</span>
+          <p className="mb-0.5 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--accent)]/70">// TRADE</p>
+          <h1 className="text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+            {symbol}/USD <span className="text-xs font-normal text-[var(--text-muted)]">PERP</span>
           </h1>
-          <div className="mt-1 flex items-center gap-3">
-            <span className="flex items-center text-[11px] text-[var(--text-dim)]">
+          <div className="mt-0.5 flex items-center gap-3">
+            <span className="flex items-center text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
               {shortAddress}
               <CopyButton text={slab} />
             </span>
@@ -170,13 +170,13 @@ function TradePageInner({ slab }: { slab: string }) {
         </div>
         {priceDisplay && (
           <div className="text-right">
-            <div className="text-2xl font-bold text-[var(--text)]">{priceDisplay}</div>
+            <div className="text-xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</div>
           </div>
         )}
       </div>
 
       {/* ── Quick start guide — desktop only ── */}
-      <div className="hidden md:flex mx-4 mb-3 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-2 items-center gap-4 text-xs text-[var(--text-secondary)]">
+      <div className="hidden md:flex mx-4 mb-2 mt-2 rounded-none border border-[var(--border)]/30 bg-[var(--bg)]/80 px-3 py-1.5 items-center gap-4 text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.1em]">
         <span className="text-[var(--text-dim)]">quick start:</span>
         <span><span className="text-[var(--long)]">1</span> connect wallet</span>
         <span className="text-[var(--text-dim)]">&rarr;</span>
@@ -191,7 +191,7 @@ function TradePageInner({ slab }: { slab: string }) {
           MOBILE LAYOUT  (< lg)
           Single column, everything stacked
           ════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col gap-2 px-3 pt-3 pb-4 lg:hidden min-w-0 w-full">
+      <div className="flex flex-col gap-1.5 px-2 pt-2 pb-4 lg:hidden min-w-0 w-full">
         {/* Chart */}
         <ErrorBoundary label="PriceChart">
           <div className="w-full overflow-hidden">
@@ -236,9 +236,9 @@ function TradePageInner({ slab }: { slab: string }) {
           DESKTOP LAYOUT  (≥ lg / 1024px)
           Two columns: left ~68%, right ~32%
           ════════════════════════════════════════════════════════ */}
-      <div className="hidden lg:grid grid-cols-[1fr_340px] gap-3 px-4 pb-4">
+      <div className="hidden lg:grid grid-cols-[1fr_340px] gap-1.5 px-3 pb-3 pt-1.5">
         {/* ── Left column ── */}
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 space-y-1.5">
           {/* Chart */}
           <ErrorBoundary label="PriceChart">
             <PriceChart slabAddress={slab} />
@@ -260,7 +260,7 @@ function TradePageInner({ slab }: { slab: string }) {
         </div>
 
         {/* ── Right column ── */}
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 space-y-1.5">
           {/* Trade form — sticky */}
           <div className="sticky top-0 z-20">
             <ErrorBoundary label="TradeForm">
