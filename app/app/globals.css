@@ -359,8 +359,8 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   height: 500px;
   border-radius: 50%;
   pointer-events: none;
-  z-index: 0;
-  background: radial-gradient(circle, rgba(153, 69, 255, 0.06) 0%, transparent 70%);
+  z-index: 1;
+  background: radial-gradient(circle, rgba(153, 69, 255, 0.08) 0%, transparent 70%);
   transform: translate(-50%, -50%);
   transition: opacity 0.3s ease;
   opacity: 0;
