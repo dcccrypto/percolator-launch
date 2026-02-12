@@ -16,6 +16,11 @@ interface PriceEntry {
   timestamp: number;
 }
 
+// BL2: Extract magic numbers to named constants
+const API_TIMEOUT_MS = 10_000; // 10 second timeout for external API calls
+const PRICE_E6_MULTIPLIER = 1_000_000; // Price precision (6 decimals)
+const CACHED_PRICE_MAX_AGE_MS = 60_000; // Reject cached prices older than 60s
+
 // DexScreener rate limit: cache responses for 10s to avoid hitting limits
 const dexScreenerCache = new Map<string, { data: DexScreenerResponse; fetchedAt: number }>();
 const DEX_SCREENER_CACHE_TTL_MS = 10_000;
@@ -72,14 +77,14 @@ export class OracleService {
           if (!pair?.priceUsd) return null;
           const p = parseFloat(pair.priceUsd);
           if (!isFinite(p) || p <= 0) return null;
-          return BigInt(Math.round(p * 1_000_000));
+          return BigInt(Math.round(p * PRICE_E6_MULTIPLIER));
         }
       }
 
       // Cache miss or expired — fetch fresh data
       // BM1: Add 10s timeout to prevent hanging requests
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10_000);
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
       
       const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
         signal: controller.signal
@@ -94,7 +99,7 @@ export class OracleService {
       if (!pair?.priceUsd) return null;
       const parsed = parseFloat(pair.priceUsd);
       if (!isFinite(parsed) || parsed <= 0) return null;
-      return BigInt(Math.round(parsed * 1_000_000));
+      return BigInt(Math.round(parsed * PRICE_E6_MULTIPLIER));
     } catch {
       return null;
     }
@@ -120,7 +125,7 @@ export class OracleService {
     try {
       // BM1: Add 10s timeout to prevent hanging requests
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10_000);
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
       
       const res = await fetch(`https://api.jup.ag/price/v2?ids=${mint}`, {
         signal: controller.signal
@@ -132,7 +137,7 @@ export class OracleService {
       if (!priceStr) return null;
       const parsed = parseFloat(priceStr);
       if (!isFinite(parsed) || parsed <= 0) return null;
-      return BigInt(Math.round(parsed * 1_000_000));
+      return BigInt(Math.round(parsed * PRICE_E6_MULTIPLIER));
     } catch {
       return null;
     }
@@ -153,7 +158,7 @@ export class OracleService {
       if (history && history.length > 0) {
         const last = history[history.length - 1];
         // Reject stale cached prices (>60s) to prevent bad liquidations
-        if (Date.now() - last.timestamp > 60_000) {
+        if (Date.now() - last.timestamp > CACHED_PRICE_MAX_AGE_MS) {
           console.warn(`[OracleService] Cached price for ${mint} is stale (${Math.round((Date.now() - last.timestamp) / 1000)}s old), rejecting`);
           return null;
         }

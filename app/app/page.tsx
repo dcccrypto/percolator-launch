@@ -148,8 +148,8 @@ export default function Home() {
         {/* Grid background — top-heavy with fade */}
         <div className="absolute inset-x-0 top-0 h-full bg-grid pointer-events-none" />
 
-        {/* HUD corner markers */}
-        <div className="pointer-events-none absolute inset-8 z-[2] hidden md:block">
+        {/* L1: HUD corner markers - decorative elements with aria-hidden */}
+        <div className="pointer-events-none absolute inset-8 z-[2] hidden md:block" aria-hidden="true">
           <div className="absolute left-0 top-0 h-8 w-8 border-l border-t border-[var(--accent)]/15" />
           <div className="absolute right-0 top-0 h-8 w-8 border-r border-t border-[var(--accent)]/15" />
           <div className="absolute bottom-0 left-0 h-8 w-8 border-b border-l border-[var(--accent)]/15" />

@@ -20,6 +20,24 @@ const outfit = Outfit({ variable: "--font-outfit", subsets: ["latin"], weight: [
 export const metadata: Metadata = {
   title: "Percolator — Perpetual Futures for Any Token",
   description: "Deploy a perpetual futures market on Solana in one click. No smart contract. No permission. Up to 20x leverage on any SPL token.",
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
+  openGraph: {
+    title: "Percolator — Perpetual Futures for Any Token",
+    description: "Deploy a perpetual futures market on Solana in one click. No smart contract. No permission. Up to 20x leverage on any SPL token.",
+    type: "website",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Percolator — Perpetual Futures for Any Token",
+    description: "Deploy a perpetual futures market on Solana in one click. No smart contract. No permission. Up to 20x leverage on any SPL token.",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
