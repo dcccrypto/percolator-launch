@@ -27,26 +27,38 @@ interface MarketCrankState {
 }
 
 /** Process items in batches with delay between batches.
- *  Each item is wrapped in try/catch so one failure doesn't kill the batch. */
+ *  Each item is wrapped in try/catch so one failure doesn't kill the batch.
+ *  BM7: Enhanced error tracking per item. */
 async function processBatched<T>(
   items: T[],
   batchSize: number,
   delayMs: number,
   fn: (item: T) => Promise<void>,
-): Promise<void> {
+): Promise<{ succeeded: number; failed: number; errors: Map<string, Error> }> {
+  const errors = new Map<string, Error>();
+  let succeeded = 0;
+  let failed = 0;
+
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
     await Promise.all(batch.map(async (item) => {
       try {
         await fn(item);
+        succeeded++;
       } catch (err) {
-        console.error(`[processBatched] Item failed:`, err);
+        failed++;
+        const itemKey = String(item);
+        const errorObj = err instanceof Error ? err : new Error(String(err));
+        errors.set(itemKey, errorObj);
+        console.error(`[processBatched] Item ${itemKey} failed:`, errorObj.message);
       }
     }));
     if (i + batchSize < items.length) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
+
+  return { succeeded, failed, errors };
 }
 
 export class CrankService {
@@ -250,11 +262,20 @@ export class CrankService {
     }
 
     // Process in batches of 3 with 2s gaps between batches
-    await processBatched(toCrank, 3, 2_000, async (slabAddress) => {
+    // BM7: Collect per-market error tracking
+    const batchResult = await processBatched(toCrank, 3, 2_000, async (slabAddress) => {
       const ok = await this.crankMarket(slabAddress);
       if (ok) success++;
       else failed++;
     });
+
+    // BM7: Log detailed error summary if any failed
+    if (batchResult.failed > 0) {
+      console.error(`[CrankService] Batch completed with ${batchResult.failed} errors:`);
+      for (const [slab, error] of batchResult.errors) {
+        console.error(`  - ${slab}: ${error.message}`);
+      }
+    }
 
     this.lastCycleResult = { success, failed, skipped };
     return { success, failed, skipped };
