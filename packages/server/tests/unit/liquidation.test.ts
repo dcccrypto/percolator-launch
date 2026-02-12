@@ -13,10 +13,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { PublicKey, Connection } from '@solana/web3.js';
+import { PublicKey, Connection, Keypair } from '@solana/web3.js';
 import { LiquidationService } from '../../src/services/liquidation.js';
 import { OracleService } from '../../src/services/oracle.js';
 import type { DiscoveredMarket } from '@percolator/core';
+
+// Create a real keypair for testing (signature verification needs a valid keypair)
+const testKeypair = Keypair.generate();
 
 // Helper to create valid base58 PublicKeys
 const createTestPublicKey = (seed: string): PublicKey => {
@@ -37,7 +40,7 @@ vi.mock('../../src/config.js', () => ({
 vi.mock('../../src/utils/solana.js', () => ({
   getConnection: vi.fn(() => ({
     getLatestBlockhash: vi.fn().mockResolvedValue({
-      blockhash: 'test-blockhash',
+      blockhash: createTestPublicKey('Blockhash').toBase58(),
       lastValidBlockHeight: 1000000,
     }),
     sendRawTransaction: vi.fn().mockResolvedValue('liquidation-sig-123'),
@@ -45,10 +48,7 @@ vi.mock('../../src/utils/solana.js', () => ({
       value: [{ confirmationStatus: 'confirmed', err: null }],
     }),
   })),
-  loadKeypair: vi.fn(() => ({
-    publicKey: createTestPublicKey('Liquidator'),
-    secretKey: new Uint8Array(64),
-  })),
+  loadKeypair: vi.fn(() => testKeypair),
   sendWithRetry: vi.fn().mockResolvedValue('liquidation-sig-123'),
   pollSignatureStatus: vi.fn().mockResolvedValue(undefined),
   getRecentPriorityFees: vi.fn().mockResolvedValue({
@@ -81,14 +81,11 @@ vi.mock('@percolator/core', async () => {
     encodeLiquidateAtOracle: vi.fn(() => Buffer.from([4, 5, 6])),
     encodePushOraclePrice: vi.fn(() => Buffer.from([7, 8, 9])),
     buildAccountMetas: vi.fn(() => []),
-    buildIx: vi.fn(() => {
-      const progBuffer = Buffer.alloc(32, 1);
-      return {
-        programId: new PublicKey(progBuffer),
-        keys: [],
-        data: Buffer.from([1, 2, 3]),
-      };
-    }),
+    buildIx: vi.fn(() => ({
+      programId: createTestPublicKey('Program1'),
+      keys: [],
+      data: Buffer.from([1, 2, 3]),
+    })),
     derivePythPushOraclePDA: vi.fn(() => [
       createTestPublicKey('PyThOracle'),
       0,
@@ -164,13 +161,13 @@ describe('LiquidationService Unit Tests', () => {
       vi.mocked(parseUsedIndices).mockReturnValue([0]);
       
       // Position: 1 unit long, entered at $100, now at $50
-      // Capital: $50, PnL: -$50, Equity: $0
-      // Maintenance margin: 5% of notional = $2.5
-      // This is UNDERWATER (equity = 0 < $2.5)
+      // Capital: $2, PnL: -$1, Equity: $1, Notional: $50
+      // Margin ratio: $1/$50 = 2% < 5% maintenance
+      // This is UNDERWATER
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n, // Long 1 unit
-          capital: 50000000n, // $50
+          capital: 2000000n, // $2
           entryPrice: 100000000n, // Entered at $100
         })
       );
@@ -198,7 +195,7 @@ describe('LiquidationService Unit Tests', () => {
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 50000000n,
+          capital: 2000000n, // $2 - underwater position
           entryPrice: 100000000n,
         })
       );
@@ -226,11 +223,12 @@ describe('LiquidationService Unit Tests', () => {
       } as any);
       vi.mocked(parseUsedIndices).mockReturnValue([0]);
       
-      // Deeply underwater position
+      // Deeply underwater position (negative equity - insurance fund covers)
+      // Entry $100, now $30 -> loss ~$0.70, capital $0.50 -> equity = -$0.20
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 20000000n, // Only $20 capital
+          capital: 500000n, // $0.50
           entryPrice: 100000000n,
         })
       );
@@ -284,7 +282,7 @@ describe('LiquidationService Unit Tests', () => {
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 10000000n, // Very low capital - underwater
+          capital: 1000000n, // $1 - underwater position (2% margin)
           entryPrice: 100000000n,
         })
       );
@@ -329,7 +327,7 @@ describe('LiquidationService Unit Tests', () => {
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 10000000n,
+          capital: 1000000n, // $1 - underwater position
           entryPrice: 100000000n,
         })
       );
@@ -475,16 +473,24 @@ describe('LiquidationService Unit Tests', () => {
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 10000000n,
+          capital: 1000000n, // $1 - underwater position
           entryPrice: 100000000n,
         })
       );
 
-      // Mock sendRawTransaction to fail with gas error
-      const mockConnection = vi.mocked(getConnection)();
-      vi.mocked(mockConnection.sendRawTransaction).mockRejectedValueOnce(
-        new Error('Insufficient gas price')
-      );
+      // Mock getConnection to return a connection that fails on sendRawTransaction
+      vi.mocked(getConnection).mockReturnValueOnce({
+        getLatestBlockhash: vi.fn().mockResolvedValue({
+          blockhash: createTestPublicKey('Blockhash').toBase58(),
+          lastValidBlockHeight: 1000000,
+        }),
+        sendRawTransaction: vi.fn().mockRejectedValue(
+          new Error('Insufficient gas price')
+        ),
+        getSignatureStatuses: vi.fn().mockResolvedValue({
+          value: [{ confirmationStatus: 'confirmed', err: null }],
+        }),
+      } as any);
 
       const sig = await liquidationService.liquidate(mockMarket, 0);
 
@@ -509,15 +515,24 @@ describe('LiquidationService Unit Tests', () => {
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 10000000n,
+          capital: 1000000n, // $1 - underwater position
           entryPrice: 100000000n,
         })
       );
 
-      const mockConnection = vi.mocked(getConnection)();
-      vi.mocked(mockConnection.sendRawTransaction).mockRejectedValue(
-        new Error('Gas estimation failed')
-      );
+      // Mock getConnection to return a connection that always fails
+      vi.mocked(getConnection).mockReturnValueOnce({
+        getLatestBlockhash: vi.fn().mockResolvedValue({
+          blockhash: createTestPublicKey('Blockhash').toBase58(),
+          lastValidBlockHeight: 1000000,
+        }),
+        sendRawTransaction: vi.fn().mockRejectedValue(
+          new Error('Gas estimation failed')
+        ),
+        getSignatureStatuses: vi.fn().mockResolvedValue({
+          value: [{ confirmationStatus: 'confirmed', err: null }],
+        }),
+      } as any);
 
       const sig = await liquidationService.liquidate(mockMarket, 0);
 
@@ -543,16 +558,17 @@ describe('LiquidationService Unit Tests', () => {
 
       vi.mocked(fetchSlab).mockResolvedValue(Buffer.from([1, 2, 3]));
       vi.mocked(parseConfig).mockReturnValue({
-        authorityPriceE6: 20000000n, // Severe price drop
+        authorityPriceE6: 20000000n, // Severe price drop to $20
         authorityTimestamp: now,
       } as any);
       vi.mocked(parseUsedIndices).mockReturnValue([0]);
       
       // Position with negative equity (insurance fund covers loss)
+      // Price $100 -> $20, loss = $0.80, capital $0.30 -> equity = -$0.50
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 50000000n,
+          capital: 300000n, // $0.30
           entryPrice: 100000000n,
         })
       );
@@ -586,7 +602,7 @@ describe('LiquidationService Unit Tests', () => {
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 10000000n,
+          capital: 1000000n, // $1 - underwater position
           entryPrice: 100000000n,
         })
       );
@@ -951,15 +967,24 @@ describe('LiquidationService Unit Tests', () => {
       vi.mocked(parseAccount).mockReturnValue(
         createMockAccount({
           positionSize: 1000000n,
-          capital: 10000000n,
+          capital: 1000000n, // $1 - underwater position
           entryPrice: 100000000n,
         })
       );
 
-      const mockConnection = vi.mocked(getConnection)();
-      vi.mocked(mockConnection.sendRawTransaction).mockRejectedValue(
-        new Error('Transaction failed')
-      );
+      // Mock getConnection to return a connection that fails
+      vi.mocked(getConnection).mockReturnValueOnce({
+        getLatestBlockhash: vi.fn().mockResolvedValue({
+          blockhash: createTestPublicKey('Blockhash').toBase58(),
+          lastValidBlockHeight: 1000000,
+        }),
+        sendRawTransaction: vi.fn().mockRejectedValue(
+          new Error('Transaction failed')
+        ),
+        getSignatureStatuses: vi.fn().mockResolvedValue({
+          value: [{ confirmationStatus: 'confirmed', err: null }],
+        }),
+      } as any);
 
       await liquidationService.liquidate(mockMarket, 0);
 
