@@ -708,7 +708,16 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 }
 .wallet-adapter-modal-list .wallet-adapter-button {
   gap: 8px !important;
-  overflow: hidden !important;
+  overflow: visible !important;
+  display: flex !important;
+  align-items: center !important;
+}
+.wallet-adapter-modal-list li {
+  margin: 0 !important;
+  width: 100% !important;
+}
+.wallet-adapter-modal-list {
+  width: 100% !important;
 }
 
 /* Collapse/expand ("More options") button */
