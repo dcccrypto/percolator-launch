@@ -389,7 +389,7 @@ export class LiquidationService {
           );
         }
       } catch (err) {
-        console.error("[LiquidationService] Cycle error:", err);
+        console.error("[LiquidationService] Failed to complete liquidation cycle:", err);
       }
     }, this.intervalMs);
   }

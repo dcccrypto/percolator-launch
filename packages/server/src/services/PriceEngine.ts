@@ -234,7 +234,7 @@ export class PriceEngine {
     });
 
     this.ws.on("error", (err) => {
-      console.error("[PriceEngine] WebSocket error:", err.message);
+      console.error("[PriceEngine] Failed to maintain WebSocket connection:", err.message);
     });
   }
 

@@ -309,7 +309,7 @@ export class CrankService {
           }
         }
       } catch (err) {
-        console.error("[CrankService] Cycle error:", err);
+        console.error("[CrankService] Failed to complete crank cycle:", err);
       } finally {
         this._cycling = false;
       }

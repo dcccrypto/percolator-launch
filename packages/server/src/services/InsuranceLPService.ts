@@ -42,9 +42,9 @@ export class InsuranceLPService {
       console.warn("[InsuranceLPService] SUPABASE_URL/KEY not set — service disabled");
       return;
     }
-    this.poll().catch((e) => console.error("[InsuranceLPService] initial poll error:", e));
+    this.poll().catch((e) => console.error("[InsuranceLPService] Failed to run initial poll:", e));
     this.timer = setInterval(() => {
-      this.poll().catch((e) => console.error("[InsuranceLPService] poll error:", e));
+      this.poll().catch((e) => console.error("[InsuranceLPService] Failed to poll insurance data:", e));
     }, POLL_INTERVAL_MS);
     console.log("[InsuranceLPService] started — polling every 30s");
   }
