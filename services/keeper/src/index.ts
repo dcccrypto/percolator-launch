@@ -58,7 +58,10 @@ async function main() {
 
   console.log(`Keeper started. Cranking ${slabs.length} markets every ${CRANK_INTERVAL_MS / 1000}s.`);
 
-  while (true) {
+  // Run loop with graceful shutdown and backoff
+  while (running) {
+    let cycleSuccess = false;
+    
     for (const slab of slabs) {
       try {
         const slabPk = new PublicKey(slab);
@@ -74,12 +77,31 @@ async function main() {
         // Remove skipPreflight to catch errors before on-chain submission
         const sig = await connection.sendTransaction(tx, [payer]);
         console.log(`  [${slab.slice(0, 8)}] Cranked → ${sig.slice(0, 16)}...`);
+        cycleSuccess = true;
       } catch (e) {
         console.error(`  [${slab.slice(0, 8)}] Crank error:`, e);
       }
     }
-    await new Promise((r) => setTimeout(r, CRANK_INTERVAL_MS));
+    
+    // Reset on success, increment failures if all cranks failed
+    if (cycleSuccess) {
+      backoffMs = CRANK_INTERVAL_MS;
+      consecutiveFailures = 0;
+    } else {
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_FAILURES) {
+        console.error(\`Too many failures (\${MAX_FAILURES}), exiting...\`);
+        process.exit(1);
+      }
+      backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+      console.log(\`Backing off: \${backoffMs}ms (failures: \${consecutiveFailures})\`);
+    }
+    
+    await new Promise((r) => setTimeout(r, backoffMs));
   }
+
+  console.log("Keeper service stopped gracefully");
+  process.exit(0);
 }
 
 main().catch(console.error);
