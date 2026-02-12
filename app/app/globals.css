@@ -518,6 +518,18 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   transition: all 200ms ease !important;
   border: 1px solid rgba(153, 69, 255, 0.3) !important;
   position: relative !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 160px !important;
+}
+@media (max-width: 380px) {
+  .wallet-adapter-button {
+    font-size: 0.5625rem !important;
+    padding: 0 0.625rem !important;
+    max-width: 120px !important;
+    letter-spacing: 0.03em !important;
+  }
 }
 .wallet-adapter-button:not([disabled]):hover {
   background-color: rgba(153, 69, 255, 0.08) !important;
