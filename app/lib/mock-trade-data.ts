@@ -288,7 +288,7 @@ export function getMockPortfolioPositions() {
   const withPositions = slabs.filter((_, i) => i < 4);
   for (const [slabAddr, m] of withPositions) {
     const priceE6 = BigInt(Math.round(m.priceUsd * 1_000_000));
-    const isLong = positions.length % 2 === 0;
+    const isLong: boolean = positions.length % 2 === 0;
     const entryOffset = isLong ? 0.97 : 1.03;
     const entryE6 = BigInt(Math.round(m.priceUsd * entryOffset * 1_000_000));
     const posSize = BigInt(Math.round((1000 + positions.length * 500) * 1_000_000)) * (isLong ? 1n : -1n);
