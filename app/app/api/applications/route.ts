@@ -115,7 +115,6 @@ export async function POST(req: NextRequest) {
       availability,
       solana_wallet,
       status: "new",
-      ip,
     });
 
     if (error) throw error;
