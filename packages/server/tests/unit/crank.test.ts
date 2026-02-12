@@ -259,12 +259,12 @@ describe('CrankService Unit Tests', () => {
   describe('CRANK-003: Transaction too large', () => {
     it('should reject transactions exceeding 1232 bytes', async () => {
       const mockMarket = createMockMarket();
-      const { checkTransactionSize } = await import('../../src/utils/solana.js');
+      const { sendWithRetry } = await import('../../src/utils/solana.js');
 
-      // Mock checkTransactionSize to throw error for oversized transaction
-      vi.mocked(checkTransactionSize).mockImplementationOnce(() => {
-        throw new Error('Transaction too large: 1300 bytes (max 1232 bytes)');
-      });
+      // Mock sendWithRetry to throw transaction size error
+      vi.mocked(sendWithRetry).mockRejectedValueOnce(
+        new Error('Transaction too large: 1300 bytes (max 1232 bytes)')
+      );
 
       const markets = crankService.getMarkets();
       markets.set(mockMarket.slabAddress.toBase58(), {
@@ -533,13 +533,14 @@ describe('CrankService Unit Tests', () => {
         return market;
       });
 
-      // Make the 5th market fail
-      vi.mocked(sendWithRetry).mockImplementation(async (conn, ix, signers) => {
-        const address = signers?.[0]?.publicKey?.toBase58();
-        if (address?.includes('Market4')) {
+      // Use call counting to fail the 5th market (index 4)
+      let callCount = 0;
+      vi.mocked(sendWithRetry).mockImplementation(async () => {
+        const currentCall = callCount++;
+        if (currentCall === 4) {
           throw new Error('Simulated crank failure for market 4');
         }
-        return `success-sig-${address}`;
+        return `success-sig-${currentCall}`;
       });
 
       const result = await crankService.crankAll();
