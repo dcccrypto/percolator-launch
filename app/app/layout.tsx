@@ -21,11 +21,8 @@ export const metadata: Metadata = {
   title: "Percolator — Perpetual Futures for Any Token",
   description: "Deploy a perpetual futures market on Solana in one click. No smart contract. No permission. Up to 20x leverage on any SPL token.",
   icons: {
-    icon: [
-      { url: '/favicon.ico', sizes: 'any' },
-      { url: '/icon.svg', type: 'image/svg+xml' },
-    ],
-    apple: '/apple-touch-icon.png',
+    icon: '/icon.png',
+    apple: '/icon.png',
   },
   openGraph: {
     title: "Percolator — Perpetual Futures for Any Token",
