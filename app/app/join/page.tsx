@@ -469,7 +469,7 @@ export default function JoinPage() {
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-[var(--accent)]" />
                     <div>
                       <p className="text-[12px] font-medium text-white">{item.title}</p>
-                      <p className="text-[11px] text-[var(--text-dim)]">{item.desc}</p>
+                      <p className="text-[11px] text-[var(--text-secondary)]">{item.desc}</p>
                     </div>
                   </li>
                 ))}
