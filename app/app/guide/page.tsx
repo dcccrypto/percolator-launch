@@ -249,7 +249,7 @@ export default function GuidePage() {
             },
           ].map((item) => (
             <details key={item.q} className="bg-[var(--panel-bg)] group">
-              <summary className="cursor-pointer px-5 py-4 text-[13px] font-medium text-white transition-colors hover:bg-[var(--bg-elevated)] list-none flex items-center justify-between">
+              <summary className="cursor-pointer px-5 py-4 text-[13px] font-medium text-white transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] list-none flex items-center justify-between">
                 {item.q}
                 <svg className="h-3 w-3 text-[var(--text-muted)] transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />

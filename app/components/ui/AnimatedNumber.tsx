@@ -50,7 +50,7 @@ export function AnimatedNumber({
   }, [value, prefix, suffix, decimals, duration, prefersReduced]);
 
   return (
-    <span ref={spanRef} className={`font-[var(--font-jetbrains-mono)] tabular-nums ${className}`}>
+    <span ref={spanRef} className={`font-[var(--font-jetbrains-mono)] tabular-nums ${className}`} style={{ willChange: 'contents' }}>
       {prefix}0{suffix}
     </span>
   );
