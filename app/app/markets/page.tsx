@@ -75,8 +75,6 @@ function MarketsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();
-  const [supabaseMarkets, setSupabaseMarkets] = useState<MarketWithStats[]>([]);
-  const [supabaseLoading, setSupabaseLoading] = useState(true);
   
   // P-MED-2: Read filters from URL params
   const [search, setSearch] = useState(searchParams.get("q") || "");
@@ -109,24 +107,7 @@ function MarketsPageInner() {
     router.replace(newUrl, { scroll: false });
   }, [debouncedSearch, sortBy, leverageFilter, oracleFilter, router]);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const { data } = await getSupabase().from("markets_with_stats").select("*");
-        setSupabaseMarkets(data || []);
-      } catch (e) {
-        console.error("[Markets] Supabase fetch failed:", e);
-        setSupabaseMarkets([]);
-      } finally {
-        setSupabaseLoading(false);
-      }
-    }
-    load();
-  }, []);
-
   const merged = useMemo<MergedMarket[]>(() => {
-    const sbMap = new Map<string, MarketWithStats>();
-    for (const m of supabaseMarkets) sbMap.set(m.slab_address, m);
     return discovered
       .filter((d) => {
         // Skip malformed markets with undefined PublicKey fields
@@ -139,34 +120,32 @@ function MarketsPageInner() {
       .map((d) => {
         const addr = d.slabAddress.toBase58();
         const mint = d.config.collateralMint.toBase58();
-        const sb = sbMap.get(addr) ?? null;
         const maxLev = d.params.initialMarginBps > 0n ? Math.floor(10000 / Number(d.params.initialMarginBps)) : 0;
         const isAdminOracle = d.config.indexFeedId.equals(PublicKey.default);
-        return { slabAddress: addr, mintAddress: mint, symbol: sb?.symbol ?? null, name: sb?.name ?? null, maxLeverage: maxLev, isAdminOracle, onChain: d, supabase: sb };
+        // No Supabase - symbol/name will come from on-chain metadata
+        return { slabAddress: addr, mintAddress: mint, symbol: null, name: null, maxLeverage: maxLev, isAdminOracle, onChain: d, supabase: null };
       });
-  }, [discovered, supabaseMarkets]);
+  }, [discovered]);
 
   // Only show mock data in development (never in production)
   const effectiveMarkets = merged.length > 0 ? merged : (process.env.NODE_ENV === "development" ? MOCK_MARKETS : []);
 
-  // Resolve on-chain token metadata for markets missing Supabase symbol
-  const missingMints = useMemo(() => {
+  // Fetch on-chain token metadata for ALL markets (no Supabase)
+  const allMints = useMemo(() => {
     return effectiveMarkets
-      .filter(m => !m.symbol && m.mintAddress)
+      .filter(m => m.mintAddress)
       .map(m => new PublicKey(m.mintAddress));
   }, [effectiveMarkets]);
-  const tokenMetaMap = useMultiTokenMeta(missingMints);
+  const tokenMetaMap = useMultiTokenMeta(allMints);
 
   const filtered = useMemo(() => {
     let list = effectiveMarkets;
-    // Text search — matches symbol, name, slab address, OR mint address
+    // Text search — matches on-chain symbol, name, slab address, OR mint address
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.toLowerCase();
       list = list.filter((m) => {
         const onChainMeta = tokenMetaMap.get(m.mintAddress);
-        return m.symbol?.toLowerCase().includes(q) ||
-          m.name?.toLowerCase().includes(q) ||
-          onChainMeta?.symbol?.toLowerCase().includes(q) ||
+        return onChainMeta?.symbol?.toLowerCase().includes(q) ||
           onChainMeta?.name?.toLowerCase().includes(q) ||
           m.slabAddress.toLowerCase().includes(q) ||
           m.mintAddress.toLowerCase().includes(q);
@@ -185,9 +164,12 @@ function MarketsPageInner() {
     }
     list = [...list].sort((a, b) => {
       switch (sortBy) {
-        case "volume": return (b.supabase?.volume_24h ?? 0) - (a.supabase?.volume_24h ?? 0);
+        case "volume": 
+          // No Supabase volume data - sort by OI instead
+          const oiA_vol = a.onChain.engine.totalOpenInterest ?? 0n;
+          const oiB_vol = b.onChain.engine.totalOpenInterest ?? 0n;
+          return oiB_vol > oiA_vol ? 1 : oiB_vol < oiA_vol ? -1 : 0;
         case "oi": {
-          // P-CRITICAL-5: Add null coalescing before BigInt sort
           const oiA = a.onChain.engine.totalOpenInterest ?? 0n;
           const oiB = b.onChain.engine.totalOpenInterest ?? 0n;
           return oiB > oiA ? 1 : oiB < oiA ? -1 : 0;
@@ -198,6 +180,9 @@ function MarketsPageInner() {
           const order: Record<string, number> = { healthy: 0, caution: 1, warning: 2, empty: 3 };
           return (order[ha.level] ?? 5) - (order[hb.level] ?? 5);
         }
+        case "recent":
+          // Sort by most recently added (slab address is sequential-ish)
+          return b.slabAddress.localeCompare(a.slabAddress);
         default: return 0;
       }
     });
@@ -233,7 +218,7 @@ function MarketsPageInner() {
   }, [debouncedSearch, leverageFilter, oracleFilter, sortBy]);
 
   const displayedMarkets = filtered.slice(0, displayCount);
-  const loading = discoveryLoading || supabaseLoading;
+  const loading = discoveryLoading;
 
   // P-MED-4: Separate clear functions
   const clearFilters = () => {
@@ -445,14 +430,14 @@ function MarketsPageInner() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-white text-sm">
-                            {m.symbol ? `${m.symbol}/USD` : tokenMetaMap.get(m.mintAddress)?.symbol ? `${tokenMetaMap.get(m.mintAddress)!.symbol}/USD` : shortenAddress(m.slabAddress)}
+                            {tokenMetaMap.get(m.mintAddress)?.symbol ? `${tokenMetaMap.get(m.mintAddress)!.symbol}/USD` : shortenAddress(m.slabAddress)}
                           </span>
                           {m.isAdminOracle && (
                             <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
                           )}
                         </div>
                         <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-                          {m.name ? `${m.name} · ${shortenAddress(m.mintAddress)}` : tokenMetaMap.get(m.mintAddress)?.name ? `${tokenMetaMap.get(m.mintAddress)!.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
+                          {tokenMetaMap.get(m.mintAddress)?.name ? `${tokenMetaMap.get(m.mintAddress)!.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
                         </div>
                       </div>
                       <div className="text-right">
@@ -463,7 +448,7 @@ function MarketsPageInner() {
                         </span>
                       </div>
                       <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiTokens}</div>
-                      <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{m.supabase?.volume_24h ? formatNum(m.supabase.volume_24h) : "\u2014"}</div>
+                      <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>\u2014</div>
                       <div className="text-right text-sm text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceTokens}</div>
                       <div className="text-right text-sm text-[var(--text-secondary)]">{m.maxLeverage}x</div>
                       <div className="text-right"><HealthBadge level={health.level} /></div>

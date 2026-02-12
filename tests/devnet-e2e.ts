@@ -36,8 +36,10 @@ import {
 import * as fs from "fs";
 
 // Config
-const RPC_URL = "https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}";
-const PROGRAM_ID = new PublicKey("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD"); // small
+const RPC_URL = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
+// Use centralized config instead of hard-coded ID
+import { getProgramId } from "../packages/core/src/config/program-ids.js";
+const PROGRAM_ID = getProgramId("devnet");
 const MATCHER_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
 const CRANK_WALLET = new PublicKey("2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm");
 const MINT = new PublicKey("DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs");
@@ -94,14 +96,21 @@ async function main() {
   );
 
   const initMarketData = encodeInitMarket({
+    admin: DEPLOYER_KP.publicKey,
     collateralMint: MINT,
-    vaultPubkey: vaultAta,
-    oracleFeed: "0".repeat(64),
+    indexFeedId: "0".repeat(64),              // All zeros = Hyperp mode (admin oracle)
     maxStalenessSecs: "86400",
     confFilterBps: 0,
-    invert: false,
-    unitScale: 0,
+    invert: 0,                                 // 0 = no inversion
+    unitScale: 0,                              // 0 = no scaling
+    initialMarkPriceE6: "1000000",             // 1.0 initial price (E6)
+    warmupPeriodSlots: "100",                  // 100 slots warmup
+    maintenanceMarginBps: "100",               // 1% maintenance margin
+    initialMarginBps: "500",                   // 5% initial margin
+    tradingFeeBps: "30",                       // 0.3% trading fee
     maxAccounts: tier.maxAccounts,
+    newAccountFee: "1000000",                  // 1 token account creation fee
+    riskReductionThreshold: "800",             // 8% risk reduction threshold
   });
   const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
     DEPLOYER_KP.publicKey, slabKeypair.publicKey,

@@ -11,13 +11,32 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
   buildAccountMetas,
   buildIx,
+  getProgramId,
 } from "@percolator/core";
 import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const PROGRAM_ID = new PublicKey("GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24");
+const PROGRAM_ID = getProgramId();
 const PUSH_INTERVAL_MS = 10_000;
+const MAX_BACKOFF_MS = 60_000; // 60 seconds max backoff
+
+// Graceful shutdown flag
+let running = true;
+let backoffMs = PUSH_INTERVAL_MS;
+let consecutiveFailures = 0;
+const MAX_FAILURES = 20; // Exit after 20 consecutive failures
+
+// Signal handlers for graceful shutdown
+process.on("SIGINT", () => {
+  console.log("\nReceived SIGINT, shutting down gracefully...");
+  running = false;
+});
+
+process.on("SIGTERM", () => {
+  console.log("\nReceived SIGTERM, shutting down gracefully...");
+  running = false;
+});
 
 interface MarketEntry {
   slab: string;
@@ -78,7 +97,8 @@ async function main() {
           data: encodePushOraclePrice({ priceE6, timestamp: now.toString() }),
         }));
 
-        const sig = await connection.sendTransaction(tx, [payer], { skipPreflight: true });
+        // Remove skipPreflight to catch errors before on-chain submission
+        const sig = await connection.sendTransaction(tx, [payer]);
         console.log(`  [${market.slab.slice(0, 8)}] Price: $${price} → ${sig.slice(0, 16)}...`);
       } catch (e) {
         console.error(`  [${market.slab.slice(0, 8)}] Error:`, e);
@@ -86,11 +106,38 @@ async function main() {
     }
   }
 
-  // Run loop
-  while (true) {
-    await pushPrices();
-    await new Promise((r) => setTimeout(r, PUSH_INTERVAL_MS));
+  // Run loop with graceful shutdown and exponential backoff
+  while (running) {
+    try {
+      await pushPrices();
+      
+      // Reset backoff and failure counter on success
+      backoffMs = PUSH_INTERVAL_MS;
+      consecutiveFailures = 0;
+      
+      await new Promise((r) => setTimeout(r, backoffMs));
+    } catch (e) {
+      console.error("Error in push cycle:", e);
+      
+      // Increment failure counter
+      consecutiveFailures++;
+      
+      // Circuit breaker: exit after too many failures
+      if (consecutiveFailures >= MAX_FAILURES) {
+        console.error(\`Too many consecutive failures (\${MAX_FAILURES}), exiting...\`);
+        process.exit(1);
+      }
+      
+      // Exponential backoff
+      backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+      console.log(\`Retrying in \${backoffMs}ms... (failures: \${consecutiveFailures})\`);
+      
+      await new Promise((r) => setTimeout(r, backoffMs));
+    }
   }
+
+  console.log("Oracle service stopped gracefully");
+  process.exit(0);
 }
 
 main().catch(console.error);
