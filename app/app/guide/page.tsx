@@ -92,7 +92,7 @@ export default function GuidePage() {
 
       {/* Devnet vs Mainnet */}
       <Section id="environments" tag="environments" title="Devnet vs Mainnet">
-        <div className={`${cardClass} overflow-hidden`}>
+        <div className={`${cardClass} overflow-x-auto`}>
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)]">
@@ -196,7 +196,7 @@ export default function GuidePage() {
 
       {/* Market Tiers */}
       <Section id="capacity" tag="capacity" title="Market Tiers">
-        <div className={`${cardClass} overflow-hidden`}>
+        <div className={`${cardClass} overflow-x-auto`}>
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)]">
