@@ -342,8 +342,8 @@ describe('DevnetMint Component', () => {
 
   it('should disable create button when wallet not connected', () => {
     mockUseWallet.mockReturnValueOnce({
-      publicKey: null,
-      signTransaction: null,
+      publicKey: null as any,
+      signTransaction: null as any,
       connected: false,
     });
 

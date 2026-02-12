@@ -43,9 +43,46 @@ const mockPublicKey = new PublicKey("11111111111111111111111111111111");
 
 const createMockMarket = (overrides?: Partial<DiscoveredMarket>): DiscoveredMarket => ({
   slabAddress: mockPublicKey,
+  programId: mockPublicKey,
+  header: {
+    magic: 0x504552434f4c4154n,
+    version: 1,
+    bump: 0,
+    flags: 0,
+    resolved: false,
+    paused: false,
+    admin: mockPublicKey,
+    nonce: 0n,
+    lastThrUpdateSlot: 0n,
+    ...overrides?.header,
+  } as any,
   config: {
     collateralMint: mockPublicKey,
+    vaultPubkey: mockPublicKey,
     indexFeedId: mockPublicKey,
+    maxStalenessSlots: 60n,
+    confFilterBps: 100,
+    vaultAuthorityBump: 0,
+    invert: 0,
+    unitScale: 0,
+    fundingHorizonSlots: 3600n,
+    fundingKBps: 100n,
+    fundingInvScaleNotionalE6: 1000000n,
+    fundingMaxPremiumBps: 500n,
+    fundingMaxBpsPerSlot: 10n,
+    threshFloor: 1000n,
+    threshRiskBps: 500n,
+    threshUpdateIntervalSlots: 100n,
+    threshStepBps: 50n,
+    threshAlphaBps: 100n,
+    threshMin: 500n,
+    threshMax: 5000n,
+    threshMinStep: 10n,
+    oracleAuthority: mockPublicKey,
+    authorityPriceE6: 0n,
+    authorityTimestamp: 0n,
+    oraclePriceCapE2bps: 0n,
+    lastEffectivePriceE6: 0n,
     ...overrides?.config,
   },
   engine: {
@@ -53,10 +90,40 @@ const createMockMarket = (overrides?: Partial<DiscoveredMarket>): DiscoveredMark
     totalOpenInterest: 5000000n,
     insuranceFund: {
       balance: 1000000n,
+      feeRevenue: 0n,
     },
+    currentSlot: 1000n,
+    fundingIndexQpbE6: 0n,
+    lastFundingSlot: 0n,
+    fundingRateBpsPerSlotLast: 0n,
+    lastCrankSlot: 0n,
+    maxCrankStalenessSlots: 100n,
+    cTot: 0n,
+    pnlPosTot: 0n,
+    liqCursor: 0,
+    gcCursor: 0,
+    lastSweepStartSlot: 0n,
+    lastSweepCompleteSlot: 0n,
+    crankCursor: 0,
+    sweepStartIdx: 0,
+    lifetimeLiquidations: 0n,
+    lifetimeForceCloses: 0n,
+    netLpPos: 0n,
+    lpSumAbs: 0n,
+    lpMaxAbs: 0n,
+    lpMaxAbsSweep: 0n,
     numUsedAccounts: 42,
+    nextAccountId: 0n,
     ...overrides?.engine,
   },
+  params: {
+    warmupPeriodSlots: 100n,
+    maintenanceMarginBps: 500n,
+    initialMarginBps: 1000n,
+    tradingFeeBps: 10n,
+    maxAccounts: 100n,
+    ...overrides?.params,
+  } as any,
   ...overrides,
 } as DiscoveredMarket);
 
@@ -152,24 +219,19 @@ describe("MarketBrowser Component Tests", () => {
 
   describe("MKT-004: Sort with null values (CRITICAL)", () => {
     it("should handle markets with null/zero values without crashing", () => {
-      const mockMarkets = [
-        createMockMarket({
-          engine: {
-            vault: 0n, // Zero vault
-            totalOpenInterest: 0n,
-            insuranceFund: { balance: 0n },
-            numUsedAccounts: 0,
-          },
-        }),
-        createMockMarket({
-          engine: {
-            vault: 10000000n,
-            totalOpenInterest: 5000000n,
-            insuranceFund: { balance: 1000000n },
-            numUsedAccounts: 42,
-          },
-        }),
-      ];
+      const market1 = createMockMarket({});
+      market1.engine.vault = 0n; // Zero vault
+      market1.engine.totalOpenInterest = 0n;
+      market1.engine.insuranceFund = { balance: 0n, feeRevenue: 0n };
+      market1.engine.numUsedAccounts = 0;
+      
+      const market2 = createMockMarket({});
+      market2.engine.vault = 10000000n;
+      market2.engine.totalOpenInterest = 5000000n;
+      market2.engine.insuranceFund = { balance: 1000000n, feeRevenue: 0n };
+      market2.engine.numUsedAccounts = 42;
+      
+      const mockMarkets = [market1, market2];
 
       (useMarketDiscovery as any).mockReturnValue({
         markets: mockMarkets,
@@ -189,26 +251,23 @@ describe("MarketBrowser Component Tests", () => {
     });
 
     it("should sort markets by health level correctly", () => {
-      const mockMarkets = [
-        createMockMarket({
-          slabAddress: new PublicKey("11111111111111111111111111111111"),
-          engine: {
-            vault: 100n, // Low vault = warning
-            totalOpenInterest: 0n,
-            insuranceFund: { balance: 0n },
-            numUsedAccounts: 0,
-          },
-        }),
-        createMockMarket({
-          slabAddress: new PublicKey("22222222222222222222222222222222"),
-          engine: {
-            vault: 10000000n, // High vault = healthy
-            totalOpenInterest: 5000000n,
-            insuranceFund: { balance: 1000000n },
-            numUsedAccounts: 42,
-          },
-        }),
-      ];
+      const market1 = createMockMarket({
+        slabAddress: new PublicKey("11111111111111111111111111111111"),
+      });
+      market1.engine.vault = 100n; // Low vault = warning
+      market1.engine.totalOpenInterest = 0n;
+      market1.engine.insuranceFund = { balance: 0n, feeRevenue: 0n };
+      market1.engine.numUsedAccounts = 0;
+      
+      const market2 = createMockMarket({
+        slabAddress: new PublicKey("22222222222222222222222222222222"),
+      });
+      market2.engine.vault = 10000000n; // High vault = healthy
+      market2.engine.totalOpenInterest = 5000000n;
+      market2.engine.insuranceFund = { balance: 1000000n, feeRevenue: 0n };
+      market2.engine.numUsedAccounts = 42;
+      
+      const mockMarkets = [market1, market2];
 
       (useMarketDiscovery as any).mockReturnValue({
         markets: mockMarkets,
@@ -320,16 +379,13 @@ describe("MarketBrowser Component Tests", () => {
     });
 
     it("should display market stats correctly", () => {
-      const mockMarkets = [
-        createMockMarket({
-          engine: {
-            vault: 10000000n,
-            totalOpenInterest: 5000000n, // 5 SOL
-            insuranceFund: { balance: 1000000n }, // 1 SOL
-            numUsedAccounts: 42,
-          },
-        }),
-      ];
+      const market = createMockMarket({});
+      market.engine.vault = 10000000n;
+      market.engine.totalOpenInterest = 5000000n; // 5 SOL
+      market.engine.insuranceFund = { balance: 1000000n, feeRevenue: 0n }; // 1 SOL
+      market.engine.numUsedAccounts = 42;
+      
+      const mockMarkets = [market];
 
       (useMarketDiscovery as any).mockReturnValue({
         markets: mockMarkets,
@@ -379,14 +435,9 @@ describe("MarketBrowser Component Tests", () => {
   describe("Oracle Type Badge", () => {
     it("should show Admin badge for zero oracle feed ID", () => {
       const zeroKey = new PublicKey("11111111111111111111111111111111");
-      const mockMarkets = [
-        createMockMarket({
-          config: {
-            collateralMint: mockPublicKey,
-            indexFeedId: zeroKey, // Admin oracle
-          },
-        }),
-      ];
+      const market = createMockMarket({});
+      market.config.indexFeedId = zeroKey; // Admin oracle
+      const mockMarkets = [market];
 
       (useMarketDiscovery as any).mockReturnValue({
         markets: mockMarkets,
@@ -405,14 +456,9 @@ describe("MarketBrowser Component Tests", () => {
 
     it("should show Pyth badge for non-zero oracle feed ID", () => {
       const pythKey = new PublicKey("DummyPythFeed111111111111111111111111");
-      const mockMarkets = [
-        createMockMarket({
-          config: {
-            collateralMint: mockPublicKey,
-            indexFeedId: pythKey, // Pyth oracle
-          },
-        }),
-      ];
+      const market = createMockMarket({});
+      market.config.indexFeedId = pythKey; // Pyth oracle
+      const mockMarkets = [market];
 
       (useMarketDiscovery as any).mockReturnValue({
         markets: mockMarkets,
