@@ -695,7 +695,19 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   color: var(--accent) !important;
 }
 .wallet-adapter-modal-list .wallet-adapter-button .wallet-adapter-button-end-icon {
-  display: none !important;
+  margin-left: auto !important;
+  font-size: 0.625rem !important;
+  opacity: 0.5 !important;
+  display: flex !important;
+  white-space: nowrap !important;
+}
+.wallet-adapter-modal-list .wallet-adapter-button .wallet-adapter-button-start-icon {
+  margin-right: 10px !important;
+  flex-shrink: 0 !important;
+}
+.wallet-adapter-modal-list .wallet-adapter-button {
+  gap: 8px !important;
+  overflow: hidden !important;
 }
 
 /* Collapse/expand ("More options") button */
