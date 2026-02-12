@@ -520,7 +520,7 @@ describe('LiquidationService Unit Tests', () => {
         })
       );
 
-      // Mock getConnection to return a connection that always fails
+      // Mock getConnection to return a connection that fails on sendRawTransaction
       vi.mocked(getConnection).mockReturnValueOnce({
         getLatestBlockhash: vi.fn().mockResolvedValue({
           blockhash: createTestPublicKey('Blockhash').toBase58(),
@@ -972,7 +972,7 @@ describe('LiquidationService Unit Tests', () => {
         })
       );
 
-      // Mock getConnection to return a connection that fails
+      // Mock getConnection to return a connection that fails on sendRawTransaction
       vi.mocked(getConnection).mockReturnValueOnce({
         getLatestBlockhash: vi.fn().mockResolvedValue({
           blockhash: createTestPublicKey('Blockhash').toBase58(),
