@@ -113,31 +113,43 @@ export class InsuranceLPService {
   }
 
   private async computeTrailingAPY(slab: string, days: number): Promise<number | null> {
-    const db = getSupabase();
-    const since = new Date(Date.now() - days * MS_PER_DAY).toISOString();
+    // BM5: Add error handling for APY calculation
+    try {
+      const db = getSupabase();
+      const since = new Date(Date.now() - days * MS_PER_DAY).toISOString();
 
-    const { data, error } = await db
-      .from("insurance_snapshots")
-      .select("redemption_rate_e6, created_at")
-      .eq("slab", slab)
-      .gte("created_at", since)
-      .order("created_at", { ascending: true })
-      .limit(1);
+      const { data, error } = await db
+        .from("insurance_snapshots")
+        .select("redemption_rate_e6, created_at")
+        .eq("slab", slab)
+        .gte("created_at", since)
+        .order("created_at", { ascending: true })
+        .limit(1);
 
-    if (error || !data || data.length === 0) return null;
+      if (error || !data || data.length === 0) return null;
 
-    const oldest = data[0] as InsuranceSnapshot;
-    const oldRate = oldest.redemption_rate_e6;
+      const oldest = data[0] as InsuranceSnapshot;
+      const oldRate = oldest.redemption_rate_e6;
 
-    const current = this.cache.get(slab);
-    if (!current || oldRate === 0) return null;
+      const current = this.cache.get(slab);
+      if (!current || oldRate === 0) return null;
 
-    const growth = (current.redemptionRate - oldRate) / oldRate;
-    const elapsed = Date.now() - new Date(oldest.created_at).getTime();
-    if (elapsed < MS_PER_DAY) return null; // need at least 1 day of data
+      const growth = (current.redemptionRate - oldRate) / oldRate;
+      const elapsed = Date.now() - new Date(oldest.created_at).getTime();
+      if (elapsed < MS_PER_DAY) return null; // need at least 1 day of data
 
-    const annualized = growth * (365 * MS_PER_DAY) / elapsed;
-    return Math.round(annualized * 10_000) / 10_000; // 4 decimal places
+      // Guard against infinite/NaN results
+      if (!isFinite(growth) || !isFinite(elapsed) || elapsed === 0) return null;
+
+      const annualized = growth * (365 * MS_PER_DAY) / elapsed;
+      
+      if (!isFinite(annualized)) return null;
+      
+      return Math.round(annualized * 10_000) / 10_000; // 4 decimal places
+    } catch (err) {
+      console.error(`[InsuranceLPService] APY calculation error for ${slab}:`, err);
+      return null;
+    }
   }
 
   async getEvents(slab: string, limit = 50) {
