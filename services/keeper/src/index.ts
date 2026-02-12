@@ -18,6 +18,24 @@ dotenv.config();
 
 const PROGRAM_ID = new PublicKey("GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24");
 const CRANK_INTERVAL_MS = 5_000;
+const MAX_BACKOFF_MS = 60_000; // 60 seconds max backoff
+
+// Graceful shutdown flag
+let running = true;
+let backoffMs = CRANK_INTERVAL_MS;
+let consecutiveFailures = 0;
+const MAX_FAILURES = 20; // Exit after 20 consecutive failures
+
+// Signal handlers for graceful shutdown
+process.on("SIGINT", () => {
+  console.log("\nReceived SIGINT, shutting down gracefully...");
+  running = false;
+});
+
+process.on("SIGTERM", () => {
+  console.log("\nReceived SIGTERM, shutting down gracefully...");
+  running = false;
+});
 
 async function main() {
   const rpcUrl = process.env.RPC_URL;
@@ -53,7 +71,8 @@ async function main() {
           data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
         }));
 
-        const sig = await connection.sendTransaction(tx, [payer], { skipPreflight: true });
+        // Remove skipPreflight to catch errors before on-chain submission
+        const sig = await connection.sendTransaction(tx, [payer]);
         console.log(`  [${slab.slice(0, 8)}] Cranked → ${sig.slice(0, 16)}...`);
       } catch (e) {
         console.error(`  [${slab.slice(0, 8)}] Crank error:`, e);
