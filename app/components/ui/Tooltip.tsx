@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
@@ -12,16 +13,17 @@ interface TooltipProps {
 
 export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) => {
   const [show, setShow] = useState(false);
-  const [position, setPosition] = useState<"top" | "bottom">("top");
+  const [mounted, setMounted] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
   const tooltipRef = useRef<HTMLSpanElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (show && triggerRef.current && tooltipRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
       const pos = rect.top < 80 ? "bottom" : "top";
-      setPosition(pos);
       const el = tooltipRef.current;
       const left = Math.max(8, Math.min(window.innerWidth - 264, rect.left + rect.width / 2 - 128));
       if (pos === "top") {
@@ -43,7 +45,6 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
     if (show) {
       if (prefersReduced) {
         el.style.opacity = "1";
-        el.style.transform = "translateX(-50%) scale(1)";
         el.style.visibility = "visible";
       } else {
         gsap.fromTo(
@@ -68,22 +69,28 @@ export const Tooltip: FC<TooltipProps> = ({ text, children, className = "" }) =>
     }
   }, [show, prefersReduced]);
 
-  return (
+  const tooltipEl = (
     <span
-      ref={triggerRef}
-      className={`relative inline-flex cursor-help ${className}`}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
+      ref={tooltipRef}
+      className="fixed z-[9999] w-64 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)] shadow-xl pointer-events-none"
+      style={{ visibility: "hidden", opacity: 0 }}
     >
-      {children}
-      <span
-        ref={tooltipRef}
-        className="fixed z-[9999] w-64 rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)] shadow-xl pointer-events-none"
-        style={{ visibility: "hidden", opacity: 0 }}
-      >
-        {text}
-      </span>
+      {text}
     </span>
+  );
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        className={`relative inline-flex cursor-help ${className}`}
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+      >
+        {children}
+      </span>
+      {mounted && createPortal(tooltipEl, document.body)}
+    </>
   );
 };
 
