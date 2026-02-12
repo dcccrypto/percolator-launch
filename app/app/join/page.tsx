@@ -459,14 +459,14 @@ export default function JoinPage() {
               <h2 className={h2Style}>Why Join?</h2>
               <ul className="space-y-3">
                 {[
-                  { icon: "⚡", title: "Early Stage", desc: "Get in on the ground floor of a new DeFi protocol" },
-                  { icon: "💰", title: "Token Allocation", desc: "Contributors receive token grants and revenue share" },
-                  { icon: "🌐", title: "Fully Remote", desc: "Work from anywhere, async-first culture" },
-                  { icon: "🚀", title: "Ship Fast", desc: "Small team, big impact — no bureaucracy" },
-                  { icon: "🔧", title: "Cutting Edge", desc: "Work with Solana, DeFi, and perpetual futures" },
+                  { title: "Early Stage", desc: "Get in on the ground floor of a new DeFi protocol" },
+                  { title: "Token Allocation", desc: "Contributors receive token grants and revenue share" },
+                  { title: "Fully Remote", desc: "Work from anywhere, async-first culture" },
+                  { title: "Ship Fast", desc: "Small team, big impact — no bureaucracy" },
+                  { title: "Cutting Edge", desc: "Work with Solana, DeFi, and perpetual futures" },
                 ].map((item) => (
                   <li key={item.title} className="flex items-start gap-3">
-                    <span className="text-base leading-none mt-0.5">{item.icon}</span>
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-[var(--accent)]" />
                     <div>
                       <p className="text-[12px] font-medium text-white">{item.title}</p>
                       <p className="text-[11px] text-[var(--text-dim)]">{item.desc}</p>
