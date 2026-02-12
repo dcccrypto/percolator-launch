@@ -53,7 +53,15 @@ export class OracleService {
         return BigInt(Math.round(p * 1_000_000));
       }
 
-      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
+      // BM1: Add 10s timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10_000);
+      
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
       const json = (await res.json()) as DexScreenerResponse;
       dexScreenerCache.set(mint, { data: json, fetchedAt: Date.now() });
 
@@ -70,7 +78,15 @@ export class OracleService {
   /** Fetch price from Jupiter */
   async fetchJupiterPrice(mint: string): Promise<bigint | null> {
     try {
-      const res = await fetch(`https://api.jup.ag/price/v2?ids=${mint}`);
+      // BM1: Add 10s timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10_000);
+      
+      const res = await fetch(`https://api.jup.ag/price/v2?ids=${mint}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
       const json = (await res.json()) as JupiterResponse;
       const priceStr = json.data?.[mint]?.price;
       if (!priceStr) return null;
