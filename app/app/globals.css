@@ -618,7 +618,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   max-width: 420px !important;
   font-family: var(--font-sans) !important;
   padding: 0 !important;
-  overflow: hidden !important;
+  overflow: visible !important;
 }
 /* HUD corners on modal */
 .wallet-adapter-modal-wrapper::before {
@@ -711,13 +711,23 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   overflow: visible !important;
   display: flex !important;
   align-items: center !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+.wallet-adapter-modal-list,
+.wallet-adapter-modal-list ul {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
 }
 .wallet-adapter-modal-list li {
   margin: 0 !important;
   width: 100% !important;
+  list-style: none !important;
 }
-.wallet-adapter-modal-list {
-  width: 100% !important;
+/* Close button fix */
+.wallet-adapter-modal-button-close {
+  overflow: visible !important;
 }
 
 /* Collapse/expand ("More options") button */
