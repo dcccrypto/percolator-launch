@@ -112,14 +112,29 @@ export async function sendWithRetry(
   maxRetries = 3,
 ): Promise<string> {
   let lastErr: unknown;
+  
+  // BH6 + BH11: Get dynamic priority fees once (outside retry loop)
+  const { priorityFeeMicroLamports, computeUnitLimit } = await getRecentPriorityFees(connection);
+  
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       await acquireToken();
-      const tx = new Transaction().add(ix);
+      const tx = new Transaction();
+      
+      // BH6 + BH11: Add compute budget instructions
+      tx.add(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFeeMicroLamports })
+      );
+      
+      tx.add(ix);
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = signers[0].publicKey;
       tx.sign(...signers);
+      
+      // BH9: Check transaction size before sending
+      checkTransactionSize(tx);
 
       const opts: SendOptions = { skipPreflight: false, preflightCommitment: "confirmed" };
       await acquireToken();

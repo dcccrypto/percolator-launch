@@ -278,26 +278,32 @@ const DevnetMintContent: FC = () => {
   // Check mint authority when user pastes an existing mint
   useEffect(() => {
     setMintAuthError(null);
-    if (!existingMint || existingMint.length < 32 || !publicKey) return;
+    if (!existingMint || existingMint.length < 32 || !publicKey) {
+      setCheckingMintAuth(false);
+      return;
+    }
     let cancelled = false;
+    setCheckingMintAuth(true);
     (async () => {
       try {
         const mintPk = new PublicKey(existingMint);
         const mintInfo = await connection.getParsedAccountInfo(mintPk);
-        if (!mintInfo.value) { if (!cancelled) setMintAuthError("Mint not found on devnet"); return; }
+        if (!mintInfo.value) { if (!cancelled) { setMintAuthError("Mint not found on devnet"); setCheckingMintAuth(false); } return; }
         const parsed = (mintInfo.value.data as any)?.parsed;
-        if (!parsed || parsed.type !== "mint") { if (!cancelled) setMintAuthError("Not a valid SPL token mint"); return; }
+        if (!parsed || parsed.type !== "mint") { if (!cancelled) { setMintAuthError("Not a valid SPL token mint"); setCheckingMintAuth(false); } return; }
         const authority = parsed.info.mintAuthority;
         if (!authority) {
-          if (!cancelled) setMintAuthError("This token has no mint authority (supply is fixed)");
+          if (!cancelled) { setMintAuthError("This token has no mint authority (supply is fixed)"); setCheckingMintAuth(false); }
         } else if (authority !== publicKey.toBase58()) {
-          if (!cancelled) setMintAuthError(`You're not the mint authority. Only ${authority.slice(0, 8)}... can mint more.`);
+          if (!cancelled) { setMintAuthError(`You're not the mint authority. Only ${authority.slice(0, 8)}... can mint more.`); setCheckingMintAuth(false); }
+        } else {
+          if (!cancelled) setCheckingMintAuth(false);
         }
       } catch {
-        if (!cancelled) setMintAuthError("Invalid address");
+        if (!cancelled) { setMintAuthError("Invalid address"); setCheckingMintAuth(false); }
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; setCheckingMintAuth(false); };
   }, [existingMint, publicKey, connection]);
 
   // Mint more of existing token
@@ -563,7 +569,13 @@ const DevnetMintContent: FC = () => {
                   <label className="mb-1 block text-xs text-[var(--text-secondary)]">Amount to Mint</label>
                   <input type="text" value={mintMoreAmount} onChange={(e) => setMintMoreAmount(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} />
                 </div>
-                {mintAuthError && <p className="text-[11px] text-[var(--short)]">{mintAuthError}</p>}
+                {checkingMintAuth && (
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
+                    <span className="text-xs text-[var(--text-muted)]">Checking mint authority...</span>
+                  </div>
+                )}
+                {!checkingMintAuth && mintAuthError && <p className="text-[11px] text-[var(--short)]">{mintAuthError}</p>}
                 {mintingMore && mintMoreStatus && (
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />

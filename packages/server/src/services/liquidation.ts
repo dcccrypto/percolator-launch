@@ -1,4 +1,4 @@
-import { PublicKey, SYSVAR_CLOCK_PUBKEY } from "@solana/web3.js";
+import { PublicKey, SYSVAR_CLOCK_PUBKEY, ComputeBudgetProgram } from "@solana/web3.js";
 import {
   fetchSlab,
   parseConfig,
@@ -19,7 +19,7 @@ import {
   type DiscoveredMarket,
 } from "@percolator/core";
 import { config } from "../config.js";
-import { getConnection, loadKeypair, sendWithRetry, pollSignatureStatus } from "../utils/solana.js";
+import { getConnection, loadKeypair, sendWithRetry, pollSignatureStatus, getRecentPriorityFees, checkTransactionSize } from "../utils/solana.js";
 import { eventBus } from "./events.js";
 import { OracleService } from "./oracle.js";
 
@@ -272,9 +272,20 @@ export class LiquidationService {
       const { Transaction } = await import("@solana/web3.js");
       const MAX_RETRIES = 2;
       let sig: string | null = null;
+      
+      // BH6 + BH11: Get dynamic priority fees and compute budget
+      const { priorityFeeMicroLamports, computeUnitLimit } = await getRecentPriorityFees(connection);
+      
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
           const tx = new Transaction();
+          
+          // BH6 + BH11: Add compute budget instructions at the start
+          tx.add(
+            ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
+            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFeeMicroLamports })
+          );
+          
           for (const ix of instructions) {
             tx.add(ix);
           }
@@ -282,6 +293,10 @@ export class LiquidationService {
           tx.recentBlockhash = blockhash;
           tx.feePayer = keypair.publicKey;
           tx.sign(keypair);
+          
+          // BH9: Check transaction size before sending
+          checkTransactionSize(tx);
+          
           const txSig = await connection.sendRawTransaction(tx.serialize(), {
             skipPreflight: false,
             preflightCommitment: "confirmed",

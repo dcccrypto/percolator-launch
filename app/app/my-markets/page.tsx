@@ -375,6 +375,7 @@ const MyMarketsPage: FC = () => {
   const { myMarkets, loading, error, connected } = useMyMarkets();
   const { connection } = useConnection();
   const [insuranceMintMap, setInsuranceMintMap] = useState<Record<string, boolean>>({});
+  const [refreshing, setRefreshing] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -385,6 +386,28 @@ const MyMarketsPage: FC = () => {
     }
     gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
   }, []);
+
+  // P-MED-13: Manual refresh function
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    // Re-check insurance mints
+    if (myMarkets.length > 0) {
+      const pdas = myMarkets.map((m) => ({
+        key: m.slabAddress.toBase58(),
+        pda: deriveInsuranceLpMint(m.programId, m.slabAddress)[0],
+      }));
+      const results = await Promise.allSettled(
+        pdas.map((p) => connection.getAccountInfo(p.pda))
+      );
+      const map: Record<string, boolean> = {};
+      for (let i = 0; i < pdas.length; i++) {
+        const result = results[i];
+        map[pdas[i].key] = result.status === "fulfilled" && result.value !== null && result.value.data.length > 0;
+      }
+      setInsuranceMintMap(map);
+    }
+    setTimeout(() => setRefreshing(false), 500);
+  };
 
   useEffect(() => {
     if (!myMarkets.length) return;
@@ -501,9 +524,18 @@ const MyMarketsPage: FC = () => {
             </h1>
             <p className="mt-2 text-[13px] text-[var(--text-secondary)]">manage what you&apos;ve built.</p>
           </div>
-          <Link href="/create">
-            <GlowButton size="sm">+ new market</GlowButton>
-          </Link>
+          <div className="flex gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              className="border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-muted)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)] disabled:opacity-40"
+            >
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+            <Link href="/create">
+              <GlowButton size="sm">+ new market</GlowButton>
+            </Link>
+          </div>
         </div>
       </ScrollReveal>
 

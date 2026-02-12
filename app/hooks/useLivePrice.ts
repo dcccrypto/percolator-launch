@@ -132,7 +132,13 @@ export function useLivePrice(): PriceState {
           };
 
           if (msg.type === "price.updated" && msg.slabAddress === slabAddr && msg.data?.priceE6) {
-            const e6 = BigInt(msg.data.priceE6);
+            // C4: Validate string format before BigInt conversion
+            const priceStr = msg.data.priceE6;
+            if (typeof priceStr !== "string" || !/^-?\d+$/.test(priceStr)) {
+              console.warn("Invalid price format from WebSocket:", priceStr);
+              return;
+            }
+            const e6 = BigInt(priceStr);
             const usd = Number(e6) / 1_000_000;
             if (mountedRef.current) {
               setState((prev) => ({
