@@ -10,8 +10,9 @@ const cache = new Map<string, TokenMeta>();
 
 /** Strip unsafe characters from token metadata strings */
 function sanitizeTokenString(input: string, maxLen: number): string {
-  // Allow alphanumeric, spaces, dashes, dots, underscores, parentheses, $, #, &
-  return input.replace(/[^a-zA-Z0-9 \-._()$#&]/g, "").trim().slice(0, maxLen);
+  // M6: Allow alphanumeric, spaces, dashes, dots, underscores, parentheses, $, #, &, and emoji
+  // Use \p{Emoji} to preserve Unicode emoji properly
+  return input.replace(/[^a-zA-Z0-9 \-._()$#&\p{Emoji}]/gu, "").trim().slice(0, maxLen);
 }
 
 /** Well-known tokens that don't need a Jupiter lookup. */

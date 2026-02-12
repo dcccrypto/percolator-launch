@@ -59,11 +59,9 @@ export const AccountsCard: FC = () => {
       const computedPnl = account.positionSize !== 0n && oraclePrice > 0n
         ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePrice)
         : account.pnl;
-      // Margin uses equity (capital + pnl) for accurate health
-      const equity = account.capital + computedPnl;
-      const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
-      const notional = Number(absPos) * Number(oraclePrice) / 1e6;
-      const marginPct = notional > 0 ? (Number(equity) / notional) * 100 : 100;
+      // H2: Margin uses liquidation health distance (mark-based) instead of oracle-based calculation
+      // Use liqHealthPct which already accounts for mark price and slippage
+      const marginPct = liqHealthPct;
       return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize, entryPrice: account.entryPrice, liqPrice, liqHealthPct, pnl: computedPnl, capital: account.capital, marginPct };
     });
   }, [accounts, maintBps, oraclePrice]);

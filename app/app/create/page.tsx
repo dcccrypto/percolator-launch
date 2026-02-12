@@ -16,7 +16,21 @@ const WalletMultiButton = dynamic(
 function CreatePageInner() {
   const { connected } = useWallet();
   const searchParams = useSearchParams();
-  const initialMint = searchParams.get("mint") ?? undefined;
+  
+  // P-CRITICAL-4: Validate mint URL parameter before use
+  const mintParam = searchParams.get("mint");
+  let initialMint: string | undefined = undefined;
+  if (mintParam) {
+    try {
+      // Validate it's a valid base58 public key
+      const { PublicKey } = require("@solana/web3.js");
+      new PublicKey(mintParam);
+      initialMint = mintParam;
+    } catch (err) {
+      console.warn("Invalid mint parameter in URL:", mintParam);
+      // initialMint stays undefined
+    }
+  }
 
   return (
     <div className="min-h-[calc(100vh-48px)] relative">

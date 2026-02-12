@@ -1,8 +1,11 @@
-import { Connection, Keypair, Transaction, TransactionInstruction, SendOptions } from "@solana/web3.js";
+import { Connection, Keypair, Transaction, TransactionInstruction, SendOptions, ComputeBudgetProgram } from "@solana/web3.js";
 import bs58 from "bs58";
 import { acquireToken, getPrimaryConnection, getFallbackConnection, backoffMs } from "./rpc-client.js";
 
 export { getPrimaryConnection as getConnection, getFallbackConnection };
+
+// BH9: Maximum transaction size in bytes (Solana limit is 1232 bytes)
+const MAX_TRANSACTION_SIZE = 1232;
 
 export function loadKeypair(raw: string): Keypair {
   const trimmed = raw.trim();
@@ -11,6 +14,58 @@ export function loadKeypair(raw: string): Keypair {
     return Keypair.fromSecretKey(Uint8Array.from(arr));
   }
   return Keypair.fromSecretKey(bs58.decode(trimmed));
+}
+
+/**
+ * BH11: Fetch recent priority fees from RPC to determine optimal priority fee.
+ * BH6: Returns both priority fee and recommended compute units.
+ * Falls back to defaults on error.
+ */
+export async function getRecentPriorityFees(connection: Connection): Promise<{
+  priorityFeeMicroLamports: number;
+  computeUnitLimit: number;
+}> {
+  try {
+    await acquireToken();
+    // Get recent prioritization fees for the last 150 slots
+    const recentFees = await connection.getRecentPrioritizationFees();
+    
+    if (recentFees.length === 0) {
+      console.warn("[getRecentPriorityFees] No recent fees found, using defaults");
+      return { priorityFeeMicroLamports: 10_000, computeUnitLimit: 400_000 };
+    }
+    
+    // Use 75th percentile to balance between cost and reliability
+    const sorted = recentFees
+      .map(f => f.prioritizationFee)
+      .sort((a, b) => a - b);
+    const p75Index = Math.floor(sorted.length * 0.75);
+    const priorityFee = sorted[p75Index] || 10_000;
+    
+    // Ensure minimum fee during congestion
+    const finalFee = Math.max(priorityFee, 1_000);
+    
+    // Default compute units (can be adjusted based on instruction complexity)
+    const computeUnitLimit = 400_000;
+    
+    return { priorityFeeMicroLamports: finalFee, computeUnitLimit };
+  } catch (err) {
+    console.warn("[getRecentPriorityFees] Failed to fetch priority fees:", err);
+    return { priorityFeeMicroLamports: 10_000, computeUnitLimit: 400_000 };
+  }
+}
+
+/**
+ * BH9: Check if transaction size exceeds Solana's limit (1232 bytes).
+ * Throws error if oversized.
+ */
+export function checkTransactionSize(tx: Transaction): void {
+  const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+  if (serialized.length > MAX_TRANSACTION_SIZE) {
+    throw new Error(
+      `Transaction size ${serialized.length} bytes exceeds maximum ${MAX_TRANSACTION_SIZE} bytes`
+    );
+  }
 }
 
 function is429(err: unknown): boolean {
@@ -57,14 +112,29 @@ export async function sendWithRetry(
   maxRetries = 3,
 ): Promise<string> {
   let lastErr: unknown;
+  
+  // BH6 + BH11: Get dynamic priority fees once (outside retry loop)
+  const { priorityFeeMicroLamports, computeUnitLimit } = await getRecentPriorityFees(connection);
+  
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       await acquireToken();
-      const tx = new Transaction().add(ix);
+      const tx = new Transaction();
+      
+      // BH6 + BH11: Add compute budget instructions
+      tx.add(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFeeMicroLamports })
+      );
+      
+      tx.add(ix);
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = signers[0].publicKey;
       tx.sign(...signers);
+      
+      // BH9: Check transaction size before sending
+      checkTransactionSize(tx);
 
       const opts: SendOptions = { skipPreflight: false, preflightCommitment: "confirmed" };
       await acquireToken();

@@ -182,7 +182,14 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           <input
             type="text"
             value={amount}
-            onChange={(e) => { maxRawRef.current = null; setAmount(e.target.value.replace(/[^0-9.]/g, "")); }}
+            onChange={(e) => { 
+              // C1: Only clear maxRawRef if value actually changed
+              const newValue = e.target.value.replace(/[^0-9.]/g, "");
+              if (newValue !== amount) {
+                maxRawRef.current = null;
+              }
+              setAmount(newValue);
+            }}
             placeholder={`Amount (${symbol})`}
             className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 pr-14 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
           />

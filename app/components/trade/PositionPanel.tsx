@@ -34,6 +34,12 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const symbol = tokenMeta?.symbol ?? "Token";
   const [closeSig, setCloseSig] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  // C2: Track fresh account data for preview
+  const [freshPreviewData, setFreshPreviewData] = useState<{
+    capital: bigint;
+    positionSize: bigint;
+    entryPrice: bigint;
+  } | null>(null);
 
   const lpIdx = useMemo(() => {
     const lp = accounts.find(({ account }) => account.kind === AccountKind.LP);
@@ -64,14 +70,21 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const entryPriceE6 = account.entryPrice;
 
+  // C2: Use fresh preview data when available (during close confirmation)
+  const displayData = freshPreviewData ?? {
+    capital: account.capital,
+    positionSize: account.positionSize,
+    entryPrice: account.entryPrice,
+  };
+
   const pnlTokens = computeMarkPnl(
-    account.positionSize,
-    entryPriceE6,
+    displayData.positionSize,
+    displayData.entryPrice,
     currentPriceE6,
   );
   const pnlUsd =
     priceUsd !== null ? (Number(pnlTokens) / 1e6) * priceUsd : null;
-  const roe = computePnlPercent(pnlTokens, account.capital);
+  const roe = computePnlPercent(pnlTokens, displayData.capital);
 
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const liqPriceE6 = computeLiqPrice(
@@ -107,13 +120,24 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (!userAccount || !hasPosition) return;
     try {
       let freshPositionSize = account.positionSize;
+      let freshCapital = account.capital;
+      let freshEntryPrice = account.entryPrice;
       try {
         const { fetchSlab, parseAccount } = await import("@percolator/core");
         const freshData = await fetchSlab(connection, new PublicKey(slabAddress));
         const freshAccount = parseAccount(freshData, userAccount.idx);
         freshPositionSize = freshAccount.positionSize;
+        freshCapital = freshAccount.capital;
+        freshEntryPrice = freshAccount.entryPrice;
+        // C2: Store fresh data for preview
+        setFreshPreviewData({
+          capital: freshCapital,
+          positionSize: freshPositionSize,
+          entryPrice: freshEntryPrice,
+        });
       } catch {
         console.warn("Could not fetch fresh position — using cached state");
+        setFreshPreviewData(null);
       }
 
       if (freshPositionSize === 0n) {

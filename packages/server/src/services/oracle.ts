@@ -16,6 +16,11 @@ interface PriceEntry {
   timestamp: number;
 }
 
+// BL2: Extract magic numbers to named constants
+const API_TIMEOUT_MS = 10_000; // 10 second timeout for external API calls
+const PRICE_E6_MULTIPLIER = 1_000_000; // Price precision (6 decimals)
+const CACHED_PRICE_MAX_AGE_MS = 60_000; // Reject cached prices older than 60s
+
 // DexScreener rate limit: cache responses for 10s to avoid hitting limits
 const dexScreenerCache = new Map<string, { data: DexScreenerResponse; fetchedAt: number }>();
 const DEX_SCREENER_CACHE_TTL_MS = 10_000;
@@ -39,29 +44,62 @@ export class OracleService {
   private readonly rateLimitMs = 5_000;
   private readonly maxHistory = 100;
   private readonly maxTrackedMarkets = 500;
+  // BM2: Deduplicate concurrent requests for the same mint
+  private inFlightRequests = new Map<string, Promise<bigint | null>>();
 
   /** Fetch price from DexScreener (with rate-limit cache) */
   async fetchDexScreenerPrice(mint: string): Promise<bigint | null> {
+    // BM2: Deduplicate concurrent requests
+    const inFlight = this.inFlightRequests.get(`dex:${mint}`);
+    if (inFlight) return inFlight;
+    
+    const promise = this._fetchDexScreenerPriceInternal(mint);
+    this.inFlightRequests.set(`dex:${mint}`, promise);
+    
     try {
-      // Check cache first
+      return await promise;
+    } finally {
+      this.inFlightRequests.delete(`dex:${mint}`);
+    }
+  }
+
+  private async _fetchDexScreenerPriceInternal(mint: string): Promise<bigint | null> {
+    try {
+      // BH7: Atomic cache check — capture timestamp once to avoid race condition
+      const now = Date.now();
       const cached = dexScreenerCache.get(mint);
-      if (cached && Date.now() - cached.fetchedAt < DEX_SCREENER_CACHE_TTL_MS) {
-        const pair = sortPairsByLiquidity(cached.data.pairs)?.[0];
-        if (!pair?.priceUsd) return null;
-        const p = parseFloat(pair.priceUsd);
-        if (!isFinite(p) || p <= 0) return null;
-        return BigInt(Math.round(p * 1_000_000));
+      
+      if (cached) {
+        const age = now - cached.fetchedAt;
+        if (age < DEX_SCREENER_CACHE_TTL_MS) {
+          // Cache hit — return cached value
+          const pair = sortPairsByLiquidity(cached.data.pairs)?.[0];
+          if (!pair?.priceUsd) return null;
+          const p = parseFloat(pair.priceUsd);
+          if (!isFinite(p) || p <= 0) return null;
+          return BigInt(Math.round(p * PRICE_E6_MULTIPLIER));
+        }
       }
 
-      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
+      // Cache miss or expired — fetch fresh data
+      // BM1: Add 10s timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+      
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
       const json = (await res.json()) as DexScreenerResponse;
-      dexScreenerCache.set(mint, { data: json, fetchedAt: Date.now() });
+      // BH7: Use captured timestamp for atomicity
+      dexScreenerCache.set(mint, { data: json, fetchedAt: now });
 
       const pair = sortPairsByLiquidity(json.pairs)?.[0];
       if (!pair?.priceUsd) return null;
       const parsed = parseFloat(pair.priceUsd);
       if (!isFinite(parsed) || parsed <= 0) return null;
-      return BigInt(Math.round(parsed * 1_000_000));
+      return BigInt(Math.round(parsed * PRICE_E6_MULTIPLIER));
     } catch {
       return null;
     }
@@ -69,14 +107,37 @@ export class OracleService {
 
   /** Fetch price from Jupiter */
   async fetchJupiterPrice(mint: string): Promise<bigint | null> {
+    // BM2: Deduplicate concurrent requests
+    const inFlight = this.inFlightRequests.get(`jup:${mint}`);
+    if (inFlight) return inFlight;
+    
+    const promise = this._fetchJupiterPriceInternal(mint);
+    this.inFlightRequests.set(`jup:${mint}`, promise);
+    
     try {
-      const res = await fetch(`https://api.jup.ag/price/v2?ids=${mint}`);
+      return await promise;
+    } finally {
+      this.inFlightRequests.delete(`jup:${mint}`);
+    }
+  }
+
+  private async _fetchJupiterPriceInternal(mint: string): Promise<bigint | null> {
+    try {
+      // BM1: Add 10s timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+      
+      const res = await fetch(`https://api.jup.ag/price/v2?ids=${mint}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
       const json = (await res.json()) as JupiterResponse;
       const priceStr = json.data?.[mint]?.price;
       if (!priceStr) return null;
       const parsed = parseFloat(priceStr);
       if (!isFinite(parsed) || parsed <= 0) return null;
-      return BigInt(Math.round(parsed * 1_000_000));
+      return BigInt(Math.round(parsed * PRICE_E6_MULTIPLIER));
     } catch {
       return null;
     }
@@ -97,7 +158,7 @@ export class OracleService {
       if (history && history.length > 0) {
         const last = history[history.length - 1];
         // Reject stale cached prices (>60s) to prevent bad liquidations
-        if (Date.now() - last.timestamp > 60_000) {
+        if (Date.now() - last.timestamp > CACHED_PRICE_MAX_AGE_MS) {
           console.warn(`[OracleService] Cached price for ${mint} is stale (${Math.round((Date.now() - last.timestamp) / 1000)}s old), rejecting`);
           return null;
         }
@@ -185,6 +246,13 @@ export class OracleService {
       const keypair = loadKeypair(config.crankKeypair);
       const slabPubkey = new PublicKey(slabAddress);
       const programId = marketProgramId ?? new PublicKey(config.programId);
+
+      // BC4: Validate that crank keypair is the oracle authority
+      if (!keypair.publicKey.equals(marketConfig.oracleAuthority)) {
+        throw new Error(
+          `Crank keypair ${keypair.publicKey.toBase58()} is not the oracle authority ${marketConfig.oracleAuthority.toBase58()}`
+        );
+      }
 
       const data = encodePushOraclePrice({
         priceE6: priceEntry.priceE6,

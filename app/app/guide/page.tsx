@@ -9,9 +9,9 @@ const cardClass = "border border-[var(--border)] bg-[var(--panel-bg)]";
 const cellClass = "px-4 py-3 text-[12px]";
 const thClass = "px-4 py-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)] text-left";
 
-function Section({ tag, title, children }: { tag: string; title: string; children: React.ReactNode }) {
+function Section({ id, tag, title, children }: { id: string; tag: string; title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-4">
+    <section id={id} className="space-y-4 scroll-mt-20">
       <div>
         <div className={sectionHeader}>// {tag}</div>
         <h2 className={sectionTitle} style={{ fontFamily: "var(--font-heading)" }}>{title}</h2>
@@ -22,6 +22,16 @@ function Section({ tag, title, children }: { tag: string; title: string; childre
 }
 
 export default function GuidePage() {
+  const sections = [
+    { id: "overview", label: "What is Percolator?" },
+    { id: "environments", label: "Devnet vs Mainnet" },
+    { id: "mechanics", label: "How Markets Work" },
+    { id: "oracles", label: "Oracle Modes" },
+    { id: "capacity", label: "Market Tiers" },
+    { id: "quickstart", label: "Getting Started" },
+    { id: "faq", label: "FAQ" },
+  ];
+
   return (
     <div className="min-h-[calc(100vh-48px)] relative">
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
@@ -44,8 +54,30 @@ export default function GuidePage() {
         </div>
       </ScrollReveal>
 
+      {/* P-MED-6: Table of Contents */}
+      <ScrollReveal>
+        <nav className={`${cardClass} p-5`}>
+          <h2 className="text-sm font-semibold text-white mb-3 uppercase tracking-wider">Contents</h2>
+          <ul className="space-y-2">
+            {sections.map((section) => (
+              <li key={section.id}>
+                <a
+                  href={`#${section.id}`}
+                  className="text-[13px] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors flex items-center gap-2 group"
+                >
+                  <svg className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                  {section.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </ScrollReveal>
+
       {/* What is Percolator */}
-      <Section tag="overview" title="What is Percolator?">
+      <Section id="overview" tag="overview" title="What is Percolator?">
         <div className={cardClass}>
           <div className="p-5 space-y-3">
             <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
@@ -59,8 +91,8 @@ export default function GuidePage() {
       </Section>
 
       {/* Devnet vs Mainnet */}
-      <Section tag="environments" title="Devnet vs Mainnet">
-        <div className={`${cardClass} overflow-hidden`}>
+      <Section id="environments" tag="environments" title="Devnet vs Mainnet">
+        <div className={`${cardClass} overflow-x-auto`}>
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)]">
@@ -89,7 +121,7 @@ export default function GuidePage() {
       </Section>
 
       {/* How Markets Work */}
-      <Section tag="mechanics" title="How Markets Work">
+      <Section id="mechanics" tag="mechanics" title="How Markets Work">
         <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2">
           {[
             {
@@ -118,7 +150,7 @@ export default function GuidePage() {
       </Section>
 
       {/* Oracle Modes */}
-      <Section tag="oracles" title="Oracle Modes">
+      <Section id="oracles" tag="oracles" title="Oracle Modes">
         <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
           {[
             {
@@ -163,8 +195,8 @@ export default function GuidePage() {
       </Section>
 
       {/* Market Tiers */}
-      <Section tag="capacity" title="Market Tiers">
-        <div className={`${cardClass} overflow-hidden`}>
+      <Section id="capacity" tag="capacity" title="Market Tiers">
+        <div className={`${cardClass} overflow-x-auto`}>
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)]">
@@ -194,7 +226,7 @@ export default function GuidePage() {
       </Section>
 
       {/* Getting Started */}
-      <Section tag="quickstart" title="Getting Started on Devnet">
+      <Section id="quickstart" tag="quickstart" title="Getting Started on Devnet">
         <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
           {[
             { step: "01", title: "Connect Phantom", desc: "Open Phantom wallet settings and switch network to Devnet." },
@@ -220,7 +252,7 @@ export default function GuidePage() {
       </Section>
 
       {/* FAQ */}
-      <Section tag="faq" title="Frequently Asked Questions">
+      <Section id="faq" tag="faq" title="Frequently Asked Questions">
         <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
           {[
             {
@@ -247,9 +279,9 @@ export default function GuidePage() {
               q: "How do I switch between devnet and mainnet?",
               a: "Click the network badge in the header to toggle. Your wallet must also be set to the matching network in its settings.",
             },
-          ].map((item) => (
-            <details key={item.q} className="bg-[var(--panel-bg)] group">
-              <summary className="cursor-pointer px-5 py-4 text-[13px] font-medium text-white transition-colors hover:bg-[var(--bg-elevated)] list-none flex items-center justify-between">
+          ].map((item, idx) => (
+            <details key={idx} className="bg-[var(--panel-bg)] group">
+              <summary className="cursor-pointer px-5 py-4 text-[13px] font-medium text-white transition-colors hover:bg-[var(--bg-elevated)] list-none flex items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50">
                 {item.q}
                 <svg className="h-3 w-3 text-[var(--text-muted)] transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />

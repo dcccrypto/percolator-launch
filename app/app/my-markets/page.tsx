@@ -115,7 +115,8 @@ const InputDialog: FC<{
 const MarketCard: FC<{
   market: MyMarket;
   insuranceMintExists: boolean;
-}> = ({ market, insuranceMintExists }) => {
+  insuranceMintChecking: boolean;
+}> = ({ market, insuranceMintExists, insuranceMintChecking }) => {
   const { toast } = useToast();
   const actions = useAdminActions();
   const wallet = useWallet();
@@ -245,7 +246,10 @@ const MarketCard: FC<{
                   {actions.loading === "resetRiskGate" ? "resetting..." : "reset risk gate"}
                 </button>
               )}
-              {!insuranceMintExists && (
+              {/* P-HIGH-7: Show loading state during insurance mint check */}
+              {insuranceMintChecking ? (
+                <span className="text-xs text-[#71717a]">checking insurance mint...</span>
+              ) : !insuranceMintExists ? (
                 <button
                   onClick={() => handleAction("Create Insurance Mint", () => actions.createInsuranceMint(market))}
                   disabled={actions.loading === "createInsuranceMint"}
@@ -253,7 +257,7 @@ const MarketCard: FC<{
                 >
                   {actions.loading === "createInsuranceMint" ? "creating..." : "create insurance mint"}
                 </button>
-              )}
+              ) : null}
               {!market.header?.paused ? (
                 <button
                   onClick={() => handleAction("Pause Market", () => actions.pauseMarket(market))}
@@ -375,6 +379,9 @@ const MyMarketsPage: FC = () => {
   const { myMarkets, loading, error, connected } = useMyMarkets();
   const { connection } = useConnection();
   const [insuranceMintMap, setInsuranceMintMap] = useState<Record<string, boolean>>({});
+  // P-HIGH-7: Add loading state for insurance mint checks
+  const [insuranceMintChecking, setInsuranceMintChecking] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -386,9 +393,37 @@ const MyMarketsPage: FC = () => {
     gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
   }, []);
 
+  // P-MED-13: Manual refresh function
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setInsuranceMintChecking(true);
+    // Re-check insurance mints
+    if (myMarkets.length > 0) {
+      const pdas = myMarkets.map((m) => ({
+        key: m.slabAddress.toBase58(),
+        pda: deriveInsuranceLpMint(m.programId, m.slabAddress)[0],
+      }));
+      const results = await Promise.allSettled(
+        pdas.map((p) => connection.getAccountInfo(p.pda))
+      );
+      const map: Record<string, boolean> = {};
+      for (let i = 0; i < pdas.length; i++) {
+        const result = results[i];
+        map[pdas[i].key] = result.status === "fulfilled" && result.value !== null && result.value.data.length > 0;
+      }
+      setInsuranceMintMap(map);
+      setInsuranceMintChecking(false);
+    }
+    setTimeout(() => setRefreshing(false), 500);
+  };
+
   useEffect(() => {
-    if (!myMarkets.length) return;
+    if (!myMarkets.length) {
+      setInsuranceMintChecking(false);
+      return;
+    }
     let cancelled = false;
+    setInsuranceMintChecking(true);
     async function check() {
       const pdas = myMarkets.map((m) => ({
         key: m.slabAddress.toBase58(),
@@ -402,7 +437,10 @@ const MyMarketsPage: FC = () => {
         const result = results[i];
         map[pdas[i].key] = result.status === "fulfilled" && result.value !== null && result.value.data.length > 0;
       }
-      if (!cancelled) setInsuranceMintMap(map);
+      if (!cancelled) {
+        setInsuranceMintMap(map);
+        setInsuranceMintChecking(false);
+      }
     }
     check();
     return () => { cancelled = true; };
@@ -501,9 +539,18 @@ const MyMarketsPage: FC = () => {
             </h1>
             <p className="mt-2 text-[13px] text-[var(--text-secondary)]">manage what you&apos;ve built.</p>
           </div>
-          <Link href="/create">
-            <GlowButton size="sm">+ new market</GlowButton>
-          </Link>
+          <div className="flex gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              className="border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-muted)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)] disabled:opacity-40"
+            >
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+            <Link href="/create">
+              <GlowButton size="sm">+ new market</GlowButton>
+            </Link>
+          </div>
         </div>
       </ScrollReveal>
 
@@ -526,6 +573,7 @@ const MyMarketsPage: FC = () => {
             key={m.slabAddress.toBase58()}
             market={m}
             insuranceMintExists={insuranceMintMap[m.slabAddress.toBase58()] ?? false}
+            insuranceMintChecking={insuranceMintChecking}
           />
         ))}
       </div>

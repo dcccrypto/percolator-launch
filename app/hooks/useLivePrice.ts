@@ -132,7 +132,13 @@ export function useLivePrice(): PriceState {
           };
 
           if (msg.type === "price.updated" && msg.slabAddress === slabAddr && msg.data?.priceE6) {
-            const e6 = BigInt(msg.data.priceE6);
+            // C4: Validate string format before BigInt conversion
+            const priceStr = msg.data.priceE6;
+            if (typeof priceStr !== "string" || !/^-?\d+$/.test(priceStr)) {
+              console.warn("Invalid price format from WebSocket:", priceStr);
+              return;
+            }
+            const e6 = BigInt(priceStr);
             const usd = Number(e6) / 1_000_000;
             if (mountedRef.current) {
               setState((prev) => ({
@@ -186,6 +192,9 @@ export function useLivePrice(): PriceState {
       })
       .catch(() => {});
 
+    // M3: Capture slabAddr at subscription time for cleanup
+    const capturedSlabAddr = slabAddr;
+    
     return () => {
       mountedRef.current = false;
       wsConnected.current = false;
@@ -193,8 +202,8 @@ export function useLivePrice(): PriceState {
       if (wsRef.current) {
         // Unsubscribe before closing to clean up server-side state
         try {
-          if (wsRef.current.readyState === WebSocket.OPEN && slabAddr) {
-            wsRef.current.send(JSON.stringify({ type: "unsubscribe", slabAddress: slabAddr }));
+          if (wsRef.current.readyState === WebSocket.OPEN && capturedSlabAddr) {
+            wsRef.current.send(JSON.stringify({ type: "unsubscribe", slabAddress: capturedSlabAddr }));
           }
         } catch { /* ignore */ }
         wsRef.current.close();

@@ -13,7 +13,14 @@ export function parseHumanAmount(input: string, decimals: number): bigint {
   const parts = abs.split(".");
   if (parts.length > 2) return 0n; // reject "1.2.3"
   const whole = parts[0] || "0";
-  const frac = (parts[1] || "").padEnd(decimals, "0").slice(0, decimals);
+  const fracPart = parts[1] || "";
+  
+  // M1: Throw error if decimals exceed token precision
+  if (fracPart.length > decimals) {
+    throw new Error(`Input has ${fracPart.length} decimals, but token only supports ${decimals}`);
+  }
+  
+  const frac = fracPart.padEnd(decimals, "0");
   const result = BigInt(whole) * BigInt(10 ** decimals) + BigInt(frac);
   return negative ? -result : result;
 }

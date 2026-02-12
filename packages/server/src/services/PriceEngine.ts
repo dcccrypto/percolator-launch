@@ -3,6 +3,10 @@ import { parseConfig, type MarketConfig } from "@percolator/core";
 import { config } from "../config.js";
 import { eventBus } from "./events.js";
 
+// BL2: Extract magic numbers to named constants
+const PENDING_SUB_CLEANUP_INTERVAL_MS = 60_000; // Clean stale subscriptions every 60s
+const PENDING_SUB_MAX_AGE_MS = PENDING_SUB_MAX_AGE_MS; // Stale subscription age threshold
+
 interface PriceTick {
   priceE6: bigint;
   source: string;
@@ -29,7 +33,10 @@ export class PriceEngine {
   private readonly maxTrackedMarkets = 500;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
-  private readonly maxReconnectDelay = 30_000;
+  private readonly maxReconnectDelay = PENDING_SUB_MAX_AGE_MS;
+  // BM6: Limit reconnection attempts to prevent infinite loops
+  private reconnectAttempts = 0;
+  private readonly maxReconnectAttempts = 10;
   private rpcMsgId = 1;
   private started = false;
   private pendingSubscriptions: string[] = [];
@@ -46,13 +53,13 @@ export class PriceEngine {
 
     // Periodically clean up stale pending subscription responses (older than 30s)
     this.pendingCleanupTimer = setInterval(() => {
-      const cutoff = Date.now() - 30_000;
+      const cutoff = Date.now() - PENDING_SUB_MAX_AGE_MS;
       for (const [msgId, entry] of this._pendingSubResponses) {
         if (entry.timestamp < cutoff) {
           this._pendingSubResponses.delete(msgId);
         }
       }
-    }, 60_000);
+    }, PENDING_SUB_CLEANUP_INTERVAL_MS);
   }
 
   stop(): void {
@@ -189,6 +196,8 @@ export class PriceEngine {
     this.ws.on("open", () => {
       console.log("[PriceEngine] Connected to Helius WebSocket");
       this.reconnectDelay = 1000;
+      // BM6: Reset reconnect attempt counter on successful connection
+      this.reconnectAttempts = 0;
 
       // Clear stale subscription mappings from previous connection
       const existingSlabs = [...this.slabToSubId.keys()];
@@ -225,13 +234,22 @@ export class PriceEngine {
     });
 
     this.ws.on("error", (err) => {
-      console.error("[PriceEngine] WebSocket error:", err.message);
+      console.error("[PriceEngine] Failed to maintain WebSocket connection:", err.message);
     });
   }
 
   private scheduleReconnect(): void {
     if (!this.started || this.reconnectTimer) return;
-    console.log(`[PriceEngine] Reconnecting in ${this.reconnectDelay}ms...`);
+    
+    // BM6: Stop reconnecting after max attempts
+    this.reconnectAttempts++;
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error(`[PriceEngine] Max reconnection attempts (${this.maxReconnectAttempts}) reached. Stopping.`);
+      this.stop();
+      return;
+    }
+    
+    console.log(`[PriceEngine] Reconnecting in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();

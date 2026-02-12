@@ -63,7 +63,11 @@ export async function upsertMarketStats(stats: Partial<MarketStatsRow> & { slab_
 
 export async function insertTrade(trade: Omit<TradeRow, "id" | "created_at">): Promise<void> {
   const { error } = await getSupabase().from("trades").insert(trade);
-  if (error) throw error;
+  // BH8: Ignore unique constraint violations (23505 = unique_violation)
+  // This allows the TradeIndexer to safely retry without crashing on duplicates
+  if (error && error.code !== "23505") {
+    throw error;
+  }
 }
 
 export async function tradeExistsBySignature(txSignature: string): Promise<boolean> {

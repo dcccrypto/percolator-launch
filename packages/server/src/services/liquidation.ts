@@ -1,4 +1,4 @@
-import { PublicKey, SYSVAR_CLOCK_PUBKEY } from "@solana/web3.js";
+import { PublicKey, SYSVAR_CLOCK_PUBKEY, ComputeBudgetProgram } from "@solana/web3.js";
 import {
   fetchSlab,
   parseConfig,
@@ -19,9 +19,13 @@ import {
   type DiscoveredMarket,
 } from "@percolator/core";
 import { config } from "../config.js";
-import { getConnection, loadKeypair, sendWithRetry, pollSignatureStatus } from "../utils/solana.js";
+import { getConnection, loadKeypair, sendWithRetry, pollSignatureStatus, getRecentPriorityFees, checkTransactionSize } from "../utils/solana.js";
 import { eventBus } from "./events.js";
 import { OracleService } from "./oracle.js";
+
+// BL2: Extract magic numbers to named constants
+const PRICE_E6_DIVISOR = 1_000_000n; // Price precision divisor (6 decimals)
+const BPS_MULTIPLIER = 10_000n; // Basis points multiplier (100% = 10000 bps)
 
 interface LiquidationCandidate {
   slabAddress: string;
@@ -41,6 +45,9 @@ export class LiquidationService {
   private liquidationCount = 0;
   private scanCount = 0;
   private lastScanTime = 0;
+  // BC1: Signature replay protection
+  private recentSignatures = new Map<string, number>(); // signature -> timestamp
+  private readonly signatureTTLMs = 60_000; // 60 seconds
 
   constructor(oracleService: OracleService, intervalMs = 15_000) {
     this.oracleService = oracleService;
@@ -68,6 +75,14 @@ export class LiquidationService {
 
       if (price === 0n) return []; // No price set
 
+      // BC2: Check oracle staleness - reject if timestamp > 60s old
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      const priceAge = now - cfg.authorityTimestamp;
+      if (priceAge > 60n) {
+        console.warn(`[LiquidationService] Skipping ${slabAddress}: oracle price is ${priceAge}s old (max 60s)`);
+        return []; // Don't liquidate with stale prices
+      }
+
       // Use bitmap to find actually-used account indices (not sequential iteration)
       // The bitmap can be sparse — e.g., accounts at indices 0, 5, 100
       const usedIndices = parseUsedIndices(data);
@@ -82,7 +97,7 @@ export class LiquidationService {
 
           // Calculate margin health using mark-to-market PnL (not stale on-chain pnl)
           // On-chain pnl is only updated during cranks; between cranks it can be stale
-          const notional = absBI(account.positionSize) * price / 1_000_000n;
+          const notional = absBI(account.positionSize) * price / PRICE_E6_DIVISOR;
           if (notional === 0n) continue;
 
           // Compute mark PnL from live price instead of stale on-chain pnl
@@ -92,7 +107,21 @@ export class LiquidationService {
             const diff = account.positionSize > 0n
               ? price - entryPrice    // long: profit when price goes up
               : entryPrice - price;   // short: profit when price goes down
-            markPnl = (diff * absBI(account.positionSize)) / price;
+            
+            // BH5: Overflow protection - check bounds before multiplication
+            const MAX_SAFE_BIGINT = 9007199254740991n; // Number.MAX_SAFE_INTEGER
+            const absPosSize = absBI(account.positionSize);
+            
+            // Check if multiplication would overflow
+            if (diff > 0n && absPosSize > MAX_SAFE_BIGINT / diff) {
+              console.warn(`[LiquidationService] PnL calculation overflow for account ${i} in ${slabAddress}`);
+              markPnl = diff > 0n ? MAX_SAFE_BIGINT : -MAX_SAFE_BIGINT;
+            } else if (diff < 0n && absPosSize > MAX_SAFE_BIGINT / -diff) {
+              console.warn(`[LiquidationService] PnL calculation overflow for account ${i} in ${slabAddress}`);
+              markPnl = -MAX_SAFE_BIGINT;
+            } else {
+              markPnl = (diff * absPosSize) / price;
+            }
           }
           const equity = account.capital + markPnl;
 
@@ -111,7 +140,7 @@ export class LiquidationService {
             continue;
           }
 
-          const marginRatioBps = equity * 10_000n / notional;
+          const marginRatioBps = equity * BPS_MULTIPLIER / notional;
 
           // If margin ratio < maintenance margin, this account is liquidatable
           if (marginRatioBps < maintenanceMarginBps) {
@@ -220,7 +249,7 @@ export class LiquidationService {
 
         const freshPrice = freshCfg.authorityPriceE6;
         if (freshPrice > 0n) {
-          const notional = absBI(freshAccount.positionSize) * freshPrice / 1_000_000n;
+          const notional = absBI(freshAccount.positionSize) * freshPrice / PRICE_E6_DIVISOR;
           if (notional > 0n) {
             // Use mark-to-market PnL for re-verification
             const freshEntry = freshAccount.entryPrice;
@@ -233,7 +262,7 @@ export class LiquidationService {
             }
             const equity = freshAccount.capital + freshMarkPnl;
             if (equity > 0n) {
-              const marginRatioBps = equity * 10_000n / notional;
+              const marginRatioBps = equity * BPS_MULTIPLIER / notional;
               if (marginRatioBps >= freshParams.maintenanceMarginBps) {
                 console.warn(`[LiquidationService] Race condition: account ${accountIdx} on ${slabAddress.toBase58()} no longer undercollateralized (margin: ${marginRatioBps} bps), skipping`);
                 return null;
@@ -247,9 +276,20 @@ export class LiquidationService {
       const { Transaction } = await import("@solana/web3.js");
       const MAX_RETRIES = 2;
       let sig: string | null = null;
+      
+      // BH6 + BH11: Get dynamic priority fees and compute budget
+      const { priorityFeeMicroLamports, computeUnitLimit } = await getRecentPriorityFees(connection);
+      
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
           const tx = new Transaction();
+          
+          // BH6 + BH11: Add compute budget instructions at the start
+          tx.add(
+            ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
+            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFeeMicroLamports })
+          );
+          
           for (const ix of instructions) {
             tx.add(ix);
           }
@@ -257,6 +297,10 @@ export class LiquidationService {
           tx.recentBlockhash = blockhash;
           tx.feePayer = keypair.publicKey;
           tx.sign(keypair);
+          
+          // BH9: Check transaction size before sending
+          checkTransactionSize(tx);
+          
           const txSig = await connection.sendRawTransaction(tx.serialize(), {
             skipPreflight: false,
             preflightCommitment: "confirmed",
@@ -274,6 +318,16 @@ export class LiquidationService {
           }
           console.warn(`[LiquidationService] Attempt ${attempt + 1} failed with network error, retrying...`);
           await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+
+      // BC1: Track signature to prevent replay attacks
+      const now = Date.now();
+      this.recentSignatures.set(sig!, now);
+      // Clean up signatures older than TTL
+      for (const [oldSig, timestamp] of this.recentSignatures.entries()) {
+        if (now - timestamp > this.signatureTTLMs) {
+          this.recentSignatures.delete(oldSig);
         }
       }
 
@@ -335,7 +389,7 @@ export class LiquidationService {
           );
         }
       } catch (err) {
-        console.error("[LiquidationService] Cycle error:", err);
+        console.error("[LiquidationService] Failed to complete liquidation cycle:", err);
       }
     }, this.intervalMs);
   }

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
+import { CodeBlock } from "@/components/ui/CodeBlock";
 
-const codeBlock = "rounded-sm bg-[#0D0D14] border border-[var(--border)] p-4 text-[12px] font-mono text-[var(--text-secondary)] overflow-x-auto whitespace-pre";
 const card = "rounded-sm bg-[var(--panel-bg)] border border-[var(--border)] p-6";
 const h2Style = "text-lg font-bold text-white mb-4";
 const h3Style = "text-sm font-semibold text-[var(--accent)] mb-2 uppercase tracking-wider";
@@ -91,7 +91,7 @@ export default function AgentsPage() {
           <p className={`${textMuted} mb-4`}>
             Copy this into your agent&apos;s context window before starting any task:
           </p>
-          <pre className={codeBlock}>{`Percolator Launch — Solana perpetual futures DEX launcher
+          <CodeBlock>{`Percolator Launch — Solana perpetual futures DEX launcher
 
 Stack:
 ├── app/              Next.js 14 + TypeScript + Tailwind (frontend)
@@ -109,7 +109,7 @@ Key concepts:
 - Crank = background funding/liquidation processor
 - Admin Oracle = devnet manual price push
 - Coin-margined = deposit same token you trade
-- vAMM = automatic liquidity via matcher program`}</pre>
+- vAMM = automatic liquidity via matcher program`}</CodeBlock>
         </div>
 
         {/* What to work on */}
@@ -161,36 +161,36 @@ Key concepts:
           <div className="space-y-6">
             <div>
               <h3 className={h3Style}>Bug Hunt</h3>
-              <pre className={codeBlock}>{`Read the codebase. For each page in app/app/, check:
+              <CodeBlock>{`Read the codebase. For each page in app/app/, check:
 1. Does data load and display correctly?
 2. Are there null/undefined paths that render nothing?
 3. Are BigInt values rendered safely?
 4. Do error boundaries catch crashes?
 5. Are loading and empty states shown?
 
-Report: file, line, severity, description, fix.`}</pre>
+Report: file, line, severity, description, fix.`}</CodeBlock>
             </div>
             <div>
               <h3 className={h3Style}>Feature Build</h3>
-              <pre className={codeBlock}>{`Implement [your feature] in percolator-launch.
+              <CodeBlock>{`Implement [your feature] in percolator-launch.
 
 Rules:
 - Branch: agent/[name]/[feature]
 - TypeScript clean: npx tsc --noEmit -p app/tsconfig.json
 - Use CSS variables from globals.css, not hardcoded colors
 - No emojis in UI. Follow Solana Terminal design.
-- Write a clear PR description.`}</pre>
+- Write a clear PR description.`}</CodeBlock>
             </div>
             <div>
               <h3 className={h3Style}>Security Audit</h3>
-              <pre className={codeBlock}>{`Audit [file] line by line for:
+              <CodeBlock>{`Audit [file] line by line for:
 1. Exposed secrets or missing auth
 2. Logic errors (wrong math, race conditions)
 3. Missing error handling
 4. Type safety issues (any casts, null checks)
 5. Performance problems
 
-Severity + line number + fix for each finding.`}</pre>
+Severity + line number + fix for each finding.`}</CodeBlock>
             </div>
           </div>
         </div>
@@ -218,7 +218,7 @@ Severity + line number + fix for each finding.`}</pre>
         {/* Quick Start */}
         <div className={card}>
           <h2 className={h2Style}>Quick Start</h2>
-          <pre className={codeBlock}>{`# Fork and clone
+          <CodeBlock>{`# Fork and clone
 gh repo fork dcccrypto/percolator-launch --clone
 cd percolator-launch
 
@@ -236,7 +236,7 @@ cd app && pnpm dev
 npx tsc --noEmit -p app/tsconfig.json
 
 # Run tests (needs devnet SOL)
-npx tsx tests/t1-market-boot.ts`}</pre>
+npx tsx tests/t1-market-boot.ts`}</CodeBlock>
         </div>
 
         {/* Back link */}

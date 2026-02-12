@@ -53,6 +53,8 @@ const DevnetMintContent: FC = () => {
   const [tokenSymbol, setTokenSymbol] = useState("TEST");
   const [mintColor, setMintColor] = useState<string | null>(null);
   const [lastTxSig, setLastTxSig] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [symbolError, setSymbolError] = useState<string | null>(null);
 
   // Mint More state
   const [existingMint, setExistingMint] = useState("");
@@ -60,6 +62,7 @@ const DevnetMintContent: FC = () => {
   const [mintingMore, setMintingMore] = useState(false);
   const [mintMoreStatus, setMintMoreStatus] = useState<string | null>(null);
   const [mintAuthError, setMintAuthError] = useState<string | null>(null);
+  const [checkingMintAuth, setCheckingMintAuth] = useState(false);
 
   const connection = useMemo(() => new Connection(HELIUS_RPC, "confirmed"), []);
   const airdropConnection = useMemo(() => new Connection(PUBLIC_DEVNET_RPC, "confirmed"), []);
@@ -140,6 +143,39 @@ const DevnetMintContent: FC = () => {
   // Create mint + mint tokens
   const handleCreateAndMint = useCallback(async () => {
     if (!publicKey || !signTransaction) return;
+    
+    // P-MED-9: Validate token name and symbol
+    setNameError(null);
+    setSymbolError(null);
+    
+    const trimmedName = tokenName.trim();
+    const trimmedSymbol = tokenSymbol.trim();
+    
+    if (trimmedName.length === 0) {
+      setNameError("Token name cannot be empty");
+      return;
+    }
+    if (trimmedName.length < 2) {
+      setNameError("Token name must be at least 2 characters");
+      return;
+    }
+    if (trimmedSymbol.length === 0) {
+      setSymbolError("Token symbol cannot be empty");
+      return;
+    }
+    if (trimmedSymbol.length < 2) {
+      setSymbolError("Token symbol must be at least 2 characters");
+      return;
+    }
+    if (!/^[A-Za-z0-9\s\-_]+$/.test(trimmedName)) {
+      setNameError("Token name can only contain letters, numbers, spaces, hyphens, and underscores");
+      return;
+    }
+    if (!/^[A-Z0-9]+$/.test(trimmedSymbol)) {
+      setSymbolError("Token symbol can only contain uppercase letters and numbers");
+      return;
+    }
+    
     setLoading(true);
     setCreateStatus("Creating mint account...");
     setMintAddress(null);
@@ -151,7 +187,15 @@ const DevnetMintContent: FC = () => {
       }
 
       const mintKeypair = Keypair.generate();
-      const recipientPubkey = new PublicKey(recipient);
+      
+      // P-CRITICAL-1: Validate recipient PublicKey before transaction
+      let recipientPubkey: PublicKey;
+      try {
+        recipientPubkey = new PublicKey(recipient);
+      } catch (err) {
+        throw new Error(`Invalid recipient address: ${recipient}`);
+      }
+      
       const lamports = await getMinimumBalanceForRentExemptMint(connection);
 
       setCreateStatus("Building transaction...");
@@ -174,11 +218,16 @@ const DevnetMintContent: FC = () => {
       const rawSupply = BigInt(supply) * BigInt(10 ** decimals);
       tx.add(createMintToInstruction(mintKeypair.publicKey, ata, publicKey, rawSupply));
 
-      // Metaplex metadata
-      const [metadataPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mintKeypair.publicKey.toBuffer()],
-        TOKEN_METADATA_PROGRAM_ID
-      );
+      // P-HIGH-5: Wrap Metaplex PDA derivation in try-catch
+      let metadataPDA: PublicKey;
+      try {
+        [metadataPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mintKeypair.publicKey.toBuffer()],
+          TOKEN_METADATA_PROGRAM_ID
+        );
+      } catch (err) {
+        throw new Error("Failed to derive metadata PDA. Please try again.");
+      }
       tx.add(
         createCreateMetadataAccountV3Instruction(
           { metadata: metadataPDA, mint: mintKeypair.publicKey, mintAuthority: publicKey, payer: publicKey, updateAuthority: publicKey },
@@ -234,26 +283,32 @@ const DevnetMintContent: FC = () => {
   // Check mint authority when user pastes an existing mint
   useEffect(() => {
     setMintAuthError(null);
-    if (!existingMint || existingMint.length < 32 || !publicKey) return;
+    if (!existingMint || existingMint.length < 32 || !publicKey) {
+      setCheckingMintAuth(false);
+      return;
+    }
     let cancelled = false;
+    setCheckingMintAuth(true);
     (async () => {
       try {
         const mintPk = new PublicKey(existingMint);
         const mintInfo = await connection.getParsedAccountInfo(mintPk);
-        if (!mintInfo.value) { if (!cancelled) setMintAuthError("Mint not found on devnet"); return; }
+        if (!mintInfo.value) { if (!cancelled) { setMintAuthError("Mint not found on devnet"); setCheckingMintAuth(false); } return; }
         const parsed = (mintInfo.value.data as any)?.parsed;
-        if (!parsed || parsed.type !== "mint") { if (!cancelled) setMintAuthError("Not a valid SPL token mint"); return; }
+        if (!parsed || parsed.type !== "mint") { if (!cancelled) { setMintAuthError("Not a valid SPL token mint"); setCheckingMintAuth(false); } return; }
         const authority = parsed.info.mintAuthority;
         if (!authority) {
-          if (!cancelled) setMintAuthError("This token has no mint authority (supply is fixed)");
+          if (!cancelled) { setMintAuthError("This token has no mint authority (supply is fixed)"); setCheckingMintAuth(false); }
         } else if (authority !== publicKey.toBase58()) {
-          if (!cancelled) setMintAuthError(`You're not the mint authority. Only ${authority.slice(0, 8)}... can mint more.`);
+          if (!cancelled) { setMintAuthError(`You're not the mint authority. Only ${authority.slice(0, 8)}... can mint more.`); setCheckingMintAuth(false); }
+        } else {
+          if (!cancelled) setCheckingMintAuth(false);
         }
       } catch {
-        if (!cancelled) setMintAuthError("Invalid address");
+        if (!cancelled) { setMintAuthError("Invalid address"); setCheckingMintAuth(false); }
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; setCheckingMintAuth(false); };
   }, [existingMint, publicKey, connection]);
 
   // Mint more of existing token
@@ -397,11 +452,23 @@ const DevnetMintContent: FC = () => {
                 <div className="flex gap-3">
                   <div className="flex-1">
                     <label className="mb-1 block text-xs text-[var(--text-secondary)]">Token Name</label>
-                    <input type="text" value={tokenName} onChange={(e) => setTokenName(e.target.value)} className={inputClass} />
+                    <input 
+                      type="text" 
+                      value={tokenName} 
+                      onChange={(e) => { setTokenName(e.target.value); setNameError(null); }} 
+                      className={`${inputClass} ${nameError ? "border-[var(--short)]" : ""}`}
+                    />
+                    {nameError && <p className="mt-1 text-xs text-[var(--short)]">{nameError}</p>}
                   </div>
                   <div className="flex-1">
                     <label className="mb-1 block text-xs text-[var(--text-secondary)]">Symbol</label>
-                    <input type="text" value={tokenSymbol} onChange={(e) => setTokenSymbol(e.target.value)} className={inputClass} />
+                    <input 
+                      type="text" 
+                      value={tokenSymbol} 
+                      onChange={(e) => { setTokenSymbol(e.target.value.toUpperCase()); setSymbolError(null); }} 
+                      className={`${inputClass} ${symbolError ? "border-[var(--short)]" : ""}`}
+                    />
+                    {symbolError && <p className="mt-1 text-xs text-[var(--short)]">{symbolError}</p>}
                   </div>
                 </div>
                 <div className="flex gap-3">
@@ -507,7 +574,13 @@ const DevnetMintContent: FC = () => {
                   <label className="mb-1 block text-xs text-[var(--text-secondary)]">Amount to Mint</label>
                   <input type="text" value={mintMoreAmount} onChange={(e) => setMintMoreAmount(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} />
                 </div>
-                {mintAuthError && <p className="text-[11px] text-[var(--short)]">{mintAuthError}</p>}
+                {checkingMintAuth && (
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
+                    <span className="text-xs text-[var(--text-muted)]">Checking mint authority...</span>
+                  </div>
+                )}
+                {!checkingMintAuth && mintAuthError && <p className="text-[11px] text-[var(--short)]">{mintAuthError}</p>}
                 {mintingMore && mintMoreStatus && (
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
@@ -527,8 +600,9 @@ const DevnetMintContent: FC = () => {
                     )}
                   </p>
                 )}
-                <button className={`${btnPrimary} w-full`} onClick={handleMintMore} disabled={mintingMore || !existingMint || !mintMoreAmount || !!mintAuthError || !walletReady}>
-                  {!walletReady ? "Connect Wallet First" : mintingMore ? "Minting..." : `Mint ${Number(mintMoreAmount).toLocaleString()} More Tokens`}
+                {/* P-HIGH-4: Disable button during mint authority check */}
+                <button className={`${btnPrimary} w-full`} onClick={handleMintMore} disabled={mintingMore || checkingMintAuth || !existingMint || !mintMoreAmount || !!mintAuthError || !walletReady}>
+                  {!walletReady ? "Connect Wallet First" : checkingMintAuth ? "Checking..." : mintingMore ? "Minting..." : `Mint ${Number(mintMoreAmount).toLocaleString()} More Tokens`}
                 </button>
               </div>
             </div>

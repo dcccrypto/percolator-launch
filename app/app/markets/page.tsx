@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, Suspense } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
@@ -69,14 +70,43 @@ const MOCK_MARKETS: MergedMarket[] = [
   mockMarket("2qVfA7g3bKfc7WJBb6RvTa5rJFmB8itu4C88Rdg1xN8z", "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", "PYTH", "Pyth Network", 10, true, 0.312, 95_000, 5_000_000_000n, 12_000_000_000n, 1_200_000_000n),
 ];
 
-export default function MarketsPage() {
+function MarketsPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();
   const [supabaseMarkets, setSupabaseMarkets] = useState<MarketWithStats[]>([]);
   const [supabaseLoading, setSupabaseLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<SortKey>("volume");
-  const [leverageFilter, setLeverageFilter] = useState<LeverageFilter>("all");
-  const [oracleFilter, setOracleFilter] = useState<OracleFilter>("all");
+  
+  // P-MED-2: Read filters from URL params
+  const [search, setSearch] = useState(searchParams.get("q") || "");
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  const [sortBy, setSortBy] = useState<SortKey>((searchParams.get("sort") as SortKey) || "volume");
+  const [leverageFilter, setLeverageFilter] = useState<LeverageFilter>((searchParams.get("lev") as LeverageFilter) || "all");
+  const [oracleFilter, setOracleFilter] = useState<OracleFilter>((searchParams.get("oracle") as OracleFilter) || "all");
+  
+  // P-MED-3: Pagination state for infinite scroll
+  const [displayCount, setDisplayCount] = useState(20);
+  const observerTarget = useRef<HTMLDivElement>(null);
+
+  // P-MED-1: Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // P-MED-2: Update URL params when filters change
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (debouncedSearch) params.set("q", debouncedSearch);
+    if (sortBy !== "volume") params.set("sort", sortBy);
+    if (leverageFilter !== "all") params.set("lev", leverageFilter);
+    if (oracleFilter !== "all") params.set("oracle", oracleFilter);
+    
+    const newUrl = params.toString() ? `?${params.toString()}` : "/markets";
+    router.replace(newUrl, { scroll: false });
+  }, [debouncedSearch, sortBy, leverageFilter, oracleFilter, router]);
 
   useEffect(() => {
     async function load() {
@@ -121,8 +151,8 @@ export default function MarketsPage() {
   const filtered = useMemo(() => {
     let list = effectiveMarkets;
     // Text search — matches symbol, name, slab address, OR mint address
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       list = list.filter((m) =>
         m.symbol?.toLowerCase().includes(q) ||
         m.name?.toLowerCase().includes(q) ||
@@ -144,7 +174,12 @@ export default function MarketsPage() {
     list = [...list].sort((a, b) => {
       switch (sortBy) {
         case "volume": return (b.supabase?.volume_24h ?? 0) - (a.supabase?.volume_24h ?? 0);
-        case "oi": return b.onChain.engine.totalOpenInterest > a.onChain.engine.totalOpenInterest ? 1 : b.onChain.engine.totalOpenInterest < a.onChain.engine.totalOpenInterest ? -1 : 0;
+        case "oi": {
+          // P-CRITICAL-5: Add null coalescing before BigInt sort
+          const oiA = a.onChain.engine.totalOpenInterest ?? 0n;
+          const oiB = b.onChain.engine.totalOpenInterest ?? 0n;
+          return oiB > oiA ? 1 : oiB < oiA ? -1 : 0;
+        }
         case "health": {
           const ha = computeMarketHealth(a.onChain.engine);
           const hb = computeMarketHealth(b.onChain.engine);
@@ -155,9 +190,51 @@ export default function MarketsPage() {
       }
     });
     return list;
-  }, [effectiveMarkets, search, sortBy, leverageFilter, oracleFilter]);
+  }, [effectiveMarkets, debouncedSearch, sortBy, leverageFilter, oracleFilter]);
 
+  // P-MED-3: Infinite scroll observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && displayCount < filtered.length) {
+          setDisplayCount((prev) => Math.min(prev + 20, filtered.length));
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentTarget = observerTarget.current;
+    if (currentTarget) {
+      observer.observe(currentTarget);
+    }
+
+    return () => {
+      if (currentTarget) {
+        observer.unobserve(currentTarget);
+      }
+    };
+  }, [displayCount, filtered.length]);
+
+  // Reset display count when filters change
+  useEffect(() => {
+    setDisplayCount(20);
+  }, [debouncedSearch, leverageFilter, oracleFilter, sortBy]);
+
+  const displayedMarkets = filtered.slice(0, displayCount);
   const loading = discoveryLoading || supabaseLoading;
+
+  // P-MED-4: Separate clear functions
+  const clearFilters = () => {
+    setLeverageFilter("all");
+    setOracleFilter("all");
+  };
+
+  const clearSearch = () => {
+    setSearch("");
+  };
+
+  const hasActiveFilters = leverageFilter !== "all" || oracleFilter !== "all";
+  const hasSearch = search.trim() !== "";
 
   return (
     <div className="min-h-[calc(100vh-48px)] relative">
@@ -197,6 +274,17 @@ export default function MarketsPage() {
                 placeholder="search token, address, or mint..."
                 className="w-full rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] py-2.5 pl-10 pr-4 text-sm text-[var(--text)] placeholder-[var(--text-dim)] focus:border-[var(--accent)]/40 focus:outline-none"
               />
+              {hasSearch && (
+                <button
+                  onClick={clearSearch}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
+                  title="Clear search"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
             <div className="relative flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-1">
               {([
@@ -270,10 +358,10 @@ export default function MarketsPage() {
               ))}
             </div>
 
-            {/* Active filter count */}
-            {(leverageFilter !== "all" || oracleFilter !== "all" || search.trim()) && (
+            {/* P-MED-4: Separate clear buttons */}
+            {hasActiveFilters && (
               <button
-                onClick={() => { setLeverageFilter("all"); setOracleFilter("all"); setSearch(""); }}
+                onClick={clearFilters}
                 className="text-[10px] text-[var(--short)] hover:text-[var(--short)]/80 underline underline-offset-2"
               >
                 clear filters
@@ -297,10 +385,10 @@ export default function MarketsPage() {
             </div>
           ) : filtered.length === 0 ? (
             <div className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] p-16 text-center">
-              {search ? (
+              {hasSearch || hasActiveFilters ? (
                 <>
                   <h3 className="text-base font-semibold text-white">nothing here.</h3>
-                  <p className="mt-1 text-sm text-[var(--text-secondary)]">try a different search.</p>
+                  <p className="mt-1 text-sm text-[var(--text-secondary)]">try a different search or filter.</p>
                 </>
               ) : (
                 <>
@@ -314,65 +402,86 @@ export default function MarketsPage() {
               )}
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-sm border border-[var(--border)] hud-corners">
-              {/* Header row */}
-              <div className="grid min-w-[640px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
-                <div>token</div>
-                <div className="text-right">price</div>
-                <div className="text-right">OI</div>
-                <div className="text-right">volume</div>
-                <div className="text-right hidden sm:block">insurance</div>
-                <div className="text-right hidden sm:block">max lev</div>
-                <div className="text-right">health</div>
-              </div>
+            <>
+              <div className="overflow-x-auto rounded-sm border border-[var(--border)] hud-corners">
+                {/* Header row */}
+                <div className="grid min-w-[640px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+                  <div>token</div>
+                  <div className="text-right">price</div>
+                  <div className="text-right">OI</div>
+                  <div className="text-right">volume</div>
+                  <div className="text-right hidden sm:block">insurance</div>
+                  <div className="text-right hidden sm:block">max lev</div>
+                  <div className="text-right">health</div>
+                </div>
 
-              {filtered.map((m, i) => {
-                const health = computeMarketHealth(m.onChain.engine);
-                const oiTokens = formatTokenAmount(m.onChain.engine.totalOpenInterest);
-                const insuranceTokens = formatTokenAmount(m.onChain.engine.insuranceFund.balance);
-                const lastPrice = m.supabase?.last_price;
+                {displayedMarkets.map((m, i) => {
+                  const health = computeMarketHealth(m.onChain.engine);
+                  const oiTokens = formatTokenAmount(m.onChain.engine.totalOpenInterest);
+                  const insuranceTokens = formatTokenAmount(m.onChain.engine.insuranceFund.balance);
+                  const lastPrice = m.supabase?.last_price;
 
-                return (
-                  <Link
-                    key={m.slabAddress}
-                    href={`/trade/${m.slabAddress}`}
-                    className={[
-                      "grid min-w-[640px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 items-center px-4 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.04] hover:border-l-2 hover:border-l-[var(--accent)]/30",
-                      i > 0 ? "border-t border-[var(--border)]" : "",
-                    ].join(" ")}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-white text-sm">
-                          {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
+                  return (
+                    <Link
+                      key={m.slabAddress}
+                      href={`/trade/${m.slabAddress}`}
+                      className={[
+                        "grid min-w-[640px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 items-center px-4 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.04] hover:border-l-2 hover:border-l-[var(--accent)]/30",
+                        i > 0 ? "border-t border-[var(--border)]" : "",
+                      ].join(" ")}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-white text-sm">
+                            {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
+                          </span>
+                          {m.isAdminOracle && (
+                            <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+                          {m.name ? `${m.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                          {lastPrice != null
+                            ? `$${lastPrice < 0.01 ? lastPrice.toFixed(6) : lastPrice < 1 ? lastPrice.toFixed(4) : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : "\u2014"}
                         </span>
-                        {m.isAdminOracle && (
-                          <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
-                        )}
                       </div>
-                      <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-                        {m.name ? `${m.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-sm text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                        {lastPrice != null
-                          ? `$${lastPrice < 0.01 ? lastPrice.toFixed(6) : lastPrice < 1 ? lastPrice.toFixed(4) : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : "\u2014"}
-                      </span>
-                    </div>
-                    <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiTokens}</div>
-                    <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{m.supabase?.volume_24h ? formatNum(m.supabase.volume_24h) : "\u2014"}</div>
-                    <div className="text-right text-sm text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceTokens}</div>
-                    <div className="text-right text-sm text-[var(--text-secondary)]">{m.maxLeverage}x</div>
-                    <div className="text-right"><HealthBadge level={health.level} /></div>
-                  </Link>
-                );
-              })}
-            </div>
+                      <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiTokens}</div>
+                      <div className="text-right text-sm text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{m.supabase?.volume_24h ? formatNum(m.supabase.volume_24h) : "\u2014"}</div>
+                      <div className="text-right text-sm text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceTokens}</div>
+                      <div className="text-right text-sm text-[var(--text-secondary)]">{m.maxLeverage}x</div>
+                      <div className="text-right"><HealthBadge level={health.level} /></div>
+                    </Link>
+                  );
+                })}
+              </div>
+              
+              {/* P-MED-3: Infinite scroll trigger */}
+              {displayCount < filtered.length && (
+                <div ref={observerTarget} className="py-4 text-center">
+                  <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                </div>
+              )}
+            </>
           )}
         </ScrollReveal>
       </div>
     </div>
+  );
+}
+
+export default function MarketsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-[calc(100vh-48px)] flex items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+      </div>
+    }>
+      <MarketsPageInner />
+    </Suspense>
   );
 }

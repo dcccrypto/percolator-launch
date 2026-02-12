@@ -34,6 +34,16 @@ export function useWithdraw(slabAddress: string) {
       setError(null);
       try {
         if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
+        
+        // P-CRITICAL-3: Validate network before withdrawal
+        try {
+          const slabInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
+          if (!slabInfo) {
+            throw new Error("Market not found on current network. Please switch networks in your wallet and refresh.");
+          }
+        } catch (e) {
+          if (e instanceof Error && e.message.includes("Market not found")) throw e;
+        }
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
         const userAta = await getAta(wallet.publicKey, mktConfig.collateralMint);

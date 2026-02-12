@@ -18,6 +18,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { useToast } from "@/hooks/useToast";
 
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -40,11 +41,13 @@ function Collapsible({ title, defaultOpen = true, badge, children }: { title: st
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
   return (
     <button
       onClick={() => {
         navigator.clipboard.writeText(text);
         setCopied(true);
+        toast("Address copied to clipboard!", "success");
         setTimeout(() => setCopied(false), 1500);
       }}
       className="ml-1.5 inline-flex items-center text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"

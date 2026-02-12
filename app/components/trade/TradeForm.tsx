@@ -93,6 +93,12 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
   const positionSize = marginNative * BigInt(leverage);
+  
+  // C3: Defensive check for BigInt overflow
+  if (positionSize < 0n) {
+    throw new Error("Position size overflow detected");
+  }
+  
   const exceedsMargin = marginNative > 0n && marginNative > capital;
 
   const setMarginPercent = useCallback(
@@ -178,6 +184,13 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   async function handleTrade() {
     if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin) return;
+    
+    // P-CRITICAL-2: Check wallet is still connected before trade
+    if (!connected) {
+      setHumanError("Wallet disconnected. Please reconnect your wallet.");
+      return;
+    }
+    
     setHumanError(null);
     setTradePhase("submitting");
     try {
