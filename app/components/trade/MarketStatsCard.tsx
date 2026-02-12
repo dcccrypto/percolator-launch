@@ -35,11 +35,11 @@ export const MarketStatsCard: FC = () => {
 
   return (
     <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-      <div className="grid grid-cols-3 gap-px">
+      <div className="grid grid-cols-2 gap-px">
         {stats.map((s) => (
-          <div key={s.label} className="p-2 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(3n)]:border-r-0 [&:nth-last-child(-n+3)]:border-b-0">
-            <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">{s.label}</p>
-            <p className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{s.value}</p>
+          <div key={s.label} className="p-2 border-b border-[var(--border)]/20 [&:nth-last-child(-n+2)]:border-b-0">
+            <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)] truncate">{s.label}</p>
+            <p className="text-[11px] font-medium text-[var(--text)] truncate" style={{ fontFamily: "var(--font-mono)" }}>{s.value}</p>
           </div>
         ))}
       </div>
