@@ -5,8 +5,10 @@ import { getConnection } from "../utils/solana.js";
 import { deriveInsuranceLpMint } from "@percolator/core";
 import { PublicKey } from "@solana/web3.js";
 
+// BL2: Named constants for magic numbers
 const POLL_INTERVAL_MS = 30_000;
 const MS_PER_DAY = 86_400_000;
+const REDEMPTION_RATE_E6_DEFAULT = 1_000_000; // 1:1 ratio when no LPs
 
 interface InsuranceSnapshot {
   slab: string;
@@ -83,7 +85,7 @@ export class InsuranceLPService {
         }
 
         const redemptionRateE6 =
-          lpSupply > 0 ? Math.floor((insuranceBalance * 1_000_000) / lpSupply) : 1_000_000;
+          lpSupply > 0 ? Math.floor((insuranceBalance * 1_000_000) / lpSupply) : REDEMPTION_RATE_E6_DEFAULT;
 
         // Record snapshot
         const db = getSupabase();

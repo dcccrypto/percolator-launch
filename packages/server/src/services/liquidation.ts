@@ -23,6 +23,10 @@ import { getConnection, loadKeypair, sendWithRetry, pollSignatureStatus, getRece
 import { eventBus } from "./events.js";
 import { OracleService } from "./oracle.js";
 
+// BL2: Extract magic numbers to named constants
+const PRICE_E6_DIVISOR = 1_000_000n; // Price precision divisor (6 decimals)
+const BPS_MULTIPLIER = 10_000n; // Basis points multiplier (100% = 10000 bps)
+
 interface LiquidationCandidate {
   slabAddress: string;
   accountIdx: number;
@@ -93,7 +97,7 @@ export class LiquidationService {
 
           // Calculate margin health using mark-to-market PnL (not stale on-chain pnl)
           // On-chain pnl is only updated during cranks; between cranks it can be stale
-          const notional = absBI(account.positionSize) * price / 1_000_000n;
+          const notional = absBI(account.positionSize) * price / PRICE_E6_DIVISOR;
           if (notional === 0n) continue;
 
           // Compute mark PnL from live price instead of stale on-chain pnl
@@ -136,7 +140,7 @@ export class LiquidationService {
             continue;
           }
 
-          const marginRatioBps = equity * 10_000n / notional;
+          const marginRatioBps = equity * BPS_MULTIPLIER / notional;
 
           // If margin ratio < maintenance margin, this account is liquidatable
           if (marginRatioBps < maintenanceMarginBps) {
@@ -245,7 +249,7 @@ export class LiquidationService {
 
         const freshPrice = freshCfg.authorityPriceE6;
         if (freshPrice > 0n) {
-          const notional = absBI(freshAccount.positionSize) * freshPrice / 1_000_000n;
+          const notional = absBI(freshAccount.positionSize) * freshPrice / PRICE_E6_DIVISOR;
           if (notional > 0n) {
             // Use mark-to-market PnL for re-verification
             const freshEntry = freshAccount.entryPrice;
@@ -258,7 +262,7 @@ export class LiquidationService {
             }
             const equity = freshAccount.capital + freshMarkPnl;
             if (equity > 0n) {
-              const marginRatioBps = equity * 10_000n / notional;
+              const marginRatioBps = equity * BPS_MULTIPLIER / notional;
               if (marginRatioBps >= freshParams.maintenanceMarginBps) {
                 console.warn(`[LiquidationService] Race condition: account ${accountIdx} on ${slabAddress.toBase58()} no longer undercollateralized (margin: ${marginRatioBps} bps), skipping`);
                 return null;
