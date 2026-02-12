@@ -10,7 +10,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
+import { act } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useTrade } from "../../hooks/useTrade";
 

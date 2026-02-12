@@ -10,7 +10,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook } from "@testing-library/react";
+import { act } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWithdraw } from "../../hooks/useWithdraw";
 

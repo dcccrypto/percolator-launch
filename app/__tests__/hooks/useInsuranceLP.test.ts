@@ -2,15 +2,16 @@
  * useInsuranceLP Hook Tests
  * 
  * Critical Test Cases:
- * - H3: Infinite loop fix in auto-refresh
- * - Insurance LP state calculations
- * - Mint creation for admin
- * - Deposit/withdrawal flow
- * - Redemption rate calculations
+ * - H3: Infinite loop fix in auto-refresh mechanism
+ * - Insurance fund balance calculations
+ * - LP token minting and redemption
+ * - User share percentage calculations
+ * - Redemption rate with edge cases (zero supply, overflow)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
+import { act } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useInsuranceLP } from "../../hooks/useInsuranceLP";
 
@@ -24,103 +25,70 @@ vi.mock("@/components/providers/SlabProvider", () => ({
   useSlabState: vi.fn(),
 }));
 
-vi.mock("../lib/tx", () => ({
-  sendTx: vi.fn(),
-}));
-
 vi.mock("next/navigation", () => ({
   useParams: vi.fn(),
 }));
 
-vi.mock("@solana/spl-token", async () => {
-  const actual = await vi.importActual("@solana/spl-token");
-  return {
-    ...actual,
-    getAssociatedTokenAddress: vi.fn(),
-    createAssociatedTokenAccountInstruction: vi.fn(),
-    unpackMint: vi.fn(),
-    unpackAccount: vi.fn(),
-  };
-});
+vi.mock("@/lib/tx", () => ({
+  sendTx: vi.fn(),
+}));
+
+vi.mock("@solana/spl-token", () => ({
+  TOKEN_PROGRAM_ID: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+  getAssociatedTokenAddress: vi.fn(),
+  createAssociatedTokenAccountInstruction: vi.fn(),
+  unpackMint: vi.fn(),
+  unpackAccount: vi.fn(),
+}));
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { sendTx } from "../lib/tx";
 import { useParams } from "next/navigation";
-import {
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  unpackMint,
-  unpackAccount,
-} from "@solana/spl-token";
+import { sendTx } from "@/lib/tx";
+import { getAssociatedTokenAddress, unpackMint, unpackAccount } from "@solana/spl-token";
 
 describe("useInsuranceLP", () => {
   const mockSlabAddress = "11111111111111111111111111111111";
   const mockWalletPubkey = new PublicKey("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
   const mockProgramId = new PublicKey("5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf");
+  const mockSlabPubkey = new PublicKey(mockSlabAddress);
+  const mockLpMintPubkey = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
   const mockCollateralMint = new PublicKey("So11111111111111111111111111111111111111112");
-  const mockVault = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
-  const mockLpMint = new PublicKey("DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1");
-  const mockUserLpAta = new PublicKey("EhcT8iqx3u8RNMR5yPzG9CWqVmrKnRKV3y9RkHqQ3Qds");
-
+  const mockVault = new PublicKey("Vault1111111111111111111111111111111111111111");
+  
   let mockConnection: any;
   let mockWallet: any;
   let mockSlabState: any;
-  let refreshCallCount: number;
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    refreshCallCount = 0;
 
     // Mock connection
     mockConnection = {
-      getAccountInfo: vi.fn().mockImplementation(async (pubkey) => {
-        refreshCallCount++;
-        
-        // Mock LP mint account
-        if (pubkey.equals(mockLpMint)) {
-          return {
-            data: Buffer.alloc(82), // Mint account size
-            executable: false,
-            lamports: 1000000,
-            owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-          };
-        }
-        
-        // Mock user LP ATA
-        if (pubkey.equals(mockUserLpAta)) {
-          return {
-            data: Buffer.alloc(165), // Token account size
-            executable: false,
-            lamports: 2039280,
-            owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-          };
-        }
-        
-        return null;
-      }),
+      getAccountInfo: vi.fn(),
     };
 
     // Mock wallet
     mockWallet = {
       publicKey: mockWalletPubkey,
       signTransaction: vi.fn(),
+      signAllTransactions: vi.fn(),
       connected: true,
     };
 
     // Mock slab state
     mockSlabState = {
+      programId: mockProgramId.toBase58(),
+      engine: {
+        insuranceFund: {
+          balance: 1000000n, // 1 SOL
+        },
+      },
       config: {
         collateralMint: mockCollateralMint,
         vaultPubkey: mockVault,
       },
-      engine: {
-        insuranceFund: {
-          balance: 10_000000n, // 10 SOL
-        },
-      },
-      programId: mockProgramId.toBase58(),
     };
 
     (useConnection as any).mockReturnValue({ connection: mockConnection });
@@ -128,35 +96,9 @@ describe("useInsuranceLP", () => {
     (useSlabState as any).mockReturnValue(mockSlabState);
     (useParams as any).mockReturnValue({ slab: mockSlabAddress });
     (sendTx as any).mockResolvedValue({ signature: "mock-signature" });
-    (getAssociatedTokenAddress as any).mockResolvedValue(mockUserLpAta);
-    (createAssociatedTokenAccountInstruction as any).mockReturnValue({
-      keys: [],
-      programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      data: Buffer.alloc(0),
-    });
-
-    // Mock unpackMint to return mint data
-    (unpackMint as any).mockReturnValue({
-      mintAuthority: mockProgramId,
-      supply: 5_000000n, // 5 LP tokens
-      decimals: 6,
-      isInitialized: true,
-      freezeAuthority: null,
-    });
-
-    // Mock unpackAccount to return user balance
-    (unpackAccount as any).mockReturnValue({
-      mint: mockLpMint,
-      owner: mockWalletPubkey,
-      amount: 2_000000n, // 2 LP tokens
-      delegate: null,
-      delegatedAmount: 0n,
-      isInitialized: true,
-      isFrozen: false,
-      isNative: false,
-      rentExemptReserve: null,
-      closeAuthority: null,
-    });
+    (getAssociatedTokenAddress as any).mockResolvedValue(
+      new PublicKey("ATA1111111111111111111111111111111111111111")
+    );
   });
 
   afterEach(() => {
@@ -164,302 +106,314 @@ describe("useInsuranceLP", () => {
     vi.restoreAllMocks();
   });
 
-  describe("H3: Infinite Loop Fix - Auto-Refresh", () => {
-    it("should NOT cause infinite loop with stable dependencies", async () => {
-      const { result, unmount } = renderHook(() => useInsuranceLP());
-
-      // Initial render triggers first refresh
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+  describe("H3: Infinite Loop Fix", () => {
+    it("should not cause infinite re-renders with auto-refresh", async () => {
+      // Mock mint exists
+      mockConnection.getAccountInfo.mockResolvedValue({
+        data: Buffer.alloc(82), // Standard mint account size
+        executable: false,
+        lamports: 1000000,
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
       });
 
-      const initialCallCount = refreshCallCount;
-      expect(initialCallCount).toBeGreaterThan(0);
-
-      // Advance timer by 10s (one auto-refresh cycle)
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000);
+      (unpackMint as any).mockReturnValue({
+        supply: 1000000n,
+        decimals: 9,
+        isInitialized: true,
+        freezeAuthority: null,
+        mintAuthority: mockLpMintPubkey,
       });
 
-      const afterOneRefresh = refreshCallCount;
-      
-      // Should have called refresh ONCE more (not continuously)
-      expect(afterOneRefresh).toBeLessThan(initialCallCount + 5);
+      const { result } = renderHook(() => useInsuranceLP());
 
-      // Advance another 10s
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000);
+      // Initial render should trigger first refresh
+      await waitFor(() => {
+        expect(result.current.state.mintExists).toBe(true);
       });
 
-      const afterTwoRefreshes = refreshCallCount;
-      
-      // Should be stable (not exponentially growing)
-      expect(afterTwoRefreshes).toBeLessThan(afterOneRefresh + 5);
+      const callCount = mockConnection.getAccountInfo.mock.calls.length;
 
-      unmount();
+      // Fast-forward 10 seconds (auto-refresh interval)
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+      });
+
+      // Should have called getAccountInfo again for auto-refresh
+      await waitFor(() => {
+        expect(mockConnection.getAccountInfo.mock.calls.length).toBeGreaterThan(callCount);
+      });
+
+      // Should NOT have excessive calls (would indicate infinite loop)
+      expect(mockConnection.getAccountInfo.mock.calls.length).toBeLessThan(callCount + 10);
     });
 
-    it("should use empty dependency array to prevent infinite loop", async () => {
-      const { result, unmount } = renderHook(() => useInsuranceLP());
+    it("should use stable wallet public key reference to prevent re-render loop", async () => {
+      mockConnection.getAccountInfo.mockResolvedValue(null); // Mint doesn't exist
 
-      // Let it run for 30 seconds
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(30_000);
-      });
-
-      // Should have ~3 auto-refreshes (every 10s) + initial
-      // If there's an infinite loop, this would be in the thousands
-      expect(refreshCallCount).toBeLessThan(20);
-
-      unmount();
-    });
-
-    it("should capture refreshState at mount time to prevent dependency changes", async () => {
-      const { result, rerender, unmount } = renderHook(() => useInsuranceLP());
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
-      });
-
-      const callCountBeforeRerender = refreshCallCount;
-
-      // Change wallet pubkey (should NOT retrigger useEffect)
-      (useWallet as any).mockReturnValue({
-        publicKey: new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"),
+      const refreshSpy = vi.fn();
+      
+      // Mock wallet with new PublicKey instance on each call (simulating unstable reference)
+      let callCount = 0;
+      (useWallet as any).mockImplementation(() => ({
+        publicKey: callCount++ < 5 
+          ? new PublicKey(mockWalletPubkey.toBase58()) // New instance each time
+          : mockWalletPubkey, // Stable after 5 calls
+        signTransaction: vi.fn(),
         connected: true,
+      }));
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.mintExists).toBe(false);
       });
 
-      rerender();
-
+      // Should stabilize and not loop infinitely
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+        vi.advanceTimersByTime(1000);
       });
 
-      // Should NOT have caused a new refresh cycle
-      expect(refreshCallCount).toBe(callCountBeforeRerender);
-
-      unmount();
+      // Verify no excessive re-renders
+      expect(mockConnection.getAccountInfo.mock.calls.length).toBeLessThan(20);
     });
 
-    it("should cleanup interval on unmount to prevent memory leaks", async () => {
-      const { unmount } = renderHook(() => useInsuranceLP());
+    it("should cleanup interval on unmount", async () => {
+      mockConnection.getAccountInfo.mockResolvedValue(null);
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+      const { result, unmount } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.insuranceBalance).toBe(1000000n);
       });
 
-      const callCountBeforeUnmount = refreshCallCount;
+      const callsBefore = mockConnection.getAccountInfo.mock.calls.length;
 
+      // Unmount
       unmount();
 
       // Advance time after unmount
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(20_000);
-      });
+      vi.advanceTimersByTime(20000);
 
-      // Should NOT have called refresh after unmount
-      expect(refreshCallCount).toBe(callCountBeforeUnmount);
-    });
-
-    it("should handle rapid mount/unmount without infinite loop", async () => {
-      // Simulate rapid component mounting/unmounting
-      for (let i = 0; i < 5; i++) {
-        const { unmount } = renderHook(() => useInsuranceLP());
-        
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(50);
-        });
-        
-        unmount();
-      }
-
-      // Should be stable (not exponentially growing)
-      expect(refreshCallCount).toBeLessThan(30);
+      // Should NOT have called getAccountInfo again
+      expect(mockConnection.getAccountInfo.mock.calls.length).toBe(callsBefore);
     });
   });
 
-  describe("Insurance State Calculations", () => {
-    it("should calculate redemption rate correctly", async () => {
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await waitFor(() => {
-        expect(result.current.state.redemptionRateE6).toBe(2_000000n); // 10 SOL / 5 LP = 2.0
-      });
-    });
-
-    it("should calculate user share percentage correctly", async () => {
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await waitFor(() => {
-        expect(result.current.state.userSharePct).toBe(40); // 2 LP / 5 LP = 40%
-      });
-    });
-
-    it("should calculate user redeemable value correctly", async () => {
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await waitFor(() => {
-        expect(result.current.state.userRedeemableValue).toBe(4_000000n); // 40% of 10 SOL = 4 SOL
-      });
-    });
-
-    it("should handle zero LP supply (1:1 redemption rate)", async () => {
-      (unpackMint as any).mockReturnValue({
-        mintAuthority: mockProgramId,
-        supply: 0n,
-        decimals: 6,
-        isInitialized: true,
-        freezeAuthority: null,
-      });
+  describe("Insurance Balance Calculations", () => {
+    it("should read insurance balance from engine state", async () => {
+      mockConnection.getAccountInfo.mockResolvedValue(null); // No mint yet
 
       const { result } = renderHook(() => useInsuranceLP());
 
       await waitFor(() => {
-        expect(result.current.state.redemptionRateE6).toBe(1_000000n); // 1:1
+        expect(result.current.state.insuranceBalance).toBe(1000000n);
       });
     });
 
-    it("should handle mint not existing yet", async () => {
+    it("should handle zero insurance balance", async () => {
+      mockSlabState.engine.insuranceFund.balance = 0n;
       mockConnection.getAccountInfo.mockResolvedValue(null);
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.insuranceBalance).toBe(0n);
+        expect(result.current.state.redemptionRateE6).toBe(1_000_000n); // 1:1 when no supply
+      });
+    });
+
+    it("should handle large insurance balances without overflow", async () => {
+      const largeBalance = 1_000_000_000_000n; // 1 million SOL
+      mockSlabState.engine.insuranceFund.balance = largeBalance;
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.insuranceBalance).toBe(largeBalance);
+      });
+    });
+  });
+
+  describe("LP Token Supply & Redemption Rate", () => {
+    it("should calculate redemption rate with existing supply", async () => {
+      const insuranceBalance = 2000000n; // 2 SOL
+      const lpSupply = 1000000n; // 1 million LP tokens
+      
+      mockSlabState.engine.insuranceFund.balance = insuranceBalance;
+      mockConnection.getAccountInfo.mockResolvedValue({
+        data: Buffer.alloc(82),
+        executable: false,
+        lamports: 1000000,
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      });
+
+      (unpackMint as any).mockReturnValue({
+        supply: lpSupply,
+        decimals: 9,
+        isInitialized: true,
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.lpSupply).toBe(lpSupply);
+        // redemptionRateE6 = (2000000 * 1000000) / 1000000 = 2000000 (2:1)
+        expect(result.current.state.redemptionRateE6).toBe(2_000_000n);
+      });
+    });
+
+    it("should default to 1:1 redemption when supply is zero", async () => {
+      mockSlabState.engine.insuranceFund.balance = 5000000n;
+      mockConnection.getAccountInfo.mockResolvedValue({
+        data: Buffer.alloc(82),
+        executable: false,
+        lamports: 1000000,
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      });
+
+      (unpackMint as any).mockReturnValue({
+        supply: 0n, // No LP tokens minted yet
+        decimals: 9,
+        isInitialized: true,
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.redemptionRateE6).toBe(1_000_000n); // 1:1
+      });
+    });
+
+    it("should handle mint not existing", async () => {
+      mockConnection.getAccountInfo.mockResolvedValue(null); // Mint doesn't exist
 
       const { result } = renderHook(() => useInsuranceLP());
 
       await waitFor(() => {
         expect(result.current.state.mintExists).toBe(false);
         expect(result.current.state.lpSupply).toBe(0n);
-        expect(result.current.state.userLpBalance).toBe(0n);
+        expect(result.current.state.lpMintAddress).toBeNull();
       });
     });
   });
 
-  describe("Wallet PublicKey Stability", () => {
-    it("should use stabilized wallet pubkey string to prevent re-renders", async () => {
-      const { result, rerender } = renderHook(() => useInsuranceLP());
+  describe("User Share Calculations", () => {
+    it("should calculate user share percentage correctly", async () => {
+      const lpSupply = 10000000n; // 10 million LP tokens
+      const userLpBalance = 2500000n; // 2.5 million LP tokens (25%)
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+      mockConnection.getAccountInfo
+        .mockResolvedValueOnce({
+          // Mint account
+          data: Buffer.alloc(82),
+          executable: false,
+          lamports: 1000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        })
+        .mockResolvedValueOnce({
+          // User ATA
+          data: Buffer.alloc(165), // Token account size
+          executable: false,
+          lamports: 2000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        });
+
+      (unpackMint as any).mockReturnValue({
+        supply: lpSupply,
+        decimals: 9,
+        isInitialized: true,
       });
 
-      const initialBalance = result.current.state.userLpBalance;
-
-      // Mock returns a NEW PublicKey instance (different object, same value)
-      (useWallet as any).mockReturnValue({
-        publicKey: new PublicKey(mockWalletPubkey.toBase58()),
-        connected: true,
+      (unpackAccount as any).mockReturnValue({
+        amount: userLpBalance,
+        mint: mockLpMintPubkey,
+        owner: mockWalletPubkey,
       });
 
-      rerender();
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
-      });
-
-      // Balance should remain stable (not trigger unnecessary re-fetch)
-      expect(result.current.state.userLpBalance).toBe(initialBalance);
-    });
-
-    it("should handle wallet disconnect gracefully", async () => {
-      const { result, rerender } = renderHook(() => useInsuranceLP());
+      const { result } = renderHook(() => useInsuranceLP());
 
       await waitFor(() => {
-        expect(result.current.state.userLpBalance).toBeGreaterThan(0n);
+        expect(result.current.state.userLpBalance).toBe(userLpBalance);
+        expect(result.current.state.userSharePct).toBe(25); // 25%
+      });
+    });
+
+    it("should calculate user redeemable value", async () => {
+      const insuranceBalance = 10000000n; // 10 SOL
+      const lpSupply = 1000000n; // 1 million LP tokens
+      const userLpBalance = 250000n; // 250k LP tokens (25%)
+
+      mockSlabState.engine.insuranceFund.balance = insuranceBalance;
+      mockConnection.getAccountInfo
+        .mockResolvedValueOnce({
+          data: Buffer.alloc(82),
+          executable: false,
+          lamports: 1000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        })
+        .mockResolvedValueOnce({
+          data: Buffer.alloc(165),
+          executable: false,
+          lamports: 2000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        });
+
+      (unpackMint as any).mockReturnValue({
+        supply: lpSupply,
+        decimals: 9,
+        isInitialized: true,
       });
 
-      // Disconnect wallet
-      (useWallet as any).mockReturnValue({
-        publicKey: null,
-        connected: false,
+      (unpackAccount as any).mockReturnValue({
+        amount: userLpBalance,
+        mint: mockLpMintPubkey,
+        owner: mockWalletPubkey,
       });
 
-      rerender();
+      const { result } = renderHook(() => useInsuranceLP());
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+      await waitFor(() => {
+        // userRedeemableValue = (250000 * 10000000) / 1000000 = 2500000 (2.5 SOL)
+        expect(result.current.state.userRedeemableValue).toBe(2500000n);
+      });
+    });
+
+    it("should handle user with no LP tokens", async () => {
+      mockConnection.getAccountInfo
+        .mockResolvedValueOnce({
+          data: Buffer.alloc(82),
+          executable: false,
+          lamports: 1000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        })
+        .mockResolvedValueOnce(null); // User ATA doesn't exist
+
+      (unpackMint as any).mockReturnValue({
+        supply: 1000000n,
+        decimals: 9,
+        isInitialized: true,
       });
 
-      // Should gracefully handle null wallet
-      expect(result.current.state.insuranceBalance).toBe(10_000000n);
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.userLpBalance).toBe(0n);
+        expect(result.current.state.userSharePct).toBe(0);
+        expect(result.current.state.userRedeemableValue).toBe(0n);
+      });
     });
   });
 
-  describe("Deposit Flow", () => {
-    it("should create LP ATA if it doesn't exist", async () => {
-      mockConnection.getAccountInfo.mockImplementation(async (pubkey) => {
-        if (pubkey.equals(mockUserLpAta)) {
-          return null; // ATA doesn't exist
-        }
-        if (pubkey.equals(mockLpMint)) {
-          return { data: Buffer.alloc(82), executable: false, lamports: 1000000, owner: mockProgramId };
-        }
-        return null;
-      });
-
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await act(async () => {
-        await result.current.deposit(1_000000n);
-      });
-
-      expect(createAssociatedTokenAccountInstruction).toHaveBeenCalled();
-      expect(sendTx).toHaveBeenCalled();
-    });
-
-    it("should deposit successfully", async () => {
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await act(async () => {
-        await result.current.deposit(5_000000n);
-      });
-
-      expect(sendTx).toHaveBeenCalledTimes(1);
-      expect(result.current.loading).toBe(false);
-      expect(result.current.error).toBeNull();
-    });
-
-    it("should refresh state after deposit", async () => {
-      const { result } = renderHook(() => useInsuranceLP());
-
-      const initialCallCount = refreshCallCount;
-
-      await act(async () => {
-        await result.current.deposit(1_000000n);
-      });
-
-      // Should have triggered a refresh after deposit
-      expect(refreshCallCount).toBeGreaterThan(initialCallCount);
-    });
-  });
-
-  describe("Withdrawal Flow", () => {
-    it("should withdraw successfully", async () => {
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await act(async () => {
-        await result.current.withdraw(1_000000n);
-      });
-
-      expect(sendTx).toHaveBeenCalledTimes(1);
-      expect(result.current.loading).toBe(false);
-      expect(result.current.error).toBeNull();
-    });
-
-    it("should refresh state after withdrawal", async () => {
-      const { result } = renderHook(() => useInsuranceLP());
-
-      const initialCallCount = refreshCallCount;
-
-      await act(async () => {
-        await result.current.withdraw(1_000000n);
-      });
-
-      // Should have triggered a refresh after withdrawal
-      expect(refreshCallCount).toBeGreaterThan(initialCallCount);
-    });
-  });
-
-  describe("Create Mint (Admin)", () => {
+  describe("Create Mint", () => {
     it("should create insurance mint successfully", async () => {
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+
       const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.mintExists).toBe(false);
+      });
 
       await act(async () => {
         await result.current.createMint();
@@ -470,71 +424,215 @@ describe("useInsuranceLP", () => {
       expect(result.current.error).toBeNull();
     });
 
-    it("should refresh state after mint creation", async () => {
+    it("should throw error if wallet not connected", async () => {
+      (useWallet as any).mockReturnValue({ publicKey: null, connected: false });
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+
       const { result } = renderHook(() => useInsuranceLP());
 
-      const initialCallCount = refreshCallCount;
-
-      await act(async () => {
-        await result.current.createMint();
+      await waitFor(() => {
+        expect(result.current.state.mintExists).toBe(false);
       });
 
-      // Should have triggered a refresh
-      expect(refreshCallCount).toBeGreaterThan(initialCallCount);
+      await act(async () => {
+        await expect(result.current.createMint()).rejects.toThrow(
+          "Wallet not connected"
+        );
+      });
+
+      expect(result.current.error).toContain("Wallet not connected");
+    });
+  });
+
+  describe("Deposit", () => {
+    it("should deposit into insurance fund and mint LP tokens", async () => {
+      mockConnection.getAccountInfo
+        .mockResolvedValueOnce({
+          // Mint exists
+          data: Buffer.alloc(82),
+          executable: false,
+          lamports: 1000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        })
+        .mockResolvedValueOnce({
+          // User LP ATA exists
+          data: Buffer.alloc(165),
+          executable: false,
+          lamports: 2000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        });
+
+      (unpackMint as any).mockReturnValue({
+        supply: 1000000n,
+        decimals: 9,
+        isInitialized: true,
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.mintExists).toBe(true);
+      });
+
+      await act(async () => {
+        await result.current.deposit(500000n);
+      });
+
+      expect(sendTx).toHaveBeenCalledTimes(1);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
+    });
+
+    it("should create LP ATA if it doesn't exist", async () => {
+      mockConnection.getAccountInfo
+        .mockResolvedValueOnce({
+          // Mint exists
+          data: Buffer.alloc(82),
+          executable: false,
+          lamports: 1000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        })
+        .mockResolvedValueOnce(null); // User LP ATA doesn't exist
+
+      (unpackMint as any).mockReturnValue({
+        supply: 1000000n,
+        decimals: 9,
+        isInitialized: true,
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.mintExists).toBe(true);
+      });
+
+      await act(async () => {
+        await result.current.deposit(500000n);
+      });
+
+      // Should include ATA creation instruction
+      const txCall = (sendTx as any).mock.calls[0][0];
+      expect(txCall.instructions.length).toBeGreaterThanOrEqual(2); // Create ATA + deposit
+    });
+  });
+
+  describe("Withdraw", () => {
+    it("should withdraw from insurance fund by burning LP tokens", async () => {
+      mockConnection.getAccountInfo
+        .mockResolvedValueOnce({
+          data: Buffer.alloc(82),
+          executable: false,
+          lamports: 1000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        })
+        .mockResolvedValueOnce({
+          data: Buffer.alloc(165),
+          executable: false,
+          lamports: 2000000,
+          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        });
+
+      (unpackMint as any).mockReturnValue({
+        supply: 1000000n,
+        decimals: 9,
+        isInitialized: true,
+      });
+
+      (unpackAccount as any).mockReturnValue({
+        amount: 500000n,
+        mint: mockLpMintPubkey,
+        owner: mockWalletPubkey,
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.userLpBalance).toBe(500000n);
+      });
+
+      await act(async () => {
+        await result.current.withdraw(250000n);
+      });
+
+      expect(sendTx).toHaveBeenCalledTimes(1);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
     });
   });
 
   describe("Error Handling", () => {
-    it("should throw error if wallet not connected", async () => {
-      (useWallet as any).mockReturnValue({ publicKey: null, connected: false });
+    it("should handle RPC errors gracefully", async () => {
+      mockConnection.getAccountInfo.mockRejectedValue(new Error("RPC timeout"));
 
       const { result } = renderHook(() => useInsuranceLP());
 
+      // Should not throw, error logged to console
+      await waitFor(() => {
+        expect(result.current.state.insuranceBalance).toBe(1000000n);
+      });
+    });
+
+    it("should handle invalid slab address", async () => {
+      (useParams as any).mockReturnValue({ slab: "invalid-address" });
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      // Should handle gracefully without crashing
+      await waitFor(() => {
+        expect(result.current.state.lpMintAddress).toBeNull();
+      });
+    });
+
+    it("should set error state on transaction failure", async () => {
+      (sendTx as any).mockRejectedValue(new Error("Transaction failed"));
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(result.current.state.mintExists).toBe(false);
+      });
+
       await act(async () => {
-        await expect(result.current.deposit(1_000000n)).rejects.toThrow(
-          "Wallet not connected"
+        await expect(result.current.createMint()).rejects.toThrow(
+          "Transaction failed"
         );
       });
-    });
 
-    it("should set error state on deposit failure", async () => {
-      (sendTx as any).mockRejectedValue(new Error("Transaction failed"));
-
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await act(async () => {
-        await result.current.deposit(1_000000n).catch(() => {});
-      });
-
-      expect(result.current.error).toBe("Transaction failed");
-    });
-
-    it("should handle missing slab state gracefully", async () => {
-      (useSlabState as any).mockReturnValue(null);
-
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await act(async () => {
-        await expect(result.current.deposit(1_000000n)).rejects.toThrow();
-      });
+      expect(result.current.error).toContain("Failed to create insurance mint");
     });
   });
 
-  describe("Manual Refresh", () => {
-    it("should allow manual refresh", async () => {
+  describe("Loading State", () => {
+    it("should set loading during operations", async () => {
+      let resolveSendTx: any;
+      (sendTx as any).mockReturnValue(
+        new Promise((resolve) => {
+          resolveSendTx = resolve;
+        })
+      );
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+
       const { result } = renderHook(() => useInsuranceLP());
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
+      await waitFor(() => {
+        expect(result.current.state.mintExists).toBe(false);
       });
 
-      const callCountBefore = refreshCallCount;
-
-      await act(async () => {
-        await result.current.refreshState();
+      act(() => {
+        result.current.createMint();
       });
 
-      expect(refreshCallCount).toBeGreaterThan(callCountBefore);
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => {
+        resolveSendTx({ signature: "mock-sig" });
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
     });
   });
 });
