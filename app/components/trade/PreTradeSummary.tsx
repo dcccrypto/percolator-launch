@@ -17,6 +17,7 @@ interface PreTradeSummaryProps {
   tradingFeeBps: bigint;
   maintenanceMarginBps: bigint;
   symbol: string;
+  decimals: number;
 }
 
 function SummaryRow({
@@ -45,6 +46,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
   tradingFeeBps,
   maintenanceMarginBps,
   symbol,
+  decimals,
 }) => {
   if (oracleE6 === 0n || margin === 0n || positionSize === 0n) return null;
 
@@ -79,16 +81,16 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         <SummaryRow label="Est. Entry Price" value={formatUsd(estEntry)} />
         <SummaryRow
           label="Notional Value"
-          value={`${formatTokenAmount(positionSize)} ${symbol}`}
+          value={`${formatTokenAmount(positionSize, decimals)} ${symbol}`}
         />
         <SummaryRow
           label="Trading Fee"
-          value={`${formatTokenAmount(fee)} ${symbol}`}
+          value={`${formatTokenAmount(fee, decimals)} ${symbol}`}
           valueClass="text-[var(--text-secondary)]"
         />
         <SummaryRow
           label="Margin Required"
-          value={`${formatTokenAmount(margin)} ${symbol}`}
+          value={`${formatTokenAmount(margin, decimals)} ${symbol}`}
         />
         <SummaryRow
           label="Est. Liq Price"

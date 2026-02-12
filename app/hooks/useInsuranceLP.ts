@@ -231,6 +231,19 @@ export function useInsuranceLP() {
 
       const instructions: TransactionInstruction[] = [];
 
+      // BUG FIX: Create user's collateral ATA if it doesn't exist
+      const userAtaInfo = await connection.getAccountInfo(userAta);
+      if (!userAtaInfo) {
+        instructions.push(
+          createAssociatedTokenAccountInstruction(
+            wallet.publicKey,
+            userAta,
+            wallet.publicKey,
+            collateralMint
+          )
+        );
+      }
+
       // Create LP ATA if it doesn't exist
       const lpAtaInfo = await connection.getAccountInfo(userLpAta);
       if (!lpAtaInfo) {
