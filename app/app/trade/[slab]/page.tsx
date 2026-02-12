@@ -60,7 +60,7 @@ function Tabs({ tabs, children }: { tabs: string[]; children: React.ReactNode[] 
           </button>
         ))}
       </div>
-      <div className="mt-1">{children[active]}</div>
+      <div>{children[active]}</div>
     </div>
   );
 }
