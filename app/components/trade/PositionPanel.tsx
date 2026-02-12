@@ -280,12 +280,12 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   ~
                   {formatTokenAmount(
                     pnlTokens > 0n
-                      ? account.capital + pnlTokens
+                      ? displayData.capital + pnlTokens
                       : pnlTokens < 0n
-                        ? account.capital > abs(pnlTokens)
-                          ? account.capital - abs(pnlTokens)
+                        ? displayData.capital > abs(pnlTokens)
+                          ? displayData.capital - abs(pnlTokens)
                           : 0n
-                        : account.capital,
+                        : displayData.capital,
                   )}{" "}
                   {symbol}
                 </span>

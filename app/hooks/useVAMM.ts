@@ -8,7 +8,10 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { getAssociatedTokenAddress } from "@solana/spl-token";
+import { 
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+} from "@solana/spl-token";
 import {
   encodeInitLP,
   encodeInitVamm,
@@ -104,6 +107,21 @@ export function useVAMM(slabAddress: string) {
           wallet.publicKey,
         );
 
+        const instructions: TransactionInstruction[] = [];
+
+        // BUG FIX: Check if user's collateral token account exists, create if missing
+        const userAtaInfo = await connection.getAccountInfo(userAta);
+        if (!userAtaInfo) {
+          instructions.push(
+            createAssociatedTokenAccountInstruction(
+              wallet.publicKey,
+              userAta,
+              wallet.publicKey,
+              mktConfig.collateralMint
+            )
+          );
+        }
+
         const matcherCtxKp = Keypair.generate();
         const matcherCtxRent =
           await connection.getMinimumBalanceForRentExemption(MATCHER_CTX_SIZE);
@@ -164,10 +182,12 @@ export function useVAMM(slabAddress: string) {
           data: initLpData,
         });
 
+        instructions.push(createCtxIx, initMatcherIx, initLpIx);
+
         const sig = await sendTx({
           connection,
           wallet,
-          instructions: [createCtxIx, initMatcherIx, initLpIx],
+          instructions,
           computeUnits: 300_000,
           signers: [matcherCtxKp],
         });
