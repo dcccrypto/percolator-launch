@@ -101,8 +101,8 @@ describe("OracleService", () => {
    * Type: Integration
    * AC2: DexScreener API calls timeout after 10s
    */
-  it("ORACLE-003: should timeout DexScreener API call after 10s", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+  it("ORACLE-003: should timeout DexScreener API call after 10s", { timeout: 15000 }, async () => {
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
 
     // Mock fetch with AbortController support
     let abortCalled = false;
@@ -136,7 +136,7 @@ describe("OracleService", () => {
    * AC3: Cache race conditions are prevented
    */
   it("ORACLE-004: should prevent cache race conditions with concurrent requests", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
     
     let callCount = 0;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
@@ -172,7 +172,7 @@ describe("OracleService", () => {
    * AC4: Invalid prices are rejected (negative, zero, NaN)
    */
   it("ORACLE-005: should reject negative price", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({
@@ -192,7 +192,7 @@ describe("OracleService", () => {
    * AC4: Invalid prices are rejected (negative, zero, NaN)
    */
   it("ORACLE-006: should reject zero price", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({
@@ -212,7 +212,7 @@ describe("OracleService", () => {
    * AC4: Invalid prices are rejected (negative, zero, NaN)
    */
   it("ORACLE-007: should reject NaN price", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({
@@ -230,7 +230,7 @@ describe("OracleService", () => {
    * Additional test: Empty pairs array
    */
   it("should handle empty pairs array", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({ pairs: [] }),
@@ -245,7 +245,7 @@ describe("OracleService", () => {
    * Additional test: Jupiter fallback
    */
   it("should fallback to Jupiter when DexScreener fails", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
     const slabAddress = Keypair.generate().publicKey.toBase58();
 
     let callCount = 0;
@@ -279,7 +279,7 @@ describe("OracleService", () => {
    * Additional test: Cached price fallback
    */
   it("should use cached price when both external sources fail (fresh cache)", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
     const slabAddress = Keypair.generate().publicKey.toBase58();
 
     // First, populate cache with a successful fetch
@@ -307,7 +307,7 @@ describe("OracleService", () => {
    * Additional test: Stale cache rejection
    */
   it("should reject cached price older than 60s", async () => {
-    const mint = "So11111111111111111111111111111111111111112";
+    const mint = Keypair.generate().publicKey.toBase58(); // Unique mint to avoid cache
     const slabAddress = Keypair.generate().publicKey.toBase58();
 
     // Populate cache
