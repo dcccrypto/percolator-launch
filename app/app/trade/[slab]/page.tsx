@@ -224,7 +224,7 @@ function TradePageInner({ slab }: { slab: string }) {
         </ErrorBoundary>
 
         <ErrorBoundary label="AccountsCard">
-          <Collapsible title="Account" defaultOpen={false}>
+          <Collapsible title="Positions & Liqs" defaultOpen={false}>
             <AccountsCard />
           </Collapsible>
         </ErrorBoundary>
@@ -250,7 +250,7 @@ function TradePageInner({ slab }: { slab: string }) {
           </ErrorBoundary>
 
           {/* Position / Account / Deposit — tabbed */}
-          <Tabs tabs={["Position", "Account", "Deposit"]} defaultTab={defaultLeftTab}>
+          <Tabs tabs={["Position", "Positions & Liqs", "Deposit"]} defaultTab={defaultLeftTab}>
             <ErrorBoundary label="PositionPanel"><PositionPanel slabAddress={slab} /></ErrorBoundary>
             <ErrorBoundary label="AccountsCard"><AccountsCard /></ErrorBoundary>
             <ErrorBoundary label="DepositWithdrawCard"><DepositWithdrawCard slabAddress={slab} /></ErrorBoundary>
