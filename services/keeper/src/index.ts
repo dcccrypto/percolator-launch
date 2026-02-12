@@ -11,12 +11,13 @@ import {
   ACCOUNTS_KEEPER_CRANK,
   buildAccountMetas,
   buildIx,
+  getProgramId,
 } from "@percolator/core";
 import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const PROGRAM_ID = new PublicKey("GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24");
+const PROGRAM_ID = getProgramId();
 const CRANK_INTERVAL_MS = 5_000;
 
 async function main() {

@@ -11,12 +11,13 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
   buildAccountMetas,
   buildIx,
+  getProgramId,
 } from "@percolator/core";
 import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const PROGRAM_ID = new PublicKey("GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24");
+const PROGRAM_ID = getProgramId();
 const PUSH_INTERVAL_MS = 10_000;
 
 interface MarketEntry {
