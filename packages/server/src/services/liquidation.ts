@@ -41,6 +41,9 @@ export class LiquidationService {
   private liquidationCount = 0;
   private scanCount = 0;
   private lastScanTime = 0;
+  // BC1: Signature replay protection
+  private recentSignatures = new Map<string, number>(); // signature -> timestamp
+  private readonly signatureTTLMs = 60_000; // 60 seconds
 
   constructor(oracleService: OracleService, intervalMs = 15_000) {
     this.oracleService = oracleService;
@@ -67,6 +70,14 @@ export class LiquidationService {
       const price = cfg.authorityPriceE6;
 
       if (price === 0n) return []; // No price set
+
+      // BC2: Check oracle staleness - reject if timestamp > 60s old
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      const priceAge = now - cfg.authorityTimestamp;
+      if (priceAge > 60n) {
+        console.warn(`[LiquidationService] Skipping ${slabAddress}: oracle price is ${priceAge}s old (max 60s)`);
+        return []; // Don't liquidate with stale prices
+      }
 
       // Use bitmap to find actually-used account indices (not sequential iteration)
       // The bitmap can be sparse — e.g., accounts at indices 0, 5, 100
@@ -274,6 +285,16 @@ export class LiquidationService {
           }
           console.warn(`[LiquidationService] Attempt ${attempt + 1} failed with network error, retrying...`);
           await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+
+      // BC1: Track signature to prevent replay attacks
+      const now = Date.now();
+      this.recentSignatures.set(sig!, now);
+      // Clean up signatures older than TTL
+      for (const [oldSig, timestamp] of this.recentSignatures.entries()) {
+        if (now - timestamp > this.signatureTTLMs) {
+          this.recentSignatures.delete(oldSig);
         }
       }
 

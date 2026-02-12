@@ -186,6 +186,13 @@ export class OracleService {
       const slabPubkey = new PublicKey(slabAddress);
       const programId = marketProgramId ?? new PublicKey(config.programId);
 
+      // BC4: Validate that crank keypair is the oracle authority
+      if (!keypair.publicKey.equals(marketConfig.oracleAuthority)) {
+        throw new Error(
+          `Crank keypair ${keypair.publicKey.toBase58()} is not the oracle authority ${marketConfig.oracleAuthority.toBase58()}`
+        );
+      }
+
       const data = encodePushOraclePrice({
         priceE6: priceEntry.priceE6,
         timestamp: BigInt(Math.floor(Date.now() / 1000)),

@@ -58,6 +58,9 @@ export class CrankService {
   private readonly oracleService: OracleService;
   private lastCycleResult = { success: 0, failed: 0, skipped: 0 };
   private lastDiscoveryTime = 0;
+  // BC1: Signature replay protection
+  private recentSignatures = new Map<string, number>(); // signature -> timestamp
+  private readonly signatureTTLMs = 60_000; // 60 seconds
   private _isRunning = false;
   private _cycling = false;
 
@@ -184,6 +187,16 @@ export class CrankService {
 
       const ix = buildIx({ programId, keys, data });
       const sig = await sendWithRetry(connection, ix, [keypair]);
+
+      // BC1: Track signature to prevent replay attacks
+      const now = Date.now();
+      this.recentSignatures.set(sig, now);
+      // Clean up signatures older than TTL
+      for (const [oldSig, timestamp] of this.recentSignatures.entries()) {
+        if (now - timestamp > this.signatureTTLMs) {
+          this.recentSignatures.delete(oldSig);
+        }
+      }
 
       state.lastCrankTime = Date.now();
       state.successCount++;
