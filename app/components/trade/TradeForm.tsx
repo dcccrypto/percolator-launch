@@ -1,7 +1,8 @@
 "use client";
 
 import { FC, useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import gsap from "gsap";
 import { useTrade } from "@/hooks/useTrade";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
@@ -43,7 +44,8 @@ function abs(n: bigint): bigint {
 }
 
 export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { connected: walletConnected } = useWallet();
+  const { connected: walletConnected, publicKey } = useWallet();
+  const { connection } = useConnection();
   const realUserAccount = useUserAccount();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const connected = walletConnected || mockMode;
@@ -54,7 +56,12 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
   const symbol = tokenMeta?.symbol ?? "Token";
-  const decimals = tokenMeta?.decimals ?? 6;
+  
+  // BUG FIX: Fetch on-chain decimals from token account (like DepositWithdrawCard)
+  // Don't rely solely on tokenMeta which may fail for cross-network tokens
+  const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
+  const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
+  
   const prefersReduced = usePrefersReducedMotion();
 
   // Risk reduction gate detection
@@ -114,6 +121,29 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     },
     [capital, decimals]
   );
+
+  // BUG FIX: Fetch on-chain decimals from user's token account
+  // This ensures correct decimals even for cross-network tokens or missing metadata
+  useEffect(() => {
+    if (!publicKey || !mktConfig?.collateralMint || mockMode) {
+      setOnChainDecimals(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
+        const info = await connection.getTokenAccountBalance(ata);
+        if (!cancelled && info.value.decimals !== undefined) {
+          setOnChainDecimals(info.value.decimals);
+        }
+      } catch {
+        // Token account may not exist yet, keep using fallback decimals
+        if (!cancelled) setOnChainDecimals(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [publicKey, mktConfig?.collateralMint, connection, mockMode]);
 
   // Direction toggle GSAP bounce
   useEffect(() => {
