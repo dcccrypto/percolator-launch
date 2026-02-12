@@ -588,7 +588,9 @@ describe('CrankService Unit Tests', () => {
       const { sendWithRetry } = await import('../../src/utils/solana.js');
       const { eventBus } = await import('../../src/services/events.js');
 
-      // Create 5 markets
+      // Create 5 markets and track the one that should fail
+      const failingMarketAddress = createTestPublicKey(`ErrMkt2`).toBase58();
+      
       for (let i = 0; i < 5; i++) {
         const market = createMockMarket({
           slabAddress: createTestPublicKey(`ErrMkt${i}`),
@@ -605,10 +607,11 @@ describe('CrankService Unit Tests', () => {
         });
       }
 
-      // Market 2 fails
+      // Market 2 (third call) fails - use call count to track
+      let callCount = 0;
       vi.mocked(sendWithRetry).mockImplementation(async (conn, ix, signers) => {
-        const address = signers?.[0]?.publicKey?.toBase58();
-        if (address?.includes('ErrMkt2')) {
+        callCount++;
+        if (callCount === 3) { // Third market (index 2)
           throw new Error('Market 2 error');
         }
         return 'success';
@@ -619,7 +622,7 @@ describe('CrankService Unit Tests', () => {
       // Should publish failure event for the failed market
       expect(eventBus.publish).toHaveBeenCalledWith(
         'crank.failure',
-        expect.stringContaining('ErrMkt2'),
+        failingMarketAddress,
         expect.objectContaining({
           error: expect.stringContaining('Market 2 error'),
         })
@@ -630,7 +633,7 @@ describe('CrankService Unit Tests', () => {
       const markets = crankService.getMarkets();
       const { sendWithRetry } = await import('../../src/utils/solana.js');
 
-      // Create 3 markets
+      // Create 3 markets and track the one that should fail
       for (let i = 0; i < 3; i++) {
         const market = createMockMarket({
           slabAddress: createTestPublicKey(`UnexpMkt${i}`),
@@ -647,10 +650,11 @@ describe('CrankService Unit Tests', () => {
         });
       }
 
-      // Middle market throws non-standard error
+      // Middle market (second call) throws non-standard error
+      let callCount = 0;
       vi.mocked(sendWithRetry).mockImplementation(async (conn, ix, signers) => {
-        const address = signers?.[0]?.publicKey?.toBase58();
-        if (address?.includes('UnexpMkt1')) {
+        callCount++;
+        if (callCount === 2) { // Second market (index 1)
           throw 'String error'; // Non-Error object
         }
         return 'success';

@@ -806,7 +806,7 @@ describe('LiquidationService Unit Tests', () => {
       const markets = new Map();
       for (let i = 0; i < 10; i++) {
         const market = createMockMarket({
-          slabAddress: new PublicKey(`Market${i}11111111111111111111111111`),
+          slabAddress: createTestPublicKey(`Market${i}`),
         });
         markets.set(`market${i}`, { market });
       }
