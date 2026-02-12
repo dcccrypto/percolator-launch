@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
@@ -25,11 +26,23 @@ function formatPnl(pnl: bigint | undefined | null, decimals = 6): string {
 
 export default function PortfolioPage() {
   const { connected } = useWallet();
-  const { positions, totalPnl, totalDeposited, loading } = usePortfolio();
+  const { positions, totalPnl, totalDeposited, loading, refresh } = usePortfolio();
+
+  // P-HIGH-2: Add auto-refresh every 15s
+  useEffect(() => {
+    if (!connected || !refresh) return;
+    const interval = setInterval(() => {
+      refresh();
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [connected, refresh]);
 
   // Resolve collateral mint addresses to token symbols
   const collateralMints = positions.map((pos) => pos.market.config.collateralMint);
   const tokenMetaMap = useMultiTokenMeta(collateralMints);
+  
+  // P-HIGH-3: Check if token metas are still loading
+  const tokenMetasLoading = collateralMints.length > 0 && tokenMetaMap.size === 0;
 
   if (!connected) {
     return (
@@ -60,14 +73,26 @@ export default function PortfolioPage() {
       <div className="relative mx-auto max-w-4xl px-4 py-10">
         {/* Header */}
         <ScrollReveal>
-          <div className="mb-8">
-            <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
-              // portfolio
+          <div className="mb-8 flex items-start justify-between gap-4">
+            <div>
+              <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+                // portfolio
+              </div>
+              <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+                <span className="font-normal text-white/50">Your </span>Positions
+              </h1>
+              <p className="mt-2 text-[13px] text-[var(--text-secondary)]">All positions across Percolator markets</p>
             </div>
-            <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
-              <span className="font-normal text-white/50">Your </span>Positions
-            </h1>
-            <p className="mt-2 text-[13px] text-[var(--text-secondary)]">All positions across Percolator markets</p>
+            {/* P-HIGH-2: Add refresh button */}
+            {refresh && (
+              <button
+                onClick={() => refresh()}
+                disabled={loading}
+                className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2 text-xs text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--text)] disabled:opacity-40"
+              >
+                {loading ? "Refreshing..." : "Refresh"}
+              </button>
+            )}
           </div>
         </ScrollReveal>
 
@@ -91,7 +116,8 @@ export default function PortfolioPage() {
 
         {/* Positions */}
         <ScrollReveal delay={0.2}>
-          {loading ? (
+          {/* P-HIGH-3: Show skeleton while loading OR while token metas are loading */}
+          {loading || tokenMetasLoading ? (
             <div className="space-y-px">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="h-14 animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" />
