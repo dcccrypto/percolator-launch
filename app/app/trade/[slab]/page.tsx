@@ -95,7 +95,7 @@ function CopyButton({ text }: { text: string }) {
 /* ── Main inner page ──────────────────────────────────────── */
 
 function TradePageInner({ slab }: { slab: string }) {
-  const { engine, config } = useSlabState();
+  const { engine, config, accounts } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
@@ -175,7 +175,8 @@ function TradePageInner({ slab }: { slab: string }) {
         )}
       </div>
 
-      {/* ── Quick start guide — desktop only ── */}
+      {/* ── Quick start guide — desktop only, hidden after first trade ── */}
+      {accounts.filter(a => a.account.capital > 0n || a.account.positionSize !== 0n).length === 0 && (
       <div className="hidden md:flex mx-4 mb-2 mt-2 rounded-none border border-[var(--border)]/30 bg-[var(--bg)]/80 px-3 py-1.5 items-center gap-4 text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.1em]">
         <span className="text-[var(--text-dim)]">quick start:</span>
         <span><span className="text-[var(--long)]">1</span> connect wallet</span>
@@ -186,6 +187,7 @@ function TradePageInner({ slab }: { slab: string }) {
         <span className="text-[var(--text-dim)]">&rarr;</span>
         <span><span className="text-[var(--long)]">4</span> trade</span>
       </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════
           MOBILE LAYOUT  (< lg)

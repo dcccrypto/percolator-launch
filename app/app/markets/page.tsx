@@ -403,8 +403,7 @@ function MarketsPageInner() {
             </div>
           ) : (
             <>
-              <div className="relative rounded-sm border border-[var(--border)] hud-corners">
-              <div className="overflow-x-auto">
+              <div className="relative rounded-sm border border-[var(--border)] hud-corners overflow-x-clip">
                 {/* Header row */}
                 <div className="grid min-w-[640px] grid-cols-[2fr_1fr_1fr_1fr_1fr_0.7fr_0.7fr] gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
                   <div>token</div>
@@ -459,7 +458,6 @@ function MarketsPageInner() {
                     </Link>
                   );
                 })}
-              </div>
               </div>
               
               {/* P-MED-3: Infinite scroll trigger */}
