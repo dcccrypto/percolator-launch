@@ -595,8 +595,9 @@ const DevnetMintContent: FC = () => {
                     )}
                   </p>
                 )}
-                <button className={`${btnPrimary} w-full`} onClick={handleMintMore} disabled={mintingMore || !existingMint || !mintMoreAmount || !!mintAuthError || !walletReady}>
-                  {!walletReady ? "Connect Wallet First" : mintingMore ? "Minting..." : `Mint ${Number(mintMoreAmount).toLocaleString()} More Tokens`}
+                {/* P-HIGH-4: Disable button during mint authority check */}
+                <button className={`${btnPrimary} w-full`} onClick={handleMintMore} disabled={mintingMore || checkingMintAuth || !existingMint || !mintMoreAmount || !!mintAuthError || !walletReady}>
+                  {!walletReady ? "Connect Wallet First" : checkingMintAuth ? "Checking..." : mintingMore ? "Minting..." : `Mint ${Number(mintMoreAmount).toLocaleString()} More Tokens`}
                 </button>
               </div>
             </div>

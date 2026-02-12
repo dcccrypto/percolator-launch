@@ -60,7 +60,7 @@ export default function GuidePage() {
 
       {/* Devnet vs Mainnet */}
       <Section tag="environments" title="Devnet vs Mainnet">
-        <div className={`${cardClass} overflow-hidden`}>
+        <div className={`${cardClass} overflow-x-auto`}>
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)]">
