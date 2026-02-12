@@ -21,6 +21,9 @@ export interface EventPayload {
 }
 
 class ServerEventBus extends EventEmitter {
+  // BM4: Track subscriptions to prevent listener leaks
+  private subscriptions = new Map<string, number>();
+
   publish(event: ServerEvent, slabAddress: string, data: Record<string, unknown> = {}): void {
     const payload: EventPayload = {
       event,
@@ -31,8 +34,30 @@ class ServerEventBus extends EventEmitter {
     this.emit(event, payload);
     this.emit("*", payload);
   }
+
+  subscribe(event: ServerEvent | "*", listener: (payload: EventPayload) => void): () => void {
+    this.on(event, listener);
+    
+    // Track subscription count
+    const key = event;
+    this.subscriptions.set(key, (this.subscriptions.get(key) ?? 0) + 1);
+    
+    // Return unsubscribe function
+    return () => {
+      this.off(event, listener);
+      const count = this.subscriptions.get(key) ?? 0;
+      if (count > 0) {
+        this.subscriptions.set(key, count - 1);
+      }
+    };
+  }
+
+  getSubscriptionCount(event: ServerEvent | "*"): number {
+    return this.subscriptions.get(event) ?? 0;
+  }
 }
 
 export const eventBus = new ServerEventBus();
 // H7: Increase max listeners to handle many markets
+// BM4: Set max to prevent unchecked listener growth
 eventBus.setMaxListeners(100);
