@@ -544,10 +544,16 @@ const MyMarketsPage: FC = () => {
     <div className="min-h-[calc(100vh-48px)] relative">
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
       <main ref={pageRef} className="relative mx-auto max-w-4xl px-4 py-10 gsap-fade">
+        {/* Page Title */}
+        <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// admin</div>
+        <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+          <span className="font-normal text-[var(--text-muted)]">Your </span>Markets
+        </h1>
+        <p className="mt-2 mb-6 text-[13px] text-[var(--text-secondary)]">manage what you&apos;ve built.</p>
+
         {/* Summary Stats Bar */}
         <div className="hud-corners mb-8 flex flex-col gap-4 border border-[var(--border)]/50 bg-[var(--bg)]/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-            <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// admin</span>
             {[
               { label: "Total Markets", value: totalMarkets.toString() },
               { label: "TVL", value: "$" + fmt(totalVault) },
