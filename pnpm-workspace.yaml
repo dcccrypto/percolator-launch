@@ -1,4 +1,7 @@
 packages:
-  - "packages/*"
-  - "app"
-  - "services/*"
+  - packages/*
+  - app
+  - services/*
+
+onlyBuiltDependencies:
+  - msw

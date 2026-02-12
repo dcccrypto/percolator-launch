@@ -8,7 +8,13 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:unit": "vitest run --reporter=verbose --coverage tests/unit",
+    "test:integration": "vitest run --reporter=verbose --coverage tests/integration",
+    "test:security": "vitest run --reporter=verbose tests/security",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",
@@ -22,8 +28,13 @@
   },
   "devDependencies": {
     "@types/node": "^25.2.2",
+    "@types/supertest": "^6.0.3",
     "@types/ws": "^8.5.14",
+    "@vitest/coverage-v8": "^4.0.18",
+    "@vitest/ui": "^4.0.18",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
   }
 }

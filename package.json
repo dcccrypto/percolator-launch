@@ -8,12 +8,20 @@
     "build": "pnpm -r build",
     "dev": "pnpm --filter @percolator/app dev",
     "build:app": "pnpm --filter @percolator/app build",
-    "build:core": "pnpm --filter @percolator/core build"
+    "build:core": "pnpm --filter @percolator/core build",
+    "test": "pnpm -r test",
+    "test:unit": "pnpm -r test:unit",
+    "test:integration": "pnpm --filter @percolator/server test:integration",
+    "test:e2e": "playwright test",
+    "test:coverage": "pnpm -r test:coverage"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "msw": "^2.12.10",
+    "playwright": "^1.58.2",
     "tsx": "^4.21.0"
   },
   "dependencies": {

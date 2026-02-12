@@ -5,7 +5,7 @@ import { eventBus } from "./events.js";
 
 // BL2: Extract magic numbers to named constants
 const PENDING_SUB_CLEANUP_INTERVAL_MS = 60_000; // Clean stale subscriptions every 60s
-const PENDING_SUB_MAX_AGE_MS = PENDING_SUB_MAX_AGE_MS; // Stale subscription age threshold
+const PENDING_SUB_MAX_AGE_MS = 60_000; // Stale subscription age threshold (60s)
 
 interface PriceTick {
   priceE6: bigint;
