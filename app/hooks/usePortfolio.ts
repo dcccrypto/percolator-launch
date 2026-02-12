@@ -27,6 +27,7 @@ export interface PortfolioData {
   totalPnl: bigint;
   totalDeposited: bigint;
   loading: boolean;
+  refresh: () => void;
 }
 
 /**
@@ -39,6 +40,7 @@ export function usePortfolio(): PortfolioData {
   const [totalPnl, setTotalPnl] = useState<bigint>(0n);
   const [totalDeposited, setTotalDeposited] = useState<bigint>(0n);
   const [loading, setLoading] = useState(true);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   useEffect(() => {
     if (!publicKey) {
@@ -106,7 +108,9 @@ export function usePortfolio(): PortfolioData {
 
     load();
     return () => { cancelled = true; };
-  }, [connection, publicKey]);
+  }, [connection, publicKey, refreshCounter]);
 
-  return { positions, totalPnl, totalDeposited, loading };
+  const refresh = () => setRefreshCounter((c) => c + 1);
+
+  return { positions, totalPnl, totalDeposited, loading, refresh };
 }
