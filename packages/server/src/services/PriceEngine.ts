@@ -30,6 +30,9 @@ export class PriceEngine {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
   private readonly maxReconnectDelay = 30_000;
+  // BM6: Limit reconnection attempts to prevent infinite loops
+  private reconnectAttempts = 0;
+  private readonly maxReconnectAttempts = 10;
   private rpcMsgId = 1;
   private started = false;
   private pendingSubscriptions: string[] = [];
@@ -189,6 +192,8 @@ export class PriceEngine {
     this.ws.on("open", () => {
       console.log("[PriceEngine] Connected to Helius WebSocket");
       this.reconnectDelay = 1000;
+      // BM6: Reset reconnect attempt counter on successful connection
+      this.reconnectAttempts = 0;
 
       // Clear stale subscription mappings from previous connection
       const existingSlabs = [...this.slabToSubId.keys()];
@@ -231,7 +236,16 @@ export class PriceEngine {
 
   private scheduleReconnect(): void {
     if (!this.started || this.reconnectTimer) return;
-    console.log(`[PriceEngine] Reconnecting in ${this.reconnectDelay}ms...`);
+    
+    // BM6: Stop reconnecting after max attempts
+    this.reconnectAttempts++;
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error(`[PriceEngine] Max reconnection attempts (${this.maxReconnectAttempts}) reached. Stopping.`);
+      this.stop();
+      return;
+    }
+    
+    console.log(`[PriceEngine] Reconnecting in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
