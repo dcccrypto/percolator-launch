@@ -218,11 +218,16 @@ const DevnetMintContent: FC = () => {
       const rawSupply = BigInt(supply) * BigInt(10 ** decimals);
       tx.add(createMintToInstruction(mintKeypair.publicKey, ata, publicKey, rawSupply));
 
-      // Metaplex metadata
-      const [metadataPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mintKeypair.publicKey.toBuffer()],
-        TOKEN_METADATA_PROGRAM_ID
-      );
+      // P-HIGH-5: Wrap Metaplex PDA derivation in try-catch
+      let metadataPDA: PublicKey;
+      try {
+        [metadataPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mintKeypair.publicKey.toBuffer()],
+          TOKEN_METADATA_PROGRAM_ID
+        );
+      } catch (err) {
+        throw new Error("Failed to derive metadata PDA. Please try again.");
+      }
       tx.add(
         createCreateMetadataAccountV3Instruction(
           { metadata: metadataPDA, mint: mintKeypair.publicKey, mintAuthority: publicKey, payer: publicKey, updateAuthority: publicKey },
