@@ -14,6 +14,7 @@ import { PublicKey } from "@solana/web3.js";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
+import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "\u2014";
@@ -148,17 +149,28 @@ function MarketsPageInner() {
   // Only show mock data in development (never in production)
   const effectiveMarkets = merged.length > 0 ? merged : (process.env.NODE_ENV === "development" ? MOCK_MARKETS : []);
 
+  // Resolve on-chain token metadata for markets missing Supabase symbol
+  const missingMints = useMemo(() => {
+    return effectiveMarkets
+      .filter(m => !m.symbol && m.mintAddress)
+      .map(m => new PublicKey(m.mintAddress));
+  }, [effectiveMarkets]);
+  const tokenMetaMap = useMultiTokenMeta(missingMints);
+
   const filtered = useMemo(() => {
     let list = effectiveMarkets;
     // Text search — matches symbol, name, slab address, OR mint address
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.toLowerCase();
-      list = list.filter((m) =>
-        m.symbol?.toLowerCase().includes(q) ||
-        m.name?.toLowerCase().includes(q) ||
-        m.slabAddress.toLowerCase().includes(q) ||
-        m.mintAddress.toLowerCase().includes(q)
-      );
+      list = list.filter((m) => {
+        const onChainMeta = tokenMetaMap.get(m.mintAddress);
+        return m.symbol?.toLowerCase().includes(q) ||
+          m.name?.toLowerCase().includes(q) ||
+          onChainMeta?.symbol?.toLowerCase().includes(q) ||
+          onChainMeta?.name?.toLowerCase().includes(q) ||
+          m.slabAddress.toLowerCase().includes(q) ||
+          m.mintAddress.toLowerCase().includes(q);
+      });
     }
     // Leverage filter
     if (leverageFilter !== "all") {
@@ -433,14 +445,14 @@ function MarketsPageInner() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-white text-sm">
-                            {m.symbol ? `${m.symbol}/USD` : shortenAddress(m.slabAddress)}
+                            {m.symbol ? `${m.symbol}/USD` : tokenMetaMap.get(m.mintAddress)?.symbol ? `${tokenMetaMap.get(m.mintAddress)!.symbol}/USD` : shortenAddress(m.slabAddress)}
                           </span>
                           {m.isAdminOracle && (
                             <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
                           )}
                         </div>
                         <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-                          {m.name ? `${m.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
+                          {m.name ? `${m.name} · ${shortenAddress(m.mintAddress)}` : tokenMetaMap.get(m.mintAddress)?.name ? `${tokenMetaMap.get(m.mintAddress)!.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
                         </div>
                       </div>
                       <div className="text-right">
