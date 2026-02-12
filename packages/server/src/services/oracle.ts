@@ -94,6 +94,21 @@ export class OracleService {
 
   /** Fetch price from Jupiter */
   async fetchJupiterPrice(mint: string): Promise<bigint | null> {
+    // BM2: Deduplicate concurrent requests
+    const inFlight = this.inFlightRequests.get(`jup:${mint}`);
+    if (inFlight) return inFlight;
+    
+    const promise = this._fetchJupiterPriceInternal(mint);
+    this.inFlightRequests.set(`jup:${mint}`, promise);
+    
+    try {
+      return await promise;
+    } finally {
+      this.inFlightRequests.delete(`jup:${mint}`);
+    }
+  }
+
+  private async _fetchJupiterPriceInternal(mint: string): Promise<bigint | null> {
     try {
       // BM1: Add 10s timeout to prevent hanging requests
       const controller = new AbortController();
