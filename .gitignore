@@ -1,10 +1,45 @@
+# Dependencies
 node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Next.js
 .next/
+out/
+build/
 dist/
-.env
-*.json.bak
-.turbo/
-.vercel
-.env.local
-.keys
 *.tsbuildinfo
+
+# Production
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Misc
+.DS_Store
+*.pem
+.keys/
+
+# Debug
+.vscode/
+.idea/
+
+# Local env files
+.env
+.env*.local
+.env.test
+
+# Vercel
+.vercel
+
+# Turbo
+.turbo
