@@ -44,8 +44,9 @@ export function InsuranceLPPanel() {
       setTxStatus('Deposit successful!');
       setAmount('');
       setTimeout(() => setTxStatus(null), 3000);
-    } catch (err: any) {
-      setTxStatus(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setTxStatus(`Error: ${message}`);
     }
   };
 
@@ -58,8 +59,9 @@ export function InsuranceLPPanel() {
       setTxStatus('Withdrawal successful!');
       setAmount('');
       setTimeout(() => setTxStatus(null), 3000);
-    } catch (err: any) {
-      setTxStatus(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setTxStatus(`Error: ${message}`);
     }
   };
 
@@ -69,8 +71,9 @@ export function InsuranceLPPanel() {
       await createMint();
       setTxStatus('Insurance LP mint created!');
       setTimeout(() => setTxStatus(null), 3000);
-    } catch (err: any) {
-      setTxStatus(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setTxStatus(`Error: ${message}`);
     }
   };
 
