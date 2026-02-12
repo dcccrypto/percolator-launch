@@ -318,11 +318,13 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div ref={hoverDateRef} className="mb-1 h-4 text-right text-[10px] text-[var(--text-muted)]">
         {"\u00A0"}
       </div>
-      <div ref={chartWrapCallback}>
+      <div ref={chartWrapCallback} className="h-[200px] lg:h-[350px]">
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
-          className="w-full h-[200px] lg:h-[350px]"
+          className="w-full"
+          preserveAspectRatio="none"
+          style={{ height: "100%" }}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
         >
