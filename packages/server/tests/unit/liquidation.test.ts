@@ -18,6 +18,14 @@ import { LiquidationService } from '../../src/services/liquidation.js';
 import { OracleService } from '../../src/services/oracle.js';
 import type { DiscoveredMarket } from '@percolator/core';
 
+// Helper to create valid base58 PublicKeys
+const createTestPublicKey = (seed: string): PublicKey => {
+  const buffer = Buffer.alloc(32);
+  for (let i = 0; i < seed.length && i < 32; i++) {
+    buffer[i] = seed.charCodeAt(i);
+  }
+  return new PublicKey(buffer);
+};
 // Mock modules
 vi.mock('../../src/config.js', () => ({
   config: {
@@ -38,7 +46,7 @@ vi.mock('../../src/utils/solana.js', () => ({
     }),
   })),
   loadKeypair: vi.fn(() => ({
-    publicKey: new PublicKey('Liquidator1111111111111111111111111111'),
+    publicKey: createTestPublicKey('Liquidator'),
     secretKey: new Uint8Array(64),
   })),
   sendWithRetry: vi.fn().mockResolvedValue('liquidation-sig-123'),
@@ -73,13 +81,16 @@ vi.mock('@percolator/core', async () => {
     encodeLiquidateAtOracle: vi.fn(() => Buffer.from([4, 5, 6])),
     encodePushOraclePrice: vi.fn(() => Buffer.from([7, 8, 9])),
     buildAccountMetas: vi.fn(() => []),
-    buildIx: vi.fn(() => ({
-      programId: new PublicKey('11111111111111111111111111111111'),
-      keys: [],
-      data: Buffer.from([1, 2, 3]),
-    })),
+    buildIx: vi.fn(() => {
+      const progBuffer = Buffer.alloc(32, 1);
+      return {
+        programId: new PublicKey(progBuffer),
+        keys: [],
+        data: Buffer.from([1, 2, 3]),
+      };
+    }),
     derivePythPushOraclePDA: vi.fn(() => [
-      new PublicKey('PyThOracle111111111111111111111111111111'),
+      createTestPublicKey('PyThOracle'),
       0,
     ]),
   };
@@ -99,12 +110,12 @@ const createMockOracleService = () => {
 const createMockMarket = (overrides: Partial<DiscoveredMarket> = {}): DiscoveredMarket => {
   const now = BigInt(Math.floor(Date.now() / 1000));
   return {
-    slabAddress: new PublicKey('Market111111111111111111111111111111111'),
-    programId: new PublicKey('Program11111111111111111111111111111111'),
+    slabAddress: createTestPublicKey('Market1'),
+    programId: createTestPublicKey('Program1'),
     config: {
-      oracleAuthority: new PublicKey('Oracle111111111111111111111111111111111'),
-      indexFeedId: new PublicKey('FeedId111111111111111111111111111111111'),
-      collateralMint: new PublicKey('Mint11111111111111111111111111111111111'),
+      oracleAuthority: createTestPublicKey('Oracle1'),
+      indexFeedId: createTestPublicKey('FeedId1'),
+      collateralMint: createTestPublicKey('MintSOL'),
       authorityPriceE6: 100000000n, // $100
       authorityTimestamp: now,
       ...overrides.config,
@@ -116,7 +127,7 @@ const createMockMarket = (overrides: Partial<DiscoveredMarket> = {}): Discovered
 // Helper to create mock account
 const createMockAccount = (overrides: any = {}) => ({
   kind: 0, // User account
-  owner: new PublicKey('Owner1111111111111111111111111111111111'),
+  owner: createTestPublicKey('Owner1'),
   positionSize: 1000000n, // 1 unit
   capital: 50000000n, // $50 capital
   entryPrice: 100000000n, // Entry at $100

@@ -42,10 +42,14 @@ vi.mock('../../src/utils/solana.js', () => ({
   getFallbackConnection: vi.fn(() => ({
     getProgramAccounts: vi.fn().mockResolvedValue([]),
   })),
-  loadKeypair: vi.fn(() => ({
-    publicKey: new PublicKey('CRankKeypair11111111111111111111111111111'),
-    secretKey: new Uint8Array(64),
-  })),
+  loadKeypair: vi.fn(() => {
+    const buffer = Buffer.alloc(32);
+    Buffer.from('CRankKeypair').copy(buffer);
+    return {
+      publicKey: new PublicKey(buffer),
+      secretKey: new Uint8Array(64),
+    };
+  }),
   sendWithRetry: vi.fn().mockResolvedValue('test-signature-123'),
   checkTransactionSize: vi.fn(),
 }));
@@ -62,18 +66,23 @@ vi.mock('../../src/services/events.js', () => ({
 
 vi.mock('@percolator/core', async () => {
   const actual = await vi.importActual('@percolator/core');
+  const buffer = Buffer.alloc(32);
+  Buffer.from('PyThOracle').copy(buffer);
   return {
     ...actual,
     discoverMarkets: vi.fn().mockResolvedValue([]),
     encodeKeeperCrank: vi.fn(() => Buffer.from([1, 2, 3])),
     buildAccountMetas: vi.fn(() => []),
-    buildIx: vi.fn(() => ({
-      programId: new PublicKey('11111111111111111111111111111111'),
-      keys: [],
-      data: Buffer.from([1, 2, 3]),
-    })),
+    buildIx: vi.fn(() => {
+      const progBuffer = Buffer.alloc(32, 1);
+      return {
+        programId: new PublicKey(progBuffer),
+        keys: [],
+        data: Buffer.from([1, 2, 3]),
+      };
+    }),
     derivePythPushOraclePDA: vi.fn(() => [
-      new PublicKey('PyThOracle111111111111111111111111111111'),
+      new PublicKey(buffer),
       0,
     ]),
   };
@@ -90,14 +99,24 @@ const createMockOracleService = () => {
   } as unknown as OracleService;
 };
 
+// Helper to create valid base58 PublicKeys
+const createTestPublicKey = (seed: string): PublicKey => {
+  // Create a deterministic public key from a seed string
+  const buffer = Buffer.alloc(32);
+  for (let i = 0; i < seed.length && i < 32; i++) {
+    buffer[i] = seed.charCodeAt(i);
+  }
+  return new PublicKey(buffer);
+};
+
 // Helper to create a mock market
 const createMockMarket = (overrides: Partial<DiscoveredMarket> = {}): DiscoveredMarket => ({
-  slabAddress: new PublicKey('Market111111111111111111111111111111111'),
-  programId: new PublicKey('Program11111111111111111111111111111111'),
+  slabAddress: overrides.slabAddress || createTestPublicKey('Market1'),
+  programId: createTestPublicKey('Program1'),
   config: {
     oracleAuthority: PublicKey.default,
-    indexFeedId: new PublicKey('11111111111111111111111111111111'),
-    collateralMint: new PublicKey('Mint11111111111111111111111111111111111'),
+    indexFeedId: createTestPublicKey('IndexFeed1'),
+    collateralMint: createTestPublicKey('MintSOL'),
     authorityPriceE6: 100000000n,
     authorityTimestamp: BigInt(Math.floor(Date.now() / 1000)),
     ...overrides.config,
@@ -498,7 +517,7 @@ describe('CrankService Unit Tests', () => {
       // Create 10 markets
       const mockMarkets = Array.from({ length: 10 }, (_, i) => {
         const market = createMockMarket({
-          slabAddress: new PublicKey(`Market${i}11111111111111111111111111111`),
+          slabAddress: createTestPublicKey(`Market${i}`),
         });
 
         markets.set(market.slabAddress.toBase58(), {
@@ -538,7 +557,7 @@ describe('CrankService Unit Tests', () => {
       // Create 7 markets (will be processed in 3 batches: 3, 3, 1)
       for (let i = 0; i < 7; i++) {
         const market = createMockMarket({
-          slabAddress: new PublicKey(`BatchMkt${i}111111111111111111111111`),
+          slabAddress: createTestPublicKey(`BatchMkt${i}`),
         });
 
         markets.set(market.slabAddress.toBase58(), {
@@ -572,7 +591,7 @@ describe('CrankService Unit Tests', () => {
       // Create 5 markets
       for (let i = 0; i < 5; i++) {
         const market = createMockMarket({
-          slabAddress: new PublicKey(`ErrMkt${i}1111111111111111111111111111`),
+          slabAddress: createTestPublicKey(`ErrMkt${i}`),
         });
 
         markets.set(market.slabAddress.toBase58(), {
@@ -614,7 +633,7 @@ describe('CrankService Unit Tests', () => {
       // Create 3 markets
       for (let i = 0; i < 3; i++) {
         const market = createMockMarket({
-          slabAddress: new PublicKey(`UnexpMkt${i}111111111111111111111111`),
+          slabAddress: createTestPublicKey(`UnexpMkt${i}`),
         });
 
         markets.set(market.slabAddress.toBase58(), {
@@ -649,8 +668,8 @@ describe('CrankService Unit Tests', () => {
     it('should discover markets and initialize state', async () => {
       const { discoverMarkets } = await import('@percolator/core');
       const mockMarkets = [
-        createMockMarket({ slabAddress: new PublicKey('Discovered1111111111111111111111111111') }),
-        createMockMarket({ slabAddress: new PublicKey('Discovered2222222222222222222222222222') }),
+        createMockMarket({ slabAddress: createTestPublicKey('Discovered1') }),
+        createMockMarket({ slabAddress: createTestPublicKey('Discovered2') }),
       ];
 
       vi.mocked(discoverMarkets).mockResolvedValueOnce(mockMarkets);
@@ -663,8 +682,8 @@ describe('CrankService Unit Tests', () => {
 
     it('should remove dead markets after 3 consecutive missing discoveries', async () => {
       const { discoverMarkets } = await import('@percolator/core');
-      const market1 = createMockMarket({ slabAddress: new PublicKey('Persistent111111111111111111111111111') });
-      const market2 = createMockMarket({ slabAddress: new PublicKey('Ephemeral222222222222222222222222222') });
+      const market1 = createMockMarket({ slabAddress: createTestPublicKey('Persistent') });
+      const market2 = createMockMarket({ slabAddress: createTestPublicKey('Ephemeral') });
 
       // First discovery: both markets
       vi.mocked(discoverMarkets).mockResolvedValueOnce([market1, market2]);
