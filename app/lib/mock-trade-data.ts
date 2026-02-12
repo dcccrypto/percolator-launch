@@ -289,12 +289,12 @@ export function getMockPortfolioPositions() {
   for (const [slabAddr, m] of withPositions) {
     const priceE6 = BigInt(Math.round(m.priceUsd * 1_000_000));
     const isLong: boolean = positions.length % 2 === 0;
-    const entryOffset = isLong ? 0.97 : 1.03;
-    const entryE6 = BigInt(Math.round(m.priceUsd * entryOffset * 1_000_000));
-    const posSize = BigInt(Math.round((1000 + positions.length * 500) * 1_000_000)) * (isLong ? 1n : -1n);
-    const priceDiff = priceE6 - entryE6;
-    const pnl = isLong ? (posSize * priceDiff / 1_000_000n) : (-posSize * priceDiff / 1_000_000n);
-    const capital = BigInt(Math.round((500 + positions.length * 200) * 1_000_000));
+    const entryOffset: number = isLong ? 0.97 : 1.03;
+    const entryE6: bigint = BigInt(Math.round(m.priceUsd * entryOffset * 1_000_000));
+    const posSize: bigint = BigInt(Math.round((1000 + positions.length * 500) * 1_000_000)) * (isLong ? 1n : -1n);
+    const priceDiff: bigint = priceE6 - entryE6;
+    const pnl: bigint = isLong ? (posSize * priceDiff / 1_000_000n) : (-posSize * priceDiff / 1_000_000n);
+    const capital: bigint = BigInt(Math.round((500 + positions.length * 200) * 1_000_000));
     const mintPk = (() => { try { return new PublicKey(m.mint); } catch { return PublicKey.default; } })();
 
     positions.push({
