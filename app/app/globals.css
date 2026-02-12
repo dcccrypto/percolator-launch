@@ -522,10 +522,12 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   position: relative !important;
   white-space: nowrap !important;
   overflow: visible !important;
+}
+.wallet-adapter-button-trigger {
   max-width: 160px !important;
 }
 @media (max-width: 380px) {
-  .wallet-adapter-button {
+  .wallet-adapter-button:not(.wallet-adapter-modal-list .wallet-adapter-button) {
     font-size: 0.5625rem !important;
     padding: 0 0.625rem !important;
     max-width: 120px !important;
@@ -560,6 +562,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 }
 /* Connected state — show address in mono */
 .wallet-adapter-button-trigger {
+  max-width: 160px !important;
   font-family: var(--font-mono) !important;
   font-size: 0.6875rem !important;
   letter-spacing: 0 !important;
@@ -670,9 +673,19 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 .wallet-adapter-modal-list {
   padding: 8px !important;
   margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: 1fr !important;
 }
-.wallet-adapter-modal-list li {
+.wallet-adapter-modal-list li,
+.wallet-adapter-modal-list li button {
   margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  list-style: none !important;
+  box-sizing: border-box !important;
 }
 .wallet-adapter-modal-list .wallet-adapter-button {
   background-color: var(--panel-bg) !important;
@@ -680,6 +693,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   border: 1px solid var(--border) !important;
   border-radius: 0 !important;
   width: 100% !important;
+  max-width: 100% !important;
   height: auto !important;
   padding: 12px 16px !important;
   font-size: 0.75rem !important;
