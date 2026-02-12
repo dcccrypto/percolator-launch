@@ -144,7 +144,12 @@ export default function MarketsPage() {
     list = [...list].sort((a, b) => {
       switch (sortBy) {
         case "volume": return (b.supabase?.volume_24h ?? 0) - (a.supabase?.volume_24h ?? 0);
-        case "oi": return b.onChain.engine.totalOpenInterest > a.onChain.engine.totalOpenInterest ? 1 : b.onChain.engine.totalOpenInterest < a.onChain.engine.totalOpenInterest ? -1 : 0;
+        case "oi": {
+          // P-CRITICAL-5: Add null coalescing before BigInt sort
+          const oiA = a.onChain.engine.totalOpenInterest ?? 0n;
+          const oiB = b.onChain.engine.totalOpenInterest ?? 0n;
+          return oiB > oiA ? 1 : oiB < oiA ? -1 : 0;
+        }
         case "health": {
           const ha = computeMarketHealth(a.onChain.engine);
           const hb = computeMarketHealth(b.onChain.engine);

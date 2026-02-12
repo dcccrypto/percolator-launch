@@ -151,7 +151,15 @@ const DevnetMintContent: FC = () => {
       }
 
       const mintKeypair = Keypair.generate();
-      const recipientPubkey = new PublicKey(recipient);
+      
+      // P-CRITICAL-1: Validate recipient PublicKey before transaction
+      let recipientPubkey: PublicKey;
+      try {
+        recipientPubkey = new PublicKey(recipient);
+      } catch (err) {
+        throw new Error(`Invalid recipient address: ${recipient}`);
+      }
+      
       const lamports = await getMinimumBalanceForRentExemptMint(connection);
 
       setCreateStatus("Building transaction...");
