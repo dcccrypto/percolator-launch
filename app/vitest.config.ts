@@ -4,10 +4,16 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('development'),
+  },
   test: {
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./__tests__/setup.ts'],
+    env: {
+      NODE_ENV: 'development',
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],

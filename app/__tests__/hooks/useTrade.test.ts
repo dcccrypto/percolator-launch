@@ -70,13 +70,13 @@ describe("useTrade", () => {
       connected: true,
     };
 
-    // Mock slab state
+    // Mock slab state  
+    const feedIdBuffer = Buffer.alloc(32);
+    Buffer.from("FeedId").copy(feedIdBuffer);
     mockSlabState = {
       config: {
         oracleAuthority: PublicKey.default,
-        indexFeedId: {
-          toBytes: () => new Array(32).fill(1),
-        },
+        indexFeedId: new PublicKey(feedIdBuffer),
         authorityPriceE6: 1000000n,
       },
       accounts: [
@@ -89,7 +89,7 @@ describe("useTrade", () => {
           },
         },
       ],
-      programId: mockProgramId.toBase58(),
+      programId: mockProgramId,
     };
 
     (useConnection as any).mockReturnValue({ connection: mockConnection });
