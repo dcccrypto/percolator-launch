@@ -100,8 +100,9 @@ function TradePageInner({ slab }: { slab: string }) {
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
   const pageRef = useRef<HTMLDivElement>(null);
-  // Position tab is always the default "home" tab
-  const defaultLeftTab = 0;
+  // No wallet/account → Deposit tab (2), has capital → Position tab (0)
+  const hasCapital = accounts.some(a => a.account.capital > 0n || a.account.positionSize !== 0n);
+  const defaultLeftTab = hasCapital ? 0 : 2;
 
   const symbol = tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN");
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
