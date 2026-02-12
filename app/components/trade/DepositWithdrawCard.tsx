@@ -163,10 +163,18 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           </p>
         </div>
       )}
-      <p className="mb-1 text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(capital, decimals)} <span className="text-xs font-normal text-[var(--text-secondary)]">{symbol}</span></p>
-      {walletBalance !== null && (
-        <p className="mb-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}</p>
-      )}
+
+      {/* Balance overview */}
+      <div className="mb-3 grid grid-cols-2 gap-px border border-[var(--border)]/20">
+        <div className="p-2">
+          <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Account Balance</p>
+          <p className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(capital, decimals)} <span className="text-[10px] font-normal text-[var(--text-secondary)]">{symbol}</span></p>
+        </div>
+        <div className="p-2 border-l border-[var(--border)]/20">
+          <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Wallet Balance</p>
+          <p className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{walletBalance !== null ? formatTokenAmount(walletBalance, decimals) : "—"} <span className="text-[10px] font-normal text-[var(--text-secondary)]">{symbol}</span></p>
+        </div>
+      </div>
       {mode === "deposit" && walletBalance !== null && walletBalance === 0n && mktConfig?.collateralMint && (
         <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
           <p className="text-[10px] text-[var(--warning)]">
@@ -235,9 +243,9 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
       <button
         onClick={handleSubmit}
         disabled={loading || !amount || !!validationError}
-        className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50"
+        className={`w-full rounded-none py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:cursor-not-allowed disabled:opacity-50 ${mode === "deposit" ? "bg-[var(--long)] hover:brightness-110" : "bg-[var(--warning)] hover:brightness-110"}`}
       >
-        {loading ? "Sending..." : validationError ? validationError : mode === "deposit" ? "Deposit" : "Withdraw"}
+        {loading ? "Sending..." : validationError ? validationError : mode === "deposit" ? `Deposit ${symbol}` : `Withdraw ${symbol}`}
       </button>
 
       {error && <p className="mt-2 text-[10px] text-[var(--short)]">{error}</p>}
