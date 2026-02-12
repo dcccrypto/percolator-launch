@@ -178,6 +178,13 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   async function handleTrade() {
     if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin) return;
+    
+    // P-CRITICAL-2: Check wallet is still connected before trade
+    if (!connected) {
+      setHumanError("Wallet disconnected. Please reconnect your wallet.");
+      return;
+    }
+    
     setHumanError(null);
     setTradePhase("submitting");
     try {

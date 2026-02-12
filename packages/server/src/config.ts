@@ -22,6 +22,6 @@ export const config = {
   port: Number(process.env.PORT ?? 3001),
   crankIntervalMs: Number(process.env.CRANK_INTERVAL_MS ?? 10_000),
   crankInactiveIntervalMs: Number(process.env.CRANK_INACTIVE_INTERVAL_MS ?? 60_000),
-  /** How often to rediscover markets (default 5min to avoid rate limits) */
-  discoveryIntervalMs: Number(process.env.DISCOVERY_INTERVAL_MS ?? 300_000),
+  /** BH4: Reduced to 60s to catch markets created/deleted within smaller window */
+  discoveryIntervalMs: Number(process.env.DISCOVERY_INTERVAL_MS ?? 60_000),
 } as const;

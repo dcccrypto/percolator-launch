@@ -31,6 +31,11 @@ export function useTrade(slabAddress: string) {
     async (params: { lpIdx: number; userIdx: number; size: bigint }) => {
       setLoading(true);
       setError(null);
+      
+      // H4: Add AbortController for RPC cancellation
+      const abortController = new AbortController();
+      let cancelled = false;
+      
       try {
         if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
         const lpAccount = accounts.find((a) => a.idx === params.lpIdx);
@@ -43,7 +48,8 @@ export function useTrade(slabAddress: string) {
           throw new Error("This market has no vAMM liquidity provider. Trading is not available.");
         }
         try {
-          const ctxInfo = await connection.getAccountInfo(matcherCtxKey);
+          if (cancelled) return;
+          const ctxInfo = await connection.getAccountInfo(matcherCtxKey, { signal: abortController.signal } as any);
           if (!ctxInfo) {
             throw new Error(
               "Matcher context account not found on-chain. The market's vAMM may need to be re-initialized. Try creating a new market."
@@ -51,6 +57,7 @@ export function useTrade(slabAddress: string) {
           }
         } catch (e) {
           if (e instanceof Error && e.message.includes("Matcher context")) throw e;
+          if (e instanceof Error && e.name === "AbortError") return; // Cancelled
           // RPC error — let the transaction attempt and fail with actual error
         }
 
@@ -124,8 +131,10 @@ export function useTrade(slabAddress: string) {
 
         return await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setError(msg);
+        }
         throw e;
       } finally {
         setLoading(false);

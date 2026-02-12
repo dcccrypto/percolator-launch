@@ -13,10 +13,15 @@ const MAX_GLOBAL_SUBSCRIPTIONS = 1000; // Global subscription cap to prevent DoS
 interface WsClient {
   ws: WebSocket;
   subscriptions: Set<string>;
+  pingInterval?: ReturnType<typeof setInterval>; // BH2: Heartbeat timer
+  isAlive: boolean; // BH2: Track pong responses
 }
 
 // Track global subscription count across all clients
 let globalSubscriptionCount = 0;
+
+// BH2: Heartbeat configuration
+const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
 
 export function setupWebSocket(
   server: Server,
@@ -56,8 +61,24 @@ export function setupWebSocket(
     }
 
     // H2: No default "*" subscription — clients must explicitly subscribe
-    const client: WsClient = { ws, subscriptions: new Set() };
+    const client: WsClient = { ws, subscriptions: new Set(), isAlive: true };
     clients.add(client);
+
+    // BH2: Set up ping/pong heartbeat
+    ws.on("pong", () => {
+      client.isAlive = true;
+    });
+
+    client.pingInterval = setInterval(() => {
+      if (!client.isAlive) {
+        // Client didn't respond to last ping — terminate
+        clearInterval(client.pingInterval);
+        ws.terminate();
+        return;
+      }
+      client.isAlive = false;
+      ws.ping();
+    }, HEARTBEAT_INTERVAL_MS);
 
     ws.send(JSON.stringify({ type: "connected", message: "Percolator WebSocket connected" }));
 
@@ -115,6 +136,10 @@ export function setupWebSocket(
     });
 
     ws.on("close", () => {
+      // BH2: Clean up heartbeat interval
+      if (client.pingInterval) {
+        clearInterval(client.pingInterval);
+      }
       // H2: O(1) removal with Set
       // Decrement global subscription count for all client subscriptions
       globalSubscriptionCount -= client.subscriptions.size;

@@ -18,6 +18,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { useToast } from "@/hooks/useToast";
 
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);

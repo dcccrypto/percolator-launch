@@ -39,9 +39,26 @@ export class OracleService {
   private readonly rateLimitMs = 5_000;
   private readonly maxHistory = 100;
   private readonly maxTrackedMarkets = 500;
+  // BM2: Deduplicate concurrent requests for the same mint
+  private inFlightRequests = new Map<string, Promise<bigint | null>>();
 
   /** Fetch price from DexScreener (with rate-limit cache) */
   async fetchDexScreenerPrice(mint: string): Promise<bigint | null> {
+    // BM2: Deduplicate concurrent requests
+    const inFlight = this.inFlightRequests.get(`dex:${mint}`);
+    if (inFlight) return inFlight;
+    
+    const promise = this._fetchDexScreenerPriceInternal(mint);
+    this.inFlightRequests.set(`dex:${mint}`, promise);
+    
+    try {
+      return await promise;
+    } finally {
+      this.inFlightRequests.delete(`dex:${mint}`);
+    }
+  }
+
+  private async _fetchDexScreenerPriceInternal(mint: string): Promise<bigint | null> {
     try {
       // Check cache first
       const cached = dexScreenerCache.get(mint);
