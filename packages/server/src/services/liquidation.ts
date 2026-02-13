@@ -77,9 +77,12 @@ export class LiquidationService {
 
       // BC2: Check oracle staleness - reject if timestamp > 60s old
       const now = BigInt(Math.floor(Date.now() / 1000));
-      const priceAge = now - cfg.authorityTimestamp;
+      const priceAge = cfg.authorityTimestamp > 0n ? now - cfg.authorityTimestamp : now;
       if (priceAge > 60n) {
-        console.warn(`[LiquidationService] Skipping ${slabAddress}: oracle price is ${priceAge}s old (max 60s)`);
+        // Only log for markets with actual positions (reduce noise)
+        if (engine.totalOpenInterest > 0n) {
+          console.warn(`[LiquidationService] Skipping ${slabAddress}: oracle price is ${priceAge}s old (max 60s)`);
+        }
         return []; // Don't liquidate with stale prices
       }
 
