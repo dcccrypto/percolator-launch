@@ -44,10 +44,13 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     entryPrice: bigint;
   } | null>(null);
 
-  const lpIdx = useMemo(() => {
-    const lp = accounts.find(({ account }) => account.kind === AccountKind.LP);
-    return lp?.idx ?? 0;
+  const lpEntry = useMemo(() => {
+    return accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null;
   }, [accounts]);
+  const lpIdx = lpEntry?.idx ?? 0;
+
+  // Bug #267a67ef: LP with 0 capital cannot accept counterparty positions
+  const lpUnderfunded = lpEntry !== null && lpEntry.account.capital === 0n;
 
   if (!userAccount) {
     return (
@@ -250,11 +253,21 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
           </div>
 
+          {/* LP underfunded warning */}
+          {lpUnderfunded && (
+            <div className="mt-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 p-2.5">
+              <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--warning)]">⚠ LP Has No Capital</p>
+              <p className="mt-1 text-[10px] text-[var(--warning)]/70">
+                The liquidity provider has no capital to back the counterparty position. Closing trades will fail until the LP is funded.
+              </p>
+            </div>
+          )}
+
           {/* Close button with confirmation */}
           {!showConfirm ? (
             <button
               onClick={() => setShowConfirm(true)}
-              disabled={closeLoading}
+              disabled={closeLoading || lpUnderfunded}
               className="mt-2 w-full rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Close Position

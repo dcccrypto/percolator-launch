@@ -86,6 +86,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const lpIdx = lpEntry?.idx ?? 0;
   const hasValidLP = lpEntry !== null;
 
+  // Bug #267a67ef: Detect when LP has insufficient capital to accept trades.
+  // If LP capital is 0 (or below minimum margin for any trade), the on-chain
+  // program will reject trades with Custom(14) Undercollateralized on the LP side.
+  const lpUnderfunded = hasValidLP && lpEntry!.account.capital === 0n;
+
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const maintenanceMarginBps = params?.maintenanceMarginBps ?? 500n;
   const tradingFeeBps = params?.tradingFeeBps ?? 30n;
@@ -195,6 +200,18 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="relative rounded-none bg-[var(--bg)]/80 border border-[var(--border)]/50 p-4 text-center">
         <p className="text-[var(--text-secondary)] text-xs">
           No liquidity provider found for this market. Trading is not available until an LP initializes a vAMM.
+        </p>
+      </div>
+    );
+  }
+
+  if (lpUnderfunded) {
+    return (
+      <div className="relative rounded-none bg-[var(--bg)]/80 border border-[var(--border)]/50 p-4 text-center">
+        <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">⚠ Liquidity Unavailable</p>
+        <p className="mt-1.5 text-[10px] text-[var(--text-secondary)] leading-relaxed">
+          The market&apos;s liquidity provider has no capital. Trades cannot be executed until the LP is funded.
+          Contact the market admin to deposit collateral into the LP account.
         </p>
       </div>
     );

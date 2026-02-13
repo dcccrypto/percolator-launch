@@ -17,7 +17,7 @@ const ERROR_CODE_MAP: Record<number, string> = {
   11: "Account must be writable.",
   12: "Oracle is invalid — no price available.",
   13: "Insufficient balance — deposit more collateral.",
-  14: "Position would be undercollateralized at this size. Try a smaller amount or deposit more collateral.",
+  14: "Undercollateralized — either your margin is too low or the market's LP has insufficient capital. Try a smaller amount, deposit more collateral, or contact the market admin.",
   15: "Unauthorized — you don't have permission for this action.",
   16: "Invalid matching engine — LP matcher mismatch.",
   17: "PnL not yet warmed up — crank the market a few more times.",
