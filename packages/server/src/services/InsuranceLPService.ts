@@ -79,9 +79,8 @@ export class InsuranceLPService {
         try {
           const mintInfo = await connection.getTokenSupply(lpMint);
           lpSupply = Number(mintInfo.value.amount);
-        } catch (err) {
-          // LP mint might not exist yet if no LPs have deposited
-          console.warn(`[InsuranceLPService] LP mint not found for ${slab}:`, err);
+        } catch {
+          // LP mint doesn't exist yet — no LPs have deposited. Expected for most devnet markets.
         }
 
         const redemptionRateE6 =

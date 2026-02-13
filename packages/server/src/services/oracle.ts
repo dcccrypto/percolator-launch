@@ -41,6 +41,7 @@ interface JupiterResponse {
 export class OracleService {
   private priceHistory = new Map<string, PriceEntry[]>();
   private lastPushTime = new Map<string, number>();
+  private _nonAuthorityLogged = new Set<string>();
   private readonly rateLimitMs = 5_000;
   private readonly maxHistory = 100;
   private readonly maxTrackedMarkets = 500;
@@ -249,9 +250,12 @@ export class OracleService {
 
       // BC4: Validate that crank keypair is the oracle authority
       if (!keypair.publicKey.equals(marketConfig.oracleAuthority)) {
-        throw new Error(
-          `Crank keypair ${keypair.publicKey.toBase58()} is not the oracle authority ${marketConfig.oracleAuthority.toBase58()}`
-        );
+        // Skip silently for markets we don't control — only log once per market
+        if (!this._nonAuthorityLogged.has(slabAddress)) {
+          this._nonAuthorityLogged.add(slabAddress);
+          console.log(`[OracleService] Skipping ${slabAddress}: not oracle authority (our=${keypair.publicKey.toBase58().slice(0, 8)}... theirs=${marketConfig.oracleAuthority.toBase58().slice(0, 8)}...)`);
+        }
+        return false;
       }
 
       const data = encodePushOraclePrice({
