@@ -95,13 +95,22 @@ export class HeliusWebhookManager {
   }
 
   private async findExistingWebhook(): Promise<any | null> {
-    const res = await fetch(`${HELIUS_WEBHOOKS_URL}?api-key=${config.heliusApiKey}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    });
+    const url = `${HELIUS_WEBHOOKS_URL}?api-key=${config.heliusApiKey}`;
+    console.log(`[HeliusWebhookManager] Fetching ${url.replace(config.heliusApiKey, "***")}`);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (fetchErr) {
+      console.error(`[HeliusWebhookManager] Fetch to api.helius.dev failed:`, fetchErr instanceof Error ? fetchErr.message : fetchErr);
+      return null;
+    }
 
     if (!res.ok) {
-      console.warn(`[HeliusWebhookManager] Failed to list webhooks: ${res.status}`);
+      const body = await res.text().catch(() => "");
+      console.warn(`[HeliusWebhookManager] Failed to list webhooks: ${res.status} ${body}`);
       return null;
     }
 
