@@ -15,6 +15,7 @@ import { LiquidationService } from "./services/liquidation.js";
 import { InsuranceLPService } from "./services/InsuranceLPService.js";
 import { TradeIndexerPolling } from "./services/TradeIndexer.js";
 import { HeliusWebhookManager } from "./services/HeliusWebhookManager.js";
+import { StatsCollector } from "./services/StatsCollector.js";
 import { webhookRoutes } from "./routes/webhook.js";
 import { tradeRoutes } from "./routes/trades.js";
 import { insuranceRoutes } from "./routes/insurance.js";
@@ -30,6 +31,7 @@ const lifecycleManager = new MarketLifecycleManager(crankService, oracleService)
 const insuranceService = new InsuranceLPService(crankService);
 const tradeIndexer = new TradeIndexerPolling();
 const webhookManager = new HeliusWebhookManager();
+const statsCollector = new StatsCollector(crankService, oracleService);
 
 // Hono app
 const app = new Hono();
@@ -100,6 +102,10 @@ if (config.crankKeypair) {
     tradeIndexer.start();
     console.log("📊 Trade indexer started (polling backup)");
 
+    // Start stats collector (populates market_stats + oracle_prices tables)
+    statsCollector.start();
+    console.log("📈 Stats collector started (market_stats + oracle_prices)");
+
     // Register Helius webhook for primary trade indexing
     webhookManager.start().then(() => {
       console.log("🪝 Helius webhook manager started");
@@ -134,6 +140,7 @@ async function shutdown(signal: string) {
     insuranceService.stop();
     tradeIndexer.stop();
     webhookManager.stop();
+    statsCollector.stop();
     if (server && typeof (server as any).close === "function") {
       (server as any).close();
     }

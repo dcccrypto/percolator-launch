@@ -5,6 +5,7 @@ import { requireApiKey } from "../middleware/auth.js";
 import { fetchSlab, parseHeader, parseConfig, parseEngine, SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 import { getConnection } from "../utils/solana.js";
 import { config } from "../config.js";
+import { getSupabase } from "../db/client.js";
 import type { CrankService } from "../services/crank.js";
 import type { MarketLifecycleManager, LaunchOptions } from "../services/lifecycle.js";
 
@@ -45,6 +46,33 @@ export function marketRoutes(deps: MarketDeps): Hono {
       };
     });
     return c.json({ markets: result });
+  });
+
+  // GET /markets/stats — all market stats from DB
+  app.get("/markets/stats", async (c) => {
+    try {
+      const { data, error } = await getSupabase().from("market_stats").select("*");
+      if (error) throw error;
+      return c.json({ stats: data ?? [] });
+    } catch (err) {
+      return c.json({ error: "Failed to fetch market stats" }, 500);
+    }
+  });
+
+  // GET /markets/:slab/stats — single market stats from DB
+  app.get("/markets/:slab/stats", validateSlab, async (c) => {
+    const slab = c.req.param("slab");
+    try {
+      const { data, error } = await getSupabase()
+        .from("market_stats")
+        .select("*")
+        .eq("slab_address", slab)
+        .single();
+      if (error && error.code !== "PGRST116") throw error;
+      return c.json({ stats: data ?? null });
+    } catch (err) {
+      return c.json({ error: "Failed to fetch market stats" }, 500);
+    }
   });
 
   // GET /markets/:slab — single market details
