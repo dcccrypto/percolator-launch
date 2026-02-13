@@ -87,10 +87,8 @@ export class HeliusWebhookManager {
       webhookURL,
       transactionTypes: ["ANY"],
       accountAddresses: config.allProgramIds,
-      webhookType: "enhanced" as const,
+      webhookType: isDevnet ? "enhancedDevnet" : "enhanced",
       authHeader: config.webhookSecret || undefined,
-      // Helius requires network field — defaults to mainnet-beta if omitted
-      ...(isDevnet ? { network: "devnet" } : {}),
     };
   }
 

@@ -78,7 +78,7 @@ describe("HeliusWebhookManager", () => {
     expect(createCall[1].method).toBe("POST");
     const body = JSON.parse(createCall[1].body);
     expect(body.webhookURL).toBe("https://my-server.com/webhook/trades");
-    expect(body.webhookType).toBe("enhanced");
+    expect(body.webhookType).toBe("enhancedDevnet");
   });
 
   it("updates existing webhook when URL matches", async () => {
@@ -113,7 +113,7 @@ describe("HeliusWebhookManager", () => {
     await mgr.start();
 
     const body = JSON.parse((globalThis.fetch as any).mock.calls[1][1].body);
-    expect(body.network).toBe("devnet");
+    expect(body.webhookType).toBe("enhancedDevnet");
   });
 
   it("does not set network field for mainnet RPC", async () => {
@@ -126,7 +126,7 @@ describe("HeliusWebhookManager", () => {
     await mgr.start();
 
     const body = JSON.parse((globalThis.fetch as any).mock.calls[1][1].body);
-    expect(body.network).toBeUndefined();
+    expect(body.webhookType).toBe("enhanced");
   });
 
   it("handles API errors gracefully (falls back to polling)", async () => {
