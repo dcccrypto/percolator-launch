@@ -95,7 +95,7 @@ function CopyButton({ text }: { text: string }) {
 /* ── Main inner page ──────────────────────────────────────── */
 
 function TradePageInner({ slab }: { slab: string }) {
-  const { engine, config, accounts } = useSlabState();
+  const { engine, config, accounts, loading: slabLoading, error: slabError } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
@@ -119,6 +119,36 @@ function TradePageInner({ slab }: { slab: string }) {
     }
     gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
   }, []);
+
+  // Loading state — show while slab data is being fetched
+  if (slabLoading && !engine) {
+    return (
+      <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+        <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.15em]">Loading market data...</p>
+        <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slab.slice(0, 8)}...{slab.slice(-8)}</p>
+      </div>
+    );
+  }
+
+  // Error state — show when slab data fails to load
+  if (slabError && !engine) {
+    return (
+      <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3">
+        <div className="border border-[var(--short)]/30 bg-[var(--short)]/5 p-6 text-center max-w-md">
+          <p className="text-sm font-medium text-[var(--short)]">Failed to load market</p>
+          <p className="mt-2 text-[11px] text-[var(--text-secondary)]">{slabError}</p>
+          <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slab}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 border border-[var(--border)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={pageRef} className="mx-auto max-w-7xl overflow-x-hidden gsap-fade">
