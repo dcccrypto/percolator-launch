@@ -96,8 +96,12 @@ if (config.crankKeypair) {
   }).catch((err) => {
     console.error("Failed to start crank service:", err);
   });
+  // Trade indexer also started inside crank block (reactive mode)
 } else {
   console.warn("⚠️  CRANK_KEYPAIR not set — crank service disabled");
+  // Still start trade indexer in polling-only mode (no crank events, but polls markets)
+  tradeIndexer.start();
+  console.log("📊 Trade indexer started (polling-only mode, no crank keypair)");
 }
 
 // Graceful shutdown

@@ -39,7 +39,7 @@ export interface OraclePriceRow {
 }
 
 export async function getMarkets(): Promise<MarketRow[]> {
-  const { data, error } = await getSupabase().from("markets").select("*").eq("status", "active");
+  const { data, error } = await getSupabase().from("markets").select("*");
   if (error) throw error;
   return (data ?? []) as MarketRow[];
 }

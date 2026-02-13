@@ -2,24 +2,29 @@ import { Connection, PublicKey, type ParsedTransactionWithMeta } from "@solana/w
 import { IX_TAG } from "@percolator/core";
 import { config } from "../config.js";
 import { getConnection } from "../utils/solana.js";
-import { insertTrade, tradeExistsBySignature } from "../db/queries.js";
+import { insertTrade, tradeExistsBySignature, getMarkets } from "../db/queries.js";
 import { eventBus } from "./events.js";
 
 /** Trade instruction tags we want to index */
 const TRADE_TAGS = new Set<number>([IX_TAG.TradeNoCpi, IX_TAG.TradeCpi]);
 
 /** How many recent signatures to fetch per slab per cycle */
-const MAX_SIGNATURES = 20;
+const MAX_SIGNATURES = 50;
+
+/** Poll interval for trade indexing (30 seconds) */
+const POLL_INTERVAL_MS = 30_000;
+
+/** Initial backfill: fetch more signatures on first run */
+const BACKFILL_SIGNATURES = 100;
 
 /**
- * TradeIndexer — listens for crank.success events and indexes trades
- * from recent on-chain transactions for each market slab.
+ * TradeIndexer — indexes trade history from on-chain transactions.
  *
- * Flow:
- * 1. On crank.success, fetch recent tx signatures for the slab address
- * 2. For each tx, check if it contains a TradeCpi or TradeNoCpi instruction
- * 3. Parse trade details (trader, size, side, price) from the transaction
- * 4. Insert into Supabase trades table via insertTrade()
+ * Two modes:
+ * 1. Reactive: listens for crank.success events for immediate indexing
+ * 2. Proactive: polls all active markets periodically to catch any missed trades
+ *
+ * On startup, performs a backfill of recent trades for all known markets.
  */
 export class TradeIndexer {
   /** Track last indexed signature per slab to avoid re-processing */
@@ -27,20 +32,28 @@ export class TradeIndexer {
   private _running = false;
   private pendingSlabs = new Set<string>();
   private processTimer: ReturnType<typeof setTimeout> | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private crankListener: ((payload: { slabAddress: string }) => void) | null = null;
+  private hasBackfilled = false;
 
   start(): void {
     if (this._running) return;
     this._running = true;
 
-    // Listen for successful cranks
+    // Listen for successful cranks (reactive mode)
     this.crankListener = (payload) => {
       this.pendingSlabs.add(payload.slabAddress);
       this.scheduleProcess();
     };
     eventBus.on("crank.success", this.crankListener);
 
-    console.log("[TradeIndexer] Started — listening for crank.success events");
+    // Initial backfill after short delay to let discovery finish
+    setTimeout(() => this.backfill(), 5_000);
+
+    // Start periodic polling (proactive mode)
+    this.pollTimer = setInterval(() => this.pollAllMarkets(), POLL_INTERVAL_MS);
+
+    console.log("[TradeIndexer] Started — reactive + polling mode (30s interval)");
   }
 
   stop(): void {
@@ -53,7 +66,67 @@ export class TradeIndexer {
       clearTimeout(this.processTimer);
       this.processTimer = null;
     }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
     console.log("[TradeIndexer] Stopped");
+  }
+
+  /**
+   * Backfill: fetch recent trades for all known markets on startup
+   */
+  private async backfill(): Promise<void> {
+    if (this.hasBackfilled || !this._running) return;
+    this.hasBackfilled = true;
+
+    try {
+      const markets = await getMarkets();
+      if (markets.length === 0) {
+        console.log("[TradeIndexer] No markets found for backfill");
+        return;
+      }
+
+      console.log(`[TradeIndexer] Backfilling trades for ${markets.length} market(s)...`);
+      for (const market of markets) {
+        if (!this._running) break;
+        try {
+          await this.indexTradesForSlab(market.slab_address, BACKFILL_SIGNATURES);
+        } catch (err) {
+          console.error(`[TradeIndexer] Backfill error for ${market.slab_address.slice(0, 8)}...:`,
+            err instanceof Error ? err.message : err);
+        }
+        // Small delay between markets to avoid rate limits
+        await sleep(1_000);
+      }
+      console.log("[TradeIndexer] Backfill complete");
+    } catch (err) {
+      console.error("[TradeIndexer] Backfill failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  /**
+   * Poll all active markets for new trades
+   */
+  private async pollAllMarkets(): Promise<void> {
+    if (!this._running) return;
+
+    try {
+      const markets = await getMarkets();
+      for (const market of markets) {
+        if (!this._running) break;
+        try {
+          await this.indexTradesForSlab(market.slab_address, MAX_SIGNATURES);
+        } catch (err) {
+          console.error(`[TradeIndexer] Poll error for ${market.slab_address.slice(0, 8)}...:`,
+            err instanceof Error ? err.message : err);
+        }
+        // Small delay between markets
+        await sleep(500);
+      }
+    } catch (err) {
+      console.error("[TradeIndexer] Poll failed:", err instanceof Error ? err.message : err);
+    }
   }
 
   /**
@@ -76,13 +149,13 @@ export class TradeIndexer {
     }, 3_000); // 3s debounce after crank
   }
 
-  private async indexTradesForSlab(slabAddress: string): Promise<void> {
+  private async indexTradesForSlab(slabAddress: string, maxSigs = MAX_SIGNATURES): Promise<void> {
     const connection = getConnection();
     const slabPk = new PublicKey(slabAddress);
     const programIds = new Set(config.allProgramIds);
 
     // Fetch recent signatures for this slab account
-    const opts: { limit: number; until?: string } = { limit: MAX_SIGNATURES };
+    const opts: { limit: number; until?: string } = { limit: maxSigs };
     const lastSig = this.lastSignature.get(slabAddress);
     if (lastSig) opts.until = lastSig;
 
@@ -90,7 +163,8 @@ export class TradeIndexer {
     try {
       signatures = await connection.getSignaturesForAddress(slabPk, opts);
     } catch (err) {
-      console.warn(`[TradeIndexer] Failed to get signatures for ${slabAddress}:`, err instanceof Error ? err.message : err);
+      console.warn(`[TradeIndexer] Failed to get signatures for ${slabAddress.slice(0, 8)}...:`,
+        err instanceof Error ? err.message : err);
       return;
     }
 
@@ -102,6 +176,8 @@ export class TradeIndexer {
     // Filter out errored transactions
     const validSigs = signatures.filter(s => !s.err).map(s => s.signature);
     if (validSigs.length === 0) return;
+
+    let indexed = 0;
 
     // Fetch transactions in batches of 5
     for (let i = 0; i < validSigs.length; i += 5) {
@@ -118,12 +194,17 @@ export class TradeIndexer {
         const sig = batch[j];
 
         try {
-          await this.processTransaction(tx, sig, slabAddress, programIds);
+          const didIndex = await this.processTransaction(tx, sig, slabAddress, programIds);
+          if (didIndex) indexed++;
         } catch (err) {
           // Non-fatal: skip this tx, continue with others
           console.warn(`[TradeIndexer] Failed to process tx ${sig.slice(0, 12)}...:`, err instanceof Error ? err.message : err);
         }
       }
+    }
+
+    if (indexed > 0) {
+      console.log(`[TradeIndexer] Indexed ${indexed} trade(s) for ${slabAddress.slice(0, 8)}...`);
     }
   }
 
@@ -132,8 +213,8 @@ export class TradeIndexer {
     signature: string,
     slabAddress: string,
     programIds: Set<string>,
-  ): Promise<void> {
-    if (!tx.meta || tx.meta.err) return;
+  ): Promise<boolean> {
+    if (!tx.meta || tx.meta.err) return false;
 
     const message = tx.transaction.message;
 
@@ -174,90 +255,71 @@ export class TradeIndexer {
       }
 
       // Determine trader from account keys
-      // TradeCpi accounts[0] = user (signer), TradeNoCpi accounts[0] = user (signer)
       const traderKey = ix.accounts[0];
       if (!traderKey) continue;
       const trader = traderKey.toBase58();
 
-      // Get price from slab account data post-execution
-      // Use the oracle price from the slab's config (authorityPriceE6 or lastEffectivePriceE6)
-      // We approximate: parse price from program logs
+      // Get price from program logs
       const price = this.extractPriceFromLogs(tx) ?? 0;
-
-      // Extract fee from logs if possible, default to 0
       const fee = 0;
 
       // Check for duplicate
       const exists = await tradeExistsBySignature(signature);
-      if (exists) return; // Already indexed (a tx can only have one trade instruction we care about per slab)
+      if (exists) return false;
 
-      // Validate inputs before database insertion to prevent SQL injection
+      // Validate inputs
       const base58PubkeyRegex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
       const base58SigRegex = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
       
       if (!base58PubkeyRegex.test(trader)) {
-        console.warn(`[TradeIndexer] Invalid trader pubkey format: ${trader.slice(0, 12)}... - skipping insert`);
-        return;
+        console.warn(`[TradeIndexer] Invalid trader pubkey format: ${trader.slice(0, 12)}... - skipping`);
+        return false;
       }
       
       if (!base58SigRegex.test(signature)) {
-        console.warn(`[TradeIndexer] Invalid signature format: ${signature.slice(0, 12)}... - skipping insert`);
-        return;
+        console.warn(`[TradeIndexer] Invalid signature format: ${signature.slice(0, 12)}... - skipping`);
+        return false;
       }
       
       // Validate size is within i128 range
-      try {
-        const parsedSize = BigInt(sizeValue.toString());
-        const i128Max = (1n << 127n) - 1n;
-        const i128Min = -(1n << 127n);
-        if (parsedSize > i128Max || parsedSize < i128Min) {
-          console.warn(`[TradeIndexer] Size out of i128 range: ${parsedSize} - skipping insert`);
-          return;
-        }
-      } catch (err) {
-        console.warn(`[TradeIndexer] Invalid size format: ${sizeValue.toString()} - skipping insert`);
-        return;
+      const i128Max = (1n << 127n) - 1n;
+      if (sizeValue > i128Max) {
+        console.warn(`[TradeIndexer] Size out of range: ${sizeValue} - skipping`);
+        return false;
       }
 
       await insertTrade({
         slab_address: slabAddress,
         trader,
         side,
-        size: sizeValue.toString(), // Keep full precision (i128 on-chain)
+        size: sizeValue.toString(),
         price,
         fee,
         tx_signature: signature,
       });
 
-      console.log(`[TradeIndexer] Indexed trade: ${side} ${sizeValue} on ${slabAddress.slice(0, 8)}... tx=${signature.slice(0, 12)}...`);
       eventBus.publish("trade.executed", slabAddress, { signature, trader, side, size: sizeValue.toString() });
+      return true;
     }
+
+    return false;
   }
 
   /**
    * Try to extract execution price from transaction logs.
-   * The program uses sol_log_64 which appears as "Program log: ..." entries.
-   * We look for price patterns in the logs.
    */
   private extractPriceFromLogs(tx: ParsedTransactionWithMeta): number | null {
     if (!tx.meta?.logMessages) return null;
 
-    // Look for sol_log_64 entries that might contain price info
-    // Format: "Program log: <base10_val1>, <base10_val2>, <base10_val3>, <base10_val4>, <base10_val5>"
     for (const log of tx.meta.logMessages) {
-      // sol_log_64 logs appear as comma-separated u64 values
       const match = log.match(/^Program log: (\d+), (\d+), (\d+), (\d+), (\d+)$/);
       if (!match) continue;
 
-      // Heuristic: the program likely logs price in one of the values.
-      // Without knowing the exact log format, we look for values in a reasonable price range (e6 format).
-      // A price in e6 format would be e.g. 1_000_000 = $1.00, 150_000_000 = $150.00
       const values = [match[1], match[2], match[3], match[4], match[5]].map(Number);
 
       for (const v of values) {
-        // Reasonable price_e6 range: $0.001 (1000) to $1,000,000 (1e12)
+        // Reasonable price_e6 range: $0.001 to $1,000,000
         if (v >= 1_000 && v <= 1_000_000_000_000) {
-          // Return as human-readable price (divide by 1e6)
           return v / 1_000_000;
         }
       }
@@ -267,17 +329,19 @@ export class TradeIndexer {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /** Decode base58 string to Uint8Array */
 function decodeBase58(str: string): Uint8Array | null {
   try {
     const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
     const BASE = 58;
 
-    // Count leading '1's (zeros in base58)
     let zeros = 0;
     while (zeros < str.length && str[zeros] === "1") zeros++;
 
-    // Decode
     const bytes: number[] = [];
     for (let i = zeros; i < str.length; i++) {
       const charIndex = ALPHABET.indexOf(str[i]);
@@ -295,7 +359,6 @@ function decodeBase58(str: string): Uint8Array | null {
       }
     }
 
-    // Add leading zeros
     const result = new Uint8Array(zeros + bytes.length);
     result.set(bytes, zeros);
     return result;
