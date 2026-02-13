@@ -559,7 +559,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const insValid = insuranceAmount !== "" && !isNaN(Number(insuranceAmount)) && Number(insuranceAmount) > 0;
   const step3Valid = lpValid && insValid;
   const hasManualTokens = tokenBalance !== null && tokenBalance > 0n;
-  const allValid = step1Valid && step2Valid && step3Valid && hasManualTokens;
+  const decimalsValid = decimals <= 12; // Block tokens with > 12 decimals (u64 overflow risk)
+  const allValid = step1Valid && step2Valid && step3Valid && hasManualTokens && decimalsValid;
 
   const lpNative = useMemo(() => { try { return lpValid ? parseHumanAmount(lpCollateral, decimals) : 0n; } catch { return 0n; } }, [lpCollateral, decimals, lpValid]);
   const insNative = useMemo(() => { try { return insValid ? parseHumanAmount(insuranceAmount, decimals) : 0n; } catch { return 0n; } }, [insuranceAmount, decimals, insValid]);
@@ -692,11 +693,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
                 <input type="text" value={mint} onChange={(e) => setMint(e.target.value.trim())} placeholder="e.g. EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" className={mint && !mintValid ? inputClassError : inputClassMono} />
                 {mint && !mintValid && <p className="mt-1 text-[10px] text-[var(--short)]">Invalid base58 public key</p>}
                 {tokenMeta && mintValid && (
-                  <div className="mt-2 flex items-center gap-3 border border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] p-3">
-                    <div className="flex h-7 w-7 items-center justify-center border border-[var(--accent)]/30 text-[10px] font-bold text-[var(--accent)]">{tokenMeta.symbol.slice(0, 2)}</div>
+                  <div className={`mt-2 flex items-center gap-3 border p-3 ${tokenMeta.decimals > 12 ? "border-[var(--short)]/40 bg-[var(--short)]/[0.05]" : "border-[var(--accent)]/20 bg-[var(--accent)]/[0.03]"}`}>
+                    <div className={`flex h-7 w-7 items-center justify-center border text-[10px] font-bold ${tokenMeta.decimals > 12 ? "border-[var(--short)]/30 text-[var(--short)]" : "border-[var(--accent)]/30 text-[var(--accent)]"}`}>{tokenMeta.symbol.slice(0, 2)}</div>
                     <div>
                       <p className="text-[12px] font-medium text-[var(--text)]">{tokenMeta.name} ({tokenMeta.symbol})</p>
                       <p className="text-[10px] text-[var(--text-muted)]">{tokenMeta.decimals} decimals</p>
+                      {tokenMeta.decimals > 12 && (
+                        <p className="text-[10px] text-[var(--short)] font-medium mt-0.5">⚠ Decimals &gt; 12 risk integer overflow in on-chain arithmetic. Market creation blocked.</p>
+                      )}
                     </div>
                   </div>
                 )}

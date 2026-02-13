@@ -39,6 +39,7 @@ const DevnetMintContent: FC = () => {
   const successCardRef = useRef<HTMLDivElement>(null);
 
   const [balance, setBalance] = useState<number | null>(null);
+  const MAX_DECIMALS = 12; // Safe limit for u64 arithmetic on Solana
   const [decimals, setDecimals] = useState(9);
   const [supply, setSupply] = useState("100000");
   const [recipient, setRecipient] = useState("");
@@ -181,6 +182,24 @@ const DevnetMintContent: FC = () => {
     setMintAddress(null);
 
     try {
+      // Validate decimals (prevent integer overflow on Solana u64)
+      if (decimals < 0 || decimals > MAX_DECIMALS) {
+        throw new Error(`Decimals must be between 0 and ${MAX_DECIMALS}. Higher values cause integer overflow on Solana.`);
+      }
+      
+      // Validate supply is positive
+      const supplyNum = Number(supply);
+      if (!supply || supplyNum <= 0 || !Number.isFinite(supplyNum)) {
+        throw new Error("Supply must be a positive number.");
+      }
+      
+      // Validate total raw supply fits in u64 (max 2^64 - 1)
+      const U64_MAX = BigInt("18446744073709551615");
+      const rawSupplyCheck = BigInt(supply) * BigInt(10) ** BigInt(decimals);
+      if (rawSupplyCheck > U64_MAX) {
+        throw new Error(`Total supply (${supply} × 10^${decimals}) exceeds Solana's u64 limit. Reduce supply or decimals.`);
+      }
+
       const walletBalance = await connection.getBalance(publicKey);
       if (walletBalance < 0.01 * LAMPORTS_PER_SOL) {
         throw new Error("Not enough SOL. You need at least 0.01 SOL. Use the airdrop button above.");
@@ -215,7 +234,7 @@ const DevnetMintContent: FC = () => {
       const ata = await getAssociatedTokenAddress(mintKeypair.publicKey, recipientPubkey);
       tx.add(createAssociatedTokenAccountInstruction(publicKey, ata, recipientPubkey, mintKeypair.publicKey));
 
-      const rawSupply = BigInt(supply) * BigInt(10 ** decimals);
+      const rawSupply = BigInt(supply) * BigInt(10) ** BigInt(decimals);
       tx.add(createMintToInstruction(mintKeypair.publicKey, ata, publicKey, rawSupply));
 
       // P-HIGH-5: Wrap Metaplex PDA derivation in try-catch
@@ -332,7 +351,12 @@ const DevnetMintContent: FC = () => {
         tx.add(createAssociatedTokenAccountInstruction(publicKey, ata, recipientPk, mintPk));
       }
 
-      const rawAmount = BigInt(mintMoreAmount) * BigInt(10 ** dec);
+      // Use safe BigInt exponentiation (10 ** dec can overflow Number for high decimals)
+      const rawAmount = BigInt(mintMoreAmount) * BigInt(10) ** BigInt(dec);
+      const U64_MAX = BigInt("18446744073709551615");
+      if (rawAmount > U64_MAX) {
+        throw new Error(`Amount (${mintMoreAmount} × 10^${dec}) exceeds Solana's u64 limit. Reduce the amount.`);
+      }
       tx.add(createMintToInstruction(mintPk, ata, publicKey, rawAmount));
 
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
@@ -474,7 +498,10 @@ const DevnetMintContent: FC = () => {
                 <div className="flex gap-3">
                   <div className="flex-1">
                     <label className="mb-1 block text-xs text-[var(--text-secondary)]">Decimals</label>
-                    <input type="number" min={0} max={18} value={decimals} onChange={(e) => setDecimals(Number(e.target.value))} className={inputClass} />
+                    <input type="number" min={0} max={MAX_DECIMALS} value={decimals} onChange={(e) => {
+                      const val = Math.min(MAX_DECIMALS, Math.max(0, Math.floor(Number(e.target.value) || 0)));
+                      setDecimals(val);
+                    }} className={inputClass} />
                   </div>
                   <div className="flex-[2]">
                     <label className="mb-1 block text-xs text-[var(--text-secondary)]">Supply</label>

@@ -73,6 +73,13 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
       return;
     }
 
+    // Block tokens with > 12 decimals (u64 overflow risk in on-chain arithmetic)
+    if (tokenMeta.decimals > 12) {
+      setError(`Token has ${tokenMeta.decimals} decimals — max safe limit is 12. Tokens with excessive decimals cause integer overflow on Solana.`);
+      setConfig(null);
+      return;
+    }
+
     const bestPool = pools.length > 0 ? pools[0] : null;
     const liquidity = bestPool?.liquidityUsd ?? 0;
     const price = bestPool?.priceUsd ?? 0;
