@@ -9,6 +9,13 @@ const HELIUS_WEBHOOKS_URL = `https://api.helius.dev/v0/webhooks`;
  */
 export class HeliusWebhookManager {
   private webhookId: string | null = null;
+  private _startError: string | null = null;
+  private _status: "idle" | "active" | "failed" = "idle";
+
+  /** Get current webhook status for diagnostics */
+  getStatus(): { status: string; webhookId: string | null; error: string | null } {
+    return { status: this._status, webhookId: this.webhookId, error: this._startError };
+  }
 
   async start(): Promise<void> {
     if (!config.heliusApiKey) {
@@ -31,9 +38,12 @@ export class HeliusWebhookManager {
         console.log("[HeliusWebhookManager] Creating new webhook...");
         this.webhookId = await this.createWebhook();
       }
+      this._status = "active";
       console.log(`[HeliusWebhookManager] Webhook active: ${this.webhookId}`);
     } catch (err) {
-      console.error("[HeliusWebhookManager] Failed to register webhook:", err instanceof Error ? err.message : err);
+      this._startError = err instanceof Error ? err.message : String(err);
+      this._status = "failed";
+      console.error("[HeliusWebhookManager] Failed to register webhook:", this._startError);
       console.warn("[HeliusWebhookManager] Falling back to polling-only mode");
     }
   }
@@ -41,6 +51,32 @@ export class HeliusWebhookManager {
   async stop(): Promise<void> {
     // Don't delete webhook on shutdown — it persists across deploys
     this.webhookId = null;
+  }
+
+  /** Force re-register (for diagnostics) */
+  async reRegister(): Promise<{ ok: boolean; webhookId?: string; error?: string }> {
+    try {
+      this._startError = null;
+      await this.start();
+      return { ok: this._status === "active", webhookId: this.webhookId ?? undefined };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** List all webhooks from Helius (for diagnostics) */
+  async listWebhooks(): Promise<any[] | null> {
+    if (!config.heliusApiKey) return null;
+    try {
+      const res = await fetch(`${HELIUS_WEBHOOKS_URL}?api-key=${config.heliusApiKey}`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
   }
 
   private get webhookPayload() {

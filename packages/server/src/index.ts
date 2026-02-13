@@ -61,6 +61,17 @@ app.route("/", oracleRouterRoutes());
 app.route("/", webhookRoutes());
 app.route("/", tradeRoutes());
 
+// Webhook diagnostics
+app.get("/webhook/status", async (c) => {
+  const status = webhookManager.getStatus();
+  const webhooks = await webhookManager.listWebhooks();
+  return c.json({ ...status, registeredWebhooks: webhooks?.length ?? "unknown" });
+});
+app.post("/webhook/re-register", async (c) => {
+  const result = await webhookManager.reRegister();
+  return c.json(result);
+});
+
 // Root
 app.get("/", (c) => c.json({ name: "@percolator/server", version: "0.1.0" }));
 
