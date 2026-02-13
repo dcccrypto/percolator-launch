@@ -94,7 +94,16 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
               Create an account with an initial deposit to start trading.
             </p>
             <button
-              onClick={async () => { try { const sig = await initUser(suggestedDeposit); setLastSig(sig ?? null); } catch {} }}
+              onClick={async () => { 
+                try { 
+                  const sig = await initUser(suggestedDeposit); 
+                  setLastSig(sig ?? null); 
+                } catch (err) {
+                  if (process.env.NODE_ENV === 'development') {
+                    console.error('initUser failed:', err);
+                  }
+                }
+              }}
               disabled={initLoading}
               className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
             >
@@ -149,7 +158,12 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
       }
       setLastSig(sig ?? null);
       setAmount("");
-    } catch {}
+    } catch (err) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error(`${mode} failed:`, err);
+      }
+      // Error state is already handled by deposit/withdraw hooks
+    }
   }
 
   return (
