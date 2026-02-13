@@ -3,6 +3,7 @@ import { IX_TAG } from "@percolator/core";
 import { config } from "../config.js";
 import { insertTrade } from "../db/queries.js";
 import { eventBus } from "../services/events.js";
+import { decodeBase58, readU128LE, parseTradeSize } from "../utils/binary.js";
 
 const TRADE_TAGS = new Set<number>([IX_TAG.TradeNoCpi, IX_TAG.TradeCpi]);
 const PROGRAM_IDS = new Set(config.allProgramIds);
@@ -109,18 +110,7 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
     if (!TRADE_TAGS.has(tag)) continue;
 
     // Parse: tag(1) + lpIdx(u16=2) + userIdx(u16=2) + size(i128=16)
-    const sizeBytes = data.slice(5, 21);
-    const isNegative = sizeBytes[15] >= 128;
-    const side: "long" | "short" = isNegative ? "short" : "long";
-
-    let sizeValue: bigint;
-    if (isNegative) {
-      const inverted = new Uint8Array(16);
-      for (let k = 0; k < 16; k++) inverted[k] = ~sizeBytes[k] & 0xff;
-      sizeValue = readU128LE(inverted) + 1n;
-    } else {
-      sizeValue = readU128LE(sizeBytes);
-    }
+    const { sizeValue, side } = parseTradeSize(data.slice(5, 21));
 
     // Account layout (from core/abi/accounts.ts):
     // TradeNoCpi: [0]=user(signer), [1]=lp(signer), [2]=slab(writable), [3]=clock, [4]=oracle
@@ -162,18 +152,7 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
       const tag = data[0];
       if (!TRADE_TAGS.has(tag)) continue;
 
-      const sizeBytes = data.slice(5, 21);
-      const isNegative = sizeBytes[15] >= 128;
-      const side: "long" | "short" = isNegative ? "short" : "long";
-
-      let sizeValue: bigint;
-      if (isNegative) {
-        const inverted = new Uint8Array(16);
-        for (let k = 0; k < 16; k++) inverted[k] = ~sizeBytes[k] & 0xff;
-        sizeValue = readU128LE(inverted) + 1n;
-      } else {
-        sizeValue = readU128LE(sizeBytes);
-      }
+      const { sizeValue, side } = parseTradeSize(data.slice(5, 21));
 
       // Same account layout: [0]=user, [2]=slab
       const accounts: string[] = ix.accounts ?? [];
@@ -186,8 +165,8 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
       const price = extractPriceFromLogs(tx);
       const fee = extractFeeFromTransfers(tx, trader);
 
-      // Avoid duplicates within same tx
-      if (trades.some((t) => t.tx_signature === signature && t.trader === trader && t.side === side)) continue;
+      // Avoid duplicates within same tx (match on trader + side + size + slab)
+      if (trades.some((t) => t.tx_signature === signature && t.trader === trader && t.slab_address === slabAddress && t.side === side && t.size === sizeValue.toString())) continue;
 
       trades.push({
         slab_address: slabAddress,
@@ -244,41 +223,4 @@ function extractFeeFromTransfers(tx: any, trader: string): number {
   return 0;
 }
 
-/** Decode base58 string to Uint8Array */
-function decodeBase58(str: string): Uint8Array | null {
-  try {
-    const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    const BASE = 58;
-    let zeros = 0;
-    while (zeros < str.length && str[zeros] === "1") zeros++;
-    const bytes: number[] = [];
-    for (let i = zeros; i < str.length; i++) {
-      const charIndex = ALPHABET.indexOf(str[i]);
-      if (charIndex < 0) return null;
-      let carry = charIndex;
-      for (let j = bytes.length - 1; j >= 0; j--) {
-        carry += bytes[j] * BASE;
-        bytes[j] = carry & 0xff;
-        carry >>= 8;
-      }
-      while (carry > 0) {
-        bytes.unshift(carry & 0xff);
-        carry >>= 8;
-      }
-    }
-    const result = new Uint8Array(zeros + bytes.length);
-    result.set(bytes, zeros);
-    return result;
-  } catch {
-    return null;
-  }
-}
-
-/** Read unsigned 128-bit little-endian integer */
-function readU128LE(bytes: Uint8Array): bigint {
-  let value = 0n;
-  for (let i = 15; i >= 0; i--) {
-    value = (value << 8n) | BigInt(bytes[i]);
-  }
-  return value;
-}
+// decodeBase58, readU128LE, parseTradeSize imported from ../utils/binary.js

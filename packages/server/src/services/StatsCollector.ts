@@ -16,13 +16,9 @@ import {
   parseAllAccounts,
   type EngineState,
   type MarketConfig,
-  type Account,
-  AccountKind,
 } from "@percolator/core";
-import { config } from "../config.js";
 import { getConnection } from "../utils/solana.js";
 import { upsertMarketStats, insertOraclePrice } from "../db/queries.js";
-import { eventBus } from "./events.js";
 import type { CrankService } from "./crank.js";
 import type { OracleService } from "./oracle.js";
 
@@ -46,11 +42,6 @@ export class StatsCollector {
   start(): void {
     if (this._running) return;
     this._running = true;
-
-    // Listen for crank cycle completions to trigger immediate collection
-    eventBus.on("crank.success", () => {
-      // Debounce — don't collect on every single crank, let the interval handle it
-    });
 
     // Initial collection after a short delay
     setTimeout(() => this.collect(), 10_000);
