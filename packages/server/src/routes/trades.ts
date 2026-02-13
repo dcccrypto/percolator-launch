@@ -48,16 +48,15 @@ export function tradeRoutes(): Hono {
 
     // Default to 24h of price history
     const hoursBack = Math.min(Math.max(Number(c.req.query("hours") ?? 24), 1), 720); // max 30 days
-    const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
+    const sinceEpoch = Math.floor((Date.now() - hoursBack * 60 * 60 * 1000) / 1000);
 
     try {
-      const prices = await getPriceHistory(slab, since);
+      const prices = await getPriceHistory(slab, sinceEpoch);
       return c.json({
         slab_address: slab,
         prices: prices.map((p) => ({
           price: Number(p.price_e6) / 1_000_000,
           price_e6: p.price_e6,
-          source: p.source,
           timestamp: p.timestamp,
         })),
       });

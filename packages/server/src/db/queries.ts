@@ -47,8 +47,8 @@ export interface TradeRow {
 export interface OraclePriceRow {
   slab_address: string;
   price_e6: string;
-  source: string;
-  timestamp: string;
+  timestamp: number; // epoch seconds (BIGINT in DB)
+  tx_signature?: string | null;
 }
 
 export async function getMarkets(): Promise<MarketRow[]> {
@@ -94,7 +94,12 @@ export async function tradeExistsBySignature(txSignature: string): Promise<boole
 }
 
 export async function insertOraclePrice(price: OraclePriceRow): Promise<void> {
-  const { error } = await getSupabase().from("oracle_prices").insert(price);
+  const { error } = await getSupabase().from("oracle_prices").insert({
+    slab_address: price.slab_address,
+    price_e6: price.price_e6,
+    timestamp: price.timestamp,
+    tx_signature: price.tx_signature ?? null,
+  });
   if (error) throw error;
 }
 
@@ -142,13 +147,13 @@ export async function getGlobalRecentTrades(limit = 50): Promise<TradeRow[]> {
 
 export async function getPriceHistory(
   slabAddress: string,
-  since: string,
+  sinceEpoch: number,
 ): Promise<OraclePriceRow[]> {
   const { data, error } = await getSupabase()
     .from("oracle_prices")
     .select("*")
     .eq("slab_address", slabAddress)
-    .gte("timestamp", since)
+    .gte("timestamp", sinceEpoch)
     .order("timestamp", { ascending: true });
   if (error) throw error;
   return (data ?? []) as OraclePriceRow[];

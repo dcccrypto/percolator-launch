@@ -155,8 +155,7 @@ export class StatsCollector {
                   await insertOraclePrice({
                     slab_address: slabAddress,
                     price_e6: priceE6.toString(),
-                    source: priceEntry?.source ?? "on-chain",
-                    timestamp: new Date().toISOString(),
+                    timestamp: Math.floor(Date.now() / 1000),
                   });
                   this.lastOracleLogTime.set(slabAddress, Date.now());
                 } catch (oracleErr) {
