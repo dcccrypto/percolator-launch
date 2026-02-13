@@ -4,6 +4,7 @@ import { config } from "../config.js";
 import { getConnection } from "../utils/solana.js";
 import { insertTrade, tradeExistsBySignature, getMarkets } from "../db/queries.js";
 import { eventBus } from "./events.js";
+import { decodeBase58, readU128LE, parseTradeSize } from "../utils/binary.js";
 
 /** Trade instruction tags we want to index */
 const TRADE_TAGS = new Set<number>([IX_TAG.TradeNoCpi, IX_TAG.TradeCpi]);
@@ -239,21 +240,7 @@ export class TradeIndexerPolling {
       if (data.length < 21) continue;
 
       // Parse size as signed i128 (little-endian)
-      const sizeBytes = data.slice(5, 21);
-      const sizeAbs = readU128LE(sizeBytes);
-      const isNegative = sizeBytes[15] >= 128; // sign bit
-      const side: "long" | "short" = isNegative ? "short" : "long";
-
-      // For negative i128, compute absolute value: ~value + 1
-      let sizeValue: bigint;
-      if (isNegative) {
-        // Two's complement: invert and add 1
-        const inverted = new Uint8Array(16);
-        for (let k = 0; k < 16; k++) inverted[k] = ~sizeBytes[k] & 0xff;
-        sizeValue = readU128LE(inverted) + 1n;
-      } else {
-        sizeValue = sizeAbs;
-      }
+      const { sizeValue, side } = parseTradeSize(data.slice(5, 21));
 
       // Determine trader from account keys
       const traderKey = ix.accounts[0];
@@ -334,45 +321,4 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Decode base58 string to Uint8Array */
-function decodeBase58(str: string): Uint8Array | null {
-  try {
-    const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    const BASE = 58;
-
-    let zeros = 0;
-    while (zeros < str.length && str[zeros] === "1") zeros++;
-
-    const bytes: number[] = [];
-    for (let i = zeros; i < str.length; i++) {
-      const charIndex = ALPHABET.indexOf(str[i]);
-      if (charIndex < 0) return null;
-
-      let carry = charIndex;
-      for (let j = bytes.length - 1; j >= 0; j--) {
-        carry += bytes[j] * BASE;
-        bytes[j] = carry & 0xff;
-        carry >>= 8;
-      }
-      while (carry > 0) {
-        bytes.unshift(carry & 0xff);
-        carry >>= 8;
-      }
-    }
-
-    const result = new Uint8Array(zeros + bytes.length);
-    result.set(bytes, zeros);
-    return result;
-  } catch {
-    return null;
-  }
-}
-
-/** Read unsigned 128-bit little-endian integer */
-function readU128LE(bytes: Uint8Array): bigint {
-  let value = 0n;
-  for (let i = 15; i >= 0; i--) {
-    value = (value << 8n) | BigInt(bytes[i]);
-  }
-  return value;
-}
+// decodeBase58, readU128LE, parseTradeSize imported from ../utils/binary.js
