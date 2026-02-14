@@ -69,8 +69,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const hasPosition = account.positionSize !== 0n;
   const isLong = account.positionSize > 0n;
   const absPosition = abs(account.positionSize);
-  const onChainPriceE6 = config?.lastEffectivePriceE6 ?? 0n;
-  const currentPriceE6 = livePriceE6 ?? onChainPriceE6;
+  const onChainPriceE6 = config?.lastEffectivePriceE6 ?? null;
+  const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
 
   const entryPriceE6 = account.entryPrice;
 
@@ -80,14 +80,15 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     entryPrice: account.entryPrice,
   };
 
-  const pnlTokens = computeMarkPnl(
+  // Bug fix: Don't compute P&L with stale/zero price to avoid flash
+  const pnlTokens = currentPriceE6 > 0n ? computeMarkPnl(
     displayData.positionSize,
     displayData.entryPrice,
     currentPriceE6,
-  );
+  ) : 0n;
   const pnlUsd =
-    priceUsd !== null ? (Number(pnlTokens) / 1e6) * priceUsd : null;
-  const roe = computePnlPercent(pnlTokens, displayData.capital);
+    priceUsd !== null && currentPriceE6 > 0n ? (Number(pnlTokens) / 1e6) * priceUsd : null;
+  const roe = currentPriceE6 > 0n ? computePnlPercent(pnlTokens, displayData.capital) : 0;
 
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const liqPriceE6 = computeLiqPrice(
