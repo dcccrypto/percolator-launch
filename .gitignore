@@ -45,6 +45,9 @@ lerna-debug.log*
 .turbo
 .env.vercel.preview
 
+# Supabase CLI temp files
+supabase/.temp/
+
 Percolator-Deck-Final.pdf
 Percolator-Deck-v2.pdf
 Percolator-Pitch-Deck.pdf
