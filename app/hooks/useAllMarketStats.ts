@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSupabase, type MarketWithStats } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
+import type { Database } from "@/lib/database.types";
+
+type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 
 /**
  * Hook to fetch all markets with their latest stats from Supabase.
@@ -27,8 +30,10 @@ export function useAllMarketStats() {
           setError(dbError.message);
         } else {
           const map = new Map<string, MarketWithStats>();
-          (data as MarketWithStats[])?.forEach((market) => {
-            map.set(market.slab_address, market);
+          data?.forEach((market) => {
+            if (market.slab_address) {
+              map.set(market.slab_address, market);
+            }
           });
           setStatsMap(map);
           setError(null);

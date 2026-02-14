@@ -7,8 +7,10 @@ import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
-import type { MarketWithStats } from "@/lib/supabase";
 import { getSupabase } from "@/lib/supabase";
+import type { Database } from "@/lib/database.types";
+
+type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 import type { DiscoveredMarket } from "@percolator/core";
 import { PublicKey } from "@solana/web3.js";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";

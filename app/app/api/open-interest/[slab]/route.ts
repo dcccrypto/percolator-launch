@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import type { Database } from '@/lib/database.types';
 
 export const dynamic = 'force-dynamic';
+
+type MarketStats = Database['public']['Tables']['market_stats']['Row'];
+type OiHistory = Database['public']['Tables']['oi_history']['Row'];
 
 export async function GET(
   request: NextRequest,
@@ -14,7 +18,7 @@ export async function GET(
     // Fetch current OI data from market_stats
     const { data: stats, error: statsError } = await supabase
       .from('market_stats')
-      .select('total_open_interest, net_lp_pos, lp_sum_abs, lp_max_abs, last_crank_slot')
+      .select('total_open_interest, net_lp_pos, lp_sum_abs, lp_max_abs')
       .eq('slab_address', slab)
       .single();
 
@@ -47,16 +51,16 @@ export async function GET(
     // short_oi = (total_oi + net_lp_pos) / 2
     // Because: total_oi = long_oi + short_oi and net_lp_pos = short_oi - long_oi (LP is counterparty)
     
-    const totalOi = parseFloat((stats as any).total_open_interest || '0');
-    const netLpPos = parseFloat((stats as any).net_lp_pos || '0');
+    const totalOi = stats.total_open_interest || 0;
+    const netLpPos = stats.net_lp_pos || 0;
     
     const longOi = (totalOi - netLpPos) / 2;
     const shortOi = (totalOi + netLpPos) / 2;
 
     // Format historical data
-    const historicalOi = (history || []).map((h: any) => {
-      const total = parseFloat(h.total_oi || '0');
-      const netLp = parseFloat(h.net_lp_pos || '0');
+    const historicalOi = (history || []).map((h) => {
+      const total = h.total_oi;
+      const netLp = h.net_lp_pos;
       return {
         timestamp: new Date(h.timestamp).getTime(),
         totalOi: total / 1e6, // Convert to USD
@@ -66,10 +70,10 @@ export async function GET(
     });
 
     const response = {
-      totalOi: (stats as any).total_open_interest || '0',
-      longOi: (longOi * 1e6).toString(), // Back to e6 format
-      shortOi: (shortOi * 1e6).toString(),
-      netLpPosition: (stats as any).net_lp_pos || '0',
+      totalOi: totalOi.toString(),
+      longOi: longOi.toString(),
+      shortOi: shortOi.toString(),
+      netLpPosition: netLpPos.toString(),
       historicalOi,
     };
 

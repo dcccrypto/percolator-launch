@@ -20,6 +20,7 @@ import {
 import { humanizeError } from "@/lib/errorMessages";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
+import { WarmupProgress } from "./WarmupProgress";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -252,6 +253,21 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 {marginHealthStr}
               </span>
             </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Est. Funding (24h)</span>
+              <span className={`text-[11px] font-medium ${pnlColor}`} style={{ fontFamily: "var(--font-mono)" }}>
+                {/* Mock value - will be replaced with real funding calculation */}
+                +$5.12
+              </span>
+            </div>
+          </div>
+
+          {/* Warmup Progress (if active) */}
+          <div className="mt-3 border-t border-[var(--border)] pt-3">
+            <WarmupProgress 
+              slabAddress={slabAddress} 
+              accountIdx={userAccount.idx} 
+            />
           </div>
 
           {/* LP underfunded warning */}

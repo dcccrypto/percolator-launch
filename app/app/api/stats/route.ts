@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
+import type { Database } from "@/lib/database.types";
 export const dynamic = "force-dynamic";
+
+type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 
 /**
  * GET /api/stats — Platform-wide aggregated statistics
@@ -10,7 +13,7 @@ export async function GET() {
 
   const [marketsRes, statsRes, tradersRes, recentTradesRes] = await Promise.all([
     supabase.from("markets").select("slab_address", { count: "exact", head: true }),
-    supabase.from("markets_with_stats").select("volume_24h, open_interest, last_price"),
+    supabase.from("markets_with_stats").select("volume_24h, open_interest_long, open_interest_short, last_price"),
     supabase.from("markets").select("deployer"),
     supabase
       .from("trades")
@@ -22,15 +25,15 @@ export async function GET() {
   const statsData = statsRes.data ?? [];
 
   const totalVolume24h = statsData.reduce(
-    (sum: number, m: Record<string, unknown>) => sum + ((m.volume_24h as number) ?? 0),
+    (sum, m) => sum + (m.volume_24h ?? 0),
     0
   );
   const totalOpenInterest = statsData.reduce(
-    (sum: number, m: Record<string, unknown>) => sum + ((m.open_interest as number) ?? 0),
+    (sum, m) => sum + ((m.open_interest_long ?? 0) + (m.open_interest_short ?? 0)),
     0
   );
   const uniqueTraders = new Set(
-    ((tradersRes.data ?? []) as Array<Record<string, unknown>>).map((r) => r.deployer as string)
+    (tradersRes.data ?? []).map((r) => r.deployer)
   ).size;
   const trades24h = recentTradesRes.count ?? 0;
 

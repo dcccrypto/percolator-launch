@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSupabase, type MarketWithStats } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
+import type { Database } from "@/lib/database.types";
+
+type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 
 export function useMarketInfo(slabAddress: string) {
   const [market, setMarket] = useState<MarketWithStats | null>(null);

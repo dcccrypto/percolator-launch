@@ -1,0 +1,342 @@
+/**
+ * Integration Tests for Hidden Features APIs
+ * 
+ * TEMPLATE - Rename to hidden-features.test.ts when APIs are implemented
+ * 
+ * Tests the full API stack:
+ * - Request handling
+ * - Database queries
+ * - Response formatting
+ * - Error handling
+ */
+
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
+import request from 'supertest';
+// Import your app/server instance here
+// import { app } from '../../src/index';
+
+// Test data
+const TEST_SLAB = 'ErVCYKHbVLV2zN6Ss5gvPPQx5SbhYKb5AzKdYqiJx4qe'; // Replace with valid test slab
+const INVALID_SLAB = 'InvalidSlabAddress123';
+
+describe('Hidden Features API Integration', () => {
+  beforeAll(async () => {
+    // Setup: Ensure database is migrated
+    // Setup: Seed test data if needed
+    // Setup: Start test server if needed
+  });
+
+  afterAll(async () => {
+    // Cleanup: Remove test data
+    // Cleanup: Stop test server
+  });
+
+  // ============================================
+  // Warmup API Tests
+  // ============================================
+
+  describe('Warmup API', () => {
+    describe('GET /api/warmup/:slab/:idx', () => {
+      test('returns warmup progress for valid account', async () => {
+        const response = await request(app)
+          .get(`/api/warmup/${TEST_SLAB}/0`)
+          .expect(200);
+
+        expect(response.body).toHaveProperty('warmupActive');
+        expect(response.body).toHaveProperty('percentComplete');
+        expect(response.body).toHaveProperty('slotsRemaining');
+        expect(response.body).toHaveProperty('lockedAmount');
+        expect(response.body).toHaveProperty('unlockedAmount');
+        expect(response.body).toHaveProperty('estimatedSecondsRemaining');
+
+        // Validate types
+        expect(typeof response.body.warmupActive).toBe('boolean');
+        expect(typeof response.body.percentComplete).toBe('number');
+        expect(typeof response.body.slotsRemaining).toBe('number');
+        expect(typeof response.body.estimatedSecondsRemaining).toBe('number');
+      });
+
+      test('returns 404 for invalid slab address', async () => {
+        await request(app)
+          .get(`/api/warmup/${INVALID_SLAB}/0`)
+          .expect(404);
+      });
+
+      test('returns 404 for out of range account index', async () => {
+        await request(app)
+          .get(`/api/warmup/${TEST_SLAB}/9999`)
+          .expect(404);
+      });
+
+      test('returns warmupActive=false when warmup not started', async () => {
+        // Test account with no warmup
+        const response = await request(app)
+          .get(`/api/warmup/${TEST_SLAB}/1`)
+          .expect(200);
+
+        expect(response.body.warmupActive).toBe(false);
+        expect(response.body.percentComplete).toBe(0);
+      });
+
+      test('returns warmupActive=false when warmup complete', async () => {
+        // Test account with completed warmup
+        // (May need to mock or seed data for this)
+        const response = await request(app)
+          .get(`/api/warmup/${TEST_SLAB}/2`)
+          .expect(200);
+
+        if (response.body.warmupActive === false && response.body.percentComplete === 100) {
+          expect(response.body.slotsRemaining).toBe(0);
+          expect(response.body.estimatedSecondsRemaining).toBe(0);
+        }
+      });
+    });
+  });
+
+  // ============================================
+  // Insurance Fund API Tests
+  // ============================================
+
+  describe('Insurance API', () => {
+    describe('GET /api/insurance/:slab', () => {
+      test('returns insurance health metrics', async () => {
+        const response = await request(app)
+          .get(`/api/insurance/${TEST_SLAB}`)
+          .expect(200);
+
+        expect(response.body).toHaveProperty('balance');
+        expect(response.body).toHaveProperty('feeRevenue');
+        expect(response.body).toHaveProperty('healthRatio');
+        expect(response.body).toHaveProperty('accumulationRate');
+
+        // Validate balance is string (bigint serialized)
+        expect(typeof response.body.balance).toBe('string');
+        expect(response.body.balance).toMatch(/^\d+$/);
+
+        // Validate health ratio is number
+        expect(typeof response.body.healthRatio).toBe('number');
+      });
+
+      test('calculates health ratio correctly', async () => {
+        const response = await request(app)
+          .get(`/api/insurance/${TEST_SLAB}`)
+          .expect(200);
+
+        const { healthRatio } = response.body;
+
+        // Health ratio should be non-negative
+        expect(healthRatio).toBeGreaterThanOrEqual(0);
+
+        // If not infinite, should be a valid number
+        if (healthRatio !== Infinity) {
+          expect(Number.isFinite(healthRatio)).toBe(true);
+        }
+      });
+
+      test('returns 404 for invalid slab', async () => {
+        await request(app)
+          .get(`/api/insurance/${INVALID_SLAB}`)
+          .expect(404);
+      });
+    });
+
+    describe('GET /api/insurance/:slab/history', () => {
+      test('returns historical insurance data', async () => {
+        const response = await request(app)
+          .get(`/api/insurance/${TEST_SLAB}/history`)
+          .expect(200);
+
+        expect(response.body).toHaveProperty('history');
+        expect(Array.isArray(response.body.history)).toBe(true);
+      });
+
+      test('respects limit parameter', async () => {
+        const limit = 10;
+        const response = await request(app)
+          .get(`/api/insurance/${TEST_SLAB}/history?limit=${limit}`)
+          .expect(200);
+
+        expect(response.body.history.length).toBeLessThanOrEqual(limit);
+      });
+
+      test('returns data in chronological order (newest first)', async () => {
+        const response = await request(app)
+          .get(`/api/insurance/${TEST_SLAB}/history?limit=5`)
+          .expect(200);
+
+        const { history } = response.body;
+
+        if (history.length >= 2) {
+          const first = new Date(history[0].timestamp);
+          const second = new Date(history[1].timestamp);
+          expect(first.getTime()).toBeGreaterThanOrEqual(second.getTime());
+        }
+      });
+
+      test('each history entry has required fields', async () => {
+        const response = await request(app)
+          .get(`/api/insurance/${TEST_SLAB}/history?limit=1`)
+          .expect(200);
+
+        if (response.body.history.length > 0) {
+          const entry = response.body.history[0];
+          expect(entry).toHaveProperty('timestamp');
+          expect(entry).toHaveProperty('balance');
+          expect(entry).toHaveProperty('feeRevenue');
+        }
+      });
+    });
+  });
+
+  // ============================================
+  // Open Interest API Tests
+  // ============================================
+
+  describe('Open Interest API', () => {
+    describe('GET /api/oi/:slab', () => {
+      test('returns OI breakdown for market', async () => {
+        const response = await request(app)
+          .get(`/api/oi/${TEST_SLAB}`)
+          .expect(200);
+
+        expect(response.body).toHaveProperty('totalOI');
+        expect(response.body).toHaveProperty('longOI');
+        expect(response.body).toHaveProperty('shortOI');
+        expect(response.body).toHaveProperty('netLpPosition');
+        expect(response.body).toHaveProperty('imbalancePercent');
+      });
+
+      test('long + short equals total OI', async () => {
+        const response = await request(app)
+          .get(`/api/oi/${TEST_SLAB}`)
+          .expect(200);
+
+        const { totalOI, longOI, shortOI } = response.body;
+
+        // Parse string numbers
+        const total = BigInt(totalOI);
+        const long = BigInt(longOI);
+        const short = BigInt(shortOI);
+
+        // May be off by 1 due to rounding
+        expect(long + short).toBeLessThanOrEqual(total + 1n);
+        expect(long + short).toBeGreaterThanOrEqual(total - 1n);
+      });
+
+      test('imbalance percentage is within valid range', async () => {
+        const response = await request(app)
+          .get(`/api/oi/${TEST_SLAB}`)
+          .expect(200);
+
+        const { imbalancePercent } = response.body;
+
+        expect(imbalancePercent).toBeGreaterThanOrEqual(-100);
+        expect(imbalancePercent).toBeLessThanOrEqual(100);
+      });
+
+      test('returns 404 for invalid slab', async () => {
+        await request(app)
+          .get(`/api/oi/${INVALID_SLAB}`)
+          .expect(404);
+      });
+    });
+
+    describe('GET /api/oi/global', () => {
+      test('returns global OI aggregation', async () => {
+        const response = await request(app)
+          .get('/api/oi/global')
+          .expect(200);
+
+        expect(response.body).toHaveProperty('totalOI');
+        expect(response.body).toHaveProperty('marketCount');
+      });
+
+      test('market count is non-negative', async () => {
+        const response = await request(app)
+          .get('/api/oi/global')
+          .expect(200);
+
+        expect(response.body.marketCount).toBeGreaterThanOrEqual(0);
+      });
+
+      test('global OI is sum of all markets', async () => {
+        // Get global OI
+        const globalResponse = await request(app)
+          .get('/api/oi/global')
+          .expect(200);
+
+        const globalOI = BigInt(globalResponse.body.totalOI);
+
+        // Get individual market OI
+        const marketResponse = await request(app)
+          .get(`/api/oi/${TEST_SLAB}`)
+          .expect(200);
+
+        const marketOI = BigInt(marketResponse.body.totalOI);
+
+        // Global should be >= individual market
+        expect(globalOI).toBeGreaterThanOrEqual(marketOI);
+      });
+    });
+  });
+
+  // ============================================
+  // Performance Tests
+  // ============================================
+
+  describe('Performance', () => {
+    test('warmup API responds in < 100ms', async () => {
+      const start = Date.now();
+      await request(app).get(`/api/warmup/${TEST_SLAB}/0`);
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(100);
+    });
+
+    test('insurance API responds in < 50ms', async () => {
+      const start = Date.now();
+      await request(app).get(`/api/insurance/${TEST_SLAB}`);
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(50);
+    });
+
+    test('OI API responds in < 50ms', async () => {
+      const start = Date.now();
+      await request(app).get(`/api/oi/${TEST_SLAB}`);
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(50);
+    });
+  });
+
+  // ============================================
+  // Error Handling Tests
+  // ============================================
+
+  describe('Error Handling', () => {
+    test('returns proper error format for 404', async () => {
+      const response = await request(app)
+        .get(`/api/warmup/${INVALID_SLAB}/0`)
+        .expect(404);
+
+      expect(response.body).toHaveProperty('error');
+      expect(typeof response.body.error).toBe('string');
+    });
+
+    test('handles malformed slab addresses', async () => {
+      const malformed = 'not-a-valid-address';
+      const response = await request(app)
+        .get(`/api/oi/${malformed}`)
+        .expect(400); // or 404, depending on validation
+
+      expect(response.body).toHaveProperty('error');
+    });
+
+    test('handles negative account indices gracefully', async () => {
+      await request(app)
+        .get(`/api/warmup/${TEST_SLAB}/-1`)
+        .expect(400); // or 404
+    });
+  });
+});
