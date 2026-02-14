@@ -61,7 +61,8 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const priceE6 = Number(config.authorityPriceE6 ?? config.lastEffectivePriceE6 ?? 0);
     if (priceE6 === 0 || priceE6 === lastPriceRef.current) return;
     lastPriceRef.current = priceE6;
-    const now = Math.floor(Date.now() / 1000);
+    // Use milliseconds to match backend format
+    const now = Date.now();
     setPrices(prev => {
       const next = [...prev, { price_e6: priceE6, timestamp: now }];
       return next.slice(-500);
@@ -102,25 +103,40 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return { points: "", minP: 0, maxP: 0, curPrice: 0, high: 0, low: 0, isUp: true, minT: 0, maxT: 0, vals: [] as number[], times: [] as number[] };
 
     const v = prices.map((p) => p.price_e6 / 1e6);
+    // Backend returns timestamps in milliseconds
     const t = prices.map((p) => p.timestamp);
     const mn = Math.min(...v);
     const mx = Math.max(...v);
     const tMin = Math.min(...t);
     const tMax = Math.max(...t);
-    const range = mx - mn || 0.001;
+    
+    // If price is stable (< 0.1% movement), add padding for better visualization
+    let actualMin = mn;
+    let actualMax = mx;
+    const rawRange = mx - mn;
+    const avgPrice = (mn + mx) / 2;
+    
+    if (rawRange < avgPrice * 0.001 || rawRange === 0) {
+      // Stable price - add ±0.5% padding
+      const padding = avgPrice * 0.005;
+      actualMin = avgPrice - padding;
+      actualMax = avgPrice + padding;
+    }
+    
+    const range = actualMax - actualMin;
     const tRange = tMax - tMin || 1;
 
     const pts = prices
       .map((p, i) => {
         const x = PAD.left + ((t[i] - tMin) / tRange) * CHART_W;
-        const y = PAD.top + (1 - (v[i] - mn) / range) * CHART_H;
+        const y = PAD.top + (1 - (v[i] - actualMin) / range) * CHART_H;
         return `${x},${y}`;
       })
       .join(" ");
 
     return {
       points: pts,
-      minP: mn, maxP: mx,
+      minP: actualMin, maxP: actualMax,
       curPrice: v[v.length - 1],
       high: mx, low: mn,
       isUp: v[v.length - 1] >= v[0],
@@ -201,7 +217,8 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const timeText = crossTimeTextRef.current;
     if (timeText) {
       timeText.setAttribute("x", String(clampedX));
-      const date = new Date(d.times[idx] * 1000);
+      // Timestamps are already in milliseconds
+      const date = new Date(d.times[idx]);
       timeText.textContent = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
 
@@ -210,7 +227,8 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       hoverPriceRef.current.style.color = clr;
     }
     if (hoverDateRef.current) {
-      const date = new Date(d.times[idx] * 1000);
+      // Timestamps are already in milliseconds
+      const date = new Date(d.times[idx]);
       hoverDateRef.current.textContent = date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     }
   }, [W, CHART_W]);
@@ -247,7 +265,8 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const count = 5;
     for (let i = 0; i <= count; i++) {
       const t = minT + ((maxT - minT) * i) / count;
-      const d = new Date(t * 1000);
+      // Timestamps are already in milliseconds
+      const d = new Date(t);
       labels.push({
         x: PAD.left + (i / count) * CHART_W,
         label: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
