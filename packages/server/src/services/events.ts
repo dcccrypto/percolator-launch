@@ -11,7 +11,9 @@ export type ServerEvent =
   | "trade.executed"
   | "position.liquidated"
   | "liquidation.success"
-  | "liquidation.failure";
+  | "liquidation.failure"
+  | "price.engine.degraded"
+  | "price.engine.recovered";
 
 export interface EventPayload {
   event: ServerEvent;

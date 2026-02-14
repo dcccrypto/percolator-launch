@@ -34,9 +34,13 @@ export class PriceEngine {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
   private readonly maxReconnectDelay = PENDING_SUB_MAX_AGE_MS;
-  // BM6: Limit reconnection attempts to prevent infinite loops
+  // BM6: Limit rapid reconnection attempts (circuit breaker pattern)
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
+  // Self-healing: after exhausting rapid retries, enter cooldown then retry indefinitely
+  private readonly cooldownIntervalMs = 5 * 60_000; // 5 minutes between recovery attempts
+  private cooldownTimer: ReturnType<typeof setTimeout> | null = null;
+  private inCooldown = false;
   private rpcMsgId = 1;
   private started = false;
   private pendingSubscriptions: string[] = [];
@@ -64,6 +68,7 @@ export class PriceEngine {
 
   stop(): void {
     this.started = false;
+    this.inCooldown = false;
     if (this.pendingCleanupTimer) {
       clearInterval(this.pendingCleanupTimer);
       this.pendingCleanupTimer = null;
@@ -72,10 +77,19 @@ export class PriceEngine {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    if (this.cooldownTimer) {
+      clearTimeout(this.cooldownTimer);
+      this.cooldownTimer = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  /** Check if the engine is alive and serving prices */
+  isHealthy(): boolean {
+    return this.started && !this.inCooldown && this.ws?.readyState === WebSocket.OPEN;
   }
 
   /**
@@ -198,6 +212,12 @@ export class PriceEngine {
       this.reconnectDelay = 1000;
       // BM6: Reset reconnect attempt counter on successful connection
       this.reconnectAttempts = 0;
+      // Self-healing: if we recovered from cooldown, log and reset
+      if (this.inCooldown) {
+        console.log("[PriceEngine] Recovered from dormant cooldown — price streaming restored");
+        this.inCooldown = false;
+        eventBus.publish("price.engine.recovered", "system", {});
+      }
 
       // Clear stale subscription mappings from previous connection
       const existingSlabs = [...this.slabToSubId.keys()];
@@ -239,13 +259,30 @@ export class PriceEngine {
   }
 
   private scheduleReconnect(): void {
-    if (!this.started || this.reconnectTimer) return;
+    if (!this.started || this.reconnectTimer || this.cooldownTimer) return;
     
-    // BM6: Stop reconnecting after max attempts
+    // BM6: After exhausting rapid retries, enter cooldown mode instead of dying
     this.reconnectAttempts++;
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error(`[PriceEngine] Max reconnection attempts (${this.maxReconnectAttempts}) reached. Stopping.`);
-      this.stop();
+      if (!this.inCooldown) {
+        console.error(
+          `[PriceEngine] Max rapid reconnect attempts (${this.maxReconnectAttempts}) exhausted. ` +
+          `Entering cooldown — will retry every ${this.cooldownIntervalMs / 1000}s.`
+        );
+        this.inCooldown = true;
+        eventBus.publish("price.engine.degraded", "system", {
+          reason: "max_reconnect_exhausted",
+          cooldownMs: this.cooldownIntervalMs,
+        });
+      }
+      // Dormant recovery: retry at a much slower cadence instead of stopping
+      this.cooldownTimer = setTimeout(() => {
+        this.cooldownTimer = null;
+        this.reconnectAttempts = this.maxReconnectAttempts - 1; // Allow one rapid attempt
+        this.reconnectDelay = 1000;
+        console.log("[PriceEngine] Cooldown recovery attempt...");
+        this.connect();
+      }, this.cooldownIntervalMs);
       return;
     }
     

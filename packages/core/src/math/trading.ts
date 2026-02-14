@@ -85,13 +85,20 @@ export function computeTradingFee(
 
 /**
  * Compute PnL as a percentage of capital.
+ *
+ * Uses BigInt scaling to avoid precision loss from Number(bigint) conversion.
+ * Number(bigint) silently truncates values above 2^53, which can produce
+ * incorrect percentages for large positions (e.g., tokens with 9 decimals
+ * where capital > ~9M tokens in native units exceeds MAX_SAFE_INTEGER).
  */
 export function computePnlPercent(
   pnlTokens: bigint,
   capital: bigint,
 ): number {
   if (capital === 0n) return 0;
-  return (Number(pnlTokens) / Number(capital)) * 100;
+  // Scale by 10000 in BigInt-land (2 extra decimal places), then convert once
+  const scaledPct = (pnlTokens * 10_000n) / capital;
+  return Number(scaledPct) / 100;
 }
 
 /**

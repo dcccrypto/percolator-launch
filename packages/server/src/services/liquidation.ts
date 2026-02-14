@@ -45,6 +45,8 @@ export class LiquidationService {
   private liquidationCount = 0;
   private scanCount = 0;
   private lastScanTime = 0;
+  // Overlap guard: prevent concurrent scan cycles from interleaving
+  private _scanning = false;
   // BC1: Signature replay protection
   private recentSignatures = new Map<string, number>(); // signature -> timestamp
   private readonly signatureTTLMs = 60_000; // 60 seconds
@@ -384,8 +386,13 @@ export class LiquidationService {
     console.log(`[LiquidationService] Starting with interval ${this.intervalMs}ms`);
 
     this.timer = setInterval(async () => {
+      // Overlap guard: skip if previous cycle is still running (mirrors CrankService pattern)
+      if (this._scanning) return;
+      this._scanning = true;
       try {
-        const result = await this.scanAndLiquidateAll(getMarkets());
+        // Snapshot the market map to avoid iteration issues if markets are added/removed
+        const marketsSnapshot = new Map(getMarkets());
+        const result = await this.scanAndLiquidateAll(marketsSnapshot);
         if (result.candidates > 0) {
           console.log(
             `[LiquidationService] Scan: ${result.scanned} markets, ${result.candidates} candidates, ${result.liquidated} liquidated`,
@@ -393,6 +400,8 @@ export class LiquidationService {
         }
       } catch (err) {
         console.error("[LiquidationService] Failed to complete liquidation cycle:", err);
+      } finally {
+        this._scanning = false;
       }
     }, this.intervalMs);
   }

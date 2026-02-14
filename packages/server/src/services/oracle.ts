@@ -21,6 +21,9 @@ const API_TIMEOUT_MS = 10_000; // 10 second timeout for external API calls
 const PRICE_E6_MULTIPLIER = 1_000_000; // Price precision (6 decimals)
 const CACHED_PRICE_MAX_AGE_MS = 60_000; // Reject cached prices older than 60s
 
+// Cross-source validation: reject if DexScreener and Jupiter diverge by more than this %
+const MAX_CROSS_SOURCE_DEVIATION_PCT = 10;
+
 // DexScreener rate limit: cache responses for 10s to avoid hitting limits
 const dexScreenerCache = new Map<string, { data: DexScreenerResponse; fetchedAt: number }>();
 const DEX_SCREENER_CACHE_TTL_MS = 10_000;
@@ -144,13 +147,43 @@ export class OracleService {
     }
   }
 
-  /** Fetch price with fallback: DexScreener → Jupiter → cached */
+  /**
+   * Fetch price with cross-source validation and fallback.
+   *
+   * Strategy:
+   *   1. Fetch DexScreener and Jupiter in parallel
+   *   2. If both respond, cross-validate (reject if divergence > CROSS_SOURCE_MAX_DEVIATION_PCT)
+   *   3. Use the higher-confidence source (DexScreener preferred, Jupiter fallback)
+   *   4. If both fail, use cached price (reject if stale >60s)
+   *   5. Historical deviation check (reject if >30% change from last known price)
+   */
   async fetchPrice(mint: string, slabAddress: string): Promise<PriceEntry | null> {
-    let priceE6 = await this.fetchDexScreenerPrice(mint);
-    let source = "dexscreener";
+    // Fetch both sources in parallel for cross-validation
+    const [dexPrice, jupPrice] = await Promise.all([
+      this.fetchDexScreenerPrice(mint),
+      this.fetchJupiterPrice(mint),
+    ]);
 
+    // Cross-source validation: if both sources respond, check agreement
+    if (dexPrice !== null && jupPrice !== null && dexPrice > 0n && jupPrice > 0n) {
+      const larger = dexPrice > jupPrice ? dexPrice : jupPrice;
+      const smaller = dexPrice > jupPrice ? jupPrice : dexPrice;
+      const divergencePct = Number((larger - smaller) * 100n / smaller);
+
+      if (divergencePct > MAX_CROSS_SOURCE_DEVIATION_PCT) {
+        console.warn(
+          `[OracleService] Cross-source divergence ${divergencePct}% exceeds ${MAX_CROSS_SOURCE_DEVIATION_PCT}% for ${mint} ` +
+          `(dex=${dexPrice}, jup=${jupPrice}). Rejecting both — potential manipulation.`
+        );
+        return null;
+      }
+    }
+
+    // Select best available price (DexScreener preferred)
+    let priceE6: bigint | null = dexPrice;
+    let source = "dexscreener";
     if (priceE6 === null) {
-      priceE6 = await this.fetchJupiterPrice(mint);
+      priceE6 = jupPrice;
       source = "jupiter";
     }
 
@@ -168,7 +201,7 @@ export class OracleService {
       return null;
     }
 
-    // R2-S4: Deviation check — reject if >30% change from last known price
+    // R2-S4: Historical deviation check — reject if >30% change from last known price
     const history = this.priceHistory.get(slabAddress);
     if (history && history.length > 0) {
       const lastPrice = history[history.length - 1].priceE6;
