@@ -420,7 +420,8 @@ function MarketsPageInner() {
                   const oiTokens = formatTokenAmount(m.onChain.engine.totalOpenInterest);
                   const insuranceTokens = formatTokenAmount(m.onChain.engine.insuranceFund.balance);
                   const lastPrice = m.supabase?.last_price;
-                  const volume24h = m.supabase?.volume_24h;
+                  // volume_24h is token volume (sum of trade sizes) until prices are indexed
+                  const volume24hTokens = m.supabase?.volume_24h != null ? formatTokenAmount(BigInt(m.supabase.volume_24h)) : null;
 
                   return (
                     <Link
@@ -453,7 +454,7 @@ function MarketsPageInner() {
                       </div>
                       <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiTokens}</div>
                       <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                        {volume24h != null ? formatNum(volume24h) : "\u2014"}
+                        {volume24hTokens ?? "\u2014"}
                       </div>
                       <div className="text-right text-sm text-[var(--text)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceTokens}</div>
                       <div className="text-right text-sm text-[var(--text-secondary)]">{m.maxLeverage}x</div>
