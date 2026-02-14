@@ -15,6 +15,7 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
+import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "\u2014";
@@ -75,6 +76,7 @@ function MarketsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();
+  const { statsMap, loading: statsLoading } = useAllMarketStats();
   
   // P-MED-2: Read filters from URL params
   const [search, setSearch] = useState(searchParams.get("q") || "");
@@ -122,10 +124,11 @@ function MarketsPageInner() {
         const mint = d.config.collateralMint.toBase58();
         const maxLev = d.params.initialMarginBps > 0n ? Math.floor(10000 / Number(d.params.initialMarginBps)) : 0;
         const isAdminOracle = d.config.indexFeedId.equals(PublicKey.default);
-        // No Supabase - symbol/name will come from on-chain metadata
-        return { slabAddress: addr, mintAddress: mint, symbol: null, name: null, maxLeverage: maxLev, isAdminOracle, onChain: d, supabase: null };
+        // Fetch stats from Supabase
+        const stats = statsMap.get(addr) || null;
+        return { slabAddress: addr, mintAddress: mint, symbol: null, name: null, maxLeverage: maxLev, isAdminOracle, onChain: d, supabase: stats };
       });
-  }, [discovered]);
+  }, [discovered, statsMap]);
 
   // Only show mock data in development (never in production)
   const effectiveMarkets = merged.length > 0 ? merged : (process.env.NODE_ENV === "development" ? MOCK_MARKETS : []);
@@ -218,7 +221,7 @@ function MarketsPageInner() {
   }, [debouncedSearch, leverageFilter, oracleFilter, sortBy]);
 
   const displayedMarkets = filtered.slice(0, displayCount);
-  const loading = discoveryLoading;
+  const loading = discoveryLoading || statsLoading;
 
   // P-MED-4: Separate clear functions
   const clearFilters = () => {
@@ -417,6 +420,7 @@ function MarketsPageInner() {
                   const oiTokens = formatTokenAmount(m.onChain.engine.totalOpenInterest);
                   const insuranceTokens = formatTokenAmount(m.onChain.engine.insuranceFund.balance);
                   const lastPrice = m.supabase?.last_price;
+                  const volume24h = m.supabase?.volume_24h;
 
                   return (
                     <Link
@@ -448,7 +452,9 @@ function MarketsPageInner() {
                         </span>
                       </div>
                       <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiTokens}</div>
-                      <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>\u2014</div>
+                      <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                        {volume24h != null ? formatNum(volume24h) : "\u2014"}
+                      </div>
                       <div className="text-right text-sm text-[var(--text)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceTokens}</div>
                       <div className="text-right text-sm text-[var(--text-secondary)]">{m.maxLeverage}x</div>
                       <div className="text-right"><HealthBadge level={health.level} /></div>
