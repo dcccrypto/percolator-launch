@@ -3,8 +3,16 @@
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
+import { useLivePrice } from "@/hooks/useLivePrice";
 import { computeMarketHealth } from "@/lib/health";
 import { formatTokenAmount, formatSlotAge } from "@/lib/format";
+
+function formatNum(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 const HEALTH_COLORS: Record<string, string> = {
   healthy: "text-[var(--long)]",
@@ -16,6 +24,8 @@ const HEALTH_COLORS: Record<string, string> = {
 export const EngineHealthCard: FC = () => {
   const { engine, loading } = useEngineState();
   const { accounts } = useSlabState();
+  const { showUsd } = useUsdToggle();
+  const { priceUsd } = useLivePrice();
 
   if (loading || !engine) {
     return (
@@ -32,15 +42,28 @@ export const EngineHealthCard: FC = () => {
     ? (Number(engine.pnlPosTot * 10000n / haircutDenom) / 100).toFixed(2) + "%"
     : "0%";
 
+  const netLpPosDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(engine.netLpPos < 0n ? -engine.netLpPos : engine.netLpPos) / 1e6) * priceUsd)
+    : formatTokenAmount(engine.netLpPos < 0n ? -engine.netLpPos : engine.netLpPos);
+  const lpSumAbsDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(engine.lpSumAbs) / 1e6) * priceUsd)
+    : formatTokenAmount(engine.lpSumAbs);
+  const cTotDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(engine.cTot) / 1e6) * priceUsd)
+    : formatTokenAmount(engine.cTot);
+  const pnlPosTotDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(engine.pnlPosTot) / 1e6) * priceUsd)
+    : formatTokenAmount(engine.pnlPosTot);
+
   const metrics = [
     { label: "Crank Age", value: formatSlotAge(engine.currentSlot, engine.lastCrankSlot) },
     { label: "Current Slot", value: engine.currentSlot.toLocaleString() },
     { label: "Liquidations", value: engine.lifetimeLiquidations.toLocaleString() },
     { label: "Force Closes", value: engine.lifetimeForceCloses.toLocaleString() },
-    { label: "Net LP Pos", value: formatTokenAmount(engine.netLpPos < 0n ? -engine.netLpPos : engine.netLpPos) },
-    { label: "LP Sum |Pos|", value: formatTokenAmount(engine.lpSumAbs) },
-    { label: "Total Capital", value: formatTokenAmount(engine.cTot) },
-    { label: "Pos. PnL Tot", value: formatTokenAmount(engine.pnlPosTot) },
+    { label: "Net LP Pos", value: netLpPosDisplay },
+    { label: "LP Sum |Pos|", value: lpSumAbsDisplay },
+    { label: "Total Capital", value: cTotDisplay },
+    { label: "Pos. PnL Tot", value: pnlPosTotDisplay },
     { label: "Haircut Ratio", value: haircutPct },
     { label: "Liq/GC Cursor", value: `${engine.liqCursor}/${engine.gcCursor}` },
     { label: "Crank Cursor", value: engine.crankCursor.toString() },
