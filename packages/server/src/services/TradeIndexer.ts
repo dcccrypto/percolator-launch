@@ -295,15 +295,20 @@ export class TradeIndexerPolling {
 
   /**
    * Try to extract execution price from transaction logs.
+   * The on-chain program emits values in hex (0x...) or decimal format.
    */
   private extractPriceFromLogs(tx: ParsedTransactionWithMeta): number | null {
     if (!tx.meta?.logMessages) return null;
 
     for (const log of tx.meta.logMessages) {
-      const match = log.match(/^Program log: (\d+), (\d+), (\d+), (\d+), (\d+)$/);
+      // Match both hex (0x...) and decimal formats
+      const match = log.match(/^Program log: (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+)$/);
       if (!match) continue;
 
-      const values = [match[1], match[2], match[3], match[4], match[5]].map(Number);
+      // Parse hex or decimal to number
+      const values = [match[1], match[2], match[3], match[4], match[5]].map((v) => {
+        return v.startsWith('0x') ? parseInt(v, 16) : Number(v);
+      });
 
       for (const v of values) {
         // Reasonable price_e6 range: $0.001 to $1,000,000

@@ -187,13 +187,20 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
  * Extract execution price from program logs in the enhanced tx.
  * The on-chain program emits: "Program log: {v1}, {v2}, {v3}, {v4}, {v5}"
  * where one value is price_e6 (range $0.001 to $1M → 1,000 to 1,000,000,000,000).
+ * Values can be in hex (0x...) or decimal format.
  */
 function extractPriceFromLogs(tx: any): number {
   const logs: string[] = tx.logMessages ?? [];
   for (const log of logs) {
-    const match = log.match(/^Program log: (\d+), (\d+), (\d+), (\d+), (\d+)$/);
+    // Match both hex (0x...) and decimal formats
+    const match = log.match(/^Program log: (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+)$/);
     if (!match) continue;
-    const values = [match[1], match[2], match[3], match[4], match[5]].map(Number);
+    
+    // Parse hex or decimal to number
+    const values = [match[1], match[2], match[3], match[4], match[5]].map((v) => {
+      return v.startsWith('0x') ? parseInt(v, 16) : Number(v);
+    });
+    
     for (const v of values) {
       if (v >= 1_000 && v <= 1_000_000_000_000) {
         return v / 1_000_000;
