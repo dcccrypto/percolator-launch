@@ -84,6 +84,7 @@ function MarketsPageInner() {
   const [sortBy, setSortBy] = useState<SortKey>((searchParams.get("sort") as SortKey) || "volume");
   const [leverageFilter, setLeverageFilter] = useState<LeverageFilter>((searchParams.get("lev") as LeverageFilter) || "all");
   const [oracleFilter, setOracleFilter] = useState<OracleFilter>((searchParams.get("oracle") as OracleFilter) || "all");
+  const [showUsd, setShowUsd] = useState<boolean>(searchParams.get("usd") === "true");
   
   // P-MED-3: Pagination state for infinite scroll
   const [displayCount, setDisplayCount] = useState(20);
@@ -104,10 +105,11 @@ function MarketsPageInner() {
     if (sortBy !== "volume") params.set("sort", sortBy);
     if (leverageFilter !== "all") params.set("lev", leverageFilter);
     if (oracleFilter !== "all") params.set("oracle", oracleFilter);
+    if (showUsd) params.set("usd", "true");
     
     const newUrl = params.toString() ? `?${params.toString()}` : "/markets";
     router.replace(newUrl, { scroll: false });
-  }, [debouncedSearch, sortBy, leverageFilter, oracleFilter, router]);
+  }, [debouncedSearch, sortBy, leverageFilter, oracleFilter, showUsd, router]);
 
   const merged = useMemo<MergedMarket[]>(() => {
     return discovered
@@ -313,6 +315,32 @@ function MarketsPageInner() {
           <div className="mb-6 flex flex-wrap items-center gap-3">
             <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">filter:</span>
 
+            {/* USD/Token toggle */}
+            <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
+              <button
+                onClick={() => setShowUsd(false)}
+                className={[
+                  "rounded-sm px-2.5 py-1 text-[10px] font-medium transition-all duration-200",
+                  !showUsd
+                    ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                    : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+                ].join(" ")}
+              >
+                tokens
+              </button>
+              <button
+                onClick={() => setShowUsd(true)}
+                className={[
+                  "rounded-sm px-2.5 py-1 text-[10px] font-medium transition-all duration-200",
+                  showUsd
+                    ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                    : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+                ].join(" ")}
+              >
+                usd
+              </button>
+            </div>
+
             {/* Leverage filter */}
             <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
               {([
@@ -417,11 +445,25 @@ function MarketsPageInner() {
 
                 {displayedMarkets.map((m, i) => {
                   const health = computeMarketHealth(m.onChain.engine);
-                  const oiTokens = formatTokenAmount(m.onChain.engine.totalOpenInterest);
-                  const insuranceTokens = formatTokenAmount(m.onChain.engine.insuranceFund.balance);
                   const lastPrice = m.supabase?.last_price;
-                  // volume_24h is token volume (sum of trade sizes) until prices are indexed
-                  const volume24hTokens = m.supabase?.volume_24h != null ? formatTokenAmount(BigInt(m.supabase.volume_24h)) : null;
+                  
+                  // Token amounts
+                  const oiTokensRaw = m.onChain.engine.totalOpenInterest;
+                  const insuranceTokensRaw = m.onChain.engine.insuranceFund.balance;
+                  const volume24hRaw = m.supabase?.volume_24h != null ? BigInt(m.supabase.volume_24h) : null;
+                  
+                  // Display values (USD or tokens)
+                  const oiDisplay = showUsd && lastPrice != null
+                    ? formatNum((Number(oiTokensRaw) / 1e6) * lastPrice)
+                    : formatTokenAmount(oiTokensRaw);
+                  const insuranceDisplay = showUsd && lastPrice != null
+                    ? formatNum((Number(insuranceTokensRaw) / 1e6) * lastPrice)
+                    : formatTokenAmount(insuranceTokensRaw);
+                  const volumeDisplay = volume24hRaw != null
+                    ? (showUsd && lastPrice != null
+                        ? formatNum((Number(volume24hRaw) / 1e6) * lastPrice)
+                        : formatTokenAmount(volume24hRaw))
+                    : null;
 
                   return (
                     <Link
@@ -452,11 +494,11 @@ function MarketsPageInner() {
                             : "\u2014"}
                         </span>
                       </div>
-                      <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiTokens}</div>
+                      <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiDisplay}</div>
                       <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                        {volume24hTokens ?? "\u2014"}
+                        {volumeDisplay ?? "\u2014"}
                       </div>
-                      <div className="text-right text-sm text-[var(--text)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceTokens}</div>
+                      <div className="text-right text-sm text-[var(--text)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceDisplay}</div>
                       <div className="text-right text-sm text-[var(--text-secondary)]">{m.maxLeverage}x</div>
                       <div className="text-right"><HealthBadge level={health.level} /></div>
                     </Link>
