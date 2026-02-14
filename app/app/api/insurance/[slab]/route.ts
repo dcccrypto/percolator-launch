@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
@@ -12,6 +9,7 @@ export async function GET(
 ) {
   try {
     const { slab } = await params;
+    const supabase = getServiceClient();
 
     // Fetch current insurance data from market_stats
     const { data: stats, error: statsError } = await supabase
@@ -20,15 +18,8 @@ export async function GET(
       .eq('slab_address', slab)
       .single();
 
-    if (statsError) {
+    if (statsError || !stats) {
       console.error('[Insurance API] Stats error:', statsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch insurance data' },
-        { status: 404 }
-      );
-    }
-
-    if (!stats) {
       return NextResponse.json(
         { error: 'Market not found' },
         { status: 404 }
@@ -51,9 +42,9 @@ export async function GET(
     }
 
     // Calculate metrics
-    const insuranceBalance = stats.insurance_balance || '0';
-    const feeRevenue = stats.insurance_fee_revenue || '0';
-    const totalRisk = stats.total_open_interest || '0';
+    const insuranceBalance = (stats as any).insurance_balance || '0';
+    const feeRevenue = (stats as any).insurance_fee_revenue || '0';
+    const totalRisk = (stats as any).total_open_interest || '0';
 
     // Health ratio: insurance_balance / total_risk
     const healthRatio = parseFloat(totalRisk) > 0 
@@ -63,8 +54,8 @@ export async function GET(
     // Daily accumulation rate (estimate from recent growth)
     let dailyAccumulationRate = 0;
     if (history && history.length >= 2) {
-      const oldest = history[0];
-      const newest = history[history.length - 1];
+      const oldest = history[0] as any;
+      const newest = history[history.length - 1] as any;
       const daysDiff = (new Date(newest.timestamp).getTime() - new Date(oldest.timestamp).getTime()) / (1000 * 60 * 60 * 24);
       if (daysDiff > 0) {
         const feeDiff = parseFloat(newest.fee_revenue || '0') - parseFloat(oldest.fee_revenue || '0');
@@ -73,7 +64,7 @@ export async function GET(
     }
 
     // Format historical data
-    const historicalBalance = (history || []).map(h => ({
+    const historicalBalance = (history || []).map((h: any) => ({
       timestamp: new Date(h.timestamp).getTime(),
       balance: parseFloat(h.balance || '0') / 1e6, // Convert to USD
     }));

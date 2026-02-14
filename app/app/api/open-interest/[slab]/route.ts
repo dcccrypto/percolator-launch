@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
@@ -12,6 +9,7 @@ export async function GET(
 ) {
   try {
     const { slab } = await params;
+    const supabase = getServiceClient();
 
     // Fetch current OI data from market_stats
     const { data: stats, error: statsError } = await supabase
@@ -20,15 +18,8 @@ export async function GET(
       .eq('slab_address', slab)
       .single();
 
-    if (statsError) {
+    if (statsError || !stats) {
       console.error('[OI API] Stats error:', statsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch OI data' },
-        { status: 404 }
-      );
-    }
-
-    if (!stats) {
       return NextResponse.json(
         { error: 'Market not found' },
         { status: 404 }
@@ -56,14 +47,14 @@ export async function GET(
     // short_oi = (total_oi + net_lp_pos) / 2
     // Because: total_oi = long_oi + short_oi and net_lp_pos = short_oi - long_oi (LP is counterparty)
     
-    const totalOi = parseFloat(stats.total_open_interest || '0');
-    const netLpPos = parseFloat(stats.net_lp_pos || '0');
+    const totalOi = parseFloat((stats as any).total_open_interest || '0');
+    const netLpPos = parseFloat((stats as any).net_lp_pos || '0');
     
     const longOi = (totalOi - netLpPos) / 2;
     const shortOi = (totalOi + netLpPos) / 2;
 
     // Format historical data
-    const historicalOi = (history || []).map(h => {
+    const historicalOi = (history || []).map((h: any) => {
       const total = parseFloat(h.total_oi || '0');
       const netLp = parseFloat(h.net_lp_pos || '0');
       return {
@@ -75,10 +66,10 @@ export async function GET(
     });
 
     const response = {
-      totalOi: stats.total_open_interest || '0',
+      totalOi: (stats as any).total_open_interest || '0',
       longOi: (longOi * 1e6).toString(), // Back to e6 format
       shortOi: (shortOi * 1e6).toString(),
-      netLpPosition: stats.net_lp_pos || '0',
+      netLpPosition: (stats as any).net_lp_pos || '0',
       historicalOi,
     };
 
