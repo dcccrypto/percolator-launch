@@ -3,6 +3,7 @@
 import { use, useState, useRef, useEffect } from "react";
 import gsap from "gsap";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
+import { UsdToggleProvider, useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { TradeForm } from "@/components/trade/TradeForm";
 import { PositionPanel } from "@/components/trade/PositionPanel";
 import { AccountsCard } from "@/components/trade/AccountsCard";
@@ -21,6 +22,36 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
 
 /* ── Reusable tiny components ─────────────────────────────── */
+
+function UsdToggleButton() {
+  const { showUsd, setShowUsd } = useUsdToggle();
+  return (
+    <div className="flex gap-0.5 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
+      <button
+        onClick={() => setShowUsd(false)}
+        className={[
+          "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-all duration-200",
+          !showUsd
+            ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+            : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+        ].join(" ")}
+      >
+        tokens
+      </button>
+      <button
+        onClick={() => setShowUsd(true)}
+        className={[
+          "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-all duration-200",
+          showUsd
+            ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+            : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+        ].join(" ")}
+      >
+        usd
+      </button>
+    </div>
+  );
+}
 
 function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -162,6 +193,7 @@ function TradePageInner({ slab }: { slab: string }) {
             </h1>
           </div>
           <div className="flex items-center gap-2">
+            <UsdToggleButton />
             {health && <HealthBadge level={health.level} />}
             {priceDisplay && (
               <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
@@ -201,11 +233,14 @@ function TradePageInner({ slab }: { slab: string }) {
             />
           </div>
         </div>
-        {priceDisplay && (
-          <div className="text-right">
-            <div className="text-xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</div>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <UsdToggleButton />
+          {priceDisplay && (
+            <div className="text-right">
+              <div className="text-xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Quick start guide — desktop only, hidden after first trade ── */}
@@ -314,7 +349,9 @@ export default function TradePage({ params }: { params: Promise<{ slab: string }
 
   return (
     <SlabProvider slabAddress={slab}>
-      <TradePageInner slab={slab} />
+      <UsdToggleProvider>
+        <TradePageInner slab={slab} />
+      </UsdToggleProvider>
     </SlabProvider>
   );
 }

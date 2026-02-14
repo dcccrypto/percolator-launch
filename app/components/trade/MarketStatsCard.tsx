@@ -4,15 +4,23 @@ import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatTokenAmount, formatUsd, formatBps } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
+
+function formatNum(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 export const MarketStatsCard: FC = () => {
   const { engine, params, loading } = useEngineState();
   const { config: mktConfig } = useSlabState();
   const config = useMarketConfig();
-  const { priceE6: livePriceE6 } = useLivePrice();
+  const { priceE6: livePriceE6, priceUsd } = useLivePrice();
+  const { showUsd } = useUsdToggle();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
@@ -24,10 +32,17 @@ export const MarketStatsCard: FC = () => {
     );
   }
 
+  const oiDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(engine.totalOpenInterest) / 1e6) * priceUsd)
+    : formatTokenAmount(engine.totalOpenInterest);
+  const vaultDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(engine.vault) / 1e6) * priceUsd)
+    : formatTokenAmount(engine.vault);
+
   const stats = [
     { label: `${symbol} Price`, value: formatUsd(livePriceE6 ?? config.lastEffectivePriceE6) },
-    { label: "Open Interest", value: `${formatTokenAmount(engine.totalOpenInterest)}` },
-    { label: "Vault", value: `${formatTokenAmount(engine.vault)}` },
+    { label: "Open Interest", value: oiDisplay },
+    { label: "Vault", value: vaultDisplay },
     { label: "Trading Fee", value: formatBps(params.tradingFeeBps) },
     { label: "Init. Margin", value: formatBps(params.initialMarginBps) },
     { label: "Accounts", value: engine.numUsedAccounts.toString() },
