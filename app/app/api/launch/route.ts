@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 
+export const dynamic = 'force-dynamic';
+
 const SUPPORTED_DEX_IDS = new Set(["pumpswap", "raydium", "meteora"]);
 
 interface DexPoolDetection {

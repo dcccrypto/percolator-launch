@@ -9,6 +9,8 @@ import {
   SYSVAR_CLOCK_PUBKEY,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
+
+export const dynamic = 'force-dynamic';
 import {
   encodeKeeperCrank,
   encodePushOraclePrice,
