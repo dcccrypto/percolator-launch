@@ -11,6 +11,7 @@ import { initStatsCollector } from './services/StatsCollector.js';
 import warmupRouter, { initWarmupRouter } from './routes/warmup.js';
 import insuranceRouter from './routes/insurance.js';
 import oiRouter from './routes/oi.js';
+import fundingRouter from './routes/funding.js';
 
 // Load environment variables
 dotenv.config();
@@ -45,6 +46,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/warmup', initWarmupRouter(SOLANA_RPC_URL));
 app.use('/api/insurance', insuranceRouter);
 app.use('/api/oi', oiRouter);
+app.use('/api/funding', fundingRouter);
 
 // 404 handler
 app.use((_req, res) => {
