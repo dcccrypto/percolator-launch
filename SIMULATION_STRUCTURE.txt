@@ -1,0 +1,114 @@
+SIMULATION CONTROL PANEL - FILE STRUCTURE
+==========================================
+
+📦 NEW FILES CREATED (6 total, 1,507 lines)
+────────────────────────────────────────────
+
+📄 app/app/simulation/page.tsx (306 lines)
+   └─ Main simulation dashboard page
+   └─ Route: /simulation
+   └─ Integrates all components
+   └─ State management & API polling
+
+📄 app/components/simulation/ScenarioSelector.tsx (253 lines)
+   ├─ 6 predefined scenarios (calm, bull, crash, squeeze, whale, blackswan)
+   ├─ Custom scenario builder with 3 sliders
+   ├─ Active scenario highlighting
+   └─ Risk level indicators (colored dots)
+
+📄 app/components/simulation/SimulationControls.tsx (213 lines)
+   ├─ Start/Stop simulation button
+   ├─ Status indicator (running/stopped)
+   ├─ Market address input
+   ├─ Starting price input
+   ├─ Speed control (1x/2x/5x)
+   └─ Manual price override
+
+📄 app/components/simulation/LiveEventFeed.tsx (236 lines)
+   ├─ Real-time event scrolling feed
+   ├─ 5 event types (trade, liquidation, oracle, funding, system)
+   ├─ Color-coded by type
+   ├─ Auto-scroll with pause
+   ├─ Mock data generator
+   └─ Websocket-ready structure
+
+📄 app/components/simulation/SimulationMetrics.tsx (241 lines)
+   ├─ Active bots count
+   ├─ Total trades executed
+   ├─ Liquidations triggered
+   ├─ Insurance fund delta
+   ├─ Funding rate
+   ├─ PnL distribution chart
+   └─ Polls every 3 seconds
+
+📄 app/components/simulation/BotLeaderboard.tsx (258 lines)
+   ├─ Sortable table (by PnL or Trades)
+   ├─ Bot rank, name, type, PnL, trades, status
+   ├─ Liquidated bots struck-through
+   ├─ Status indicators (active/idle/liquidated)
+   ├─ Footer summary stats
+   └─ Polls every 5 seconds
+
+📄 SIMULATION_UI_SUMMARY.md (documentation)
+   └─ Complete implementation guide
+
+🔌 EXISTING API ROUTES (verified)
+──────────────────────────────────
+✅ GET  /api/simulation         (status)
+✅ POST /api/simulation/start   (start sim)
+✅ POST /api/simulation/stop    (stop sim)
+✅ POST /api/simulation/scenario (change scenario)
+✅ POST /api/simulation/price   (override price)
+
+🎨 DESIGN COMPLIANCE
+────────────────────
+✅ rounded-none everywhere (zero rounded corners)
+✅ Labels: text-[10px] font-bold uppercase tracking-[0.15em]
+✅ Status dots: var(--long), var(--short), amber-400
+✅ NO emojis
+✅ CSS variables: --bg, --border, --accent, etc.
+✅ font-mono for numbers
+✅ Terminal/hacker aesthetic
+
+📊 COMPONENT HIERARCHY
+──────────────────────
+/simulation (page)
+│
+├─ [LEFT SIDEBAR]
+│  ├─ SimulationControls
+│  ├─ Current Price Display
+│  └─ ScenarioSelector
+│
+└─ [MAIN DASHBOARD]
+   ├─ [TOP ROW]
+   │  ├─ SimulationMetrics
+   │  └─ LiveEventFeed
+   │
+   └─ [BOTTOM ROW]
+      └─ BotLeaderboard
+
+🚀 FEATURES
+───────────
+✓ Real-time state polling
+✓ Mock data generators (standalone operation)
+✓ Loading states & error handling
+✓ Responsive layout (desktop/mobile)
+✓ Color-coded status indicators
+✓ Auto-scrolling event feed
+✓ Sortable leaderboard
+✓ Custom scenario builder
+✓ Speed control (1x/2x/5x)
+✓ Manual price override
+✓ TypeScript strict typing
+✓ "use client" on all components
+✓ No commits/pushes made
+
+📈 STATISTICS
+─────────────
+Total lines of code: 1,507
+Components created: 6
+API integrations: 5
+Mock data generators: 4
+Design rule compliance: 100%
+
+STATUS: ✅ COMPLETE
