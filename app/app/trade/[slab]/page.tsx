@@ -11,7 +11,7 @@ import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
 import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { MarketBookCard } from "@/components/trade/MarketBookCard";
-import { PriceChart } from "@/components/trade/PriceChart";
+import { TradingChart } from "@/components/trade/TradingChart";
 import { TradeHistory } from "@/components/trade/TradeHistory";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { ShareButton } from "@/components/market/ShareCard";
@@ -263,9 +263,9 @@ function TradePageInner({ slab }: { slab: string }) {
           ════════════════════════════════════════════════════════ */}
       <div className="flex flex-col gap-1.5 px-2 pt-2 pb-4 lg:hidden min-w-0 w-full">
         {/* Chart */}
-        <ErrorBoundary label="PriceChart">
+        <ErrorBoundary label="TradingChart">
           <div className="w-full overflow-hidden">
-            <PriceChart slabAddress={slab} />
+            <TradingChart slabAddress={slab} />
           </div>
         </ErrorBoundary>
 
@@ -310,8 +310,8 @@ function TradePageInner({ slab }: { slab: string }) {
         {/* ── Left column ── */}
         <div className="min-w-0 space-y-1.5">
           {/* Chart */}
-          <ErrorBoundary label="PriceChart">
-            <PriceChart slabAddress={slab} />
+          <ErrorBoundary label="TradingChart">
+            <TradingChart slabAddress={slab} />
           </ErrorBoundary>
 
           {/* Position / Account / Deposit — tabbed */}
