@@ -27,7 +27,7 @@ export function useAllMarketStats() {
           setError(dbError.message);
         } else {
           const map = new Map<string, MarketWithStats>();
-          data?.forEach((market) => {
+          (data as MarketWithStats[])?.forEach((market) => {
             map.set(market.slab_address, market);
           });
           setStatsMap(map);
