@@ -76,11 +76,11 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       return;
     }
 
-    fetch(`/api/prices/${slabAddress}/history`)
+    fetch(`/api/markets/${slabAddress}/prices`)
       .then((r) => r.json())
       .then((d) => {
-        const apiPrices = (d.prices ?? []).map((p: { priceE6: string; timestamp: number }) => ({
-          price_e6: parseInt(p.priceE6),
+        const apiPrices = (d.prices ?? []).map((p: { price_e6: string; timestamp: number }) => ({
+          price_e6: parseInt(p.price_e6),
           timestamp: p.timestamp,
         }));
         if (apiPrices.length > 0) {

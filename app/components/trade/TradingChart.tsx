@@ -78,12 +78,12 @@ export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   // Fetch price history
   useEffect(() => {
-    fetch(`/api/prices/${slabAddress}/history`)
+    fetch(`/api/markets/${slabAddress}/prices`)
       .then((r) => r.json())
       .then((d) => {
-        const apiPrices = (d.prices ?? []).map((p: { priceE6: string; timestamp: number }) => ({
+        const apiPrices = (d.prices ?? []).map((p: { price_e6: string; timestamp: number }) => ({
           timestamp: p.timestamp,
-          price: parseInt(p.priceE6) / 1e6,
+          price: parseInt(p.price_e6) / 1e6,
         }));
         setPrices(apiPrices);
       })
