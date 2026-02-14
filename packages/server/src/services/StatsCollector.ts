@@ -18,7 +18,7 @@ import {
   type MarketConfig,
 } from "@percolator/core";
 import { getConnection } from "../utils/solana.js";
-import { upsertMarketStats, insertOraclePrice } from "../db/queries.js";
+import { upsertMarketStats, insertOraclePrice, get24hVolume } from "../db/queries.js";
 import type { CrankService } from "./crank.js";
 import type { OracleService } from "./oracle.js";
 
@@ -123,6 +123,16 @@ export class StatsCollector {
             const priceE6 = priceEntry?.priceE6 ?? marketConfig.authorityPriceE6;
             const priceUsd = priceE6 > 0n ? Number(priceE6) / 1_000_000 : null;
 
+            // Calculate 24h volume from trades table
+            let volume24h: number | null = null;
+            try {
+              const { volume } = await get24hVolume(slabAddress);
+              volume24h = Number(volume);
+            } catch (volErr) {
+              // Non-fatal — volume calculation failure shouldn't break stats collection
+              console.warn(`[StatsCollector] 24h volume calculation failed for ${slabAddress}:`, volErr instanceof Error ? volErr.message : volErr);
+            }
+
             // Upsert market stats
             await upsertMarketStats({
               slab_address: slabAddress,
@@ -134,7 +144,7 @@ export class StatsCollector {
               insurance_fund: Number(engine.insuranceFund.balance),
               total_accounts: engine.numUsedAccounts,
               funding_rate: Number(engine.fundingRateBpsPerSlotLast),
-              volume_24h: null, // Populated separately by trade indexer
+              volume_24h: volume24h,
               updated_at: new Date().toISOString(),
             });
 
