@@ -7,6 +7,14 @@ import {
   computePreTradeLiqPrice,
 } from "@/lib/trading";
 import { formatUsd, formatTokenAmount } from "@/lib/format";
+import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
+import { useLivePrice } from "@/hooks/useLivePrice";
+
+function formatNum(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 interface PreTradeSummaryProps {
   oracleE6: bigint;
@@ -48,6 +56,9 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
   symbol,
   decimals,
 }) => {
+  const { showUsd } = useUsdToggle();
+  const { priceUsd } = useLivePrice();
+
   if (oracleE6 === 0n || margin === 0n || positionSize === 0n) return null;
 
   const estEntry = computeEstimatedEntryPrice(oracleE6, tradingFeeBps, direction);
@@ -62,6 +73,17 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
   );
 
   const isLong = direction === "long";
+
+  // Convert to USD if toggle enabled
+  const notionalDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(positionSize) / Math.pow(10, decimals)) * priceUsd)
+    : `${formatTokenAmount(positionSize, decimals)} ${symbol}`;
+  const feeDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(fee) / Math.pow(10, decimals)) * priceUsd)
+    : `${formatTokenAmount(fee, decimals)} ${symbol}`;
+  const marginDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(margin) / Math.pow(10, decimals)) * priceUsd)
+    : `${formatTokenAmount(margin, decimals)} ${symbol}`;
 
   return (
     <div className="mb-4 rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 px-3.5 py-3 text-xs">
@@ -81,16 +103,16 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         <SummaryRow label="Est. Entry Price" value={formatUsd(estEntry)} />
         <SummaryRow
           label="Notional Value"
-          value={`${formatTokenAmount(positionSize, decimals)} ${symbol}`}
+          value={notionalDisplay}
         />
         <SummaryRow
           label="Trading Fee"
-          value={`${formatTokenAmount(fee, decimals)} ${symbol}`}
+          value={feeDisplay}
           valueClass="text-[var(--text-secondary)]"
         />
         <SummaryRow
           label="Margin Required"
-          value={`${formatTokenAmount(margin, decimals)} ${symbol}`}
+          value={marginDisplay}
         />
         <SummaryRow
           label="Est. Liq Price"

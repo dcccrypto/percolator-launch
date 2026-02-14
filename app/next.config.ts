@@ -15,6 +15,10 @@ const nextConfig: NextConfig = {
         source: "/api/markets/:path*",
         destination: `${API_URL}/markets/:path*`,
       },
+      {
+        source: "/api/prices/:path*",
+        destination: `${API_URL}/prices/:path*`,
+      },
     ];
   },
   webpack: (config, { isServer }) => {
