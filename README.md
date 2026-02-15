@@ -294,7 +294,13 @@ Multi-source median pricing with 30% max deviation protection and 5-minute stale
   - Displays on markets list and trade page
   - Falls back to symbol initial when no logo provided
   - Stored in Supabase Storage for fast loading
-- **Branding** — Make your markets stand out with visual identity
+- **Token Metadata** — Make tokens visible in wallets and explorers
+  - Metaplex-compliant metadata JSON generation
+  - Update via `/update-token-metadata` page
+  - Logos appear in Phantom wallet and Solana Explorer
+  - Includes name, symbol, description, image, external URL
+  - Optional on-chain metadata account updates
+- **Branding** — Make your markets and tokens stand out with visual identity
 
 ### Insurance LP
 - On-chain deposit/withdraw with SPL claim tokens

@@ -1,10 +1,14 @@
-# Supabase Storage Setup for Market Logos
+# Supabase Storage Setup for Logos and Token Metadata
 
-This document describes how to set up Supabase Storage for market logo uploads.
+This document describes how to set up Supabase Storage for market logo uploads and token metadata JSON files.
 
 ## Overview
 
-The logo upload feature stores market logos in Supabase Storage and references them via the `logo_url` column in the `markets` table.
+The logo and metadata system stores:
+1. **Market logos** - Used in markets list and trade pages (`market-logos/` folder)
+2. **Token metadata JSON** - Metaplex-compliant metadata for wallet/explorer visibility (`token-metadata/` folder)
+
+Both are stored in the same `logos` bucket and referenced via URLs.
 
 ## Setup Steps
 
@@ -56,16 +60,21 @@ USING (bucket_id = 'logos');
 
 ### 3. Configure Folder Structure
 
-Logos will be stored with the following structure:
+Files will be stored with the following structure:
 ```
 logos/
-  └── market-logos/
-      ├── <slab_address_1>.png
-      ├── <slab_address_2>.jpg
-      └── <slab_address_3>.webp
+  ├── market-logos/
+  │   ├── <slab_address_1>.png
+  │   ├── <slab_address_2>.jpg
+  │   └── <slab_address_3>.webp
+  └── token-metadata/
+      ├── <mint_address_1>.json
+      ├── <mint_address_2>.json
+      └── <mint_address_3>.json
 ```
 
-Each logo file is named using the market's slab address for easy identification.
+- **market-logos/** - Logo images for markets (PNG, JPG, GIF, WEBP, SVG)
+- **token-metadata/** - Metaplex metadata JSON files for tokens
 
 ### 4. Environment Variables
 
@@ -76,7 +85,7 @@ No additional environment variables are needed. The API uses the existing Supaba
 
 ## Usage
 
-### Uploading a Logo
+### Market Logo Upload
 
 #### Option 1: Via Upload Page
 1. Navigate to `/upload-logo`
@@ -245,3 +254,155 @@ Potential improvements:
 - Logo moderation/approval workflow
 - Batch upload for multiple markets
 - Integration with token metadata (Metaplex)
+
+---
+
+## Token Metadata System
+
+### Overview
+
+The token metadata system creates Metaplex-compliant JSON files that make token logos visible in wallets (Phantom, Solflare) and explorers (Solscan, Solana Explorer).
+
+### Metadata JSON Format
+
+Standard Metaplex format:
+```json
+{
+  "name": "My Token",
+  "symbol": "MTK",
+  "description": "A description of my token",
+  "image": "https://[project].supabase.co/storage/v1/object/public/logos/market-logos/[address].png",
+  "external_url": "https://myproject.com",
+  "properties": {
+    "files": [
+      {
+        "uri": "https://[project].supabase.co/storage/v1/object/public/logos/market-logos/[address].png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}
+```
+
+### API Endpoints
+
+#### POST /api/tokens/[mint]/metadata
+Create or update token metadata JSON and optionally update on-chain metadata account.
+
+**Request:**
+```json
+{
+  "name": "My Token",
+  "symbol": "MTK",
+  "description": "Optional description",
+  "image_url": "https://...",
+  "external_url": "https://...",
+  "update_authority_keypair": "[1,2,3,...]" // Optional, for on-chain update
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Metadata uploaded successfully",
+  "metadata_uri": "https://[project].supabase.co/storage/v1/object/public/logos/token-metadata/[mint].json",
+  "metadata": { ... },
+  "on_chain_update": {
+    "signature": "...",
+    "metadata_address": "..."
+  }
+}
+```
+
+#### GET /api/tokens/[mint]/metadata
+Retrieve existing metadata JSON for a token.
+
+### Usage Flow
+
+1. **Create Token** - Use `/devnet-mint` to create a token
+2. **Navigate to Update Page** - Go to `/update-token-metadata?mint=[address]`
+3. **Upload Logo** - Drag & drop or click to upload token logo
+4. **Fill Metadata** - Add description and external URL (optional)
+5. **Provide Update Authority** - Paste update authority keypair for on-chain update (optional)
+6. **Submit** - Click "Update Token Metadata"
+7. **Verify** - Check Phantom wallet or Solana Explorer to see the logo!
+
+### On-Chain Updates
+
+To update the on-chain metadata account, you need:
+
+1. **Update Authority Keypair** - The keypair that has authority to update the metadata
+2. **Sufficient SOL** - For transaction fees (~0.000005 SOL)
+
+The system uses `updateMetadataAccountV2` instruction to update the `uri` field in the metadata account, which points to the JSON file in Supabase Storage.
+
+### Storage Paths
+
+- Metadata JSON: `logos/token-metadata/[mint_address].json`
+- Logo Image: `logos/market-logos/[mint_address].png` (or jpg, gif, etc.)
+
+### Security Notes
+
+1. **Update Authority** - Keypair is only used client-side, never sent to server as plain text
+2. **JSON Validation** - All metadata is validated before upload
+3. **Public Access** - Metadata JSON must be publicly readable for wallets/explorers
+4. **Authentication** - API key required for creating/updating metadata
+
+### Wallet Integration
+
+Once metadata is updated:
+
+- **Phantom Wallet** - Displays logo automatically when viewing token
+- **Solana Explorer** - Shows logo on token page
+- **Solscan** - Displays logo in token details
+- **Jupiter** - May show logo in swap interface (if indexed)
+
+### Troubleshooting
+
+#### Logo not showing in wallet
+1. Wait 5-10 minutes for caches to update
+2. Verify metadata URI is set on-chain: `solana account [metadata_pda]`
+3. Check that JSON file is publicly accessible
+4. Ensure image URL in JSON is valid and public
+
+#### On-chain update failed
+1. Verify you provided the correct update authority keypair
+2. Check wallet has sufficient SOL for transaction
+3. Ensure metadata account exists (created during token creation)
+4. Check RPC connection is working
+
+#### Metadata JSON not found
+1. Confirm file was uploaded to `token-metadata/[mint].json`
+2. Check Supabase Storage bucket has public read access
+3. Verify URL format is correct
+
+### Example: Complete Flow
+
+```bash
+# 1. Create token on devnet
+# 2. Upload logo via /update-token-metadata
+# 3. The system:
+#    - Uploads logo to: logos/market-logos/[mint].png
+#    - Creates JSON: logos/token-metadata/[mint].json with:
+{
+  "name": "Test Token",
+  "symbol": "TEST",
+  "image": "https://[project].supabase.co/.../logos/market-logos/[mint].png"
+}
+#    - Updates on-chain metadata account with JSON URI
+# 4. Verify in Phantom:
+#    - Open wallet
+#    - View token
+#    - Logo should appear!
+```
+
+### Best Practices
+
+1. **Image Size** - Use 512x512px for best results
+2. **File Format** - PNG with transparency preferred
+3. **File Size** - Keep under 200KB for fast loading
+4. **Description** - Keep concise, under 200 characters
+5. **External URL** - Link to project website or docs
+6. **Update Early** - Update metadata soon after token creation for best indexing
+
