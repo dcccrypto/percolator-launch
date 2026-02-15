@@ -184,16 +184,23 @@ export default function SimulationPage() {
 
       // Fund disposable wallet from user's wallet (ONE approval)
       setPhase("funding-wallet");
-      setTxProgress({ current: 0, total: 0, label: `Funding simulation wallet (${FUND_AMOUNT_SOL} SOL)...` });
+      setTxProgress({ current: 0, total: 0, label: `Approve ${FUND_AMOUNT_SOL} SOL transfer...` });
 
-      const fundTx = new Transaction().add(
+      // Pre-fetch blockhash so Phantom popup appears instantly
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      const fundTx = new Transaction({
+        blockhash,
+        lastValidBlockHeight,
+        feePayer: publicKey,
+      }).add(
         SystemProgram.transfer({
           fromPubkey: publicKey,
           toPubkey: kp.publicKey,
           lamports: FUND_AMOUNT_LAMPORTS,
         })
       );
-      const fundSig = await sendTransaction(fundTx, connection);
+      const fundSig = await sendTransaction(fundTx, connection, { skipPreflight: true });
+      setTxProgress({ current: 0, total: 0, label: "Confirming transfer..." });
       await connection.confirmTransaction(fundSig, "confirmed");
 
       // Create market
