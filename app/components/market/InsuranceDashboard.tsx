@@ -85,30 +85,30 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
 
   // Calculate health status
   const healthStatus = useMemo(() => {
-    if (!insuranceData) return { color: "text-[var(--text-muted)]", icon: "⚪", label: "Unknown" };
+    if (!insuranceData) return { color: "text-[var(--text-muted)]", dotColor: "bg-[var(--text-muted)]", label: "Unknown" };
 
     const ratio = insuranceData.coverageRatio;
 
     if (ratio >= 5) {
       return {
         color: "text-[var(--long)]",
-        icon: "🟢",
+        dotColor: "bg-[var(--long)]",
         label: "Healthy",
         borderColor: "border-[var(--long)]",
         bgColor: "bg-[var(--long)]/5",
       };
     } else if (ratio >= 2) {
       return {
-        color: "text-[var(--warning)]",
-        icon: "🟡",
+        color: "text-amber-400",
+        dotColor: "bg-amber-400",
         label: "Moderate",
-        borderColor: "border-[var(--warning)]",
-        bgColor: "bg-[var(--warning)]/5",
+        borderColor: "border-amber-400",
+        bgColor: "bg-amber-400/5",
       };
     } else {
       return {
         color: "text-[var(--short)]",
-        icon: "🔴",
+        dotColor: "bg-[var(--short)]",
         label: "Low",
         borderColor: "border-[var(--short)]",
         bgColor: "bg-[var(--short)]/5",
@@ -129,7 +129,18 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
     );
   }
 
-  if (!insuranceData) return null;
+  if (!insuranceData || !insuranceData.balance || !insuranceData.feeRevenue) {
+    return (
+      <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            Insurance Fund
+          </span>
+          <span className="text-[10px] text-[var(--text-dim)]">No data available</span>
+        </div>
+      </div>
+    );
+  }
 
   const balanceUsd = formatUsdAmount(insuranceData.balance);
   const feeRevenueUsd = formatUsdAmount(insuranceData.feeRevenue);
@@ -140,8 +151,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
         {/* Header */}
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <span className="text-lg">🛡️</span>
-            <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
               Insurance Fund
             </span>
             <InfoIcon tooltip="Safety net that protects LPs from bankruptcy during extreme market events." />
@@ -178,9 +188,11 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
               >
                 ${feeRevenueUsd}
               </span>
-              <span className="ml-1.5 text-[10px] text-[var(--long)]">
-                (+${insuranceData.dailyAccumulationRate}/day)
-              </span>
+              {insuranceData.dailyAccumulationRate != null && (
+                <span className="ml-1.5 text-[10px] text-[var(--long)]">
+                  (+${insuranceData.dailyAccumulationRate}/day)
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -191,14 +203,16 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-lg">{healthStatus.icon}</span>
+              <span className={`inline-block w-2 h-2 rounded-full ${healthStatus.dotColor}`} />
               <div>
                 <div className="text-[11px] font-medium text-[var(--text)]">
                   Health: <span className={healthStatus.color}>{healthStatus.label}</span>
                 </div>
-                <div className="text-[10px] text-[var(--text-dim)]">
-                  Coverage Ratio: {insuranceData.coverageRatio.toFixed(1)}x total risk
-                </div>
+                {insuranceData.coverageRatio != null && (
+                  <div className="text-[10px] text-[var(--text-dim)]">
+                    Coverage Ratio: {insuranceData.coverageRatio.toFixed(1)}x total risk
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -209,26 +223,34 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
           <div className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
             7-Day Balance Trend
           </div>
-          <div className="flex h-12 items-end justify-between gap-[2px]">
-            {insuranceData.historicalBalance.map((point, idx) => {
-              const maxBalance = Math.max(
-                ...insuranceData.historicalBalance.map((p) => p.balance)
-              );
-              const height = (point.balance / maxBalance) * 100;
-              return (
-                <div
-                  key={idx}
-                  className="flex-1 rounded-t-sm bg-[var(--long)]/30 transition-all hover:bg-[var(--long)]/50"
-                  style={{ height: `${height}%` }}
-                  title={`$${point.balance.toLocaleString()}`}
-                />
-              );
-            })}
-          </div>
-          <div className="mt-1 flex justify-between text-[9px] text-[var(--text-dim)]">
-            <span>7d ago</span>
-            <span className="text-[var(--long)]">↗ +{((insuranceData.historicalBalance[insuranceData.historicalBalance.length - 1].balance / insuranceData.historicalBalance[0].balance - 1) * 100).toFixed(1)}%</span>
-          </div>
+          {insuranceData.historicalBalance && insuranceData.historicalBalance.length > 0 ? (
+            <>
+              <div className="flex h-12 items-end justify-between gap-[2px]">
+                {insuranceData.historicalBalance.map((point, idx) => {
+                  const maxBalance = Math.max(
+                    ...insuranceData.historicalBalance.map((p) => p.balance)
+                  );
+                  const height = (point.balance / maxBalance) * 100;
+                  return (
+                    <div
+                      key={idx}
+                      className="flex-1 rounded-none bg-[var(--long)]/30 transition-all hover:bg-[var(--long)]/50"
+                      style={{ height: `${height}%` }}
+                      title={`$${point.balance.toLocaleString()}`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="mt-1 flex justify-between text-[9px] text-[var(--text-dim)]">
+                <span>7d ago</span>
+                <span className="text-[var(--long)]">↗ +{((insuranceData.historicalBalance[insuranceData.historicalBalance.length - 1].balance / insuranceData.historicalBalance[0].balance - 1) * 100).toFixed(1)}%</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex h-12 items-center justify-center text-[10px] text-[var(--text-dim)]">
+              No historical data
+            </div>
+          )}
         </div>
 
         {/* Action Buttons */}

@@ -1,0 +1,20 @@
+{
+  "name": "@percolator/simulation",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "@percolator/core": "workspace:*",
+    "@solana/spl-token": "^0.4.14"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

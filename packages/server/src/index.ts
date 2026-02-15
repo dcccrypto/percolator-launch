@@ -1,96 +1,165 @@
-/**
- * Percolator Launch - Backend Server
- * 
- * Exposes hidden on-chain features via REST API
- */
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { serve } from "@hono/node-server";
+import { config } from "./config.js";
+import { OracleService } from "./services/oracle.js";
+import { CrankService } from "./services/crank.js";
+import { MarketLifecycleManager } from "./services/lifecycle.js";
+import { healthRoutes } from "./routes/health.js";
+import { marketRoutes } from "./routes/markets.js";
+import { priceRoutes } from "./routes/prices.js";
+import { crankRoutes } from "./routes/crank.js";
+import { setupWebSocket } from "./routes/ws.js";
+import { PriceEngine } from "./services/PriceEngine.js";
+import { LiquidationService } from "./services/liquidation.js";
+import { InsuranceLPService } from "./services/InsuranceLPService.js";
+import { TradeIndexerPolling } from "./services/TradeIndexer.js";
+import { HeliusWebhookManager } from "./services/HeliusWebhookManager.js";
+import { StatsCollector } from "./services/StatsCollector.js";
+import { webhookRoutes } from "./routes/webhook.js";
+import { tradeRoutes } from "./routes/trades.js";
+import { oracleRouterRoutes } from "./routes/oracle-router.js";
+import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
 
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { initStatsCollector } from './services/StatsCollector.js';
-import warmupRouter, { initWarmupRouter } from './routes/warmup.js';
-import insuranceRouter from './routes/insurance.js';
-import oiRouter from './routes/oi.js';
+// Services
+const oracleService = new OracleService();
+const priceEngine = new PriceEngine();
+const crankService = new CrankService(oracleService);
+const liquidationService = new LiquidationService(oracleService);
+const lifecycleManager = new MarketLifecycleManager(crankService, oracleService);
+const insuranceService = new InsuranceLPService(crankService);
+const tradeIndexer = new TradeIndexerPolling();
+const webhookManager = new HeliusWebhookManager();
+const statsCollector = new StatsCollector(crankService, oracleService);
 
-// Load environment variables
-dotenv.config();
+// Hono app
+const app = new Hono();
+// C1: CORS lockdown — only allow configured origins
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "https://percolatorlaunch.com,http://localhost:3000").split(",").map(s => s.trim()).filter(Boolean);
+app.use("*", cors({
+  origin: allowedOrigins,
+  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowHeaders: ["Content-Type", "x-api-key"],
+}));
 
-const app = express();
-const PORT = process.env.PORT || 4000;
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
-const MARKET_SLAB_ADDRESS = process.env.MARKET_SLAB_ADDRESS;
-const STATS_INTERVAL = parseInt(process.env.STATS_COLLECTION_INTERVAL || '30000', 10);
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Request logging
-app.use((req, _res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
-  next();
-});
-
-// Health check
-app.get('/health', (_req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    rpc: SOLANA_RPC_URL,
-    marketSlab: MARKET_SLAB_ADDRESS || 'not configured',
-  });
-});
-
-// Mount API routes
-app.use('/api/warmup', initWarmupRouter(SOLANA_RPC_URL));
-app.use('/api/insurance', insuranceRouter);
-app.use('/api/oi', oiRouter);
-
-// 404 handler
-app.use((_req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
-
-// Error handler
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ 
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
-  });
-});
-
-// Start server
-const server = app.listen(PORT, () => {
-  console.log(`[Server] Listening on port ${PORT}`);
-  console.log(`[Server] Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`[Server] RPC: ${SOLANA_RPC_URL}`);
-
-  // Initialize StatsCollector if market slab is configured
-  if (MARKET_SLAB_ADDRESS) {
-    const collector = initStatsCollector(SOLANA_RPC_URL, MARKET_SLAB_ADDRESS, STATS_INTERVAL);
-    collector.start();
-    console.log(`[Server] StatsCollector started for ${MARKET_SLAB_ADDRESS}`);
-  } else {
-    console.warn('[Server] MARKET_SLAB_ADDRESS not configured - StatsCollector not started');
+// Global rate limiting — read for GET, write for POST/PUT/DELETE
+app.use("*", async (c, next) => {
+  if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") {
+    return readRateLimit()(c, next);
   }
+  return writeRateLimit()(c, next);
 });
+
+// Mount routes
+app.route("/", healthRoutes({ crankService, liquidationService }));
+app.route("/", marketRoutes({ crankService, lifecycleManager }));
+app.route("/", priceRoutes({ oracleService, priceEngine }));
+app.route("/", crankRoutes({ crankService }));
+app.route("/", oracleRouterRoutes());
+app.route("/", webhookRoutes());
+app.route("/", tradeRoutes());
+
+// Webhook diagnostics
+app.get("/webhook/status", async (c) => {
+  const status = webhookManager.getStatus();
+  const webhooks = await webhookManager.listWebhooks();
+  return c.json({ ...status, registeredWebhooks: webhooks?.length ?? "unknown" });
+});
+app.post("/webhook/re-register", async (c) => {
+  const result = await webhookManager.reRegister();
+  return c.json(result);
+});
+
+// Root
+app.get("/", (c) => c.json({ name: "@percolator/server", version: "0.1.0" }));
+
+// Start
+const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
+  console.log(`🚀 Percolator server running on http://localhost:${info.port}`);
+});
+
+// WebSocket on the same HTTP server
+setupWebSocket(server as unknown as import("node:http").Server, oracleService, priceEngine);
+
+// Start real-time price engine
+priceEngine.start();
+console.log("📡 PriceEngine started — listening for Helius account changes");
+
+// Start crank service if keypair is configured
+if (config.crankKeypair) {
+  crankService.discover().then((markets) => {
+    crankService.start();
+    console.log("⚡ Crank service started");
+
+    // Auto-subscribe PriceEngine to all discovered markets
+    for (const market of markets) {
+      priceEngine.subscribeToSlab(market.slabAddress.toBase58());
+    }
+    if (markets.length > 0) {
+      console.log(`📡 PriceEngine subscribed to ${markets.length} market(s)`);
+    }
+
+    // Start liquidation scanner
+    liquidationService.start(() => crankService.getMarkets());
+    console.log("🔍 Liquidation scanner started");
+
+    // Start insurance LP service
+    insuranceService.start();
+    console.log("🛡️  Insurance LP service started");
+
+    // Start trade indexer (polling backup)
+    tradeIndexer.start();
+    console.log("📊 Trade indexer started (polling backup)");
+
+    // Start stats collector (populates market_stats + oracle_prices tables)
+    statsCollector.start();
+    console.log("📈 Stats collector started (market_stats + oracle_prices)");
+
+    // Register Helius webhook for primary trade indexing
+    webhookManager.start().then(() => {
+      console.log("🪝 Helius webhook manager started");
+    }).catch((err) => {
+      console.error("Failed to start webhook manager:", err);
+    });
+  }).catch((err) => {
+    console.error("Failed to start crank service:", err);
+  });
+  // Trade indexer also started inside crank block (reactive mode)
+} else {
+  console.warn("⚠️  CRANK_KEYPAIR not set — crank service disabled");
+  // Still start trade indexer in polling-only mode (no crank events, but polls markets)
+  tradeIndexer.start();
+  console.log("📊 Trade indexer started (polling-only mode, no crank keypair)");
+
+  // Register Helius webhook even without crank keypair
+  webhookManager.start().then(() => {
+    console.log("🪝 Helius webhook manager started");
+  }).catch((err) => {
+    console.error("Failed to start webhook manager:", err);
+  });
+}
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('[Server] SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    console.log('[Server] Server closed');
-    process.exit(0);
-  });
-});
+async function shutdown(signal: string) {
+  console.log(`${signal} received, shutting down...`);
+  try {
+    priceEngine.stop();
+    crankService.stop();
+    liquidationService.stop();
+    insuranceService.stop();
+    tradeIndexer.stop();
+    webhookManager.stop();
+    statsCollector.stop();
+    if (server && typeof (server as any).close === "function") {
+      (server as any).close();
+    }
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+  }
+  process.exit(0);
+}
 
-process.on('SIGINT', () => {
-  console.log('[Server] SIGINT received, shutting down gracefully');
-  server.close(() => {
-    console.log('[Server] Server closed');
-    process.exit(0);
-  });
-});
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
-export default app;
+export { app };

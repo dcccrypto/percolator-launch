@@ -100,12 +100,11 @@ export function InsuranceLPPanel() {
   })();
 
   return (
-    <div className="bg-white/[0.03] border border-white/[0.06] rounded-lg p-4">
+    <div className="bg-white/[0.03] border border-white/[0.06] rounded-none p-4">
       <div className="flex items-center gap-2 mb-4">
-        <span className="text-lg">🛡️</span>
-        <h3 className="text-sm font-semibold text-[var(--text)]">Insurance Pool</h3>
+        <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">Insurance Pool</h3>
         {state.mintExists && (
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-[var(--long)]/10 text-[var(--long)] rounded border border-[var(--long)]/20">
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-[var(--long)]/10 text-[var(--long)] rounded-none border border-[var(--long)]/20">
             LIVE
           </span>
         )}
@@ -135,7 +134,7 @@ export function InsuranceLPPanel() {
 
       {/* User Position */}
       {state.userLpBalance > 0n && (
-        <div className="bg-white/[0.05] rounded p-3 mb-4 border border-white/[0.08]">
+        <div className="bg-white/[0.05] rounded-none p-3 mb-4 border border-white/[0.08]">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-[10px] text-[var(--text-muted)] uppercase">Your LP Tokens</p>
@@ -154,7 +153,7 @@ export function InsuranceLPPanel() {
         <button
           onClick={handleCreateMint}
           disabled={loading}
-          className="w-full py-2 px-4 bg-[var(--long)] hover:bg-[var(--long)]/80 disabled:bg-white/[0.05] disabled:text-[var(--text-muted)] text-[var(--bg)] text-sm font-medium rounded transition-colors mb-3"
+          className="w-full py-2 px-4 bg-[var(--long)] hover:bg-[var(--long)]/80 disabled:bg-white/[0.05] disabled:text-[var(--text-muted)] text-[var(--bg)] text-sm font-medium rounded-none transition-colors mb-3"
         >
           {loading ? 'Creating...' : 'Create Insurance LP Mint'}
         </button>
@@ -171,10 +170,10 @@ export function InsuranceLPPanel() {
       {state.mintExists && publicKey && (
         <>
           {/* Tab Switcher */}
-          <div className="flex gap-1 mb-3 bg-white/[0.05] rounded p-0.5">
+          <div className="flex gap-1 mb-3 bg-white/[0.05] rounded-none p-0.5">
             <button
               onClick={() => { setMode('deposit'); setAmount(''); }}
-              className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
+              className={`flex-1 py-1.5 text-xs font-medium rounded-none transition-colors ${
                 mode === 'deposit'
                   ? 'bg-[var(--long)] text-[var(--bg)]'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
@@ -184,7 +183,7 @@ export function InsuranceLPPanel() {
             </button>
             <button
               onClick={() => { setMode('withdraw'); setAmount(''); }}
-              className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
+              className={`flex-1 py-1.5 text-xs font-medium rounded-none transition-colors ${
                 mode === 'withdraw'
                   ? 'bg-[var(--short)] text-white'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
@@ -201,7 +200,7 @@ export function InsuranceLPPanel() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder={mode === 'deposit' ? `Amount (${tokenSymbol})` : 'LP tokens'}
-              className="w-full bg-white/[0.05] border border-white/[0.08] rounded px-3 py-2 text-sm text-[var(--text)] font-mono placeholder:text-[var(--text-dim)] focus:outline-none focus:border-white/[0.12]"
+              className="w-full bg-white/[0.05] border border-white/[0.08] rounded-none px-3 py-2 text-sm text-[var(--text)] font-mono placeholder:text-[var(--text-dim)] focus:outline-none focus:border-white/[0.12]"
               min="0"
               step="0.001"
             />
@@ -231,7 +230,7 @@ export function InsuranceLPPanel() {
           <button
             onClick={mode === 'deposit' ? handleDeposit : handleWithdraw}
             disabled={loading || !amount || parseFloat(amount) <= 0}
-            className={`w-full py-2 px-4 text-white text-sm font-medium rounded transition-colors disabled:bg-white/[0.05] disabled:text-[var(--text-muted)] ${
+            className={`w-full py-2 px-4 text-white text-sm font-medium rounded-none transition-colors disabled:bg-white/[0.05] disabled:text-[var(--text-muted)] ${
               mode === 'deposit'
                 ? 'bg-[var(--long)] hover:bg-[var(--long)]/80 text-[var(--bg)]'
                 : 'bg-[var(--short)] hover:bg-[var(--short)]/80'

@@ -144,7 +144,7 @@ export const WarmupProgress: FC<{
     return (
       <div className="rounded-none border border-[var(--long)]/50 bg-[var(--long)]/5 p-3">
         <div className="flex items-center gap-2">
-          <span className="text-lg">✅</span>
+          <span className="inline-block w-2 h-2 rounded-full bg-[var(--long)]" />
           <div className="flex-1">
             <div className="text-[11px] font-medium text-[var(--long)]">
               Fully Unlocked
@@ -164,8 +164,7 @@ export const WarmupProgress: FC<{
         {/* Header */}
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <span className="text-lg">💰</span>
-            <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
               Profit Warming Up
             </span>
             <InfoIcon tooltip="Your profits are gradually unlocking. This protects against oracle manipulation attacks." />
@@ -233,9 +232,8 @@ export const WarmupProgress: FC<{
         </div>
 
         {/* Explainer hint */}
-        <div className="mt-2 flex items-start gap-1.5 rounded-none bg-[var(--accent)]/5 p-2">
-          <span className="text-[10px]">ℹ️</span>
-          <p className="flex-1 text-[9px] leading-relaxed text-[var(--text-dim)]">
+        <div className="mt-2 rounded-none border-l-2 border-l-[var(--accent)] bg-[var(--accent)]/5 p-2">
+          <p className="text-[9px] leading-relaxed text-[var(--text-dim)]">
             <strong className="text-[var(--text-secondary)]">Why?</strong>{" "}
             Protects against oracle attacks. Your profit gradually unlocks over ~8 minutes.
           </p>

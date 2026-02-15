@@ -57,7 +57,7 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
     >
       <div
         ref={modalRef}
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
       >
         {/* Header */}
         <div className="sticky top-0 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-4 py-3">
@@ -65,11 +65,11 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
             className="text-lg font-bold text-[var(--text)]"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            🔒 What is PNL Warmup?
+            What is PNL Warmup?
           </h2>
           <button
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)]"
+            className="flex h-8 w-8 items-center justify-center rounded-none text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)]"
           >
             <svg
               className="h-5 w-5"
@@ -120,8 +120,11 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
               can cash out.
             </p>
             <div className="mt-3 rounded-none border border-[var(--short)]/30 bg-[var(--short)]/5 p-3">
-              <div className="mb-1 text-xs font-bold uppercase tracking-wider text-[var(--short)]">
-                ⚠ Attack Scenario (Prevented)
+              <div className="mb-1 flex items-center gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--short)]" />
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--short)]">
+                  Attack Scenario (Prevented)
+                </span>
               </div>
               <ol className="space-y-1 text-sm text-[var(--text-secondary)]">
                 <li className="flex items-start gap-2">
@@ -139,7 +142,7 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
                 <li className="flex items-start gap-2">
                   <span className="font-mono text-[var(--text-dim)]">4.</span>
                   <span className="text-[var(--short)]">
-                    <strong>❌ Can&apos;t withdraw</strong> — profit is locked for 8
+                    <strong>Can&apos;t withdraw</strong> — profit is locked for 8
                     minutes
                   </span>
                 </li>
@@ -150,7 +153,7 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
                 <li className="flex items-start gap-2">
                   <span className="font-mono text-[var(--text-dim)]">6.</span>
                   <span className="text-[var(--long)]">
-                    <strong>✓ Attack fails</strong> — no fake profit withdrawal
+                    <strong>Attack fails</strong> — no fake profit withdrawal
                   </span>
                 </li>
               </ol>
@@ -320,7 +323,12 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
                     <td className="py-2 text-[var(--text-secondary)]">
                       PNL Warmup (8 min)
                     </td>
-                    <td className="py-2 text-[var(--long)]">✓ Protected</td>
+                    <td className="py-2">
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--long)]" />
+                        <span className="text-[var(--long)]">Protected</span>
+                      </span>
+                    </td>
                   </tr>
                   <tr>
                     <td className="py-2 font-medium text-[var(--text-dim)]">
@@ -329,8 +337,11 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
                     <td className="py-2 text-[var(--text-secondary)]">
                       None
                     </td>
-                    <td className="py-2 text-[var(--short)]">
-                      ❌ Vulnerable
+                    <td className="py-2">
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--short)]" />
+                        <span className="text-[var(--short)]">Vulnerable</span>
+                      </span>
                     </td>
                   </tr>
                 </tbody>

@@ -13,9 +13,11 @@ import { PublicKey } from "@solana/web3.js";
 import {
   parseEngine,
   parseConfig,
+  parseParams,
   parseAllAccounts,
   type EngineState,
   type MarketConfig,
+  type RiskParams,
 } from "@percolator/core";
 import { getConnection } from "../utils/solana.js";
 import { 
@@ -24,6 +26,7 @@ import {
   get24hVolume,
   insertFundingHistory,
 } from "../db/queries.js";
+import { getSupabase } from "../db/client.js";
 import type { CrankService } from "./crank.js";
 import type { OracleService } from "./oracle.js";
 
@@ -39,6 +42,9 @@ export class StatsCollector {
   private _collecting = false;
   private lastOracleLogTime = new Map<string, number>();
   private lastFundingLogSlot = new Map<string, number>();
+  private lastOiHistoryTime = new Map<string, number>();
+  private lastInsHistoryTime = new Map<string, number>();
+  private lastFundingHistoryTime = new Map<string, number>();
 
   constructor(
     private readonly crankService: CrankService,
@@ -95,12 +101,14 @@ export class StatsCollector {
 
             const data = new Uint8Array(accountInfo.data);
 
-            // Parse engine state
+            // Parse engine state and risk params
             let engine: EngineState;
             let marketConfig: MarketConfig;
+            let params: RiskParams;
             try {
               engine = parseEngine(data);
               marketConfig = parseConfig(data);
+              params = parseParams(data);
             } catch (parseErr) {
               // Slab too small or invalid — skip
               return;
@@ -139,7 +147,7 @@ export class StatsCollector {
               console.warn(`[StatsCollector] 24h volume calculation failed for ${slabAddress}:`, volErr instanceof Error ? volErr.message : volErr);
             }
 
-            // Upsert market stats with all funding rate fields
+            // Upsert market stats with ALL RiskEngine fields (migration 010)
             await upsertMarketStats({
               slab_address: slabAddress,
               last_price: priceUsd,
@@ -150,11 +158,28 @@ export class StatsCollector {
               insurance_fund: Number(engine.insuranceFund.balance),
               total_accounts: engine.numUsedAccounts,
               funding_rate: Number(engine.fundingRateBpsPerSlotLast),
-              funding_rate_bps_per_slot: Number(engine.fundingRateBpsPerSlotLast),
-              funding_index_qpb_e6: engine.fundingIndexQpbE6.toString(),
-              net_lp_position: engine.netLpPos.toString(),
-              last_funding_slot: Number(engine.lastFundingSlot),
               volume_24h: volume24h,
+              // Hidden features (migration 007)
+              total_open_interest: Number(engine.totalOpenInterest),
+              net_lp_pos: engine.netLpPos.toString(),
+              lp_sum_abs: Number(engine.lpSumAbs),
+              lp_max_abs: Number(engine.lpMaxAbs),
+              insurance_balance: Number(engine.insuranceFund.balance),
+              insurance_fee_revenue: Number(engine.insuranceFund.feeRevenue),
+              warmup_period_slots: Number(params.warmupPeriodSlots),
+              // Complete RiskEngine state fields (migration 010)
+              vault_balance: Number(engine.vault),
+              lifetime_liquidations: Number(engine.lifetimeLiquidations),
+              lifetime_force_closes: Number(engine.lifetimeForceCloses),
+              c_tot: Number(engine.cTot),
+              pnl_pos_tot: Number(engine.pnlPosTot),
+              last_crank_slot: Number(engine.lastCrankSlot),
+              max_crank_staleness_slots: Number(engine.maxCrankStalenessSlots),
+              // RiskParams fields (migration 010)
+              maintenance_fee_per_slot: params.maintenanceFeePerSlot.toString(),
+              liquidation_fee_bps: Number(params.liquidationFeeBps),
+              liquidation_fee_cap: params.liquidationFeeCap.toString(),
+              liquidation_buffer_bps: Number(params.liquidationBufferBps),
               updated_at: new Date().toISOString(),
             });
 
@@ -176,24 +201,59 @@ export class StatsCollector {
               }
             }
 
-            // Log funding history on every crank (when last_funding_slot advances)
-            const lastLoggedSlot = this.lastFundingLogSlot.get(slabAddress) ?? 0;
-            const currentFundingSlot = Number(engine.lastFundingSlot);
-            if (currentFundingSlot > lastLoggedSlot) {
+            // Log OI history (rate-limited per market)
+            const OI_HISTORY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+            const lastOiLog = this.lastOiHistoryTime.get(slabAddress) ?? 0;
+            if (Date.now() - lastOiLog >= OI_HISTORY_INTERVAL_MS) {
               try {
-                await insertFundingHistory({
+                await getSupabase().from('oi_history').insert({
                   market_slab: slabAddress,
-                  slot: currentFundingSlot,
-                  timestamp: new Date().toISOString(),
+                  slot: Number(engine.lastCrankSlot),
+                  total_oi: Number(engine.totalOpenInterest),
+                  net_lp_pos: Number(engine.netLpPos),
+                  lp_sum_abs: Number(engine.lpSumAbs),
+                  lp_max_abs: Number(engine.lpMaxAbs),
+                });
+                this.lastOiHistoryTime.set(slabAddress, Date.now());
+              } catch (e) {
+                // Non-fatal
+                console.warn(`[StatsCollector] OI history log failed for ${slabAddress}:`, e instanceof Error ? e.message : e);
+              }
+            }
+
+            // Log insurance history (rate-limited per market)
+            const INS_HISTORY_INTERVAL_MS = 5 * 60 * 1000;
+            const lastInsLog = this.lastInsHistoryTime.get(slabAddress) ?? 0;
+            if (Date.now() - lastInsLog >= INS_HISTORY_INTERVAL_MS) {
+              try {
+                await getSupabase().from('insurance_history').insert({
+                  market_slab: slabAddress,
+                  slot: Number(engine.lastCrankSlot),
+                  balance: Number(engine.insuranceFund.balance),
+                  fee_revenue: Number(engine.insuranceFund.feeRevenue),
+                });
+                this.lastInsHistoryTime.set(slabAddress, Date.now());
+              } catch (e) {
+                console.warn(`[StatsCollector] Insurance history log failed for ${slabAddress}:`, e instanceof Error ? e.message : e);
+              }
+            }
+
+            // Log funding history (rate-limited per market)
+            const FUNDING_HISTORY_INTERVAL_MS = 5 * 60 * 1000;
+            const lastFundLog = this.lastFundingHistoryTime.get(slabAddress) ?? 0;
+            if (Date.now() - lastFundLog >= FUNDING_HISTORY_INTERVAL_MS) {
+              try {
+                await getSupabase().from('funding_history').insert({
+                  market_slab: slabAddress,
+                  slot: Number(engine.lastCrankSlot),
                   rate_bps_per_slot: Number(engine.fundingRateBpsPerSlotLast),
-                  net_lp_pos: engine.netLpPos.toString(),
+                  net_lp_pos: Number(engine.netLpPos),
                   price_e6: Number(priceE6),
                   funding_index_qpb_e6: engine.fundingIndexQpbE6.toString(),
                 });
-                this.lastFundingLogSlot.set(slabAddress, currentFundingSlot);
-              } catch (fundingErr) {
-                // Non-fatal — funding history logging shouldn't break stats collection
-                console.warn(`[StatsCollector] Funding history log failed for ${slabAddress}:`, fundingErr instanceof Error ? fundingErr.message : fundingErr);
+                this.lastFundingHistoryTime.set(slabAddress, Date.now());
+              } catch (e) {
+                console.warn(`[StatsCollector] Funding history log failed for ${slabAddress}:`, e instanceof Error ? e.message : e);
               }
             }
 

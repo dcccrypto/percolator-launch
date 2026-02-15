@@ -131,7 +131,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
     >
       <div
         ref={modalRef}
-        className="w-full max-w-md overflow-hidden rounded-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
+        className="w-full max-w-md overflow-hidden rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-4 py-3">
@@ -144,7 +144,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
           <button
             onClick={onClose}
             disabled={loading}
-            className="flex h-8 w-8 items-center justify-center rounded-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)] disabled:opacity-50"
+            className="flex h-8 w-8 items-center justify-center rounded-none text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)] disabled:opacity-50"
           >
             <svg
               className="h-5 w-5"
@@ -168,14 +168,11 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
             <>
               {/* Info Banner */}
               <div className="mb-4 rounded-none border-l-2 border-l-[var(--accent)] bg-[var(--accent)]/5 p-3">
-                <div className="flex items-start gap-2">
-                  <span className="text-[10px]">ℹ️</span>
-                  <p className="flex-1 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-                    Anyone can contribute to the insurance fund. Your
-                    contribution helps protect all LPs and makes the market
-                    safer for everyone.
-                  </p>
-                </div>
+                <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
+                  Anyone can contribute to the insurance fund. Your
+                  contribution helps protect all LPs and makes the market
+                  safer for everyone.
+                </p>
               </div>
 
               {/* Amount Input */}
@@ -288,7 +285,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
             <div className="text-center">
               <div className="mb-4 flex justify-center">
                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--long)]/10">
-                  <span className="text-3xl">✅</span>
+                  <span className="inline-block w-8 h-8 rounded-full bg-[var(--long)]" />
                 </div>
               </div>
               <h3 className="mb-2 text-lg font-bold text-[var(--text)]">

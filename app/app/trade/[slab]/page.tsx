@@ -13,6 +13,9 @@ import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { MarketBookCard } from "@/components/trade/MarketBookCard";
 import { TradingChart } from "@/components/trade/TradingChart";
 import { TradeHistory } from "@/components/trade/TradeHistory";
+import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
+import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
+import { SystemCapitalCard } from "@/components/trade/SystemCapitalCard";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { ShareButton } from "@/components/market/ShareCard";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -295,9 +298,14 @@ function TradePageInner({ slab }: { slab: string }) {
         </ErrorBoundary>
 
         {/* Bottom tabs: Stats | Trades | Book */}
-        <Tabs tabs={["Stats", "Trades", "Book"]}>
+        <Tabs tabs={["Stats", "Trades", "Risk", "Book"]}>
           <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
           <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
+          <ErrorBoundary label="RiskAnalytics">
+            <CrankHealthCard />
+            <div className="mt-2"><LiquidationAnalytics /></div>
+            <div className="mt-2"><SystemCapitalCard /></div>
+          </ErrorBoundary>
           <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
         </Tabs>
       </div>
@@ -332,10 +340,17 @@ function TradePageInner({ slab }: { slab: string }) {
           </div>
 
           {/* Market info tabs */}
-          <Tabs tabs={["Stats", "Trades", "Health", "Book"]}>
+          <Tabs tabs={["Stats", "Trades", "Health", "Risk", "Book"]}>
             <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
             <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
-            <ErrorBoundary label="EngineHealthCard"><EngineHealthCard /></ErrorBoundary>
+            <ErrorBoundary label="EngineHealthCard">
+              <EngineHealthCard />
+              <div className="mt-2"><CrankHealthCard /></div>
+            </ErrorBoundary>
+            <ErrorBoundary label="RiskAnalytics">
+              <LiquidationAnalytics />
+              <div className="mt-2"><SystemCapitalCard /></div>
+            </ErrorBoundary>
             <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
           </Tabs>
         </div>

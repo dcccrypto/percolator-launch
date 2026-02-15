@@ -57,7 +57,7 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
     >
       <div
         ref={modalRef}
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-sm border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-none border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
       >
         {/* Header */}
         <div className="sticky top-0 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-4 py-3">
@@ -65,11 +65,11 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
             className="text-lg font-bold text-[var(--text)]"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            🛡️ What is the Insurance Fund?
+            What is the Insurance Fund?
           </h2>
           <button
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)]"
+            className="flex h-8 w-8 items-center justify-center rounded-none text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text)]"
           >
             <svg
               className="h-5 w-5"
@@ -154,8 +154,11 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
             </h3>
             <div className="space-y-3">
               <div className="rounded-none border border-[var(--long)]/30 bg-[var(--long)]/5 p-3">
-                <div className="mb-1 text-xs font-bold uppercase tracking-wider text-[var(--long)]">
-                  🟢 Strong Insurance = Safer Markets
+                <div className="mb-1 flex items-center gap-1.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--long)]" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--long)]">
+                    Strong Insurance = Safer Markets
+                  </span>
                 </div>
                 <p className="text-sm text-[var(--text-secondary)]">
                   High insurance coverage means LPs are protected even in
@@ -164,8 +167,11 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
                 </p>
               </div>
               <div className="rounded-none border border-[var(--short)]/30 bg-[var(--short)]/5 p-3">
-                <div className="mb-1 text-xs font-bold uppercase tracking-wider text-[var(--short)]">
-                  🔴 Low Insurance = Higher Risk
+                <div className="mb-1 flex items-center gap-1.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--short)]" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--short)]">
+                    Low Insurance = Higher Risk
+                  </span>
                 </div>
                 <p className="text-sm text-[var(--text-secondary)]">
                   Low insurance coverage means the system is vulnerable to
@@ -279,21 +285,21 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
             </h3>
             <div className="space-y-2 text-xs text-[var(--text-secondary)]">
               <div className="flex items-start gap-2">
-                <span className="text-[var(--long)]">🟢</span>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--long)] mt-0.5" />
                 <span>
                   <strong>&gt;5x coverage:</strong> Healthy — insurance can
                   cover multiple large liquidations
                 </span>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-[var(--warning)]">🟡</span>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 mt-0.5" />
                 <span>
                   <strong>2-5x coverage:</strong> Moderate — acceptable but
                   should be monitored
                 </span>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-[var(--short)]">🔴</span>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--short)] mt-0.5" />
                 <span>
                   <strong>&lt;2x coverage:</strong> Low — risky, consider
                   topping up

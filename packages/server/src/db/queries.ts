@@ -1,292 +1,227 @@
-import pool from './client.js';
+import { getSupabase } from "./client.js";
 
-// ============================================================================
-// Market Stats Queries
-// ============================================================================
-
-export interface MarketStats {
+export interface MarketRow {
+  id: string;
   slab_address: string;
-  warmup_period_slots: bigint | null;
-  total_open_interest: string | null;
+  mint_address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  deployer: string;
+  oracle_authority: string | null;
+  initial_price_e6: number | null;
+  max_leverage: number;
+  trading_fee_bps: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketStatsRow {
+  slab_address: string;
+  last_price: number | null;
+  mark_price: number | null;
+  index_price: number | null;
+  volume_24h: number | null;
+  volume_total: number | null;
+  open_interest_long: number | null;
+  open_interest_short: number | null;
+  insurance_fund: number | null;
+  total_accounts: number | null;
+  funding_rate: number | null;
+  // Hidden features (migration 007)
+  total_open_interest: number | null;
   net_lp_pos: string | null;
-  lp_sum_abs: string | null;
-  lp_max_abs: string | null;
-  insurance_balance: string | null;
-  insurance_fee_revenue: string | null;
-  updated_at: Date;
+  lp_sum_abs: number | null;
+  lp_max_abs: number | null;
+  insurance_balance: number | null;
+  insurance_fee_revenue: number | null;
+  warmup_period_slots: number | null;
+  // Complete RiskEngine fields (migration 010)
+  vault_balance: number | null;
+  lifetime_liquidations: number | null;
+  lifetime_force_closes: number | null;
+  c_tot: number | null;
+  pnl_pos_tot: number | null;
+  last_crank_slot: number | null;
+  max_crank_staleness_slots: number | null;
+  maintenance_fee_per_slot: string | null;
+  liquidation_fee_bps: number | null;
+  liquidation_fee_cap: string | null;
+  liquidation_buffer_bps: number | null;
+  updated_at: string | null;
 }
 
-/**
- * Update market stats with hidden features data
- */
-export async function updateMarketStats(
-  slabAddress: string,
-  data: {
-    warmupPeriodSlots?: bigint;
-    totalOpenInterest?: string;
-    netLpPos?: string;
-    lpSumAbs?: string;
-    lpMaxAbs?: string;
-    insuranceBalance?: string;
-    insuranceFeeRevenue?: string;
+export interface TradeRow {
+  id: string;
+  slab_address: string;
+  trader: string;
+  side: "long" | "short";
+  size: number | string; // string for full BigInt precision (i128 on-chain)
+  price: number;
+  fee: number;
+  tx_signature: string | null;
+  created_at: string;
+}
+
+export interface OraclePriceRow {
+  slab_address: string;
+  price_e6: string;
+  timestamp: number; // epoch seconds (BIGINT in DB)
+  tx_signature?: string | null;
+}
+
+export async function getMarkets(): Promise<MarketRow[]> {
+  const { data, error } = await getSupabase().from("markets").select("*");
+  if (error) throw error;
+  return (data ?? []) as MarketRow[];
+}
+
+export async function getMarketBySlabAddress(slabAddress: string): Promise<MarketRow | null> {
+  const { data, error } = await getSupabase()
+    .from("markets")
+    .select("*")
+    .eq("slab_address", slabAddress)
+    .single();
+  if (error && error.code !== "PGRST116") throw error;
+  return (data as MarketRow) ?? null;
+}
+
+export async function upsertMarketStats(stats: Partial<MarketStatsRow> & { slab_address: string }): Promise<void> {
+  const { error } = await getSupabase()
+    .from("market_stats")
+    .upsert(stats, { onConflict: "slab_address" });
+  if (error) throw error;
+}
+
+export async function insertTrade(trade: Omit<TradeRow, "id" | "created_at">): Promise<void> {
+  const { error } = await getSupabase().from("trades").insert(trade);
+  // BH8: Ignore unique constraint violations (23505 = unique_violation)
+  // This allows the TradeIndexer to safely retry without crashing on duplicates
+  if (error && error.code !== "23505") {
+    throw error;
   }
-): Promise<void> {
-  const query = `
-    INSERT INTO market_stats (
-      slab_address,
-      warmup_period_slots,
-      total_open_interest,
-      net_lp_pos,
-      lp_sum_abs,
-      lp_max_abs,
-      insurance_balance,
-      insurance_fee_revenue,
-      updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-    ON CONFLICT (slab_address) 
-    DO UPDATE SET
-      warmup_period_slots = EXCLUDED.warmup_period_slots,
-      total_open_interest = EXCLUDED.total_open_interest,
-      net_lp_pos = EXCLUDED.net_lp_pos,
-      lp_sum_abs = EXCLUDED.lp_sum_abs,
-      lp_max_abs = EXCLUDED.lp_max_abs,
-      insurance_balance = EXCLUDED.insurance_balance,
-      insurance_fee_revenue = EXCLUDED.insurance_fee_revenue,
-      updated_at = NOW()
-  `;
-
-  await pool.query(query, [
-    slabAddress,
-    data.warmupPeriodSlots ?? null,
-    data.totalOpenInterest ?? null,
-    data.netLpPos ?? null,
-    data.lpSumAbs ?? null,
-    data.lpMaxAbs ?? null,
-    data.insuranceBalance ?? null,
-    data.insuranceFeeRevenue ?? null,
-  ]);
 }
 
-/**
- * Get market stats by slab address
- */
-export async function getMarketStats(slabAddress: string): Promise<MarketStats | null> {
-  const query = `
-    SELECT 
-      slab_address,
-      warmup_period_slots,
-      total_open_interest,
-      net_lp_pos,
-      lp_sum_abs,
-      lp_max_abs,
-      insurance_balance,
-      insurance_fee_revenue,
-      updated_at
-    FROM market_stats
-    WHERE slab_address = $1
-  `;
-
-  const result = await pool.query(query, [slabAddress]);
-  return result.rows[0] || null;
+export async function tradeExistsBySignature(txSignature: string): Promise<boolean> {
+  const { data, error } = await getSupabase()
+    .from("trades")
+    .select("id")
+    .eq("tx_signature", txSignature)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
 }
 
-// ============================================================================
-// Insurance History Queries
-// ============================================================================
+export async function insertOraclePrice(price: OraclePriceRow): Promise<void> {
+  const { error } = await getSupabase().from("oracle_prices").insert({
+    slab_address: price.slab_address,
+    price_e6: price.price_e6,
+    timestamp: price.timestamp,
+    tx_signature: price.tx_signature ?? null,
+  });
+  if (error) throw error;
+}
 
-export interface InsuranceHistoryEntry {
-  id: bigint;
+export async function getRecentTrades(slabAddress: string, limit = 50): Promise<TradeRow[]> {
+  const { data, error } = await getSupabase()
+    .from("trades")
+    .select("*")
+    .eq("slab_address", slabAddress)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as TradeRow[];
+}
+
+export async function get24hVolume(slabAddress: string): Promise<{ volume: string; tradeCount: number }> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await getSupabase()
+    .from("trades")
+    .select("size")
+    .eq("slab_address", slabAddress)
+    .gte("created_at", since);
+  if (error) throw error;
+  let total = 0n;
+  for (const row of data ?? []) {
+    // size is stored as string for BigInt precision
+    try {
+      const abs = BigInt(row.size) < 0n ? -BigInt(row.size) : BigInt(row.size);
+      total += abs;
+    } catch {
+      total += BigInt(Math.abs(Number(row.size)));
+    }
+  }
+  return { volume: total.toString(), tradeCount: (data ?? []).length };
+}
+
+export async function getGlobalRecentTrades(limit = 50): Promise<TradeRow[]> {
+  const { data, error } = await getSupabase()
+    .from("trades")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as TradeRow[];
+}
+
+export async function getPriceHistory(
+  slabAddress: string,
+  sinceEpoch: number,
+): Promise<OraclePriceRow[]> {
+  const { data, error } = await getSupabase()
+    .from("oracle_prices")
+    .select("*")
+    .eq("slab_address", slabAddress)
+    .gte("timestamp", sinceEpoch)
+    .order("timestamp", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as OraclePriceRow[];
+}
+
+export interface FundingHistoryRow {
+  id: string;
   market_slab: string;
-  slot: bigint;
-  timestamp: Date;
-  balance: string;
-  fee_revenue: string;
+  slot: number;
+  timestamp: string;
+  rate_bps_per_slot: number;
+  net_lp_pos: string;
+  price_e6: number;
+  funding_index_qpb_e6: string;
+  created_at: string;
 }
 
-/**
- * Insert insurance history snapshot
- */
-export async function insertInsuranceHistory(
-  marketSlab: string,
-  slot: bigint,
-  balance: string,
-  feeRevenue: string
-): Promise<void> {
-  const query = `
-    INSERT INTO insurance_history (market_slab, slot, balance, fee_revenue, timestamp)
-    VALUES ($1, $2, $3, $4, NOW())
-    ON CONFLICT (market_slab, slot) DO NOTHING
-  `;
-
-  await pool.query(query, [marketSlab, slot, balance, feeRevenue]);
-}
-
-/**
- * Get insurance history for a market (last N hours)
- */
-export async function getInsuranceHistory(
-  marketSlab: string,
-  hoursBack: number = 24
-): Promise<InsuranceHistoryEntry[]> {
-  const query = `
-    SELECT id, market_slab, slot, timestamp, balance, fee_revenue
-    FROM insurance_history
-    WHERE market_slab = $1 
-      AND timestamp > NOW() - INTERVAL '${hoursBack} hours'
-    ORDER BY timestamp DESC
-  `;
-
-  const result = await pool.query(query, [marketSlab]);
-  return result.rows;
-}
-
-/**
- * Get 24h fee growth for insurance fund
- */
-export async function get24hFeeGrowth(marketSlab: string): Promise<string | null> {
-  const query = `
-    WITH ordered AS (
-      SELECT fee_revenue, 
-             ROW_NUMBER() OVER (ORDER BY timestamp DESC) as rn
-      FROM insurance_history
-      WHERE market_slab = $1
-        AND timestamp > NOW() - INTERVAL '24 hours'
-    )
-    SELECT 
-      (SELECT fee_revenue FROM ordered WHERE rn = 1) -
-      (SELECT fee_revenue FROM ordered ORDER BY rn DESC LIMIT 1) as growth
-  `;
-
-  const result = await pool.query(query, [marketSlab]);
-  return result.rows[0]?.growth ?? null;
-}
-
-// ============================================================================
-// Open Interest History Queries
-// ============================================================================
-
-export interface OIHistoryEntry {
-  id: bigint;
+export async function insertFundingHistory(record: {
   market_slab: string;
-  slot: bigint;
-  timestamp: Date;
-  total_oi: string;
+  slot: number;
+  timestamp: string;
+  rate_bps_per_slot: number;
   net_lp_pos: string;
-  lp_sum_abs: string;
-  lp_max_abs: string;
+  price_e6: number;
+  funding_index_qpb_e6: string;
+}): Promise<void> {
+  const { error } = await getSupabase().from("funding_history").insert(record);
+  if (error) throw error;
 }
 
-/**
- * Insert OI history snapshot
- */
-export async function insertOIHistory(
-  marketSlab: string,
-  slot: bigint,
-  totalOI: string,
-  netLpPos: string,
-  lpSumAbs: string,
-  lpMaxAbs: string
-): Promise<void> {
-  const query = `
-    INSERT INTO oi_history (market_slab, slot, total_oi, net_lp_pos, lp_sum_abs, lp_max_abs, timestamp)
-    VALUES ($1, $2, $3, $4, $5, $6, NOW())
-    ON CONFLICT (market_slab, slot) DO NOTHING
-  `;
-
-  await pool.query(query, [marketSlab, slot, totalOI, netLpPos, lpSumAbs, lpMaxAbs]);
+export async function getFundingHistory(slabAddress: string, limit: number = 100): Promise<FundingHistoryRow[]> {
+  const { data, error } = await getSupabase()
+    .from("funding_history")
+    .select("*")
+    .eq("market_slab", slabAddress)
+    .order("timestamp", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data ?? [];
 }
 
-/**
- * Get OI history for a market (last N hours)
- */
-export async function getOIHistory(
-  marketSlab: string,
-  hoursBack: number = 24
-): Promise<OIHistoryEntry[]> {
-  const query = `
-    SELECT id, market_slab, slot, timestamp, total_oi, net_lp_pos, lp_sum_abs, lp_max_abs
-    FROM oi_history
-    WHERE market_slab = $1 
-      AND timestamp > NOW() - INTERVAL '${hoursBack} hours'
-    ORDER BY timestamp DESC
-  `;
-
-  const result = await pool.query(query, [marketSlab]);
-  return result.rows;
-}
-
-// ============================================================================
-// Insurance Fund Health View
-// ============================================================================
-
-export interface InsuranceFundHealth {
-  slab_address: string;
-  insurance_balance: string;
-  insurance_fee_revenue: string;
-  total_open_interest: string;
-  health_ratio: number | null;
-}
-
-/**
- * Get insurance fund health metrics
- */
-export async function getInsuranceFundHealth(slabAddress: string): Promise<InsuranceFundHealth | null> {
-  const query = `
-    SELECT 
-      slab_address,
-      insurance_balance,
-      insurance_fee_revenue,
-      total_open_interest,
-      CASE 
-        WHEN total_open_interest > 0 THEN 
-          (insurance_balance::numeric / total_open_interest::numeric)
-        ELSE NULL
-      END AS health_ratio
-    FROM market_stats
-    WHERE slab_address = $1
-  `;
-
-  const result = await pool.query(query, [slabAddress]);
-  return result.rows[0] || null;
-}
-
-// ============================================================================
-// Open Interest Imbalance View
-// ============================================================================
-
-export interface OIImbalance {
-  slab_address: string;
-  total_open_interest: string;
-  net_lp_pos: string;
-  lp_sum_abs: string;
-  lp_max_abs: string;
-  long_oi: string;
-  short_oi: string;
-  imbalance_percent: number;
-}
-
-/**
- * Get open interest imbalance metrics
- */
-export async function getOIImbalance(slabAddress: string): Promise<OIImbalance | null> {
-  const query = `
-    SELECT 
-      slab_address,
-      total_open_interest,
-      net_lp_pos,
-      lp_sum_abs,
-      lp_max_abs,
-      ((total_open_interest::numeric - net_lp_pos::numeric) / 2) AS long_oi,
-      ((total_open_interest::numeric + net_lp_pos::numeric) / 2) AS short_oi,
-      CASE 
-        WHEN total_open_interest::numeric > 0 THEN 
-          (net_lp_pos::numeric * 100.0 / total_open_interest::numeric)
-        ELSE 0
-      END AS imbalance_percent
-    FROM market_stats
-    WHERE slab_address = $1
-  `;
-
-  const result = await pool.query(query, [slabAddress]);
-  return result.rows[0] || null;
+export async function getFundingHistorySince(slabAddress: string, sinceTimestamp: string): Promise<FundingHistoryRow[]> {
+  const { data, error } = await getSupabase()
+    .from("funding_history")
+    .select("*")
+    .eq("market_slab", slabAddress)
+    .gte("timestamp", sinceTimestamp)
+    .order("timestamp", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
 }

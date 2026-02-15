@@ -153,7 +153,18 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     );
   }
 
-  if (!oiData) return null;
+  if (!oiData || !oiData.totalOi || !oiData.longOi || !oiData.shortOi || !oiData.netLpPosition) {
+    return (
+      <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            Open Interest
+          </span>
+          <span className="text-[10px] text-[var(--text-dim)]">No data available</span>
+        </div>
+      </div>
+    );
+  }
 
   const totalOiUsd = formatUsdAmount(oiData.totalOi);
   const longOiUsd = formatUsdAmount(oiData.longOi);
@@ -166,8 +177,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
       {/* Header */}
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <span className="text-lg">📊</span>
-          <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
             Open Interest
           </span>
           <InfoIcon tooltip="Total notional value of all open positions in the market." />
@@ -285,55 +295,63 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
         <div className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
           24h OI History
         </div>
-        <div className="flex h-16 items-end justify-between gap-[2px]">
-          {oiData.historicalOi.map((point, idx) => {
-            const maxOi = Math.max(
-              ...oiData.historicalOi.map((p) => p.totalOi)
-            );
-            const height = (point.totalOi / maxOi) * 100;
-            const longHeight = (point.longOi / maxOi) * 100;
-            const shortHeight = (point.shortOi / maxOi) * 100;
+        {oiData.historicalOi && oiData.historicalOi.length > 0 ? (
+          <>
+            <div className="flex h-16 items-end justify-between gap-[2px]">
+              {oiData.historicalOi.map((point, idx) => {
+                const maxOi = Math.max(
+                  ...oiData.historicalOi.map((p) => p.totalOi)
+                );
+                const height = (point.totalOi / maxOi) * 100;
+                const longHeight = (point.longOi / maxOi) * 100;
+                const shortHeight = (point.shortOi / maxOi) * 100;
 
-            return (
-              <div
-                key={idx}
-                className="relative flex-1"
-                title={`Total: $${point.totalOi.toLocaleString()}\nLong: $${point.longOi.toLocaleString()}\nShort: $${point.shortOi.toLocaleString()}`}
-              >
-                {/* Stacked bars */}
-                <div
-                  className="absolute bottom-0 w-full rounded-t-sm bg-[var(--long)]/40 transition-all hover:bg-[var(--long)]/60"
-                  style={{ height: `${longHeight}%` }}
-                />
-                <div
-                  className="absolute w-full rounded-t-sm bg-[var(--short)]/40 transition-all hover:bg-[var(--short)]/60"
-                  style={{
-                    bottom: `${longHeight}%`,
-                    height: `${shortHeight}%`,
-                  }}
-                />
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-1 flex justify-between text-[9px] text-[var(--text-dim)]">
-          <span>24h ago</span>
-          <span className="text-[var(--accent)]">
-            {((oiData.historicalOi[oiData.historicalOi.length - 1].totalOi /
-              oiData.historicalOi[0].totalOi -
-              1) *
-              100) >= 0
-              ? "↗"
-              : "↘"}{" "}
-            {Math.abs(
-              (oiData.historicalOi[oiData.historicalOi.length - 1].totalOi /
-                oiData.historicalOi[0].totalOi -
-                1) *
-                100
-            ).toFixed(1)}
-            %
-          </span>
-        </div>
+                return (
+                  <div
+                    key={idx}
+                    className="relative flex-1"
+                    title={`Total: $${point.totalOi.toLocaleString()}\nLong: $${point.longOi.toLocaleString()}\nShort: $${point.shortOi.toLocaleString()}`}
+                  >
+                    {/* Stacked bars */}
+                    <div
+                      className="absolute bottom-0 w-full rounded-none bg-[var(--long)]/40 transition-all hover:bg-[var(--long)]/60"
+                      style={{ height: `${longHeight}%` }}
+                    />
+                    <div
+                      className="absolute w-full rounded-none bg-[var(--short)]/40 transition-all hover:bg-[var(--short)]/60"
+                      style={{
+                        bottom: `${longHeight}%`,
+                        height: `${shortHeight}%`,
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-1 flex justify-between text-[9px] text-[var(--text-dim)]">
+              <span>24h ago</span>
+              <span className="text-[var(--accent)]">
+                {((oiData.historicalOi[oiData.historicalOi.length - 1].totalOi /
+                  oiData.historicalOi[0].totalOi -
+                  1) *
+                  100) >= 0
+                  ? "↗"
+                  : "↘"}{" "}
+                {Math.abs(
+                  (oiData.historicalOi[oiData.historicalOi.length - 1].totalOi /
+                    oiData.historicalOi[0].totalOi -
+                    1) *
+                    100
+                ).toFixed(1)}
+                %
+              </span>
+            </div>
+          </>
+        ) : (
+          <div className="flex h-16 items-center justify-center text-[10px] text-[var(--text-dim)]">
+            No historical data
+          </div>
+        )}
       </div>
 
       {error && !mockMode && (
