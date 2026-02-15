@@ -17,7 +17,8 @@ interface InsuranceData {
   totalRisk: string; // Total open interest
 }
 
-// Mock data for development
+// Mock data for development — use fixed timestamps to avoid SSR/client hydration mismatch
+const MOCK_BASE_TS = 1739600000000; // fixed reference point
 const MOCK_INSURANCE: InsuranceData = {
   balance: "125432000000", // $125,432
   feeRevenue: "12543000000", // $12,543
@@ -25,14 +26,14 @@ const MOCK_INSURANCE: InsuranceData = {
   coverageRatio: 8.5, // 8.5x coverage
   totalRisk: "14750000000", // $14,750 total risk
   historicalBalance: [
-    { timestamp: Date.now() - 7 * 24 * 60 * 60 * 1000, balance: 120000 },
-    { timestamp: Date.now() - 6 * 24 * 60 * 60 * 1000, balance: 121200 },
-    { timestamp: Date.now() - 5 * 24 * 60 * 60 * 1000, balance: 122100 },
-    { timestamp: Date.now() - 4 * 24 * 60 * 60 * 1000, balance: 123000 },
-    { timestamp: Date.now() - 3 * 24 * 60 * 60 * 1000, balance: 123800 },
-    { timestamp: Date.now() - 2 * 24 * 60 * 60 * 1000, balance: 124500 },
-    { timestamp: Date.now() - 1 * 24 * 60 * 60 * 1000, balance: 125000 },
-    { timestamp: Date.now(), balance: 125432 },
+    { timestamp: MOCK_BASE_TS - 7 * 24 * 60 * 60 * 1000, balance: 120000 },
+    { timestamp: MOCK_BASE_TS - 6 * 24 * 60 * 60 * 1000, balance: 121200 },
+    { timestamp: MOCK_BASE_TS - 5 * 24 * 60 * 60 * 1000, balance: 122100 },
+    { timestamp: MOCK_BASE_TS - 4 * 24 * 60 * 60 * 1000, balance: 123000 },
+    { timestamp: MOCK_BASE_TS - 3 * 24 * 60 * 60 * 1000, balance: 123800 },
+    { timestamp: MOCK_BASE_TS - 2 * 24 * 60 * 60 * 1000, balance: 124500 },
+    { timestamp: MOCK_BASE_TS - 1 * 24 * 60 * 60 * 1000, balance: 125000 },
+    { timestamp: MOCK_BASE_TS, balance: 125432 },
   ],
 };
 

@@ -14,20 +14,21 @@ interface OpenInterestData {
   historicalOi: Array<{ timestamp: number; totalOi: number; longOi: number; shortOi: number }>;
 }
 
-// Mock data for development
+// Mock data for development — use fixed timestamps to avoid SSR/client hydration mismatch
+const MOCK_BASE_TS = 1739600000000; // fixed reference point
 const MOCK_OI: OpenInterestData = {
   totalOi: "5234123000000", // $5,234,123
   longOi: "2850000000000", // $2,850,000 (54.5%)
   shortOi: "2384123000000", // $2,384,123 (45.5%)
   netLpPosition: "465877000000", // +$465,877 (long)
   historicalOi: [
-    { timestamp: Date.now() - 24 * 60 * 60 * 1000, totalOi: 4800000, longOi: 2500000, shortOi: 2300000 },
-    { timestamp: Date.now() - 20 * 60 * 60 * 1000, totalOi: 4950000, longOi: 2600000, shortOi: 2350000 },
-    { timestamp: Date.now() - 16 * 60 * 60 * 1000, totalOi: 5100000, longOi: 2750000, shortOi: 2350000 },
-    { timestamp: Date.now() - 12 * 60 * 60 * 1000, totalOi: 5200000, longOi: 2800000, shortOi: 2400000 },
-    { timestamp: Date.now() - 8 * 60 * 60 * 1000, totalOi: 5150000, longOi: 2820000, shortOi: 2330000 },
-    { timestamp: Date.now() - 4 * 60 * 60 * 1000, totalOi: 5220000, longOi: 2840000, shortOi: 2380000 },
-    { timestamp: Date.now(), totalOi: 5234123, longOi: 2850000, shortOi: 2384123 },
+    { timestamp: MOCK_BASE_TS - 24 * 60 * 60 * 1000, totalOi: 4800000, longOi: 2500000, shortOi: 2300000 },
+    { timestamp: MOCK_BASE_TS - 20 * 60 * 60 * 1000, totalOi: 4950000, longOi: 2600000, shortOi: 2350000 },
+    { timestamp: MOCK_BASE_TS - 16 * 60 * 60 * 1000, totalOi: 5100000, longOi: 2750000, shortOi: 2380000 },
+    { timestamp: MOCK_BASE_TS - 12 * 60 * 60 * 1000, totalOi: 5200000, longOi: 2800000, shortOi: 2400000 },
+    { timestamp: MOCK_BASE_TS - 8 * 60 * 60 * 1000, totalOi: 5150000, longOi: 2820000, shortOi: 2330000 },
+    { timestamp: MOCK_BASE_TS - 4 * 60 * 60 * 1000, totalOi: 5220000, longOi: 2840000, shortOi: 2380000 },
+    { timestamp: MOCK_BASE_TS, totalOi: 5234123, longOi: 2850000, shortOi: 2384123 },
   ],
 };
 
