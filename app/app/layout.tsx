@@ -41,8 +41,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-        <body className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${interTight.variable} ${outfit.variable} min-h-screen bg-[#050508] text-[#eeeef0] antialiased`}>
+    <html lang="en" suppressHydrationWarning>
+        <body suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${interTight.variable} ${outfit.variable} min-h-screen bg-[#050508] text-[#eeeef0] antialiased`}>
         <Providers>
           <CursorGlow />
           <div className="relative z-[1] flex min-h-screen flex-col">
