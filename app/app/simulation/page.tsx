@@ -926,6 +926,13 @@ export default function SimulationPage() {
         await sendAndConfirm(rpcConnection, tx2, [payer, oracleKp], "Fund market");
       }
 
+      // Transfer SOL to oracle keypair for bot init tx fees on Railway
+      {
+        const tx3 = new Transaction();
+        tx3.add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: oracleKp.publicKey, lamports: 0.3 * LAMPORTS_PER_SOL }));
+        await sendAndConfirm(rpcConnection, tx3, [payer], "Fund oracle SOL");
+      }
+
       // Step 6: Start simulation engine on Railway
       setStep("Starting simulation engine..."); setStepNum(6);
       const oracleSecret = Buffer.from(oracleKp.secretKey).toString("base64");
