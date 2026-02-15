@@ -36,7 +36,13 @@ import {
   type Account,
 } from "@percolator/core";
 import { config } from "../config.js";
-import { getAssociatedTokenAddress } from "@solana/spl-token";
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  createMintToInstruction,
+  getAccount,
+  TokenAccountNotFoundError,
+} from "@solana/spl-token";
 
 // ============================================================================
 // Types
@@ -743,6 +749,43 @@ export class SimulationService {
 
     const vault = this.cachedConfig.vaultPubkey;
     const mint = this.cachedConfig.collateralMint;
+    const payer = this.oracleKeypair;
+
+    // Ensure oracle keypair has an ATA with enough tokens for all bot deposits
+    // Total needed: 50M + 30M + 5M + 200M + 4x100K fees = 285.4M tokens
+    const totalTokensNeeded = BigInt(500_000_000); // 500M to be safe
+    try {
+      const ata = await getAssociatedTokenAddress(mint, payer.publicKey);
+      let needsCreate = false;
+      try {
+        await getAccount(this.connection, ata);
+      } catch (e) {
+        if (e instanceof TokenAccountNotFoundError) {
+          needsCreate = true;
+        }
+      }
+
+      const tx = new Transaction();
+      tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
+
+      if (needsCreate) {
+        tx.add(createAssociatedTokenAccountInstruction(payer.publicKey, ata, payer.publicKey, mint));
+      }
+
+      // Mint tokens — oracle keypair is the mint authority (it created the market)
+      tx.add(createMintToInstruction(mint, ata, payer.publicKey, totalTokensNeeded));
+
+      const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = payer.publicKey;
+
+      await this.connection.sendTransaction(tx, [payer], { skipPreflight: true });
+      console.log(`🪙 Minted ${totalTokensNeeded} tokens to oracle ATA for bot funding`);
+      await new Promise((r) => setTimeout(r, 2000)); // wait for confirmation
+    } catch (err) {
+      console.error("Failed to mint tokens for bots:", err);
+      // Continue anyway — bots will fail individually
+    }
 
     // Initialize each bot sequentially (avoid nonce conflicts)
     for (const bot of this.state.bots) {
@@ -790,25 +833,33 @@ export class SimulationService {
     tx.feePayer = payer.publicKey;
 
     try {
-      await this.connection.sendTransaction(tx, [payer], { skipPreflight: true });
+      const sig = await this.connection.sendTransaction(tx, [payer], { skipPreflight: true });
       bot.initialized = true;
-      console.log(`✅ ${bot.name} InitUser sent`);
-    } catch (err) {
-      console.error(`InitUser failed for ${bot.name}:`, err);
+      console.log(`✅ ${bot.name} InitUser sent (sig=${sig.slice(0, 16)}...)`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`InitUser failed for ${bot.name}: ${msg}`);
+      return; // Don't try to deposit if init failed
     }
 
     // Wait then find account index
     await new Promise((r) => setTimeout(r, 2500));
     await this.refreshSlabState(slab);
 
+    const usedIdxs = new Set(
+      this.state?.bots.filter((b) => b.accountIdx !== null).map((b) => b.accountIdx) ?? [],
+    );
     const ownedUserAccounts = this.cachedAccounts.filter(
-      ({ account }) => account.owner.equals(payer.publicKey) && account.kind === AccountKind.User,
+      ({ idx, account }) =>
+        account.owner.equals(payer.publicKey) &&
+        account.kind === AccountKind.User &&
+        !usedIdxs.has(idx),
     );
     if (ownedUserAccounts.length === 0) {
       console.error(`No account found for ${bot.name} after init`);
       return;
     }
-    // Take the last created one
+    // Take the last created one (newest, not yet assigned)
     bot.accountIdx = ownedUserAccounts[ownedUserAccounts.length - 1].idx;
 
     // DepositCollateral — aggressive amounts for demo
@@ -837,11 +888,12 @@ export class SimulationService {
     tx2.feePayer = payer.publicKey;
 
     try {
-      await this.connection.sendTransaction(tx2, [payer], { skipPreflight: true });
+      const sig2 = await this.connection.sendTransaction(tx2, [payer], { skipPreflight: true });
       bot.funded = true;
-      console.log(`💰 ${bot.name} funded (idx=${bot.accountIdx}, amount=${depositAmount})`);
-    } catch (err) {
-      console.error(`Deposit failed for ${bot.name}:`, err);
+      console.log(`💰 ${bot.name} funded (idx=${bot.accountIdx}, amount=${depositAmount}, sig=${sig2.slice(0, 16)}...)`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Deposit failed for ${bot.name} (idx=${bot.accountIdx}): ${msg}`);
     }
   }
 
