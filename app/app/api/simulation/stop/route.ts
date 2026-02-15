@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { SimulationManager } from '@/lib/simulation/SimulationManager';
+import { requireAuth, UNAUTHORIZED } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +9,8 @@ export const dynamic = 'force-dynamic';
  * 
  * Stops the currently running simulation.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
+  if (!requireAuth(request)) return UNAUTHORIZED;
   try {
     const manager = SimulationManager.getInstance();
     const state = manager.getState();

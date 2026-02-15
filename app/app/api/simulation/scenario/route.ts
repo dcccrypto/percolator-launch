@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SimulationManager } from '@/lib/simulation/SimulationManager';
+import { requireAuth, UNAUTHORIZED } from '@/lib/api-auth';
 import { ScenarioName, SCENARIOS } from '@/lib/simulation/scenarios';
 
 export const dynamic = 'force-dynamic';

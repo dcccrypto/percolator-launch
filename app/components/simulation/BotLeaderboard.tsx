@@ -18,7 +18,7 @@ interface Bot {
 
 const STATUS_COLORS: Record<BotStatus, string> = {
   active: "var(--long)",
-  idle: "rgb(250, 204, 21)",
+  idle: "var(--warning)",
   liquidated: "var(--short)",
 };
 

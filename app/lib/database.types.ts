@@ -531,6 +531,143 @@ export type Database = {
           },
         ]
       }
+      simulation_price_history: {
+        Row: {
+          id: number
+          session_id: number | null
+          slab_address: string
+          price_e6: number
+          model: string
+          timestamp: string
+        }
+        Insert: {
+          id?: number
+          session_id?: number | null
+          slab_address: string
+          price_e6: number
+          model: string
+          timestamp?: string
+        }
+        Update: {
+          id?: number
+          session_id?: number | null
+          slab_address?: string
+          price_e6?: number
+          model?: string
+          timestamp?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "simulation_price_history_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "simulation_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      simulation_sessions: {
+        Row: {
+          id: number
+          slab_address: string
+          scenario: string | null
+          model: string
+          start_price_e6: number
+          current_price_e6: number
+          status: string
+          updates_count: number | null
+          started_at: string
+          ended_at: string | null
+          config: Json | null
+          token_symbol: string | null
+          token_name: string | null
+          mint_address: string | null
+          creator_wallet: string | null
+          end_price_e6: number | null
+          high_price_e6: number | null
+          low_price_e6: number | null
+          total_trades: number | null
+          total_liquidations: number | null
+          total_volume_e6: number | null
+          force_closes: number | null
+          peak_oi_e6: number | null
+          final_funding_rate_e6: number | null
+          final_insurance_balance_e6: number | null
+          final_insurance_health_pct: number | null
+          final_vault_balance_e6: number | null
+          duration_seconds: number | null
+          bot_count: number | null
+          bots_data: Json | null
+          share_image_url: string | null
+        }
+        Insert: {
+          id?: number
+          slab_address: string
+          scenario?: string | null
+          model: string
+          start_price_e6: number
+          current_price_e6: number
+          status?: string
+          updates_count?: number | null
+          started_at?: string
+          ended_at?: string | null
+          config?: Json | null
+          token_symbol?: string | null
+          token_name?: string | null
+          mint_address?: string | null
+          creator_wallet?: string | null
+          end_price_e6?: number | null
+          high_price_e6?: number | null
+          low_price_e6?: number | null
+          total_trades?: number | null
+          total_liquidations?: number | null
+          total_volume_e6?: number | null
+          force_closes?: number | null
+          peak_oi_e6?: number | null
+          final_funding_rate_e6?: number | null
+          final_insurance_balance_e6?: number | null
+          final_insurance_health_pct?: number | null
+          final_vault_balance_e6?: number | null
+          duration_seconds?: number | null
+          bot_count?: number | null
+          bots_data?: Json | null
+          share_image_url?: string | null
+        }
+        Update: {
+          id?: number
+          slab_address?: string
+          scenario?: string | null
+          model?: string
+          start_price_e6?: number
+          current_price_e6?: number
+          status?: string
+          updates_count?: number | null
+          started_at?: string
+          ended_at?: string | null
+          config?: Json | null
+          token_symbol?: string | null
+          token_name?: string | null
+          mint_address?: string | null
+          creator_wallet?: string | null
+          end_price_e6?: number | null
+          high_price_e6?: number | null
+          low_price_e6?: number | null
+          total_trades?: number | null
+          total_liquidations?: number | null
+          total_volume_e6?: number | null
+          force_closes?: number | null
+          peak_oi_e6?: number | null
+          final_funding_rate_e6?: number | null
+          final_insurance_balance_e6?: number | null
+          final_insurance_health_pct?: number | null
+          final_vault_balance_e6?: number | null
+          duration_seconds?: number | null
+          bot_count?: number | null
+          bots_data?: Json | null
+          share_image_url?: string | null
+        }
+        Relationships: []
+      }
       trades: {
         Row: {
           created_at: string | null
@@ -660,6 +797,41 @@ export type Database = {
           volume_24h: number | null
           volume_total: number | null
           warmup_period_slots: number | null
+        }
+        Relationships: []
+      }
+      simulation_gallery: {
+        Row: {
+          id: number | null
+          slab_address: string | null
+          token_symbol: string | null
+          token_name: string | null
+          mint_address: string | null
+          creator_wallet: string | null
+          scenario: string | null
+          model: string | null
+          start_price_e6: number | null
+          end_price_e6: number | null
+          high_price_e6: number | null
+          low_price_e6: number | null
+          price_change_pct: number | null
+          total_trades: number | null
+          total_liquidations: number | null
+          total_volume_e6: number | null
+          force_closes: number | null
+          peak_oi_e6: number | null
+          final_funding_rate_e6: number | null
+          final_insurance_balance_e6: number | null
+          final_insurance_health_pct: number | null
+          final_vault_balance_e6: number | null
+          duration_seconds: number | null
+          bot_count: number | null
+          bots_data: Json | null
+          share_image_url: string | null
+          status: string | null
+          started_at: string | null
+          ended_at: string | null
+          config: Json | null
         }
         Relationships: []
       }

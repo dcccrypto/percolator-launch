@@ -86,11 +86,17 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
     min = Math.min(min, 0);
     max = Math.max(max, 0);
 
-    // Add padding
+    // Add padding (guard against zero range)
     const range = max - min;
-    const padding = range * 0.1;
-    min -= padding;
-    max += padding;
+    if (range === 0) {
+      const fallback = Math.abs(max) * 0.1 || 0.01;
+      min -= fallback;
+      max += fallback;
+    } else {
+      const padding = range * 0.1;
+      min -= padding;
+      max += padding;
+    }
 
     return {
       minRate: min,
@@ -225,7 +231,7 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
   if (loading) {
     return (
       <div className="flex h-[300px] items-center justify-center rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+        <div className="h-8 w-8 animate-spin border-2 border-[var(--accent)] border-t-transparent" />
       </div>
     );
   }
@@ -244,7 +250,7 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
   return (
     <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+        <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
           Funding Rate (24h)
         </h3>
         {hoveredPoint && (

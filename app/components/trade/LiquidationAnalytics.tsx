@@ -40,8 +40,8 @@ export const LiquidationAnalytics: FC = () => {
     textColor = "text-[var(--long)]";
     coverageText = coveragePercent === Infinity ? "∞" : `${coveragePercent.toFixed(1)}%`;
   } else if (coveragePercent >= 10) {
-    dotColor = "bg-amber-400";
-    textColor = "text-amber-400";
+    dotColor = "bg-[var(--warning)]";
+    textColor = "text-[var(--warning)]";
     coverageText = `${coveragePercent.toFixed(1)}%`;
   } else {
     dotColor = "bg-[var(--short)]";

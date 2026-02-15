@@ -164,7 +164,7 @@ export const FundingRateCard: FC<{ slabAddress: string; simulation?: boolean }> 
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center justify-between">
           <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Funding Rate</span>
-          <div className="h-4 w-16 animate-pulse rounded bg-[var(--border)]" />
+          <div className="h-4 w-16 animate-pulse rounded-none bg-[var(--border)]" />
         </div>
       </div>
     );

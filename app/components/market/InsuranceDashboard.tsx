@@ -117,11 +117,11 @@ export const InsuranceDashboard: FC<{ slabAddress: string; simulation?: boolean 
       };
     } else if (ratio >= 2) {
       return {
-        color: "text-amber-400",
-        dotColor: "bg-amber-400",
+        color: "text-[var(--warning)]",
+        dotColor: "bg-[var(--warning)]",
         label: "Moderate",
-        borderColor: "border-amber-400",
-        bgColor: "bg-amber-400/5",
+        borderColor: "border-[var(--warning)]",
+        bgColor: "bg-[var(--warning)]/5",
       };
     } else {
       return {
@@ -141,7 +141,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string; simulation?: boolean 
           <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
             Insurance Fund
           </span>
-          <div className="h-4 w-16 animate-pulse rounded bg-[var(--border)]" />
+          <div className="h-4 w-16 animate-pulse rounded-none bg-[var(--border)]" />
         </div>
       </div>
     );
