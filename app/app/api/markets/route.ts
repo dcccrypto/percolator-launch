@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     trading_fee_bps,
     lp_collateral,
     matcher_context,
+    logo_url,
   } = body;
 
   if (!slab_address || !mint_address || !deployer) {
@@ -98,6 +99,7 @@ export async function POST(req: NextRequest) {
       trading_fee_bps: trading_fee_bps || 10,
       lp_collateral,
       matcher_context,
+      logo_url: logo_url || null,
     })
     .select()
     .single();
