@@ -394,6 +394,7 @@ export async function POST(request: NextRequest) {
       slabAddress: slabKeypair.publicKey.toBase58(),
       mintAddress: mintKeypair.publicKey.toBase58(),
       oraclePublicKey: oracleKeypair.publicKey.toBase58(),
+      oracleSecret: Buffer.from(oracleKeypair.secretKey).toString('base64'),
       tokenName: token.name,
       tokenSymbol: token.symbol,
       tokenDescription: token.description,

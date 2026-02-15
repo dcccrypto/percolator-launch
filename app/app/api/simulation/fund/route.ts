@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   Connection,
+  Keypair,
   PublicKey,
   Transaction,
 } from '@solana/web3.js';
@@ -28,7 +29,7 @@ import {
   SLAB_TIERS,
 } from '@percolator/core';
 import { getConfig } from '@/lib/config';
-import { SimulationManager } from '@/lib/simulation/SimulationManager';
+// Session data now passed from client (Vercel serverless = no shared memory)
 
 /**
  * POST /api/simulation/fund
@@ -36,16 +37,16 @@ import { SimulationManager } from '@/lib/simulation/SimulationManager';
  * Mints collateral tokens to the user's wallet and deposits them into the market.
  * Since we generated the mint, the user is mint authority and can mint freely.
  * 
- * Request body: { payerPublicKey: string, mintAmount?: number }
- * Returns: { transactions: string[] } — base64 serialized unsigned transactions
+ * Request body: { payerPublicKey: string, slabAddress: string, mintAddress: string, oracleSecret: string, mintAmount?: number }
+ * Returns: { instructionGroups: [...] }
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { payerPublicKey, mintAmount = 10_000_000_000 } = body; // Default: 10,000 tokens (6 decimals)
+    const { payerPublicKey, slabAddress, mintAddress, oracleSecret, mintAmount = 10_000_000_000 } = body;
 
-    if (!payerPublicKey) {
-      return NextResponse.json({ error: 'payerPublicKey is required' }, { status: 400 });
+    if (!payerPublicKey || !slabAddress || !mintAddress || !oracleSecret) {
+      return NextResponse.json({ error: 'payerPublicKey, slabAddress, mintAddress, and oracleSecret are required' }, { status: 400 });
     }
 
     let payerPk: PublicKey;
@@ -55,15 +56,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid payerPublicKey' }, { status: 400 });
     }
 
-    const manager = SimulationManager.getInstance();
-    const session = manager.getSelfServiceSession(payerPublicKey);
-
-    if (!session) {
-      return NextResponse.json(
-        { error: 'No simulation session found. Create a market first.' },
-        { status: 404 }
-      );
-    }
+    const oracleKeypair = Keypair.fromSecretKey(Buffer.from(oracleSecret, 'base64'));
 
     const cfg = getConfig();
     const connection = new Connection(cfg.rpcUrl, 'confirmed');
@@ -71,8 +64,8 @@ export async function POST(request: NextRequest) {
     const selectedProgramId = programsByTier?.small ?? cfg.programId;
     const programId = new PublicKey(selectedProgramId);
 
-    const slabPk = new PublicKey(session.slabAddress);
-    const mintPk = new PublicKey(session.mintKeypair.publicKey);
+    const slabPk = new PublicKey(slabAddress);
+    const mintPk = new PublicKey(mintAddress);
     const [vaultPda] = deriveVaultAuthority(programId, slabPk);
     const vaultAta = await getAssociatedTokenAddress(mintPk, vaultPda, true);
     const payerAta = await getAssociatedTokenAddress(mintPk, payerPk);
@@ -127,7 +120,7 @@ export async function POST(request: NextRequest) {
       timestamp: now.toString(),
     });
     const pushKeys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
-      session.oracleKeypair.publicKey, slabPk,
+      oracleKeypair.publicKey, slabPk,
     ]);
     tx2.add(buildIx({ programId, keys: pushKeys, data: pushData }));
 
@@ -149,8 +142,7 @@ export async function POST(request: NextRequest) {
       data: Buffer.from(ix.data).toString('base64'),
     });
 
-    const { Keypair: _Keypair } = await import('@solana/web3.js');
-    const serializeKeypair = (kp: InstanceType<typeof _Keypair>) =>
+    const serializeKeypair = (kp: Keypair) =>
       Buffer.from(kp.secretKey).toString('base64');
 
     const instructionGroups = [
@@ -162,7 +154,7 @@ export async function POST(request: NextRequest) {
       {
         label: 'Deposit, insurance & crank',
         instructions: tx2.instructions.map(serializeIx),
-        signers: [serializeKeypair(session.oracleKeypair)],
+        signers: [serializeKeypair(oracleKeypair)],
       },
     ];
 

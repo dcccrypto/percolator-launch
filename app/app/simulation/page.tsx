@@ -247,7 +247,12 @@ export default function SimulationPage() {
       const fundRes = await fetch("/api/simulation/fund", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payerPublicKey: publicKey.toBase58() }),
+        body: JSON.stringify({
+          payerPublicKey: publicKey.toBase58(),
+          slabAddress: createData.slabAddress,
+          mintAddress: createData.mintAddress,
+          oracleSecret: createData.oracleSecret,
+        }),
       });
 
       if (!fundRes.ok) {
