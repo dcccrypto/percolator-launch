@@ -67,8 +67,11 @@ export const OpenInterestCard: FC<{ slabAddress: string; simulation?: boolean }>
     if (!simulation || !engine) return;
     const totalOi = engine.totalOpenInterest ?? 0n;
     const netLpPos = engine.netLpPos ?? 0n;
-    const longOi = (totalOi - netLpPos) / 2n;
-    const shortOi = (totalOi + netLpPos) / 2n;
+    // Clamp to avoid negative values when netLpPos > totalOi
+    const rawLong = (totalOi + netLpPos) / 2n;
+    const rawShort = (totalOi - netLpPos) / 2n;
+    const longOi = rawLong < 0n ? 0n : rawLong;
+    const shortOi = rawShort < 0n ? 0n : rawShort;
     setOiData({
       totalOi: totalOi.toString(),
       longOi: longOi.toString(),
@@ -320,7 +323,7 @@ export const OpenInterestCard: FC<{ slabAddress: string; simulation?: boolean }>
               {oiData.historicalOi.map((point, idx) => {
                 const maxOi = Math.max(
                   ...oiData.historicalOi.map((p) => p.totalOi)
-                );
+                ) || 1;
                 const height = (point.totalOi / maxOi) * 100;
                 const longHeight = (point.longOi / maxOi) * 100;
                 const shortHeight = (point.shortOi / maxOi) * 100;
@@ -350,18 +353,22 @@ export const OpenInterestCard: FC<{ slabAddress: string; simulation?: boolean }>
             <div className="mt-1 flex justify-between text-[9px] text-[var(--text-dim)]">
               <span>24h ago</span>
               <span className="text-[var(--accent)]">
-                {((oiData.historicalOi[oiData.historicalOi.length - 1].totalOi /
-                  oiData.historicalOi[0].totalOi -
-                  1) *
-                  100) >= 0
-                  ? "↗"
-                  : "↘"}{" "}
-                {Math.abs(
-                  (oiData.historicalOi[oiData.historicalOi.length - 1].totalOi /
-                    oiData.historicalOi[0].totalOi -
-                    1) *
-                    100
-                ).toFixed(1)}
+                {oiData.historicalOi[0].totalOi > 0
+                  ? ((oiData.historicalOi[oiData.historicalOi.length - 1].totalOi /
+                      oiData.historicalOi[0].totalOi -
+                      1) *
+                      100) >= 0
+                    ? "+"
+                    : ""
+                  : "+"}{" "}
+                {oiData.historicalOi[0].totalOi > 0
+                  ? Math.abs(
+                      (oiData.historicalOi[oiData.historicalOi.length - 1].totalOi /
+                        oiData.historicalOi[0].totalOi -
+                        1) *
+                        100
+                    ).toFixed(1)
+                  : "0.0"}
                 %
               </span>
             </div>

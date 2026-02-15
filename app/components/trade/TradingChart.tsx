@@ -165,9 +165,10 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
     if (chartType !== "line" || lineData.length === 0) return "";
     
     const timeRange = maxTime - minTime || 1;
+    const safePriceRange = priceRange || 1;
     const points = lineData.map((p) => {
       const x = PAD.left + ((p.timestamp - minTime) / timeRange) * CHART_W;
-      const y = PAD.top + ((maxPrice - p.price) / priceRange) * CHART_H;
+      const y = PAD.top + ((maxPrice - p.price) / safePriceRange) * CHART_H;
       return `${x},${y}`;
     });
     
@@ -212,7 +213,7 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
 
   if (filteredPrices.length === 0) {
     return (
-      <div className="flex h-[400px] items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--bg)]">
+      <div className="flex h-[400px] items-center justify-center rounded-none border border-[var(--border)] bg-[var(--bg)]">
         <div className="text-center">
           <div className="text-sm text-[var(--text-secondary)]">No price data yet</div>
           <div className="mt-1 text-xs text-[var(--text-dim)]">Prices will appear after trades</div>
@@ -222,7 +223,7 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
   }
 
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--bg)] p-3">
+    <div className="rounded-none border border-[var(--border)] bg-[var(--bg)] p-3">
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <div>
@@ -237,10 +238,10 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
         {/* Controls */}
         <div className="flex items-center gap-2">
           {/* Chart type */}
-          <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
+          <div className="flex gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
             <button
               onClick={() => setChartType("line")}
-              className={`rounded-sm px-2 py-1 text-xs transition-colors ${
+              className={`rounded-none px-2 py-1 text-xs transition-colors ${
                 chartType === "line"
                   ? "bg-[var(--accent)]/10 text-[var(--accent)]"
                   : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
@@ -250,7 +251,7 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
             </button>
             <button
               onClick={() => setChartType("candle")}
-              className={`rounded-sm px-2 py-1 text-xs transition-colors ${
+              className={`rounded-none px-2 py-1 text-xs transition-colors ${
                 chartType === "candle"
                   ? "bg-[var(--accent)]/10 text-[var(--accent)]"
                   : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
@@ -261,12 +262,12 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
           </div>
 
           {/* Timeframe */}
-          <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
+          <div className="flex gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
             {(["1h", "4h", "1d", "7d", "30d"] as Timeframe[]).map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
-                className={`rounded-sm px-2 py-1 text-xs transition-colors ${
+                className={`rounded-none px-2 py-1 text-xs transition-colors ${
                   timeframe === tf
                     ? "bg-[var(--accent)]/10 text-[var(--accent)]"
                     : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
@@ -354,10 +355,11 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
           candles.map((candle, i) => {
             const timeRange = maxTime - minTime || 1;
             const x = PAD.left + ((candle.timestamp - minTime) / timeRange) * CHART_W;
-            const yOpen = PAD.top + ((maxPrice - candle.open) / priceRange) * CHART_H;
-            const yClose = PAD.top + ((maxPrice - candle.close) / priceRange) * CHART_H;
-            const yHigh = PAD.top + ((maxPrice - candle.high) / priceRange) * CHART_H;
-            const yLow = PAD.top + ((maxPrice - candle.low) / priceRange) * CHART_H;
+            const safePriceRange = priceRange || 1;
+            const yOpen = PAD.top + ((maxPrice - candle.open) / safePriceRange) * CHART_H;
+            const yClose = PAD.top + ((maxPrice - candle.close) / safePriceRange) * CHART_H;
+            const yHigh = PAD.top + ((maxPrice - candle.high) / safePriceRange) * CHART_H;
+            const yLow = PAD.top + ((maxPrice - candle.low) / safePriceRange) * CHART_H;
             const candleW = Math.max(2, CHART_W / candles.length - 2);
             const isGreen = candle.close >= candle.open;
             const color = isGreen ? "#14F195" : "#FF3B5C";

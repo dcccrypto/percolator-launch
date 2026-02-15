@@ -255,9 +255,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
             <div className="flex items-center justify-between py-1.5">
               <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Est. Funding (24h)</span>
-              <span className={`text-[11px] font-medium ${pnlColor}`} style={{ fontFamily: "var(--font-mono)" }}>
-                {/* Mock value - will be replaced with real funding calculation */}
-                +$5.12
+              <span className="text-[11px] font-medium text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
+                -
               </span>
             </div>
           </div>
@@ -273,7 +272,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           {/* LP underfunded warning */}
           {lpUnderfunded && (
             <div className="mt-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 p-2.5">
-              <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--warning)]">⚠ LP Has No Capital</p>
+              <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--warning)]">LP Has No Capital</p>
               <p className="mt-1 text-[10px] text-[var(--warning)]/70">
                 The liquidity provider has no capital to back the counterparty position. Closing trades will fail until the LP is funded.
               </p>

@@ -26,7 +26,7 @@ export const SystemCapitalCard: FC = () => {
   const vault = Number(engine.vault);
   const cTot = Number(engine.cTot);
   const pnlPosTot = Number(engine.pnlPosTot);
-  const insurance = Number(engine.insuranceFund.balance);
+  const insurance = Number(engine.insuranceFund?.balance ?? 0n);
   const totalOI = Number(engine.totalOpenInterest);
   const netLp = Number(engine.netLpPos);
   const lpSum = Number(engine.lpSumAbs);

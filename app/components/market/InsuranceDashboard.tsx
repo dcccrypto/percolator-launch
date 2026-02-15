@@ -247,7 +247,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string; simulation?: boolean 
                 {insuranceData.historicalBalance.map((point, idx) => {
                   const maxBalance = Math.max(
                     ...insuranceData.historicalBalance.map((p) => p.balance)
-                  );
+                  ) || 1;
                   const height = (point.balance / maxBalance) * 100;
                   return (
                     <div
@@ -261,7 +261,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string; simulation?: boolean 
               </div>
               <div className="mt-1 flex justify-between text-[9px] text-[var(--text-dim)]">
                 <span>7d ago</span>
-                <span className="text-[var(--long)]">↗ +{((insuranceData.historicalBalance[insuranceData.historicalBalance.length - 1].balance / insuranceData.historicalBalance[0].balance - 1) * 100).toFixed(1)}%</span>
+                <span className="text-[var(--long)]">+{insuranceData.historicalBalance[0].balance > 0 ? ((insuranceData.historicalBalance[insuranceData.historicalBalance.length - 1].balance / insuranceData.historicalBalance[0].balance - 1) * 100).toFixed(1) : "0.0"}%</span>
               </div>
             </>
           ) : (

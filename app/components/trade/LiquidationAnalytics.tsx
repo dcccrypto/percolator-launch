@@ -25,7 +25,7 @@ export const LiquidationAnalytics: FC = () => {
 
   const lifetimeLiquidations = Number(engine.lifetimeLiquidations);
   const lifetimeForceCloses = Number(engine.lifetimeForceCloses);
-  const insuranceBalance = Number(engine.insuranceFund.balance);
+  const insuranceBalance = Number(engine.insuranceFund?.balance ?? 0n);
   const totalOI = Number(engine.totalOpenInterest);
   const liqFeeBps = params ? Number(params.liquidationFeeBps) : 0;
   const bufferBps = params ? Number(params.liquidationBufferBps) : 0;
