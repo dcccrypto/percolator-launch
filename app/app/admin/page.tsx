@@ -90,15 +90,26 @@ export default function AdminDashboard() {
   const [adminNotes, setAdminNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Auth check
+  // Auth check + admin whitelist
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) {
         router.push("/admin/login");
-      } else {
-        setUser(data.user);
-        setLoading(false);
+        return;
       }
+      // Check admin_users whitelist
+      const { data: adminRow } = await supabase
+        .from("admin_users")
+        .select("id")
+        .eq("email", data.user.email!)
+        .maybeSingle();
+      if (!adminRow) {
+        await supabase.auth.signOut();
+        router.push("/admin/login");
+        return;
+      }
+      setUser(data.user);
+      setLoading(false);
     });
   }, [router]);
 
