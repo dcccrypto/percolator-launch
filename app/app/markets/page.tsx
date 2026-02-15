@@ -18,6 +18,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
+import { MarketLogo } from "@/components/market/MarketLogo";
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "\u2014";
@@ -479,14 +480,21 @@ function MarketsPageInner() {
                     >
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-white text-sm">
-                            {tokenMetaMap.get(m.mintAddress)?.symbol ? `${tokenMetaMap.get(m.mintAddress)!.symbol}/USD` : shortenAddress(m.slabAddress)}
-                          </span>
-                          {m.isAdminOracle && (
-                            <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
-                          )}
+                          <MarketLogo
+                            logoUrl={m.supabase?.logo_url}
+                            symbol={tokenMetaMap.get(m.mintAddress)?.symbol || m.slabAddress.slice(0, 2)}
+                            size="sm"
+                          />
+                          <div>
+                            <span className="font-semibold text-white text-sm">
+                              {tokenMetaMap.get(m.mintAddress)?.symbol ? `${tokenMetaMap.get(m.mintAddress)!.symbol}/USD` : shortenAddress(m.slabAddress)}
+                            </span>
+                            {m.isAdminOracle && (
+                              <span className="ml-2 border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+                        <div className="text-[10px] text-[var(--text-dim)] ml-10" style={{ fontFamily: "var(--font-mono)" }}>
                           {tokenMetaMap.get(m.mintAddress)?.name ? `${tokenMetaMap.get(m.mintAddress)!.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
                         </div>
                       </div>

@@ -23,6 +23,8 @@ import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
+import { useMarketInfo } from "@/hooks/useMarketInfo";
+import { MarketLogo } from "@/components/market/MarketLogo";
 
 /* ── Reusable tiny components ─────────────────────────────── */
 
@@ -131,6 +133,7 @@ function CopyButton({ text }: { text: string }) {
 function TradePageInner({ slab }: { slab: string }) {
   const { engine, config, accounts, loading: slabLoading, error: slabError } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const { market: marketInfo } = useMarketInfo(slab);
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
   const pageRef = useRef<HTMLDivElement>(null);
@@ -195,7 +198,12 @@ function TradePageInner({ slab }: { slab: string }) {
       {/* ── MOBILE: Sticky header ── */}
       <div className="sticky top-0 z-30 border-b border-[var(--border)]/50 bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">
         <div className="flex items-center justify-between">
-          <div className="min-w-0">
+          <div className="min-w-0 flex items-center gap-2">
+            <MarketLogo
+              logoUrl={marketInfo?.logo_url}
+              symbol={symbol}
+              size="sm"
+            />
             <h1 className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
               {symbol}/USD <span className="text-[10px] font-normal uppercase tracking-[0.15em] text-[var(--text-muted)]">PERP</span>
             </h1>
@@ -223,22 +231,29 @@ function TradePageInner({ slab }: { slab: string }) {
 
       {/* ── DESKTOP: Full header ── */}
       <div className="hidden lg:flex items-start justify-between px-4 py-2 gap-3 border-b border-[var(--border)]/30">
-        <div className="min-w-0">
-          <p className="mb-0.5 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--accent)]/70">// TRADE</p>
-          <h1 className="text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-            {symbol}/USD <span className="text-xs font-normal text-[var(--text-muted)]">PERP</span>
-          </h1>
-          <div className="mt-0.5 flex items-center gap-3">
-            <span className="flex items-center text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-              {shortAddress}
-              <CopyButton text={slab} />
-            </span>
-            {health && <HealthBadge level={health.level} />}
-            <ShareButton
-              slabAddress={slab}
-              marketName={symbol}
-              price={BigInt(Math.round((priceUsd ?? 0) * 1e6))}
-            />
+        <div className="min-w-0 flex items-start gap-3">
+          <MarketLogo
+            logoUrl={marketInfo?.logo_url}
+            symbol={symbol}
+            size="lg"
+          />
+          <div>
+            <p className="mb-0.5 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--accent)]/70">// TRADE</p>
+            <h1 className="text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+              {symbol}/USD <span className="text-xs font-normal text-[var(--text-muted)]">PERP</span>
+            </h1>
+            <div className="mt-0.5 flex items-center gap-3">
+              <span className="flex items-center text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+                {shortAddress}
+                <CopyButton text={slab} />
+              </span>
+              {health && <HealthBadge level={health.level} />}
+              <ShareButton
+                slabAddress={slab}
+                marketName={symbol}
+                price={BigInt(Math.round((priceUsd ?? 0) * 1e6))}
+              />
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
