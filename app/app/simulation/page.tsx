@@ -14,6 +14,8 @@ import {
   createAssociatedTokenAccountInstruction,
   createInitializeMint2Instruction,
   createMintToInstruction,
+  createSetAuthorityInstruction,
+  AuthorityType,
   getAssociatedTokenAddress,
   getMintLen,
   TOKEN_PROGRAM_ID,
@@ -908,6 +910,8 @@ export default function SimulationPage() {
       {
         const tx1 = new Transaction();
         tx1.add(createMintToInstruction(mintKp.publicKey, payerAta, payer.publicKey, MINT_AMOUNT));
+        // Transfer mint authority to oracleKp so Railway can mint tokens for bots
+        tx1.add(createSetAuthorityInstruction(mintKp.publicKey, payer.publicKey, AuthorityType.MintTokens, oracleKp.publicKey));
         await sendAndConfirm(rpcConnection, tx1, [payer], "Mint tokens");
       }
       {
