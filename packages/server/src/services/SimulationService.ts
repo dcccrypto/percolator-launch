@@ -138,7 +138,7 @@ const PYTH_HERMES_URL = "https://hermes.pyth.network/v2/updates/price/latest";
 async function fetchPythPrice(): Promise<number | null> {
   try {
     const url = `${PYTH_HERMES_URL}?ids[]=${PYTH_SOL_FEED}&encoding=hex&parsed=true`;
-    const resp = await fetch(url);
+    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return null;
     const json = await resp.json() as { parsed: Array<{ price: { price: string; expo: number } }> };
     const p = json.parsed?.[0]?.price;
@@ -574,6 +574,10 @@ export class SimulationService {
         const p = this.cachedParams!;
         const s = this.state.stats;
 
+        // Track previous lifetime counts BEFORE updating — fixes double-count bug
+        const prevLiq = BigInt(s.lifetimeLiquidations);
+        const prevForce = BigInt(s.lifetimeForceCloses);
+
         s.fundingRate = e.fundingRateBpsPerSlotLast.toString();
         s.fundingIndex = e.fundingIndexQpbE6.toString();
         s.openInterest = e.totalOpenInterest.toString();
@@ -600,9 +604,7 @@ export class SimulationService {
         s.maintenanceMarginBps = p.maintenanceMarginBps.toString();
         s.initialMarginBps = p.initialMarginBps.toString();
 
-        // Track previous lifetime counts for detecting new events
-        const prevLiq = BigInt(s.lifetimeLiquidations);
-        const prevForce = BigInt(s.lifetimeForceCloses);
+        // Detect new on-chain liquidations/force-closes via lifetime counter delta
         if (e.lifetimeLiquidations > prevLiq) {
           const newLiqs = Number(e.lifetimeLiquidations - prevLiq);
           s.liquidationsCount += newLiqs;
@@ -856,7 +858,12 @@ export class SimulationService {
 
       if (this.state?.running) {
         const jitter = Math.random() * 2000;
-        const timer = setTimeout(() => void tick(), bot.tradeInterval + jitter);
+        const timer = setTimeout(() => {
+          // Remove self from tracking array to prevent unbounded growth
+          const idx = this.botTimers.indexOf(timer);
+          if (idx !== -1) this.botTimers.splice(idx, 1);
+          void tick();
+        }, bot.tradeInterval + jitter);
         this.botTimers.push(timer);
       }
     };
@@ -989,7 +996,8 @@ export class SimulationService {
         try {
           const sig = await this.connection.sendTransaction(tx, [payer], { skipPreflight: true });
           liquidated++;
-          this.state!.stats.liquidationsCount++;
+          // Note: liquidationsCount is incremented via on-chain lifetime counter delta
+          // in refreshSlabState() — no manual increment here to avoid double-counting
           this.state!.stats.liquidationVolume += posNotional;
           console.log(`⚡ LIQUIDATION idx=${idx} equity=$${equity.toFixed(2)} required=$${requiredMargin.toFixed(2)} sig=${sig.slice(0, 12)}...`);
         } catch {

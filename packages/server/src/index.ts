@@ -110,8 +110,8 @@ app.get("/api/simulation/history", (c) => {
 });
 
 app.get("/api/simulation/bots", (c) => {
-  const state = simulationService.getState();
-  return c.json(state.bots ?? []);
+  const state = simulationService.getState() as { bots?: unknown[] } | null;
+  return c.json(state?.bots ?? []);
 });
 
 // Root
@@ -194,6 +194,7 @@ async function shutdown(signal: string) {
     tradeIndexer.stop();
     webhookManager.stop();
     statsCollector.stop();
+    await simulationService.stop();
     if (server && typeof (server as any).close === "function") {
       (server as any).close();
     }

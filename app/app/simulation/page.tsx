@@ -143,7 +143,8 @@ function generateShareImage(
   const W = 1200, H = 630;
   const canvas = document.createElement("canvas");
   canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
 
   // Background
   ctx.fillStyle = "#0a0a0f";
@@ -221,7 +222,7 @@ function generateShareImage(
 
   // Stats rows — now with on-chain data
   const statsY = 420;
-  const pctChange = ((stats.endPrice - stats.startPrice) / stats.startPrice * 100);
+  const pctChange = stats.startPrice > 0 ? ((stats.endPrice - stats.startPrice) / stats.startPrice * 100) : 0;
   const duration = Math.floor((stats.endTime - stats.startTime) / 1000);
   const durStr = duration > 60 ? `${Math.floor(duration / 60)}m ${duration % 60}s` : `${duration}s`;
 
@@ -414,7 +415,7 @@ function RunningDashboardInner({
   onScenarioSelect: (scenario: string) => Promise<void>;
 }) {
   const currentPrice = state.price / 1e6;
-  const priceChange = priceHistory.length > 1
+  const priceChange = priceHistory.length > 1 && priceHistory[0].price > 0
     ? ((currentPrice - priceHistory[0].price) / priceHistory[0].price) * 100
     : 0;
 
@@ -617,11 +618,16 @@ export default function SimulationPage() {
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const buildingRef = useRef(false);
+  const unmountedRef = useRef(false);
   const sessionStatsRef = useRef<SessionStats | null>(null);
   const priceHistoryRef = useRef<PricePoint[]>([]);
   const tokenPreviewRef = useRef<TokenPreview | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    return () => { unmountedRef.current = true; };
+  }, []);
 
   // Keep refs in sync for use inside intervals (avoids stale closures)
   useEffect(() => { sessionStatsRef.current = sessionStats; }, [sessionStats]);
@@ -966,19 +972,20 @@ export default function SimulationPage() {
 
       await railwayFetch("/api/simulation/stop", { method: "POST" });
 
-      const finalStats: SessionStats = sessionStats ? {
-        ...sessionStats,
+      const currentStats = sessionStatsRef.current;
+      const finalStats: SessionStats = currentStats ? {
+        ...currentStats,
         endTime: Date.now(),
-        totalTrades: finalRailwayStats.totalTrades ?? sessionStats.totalTrades,
-        liquidations: finalRailwayStats.liquidations ?? sessionStats.liquidations,
-        fundingRate: finalRailwayStats.fundingRate ?? sessionStats.fundingRate,
-        openInterest: finalRailwayStats.openInterest ?? sessionStats.openInterest,
+        totalTrades: finalRailwayStats.totalTrades ?? currentStats.totalTrades,
+        liquidations: finalRailwayStats.liquidations ?? currentStats.liquidations,
+        fundingRate: finalRailwayStats.fundingRate ?? currentStats.fundingRate,
+        openInterest: finalRailwayStats.openInterest ?? currentStats.openInterest,
       } : {
         startTime: Date.now(), endTime: Date.now(), highPrice: 1, lowPrice: 1, startPrice: 1, endPrice: 1, dataPoints: 0, scenario: null, totalTrades: 0, liquidations: 0, fundingRate: 0, openInterest: 0, peakOpenInterest: 0, insuranceBalance: 0, insuranceHealth: 0, forceCloses: 0,
       };
       setSessionStats(finalStats);
       try {
-        const img = generateShareImage(finalStats, priceHistory, tokenPreview?.symbol || "SIM", tokenPreview?.name || "Simulation");
+        const img = generateShareImage(finalStats, priceHistoryRef.current, tokenPreviewRef.current?.symbol || "SIM", tokenPreviewRef.current?.name || "Simulation");
         setShareImage(img);
       } catch (e) { console.error("Share image error:", e); }
       setState({ running: false, slabAddress: null, price: 1_000_000, scenario: null, model: "random-walk", uptime: 0 });
@@ -991,12 +998,14 @@ export default function SimulationPage() {
     setPhase("deposit");
     setSlabAddress(null);
     setMintAddress(null);
+    setBalance(0);
     setError(null);
     setStep("");
     setStepNum(0);
     setPriceHistory([]);
     setSessionStats(null);
     setShareImage(null);
+    setState({ running: false, slabAddress: null, price: 1_000_000, scenario: null, model: "random-walk", uptime: 0 });
     buildingRef.current = false;
     fetchTokenPreview();
   };
@@ -1023,7 +1032,10 @@ export default function SimulationPage() {
   const copyAddress = () => {
     navigator.clipboard.writeText(payer.publicKey.toBase58());
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(() => {
+      if (!unmountedRef.current) setCopied(false);
+    }, 2000);
   };
 
   /* ─── Deposit Screen ─── */
