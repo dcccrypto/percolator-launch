@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SimulationManager } from '@/lib/simulation/SimulationManager';
+import { requireAuth, UNAUTHORIZED } from '@/lib/api-auth';
 import { ScenarioName, SCENARIOS } from '@/lib/simulation/scenarios';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,7 @@ interface SwitchScenarioRequest {
  * Only works if a simulation is currently running.
  */
 export async function POST(request: NextRequest) {
+  if (!requireAuth(request)) return UNAUTHORIZED;
   try {
     const body: SwitchScenarioRequest = await request.json();
     

@@ -793,7 +793,7 @@ export default function SimulationPage() {
         setError(`Transfer failed: ${msg}`);
       }
     } finally {
-      setSending(false);
+      if (!unmountedRef.current) setSending(false);
     }
   };
 
@@ -951,6 +951,7 @@ export default function SimulationPage() {
       setPhase("running");
     } catch (err: unknown) {
       console.error("Build error:", err);
+      if (unmountedRef.current) return;
       setError(await extractError(err));
       setPhase("deposit");
       buildingRef.current = false;

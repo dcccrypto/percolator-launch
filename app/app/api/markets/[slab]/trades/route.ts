@@ -37,9 +37,16 @@ export async function POST(
   const body = await req.json();
   const supabase = getServiceClient();
 
+  // Allowlist fields to prevent mass assignment
   const { error } = await (supabase.from("trades") as any).insert({
     slab_address: slab,
-    ...body,
+    trader: body.trader,
+    side: body.side,
+    size: body.size,
+    price: body.price,
+    fee: body.fee,
+    tx_signature: body.tx_signature,
+    slot: body.slot,
   });
 
   if (error) {

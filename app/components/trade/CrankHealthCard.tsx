@@ -50,9 +50,9 @@ export const CrankHealthCard: FC = () => {
     barColor = "bg-[var(--long)]";
   } else if (stalenessRatio < 0.9) {
     statusLabel = "AGING";
-    statusColor = "text-amber-400";
-    dotColor = "bg-amber-400";
-    barColor = "bg-amber-400";
+    statusColor = "text-[var(--warning)]";
+    dotColor = "bg-[var(--warning)]";
+    barColor = "bg-[var(--warning)]";
   } else {
     statusLabel = "STALE";
     statusColor = "text-[var(--short)]";

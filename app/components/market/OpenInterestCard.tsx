@@ -169,7 +169,7 @@ export const OpenInterestCard: FC<{ slabAddress: string; simulation?: boolean }>
           <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
             Open Interest
           </span>
-          <div className="h-4 w-16 animate-pulse rounded bg-[var(--border)]" />
+          <div className="h-4 w-16 animate-pulse rounded-none bg-[var(--border)]" />
         </div>
       </div>
     );

@@ -74,7 +74,7 @@ export const LiveLiquidationFeed: FC = () => {
 
   const lifetimeLiqs = Number(engine.lifetimeLiquidations);
   const lifetimeForce = Number(engine.lifetimeForceCloses);
-  const insuranceBalance = Number(engine.insuranceFund.balance);
+  const insuranceBalance = Number(engine.insuranceFund?.balance ?? 0n);
 
   return (
     <div className="border border-[var(--border)]/50 bg-[var(--bg)]/80">
@@ -128,8 +128,8 @@ export const LiveLiquidationFeed: FC = () => {
               key={event.id}
               className="flex items-center gap-2 border border-[var(--border)]/20 bg-[var(--bg-elevated)]/50 px-2 py-1.5"
             >
-              <div className="h-1.5 w-1.5" style={{ backgroundColor: event.type === "liquidation" ? "var(--short)" : "rgb(251, 146, 60)" }} />
-              <span className="text-[8px] font-bold uppercase tracking-[0.1em]" style={{ color: event.type === "liquidation" ? "var(--short)" : "rgb(251, 146, 60)" }}>
+              <div className="h-1.5 w-1.5" style={{ backgroundColor: event.type === "liquidation" ? "var(--short)" : "var(--warning)" }} />
+              <span className="text-[8px] font-bold uppercase tracking-[0.1em]" style={{ color: event.type === "liquidation" ? "var(--short)" : "var(--warning)" }}>
                 {event.type === "liquidation" ? "LIQ" : "FORCE"}
               </span>
               <span className="text-[9px] font-mono text-[var(--text)] flex-1">

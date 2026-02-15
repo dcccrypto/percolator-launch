@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { getBackendUrl } from "@/lib/config";
@@ -27,9 +27,12 @@ export function useWithdraw(slabAddress: string) {
   const { config: mktConfig, programId: slabProgramId } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inflightRef = useRef(false);
 
   const withdraw = useCallback(
     async (params: { userIdx: number; amount: bigint }) => {
+      if (inflightRef.current) throw new Error("Withdrawal already in progress");
+      inflightRef.current = true;
       setLoading(true);
       setError(null);
       try {
@@ -99,6 +102,7 @@ export function useWithdraw(slabAddress: string) {
         setError(e instanceof Error ? e.message : String(e));
         throw e;
       } finally {
+        inflightRef.current = false;
         setLoading(false);
       }
     },

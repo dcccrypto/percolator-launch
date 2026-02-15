@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
@@ -20,9 +20,12 @@ export function useDeposit(slabAddress: string) {
   const { config: mktConfig, programId: slabProgramId } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inflightRef = useRef(false);
 
   const deposit = useCallback(
     async (params: { userIdx: number; amount: bigint }) => {
+      if (inflightRef.current) throw new Error("Deposit already in progress");
+      inflightRef.current = true;
       setLoading(true);
       setError(null);
       try {
@@ -53,6 +56,7 @@ export function useDeposit(slabAddress: string) {
         setError(e instanceof Error ? e.message : String(e));
         throw e;
       } finally {
+        inflightRef.current = false;
         setLoading(false);
       }
     },

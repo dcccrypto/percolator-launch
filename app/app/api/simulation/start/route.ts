@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Keypair } from '@solana/web3.js';
 import { SimulationManager } from '@/lib/simulation/SimulationManager';
+import { requireAuth, UNAUTHORIZED } from '@/lib/api-auth';
 import { ScenarioName } from '@/lib/simulation/scenarios';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,7 @@ interface StartSimulationRequest {
  * Body: { slabAddress, oracleSecret, startPriceE6?, scenario?, model?, intervalMs?, params? }
  */
 export async function POST(request: NextRequest) {
+  if (!requireAuth(request)) return UNAUTHORIZED;
   try {
     const body: StartSimulationRequest = await request.json();
     

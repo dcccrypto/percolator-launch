@@ -284,8 +284,8 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
       <svg ref={svgRef} width={W} height={H} className="w-full" style={{ maxWidth: "100%" }}>
         <defs>
           <linearGradient id="lineGradient" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={isUp ? "#14F195" : "#FF3B5C"} stopOpacity="0.3" />
-            <stop offset="100%" stopColor={isUp ? "#14F195" : "#FF3B5C"} stopOpacity="0" />
+            <stop offset="0%" stopColor={isUp ? "var(--long)" : "var(--short)"} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={isUp ? "var(--long)" : "var(--short)"} stopOpacity="0" />
           </linearGradient>
         </defs>
 
@@ -343,7 +343,7 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
             <polyline
               points={linePath}
               fill="none"
-              stroke={isUp ? "#14F195" : "#FF3B5C"}
+              stroke={isUp ? "var(--long)" : "var(--short)"}
               strokeWidth="2"
               strokeLinejoin="round"
             />
@@ -362,7 +362,7 @@ export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = (
             const yLow = PAD.top + ((maxPrice - candle.low) / safePriceRange) * CHART_H;
             const candleW = Math.max(2, CHART_W / candles.length - 2);
             const isGreen = candle.close >= candle.open;
-            const color = isGreen ? "#14F195" : "#FF3B5C";
+            const color = isGreen ? "var(--long)" : "var(--short)";
 
             return (
               <g key={i}>

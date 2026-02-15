@@ -27,6 +27,7 @@ function formatPnl(pnl: bigint | undefined | null, decimals = 6): string {
 }
 
 export default function PortfolioPage() {
+  useEffect(() => { document.title = "Portfolio — Percolator"; }, []);
   const { connected: walletConnected } = useWallet();
   const mockMode = isMockMode();
   const connected = walletConnected || mockMode;

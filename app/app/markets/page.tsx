@@ -75,6 +75,7 @@ const MOCK_MARKETS: MergedMarket[] = [
 ];
 
 function MarketsPageInner() {
+  useEffect(() => { document.title = "Markets — Percolator"; }, []);
   const router = useRouter();
   const searchParams = useSearchParams();
   const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();

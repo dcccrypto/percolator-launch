@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
@@ -26,16 +26,14 @@ export function useTrade(slabAddress: string) {
   const { config: mktConfig, accounts, programId: slabProgramId } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inflightRef = useRef(false);
 
   const trade = useCallback(
     async (params: { lpIdx: number; userIdx: number; size: bigint }) => {
+      if (inflightRef.current) throw new Error("Trade already in progress");
+      inflightRef.current = true;
       setLoading(true);
       setError(null);
-      
-      // H4: Add AbortController for RPC cancellation
-      const abortController = new AbortController();
-      let cancelled = false;
-      
       try {
         if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
         const lpAccount = accounts.find((a) => a.idx === params.lpIdx);
@@ -130,12 +128,11 @@ export function useTrade(slabAddress: string) {
 
         return await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
       } catch (e) {
-        if (!cancelled) {
-          const msg = e instanceof Error ? e.message : String(e);
-          setError(msg);
-        }
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
         throw e;
       } finally {
+        inflightRef.current = false;
         setLoading(false);
       }
     },

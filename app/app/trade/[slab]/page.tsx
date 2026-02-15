@@ -141,6 +141,11 @@ function TradePageInner({ slab }: { slab: string }) {
   const symbol = tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN");
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
+  // Dynamic page title
+  useEffect(() => {
+    document.title = `${symbol}/USD — Percolator`;
+  }, [symbol]);
+
   const priceDisplay = priceUsd != null
     ? `$${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}`
     : null;

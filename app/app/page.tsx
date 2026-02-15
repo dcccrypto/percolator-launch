@@ -400,8 +400,8 @@ export default function Home() {
                 </h2>
               </div>
 
-              <div className="overflow-hidden border border-[var(--border)] bg-[var(--panel-bg)]">
-                <div className="grid grid-cols-5 gap-4 border-b border-[var(--border)] bg-[var(--bg-surface)] px-5 py-3 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+              <div className="overflow-x-auto border border-[var(--border)] bg-[var(--panel-bg)]">
+                <div className="grid min-w-[480px] grid-cols-5 gap-4 border-b border-[var(--border)] bg-[var(--bg-surface)] px-5 py-3 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
                   <div>Token</div>
                   <div className="text-right">Price</div>
                   <div className="text-right">Volume</div>
@@ -412,7 +412,7 @@ export default function Home() {
                   <Link
                     key={m.slab_address}
                     href={`/trade/${m.slab_address}`}
-                    className="group relative grid grid-cols-5 gap-4 border-b border-[var(--border-subtle)] px-5 py-3.5 text-sm transition-all duration-150 last:border-b-0 hover:bg-[var(--accent)]/[0.03]"
+                    className="group relative grid min-w-[480px] grid-cols-5 gap-4 border-b border-[var(--border-subtle)] px-5 py-3.5 text-sm transition-all duration-150 last:border-b-0 hover:bg-[var(--accent)]/[0.03]"
                   >
                     <div className="absolute left-0 top-0 bottom-0 w-px bg-[var(--accent)] opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
                     <div className="text-[13px] font-semibold text-white">

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Connection } from '@solana/web3.js';
 import { pushOraclePrice, loadOracleKeypair } from '@/lib/simulation/solana';
+import { requireAuth, UNAUTHORIZED } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,7 @@ interface SetPriceRequest {
  * Can be used independently of simulation mode.
  */
 export async function POST(request: NextRequest) {
+  if (!requireAuth(request)) return UNAUTHORIZED;
   try {
     const keypair = loadOracleKeypair();
     if (!keypair) {
