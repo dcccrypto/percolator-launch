@@ -76,7 +76,7 @@ const WalletMultiButton = dynamic(
 /* ─── Constants ─── */
 const PROGRAM_ID = new PublicKey("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
 const MATCHER_PROGRAM_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
-const MIN_SOL = 0.5;
+const MIN_SOL = 1;
 const MIN_LAMPORTS = MIN_SOL * LAMPORTS_PER_SOL;
 const MINT_AMOUNT = 10_000_000_000n;
 const LP_FEE = 1_000_000n;
@@ -786,7 +786,7 @@ export default function SimulationPage() {
       } else if (msg.includes("Blockhash not found") || msg.includes("block height exceeded")) {
         setError("Transaction expired — try again.");
       } else if (msg.includes("0x1") || msg.includes("insufficient lamports")) {
-        setError("Insufficient SOL. Need 0.5 devnet SOL.");
+        setError(`Insufficient SOL. Need ${MIN_SOL} devnet SOL.`);
       } else if (msg.includes("not connected")) {
         setError("Wallet not connected. Reconnect and try again.");
       } else {
