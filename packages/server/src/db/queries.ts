@@ -12,6 +12,8 @@ export interface MarketRow {
   initial_price_e6: number | null;
   max_leverage: number;
   trading_fee_bps: number;
+  lp_collateral: string | null;
+  matcher_context: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -85,6 +87,14 @@ export async function getMarketBySlabAddress(slabAddress: string): Promise<Marke
     .single();
   if (error && error.code !== "PGRST116") throw error;
   return (data as MarketRow) ?? null;
+}
+
+export async function insertMarket(market: Omit<MarketRow, "id" | "created_at" | "updated_at">): Promise<void> {
+  const { error } = await getSupabase().from("markets").insert(market);
+  // Ignore unique constraint violations (market already exists)
+  if (error && error.code !== "23505") {
+    throw error;
+  }
 }
 
 export async function upsertMarketStats(stats: Partial<MarketStatsRow> & { slab_address: string }): Promise<void> {

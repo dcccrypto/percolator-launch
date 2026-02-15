@@ -25,6 +25,8 @@ import {
   insertOraclePrice, 
   get24hVolume,
   insertFundingHistory,
+  getMarkets,
+  insertMarket,
 } from "../db/queries.js";
 import { getSupabase } from "../db/client.js";
 import type { CrankService } from "./crank.js";
@@ -74,6 +76,72 @@ export class StatsCollector {
   }
 
   /**
+   * Auto-register missing markets: compare on-chain markets vs DB and insert any missing.
+   */
+  private async syncMarkets(): Promise<void> {
+    try {
+      // Get on-chain markets from crank service
+      const onChainMarkets = this.crankService.getMarkets();
+      if (onChainMarkets.size === 0) return;
+
+      // Get existing markets from DB
+      const dbMarkets = await getMarkets();
+      const dbSlabAddresses = new Set(dbMarkets.map(m => m.slab_address));
+
+      // Find missing markets
+      const missingMarkets: Array<[string, any]> = [];
+      for (const [slabAddress, state] of onChainMarkets.entries()) {
+        if (!dbSlabAddresses.has(slabAddress)) {
+          missingMarkets.push([slabAddress, state]);
+        }
+      }
+
+      if (missingMarkets.length === 0) return;
+
+      console.log(`[StatsCollector] Found ${missingMarkets.length} new markets to register`);
+
+      // Insert missing markets
+      for (const [slabAddress, state] of missingMarkets) {
+        try {
+          const market = state.market;
+          const mintAddress = market.config.collateralMint.toBase58();
+          const admin = market.header.admin.toBase58();
+          const oracleAuthority = market.config.oracleAuthority.toBase58();
+          const priceE6 = Number(market.config.authorityPriceE6);
+          const initialMarginBps = Number(market.params.initialMarginBps);
+          
+          // Derive fields as specified
+          const symbol = mintAddress.substring(0, 8);
+          const name = `Market ${slabAddress.substring(0, 8)}`;
+          const maxLeverage = Math.floor(10000 / initialMarginBps);
+          
+          await insertMarket({
+            slab_address: slabAddress,
+            mint_address: mintAddress,
+            symbol,
+            name,
+            decimals: 9,
+            deployer: admin,
+            oracle_authority: oracleAuthority,
+            initial_price_e6: priceE6,
+            max_leverage: maxLeverage,
+            trading_fee_bps: 10,
+            lp_collateral: null,
+            matcher_context: null,
+            status: "active",
+          });
+
+          console.log(`[StatsCollector] Registered new market: ${slabAddress} (${symbol})`);
+        } catch (err) {
+          console.warn(`[StatsCollector] Failed to register market ${slabAddress}:`, err instanceof Error ? err.message : err);
+        }
+      }
+    } catch (err) {
+      console.error("[StatsCollector] Market sync failed:", err);
+    }
+  }
+
+  /**
    * Collect stats for all known markets by reading on-chain slab accounts.
    */
   private async collect(): Promise<void> {
@@ -81,6 +149,9 @@ export class StatsCollector {
     this._collecting = true;
 
     try {
+      // Auto-register missing markets at the start of each cycle
+      await this.syncMarkets();
+
       const markets = this.crankService.getMarkets();
       if (markets.size === 0) return;
 
