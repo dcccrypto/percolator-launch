@@ -282,7 +282,7 @@ export async function POST(request: NextRequest) {
     const initLpData = encodeInitLP({
       matcherProgram: matcherProgramId,
       matcherContext: matcherCtxKeypair.publicKey,
-      feePayment: '1000000',
+      feePayment: '0',
     });
     const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
       payerPk, slabKeypair.publicKey, payerAta, vaultAta, WELL_KNOWN.tokenProgram,

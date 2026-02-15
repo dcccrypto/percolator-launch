@@ -54,6 +54,37 @@ export default function SimulationPage() {
   });
   const [speed, setSpeed] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  const [airdropping, setAirdropping] = useState(false);
+
+  // Fetch SOL balance
+  useEffect(() => {
+    if (!publicKey || !connected) { setSolBalance(null); return; }
+    const fetch = async () => {
+      try {
+        const bal = await connection.getBalance(publicKey);
+        setSolBalance(bal / 1e9);
+      } catch { setSolBalance(null); }
+    };
+    fetch();
+    const iv = setInterval(fetch, 5000);
+    return () => clearInterval(iv);
+  }, [publicKey, connected, connection]);
+
+  const handleAirdrop = async () => {
+    if (!publicKey) return;
+    setAirdropping(true);
+    try {
+      const sig = await connection.requestAirdrop(publicKey, 2e9); // 2 SOL
+      await connection.confirmTransaction(sig, "confirmed");
+      const bal = await connection.getBalance(publicKey);
+      setSolBalance(bal / 1e9);
+    } catch (e) {
+      console.error("Airdrop failed:", e);
+    } finally {
+      setAirdropping(false);
+    }
+  };
 
   // Update step based on wallet connection
   useEffect(() => {
@@ -370,11 +401,32 @@ export default function SimulationPage() {
                 <WalletMultiButton />
               </div>
             ) : (
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2" style={{ backgroundColor: "var(--long)" }} />
-                <span className="text-[11px] font-mono text-[var(--text)]">
-                  {publicKey?.toBase58().slice(0, 8)}...{publicKey?.toBase58().slice(-8)}
-                </span>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-2 w-2" style={{ backgroundColor: "var(--long)" }} />
+                  <span className="text-[11px] font-mono text-[var(--text)]">
+                    {publicKey?.toBase58().slice(0, 8)}...{publicKey?.toBase58().slice(-8)}
+                  </span>
+                  {solBalance !== null && (
+                    <span className={`text-[11px] font-mono ${solBalance < 0.5 ? "text-[var(--short)]" : "text-[var(--text-secondary)]"}`}>
+                      {solBalance.toFixed(3)} SOL
+                    </span>
+                  )}
+                </div>
+                {solBalance !== null && solBalance < 0.5 && (
+                  <div className="flex items-center justify-between border border-[var(--short)]/20 bg-[var(--short)]/[0.04] p-2">
+                    <span className="text-[10px] text-[var(--short)]">
+                      Need ~0.5 SOL. This is devnet — airdrop is free.
+                    </span>
+                    <button
+                      onClick={handleAirdrop}
+                      disabled={airdropping}
+                      className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-3 py-1 text-[9px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] hover:bg-[var(--accent)]/[0.15] disabled:opacity-50"
+                    >
+                      {airdropping ? "Airdropping..." : "Airdrop 2 SOL"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </StepCard>
