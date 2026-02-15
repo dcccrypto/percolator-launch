@@ -617,8 +617,16 @@ export default function SimulationPage() {
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const buildingRef = useRef(false);
+  const sessionStatsRef = useRef<SessionStats | null>(null);
+  const priceHistoryRef = useRef<PricePoint[]>([]);
+  const tokenPreviewRef = useRef<TokenPreview | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
+
+  // Keep refs in sync for use inside intervals (avoids stale closures)
+  useEffect(() => { sessionStatsRef.current = sessionStats; }, [sessionStats]);
+  useEffect(() => { priceHistoryRef.current = priceHistory; }, [priceHistory]);
+  useEffect(() => { tokenPreviewRef.current = tokenPreview; }, [tokenPreview]);
 
   /* ─── Fetch random token ─── */
   const fetchTokenPreview = useCallback(async () => {
@@ -661,7 +669,7 @@ export default function SimulationPage() {
         const res = await railwayFetch("/api/simulation");
         if (res.ok) {
           const data = await res.json();
-          const newPrice = data.price ?? state.price;
+          const newPrice = data.price ?? 1_000_000;
           setState(prev => ({
             ...prev,
             running: data.running,
@@ -696,10 +704,13 @@ export default function SimulationPage() {
             forceCloses: data.forceCloses ?? prev.forceCloses,
           } : prev);
           if (!data.running) {
-            const finalStats = sessionStats ? { ...sessionStats, endTime: Date.now(), endPrice: priceUsd } : null;
+            const currentStats = sessionStatsRef.current;
+            const currentHistory = priceHistoryRef.current;
+            const currentToken = tokenPreviewRef.current;
+            const finalStats = currentStats ? { ...currentStats, endTime: Date.now(), endPrice: priceUsd } : null;
             if (finalStats) {
               setSessionStats(finalStats);
-              try { setShareImage(generateShareImage(finalStats, priceHistory, tokenPreview?.symbol || "SIM", tokenPreview?.name || "Simulation")); } catch { /* ignore */ }
+              try { setShareImage(generateShareImage(finalStats, currentHistory, currentToken?.symbol || "SIM", currentToken?.name || "Simulation")); } catch { /* ignore */ }
             }
             setPhase("ended");
           }
@@ -917,7 +928,7 @@ export default function SimulationPage() {
           intervalMs: 5000 / speed,
           tokenSymbol: tokenPreview?.symbol,
           tokenName: tokenPreview?.name,
-          mintAddress: mintAddress ?? undefined,
+          mintAddress: mintKp.publicKey.toBase58(),
           creatorWallet: publicKey?.toBase58(),
         }),
       });
@@ -1261,9 +1272,17 @@ export default function SimulationPage() {
   }
 
   /* ─── Running Dashboard ─── */
+  if (!slabAddress) {
+    return (
+      <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center">
+        <div className="h-6 w-6 animate-spin border-2 border-[var(--accent)] border-t-transparent" />
+      </div>
+    );
+  }
+
   return (
     <RunningDashboard
-      slabAddress={slabAddress!}
+      slabAddress={slabAddress}
       tokenPreview={tokenPreview}
       state={state}
       priceHistory={priceHistory}

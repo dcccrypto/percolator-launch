@@ -1,7 +1,6 @@
 "use client";
 
 import { FC, useEffect, useRef, useState } from "react";
-import { useSlabState } from "@/components/providers/SlabProvider";
 import { useEngineState } from "@/hooks/useEngineState";
 
 interface LiqEvent {
@@ -17,7 +16,6 @@ interface LiqEvent {
  */
 export const LiveLiquidationFeed: FC = () => {
   const { engine, loading } = useEngineState();
-  const { accounts } = useSlabState();
   const [events, setEvents] = useState<LiqEvent[]>([]);
   const prevLiqs = useRef<bigint>(0n);
   const prevForce = useRef<bigint>(0n);

@@ -100,7 +100,7 @@ export const FundingRateCard: FC<{ slabAddress: string; simulation?: boolean }> 
     fetchFunding();
     const interval = setInterval(fetchFunding, 30000); // Refresh every 30s
     return () => clearInterval(interval);
-  }, [slabAddress, mockMode]);
+  }, [slabAddress, mockMode, simulation]);
 
   // Update countdown every second
   useEffect(() => {
@@ -187,7 +187,7 @@ export const FundingRateCard: FC<{ slabAddress: string; simulation?: boolean }> 
         {/* Header */}
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
               Funding Rate
             </span>
             <InfoIcon tooltip="Funding rates balance long/short positions. Percolator uses inventory-based funding to protect LPs." />
