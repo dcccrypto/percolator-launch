@@ -184,7 +184,17 @@ export const FundingRateCard: FC<{ slabAddress: string; simulation?: boolean }> 
     );
   }
 
-  if (!fundingData) return null;
+  if (!fundingData) {
+    return (
+      <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Funding Rate</span>
+          <span className="text-[10px] text-[var(--text-muted)]">No data available</span>
+        </div>
+        {error && <p className="mt-2 text-[9px] text-[var(--warning)]">{error}</p>}
+      </div>
+    );
+  }
 
   const rateDisplay = fundingData.hourlyRatePercent >= 0 
     ? `+${fundingData.hourlyRatePercent.toFixed(4)}%` 
