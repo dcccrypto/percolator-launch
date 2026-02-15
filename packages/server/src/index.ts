@@ -111,7 +111,7 @@ app.get("/api/simulation/history", (c) => {
 
 app.get("/api/simulation/bots", (c) => {
   const state = simulationService.getState();
-  return c.json(state.bots ?? []);
+  return c.json(state?.bots ?? []);
 });
 
 // Root

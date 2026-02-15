@@ -71,6 +71,18 @@ interface BotStats {
   warmupStartSlot: string;
 }
 
+interface SimulationStateSnapshot {
+  running: boolean;
+  slabAddress: string;
+  scenario: Scenario;
+  currentPrice: number;
+  currentPriceE6: string;
+  livePriceE6: string | null;
+  uptime: number;
+  stats: object;
+  bots: BotStats[];
+}
+
 interface SimStats {
   tradesCount: number;
   liquidationsCount: number;
@@ -439,7 +451,7 @@ export class SimulationService {
     return { ok: true, stats };
   }
 
-  getState(): object | null {
+  getState(): SimulationStateSnapshot | null {
     if (!this.state) return null;
 
     // Enrich bot stats with on-chain data
