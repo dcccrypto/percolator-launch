@@ -218,6 +218,10 @@ function applyScenario(
       const swing = Math.sin(elapsedMs / 5000) * 0.001 + (Math.random() - 0.5) * 0.002;
       return basePrice * (1 + swing);
     }
+
+    default:
+      // Unknown scenario — treat as live (return base price unchanged)
+      return basePrice;
   }
 }
 
@@ -489,6 +493,8 @@ export class SimulationService {
 
   setScenario(scenario: Scenario): { ok: boolean } {
     if (!this.state?.running) return { ok: false };
+    const validScenarios: Scenario[] = ["live", "crash", "squeeze", "blackswan", "volatile", "calm"];
+    if (!validScenarios.includes(scenario)) return { ok: false };
     this.state.scenario = scenario;
     this.scenarioStartTime = Date.now();
     this.scenarioBasePrice = this.state.currentPrice;
@@ -660,8 +666,8 @@ export class SimulationService {
       const elapsed = Date.now() - this.scenarioStartTime;
       const scenarioPrice = applyScenario(basePrice, this.state.scenario, elapsed);
 
-      // Clamp to positive
-      const finalPrice = Math.max(scenarioPrice, 0.01);
+      // Clamp to positive, guard NaN
+      const finalPrice = Math.max(Number.isFinite(scenarioPrice) ? scenarioPrice : basePrice, 0.01);
       const priceE6 = BigInt(Math.round(finalPrice * 1_000_000));
       const now = Math.floor(Date.now() / 1000);
 
