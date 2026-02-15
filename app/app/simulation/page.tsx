@@ -272,6 +272,7 @@ export default function SimulationPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           slabAddress: createData.slabAddress,
+          oracleSecret: createData.oracleSecret,
           startPriceE6: createData.initialPriceE6,
           scenario: null,
           intervalMs: 5000 / speed,
