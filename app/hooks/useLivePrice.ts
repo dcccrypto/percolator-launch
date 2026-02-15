@@ -9,7 +9,6 @@ if (!WS_URL && typeof window !== "undefined") {
 }
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
-const POLL_FALLBACK_MS = 10_000;
 
 interface PriceState {
   price: number | null;
@@ -24,12 +23,15 @@ interface PriceState {
 
 /**
  * Real-time price hook — connects to the Percolator WebSocket price engine.
- * Falls back to Jupiter polling if WebSocket is unavailable.
+ * Falls back to on-chain oracle price from SlabProvider if WebSocket is unavailable.
  *
  * Gets the slab address from SlabProvider context (not query params)
  * so it works on both /trade/[slab] and ?market= routes.
+ * 
+ * @param options.simulation - If true, skips Railway price cache calls (for simulation markets)
  */
-export function useLivePrice(): PriceState {
+export function useLivePrice(options?: { simulation?: boolean }): PriceState {
+  const simulation = options?.simulation ?? false;
   const [state, setState] = useState<PriceState>({
     price: null,
     priceUsd: null,
@@ -61,34 +63,7 @@ export function useLivePrice(): PriceState {
   const reconnectDelay = useRef(RECONNECT_BASE_MS);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const mountedRef = useRef(true);
-  const pollTimer = useRef<ReturnType<typeof setInterval>>(undefined);
   const wsConnected = useRef(false);
-
-  // Jupiter polling fallback — use ref to avoid being a dep of the WS effect
-  const pollJupiterRef = useRef<() => Promise<void>>(async () => {});
-  pollJupiterRef.current = async () => {
-    if (!mint || wsConnected.current) return;
-    try {
-      const url = `https://api.jup.ag/price/v2?ids=${mint}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!resp.ok) return; // Jupiter may require auth (401) — skip gracefully
-      const json = (await resp.json()) as Record<string, unknown>;
-      const data = json.data as Record<string, { price?: string }> | undefined;
-      if (!data || !data[mint]) return;
-      const p = parseFloat(data[mint].price ?? "0");
-      if (p > 0 && mountedRef.current) {
-        setState((prev) => ({
-          ...prev,
-          price: p,
-          priceUsd: p,
-          priceE6: BigInt(Math.round(p * 1_000_000)),
-          loading: false,
-        }));
-      }
-    } catch {
-      // keep last known
-    }
-  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -178,20 +153,22 @@ export function useLivePrice(): PriceState {
 
     connect();
 
-    // Also fetch 24h stats via REST
-    fetch(`${WS_URL.replace("ws://", "http://").replace("wss://", "https://")}/prices/${slabAddr}`)
-      .then((r) => { if (!r.ok) throw new Error("not found"); return r.json(); })
-      .then((json: { stats?: { change24h?: number; high24h?: string; low24h?: string } }) => {
-        if (json.stats && mountedRef.current) {
-          setState((prev) => ({
-            ...prev,
-            change24h: json.stats?.change24h ?? null,
-            high24h: json.stats?.high24h ? Number(json.stats.high24h) / 1_000_000 : null,
-            low24h: json.stats?.low24h ? Number(json.stats.low24h) / 1_000_000 : null,
-          }));
-        }
-      })
-      .catch(() => {});
+    // Also fetch 24h stats via REST (skip for simulation markets)
+    if (!simulation && WS_URL) {
+      fetch(`${WS_URL.replace("ws://", "http://").replace("wss://", "https://")}/prices/${slabAddr}`)
+        .then((r) => { if (!r.ok) throw new Error("not found"); return r.json(); })
+        .then((json: { stats?: { change24h?: number; high24h?: string; low24h?: string } }) => {
+          if (json.stats && mountedRef.current) {
+            setState((prev) => ({
+              ...prev,
+              change24h: json.stats?.change24h ?? null,
+              high24h: json.stats?.high24h ? Number(json.stats.high24h) / 1_000_000 : null,
+              low24h: json.stats?.low24h ? Number(json.stats.low24h) / 1_000_000 : null,
+            }));
+          }
+        })
+        .catch(() => {});
+    }
 
     // M3: Capture slabAddr at subscription time for cleanup
     const capturedSlabAddr = slabAddr;
@@ -211,17 +188,7 @@ export function useLivePrice(): PriceState {
         wsRef.current = null;
       }
     };
-  }, [slabAddr]);
-
-  // Separate effect for Jupiter polling fallback — avoids causing WS reconnects
-  useEffect(() => {
-    if (!slabAddr || !mint) return;
-    pollJupiterRef.current();
-    pollTimer.current = setInterval(() => pollJupiterRef.current(), POLL_FALLBACK_MS);
-    return () => {
-      if (pollTimer.current) clearInterval(pollTimer.current);
-    };
-  }, [slabAddr, mint]);
+  }, [slabAddr, simulation]);
 
   return state;
 }

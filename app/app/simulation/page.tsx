@@ -529,7 +529,7 @@ function RunningDashboardInner({
                 <FundingRateCard slabAddress={slabAddress} simulation />
               </ErrorBoundary>
               <ErrorBoundary label="FundingRateChart">
-                <FundingRateChart slabAddress={slabAddress} />
+                <FundingRateChart slabAddress={slabAddress} simulation />
               </ErrorBoundary>
             </div>
 
@@ -787,7 +787,7 @@ export default function SimulationPage() {
       if (msg.includes("reject") || msg.includes("cancelled") || msg.includes("User rejected")) {
         // user cancelled — no error
       } else if (msg.includes("Blockhash not found") || msg.includes("block height exceeded")) {
-        setError("Transaction expired — try again.");
+        setError("Transaction expired — devnet can be slow. Click send again.");
       } else if (msg.includes("0x1") || msg.includes("insufficient lamports")) {
         setError(`Insufficient SOL. Need ${MIN_SOL} devnet SOL.`);
       } else if (msg.includes("not connected")) {
