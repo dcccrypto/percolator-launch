@@ -11,7 +11,7 @@ import {
   useCallback,
 } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
 import {
   parseHeader,
   parseConfig,
@@ -62,7 +62,6 @@ const POLL_INTERVAL_MS = 3000;
 
 export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({ children, slabAddress }) => {
   const { connection } = useConnection();
-  const { publicKey } = useWallet();
   const [state, setState] = useState<SlabState>({ ...defaultState, slabAddress });
   const wsActive = useRef(false);
   const fetchRef = useRef<() => void>(() => {});
@@ -150,7 +149,7 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       if (subId !== undefined) connection.removeAccountChangeListener(subId);
       if (timer) clearTimeout(timer);
     };
-  }, [connection.rpcEndpoint, slabAddress, publicKey?.toBase58()]);
+  }, [connection.rpcEndpoint, slabAddress]);
 
   // Re-poll immediately when tab becomes visible (browser sleep/wake)
   useEffect(() => {
