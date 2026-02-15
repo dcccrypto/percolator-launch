@@ -45,8 +45,7 @@ export async function fetchTokenMeta(
   let name = known?.name ?? "Unknown Token";
 
   if (!known) {
-    // Try on-chain Metaplex metadata first (works for devnet test tokens)
-    let foundOnChain = false;
+    // Try on-chain Metaplex metadata (works for most SPL tokens)
     const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
     const [metadataPDA] = PublicKey.findProgramAddressSync(
       [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
@@ -86,25 +85,10 @@ export async function fetchTokenMeta(
         if (nameRaw && symRaw) {
           symbol = symRaw;
           name = nameRaw;
-          foundOnChain = true;
         }
       }
-    } catch { /* fall through to Jupiter */ }
-
-    // Fall back to Jupiter
-    if (!foundOnChain) {
-      try {
-        const resp = await fetch(`https://tokens.jup.ag/token/${key}`, {
-          signal: AbortSignal.timeout(5000),
-        });
-        if (resp.ok) {
-          const json = (await resp.json()) as any;
-          if (json.symbol) symbol = json.symbol;
-          if (json.name) name = json.name;
-        }
-      } catch {
-        // Use defaults
-      }
+    } catch {
+      // Use fallback defaults (truncated mint address)
     }
   }
 
