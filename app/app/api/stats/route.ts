@@ -13,8 +13,8 @@ export async function GET() {
 
   const [marketsRes, statsRes, tradersRes, recentTradesRes] = await Promise.all([
     supabase.from("markets").select("slab_address", { count: "exact", head: true }),
-    supabase.from("markets_with_stats").select("volume_24h, open_interest_long, open_interest_short, last_price"),
-    supabase.from("markets").select("deployer"),
+    supabase.from("markets_with_stats").select("volume_24h, open_interest_long, open_interest_short, last_price").limit(500),
+    supabase.from("markets").select("deployer").limit(500),
     supabase
       .from("trades")
       .select("id", { count: "exact", head: true })

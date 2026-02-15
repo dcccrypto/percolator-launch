@@ -176,6 +176,7 @@ body::before {
 .animate-float { animation: float 5s ease-in-out infinite; }
 .animate-scale-in { animation: scale-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both; }
 .animate-flow-line { background-size: 30% 100%; background-repeat: no-repeat; animation: flow-line 3s linear infinite; }
+.gsap-fade { opacity: 0; }
 
 .delay-100 { animation-delay: 100ms; }
 .delay-200 { animation-delay: 200ms; }

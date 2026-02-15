@@ -17,6 +17,7 @@ interface SwitchScenarioRequest {
  * Only works if a simulation is currently running.
  */
 export async function POST(request: NextRequest) {
+  if (!requireAuth(request)) return UNAUTHORIZED;
   try {
     const body: SwitchScenarioRequest = await request.json();
     
