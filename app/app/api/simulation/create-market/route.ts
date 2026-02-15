@@ -328,24 +328,42 @@ export async function POST(request: NextRequest) {
     ]);
     tx4.add(buildIx({ programId, keys: pushKeys3, data: pushData3 }));
 
-    // Set recent blockhash for all transactions
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    // ─── Serialize instructions as JSON (no blockhash needed) ───
+    // Client will build fresh transactions with fresh blockhashes
 
-    for (const tx of [tx1, tx2, tx3, tx4]) {
-      tx.recentBlockhash = blockhash;
-      tx.lastValidBlockHeight = lastValidBlockHeight;
-      tx.feePayer = payerPk;
-    }
+    const serializeIx = (ix: TransactionInstruction) => ({
+      programId: ix.programId.toBase58(),
+      keys: ix.keys.map(k => ({
+        pubkey: k.pubkey.toBase58(),
+        isSigner: k.isSigner,
+        isWritable: k.isWritable,
+      })),
+      data: Buffer.from(ix.data).toString('base64'),
+    });
 
-    // Partially sign transactions that have server-side keypairs
-    tx1.partialSign(mintKeypair, slabKeypair);
-    tx3.partialSign(matcherCtxKeypair);
-    tx4.partialSign(oracleKeypair);
+    const serializeKeypair = (kp: Keypair) =>
+      Buffer.from(kp.secretKey).toString('base64');
 
-    // Serialize for client (user still needs to sign)
-    const serializedTxs = [tx1, tx2, tx3, tx4].map(tx =>
-      Buffer.from(tx.serialize({ requireAllSignatures: false })).toString('base64')
-    );
+    // Group A: tx1 — Create mint + slab + vault ATA + InitMarket
+    // Group B: tx2 + tx3 combined — Oracle setup + Config + Crank + Payer ATA + Matcher + vAMM + InitLP
+    // Group C: tx4 — Push price + Crank + Delegate oracle + Push from oracle
+    const instructionGroups = [
+      {
+        label: 'Create mint, slab & market',
+        instructions: tx1.instructions.map(serializeIx),
+        signers: [serializeKeypair(mintKeypair), serializeKeypair(slabKeypair)],
+      },
+      {
+        label: 'Oracle, config & LP setup',
+        instructions: [...tx2.instructions, ...tx3.instructions].map(serializeIx),
+        signers: [serializeKeypair(matcherCtxKeypair)],
+      },
+      {
+        label: 'Delegate oracle & finalize',
+        instructions: tx4.instructions.map(serializeIx),
+        signers: [serializeKeypair(oracleKeypair)],
+      },
+    ];
 
     // Store session in manager
     const manager = SimulationManager.getInstance();
@@ -360,7 +378,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({
-      transactions: serializedTxs,
+      instructionGroups,
       slabAddress: slabKeypair.publicKey.toBase58(),
       mintAddress: mintKeypair.publicKey.toBase58(),
       oraclePublicKey: oracleKeypair.publicKey.toBase58(),
