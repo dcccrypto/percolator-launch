@@ -1,4 +1,4 @@
-import { Connection } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { pushOraclePrice, loadOracleKeypair } from './solana';
 import { getConfig } from '@/lib/config';
 import { getServiceClient } from '@/lib/supabase';
@@ -43,6 +43,23 @@ interface SimulationState {
   pythBasePrice: number | null; // Last known Pyth base price
 }
 
+/** Tracks a self-service simulation session's on-chain assets */
+export interface SelfServiceSession {
+  /** Oracle authority keypair (generated server-side, used to push prices) */
+  oracleKeypair: Keypair;
+  /** SPL token mint keypair (we are mint authority) */
+  mintKeypair: Keypair;
+  /** The slab/market address on-chain */
+  slabAddress: string;
+  /** Token metadata */
+  tokenName: string;
+  tokenSymbol: string;
+  /** The user's wallet that funded this session */
+  payerPublicKey: string;
+  /** Timestamp when session was created */
+  createdAt: number;
+}
+
 /**
  * Singleton manager for simulation mode
  * 
@@ -51,6 +68,7 @@ interface SimulationState {
  * - Periodic price updates via PushOraclePrice
  * - Simulation state management
  * - Database session tracking
+ * - Self-service session keypair storage (oracle + mint)
  */
 export class SimulationManager {
   private static instance: SimulationManager;
@@ -76,6 +94,9 @@ export class SimulationManager {
   private meanPrice = 0;
   private scenarioStartTime = 0;
   private scenarioDuration = 0;
+
+  // Self-service session storage (in-memory, keyed by payer pubkey)
+  private selfServiceSessions = new Map<string, SelfServiceSession>();
   
   private constructor() {}
   
@@ -84,6 +105,46 @@ export class SimulationManager {
       SimulationManager.instance = new SimulationManager();
     }
     return SimulationManager.instance;
+  }
+
+  // ─── Self-Service Session Management ───────────────────────────────
+
+  /**
+   * Store a self-service session's keypairs and metadata.
+   */
+  storeSelfServiceSession(session: SelfServiceSession): void {
+    this.selfServiceSessions.set(session.payerPublicKey, session);
+  }
+
+  /**
+   * Get a self-service session by payer public key.
+   */
+  getSelfServiceSession(payerPublicKey: string): SelfServiceSession | undefined {
+    return this.selfServiceSessions.get(payerPublicKey);
+  }
+
+  /**
+   * Remove a self-service session.
+   */
+  removeSelfServiceSession(payerPublicKey: string): void {
+    this.selfServiceSessions.delete(payerPublicKey);
+  }
+
+  /**
+   * Get the oracle keypair for price pushing.
+   * Checks self-service sessions first, then falls back to env var.
+   */
+  getOracleKeypair(slabAddress?: string): Keypair | null {
+    // Check self-service sessions
+    if (slabAddress) {
+      for (const session of this.selfServiceSessions.values()) {
+        if (session.slabAddress === slabAddress) {
+          return session.oracleKeypair;
+        }
+      }
+    }
+    // Fallback to env-based keypair
+    return loadOracleKeypair();
   }
   
   /**
@@ -94,9 +155,9 @@ export class SimulationManager {
       throw new Error('Simulation already running. Stop it first.');
     }
     
-    const keypair = loadOracleKeypair();
+    const keypair = this.getOracleKeypair(config.slabAddress);
     if (!keypair) {
-      throw new Error('SIMULATION_ORACLE_KEYPAIR not configured');
+      throw new Error('No oracle keypair available. Create a market first or set SIMULATION_ORACLE_KEYPAIR.');
     }
     
     const cfg = getConfig();
@@ -555,7 +616,7 @@ export class SimulationManager {
   private async sendPriceToChain(priceE6: number): Promise<void> {
     if (!this.connection || !this.state.slabAddress) return;
     
-    const keypair = loadOracleKeypair();
+    const keypair = this.getOracleKeypair(this.state.slabAddress);
     if (!keypair) {
       console.error('Oracle keypair not available');
       return;
