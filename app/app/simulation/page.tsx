@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { Transaction } from "@solana/web3.js";
+import { Transaction, TransactionInstruction, PublicKey, Keypair } from "@solana/web3.js";
 import dynamic from "next/dynamic";
 import { ScenarioSelector } from "@/components/simulation/ScenarioSelector";
 import { SimulationControls } from "@/components/simulation/SimulationControls";
@@ -115,15 +115,52 @@ export default function SimulationPage() {
     fetchTokenPreview();
   };
 
-  const sendSerializedTransactions = async (serializedTxs: string[], labels: string[]): Promise<boolean> => {
+  interface InstructionGroupData {
+    label: string;
+    instructions: {
+      programId: string;
+      keys: { pubkey: string; isSigner: boolean; isWritable: boolean }[];
+      data: string; // base64
+    }[];
+    signers: string[]; // base64 secret keys
+  }
+
+  const sendInstructionGroups = async (groups: InstructionGroupData[]): Promise<boolean> => {
     if (!signTransaction || !publicKey) return false;
 
-    for (let i = 0; i < serializedTxs.length; i++) {
-      setTxProgress({ current: i + 1, total: serializedTxs.length, label: labels[i] || `Transaction ${i + 1}` });
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      setTxProgress({ current: i + 1, total: groups.length, label: group.label });
 
       try {
-        const tx = Transaction.from(Buffer.from(serializedTxs[i], "base64"));
-        // Sign with wallet (preserves existing partial signatures from server keypairs)
+        // Get fresh blockhash for each transaction
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+
+        const tx = new Transaction();
+        tx.recentBlockhash = blockhash;
+        tx.lastValidBlockHeight = lastValidBlockHeight;
+        tx.feePayer = publicKey;
+
+        // Add instructions
+        for (const ix of group.instructions) {
+          tx.add(new TransactionInstruction({
+            programId: new PublicKey(ix.programId),
+            keys: ix.keys.map(k => ({
+              pubkey: new PublicKey(k.pubkey),
+              isSigner: k.isSigner,
+              isWritable: k.isWritable,
+            })),
+            data: Buffer.from(ix.data, 'base64'),
+          }));
+        }
+
+        // Partial sign with server-provided keypairs
+        if (group.signers.length > 0) {
+          const keypairs = group.signers.map(s => Keypair.fromSecretKey(Buffer.from(s, 'base64')));
+          tx.partialSign(...keypairs);
+        }
+
+        // Wallet sign
         const signed = await signTransaction(tx);
         const sig = await connection.sendRawTransaction(signed.serialize(), {
           skipPreflight: false,
@@ -132,7 +169,7 @@ export default function SimulationPage() {
         await connection.confirmTransaction(sig, "confirmed");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`Failed at step ${i + 1} (${labels[i]}): ${msg}`);
+        throw new Error(`Failed at step ${i + 1} (${group.label}): ${msg}`);
       }
     }
 
@@ -146,7 +183,7 @@ export default function SimulationPage() {
 
     try {
       // Step 1: Create market
-      setTxProgress({ current: 0, total: 6, label: "Preparing market..." });
+      setTxProgress({ current: 0, total: 5, label: "Preparing market..." });
 
       const createRes = await fetch("/api/simulation/create-market", {
         method: "POST",
@@ -169,13 +206,8 @@ export default function SimulationPage() {
       });
       setEstimatedCost(createData.estimatedCostSol);
 
-      // Sign and send create transactions
-      await sendSerializedTransactions(createData.transactions, [
-        "Create mint & slab",
-        "Oracle setup & config",
-        "Initialize LP",
-        "Delegate oracle & crank",
-      ]);
+      // Sign and send create transactions (fresh blockhash per tx)
+      await sendInstructionGroups(createData.instructionGroups);
 
       // Step 2: Fund market
       setSetupStep("funding");
@@ -194,10 +226,7 @@ export default function SimulationPage() {
 
       const fundData = await fundRes.json();
 
-      await sendSerializedTransactions(fundData.transactions, [
-        "Mint collateral tokens",
-        "Deposit & configure",
-      ]);
+      await sendInstructionGroups(fundData.instructionGroups);
 
       // Step 3: Start simulation
       setTxProgress({ current: 0, total: 0, label: "Starting simulation engine..." });
@@ -406,11 +435,11 @@ export default function SimulationPage() {
                     Estimated Cost
                   </span>
                   <span className="text-[13px] font-bold font-mono text-[var(--text)]">
-                    ~0.5 SOL
+                    ~0.5 SOL <span className="text-[9px] text-[var(--text-dim)] font-normal">(reclaimable)</span>
                   </span>
                 </div>
                 <p className="text-[9px] text-[var(--text-dim)]">
-                  Creates an SPL mint, market slab, vault, and LP. You will sign 4-6 transactions.
+                  Creates an SPL mint, market slab, vault, and LP. You will sign ~5 transactions.
                   Rent is reclaimable by closing the market after.
                 </p>
 

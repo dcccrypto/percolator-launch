@@ -138,23 +138,36 @@ export async function POST(request: NextRequest) {
     ]);
     tx2.add(buildIx({ programId, keys: crankKeys, data: crankData }));
 
-    // Set blockhash
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    for (const tx of [tx1, tx2]) {
-      tx.recentBlockhash = blockhash;
-      tx.lastValidBlockHeight = lastValidBlockHeight;
-      tx.feePayer = payerPk;
-    }
+    // Serialize instructions as JSON (client builds fresh txs with fresh blockhashes)
+    const serializeIx = (ix: { programId: PublicKey; keys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[]; data: Buffer | Uint8Array }) => ({
+      programId: ix.programId.toBase58(),
+      keys: ix.keys.map((k: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }) => ({
+        pubkey: k.pubkey.toBase58(),
+        isSigner: k.isSigner,
+        isWritable: k.isWritable,
+      })),
+      data: Buffer.from(ix.data).toString('base64'),
+    });
 
-    // Partially sign tx2 with oracle keypair (for PushOraclePrice)
-    tx2.partialSign(session.oracleKeypair);
+    const { Keypair: _Keypair } = await import('@solana/web3.js');
+    const serializeKeypair = (kp: InstanceType<typeof _Keypair>) =>
+      Buffer.from(kp.secretKey).toString('base64');
 
-    const serializedTxs = [tx1, tx2].map(tx =>
-      Buffer.from(tx.serialize({ requireAllSignatures: false })).toString('base64')
-    );
+    const instructionGroups = [
+      {
+        label: 'Mint collateral tokens',
+        instructions: tx1.instructions.map(serializeIx),
+        signers: [] as string[],
+      },
+      {
+        label: 'Deposit, insurance & crank',
+        instructions: tx2.instructions.map(serializeIx),
+        signers: [serializeKeypair(session.oracleKeypair)],
+      },
+    ];
 
     return NextResponse.json({
-      transactions: serializedTxs,
+      instructionGroups,
       mintedAmount: mintAmount,
       lpCollateral: lpCollateral.toString(),
       insuranceAmount: insuranceAmount.toString(),
