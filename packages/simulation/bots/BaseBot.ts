@@ -37,6 +37,7 @@ import {
   parseConfig,
   parseEngine,
   deriveVaultAuthority,
+  derivePythPushOraclePDA,
   type MarketConfig,
 } from "@percolator/core";
 
@@ -131,11 +132,21 @@ export abstract class BaseBot {
 
     const [vaultAuthority] = deriveVaultAuthority(programId, slabPubkey);
 
-    // Oracle: for Hyperp mode (all-zero feed ID), the slab itself serves as oracle
-    // because the program reads authority_price_e6 from the slab.
-    // For Pyth, you'd derive from the feed ID. Here we default to slab as oracle
-    // placeholder — works for admin-pushed oracle mode on devnet.
-    const oraclePubkey = slabPubkey;
+    // Oracle resolution — mirrors server CrankService logic exactly:
+    // If oracleAuthority is set (non-default), the market uses admin-pushed prices
+    // and the slab itself is passed as the oracle account (program reads authority_price_e6).
+    // If oracleAuthority is default (all zeros), the market uses Pyth and we derive
+    // the oracle PDA from the feed ID.
+    const isAdminOracle = !config.oracleAuthority.equals(PublicKey.default);
+    let oraclePubkey: PublicKey;
+    if (isAdminOracle) {
+      oraclePubkey = slabPubkey;
+    } else {
+      const feedHex = Array.from(config.indexFeedId.toBytes())
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      [oraclePubkey] = derivePythPushOraclePDA(feedHex);
+    }
 
     this.slabMeta = { slabPubkey, programId, config, vaultAuthority, oraclePubkey };
     return this.slabMeta;
