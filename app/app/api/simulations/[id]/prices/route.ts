@@ -11,7 +11,7 @@ export async function GET(
 
   try {
     const sb = getServiceClient();
-    const { data, error } = await sb
+    const { data, error } = await (sb as any)
       .from("simulation_price_history")
       .select("price_e6, timestamp")
       .eq("session_id", id)
