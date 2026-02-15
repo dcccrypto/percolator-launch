@@ -384,6 +384,7 @@ export type Database = {
           deployer: string
           id: string
           initial_price_e6: number | null
+          logo_url: string | null
           lp_collateral: number | null
           matcher_context: string | null
           max_leverage: number
@@ -402,6 +403,7 @@ export type Database = {
           deployer: string
           id?: string
           initial_price_e6?: number | null
+          logo_url?: string | null
           lp_collateral?: number | null
           matcher_context?: string | null
           max_leverage?: number
@@ -420,6 +422,7 @@ export type Database = {
           deployer?: string
           id?: string
           initial_price_e6?: number | null
+          logo_url?: string | null
           lp_collateral?: number | null
           matcher_context?: string | null
           max_leverage?: number
@@ -770,6 +773,7 @@ export type Database = {
           liquidation_buffer_bps: number | null
           liquidation_fee_bps: number | null
           liquidation_fee_cap: string | null
+          logo_url: string | null
           lp_collateral: number | null
           lp_max_abs: number | null
           lp_sum_abs: number | null

@@ -551,6 +551,16 @@ const DevnetMintContent: FC = () => {
                   )}
                 </div>
 
+                <div className="mt-3 p-3 border border-[var(--border)] bg-[var(--bg-elevated)]">
+                  <p className="text-[10px] text-[var(--text-secondary)]">
+                    💡 <strong>Pro tip:</strong> After creating your market, you can upload a custom logo at{" "}
+                    <Link href="/upload-logo" className="text-[var(--accent)] hover:underline">
+                      /upload-logo
+                    </Link>
+                    {" "}to make it stand out on the markets list and trade page!
+                  </p>
+                </div>
+
                 <button onClick={() => { setMintAddress(null); setCreateStatus(null); setLastTxSig(null); }} className="mt-4 text-xs text-[var(--text-dim)] hover:text-[var(--text-muted)] underline">
                   Create another token
                 </button>
