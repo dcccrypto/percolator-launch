@@ -70,22 +70,15 @@ export default function SimulationPage() {
 
   const fetchTokenPreview = useCallback(async () => {
     try {
-      const res = await fetch("/api/simulation/create-market", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payerPublicKey: publicKey?.toBase58(), dryRun: true }),
-      });
-      // We'll use the actual create endpoint, the token is random each time
-      // For preview, just generate client-side placeholder
-      setTokenPreview({
-        name: "Loading...",
-        symbol: "...",
-        description: "Generating random token...",
-      });
+      const res = await fetch("/api/simulation/random-token");
+      if (res.ok) {
+        const data = await res.json();
+        setTokenPreview({ name: data.name, symbol: data.symbol, description: data.description });
+      }
     } catch {
-      // Fallback
+      setTokenPreview({ name: "Mystery Token", symbol: "???", description: "Could not load preview" });
     }
-  }, [publicKey]);
+  }, []);
 
   // Poll simulation state when running
   useEffect(() => {
@@ -119,12 +112,7 @@ export default function SimulationPage() {
   }, [setupStep]);
 
   const refreshToken = () => {
-    // Token is random server-side, just update the preview text
-    setTokenPreview({
-      name: "New random token",
-      symbol: "???",
-      description: "Will be revealed on creation",
-    });
+    fetchTokenPreview();
   };
 
   const sendSerializedTransactions = async (serializedTxs: string[], labels: string[]): Promise<boolean> => {
@@ -403,7 +391,7 @@ export default function SimulationPage() {
           <StepCard
             number={3}
             title="Create Market & Start"
-            active={setupStep === "creating" || setupStep === "funding"}
+            active={setupStep === "preview" || setupStep === "creating" || setupStep === "funding"}
             complete={setupStep === "ended"}
           >
             {setupStep === "preview" && (
