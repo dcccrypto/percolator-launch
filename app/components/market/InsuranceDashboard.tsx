@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useState, useEffect, useMemo } from "react";
+import { useEngineState } from "@/hooks/useEngineState";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { InsuranceExplainerModal } from "./InsuranceExplainerModal";
 import { InsuranceTopUpModal } from "./InsuranceTopUpModal";
@@ -44,22 +45,39 @@ function formatUsdAmount(amountE6: string | bigint): string {
   });
 }
 
-export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
-  slabAddress,
+export const InsuranceDashboard: FC<{ slabAddress: string; simulation?: boolean }> = ({
+  slabAddress, simulation,
 }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
+  const { engine, insuranceFund, totalOI } = useEngineState();
 
   const [insuranceData, setInsuranceData] = useState<InsuranceData | null>(
     mockMode ? MOCK_INSURANCE : null
   );
-  const [loading, setLoading] = useState(!mockMode);
+  const [loading, setLoading] = useState(!mockMode && !simulation);
   const [error, setError] = useState<string | null>(null);
   const [showExplainer, setShowExplainer] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
 
-  // Fetch insurance data
+  // In simulation mode, derive from on-chain state
   useEffect(() => {
-    if (mockMode) return;
+    if (!simulation || !engine) return;
+    const balance = (insuranceFund?.balance ?? 0n).toString();
+    const feeRev = (insuranceFund?.feeRevenue ?? 0n).toString();
+    const risk = (totalOI ?? 0n).toString();
+    const healthRatio = Number(totalOI ?? 0n) > 0
+      ? Number(insuranceFund?.balance ?? 0n) / Number(totalOI ?? 0n)
+      : 0;
+    setInsuranceData({
+      balance, feeRevenue: feeRev, dailyAccumulationRate: 0,
+      coverageRatio: healthRatio, totalRisk: risk, historicalBalance: [],
+    });
+    setLoading(false);
+  }, [simulation, engine, insuranceFund, totalOI]);
+
+  // Fetch insurance data from API (non-simulation)
+  useEffect(() => {
+    if (mockMode || simulation) return;
 
     const fetchInsurance = async () => {
       try {

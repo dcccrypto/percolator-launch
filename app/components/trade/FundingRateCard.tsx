@@ -2,6 +2,7 @@
 
 import { FC, useState, useEffect, useMemo } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { useEngineState } from "@/hooks/useEngineState";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { FundingExplainerModal } from "./FundingExplainerModal";
@@ -41,20 +42,40 @@ function formatCountdown(slots: number): string {
   return `${secs}s`;
 }
 
-export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+export const FundingRateCard: FC<{ slabAddress: string; simulation?: boolean }> = ({ slabAddress, simulation }) => {
   const { params } = useSlabState();
+  const { engine, fundingRate } = useEngineState();
   const userAccount = useUserAccount();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   
   const [fundingData, setFundingData] = useState<FundingData | null>(mockMode ? MOCK_FUNDING : null);
-  const [loading, setLoading] = useState(!mockMode);
+  const [loading, setLoading] = useState(!mockMode && !simulation);
   const [error, setError] = useState<string | null>(null);
   const [showExplainer, setShowExplainer] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
-  // Fetch funding data
+  // In simulation mode, derive funding data from on-chain state
   useEffect(() => {
-    if (mockMode) return;
+    if (!simulation || !engine) return;
+    const rate = Number(fundingRate ?? 0n);
+    const hourly = (rate * 9000) / 100;
+    const apr = hourly * 24 * 365;
+    const netLp = engine.netLpPos ?? 0n;
+    setFundingData({
+      currentRateBpsPerSlot: rate,
+      hourlyRatePercent: hourly,
+      aprPercent: apr,
+      direction: rate > 0 ? "long_pays_short" : rate < 0 ? "short_pays_long" : "neutral",
+      nextFundingSlot: 0,
+      netLpPosition: netLp,
+      currentSlot: 0,
+    });
+    setLoading(false);
+  }, [simulation, engine, fundingRate]);
+
+  // Fetch funding data from API (non-simulation)
+  useEffect(() => {
+    if (mockMode || simulation) return;
     
     const fetchFunding = async () => {
       try {

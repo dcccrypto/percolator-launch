@@ -462,7 +462,7 @@ function RunningDashboardInner({
       {/* On-chain Trading Chart */}
       <div className="mx-auto max-w-7xl px-3 pt-3">
         <ErrorBoundary label="TradingChart">
-          <TradingChart slabAddress={slabAddress} />
+          <TradingChart slabAddress={slabAddress} simulation />
         </ErrorBoundary>
       </div>
 
@@ -523,7 +523,7 @@ function RunningDashboardInner({
             {/* Row 2: Funding Rates — current + historical chart */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               <ErrorBoundary label="FundingRateCard">
-                <FundingRateCard slabAddress={slabAddress} />
+                <FundingRateCard slabAddress={slabAddress} simulation />
               </ErrorBoundary>
               <ErrorBoundary label="FundingRateChart">
                 <FundingRateChart slabAddress={slabAddress} />
@@ -533,10 +533,10 @@ function RunningDashboardInner({
             {/* Row 3: Open Interest + Insurance Fund */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               <ErrorBoundary label="OpenInterestCard">
-                <OpenInterestCard slabAddress={slabAddress} />
+                <OpenInterestCard slabAddress={slabAddress} simulation />
               </ErrorBoundary>
               <ErrorBoundary label="InsuranceDashboard">
-                <InsuranceDashboard slabAddress={slabAddress} />
+                <InsuranceDashboard slabAddress={slabAddress} simulation />
               </ErrorBoundary>
             </div>
 

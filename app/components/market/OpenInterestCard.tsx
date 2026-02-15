@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useState, useEffect, useMemo } from "react";
+import { useEngineState } from "@/hooks/useEngineState";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
@@ -49,20 +50,38 @@ function formatSignedUsdAmount(amountE6: string): string {
   return usd >= 0 ? `+$${formatted}` : `-$${formatted}`;
 }
 
-export const OpenInterestCard: FC<{ slabAddress: string }> = ({
-  slabAddress,
+export const OpenInterestCard: FC<{ slabAddress: string; simulation?: boolean }> = ({
+  slabAddress, simulation,
 }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
+  const { engine } = useEngineState();
 
   const [oiData, setOiData] = useState<OpenInterestData | null>(
     mockMode ? MOCK_OI : null
   );
-  const [loading, setLoading] = useState(!mockMode);
+  const [loading, setLoading] = useState(!mockMode && !simulation);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch OI data
+  // In simulation mode, derive from on-chain state
   useEffect(() => {
-    if (mockMode) return;
+    if (!simulation || !engine) return;
+    const totalOi = engine.totalOpenInterest ?? 0n;
+    const netLpPos = engine.netLpPos ?? 0n;
+    const longOi = (totalOi - netLpPos) / 2n;
+    const shortOi = (totalOi + netLpPos) / 2n;
+    setOiData({
+      totalOi: totalOi.toString(),
+      longOi: longOi.toString(),
+      shortOi: shortOi.toString(),
+      netLpPosition: netLpPos.toString(),
+      historicalOi: [],
+    });
+    setLoading(false);
+  }, [simulation, engine]);
+
+  // Fetch OI data from API (non-simulation)
+  useEffect(() => {
+    if (mockMode || simulation) return;
 
     const fetchOi = async () => {
       try {

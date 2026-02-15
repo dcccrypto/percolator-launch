@@ -67,7 +67,7 @@ const CHART_H = 300;
 const VOLUME_H = 60;
 const PAD = { top: 20, bottom: 40, left: 60, right: 20 };
 
-export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = ({ slabAddress, simulation }) => {
   const { config } = useSlabState();
   const { priceUsd } = useLivePrice();
   const [chartType, setChartType] = useState<ChartType>("line");
@@ -76,8 +76,9 @@ export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [hoveredCandle, setHoveredCandle] = useState<CandleData | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Fetch price history
+  // Fetch price history (skip in simulation — live prices build up from WebSocket)
   useEffect(() => {
+    if (simulation) return;
     fetch(`/api/markets/${slabAddress}/prices`)
       .then((r) => r.json())
       .then((d) => {
@@ -88,7 +89,7 @@ export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         setPrices(apiPrices);
       })
       .catch(() => {});
-  }, [slabAddress]);
+  }, [slabAddress, simulation]);
 
   // Add live price updates
   useEffect(() => {
