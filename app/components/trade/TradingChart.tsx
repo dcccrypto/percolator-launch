@@ -69,7 +69,7 @@ const PAD = { top: 20, bottom: 40, left: 60, right: 20 };
 
 export const TradingChart: FC<{ slabAddress: string; simulation?: boolean }> = ({ slabAddress, simulation }) => {
   const { config } = useSlabState();
-  const { priceUsd } = useLivePrice();
+  const { priceUsd } = useLivePrice({ simulation });
   const [chartType, setChartType] = useState<ChartType>("line");
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [prices, setPrices] = useState<PricePoint[]>([]);
