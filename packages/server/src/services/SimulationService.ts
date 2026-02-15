@@ -744,32 +744,63 @@ export class SimulationService {
       return;
     }
 
-    // Wait for frontend to transfer SOL to oracle keypair (0.3 SOL for tx fees)
-    // Frontend sends SOL transfer before calling /api/simulation/start, but it may not be confirmed yet
-    const MIN_SOL = 100_000_000; // 0.1 SOL minimum needed
-    const MAX_WAIT_ATTEMPTS = 12; // 12 x 5s = 60s max wait
+    // Check and ensure oracle keypair has enough SOL for bot init tx fees
+    // Each bot needs ~0.01 SOL for InitUser + DepositCollateral fees
+    // Plus ATA creation, minting, etc. We need minimum 0.3 SOL total.
+    const MIN_SOL_REQUIRED = 300_000_000; // 0.3 SOL minimum (5 bots × 0.05 SOL + buffer)
+    
+    // Wait up to 30s for frontend to transfer SOL (with retries)
     let solBalance = 0;
-    for (let attempt = 1; attempt <= MAX_WAIT_ATTEMPTS; attempt++) {
+    let attempts = 0;
+    const maxAttempts = 6; // 6 attempts × 5s = 30s max wait
+    
+    while (attempts < maxAttempts) {
       solBalance = await this.connection.getBalance(this.oracleKeypair.publicKey);
-      console.log(`💰 Oracle SOL check ${attempt}/${MAX_WAIT_ATTEMPTS}: ${(solBalance / 1e9).toFixed(4)} SOL`);
-      if (solBalance >= MIN_SOL) break;
-      if (attempt < MAX_WAIT_ATTEMPTS) {
-        await new Promise((r) => setTimeout(r, 5000));
+      console.log(`💰 Oracle SOL balance check (attempt ${attempts + 1}/${maxAttempts}): ${(solBalance / 1e9).toFixed(6)} SOL`);
+      
+      if (solBalance >= MIN_SOL_REQUIRED) {
+        console.log(`✅ Oracle has sufficient SOL (${(solBalance / 1e9).toFixed(3)} SOL) — proceeding with bot init`);
+        break;
+      }
+      
+      if (attempts === 0) {
+        console.log(`⏳ Oracle has ${(solBalance / 1e9).toFixed(6)} SOL (need ${(MIN_SOL_REQUIRED / 1e9).toFixed(3)} SOL) — waiting for frontend transfer...`);
+      }
+      
+      attempts++;
+      if (attempts < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 5000)); // Wait 5s between checks
       }
     }
-    if (solBalance < MIN_SOL) {
-      // Last resort: try devnet airdrop
-      console.log("🪂 No SOL from frontend, trying devnet airdrop...");
+    
+    // If still insufficient after waiting, try airdrop as FALLBACK ONLY
+    if (solBalance < MIN_SOL_REQUIRED) {
+      console.warn(`⚠️  Oracle still has insufficient SOL after ${maxAttempts * 5}s wait (${(solBalance / 1e9).toFixed(6)} SOL) — attempting airdrop fallback...`);
       try {
         const devnetConn = new Connection("https://api.devnet.solana.com", "confirmed");
-        const sig = await devnetConn.requestAirdrop(this.oracleKeypair.publicKey, 1_000_000_000);
-        await devnetConn.confirmTransaction(sig, "confirmed");
-        console.log("✅ Airdrop 1 SOL succeeded");
-        await new Promise((r) => setTimeout(r, 2000));
-      } catch (err) {
-        console.error("❌ Airdrop failed — bots cannot init without SOL:", err);
-        return;
+        const airdropAmount = 500_000_000; // 0.5 SOL
+        console.log(`🪂 Requesting ${(airdropAmount / 1e9).toFixed(1)} SOL airdrop to ${this.oracleKeypair.publicKey.toBase58().slice(0, 8)}...`);
+        const airdropSig = await devnetConn.requestAirdrop(this.oracleKeypair.publicKey, airdropAmount);
+        await devnetConn.confirmTransaction(airdropSig, "confirmed");
+        console.log(`✅ Airdrop successful (sig=${airdropSig.slice(0, 16)}...)`);
+        await new Promise((r) => setTimeout(r, 3000)); // Wait for propagation
+        
+        // Re-check balance
+        solBalance = await this.connection.getBalance(this.oracleKeypair.publicKey);
+        console.log(`💰 Post-airdrop balance: ${(solBalance / 1e9).toFixed(6)} SOL`);
+      } catch (airdropErr) {
+        console.error(`❌ Airdrop failed (devnet rate limit or network issue):`, airdropErr);
+        console.warn(`⚠️  Continuing with ${(solBalance / 1e9).toFixed(6)} SOL — bots WILL LIKELY FAIL`);
+        console.warn(`⚠️  ACTION REQUIRED: Frontend must transfer ≥${(MIN_SOL_REQUIRED / 1e9).toFixed(3)} SOL to oracle pubkey: ${this.oracleKeypair.publicKey.toBase58()}`);
       }
+    }
+    
+    // Final balance check before proceeding
+    solBalance = await this.connection.getBalance(this.oracleKeypair.publicKey);
+    if (solBalance < MIN_SOL_REQUIRED) {
+      console.error(`🚨 CRITICAL: Oracle has ${(solBalance / 1e9).toFixed(6)} SOL (need ${(MIN_SOL_REQUIRED / 1e9).toFixed(3)} SOL)`);
+      console.error(`🚨 Bot initialization will likely fail. Oracle pubkey: ${this.oracleKeypair.publicKey.toBase58()}`);
+      // Don't return — try anyway, individual bots will fail with clear logs
     }
 
     // Read slab
