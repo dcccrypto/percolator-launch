@@ -279,7 +279,7 @@ function generateShareImage(
   ctx.fillText("Permissionless Perpetual Futures on Solana", 180, H - 30);
   ctx.fillStyle = "#333";
   ctx.font = "10px monospace";
-  ctx.fillText("percolator-launch.vercel.app", W - 260, H - 30);
+  ctx.fillText("percolatorlaunch.com", W - 260, H - 30);
 
   // Pyth badge
   ctx.fillStyle = "#6B3FA0";
@@ -1189,7 +1189,7 @@ export default function SimulationPage() {
         `${Number(pct) >= 0 ? "+" : ""}${pct}% price movement\n` +
         `${trades} trades | ${liqs} liquidations\n` +
         `High: $${sessionStats?.highPrice.toFixed(4)} | Low: $${sessionStats?.lowPrice.toFixed(4)}\n\n` +
-        `Permissionless perpetual futures on Solana\npercolator-launch.vercel.app/simulation`
+        `Permissionless perpetual futures on Solana\npercolatorlaunch.com/simulation`
       );
       window.open(`https://twitter.com/intent/tweet?text=${text}`, "_blank");
     };
