@@ -90,8 +90,22 @@ export const FundingRateCard: FC<{ slabAddress: string; simulation?: boolean }> 
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
-        // Fallback to mock data on error (for demo)
-        setFundingData(MOCK_FUNDING);
+        // Fallback to on-chain data when API unavailable
+        if (engine && fundingRate !== null) {
+          const rate = Number(fundingRate);
+          const hourly = (rate * 9000) / 100;
+          const apr = hourly * 24 * 365;
+          const netLp = engine.netLpPos ?? 0n;
+          setFundingData({
+            currentRateBpsPerSlot: rate,
+            hourlyRatePercent: hourly,
+            aprPercent: apr,
+            direction: rate > 0 ? "long_pays_short" : rate < 0 ? "short_pays_long" : "neutral",
+            nextFundingSlot: 0,
+            netLpPosition: netLp,
+            currentSlot: 0,
+          });
+        }
       } finally {
         setLoading(false);
       }
@@ -248,7 +262,7 @@ export const FundingRateCard: FC<{ slabAddress: string; simulation?: boolean }> 
 
         {error && !mockMode && (
           <div className="mt-2 text-[9px] text-[var(--warning)]">
-            {error} (using mock data)
+            {error} (using on-chain data)
           </div>
         )}
       </div>

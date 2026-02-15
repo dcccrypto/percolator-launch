@@ -96,8 +96,22 @@ export const OpenInterestCard: FC<{ slabAddress: string; simulation?: boolean }>
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
-        // Fallback to mock data on error (for demo)
-        setOiData(MOCK_OI);
+        // Fallback to on-chain data when API unavailable
+        if (engine) {
+          const totalOi = engine.totalOpenInterest?.toString() ?? "0";
+          const netLp = engine.netLpPos ?? 0n;
+          const totalOiBn = engine.totalOpenInterest ?? 0n;
+          const netLpBn = netLp < 0n ? -netLp : netLp;
+          const longOi = totalOiBn > netLpBn ? (totalOiBn + netLp) / 2n : 0n;
+          const shortOi = totalOiBn > netLpBn ? (totalOiBn - netLp) / 2n : 0n;
+          setOiData({
+            totalOi,
+            longOi: (longOi < 0n ? 0n : longOi).toString(),
+            shortOi: (shortOi < 0n ? 0n : shortOi).toString(),
+            netLpPosition: netLp.toString(),
+            historicalOi: [],
+          });
+        }
       } finally {
         setLoading(false);
       }
@@ -382,7 +396,7 @@ export const OpenInterestCard: FC<{ slabAddress: string; simulation?: boolean }>
 
       {error && !mockMode && (
         <div className="mt-2 text-[9px] text-[var(--warning)]">
-          {error} (using mock data)
+          {error} (using on-chain data)
         </div>
       )}
     </div>

@@ -89,8 +89,21 @@ export const InsuranceDashboard: FC<{ slabAddress: string; simulation?: boolean 
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
-        // Fallback to mock data on error (for demo)
-        setInsuranceData(MOCK_INSURANCE);
+        // Fallback to on-chain data when API unavailable
+        if (engine) {
+          const balance = engine.insuranceFund?.balance ?? 0n;
+          const feeRev = engine.insuranceFund?.feeRevenue ?? 0n;
+          const totalOi = engine.totalOpenInterest ?? 0n;
+          const ratio = totalOi > 0n ? Number(balance * 10000n / totalOi) / 100 : 0;
+          setInsuranceData({
+            balance: balance.toString(),
+            feeRevenue: feeRev.toString(),
+            totalRisk: totalOi.toString(),
+            coverageRatio: ratio,
+            dailyAccumulationRate: 0,
+            historicalBalance: [],
+          });
+        }
       } finally {
         setLoading(false);
       }
@@ -289,7 +302,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string; simulation?: boolean 
 
         {error && !mockMode && (
           <div className="mt-2 text-[9px] text-[var(--warning)]">
-            {error} (using mock data)
+            {error} (using on-chain data)
           </div>
         )}
       </div>
