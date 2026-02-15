@@ -121,7 +121,7 @@ export const OpenInterestCard: FC<{ slabAddress: string; simulation?: boolean }>
     fetchOi();
     const interval = setInterval(fetchOi, 30000); // Refresh every 30s
     return () => clearInterval(interval);
-  }, [slabAddress, mockMode]);
+  }, [slabAddress, mockMode, simulation, engine]);
 
   // Calculate percentages and imbalance
   const { longPct, shortPct, imbalancePct, imbalanceLabel, imbalanceColor } =
