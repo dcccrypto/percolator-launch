@@ -114,7 +114,7 @@ export const FundingRateCard: FC<{ slabAddress: string; simulation?: boolean }> 
     fetchFunding();
     const interval = setInterval(fetchFunding, 30000); // Refresh every 30s
     return () => clearInterval(interval);
-  }, [slabAddress, mockMode, simulation]);
+  }, [slabAddress, mockMode, simulation, engine, fundingRate]);
 
   // Update countdown every second
   useEffect(() => {

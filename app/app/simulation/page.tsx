@@ -529,7 +529,7 @@ function RunningDashboardInner({
                 <FundingRateCard slabAddress={slabAddress} simulation />
               </ErrorBoundary>
               <ErrorBoundary label="FundingRateChart">
-                <FundingRateChart slabAddress={slabAddress} />
+                <FundingRateChart slabAddress={slabAddress} simulation />
               </ErrorBoundary>
             </div>
 

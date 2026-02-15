@@ -113,7 +113,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string; simulation?: boolean 
     fetchInsurance();
     const interval = setInterval(fetchInsurance, 30000); // Refresh every 30s
     return () => clearInterval(interval);
-  }, [slabAddress, mockMode]);
+  }, [slabAddress, mockMode, simulation, engine]);
 
   // Calculate health status
   const healthStatus = useMemo(() => {

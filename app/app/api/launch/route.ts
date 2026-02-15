@@ -64,15 +64,16 @@ export async function POST(req: NextRequest) {
     }
     const tier = SLAB_TIERS[slabTier];
 
-    // 1. Fetch token metadata via Jupiter
+    // 1. Fetch token metadata from on-chain (Metaplex)
     let name = `Token ${mint.slice(0, 6)}`;
     let symbol = mint.slice(0, 4).toUpperCase();
     let decimals = 6;
 
+    const rpcUrl = process.env.NEXT_PUBLIC_HELIUS_RPC_URL
+      ?? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? ""}`;
+
     try {
       // Get decimals from RPC
-      const rpcUrl = process.env.NEXT_PUBLIC_HELIUS_RPC_URL
-        ?? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? ""}`;
       const rpcResp = await fetch(rpcUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,16 +93,52 @@ export async function POST(req: NextRequest) {
       // Use default decimals
     }
 
+    // Try to get token name/symbol from Metaplex metadata
     try {
-      const jupResp = await fetch(`https://tokens.jup.ag/token/${mint}`);
-      if (jupResp.ok) {
-        const jupData = await jupResp.json();
-        if (jupData.symbol) symbol = jupData.symbol;
-        if (jupData.name) name = jupData.name;
-        if (jupData.decimals != null) decimals = jupData.decimals;
+      const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+      const [metadataPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mintPk.toBuffer()],
+        TOKEN_METADATA_PROGRAM_ID
+      );
+      
+      const metaResp = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "getAccountInfo",
+          params: [metadataPDA.toBase58(), { encoding: "base64" }],
+        }),
+      });
+      const metaData = await metaResp.json();
+      
+      if (metaData?.result?.value?.data?.[0]) {
+        const data = Buffer.from(metaData.result.value.data[0], "base64");
+        const MAX_NAME_LEN = 256;
+        const MAX_SYM_LEN = 32;
+        
+        if (data.length >= 69) {
+          const nameLen = data.readUInt32LE(65);
+          if (nameLen <= MAX_NAME_LEN && data.length >= 69 + nameLen) {
+            const nameRaw = data.slice(69, 69 + nameLen).toString("utf8").replace(/\0/g, "").trim();
+            const symOffset = 69 + nameLen;
+            
+            if (data.length >= symOffset + 4) {
+              const symLen = data.readUInt32LE(symOffset);
+              if (symLen <= MAX_SYM_LEN && data.length >= symOffset + 4 + symLen) {
+                const symRaw = data.slice(symOffset + 4, symOffset + 4 + symLen).toString("utf8").replace(/\0/g, "").trim();
+                if (nameRaw && symRaw) {
+                  symbol = symRaw;
+                  name = nameRaw;
+                }
+              }
+            }
+          }
+        }
       }
     } catch {
-      // Use defaults
+      // Use defaults if metadata not found
     }
 
     // 2. Auto-detect DEX pool via DexScreener

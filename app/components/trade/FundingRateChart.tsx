@@ -37,15 +37,15 @@ const PAD = { top: 20, bottom: 40, left: 60, right: 20 };
 const CHART_W = W - PAD.left - PAD.right;
 const CHART_H = H - PAD.top - PAD.bottom;
 
-export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+export const FundingRateChart: FC<{ slabAddress: string; simulation?: boolean }> = ({ slabAddress, simulation }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const [history, setHistory] = useState<FundingHistoryPoint[]>(mockMode ? MOCK_HISTORY : []);
-  const [loading, setLoading] = useState(!mockMode);
+  const [loading, setLoading] = useState(!mockMode && !simulation);
   const [hoveredPoint, setHoveredPoint] = useState<FundingHistoryPoint | null>(null);
   const [mouseX, setMouseX] = useState(0);
 
   useEffect(() => {
-    if (mockMode) return;
+    if (mockMode || simulation) return;
 
     const fetchHistory = async () => {
       try {
@@ -63,7 +63,7 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
     };
 
     fetchHistory();
-  }, [slabAddress, mockMode]);
+  }, [slabAddress, mockMode, simulation]);
 
   const { minRate, maxRate, rateRange, minTime, maxTime, timeRange } = useMemo(() => {
     if (history.length === 0) {
