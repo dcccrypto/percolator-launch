@@ -14,6 +14,7 @@ import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
 import { InfoBanner } from "@/components/ui/InfoBanner";
+import { LogoUpload } from "@/components/create/LogoUpload";
 
 function isValidBase58Pubkey(s: string): boolean {
   try {
@@ -520,6 +521,7 @@ const CreationProgress: FC<{
               </Link>
               <button onClick={onReset} className={btnSecondary}>Create Another</button>
             </div>
+            <LogoUpload slabAddress={state.slabAddress} />
           </div>
         )}
 

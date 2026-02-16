@@ -551,7 +551,10 @@ const DevnetMintContent: FC = () => {
                   )}
                 </div>
 
-                <button onClick={() => { setMintAddress(null); setCreateStatus(null); setLastTxSig(null); }} className="mt-4 text-xs text-[var(--text-dim)] hover:text-[var(--text-muted)] underline">
+                <p className="mt-4 text-[10px] text-[var(--text-dim)]">
+                  Logo can be uploaded after you create a market for this token.
+                </p>
+                <button onClick={() => { setMintAddress(null); setCreateStatus(null); setLastTxSig(null); }} className="mt-2 text-xs text-[var(--text-dim)] hover:text-[var(--text-muted)] underline">
                   Create another token
                 </button>
               </div>
