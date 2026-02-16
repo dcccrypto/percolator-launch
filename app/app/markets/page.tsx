@@ -18,6 +18,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
+import { MarketLogo } from "@/components/market/MarketLogo";
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "\u2014";
@@ -479,6 +480,7 @@ function MarketsPageInner() {
                     >
                       <div>
                         <div className="flex items-center gap-2">
+                          <MarketLogo logoUrl={m.supabase?.logo_url} symbol={tokenMetaMap.get(m.mintAddress)?.symbol ?? undefined} size="sm" />
                           <span className="font-semibold text-white text-sm">
                             {tokenMetaMap.get(m.mintAddress)?.symbol ? `${tokenMetaMap.get(m.mintAddress)!.symbol}/USD` : shortenAddress(m.slabAddress)}
                           </span>

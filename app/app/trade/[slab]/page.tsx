@@ -18,6 +18,7 @@ import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
 import { SystemCapitalCard } from "@/components/trade/SystemCapitalCard";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { ShareButton } from "@/components/market/ShareCard";
+import { MarketLogo } from "@/components/market/MarketLogo";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
@@ -141,6 +142,16 @@ function TradePageInner({ slab }: { slab: string }) {
   const symbol = tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN");
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
+  // Fetch logo URL
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/markets/${slab}/logo`).then(r => r.json()).then(d => {
+      if (!cancelled && d.logo_url) setLogoUrl(d.logo_url);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [slab]);
+
   // Dynamic page title
   useEffect(() => {
     document.title = `${symbol}/USD — Percolator`;
@@ -196,9 +207,12 @@ function TradePageInner({ slab }: { slab: string }) {
       <div className="sticky top-0 z-30 border-b border-[var(--border)]/50 bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">
         <div className="flex items-center justify-between">
           <div className="min-w-0">
-            <h1 className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-              {symbol}/USD <span className="text-[10px] font-normal uppercase tracking-[0.15em] text-[var(--text-muted)]">PERP</span>
-            </h1>
+            <div className="flex items-center gap-2">
+              <MarketLogo logoUrl={logoUrl} symbol={symbol} size="sm" />
+              <h1 className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+                {symbol}/USD <span className="text-[10px] font-normal uppercase tracking-[0.15em] text-[var(--text-muted)]">PERP</span>
+              </h1>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <UsdToggleButton />
@@ -225,9 +239,12 @@ function TradePageInner({ slab }: { slab: string }) {
       <div className="hidden lg:flex items-start justify-between px-4 py-2 gap-3 border-b border-[var(--border)]/30">
         <div className="min-w-0">
           <p className="mb-0.5 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--accent)]/70">// TRADE</p>
-          <h1 className="text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-            {symbol}/USD <span className="text-xs font-normal text-[var(--text-muted)]">PERP</span>
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <MarketLogo logoUrl={logoUrl} symbol={symbol} size="md" />
+            <h1 className="text-lg font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+              {symbol}/USD <span className="text-xs font-normal text-[var(--text-muted)]">PERP</span>
+            </h1>
+          </div>
           <div className="mt-0.5 flex items-center gap-3">
             <span className="flex items-center text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
               {shortAddress}
