@@ -15,4 +15,12 @@ if (typeof window !== "undefined") {
   }
 }
 
+// BigInt JSON serialization — prevents "Do not know how to serialize BigInt" crashes
+// Safe: only adds toJSON if not already defined
+if (typeof BigInt !== "undefined" && !(BigInt.prototype as unknown as Record<string, unknown>).toJSON) {
+  (BigInt.prototype as unknown as Record<string, unknown>).toJSON = function () {
+    return this.toString();
+  };
+}
+
 export {};

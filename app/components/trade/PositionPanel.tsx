@@ -178,11 +178,11 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       ) : (
         <div>
           {/* PnL highlight */}
-          <div className={`rounded-none border-l-2 ${pnlTokens >= 0n ? "border-l-[var(--long)]" : "border-l-[var(--short)]"} bg-[var(--bg)] p-2.5 mb-2`}>
+          <div className={`rounded-none border-l-2 ${pnlTokens >= 0n ? "border-l-[var(--long)]" : "border-l-[var(--short)]"} bg-[var(--bg)] p-2.5 mb-2 min-h-[60px]`}>
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Unrealized PnL</span>
               <div className="text-right">
-                <span className={`text-sm font-bold ${pnlColor}`} style={{ fontFamily: "var(--font-mono)" }}>
+                <span className={`text-sm font-bold ${pnlColor} tabular-nums`} style={{ fontFamily: "var(--font-mono)" }}>
                   {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
                   {formatTokenAmount(abs(pnlTokens))} {symbol}
                 </span>

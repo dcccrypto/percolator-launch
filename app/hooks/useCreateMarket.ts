@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Keypair,
   PublicKey,
@@ -107,6 +107,9 @@ export function useCreateMarket() {
     loading: false,
   });
 
+  // Persist slab keypair across retries so we can resume from any step
+  const slabKpRef = useRef<Keypair | null>(null);
+
   const create = useCallback(
     async (params: CreateMarketParams, retryFromStep?: number) => {
       if (!wallet.publicKey || !wallet.sendTransaction) {
@@ -133,27 +136,30 @@ export function useCreateMarket() {
         ...(startStep === 0 ? { txSigs: [], slabAddress: null } : {}),
       }));
 
-      // For retry, we need to reuse the slab keypair. We store it in a ref-like closure.
-      // On fresh start, generate a new keypair.
+      // Persist slab keypair in ref so retries can reuse it
       let slabKp: Keypair;
       let slabPk: PublicKey;
       let vaultAta: PublicKey;
 
       if (startStep === 0) {
         slabKp = Keypair.generate();
+        slabKpRef.current = slabKp;
         slabPk = slabKp.publicKey;
-      } else {
-        // On retry, recover slab public key only (secret key not persisted for security)
-        if (!state.slabAddress) {
-          setState((s) => ({
-            ...s,
-            loading: false,
-            error: "Cannot retry: slab address unknown. Please start over.",
-          }));
-          return;
-        }
+      } else if (slabKpRef.current) {
+        // Retry with persisted keypair — full functionality
+        slabKp = slabKpRef.current;
+        slabPk = slabKp.publicKey;
+      } else if (state.slabAddress) {
+        // Keypair lost (page refresh) but we have the address — limited retry (steps > 0 only)
         slabPk = new PublicKey(state.slabAddress);
-        slabKp = null as unknown as Keypair; // Not needed for steps > 0
+        slabKp = null as unknown as Keypair;
+      } else {
+        setState((s) => ({
+          ...s,
+          loading: false,
+          error: "Cannot retry: slab keypair lost. Please start over.",
+        }));
+        return;
       }
 
       const [vaultPda] = deriveVaultAuthority(programId, slabPk);
@@ -553,6 +559,7 @@ export function useCreateMarket() {
   );
 
   const reset = useCallback(() => {
+    slabKpRef.current = null;
     setState({
       step: 0,
       stepLabel: "",
