@@ -4,23 +4,31 @@ import { FC, useCallback, useRef, useState } from "react";
 import { MarketLogo } from "@/components/market/MarketLogo";
 
 interface LogoUploadProps {
-  slabAddress: string;
+  /** Upload by slab address (market must exist) */
+  slabAddress?: string;
+  /** Upload by mint address (no market required — for faucet) */
+  mintAddress?: string;
   symbol?: string;
 }
 
-export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, symbol }) => {
+export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, symbol }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
 
+  const endpoint = mintAddress
+    ? `/api/tokens/${mintAddress}/logo`
+    : slabAddress
+      ? `/api/markets/${slabAddress}/logo`
+      : null;
+
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (!file) return;
+      if (!file || !endpoint) return;
 
-      // Client-side validation
       const allowed = ["image/png", "image/jpeg", "image/webp", "image/gif"];
       if (!allowed.includes(file.type)) {
         setError("Only PNG, JPEG, WebP, or GIF allowed.");
@@ -31,7 +39,6 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, symbol }) => {
         return;
       }
 
-      // Show preview immediately
       setPreview(URL.createObjectURL(file));
       setError(null);
       setUploading(true);
@@ -40,12 +47,9 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, symbol }) => {
         const form = new FormData();
         form.append("logo", file);
 
-        const res = await fetch(`/api/markets/${slabAddress}/logo`, {
-          method: "POST",
-          body: form,
-        });
-
+        const res = await fetch(endpoint, { method: "POST", body: form });
         const data = await res.json();
+
         if (!res.ok) {
           throw new Error(data.error || "Upload failed");
         }
@@ -59,8 +63,10 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, symbol }) => {
         setUploading(false);
       }
     },
-    [slabAddress]
+    [endpoint]
   );
+
+  if (!endpoint) return null;
 
   return (
     <div className="mt-4 border border-[var(--border)] bg-[var(--panel-bg)] p-4">
@@ -69,7 +75,6 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, symbol }) => {
       </p>
 
       <div className="flex items-center gap-4">
-        {/* Current logo / preview */}
         <div className="shrink-0">
           {preview ? (
             <img
@@ -84,7 +89,15 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, symbol }) => {
 
         <div className="flex-1">
           {logoUrl ? (
-            <p className="text-[11px] text-[var(--accent)]">Logo uploaded</p>
+            <div>
+              <p className="text-[11px] text-[var(--accent)]">Logo uploaded</p>
+              <button
+                onClick={() => { setLogoUrl(null); setError(null); }}
+                className="mt-1 text-[10px] text-[var(--text-dim)] underline hover:text-[var(--text-muted)]"
+              >
+                Replace
+              </button>
+            </div>
           ) : (
             <>
               <input
