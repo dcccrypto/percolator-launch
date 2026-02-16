@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useCallback, useRef, useState } from "react";
+import { FC, useCallback, useEffect, useRef, useState } from "react";
 import { MarketLogo } from "@/components/market/MarketLogo";
 
 interface LogoUploadProps {
@@ -65,6 +65,15 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, symb
     },
     [endpoint]
   );
+
+  // Cleanup preview URL to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (preview) {
+        URL.revokeObjectURL(preview);
+      }
+    };
+  }, [preview]);
 
   if (!endpoint) return null;
 
