@@ -27,6 +27,13 @@ export function computeMarkPnl(
 }
 
 /**
+ * Sentinel value returned by computeLiqPrice when a short position is effectively
+ * unliquidatable (maintenance margin ≥ 100%). Equal to max u64.
+ * UI should display "∞" rather than the raw numeric value.
+ */
+export const UNLIQUIDATABLE_LIQ_PRICE = 18446744073709551615n;
+
+/**
  * Compute liquidation price given entry, capital, position and maintenance margin.
  * Uses pure BigInt arithmetic for precision (no Number() truncation).
  */
@@ -46,8 +53,10 @@ export function computeLiqPrice(
     const liq = entryPrice - adjusted;
     return liq > 0n ? liq : 0n;
   } else {
-    // Guard: if maintenanceMarginBps >= 10000 (100%), position is effectively unliquidatable
-    if (maintenanceMarginBps >= 10000n) return entryPrice;
+    // Guard: if maintenanceMarginBps >= 10000 (100%), position is effectively unliquidatable.
+    // Short positions liquidate when price rises. With >= 100% margin, there is enough
+    // collateral to cover any price increase — return UNLIQUIDATABLE_LIQ_PRICE (max u64).
+    if (maintenanceMarginBps >= 10000n) return UNLIQUIDATABLE_LIQ_PRICE;
     const adjusted = (capitalPerUnitE6 * 10000n) / (10000n - maintenanceMarginBps);
     return entryPrice + adjusted;
   }

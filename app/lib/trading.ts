@@ -12,4 +12,5 @@ export {
   computeFundingRateAnnualized,
   computeRequiredMargin,
   computeMaxLeverage,
+  UNLIQUIDATABLE_LIQ_PRICE,
 } from "@percolator/core";

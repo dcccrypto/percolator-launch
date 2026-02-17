@@ -6,7 +6,7 @@ import {
   computeTradingFee,
   computePreTradeLiqPrice,
 } from "@/lib/trading";
-import { formatUsd, formatTokenAmount } from "@/lib/format";
+import { formatUsd, formatTokenAmount, formatLiqPrice } from "@/lib/format";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
 
@@ -116,7 +116,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         />
         <SummaryRow
           label="Est. Liq Price"
-          value={formatUsd(liqPrice)}
+          value={formatLiqPrice(liqPrice)}
           valueClass={isLong ? "text-[var(--short)]" : "text-[var(--long)]"}
         />
       </div>

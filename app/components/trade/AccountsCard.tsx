@@ -5,8 +5,8 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
-import { formatTokenAmount, formatUsd, formatPnl, shortenAddress } from "@/lib/format";
-import { AccountKind, computeMarkPnl, computeLiqPrice } from "@percolator/core";
+import { formatTokenAmount, formatPnl, shortenAddress, formatLiqPrice } from "@/lib/format";
+import { AccountKind, computeMarkPnl, computeLiqPrice, UNLIQUIDATABLE_LIQ_PRICE } from "@percolator/core";
 
 type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl" | "capital" | "margin";
 type SortDir = "asc" | "desc";
@@ -44,7 +44,10 @@ export const AccountsCard: FC = () => {
       const liqPrice = computeLiqPrice(account.entryPrice, account.capital, account.positionSize, maintBps);
       let liqHealthPct = 100;
       if (account.positionSize !== 0n && liqPrice > 0n && oraclePrice > 0n) {
-        if (account.positionSize > 0n) {
+        if (liqPrice >= UNLIQUIDATABLE_LIQ_PRICE) {
+          // Position is over-collateralised — cannot be liquidated
+          liqHealthPct = 100;
+        } else if (account.positionSize > 0n) {
           const range = Number(account.entryPrice - liqPrice);
           const dist = Number(oraclePrice - liqPrice);
           liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
@@ -175,7 +178,7 @@ export const AccountsCard: FC = () => {
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">
                         {row.positionSize !== 0n ? (
                           <div className="flex items-center justify-end gap-1">
-                            <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsd(row.liqPrice)}</span>
+                            <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatLiqPrice(row.liqPrice)}</span>
                             <div className="h-1 w-8 shrink-0 bg-[var(--border)]/50">
                               <div className={`h-1 ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
                             </div>

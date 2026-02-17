@@ -10,7 +10,7 @@ import { useTrade } from "@/hooks/useTrade";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { AccountKind } from "@percolator/core";
-import { formatTokenAmount, formatUsd } from "@/lib/format";
+import { formatTokenAmount, formatLiqPrice } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {
   computeMarkPnl,
@@ -244,7 +244,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div className="flex items-center justify-between py-1.5">
               <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Liq. Price</span>
               <span className="text-[11px] text-[var(--warning)]" style={{ fontFamily: "var(--font-mono)" }}>
-                {liqPriceE6 > 0n ? formatUsd(liqPriceE6) : "-"}
+                {formatLiqPrice(liqPriceE6)}
               </span>
             </div>
             <div className="flex items-center justify-between py-1.5">

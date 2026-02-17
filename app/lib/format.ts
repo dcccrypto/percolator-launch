@@ -25,6 +25,17 @@ export function formatUsd(priceE6: bigint | null | undefined): string {
   return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
 }
 
+/**
+ * Format a liquidation price — returns "∞" for unliquidatable positions
+ * (i.e. when liqPrice === UNLIQUIDATABLE_LIQ_PRICE sentinel from computeLiqPrice).
+ */
+export function formatLiqPrice(priceE6: bigint | null | undefined): string {
+  if (priceE6 == null || priceE6 === 0n) return "—";
+  // UNLIQUIDATABLE_LIQ_PRICE = max u64 = 18446744073709551615n
+  if (priceE6 >= 18446744073709551615n) return "∞";
+  return formatUsd(priceE6);
+}
+
 export function shortenAddress(address: string, chars: number = 4): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
 }
