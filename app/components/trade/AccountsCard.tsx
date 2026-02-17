@@ -5,7 +5,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
-import { formatTokenAmount, formatPnl, shortenAddress, formatLiqPrice } from "@/lib/format";
+import { formatTokenAmount, formatPnl, shortenAddress, formatLiqPrice, formatUsd } from "@/lib/format";
 import { AccountKind, computeMarkPnl, computeLiqPrice, UNLIQUIDATABLE_LIQ_PRICE } from "@percolator/core";
 
 type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl" | "capital" | "margin";
