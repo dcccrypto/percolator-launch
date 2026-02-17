@@ -1,6 +1,6 @@
 # Percolator Architecture
 
-Percolator is a high-performance perpetual futures trading engine built on Solana. The platform consists of three main services that work together to provide a complete trading experience.
+Percolator is a permissionless perpetual futures platform built on Solana. The backend runs as three independent services that work together to provide a complete trading experience.
 
 ## System Overview
 
@@ -371,43 +371,60 @@ VIEW markets_with_stats AS
 
 ## Environment Configuration
 
-### Common Environment Variables
+### Shared Config (all backend services)
 
 ```bash
-# Solana RPC
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+# Solana RPC (Helius recommended)
+RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
+FALLBACK_RPC_URL=https://api.devnet.solana.com
+HELIUS_API_KEY=your-helius-api-key
 
 # Supabase
 SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_ANON_KEY=xxx
-SUPABASE_SERVICE_ROLE_KEY=xxx  # Indexer only
+SUPABASE_KEY=xxx
+
+# Program IDs
+ALL_PROGRAM_IDS=FxfD37s1...,FwfBKZXb...,g9msRSV3...
+
+# Error tracking
+SENTRY_DSN=https://xxx@sentry.io/xxx
 
 # Node Environment
 NODE_ENV=production
 ```
 
-### API Service Specific
+### API Service
 
 ```bash
 API_PORT=3001
-CORS_ORIGINS=https://app.percolator.trade
-RATE_LIMIT_READ=100
-RATE_LIMIT_WRITE=20
+CORS_ORIGINS=https://percolatorlaunch.com
+API_AUTH_KEY=your-api-key
+WS_AUTH_REQUIRED=false
 ```
 
-### Indexer Service Specific
+### Keeper Service
 
 ```bash
-INDEXER_POLL_INTERVAL=10000  # 10s
-INDEXER_BATCH_SIZE=50
+CRANK_KEYPAIR=your-base58-keypair
+CRANK_INTERVAL_MS=30000
+KEEPER_HEALTH_PORT=8081
 ```
 
-### Frontend Specific
+### Indexer Service
 
 ```bash
-NEXT_PUBLIC_API_URL=https://api.percolator.trade
-NEXT_PUBLIC_WS_URL=wss://api.percolator.trade
-NEXT_PUBLIC_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+INDEXER_PORT=3002
+WEBHOOK_URL=https://your-indexer.railway.app
+HELIUS_WEBHOOK_SECRET=your-webhook-secret
+```
+
+### Frontend
+
+```bash
+NEXT_PUBLIC_API_URL=https://your-api.railway.app
+NEXT_PUBLIC_WS_URL=wss://your-api.railway.app
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=xxx
 ```
 
 ---
@@ -541,9 +558,8 @@ The `docker-compose.yml` file orchestrates all three services with proper networ
   - Monitor query performance
 
 - [ ] **Monitoring**:
-  - Set up Sentry/LogRocket for error tracking
-  - Configure uptime monitoring (UptimeRobot, etc.)
-  - Set up alerts for API downtime
+  - Configure Sentry DSN (all services have Sentry built in)
+  - Set up uptime monitoring
   - Monitor database performance
 
 ---

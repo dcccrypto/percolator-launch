@@ -1,140 +1,146 @@
 # @percolator/simulation
 
-Oracle price engine for Percolator simulation mode.
+Oracle price engine and bot fleet for Percolator simulation mode. Used for testing market mechanics without real users.
+
+---
 
 ## Overview
 
-This package provides a standalone price simulation engine that generates realistic market price movements for testing and simulation. It does **not** handle Solana transactions directly — it computes prices and emits updates via callback.
+Two components:
 
-## Installation
+1. **Oracle (price engine)** — Generates realistic price movements using configurable models
+2. **Bot fleet** — Simulated traders that open/close positions based on different strategies
+
+---
+
+## Quick Start
 
 ```bash
 cd packages/simulation
-npm install
-npm run build
+pnpm install
+pnpm build
 ```
 
-## Usage
+---
+
+## Oracle (Price Engine)
+
+Generates synthetic price updates and emits them via callback. Does not send Solana transactions directly — the caller is responsible for calling `PushOraclePrice`.
 
 ```typescript
 import { PriceEngine } from '@percolator/simulation';
 
-// Create engine
 const engine = new PriceEngine(
   {
     slabAddress: 'YourMarketSlabAddress',
-    startPriceE6: 5000000,  // $5.00
+    startPriceE6: 5_000_000,  // $5.00
     model: 'random-walk',
-    intervalMs: 2000,  // Update every 2 seconds
+    intervalMs: 2000,
     params: {
-      volatility: 0.01,  // 1% volatility
-      minPrice: 100000,  // $0.10 minimum
-      maxPrice: 10000000  // $10.00 maximum
-    }
+      volatility: 0.01,  // 1% per step
+      minPrice: 100_000,
+      maxPrice: 10_000_000,
+    },
   },
-  (update) => {
-    console.log(`Price: $${update.priceE6 / 1e6}`);
-    // Handle Solana PushOraclePrice transaction here
+  async (update) => {
+    // Push to chain here
+    await pushOraclePrice(update.slabAddress, update.priceE6);
   }
 );
 
-// Start simulation
 engine.start();
-
-// Switch model on the fly
-engine.setModel('trending', { driftPerStep: 10000 });  // $0.01 drift
-
-// Trigger events
-engine.triggerCrash(0.5, 10000);    // 50% crash over 10 seconds
-engine.triggerSqueeze(1.0, 15000);  // 100% pump over 15 seconds
-
-// Stop simulation
 engine.stop();
 ```
 
-## Price Models
+### Price Models
 
-### Random Walk
-Gaussian random movements with configurable volatility.
+| Model | Description |
+|-------|-------------|
+| `random-walk` | Gaussian movements with configurable volatility |
+| `mean-revert` | Price gravitates toward a target with random noise |
+| `trending` | Consistent drift with volatility |
+| `crash` | Exponential decay with optional recovery |
+| `squeeze` | Pump and dump |
 
+Models can be switched at runtime:
 ```typescript
-model: 'random-walk',
-params: {
-  volatility: 0.01  // 1% standard deviation
-}
+engine.setModel('trending', { driftPerStep: 10_000 });
+engine.triggerCrash(0.5, 10_000);    // 50% crash over 10s
+engine.triggerSqueeze(1.0, 15_000);  // 100% pump over 15s
 ```
 
-### Mean Revert
-Price gravitates towards a mean with random noise.
+All prices are in E6 format (1,000,000 = $1.00). Box-Muller transform for Gaussian distributions.
+
+---
+
+## Bot Fleet
+
+Simulated traders that interact with Percolator markets using different strategies.
 
 ```typescript
-model: 'mean-revert',
-params: {
-  meanPrice: 5000000,  // $5.00 target
-  revertSpeed: 0.1,    // 10% reversion per step
-  volatility: 0.005    // 0.5% noise
-}
+import { BotFleet, MarketMakerBot, TrendFollowerBot, DegenBot, LPBot } from '@percolator/simulation';
+
+const fleet = new BotFleet({ slabAddress: 'YOUR_SLAB', connection, keypairs });
+fleet.start();
 ```
 
-### Trending
-Consistent drift with volatility.
+### Bot Types
 
-```typescript
-model: 'trending',
-params: {
-  driftPerStep: 10000,  // $0.01 per step
-  volatility: 0.01      // 1% noise
-}
-```
+| Bot | Strategy |
+|-----|---------|
+| `MarketMakerBot` | Provides liquidity by placing both sides near the oracle price |
+| `TrendFollowerBot` | Opens positions in the direction of recent price movement |
+| `DegenBot` | High-leverage random trades — stress tests liquidation paths |
+| `LPBot` | Deposits and withdraws from the insurance LP on a cycle |
 
-### Crash
-Exponential price decay with optional recovery.
-
-```typescript
-model: 'crash',
-params: {
-  crashMagnitude: 0.5,     // 50% drop
-  crashDurationMs: 10000,  // 10 seconds
-  recoverySpeed: 0.1       // Slow recovery
-}
-```
-
-### Squeeze
-Exponential pump and dump.
-
-```typescript
-model: 'squeeze',
-params: {
-  squeezeMagnitude: 1.0,    // 100% pump
-  squeezeDurationMs: 15000  // 15 seconds
-}
-```
+---
 
 ## Architecture
 
-- **types.ts** — TypeScript interfaces and types
-- **models.ts** — Pure price movement functions
-- **PriceEngine.ts** — Main service class with event loop
-- **index.ts** — Public exports
+```
+packages/simulation/src/
+├── oracle/
+│   ├── PriceEngine.ts   # Main engine class with event loop
+│   ├── models.ts        # Pure price movement functions per model
+│   └── types.ts         # PriceEngineConfig, PriceUpdate interfaces
+├── bots/
+│   ├── BotFleet.ts      # Orchestrates multiple bots
+│   ├── BaseBot.ts       # Shared bot lifecycle
+│   ├── MarketMakerBot.ts
+│   ├── TrendFollowerBot.ts
+│   ├── DegenBot.ts
+│   ├── LPBot.ts
+│   └── types.ts         # Bot config interfaces
+└── index.ts             # Public exports
+```
 
-## Integration
+---
 
-The engine is designed to integrate with your existing server:
+## Usage in Tests
+
+The simulation package is used in integration tests to drive market activity without human traders:
 
 ```typescript
-import { PriceEngine } from '@percolator/simulation';
-import { sendOraclePriceUpdate } from './your-solana-client';
+import { PriceEngine, BotFleet } from '@percolator/simulation';
 
-const engine = new PriceEngine(config, async (update) => {
-  // Send actual Solana transaction
-  await sendOraclePriceUpdate(update.slabAddress, update.priceE6);
-});
+// In test setup:
+const oracle = new PriceEngine(config, (update) => pushPrice(update));
+const fleet = new BotFleet({ ... });
+
+oracle.start();
+fleet.start();
+
+// Run test...
+
+fleet.stop();
+oracle.stop();
 ```
+
+---
 
 ## Notes
 
-- All prices are in **E6 format** (1,000,000 = $1.00)
-- Default price bounds: $0.001 to $1000
-- Models use proper statistical distributions (Box-Muller transform for Gaussian)
-- Event triggers (crash/squeeze) temporarily override the base model
-- TypeScript strict mode enabled
+- TypeScript strict mode
+- No direct Solana transaction sending — integrates via callbacks
+- Price bounds enforced: default $0.001 to $1000 (configurable)
+- Models can be composed: start with random-walk, then trigger a crash

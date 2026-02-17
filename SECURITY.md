@@ -101,6 +101,18 @@ All user inputs are sanitized using utilities in `@percolator/shared`:
 - All query parameters (limit, offset, hours, etc.)
 - WebSocket message payloads
 
+## ✅ Input Validation (Zod)
+
+All environment variables are validated at startup via Zod schemas in `@percolator/shared/validation.ts`. Services fail fast with a clear error if required variables are missing or malformed.
+
+API route parameters and query strings are validated before processing. Invalid types or out-of-range values return 400 before hitting any database or RPC calls.
+
+## 📊 Error Tracking (Sentry)
+
+All three backend services (API, Keeper, Indexer) and the frontend initialize Sentry at startup. Unhandled exceptions and promise rejections are captured automatically. Service name is tagged on each event for filtering.
+
+Configure via the `SENTRY_DSN` environment variable.
+
 ## 🚦 Rate Limiting
 
 Rate limiting is applied per-IP with separate limits for read and write operations:
@@ -170,16 +182,6 @@ Check logs with:
 ```bash
 pnpm --filter=@percolator/api dev
 ```
-
-## 🔄 Future Enhancements
-
-Potential improvements:
-
-- [ ] JWT-based WebSocket authentication
-- [ ] Redis-backed rate limiting for multi-instance deployments
-- [ ] IP allowlist/blocklist
-- [ ] Request signing for write endpoints
-- [ ] Audit logging for sensitive operations
 
 ---
 

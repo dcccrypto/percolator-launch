@@ -1,302 +1,345 @@
-# Percolator Launch — Backend Architecture Audit & Plan
+# Backend Architecture
 
-*Created: 2026-02-08 by Cobra*
-
----
-
-## 1. Current State Comparison: Us vs MidTermDev
-
-### What MidTermDev Has (That We Already Ported)
-| Component | MidTermDev | Us | Status |
-|-----------|-----------|-----|--------|
-| DEX Oracle (TS) | `src/solana/dex-oracle.ts` — PumpSwap, Raydium CLMM, Meteora DLMM | `packages/core/src/solana/dex-oracle.ts` — same 3 DEXes + bug fixes | ✅ Better (precision fix, bounds checking, mint validation) |
-| Slab Parser | `src/solana/slab.ts` — header, config, engine, accounts | `packages/core/src/solana/slab.ts` — same + haircut fields, LP aggregates | ✅ Better (newer layout with O(1) haircut ratio) |
-| CLI Commands | 30+ commands (init-market, deposit, trade, crank, etc.) | Separate `percolator-app` repo with same commands | ✅ Equivalent |
-| Create Market Wizard | `app/components/create/CreateMarketWizard.tsx` | Same component ported | ✅ Equivalent |
-| Trade Components | `app/components/trade/` (7 components) | Same + enhanced (leverage slider, ROE, USD PnL) | ✅ Better |
-| Market Browser | `app/components/market/` (5 components) | Same + search/sort/activity feed | ✅ Better |
-| Crank Bot Scripts | `scripts/crank-bot.ts`, `scripts/mainnet-crank-bot.ts` | `scripts/auto-crank-service.ts` + API routes | ✅ Better (API-driven + standalone) |
-| Test Harness | `tests/harness.ts` (22 test suites, devnet integration) | `packages/core/test/` (unit tests only) | ❌ They're better here |
-| Audit Scripts | 20+ pentest/stress/adversarial scripts | None | ❌ Missing entirely |
-| DEX Oracle (Rust) | `program/src/percolator.rs` with DEX oracle integration | Ported but build blocked | ⏳ Blocked |
-
-### What MidTermDev Does NOT Have (We Do)
-| Component | Details |
-|-----------|---------|
-| Supabase Market Registry | DB-backed market tracking with stats, trades, prices |
-| API Routes | REST endpoints for markets, crank, stats |
-| Indexer Service | Railway-deployed, backfills from on-chain |
-| Keeper Bot Service | Multi-market with dry-run support |
-| Oracle Pusher Service | Jupiter-powered price pushing |
-| Network Toggle | Mainnet/devnet switch in UI |
-| Portfolio View | Multi-market position aggregation |
-| My Markets Dashboard | Admin view with crank health |
-| Toast System | User notification layer |
-| Quick Launch Hook | Auto-detect pool, suggest parameters |
-| DEX Pool Search | DexScreener integration for pool discovery |
-
-### What Neither Of Us Has (And We Need)
-| Component | Why It Matters |
-|-----------|---------------|
-| WebSocket Price Streaming | Polling is slow, inconsistent, rate-limited |
-| Event Bus / Pub-Sub | Services are disconnected islands |
-| Market Lifecycle Manager | The "pump.fun" zero-friction experience |
-| Trade Execution Engine | Simulate → retry → confirm pipeline |
-| Risk Monitoring Dashboard | Real-time health, insurance fund, funding anomalies |
-| Integration Test Suite | MidTermDev has one, but on their devnet — we need our own |
-| Helius Webhooks | Real-time tx indexing instead of polling |
-| Priority Fee Estimation | Dynamic fees based on network congestion |
+The backend is split into three independent services, all deployed on Railway.
 
 ---
 
-## 2. What MidTermDev Does Better (Honest Assessment)
-
-### A. Integration Test Suite (CRITICAL GAP)
-MidTermDev has a **comprehensive devnet test harness** (`tests/harness.ts`, 600+ lines) with:
-- 22 test suites covering: market boot, user lifecycle, capital, trading, oracle, liquidation, socialization, crank, determinism, adversarial, inverted markets, CPI trading, withdrawal, funding, risk reduction, edge cases, Pyth live prices, Chainlink, live trading, devnet stress
-- Fresh market creation per test (isolation)
-- Slot control and waiting
-- State snapshots for determinism checks
-- Automatic slab cleanup after tests
-- CU measurement per operation
-
-**We have:** Unit tests for the `@percolator/core` package (format, health, encode, PDA, slab, validation) — 22 tests total. No integration tests against devnet at all.
-
-### B. Audit/Security Scripts
-MidTermDev has 20+ adversarial scripts:
-- `audit-adversarial.ts` — general adversarial testing
-- `audit-deep-redteam.ts` — deep security probing
-- `audit-funding-warmup.ts` — funding rate manipulation testing
-- `audit-oracle-edge.ts` — oracle edge cases
-- `audit-timing-attacks.ts` — timing attack vectors
-- `bug-fee-debt-trap.ts` — fee-related exploit testing
-- `bug-margin-initial-vs-maintenance.ts` — margin system bugs
-- `bug-oracle-no-bounds.ts` — oracle bounds testing
-- `bug-recovery-overhaircut.ts` — haircut recovery bugs
-- `oracle-authority-stress.ts` — oracle authority edge cases
-- `pentest-oracle.ts` — oracle penetration testing
-- `stress-corner-cases.ts`, `stress-haircut-system.ts`, `stress-worst-case.ts`
-
-**We have:** The DEX oracle bug fixes we found auditing their code, but no systematic testing scripts.
-
-### C. Market Setup Scripts
-They have scripted end-to-end market creation:
-- `setup-devnet-market.ts` — creates a complete devnet market
-- `setup-mainnet-sov.ts` — mainnet deployment script
-- `complete-setup.ts` — full setup automation
-- `create-market.ts` / `create-slab.ts` — modular creation
-
-**We have:** `scripts/create-market.ts` and the CreateMarketWizard UI, but no scripted end-to-end flow.
-
----
-
-## 3. Our Technical Advantages
-
-### A. DEX Oracle Bug Fixes
-We found and fixed 4 bugs in MidTermDev's DEX oracle code:
-
-1. **CRITICAL — Raydium CLMM Precision Loss**
-   - Their code: `sqrtHi = sqrt_price_x64 >> 64n` → returns 0 for micro-priced tokens (most memecoins!)
-   - Our fix: Scale by 1e6 BEFORE right-shifting: `scaledSqrt = sqrtPriceX64 * 1_000_000n; term = scaledSqrt >> 64n`
-   - Impact: Their oracle literally returns price=0 for any token where `sqrtPriceX64 < 2^64`
-
-2. **MEDIUM — PumpSwap No Mint Validation**
-   - They define `BASE_MINT`/`QUOTE_MINT` offsets but never use them
-   - Our code adds bounds checking on all vault data
-
-3. **MEDIUM — No Bounds Checking (TS)**
-   - Their parser functions don't check `data.length` before slicing
-   - We added minimum length constants and explicit throws for all 3 DEX types
-
-4. **Documentation — Flash Loan Vulnerability**
-   - Neither codebase protects against single-tx manipulation of DEX prices
-   - We documented this clearly in JSDoc comments
-
-### B. Architecture (Supabase + Services + API)
-They have ZERO backend infrastructure. No database, no API, no services. Just a frontend and scripts.
-We have a full backend stack (Supabase, Railway indexer, API routes, keeper, oracle).
-
-### C. Newer On-Chain Layout
-Our slab parser handles the haircut-ratio refactor (O(1) aggregates: `c_tot`, `pnl_pos_tot`, LP aggregates) which replaced the older ADL/socialization system. This matches toly's latest spec v7.
-
----
-
-## 4. Architecture Plan: What To Build
-
-### Phase 1: Foundation (NOW)
-**Goal:** Solid backend that won't break, proper testing, GitHub Actions for Rust build.
-
-#### 1a. GitHub Actions CI for Custom Rust Build
-- Workflow that compiles `program/` and `matcher/` with SBF target
-- Test with MAX_ACCOUNTS=64 (small slab) and MAX_ACCOUNTS=4096 (full)
-- Upload `.so` binaries as artifacts
-- Unblocks: smaller slabs, DEX oracle on-chain, custom features
-
-#### 1b. Integration Test Suite (Port from MidTermDev)
-Port their test harness adapted to our codebase:
-- `tests/harness.ts` — adapted to use our `@percolator/core` package
-- Core test suites: market boot, user lifecycle, trading, liquidation, crank
-- Run against devnet with our program ID
-- Add to CI pipeline
-
-#### 1c. Backend Service (`packages/server`)
-Proper standalone server (Hono on Railway):
-```
-packages/server/
-  src/
-    index.ts          — Hono app entry
-    config.ts         — env vars, program IDs, RPC URLs
-    services/
-      crank.ts        — multi-market crank loop
-      oracle.ts       — price pusher (Jupiter + DexScreener fallback)  
-      indexer.ts      — Helius webhook receiver + backfill
-      lifecycle.ts    — market creation orchestrator
-    routes/
-      markets.ts      — CRUD + stats
-      prices.ts       — current prices, history
-      crank.ts        — crank status, trigger
-      launch.ts       — one-click market launch
-      ws.ts           — WebSocket price streaming
-    db/
-      supabase.ts     — typed Supabase client
-      queries.ts      — common queries
-    utils/
-      solana.ts       — connection, keypair loading
-      priority-fee.ts — Helius priority fee estimation
-      retry.ts        — tx retry with backoff
-```
-
-### Phase 2: Market Lifecycle Manager
-**Goal:** Paste a token mint → market is live in 30 seconds.
-
-Flow:
-1. `POST /api/launch` with `{ mint, collateralMint?, leverage? }`
-2. Server: fetch token metadata (Jupiter API)
-3. Server: find best DEX pool (DexScreener)
-4. Server: determine optimal parameters based on liquidity tier
-5. Server: build InitMarket tx (server keypair pays slab rent)
-6. Server: submit tx, wait for confirmation
-7. Server: register market in Supabase
-8. Server: add to oracle rotation + crank rotation
-9. Server: emit `market.created` event
-10. Return: `{ slabAddress, txSignature, marketUrl }`
-
-**Fee model:** Platform takes X% of trading fees from markets it creates. Creator gets admin rights (can update config, push oracle, close market).
-
-### Phase 3: Real-Time Price Engine
-**Goal:** Sub-second price updates to all clients.
-
-Architecture:
-- Server subscribes to DEX pool accounts via Helius `accountSubscribe`
-- On account change: recompute price using our `computeDexSpotPriceE6`
-- Broadcast via WebSocket to all connected clients
-- Same price feeds the oracle pusher (no extra API call)
-- Fallback: Jupiter API polling every 10s if WebSocket drops
-
-### Phase 4: Trade Execution Engine
-**Goal:** Reliable trade execution with retry and confirmation.
-
-Pipeline:
-1. **Validate:** Check margin requirements client-side
-2. **Simulate:** `simulateTransaction` to catch errors before sending
-3. **Fee estimate:** Query Helius priority fee API for optimal CU price
-4. **Submit:** `sendTransaction` with priority fee
-5. **Confirm:** Subscribe to tx via WebSocket, timeout after 30s
-6. **Retry:** If dropped, rebuild with higher priority fee (up to 3 attempts)
-7. **Record:** Log trade in Supabase, update market stats
-
-### Phase 5: Risk Monitoring
-**Goal:** Know when things are going wrong before they explode.
-
-Components:
-- Real-time insurance fund tracking (alert if < X% of OI)
-- Funding rate anomaly detection (alert if > 100bps/slot)
-- Oracle circuit breaker (pause if price moves > 20% in one update)
-- Market health dashboard (admin-only page)
-- Liquidation cascade detection (alert if > 3 liquidations in 1 minute)
-
----
-
-## 5. File Structure After Changes
+## Service Overview
 
 ```
-percolator-launch/
-  app/                    — Next.js frontend (existing)
-  packages/
-    core/                 — Shared SDK (existing)
-    server/               — NEW: Backend service
-  services/
-    keeper/               — Existing (to be merged into packages/server)
-    oracle/               — Existing (to be merged into packages/server)
-  scripts/                — Existing utility scripts
-  tests/                  — NEW: Integration test suite
-  program/                — Rust on-chain program (existing)
-  .github/
-    workflows/
-      build-program.yml   — NEW: Rust build CI
-      test.yml            — NEW: Integration test CI
-  docs/
-    BACKEND-ARCHITECTURE.md  — This document
+┌──────────────┐     ┌─────────────────┐     ┌──────────────────┐
+│  API         │     │  Keeper         │     │  Indexer         │
+│  packages/api│     │ packages/keeper │     │packages/indexer  │
+│              │     │                 │     │                  │
+│  Hono REST   │     │  CrankService   │     │  MarketDiscovery │
+│  WebSocket   │     │  OracleService  │     │  StatsCollector  │
+│  Swagger UI  │     │  Liquidation    │     │  TradeIndexer    │
+│              │     │                 │     │  InsuranceLP     │
+│  read-only   │     │  has keypair    │     │  Helius webhooks │
+│  stateless   │     │  no HTTP API    │     │                  │
+│  port: 3001  │     │  health: 8081   │     │  port: 3002      │
+└──────┬───────┘     └──────┬──────────┘     └──────┬───────────┘
+       │                    │                        │
+       └────────────────────┴────────────────────────┘
+                            │
+              ┌─────────────┴──────────────┐
+              ▼                            ▼
+     ┌──────────────────┐      ┌─────────────────────┐
+     │     Supabase      │      │   Solana Blockchain  │
+     │   (PostgreSQL)    │      │   + Helius RPC       │
+     └──────────────────┘      └─────────────────────┘
+```
+
+All three services import shared utilities from `@percolator/shared`:
+- `config` — env-validated config object
+- `getSupabase()` — Supabase client
+- `getConnection()` — Solana RPC connection
+- `createLogger()` — structured JSON logging
+- `initSentry()` — error tracking
+- DB queries, retry utilities, input sanitization
+
+---
+
+## API Service (`packages/api/`)
+
+**Role:** Serve all public data. No keypair, no writes to chain, no background jobs.
+
+**Framework:** Hono on Node.js
+
+**Entry point:** `packages/api/src/index.ts`
+
+### Middleware Stack
+
+Applied in order on every request:
+
+1. **CORS** — strict allowlist via `CORS_ORIGINS` env var. Rejects unknown origins with 403. Supports wildcard patterns (`*.vercel.app`).
+2. **Compression** — gzip/brotli for JSON responses.
+3. **Security headers** — X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, HSTS.
+4. **Rate limiting** — per-IP, separate read (GET) and write (POST/DELETE) limits.
+5. **Cache middleware** — in-memory TTL cache with per-route TTLs (10s–5min).
+
+### Route Files
+
+| File | Routes |
+|------|--------|
+| `routes/health.ts` | `GET /health` |
+| `routes/markets.ts` | `GET /markets`, `GET /markets/:slab`, `GET /markets/stats`, `GET /markets/:slab/stats` |
+| `routes/trades.ts` | `GET /markets/:slab/trades`, `GET /markets/:slab/volume`, `GET /trades/recent` |
+| `routes/prices.ts` | `GET /prices/markets`, `GET /prices/:slab`, `GET /markets/:slab/prices` |
+| `routes/funding.ts` | `GET /funding/global`, `GET /funding/:slab`, `GET /funding/:slab/history` |
+| `routes/open-interest.ts` | `GET /open-interest/:slab` |
+| `routes/insurance.ts` | `GET /insurance/:slab` |
+| `routes/crank.ts` | `GET /crank/status` |
+| `routes/oracle-router.ts` | `GET /oracle/resolve/:mint` |
+| `routes/stats.ts` | `GET /stats` |
+| `routes/ws.ts` | WebSocket `/ws` — price streaming |
+| `routes/docs.ts` | `GET /docs` — Swagger UI |
+
+### WebSocket Protocol
+
+Clients connect and send subscription messages:
+
+```json
+{ "type": "subscribe", "slab": "SLAB_ADDRESS" }
+{ "type": "unsubscribe", "slab": "SLAB_ADDRESS" }
+```
+
+Server pushes price updates:
+```json
+{ "type": "price", "slab": "SLAB_ADDRESS", "priceE6": 1500000, "timestamp": 1234567890 }
+```
+
+Limits: 500 global connections, 5 per IP, 50 subscriptions per client.
+
+Optional token auth: `?token=slabAddress:timestamp:hmac-sha256-sig` (configurable via `WS_AUTH_REQUIRED`).
+
+### Cache TTLs
+
+| Route | TTL |
+|-------|-----|
+| `/markets/:slab` | 10s |
+| `/markets` | 30s |
+| `/funding/:slab` | 30s |
+| `/open-interest/:slab` | 15s |
+| `/funding/global` | 60s |
+| `/stats` | 60s |
+| `/oracle/resolve/:mint` | 5 min |
+
+---
+
+## Keeper Service (`packages/keeper/`)
+
+**Role:** Run automated on-chain operations. Has a Solana keypair (`CRANK_KEYPAIR`). No public HTTP API — only a health endpoint.
+
+**Entry point:** `packages/keeper/src/index.ts`
+
+**Health endpoint:** port 8081 (configurable via `KEEPER_HEALTH_PORT`)
+
+### Services
+
+#### CrankService (`services/crank.ts`)
+
+- On startup: discovers all markets across all configured program IDs via `getProgramAccounts`
+- Runs two crank loops per market: active markets (shorter interval) and inactive markets
+- Batches multiple markets per transaction where possible
+- Tracks per-market crank state: last crank time, success/fail count, consecutive misses
+- Removes markets from tracking after 3 consecutive discovery misses
+- Default intervals: `CRANK_INTERVAL_MS` (active), `CRANK_INACTIVE_INTERVAL_MS` (inactive)
+
+#### OracleService (`services/oracle.ts`)
+
+- Fetches prices from DexScreener, with Jupiter as fallback
+- Cross-validates between sources — rejects outliers beyond 30% deviation
+- Pushes prices on-chain for markets where the keeper wallet IS the oracle authority
+- Only runs for admin-oracle markets (Pyth-oracle markets are self-updating)
+
+#### LiquidationService (`services/liquidation.ts`)
+
+- Polls all markets on a configurable interval
+- For each market: fetches all user accounts from the slab, computes mark-to-market PnL
+- Executes atomic transactions: `PushOraclePrice` → `KeeperCrank` → `LiquidateAtOracle`
+- Liquidation profit goes to the keeper wallet
+
+### Graceful Shutdown
+
+Handles SIGTERM and SIGINT — stops accepting new operations, waits for in-flight transactions, exits cleanly.
+
+---
+
+## Indexer Service (`packages/indexer/`)
+
+**Role:** Background data collection. Writes market data to Supabase. Exposes only `/health` and `/webhook/trades` — no user-facing API.
+
+**Entry point:** `packages/indexer/src/index.ts`
+
+**Port:** 3002 (configurable via `INDEXER_PORT`)
+
+### Services
+
+#### MarketDiscovery (`services/MarketDiscovery.ts`)
+
+- Polls `getProgramAccounts` across all configured program IDs every 5 minutes
+- Detects new markets (by slab address)
+- Fetches token metadata from Metaplex and Jupiter for each new market
+- Upserts into Supabase `markets` table
+- Provides `MarketProvider` interface consumed by other services
+
+#### StatsCollector (`services/StatsCollector.ts`)
+
+- Reads all slab accounts every 30 seconds
+- Parses slab binary data via `@percolator/core`
+- Writes to: `market_stats`, `oi_history`, `funding_history`, `oracle_prices`
+- Uses `MarketProvider` for market list (no dependency on CrankService)
+
+#### TradeIndexer (`services/TradeIndexer.ts`)
+
+- Backup/backfill mode: polls recent transactions for each market every 5 minutes
+- Primary path: Helius webhooks (via HeliusWebhookManager)
+- Parses `TradeCpi` (tag 10) and `TradeNoCpi` (tag 6) instructions from transaction data
+- Extracts: trader, side, size, price, timestamp
+- Deduplicates by transaction signature
+- Writes to `trades` table
+
+#### InsuranceLPService (`services/InsuranceLPService.ts`)
+
+- Monitors insurance vault token accounts across all markets
+- Tracks LP token supply (for APY calculations)
+- Writes to `insurance_history` table
+
+#### HeliusWebhookManager (`services/HeliusWebhookManager.ts`)
+
+- Auto-registers Helius enhanced webhooks for each market's program ID
+- Validates incoming webhook payloads via `HELIUS_WEBHOOK_SECRET`
+- Routes trade events to TradeIndexer for immediate processing
+- Falls back to polling if webhooks are unavailable
+
+---
+
+## Database Schema
+
+Managed via Supabase migrations (`supabase/migrations/`).
+
+```sql
+-- Market metadata (written by indexer on discovery)
+markets (
+  id               UUID PRIMARY KEY,
+  slab_address     TEXT UNIQUE NOT NULL,
+  symbol           TEXT,
+  name             TEXT,
+  mint_address     TEXT,
+  deployer         TEXT,
+  program_id       TEXT,
+  created_at       TIMESTAMP
+)
+
+-- Real-time aggregated stats (updated every 30s by StatsCollector)
+market_stats (
+  slab_address     TEXT PRIMARY KEY REFERENCES markets,
+  total_open_interest  TEXT,
+  funding_rate     TEXT,
+  last_price       TEXT,
+  volume_24h       TEXT,
+  updated_at       TIMESTAMP
+)
+
+-- Trade records (written by TradeIndexer, primary via webhooks)
+trades (
+  id               UUID PRIMARY KEY,
+  slab_address     TEXT,
+  side             TEXT,        -- 'long' | 'short'
+  price_e6         TEXT,
+  size             TEXT,
+  trader           TEXT,
+  timestamp        TIMESTAMP,
+  signature        TEXT UNIQUE  -- deduplication
+)
+
+-- Oracle price history
+oracle_prices (
+  slab_address     TEXT,
+  price_e6         TEXT,
+  source           TEXT,
+  timestamp        TIMESTAMP
+)
+
+-- Funding rate snapshots
+funding_history (
+  market_slab      TEXT,
+  slot             TEXT,
+  rate_bps_per_slot INT,
+  net_lp_pos       TEXT,
+  timestamp        TIMESTAMP
+)
+
+-- Open interest snapshots
+oi_history (
+  market_slab      TEXT,
+  total_oi         TEXT,
+  net_lp_pos       TEXT,
+  timestamp        TIMESTAMP
+)
+
+-- Insurance fund snapshots
+insurance_history (
+  market_slab      TEXT,
+  balance          TEXT,
+  lp_supply        TEXT,
+  fee_revenue      TEXT,
+  timestamp        TIMESTAMP
+)
+
+-- View: markets joined with latest stats (used by GET /markets)
+VIEW markets_with_stats AS
+  SELECT m.*, ms.*
+  FROM markets m
+  LEFT JOIN market_stats ms ON m.slab_address = ms.slab_address;
 ```
 
 ---
 
-## 6. Slab Size & Custom Program
+## Shared Package (`packages/shared/`)
 
-### Current Constraint
-The deployed programs (toly's mainnet `GM8z...` and devnet `EXsr...`, `2SSn...`) have `MAX_ACCOUNTS = 4096` hardcoded. This means:
-- Slab size: 992,560 bytes (fixed)
-- Rent: ~6.85 SOL (~$924)
-- Cannot create smaller slabs
+All three services import from `@percolator/shared`. Nothing is duplicated across services.
 
-### Custom Program Solution
-The Rust source uses a Cargo feature flag:
-```rust
-#[cfg(feature = "test")]
-const MAX_ACCOUNTS: usize = 64;
+| Export | Purpose |
+|--------|---------|
+| `config` | Validated env config object |
+| `getSupabase()` | Supabase client with connection pooling |
+| `getConnection()` | Solana RPC connection |
+| `createLogger(name)` | Structured JSON logger |
+| `initSentry(service)` | Sentry initialization |
+| `captureException(err)` | Sentry error capture |
+| `sendInfoAlert()` / `sendCriticalAlert()` | Ops alerting |
+| DB queries | Typed Supabase query helpers |
+| `sanitizeString()` / `sanitizeSlabAddress()` | Input sanitization |
+| `validateEnv()` | Zod env validation at startup |
+| `retry()` | Transaction retry with backoff |
+| `EventBus` | In-process pub/sub between services |
+| `RpcClient` | Rate-limited RPC with fallback |
 
-#[cfg(not(feature = "test"))]
-const MAX_ACCOUNTS: usize = 4096;
+---
+
+## Sentry Integration
+
+All three services initialize Sentry at startup with `initSentry(serviceName)`. Errors are captured automatically via the Sentry Node SDK, with service name as a tag for filtering in the Sentry dashboard.
+
+Frontend also has Sentry via `@sentry/nextjs`.
+
+Configure via `SENTRY_DSN` environment variable (shared across all services).
+
+---
+
+## Local Development
+
+```bash
+# Terminal 1
+pnpm --filter=@percolator/api dev
+
+# Terminal 2
+pnpm --filter=@percolator/keeper dev
+
+# Terminal 3
+pnpm --filter=@percolator/indexer dev
+
+# Terminal 4
+cd app && pnpm dev
 ```
 
-We can compile with different `MAX_ACCOUNTS` values:
-| MAX_ACCOUNTS | Slab Size | Rent (SOL) | Rent (USD) | Use Case |
-|-------------|-----------|------------|------------|----------|
-| 64 | ~25K | ~0.17 | ~$23 | Micro markets, testing |
-| 256 | ~80K | ~0.55 | ~$74 | Small markets |
-| 1024 | ~270K | ~1.86 | ~$251 | Medium markets |
-| 4096 | ~993K | ~6.85 | ~$924 | Full markets |
-
-### Blocker
-`cargo-build-sbf` ships with cargo 1.79, but the `blake3` dependency (via percolator risk engine crate) requires edition2024 which needs cargo 1.85+.
-
-### Solutions (in order of effort)
-1. **GitHub Actions** — use a newer Rust toolchain in CI, build there
-2. **Pin blake3 to older version** — `blake3 = "=1.5.0"` (pre-edition2024)
-3. **Build on Mac** — Khubair's Mac may have newer toolchain
-4. **Docker** — custom container with newer Rust + SBF target
+Or with Docker Compose:
+```bash
+docker-compose up -d
+docker-compose logs -f api
+```
 
 ---
 
-## 7. Risk Assessment
+## Production (Railway)
 
-### What Could Break
-| Action | Risk | Mitigation |
-|--------|------|------------|
-| Adding packages/server | None — new package, doesn't touch existing code | — |
-| Moving services/keeper into server | Low — keeper currently not deployed in production | Keep standalone scripts as fallback |
-| Adding GitHub Actions | None — new files, CI-only | — |
-| Porting test harness | None — test files only | — |
-| Modifying API routes | Medium — frontend depends on them | Don't change existing route signatures, only add new ones |
-| Custom program deploy | High — different slab size = different program ID | Deploy alongside existing, don't replace |
+Each service has its own Dockerfile:
+- `Dockerfile.api`
+- `Dockerfile.keeper`
+- `Dockerfile.indexer`
 
-### Safety Rules
-1. **Never modify existing API route signatures** — add new routes instead
-2. **Never change program IDs in config** — add new IDs alongside existing
-3. **Test on devnet before mainnet** — always
-4. **Feature branch everything** — `cobra/backend/*` branches
-5. **Run existing tests before pushing** — `pnpm test` must pass
+Services share environment variables. Required for all three: `RPC_URL`, `HELIUS_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`. Keeper additionally requires `CRANK_KEYPAIR`.
 
----
-
-*This is a living document. Update as we build.*
+See `.env.example` for the full variable reference.

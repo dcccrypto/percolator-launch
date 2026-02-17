@@ -1,323 +1,199 @@
 # @percolator/api
 
-REST API service for the Percolator perpetual futures trading platform. Provides read access to market data, trades, funding rates, and platform statistics.
+REST API and WebSocket server for the Percolator platform. Read-only, stateless — no keypair, no writes to chain.
 
-## Features
-
-- 📊 **Market Data** - Real-time market information and statistics
-- 💰 **Price Feeds** - Current prices and historical data
-- 📈 **Trade History** - Recent trades and volume analytics
-- 💸 **Funding Rates** - Current and historical funding rate data
-- 🔓 **Open Interest** - Total open interest tracking
-- 🛡️ **Insurance Fund** - Insurance fund balance and history
-- 📉 **Platform Stats** - Aggregated platform-wide statistics
-- 🔌 **WebSocket** - Real-time updates (separate endpoint)
+**Framework:** Hono | **Port:** 3001 | **Deployed on:** Railway
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 18+
-- Access to Solana RPC endpoint
-- Supabase database credentials
-
-### Installation
-
 ```bash
+# Install deps (from repo root)
 pnpm install
+
+# Development
+pnpm --filter=@percolator/api dev
+
+# Production build
+pnpm --filter=@percolator/api build
+pnpm --filter=@percolator/api start
 ```
 
-### Environment Variables
+API available at `http://localhost:3001`. Interactive docs at `http://localhost:3001/docs`.
 
-Create a `.env` file in the `packages/api` directory:
+## Environment Variables
 
-```env
-# Server Configuration
-API_PORT=3001
-NODE_ENV=development
+Copy `.env.example` from the repo root. All shared config (`RPC_URL`, `SUPABASE_URL`, etc.) comes from `@percolator/shared`.
 
-# Solana RPC
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
-# Optional: Use a custom endpoint for better performance
-# SOLANA_RPC_URL=https://your-rpc-endpoint.com
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_PORT` | `3001` | Listen port |
+| `NODE_ENV` | `development` | Set to `production` on Railway |
+| `RPC_URL` | Helius devnet | Solana RPC endpoint |
+| `HELIUS_API_KEY` | — | Helius API key |
+| `SUPABASE_URL` | — | Supabase project URL |
+| `SUPABASE_KEY` | — | Supabase service role key |
+| `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins (**required in production**) |
+| `API_AUTH_KEY` | — | API key for protected write endpoints |
+| `WS_AUTH_SECRET` | — | HMAC secret for WebSocket token auth |
+| `WS_AUTH_REQUIRED` | `false` | Enable WebSocket auth |
+| `MAX_WS_CONNECTIONS` | `1000` | Global WebSocket connection limit |
+| `ALL_PROGRAM_IDS` | devnet 3 tiers | Comma-separated program IDs to monitor |
 
-# Supabase Database
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
+## API Endpoints
 
-# CORS Configuration
-CORS_ORIGINS=http://localhost:3000,http://localhost:3001
-# Production: CORS_ORIGINS=https://app.percolator.trade,https://percolator.trade
+### Health
 
-# Rate Limiting (optional)
-RATE_LIMIT_READ=100  # requests per minute for GET endpoints
-RATE_LIMIT_WRITE=20  # requests per minute for POST/PUT/DELETE endpoints
-
-# Cache TTL (optional, seconds)
-CACHE_TTL_MARKETS=30
-CACHE_TTL_STATS=60
-CACHE_TTL_FUNDING=30
-```
-
-### Running Locally
-
-Development mode with auto-reload:
-
-```bash
-pnpm dev
-```
-
-Production build:
-
-```bash
-pnpm build
-pnpm start
-```
-
-The API will be available at `http://localhost:3001`.
-
-## API Documentation
-
-### Interactive Documentation
-
-Visit `/docs` for the full Swagger UI documentation:
-
-```
-http://localhost:3001/docs
-```
-
-### OpenAPI Specification
-
-The OpenAPI 3.0 specification is available at:
-
-```
-http://localhost:3001/docs/openapi.yaml
-```
-
-## Endpoints Overview
-
-### Health & Info
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /` | API info and version |
-| `GET /health` | Service health check |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Service health, DB/RPC connectivity |
 
 ### Markets
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /markets` | List all markets with embedded stats |
-| `GET /markets/stats` | Get stats for all markets |
-| `GET /markets/:slab` | Get on-chain market details (10s cache) |
-| `GET /markets/:slab/stats` | Get stats for a specific market |
+| Method | Path | Cache | Description |
+|--------|------|-------|-------------|
+| GET | `/markets` | 30s | All markets with stats |
+| GET | `/markets/stats` | 30s | Stats for all markets |
+| GET | `/markets/:slab` | 10s | On-chain market details |
+| GET | `/markets/:slab/stats` | 10s | Stats for a specific market |
+| GET | `/markets/:slab/prices` | — | Price history for charting (default 24h) |
+| GET | `/markets/:slab/trades` | — | Recent trades (max 200) |
+| GET | `/markets/:slab/volume` | — | 24h volume and trade count |
 
 ### Prices
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /prices/markets` | Current prices for all markets |
-| `GET /prices/:slab` | Price history for a market (last 100 updates) |
-| `GET /markets/:slab/prices` | Price history for charting (default 24h) |
+| Method | Path | Cache | Description |
+|--------|------|-------|-------------|
+| GET | `/prices/markets` | 30s | Current prices for all markets |
+| GET | `/prices/:slab` | — | Price history (last 100 updates) |
 
 ### Trades
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /markets/:slab/trades` | Recent trades for a market (max 200) |
-| `GET /markets/:slab/volume` | 24h volume and trade count |
-| `GET /trades/recent` | Recent trades across all markets |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/trades/recent` | Recent trades across all markets |
 
-### Funding Rates
+### Funding
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /funding/global` | Current funding rates for all markets (60s cache) |
-| `GET /funding/:slab` | Current funding rate + 24h history (30s cache) |
-| `GET /funding/:slab/history` | Historical funding data (customizable range) |
+| Method | Path | Cache | Description |
+|--------|------|-------|-------------|
+| GET | `/funding/global` | 60s | Current funding rates for all markets |
+| GET | `/funding/:slab` | 30s | Current rate + 24h history |
+| GET | `/funding/:slab/history` | 30s | Historical funding data (configurable range) |
 
 ### Open Interest
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /open-interest/:slab` | Current OI + history (15s cache) |
+| Method | Path | Cache | Description |
+|--------|------|-------|-------------|
+| GET | `/open-interest/:slab` | 15s | Current OI + history |
 
-### Insurance Fund
+### Insurance
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /insurance/:slab` | Insurance fund balance + history |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/insurance/:slab` | Insurance fund balance + history |
 
 ### Oracle
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /oracle/resolve/:mint` | Resolve price sources for a token (5min cache) |
+| Method | Path | Cache | Description |
+|--------|------|-------|-------------|
+| GET | `/oracle/resolve/:mint` | 5 min | Resolve best price source for a token mint |
 
 ### Crank
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /crank/status` | Last crank slot for all markets |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/crank/status` | Last crank slot for all markets |
 
-### Platform Stats
+### Stats
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /stats` | Platform-wide aggregated statistics (60s cache) |
+| Method | Path | Cache | Description |
+|--------|------|-------|-------------|
+| GET | `/stats` | 60s | Platform-wide aggregated statistics |
 
-## Response Caching
+### WebSocket
 
-The API implements intelligent response caching to optimize performance:
-
-- `/markets` - 30s TTL
-- `/markets/:slab` - 10s TTL
-- `/stats` - 60s TTL
-- `/funding/global` - 60s TTL
-- `/funding/:slab` - 30s TTL
-- `/open-interest/:slab` - 15s TTL
-- `/oracle/resolve/:mint` - 5min TTL
-
-## Rate Limiting
-
-Default rate limits (per IP):
-
-- **Read endpoints** (GET): 100 requests/minute
-- **Write endpoints** (POST/PUT/DELETE): 20 requests/minute
-
-Rate limit headers are included in all responses:
-- `X-RateLimit-Limit` - Request limit
-- `X-RateLimit-Remaining` - Remaining requests
-- `X-RateLimit-Reset` - Reset timestamp
-
-## Error Handling
-
-All errors return JSON with the following structure:
+Connect to `/ws`. Subscribe/unsubscribe by slab address:
 
 ```json
-{
-  "error": "Error message",
-  "details": "Additional context (optional)",
-  "hint": "Resolution hint (optional)"
-}
+// Subscribe
+{ "type": "subscribe", "slab": "SLAB_ADDRESS" }
+
+// Unsubscribe
+{ "type": "unsubscribe", "slab": "SLAB_ADDRESS" }
+
+// Price update (server → client)
+{ "type": "price", "slab": "SLAB_ADDRESS", "priceE6": 1500000, "timestamp": 1234567890 }
 ```
 
-Common HTTP status codes:
-- `200` - Success
-- `400` - Bad request (invalid parameters)
-- `404` - Resource not found
-- `500` - Internal server error
-- `503` - Service unavailable (health check failed)
+Limits: 500 global connections, 5 per IP, 50 market subscriptions per client.
 
-## Architecture
+Optional auth: `?token=slabAddress:timestamp:hmac-sha256` (enable with `WS_AUTH_REQUIRED=true`).
 
-The API service is one of three core services in the Percolator platform:
+### Error Responses
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Frontend  │────▶│     API     │────▶│   Indexer   │
-│   (Next.js) │     │   (Hono)    │     │ (Background)│
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │                     │
-                           ▼                     ▼
-                    ┌─────────────┐     ┌─────────────┐
-                    │   Supabase  │     │   Solana    │
-                    │  (Postgres) │     │     RPC     │
-                    └─────────────┘     └─────────────┘
+```json
+{ "error": "Not found", "details": "Market does not exist" }
 ```
 
-See [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) for detailed architecture documentation.
+HTTP status codes: `200` success, `400` bad request, `404` not found, `429` rate limited, `500` internal error, `503` service unavailable.
 
-## Development
+## Middleware
 
-### Project Structure
+Applied globally (in order):
+
+1. **CORS** — allowlist via `CORS_ORIGINS`. Rejects unknown origins in production.
+2. **Compression** — gzip/brotli for JSON responses.
+3. **Security headers** — X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, HSTS.
+4. **Rate limiting** — per-IP token bucket. Separate limits for read (GET) and write (POST/DELETE) endpoints.
+5. **Cache** — in-memory TTL cache, per-route TTLs (see table above).
+
+Rate limit response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
+
+## Project Structure
 
 ```
-packages/api/
-├── src/
-│   ├── routes/          # API route handlers
-│   │   ├── health.ts    # Health check
-│   │   ├── markets.ts   # Market endpoints
-│   │   ├── trades.ts    # Trade endpoints
-│   │   ├── prices.ts    # Price endpoints
-│   │   ├── funding.ts   # Funding rate endpoints
-│   │   ├── open-interest.ts
-│   │   ├── insurance.ts
-│   │   ├── crank.ts
-│   │   ├── oracle-router.ts
-│   │   ├── stats.ts
-│   │   ├── docs.ts      # Swagger UI
-│   │   └── ws.ts        # WebSocket
-│   ├── middleware/      # Express middleware
-│   │   ├── cache.ts
-│   │   ├── rate-limit.ts
-│   │   └── validateSlab.ts
-│   └── index.ts         # Server entry point
-├── openapi.yaml         # OpenAPI 3.0 spec
-├── package.json
-└── tsconfig.json
+packages/api/src/
+├── index.ts              # Server entry — CORS, middleware, route registration, graceful shutdown
+├── routes/
+│   ├── health.ts
+│   ├── markets.ts
+│   ├── trades.ts
+│   ├── prices.ts
+│   ├── funding.ts
+│   ├── open-interest.ts
+│   ├── insurance.ts
+│   ├── crank.ts
+│   ├── oracle-router.ts
+│   ├── stats.ts
+│   ├── ws.ts             # WebSocket handler
+│   └── docs.ts           # Swagger UI
+└── middleware/
+    ├── rate-limit.ts
+    ├── cache.ts
+    └── validateSlab.ts   # Slab address validation middleware
 ```
 
-### Testing
+## Testing
 
 ```bash
-# Run tests
-pnpm test
-
-# Test with coverage
-pnpm test:coverage
-
-# Lint
-pnpm lint
-```
-
-### Building
-
-```bash
-# Build TypeScript
-pnpm build
-
-# Clean build artifacts
-pnpm clean
+pnpm --filter=@percolator/api test
+pnpm --filter=@percolator/api test:coverage
 ```
 
 ## Deployment
 
-### Docker
-
-Build and run with Docker:
-
 ```bash
-docker build -t percolator-api .
+# Docker
+docker build -f Dockerfile.api -t percolator-api .
 docker run -p 3001:3001 --env-file .env percolator-api
-```
-
-### Docker Compose
-
-Run the entire stack:
-
-```bash
-docker-compose up -d
 ```
 
 ### Production Checklist
 
-- [ ] Set `NODE_ENV=production`
-- [ ] Configure `CORS_ORIGINS` with production domains
-- [ ] Use a reliable Solana RPC endpoint (not public mainnet)
-- [ ] Set up proper monitoring and logging
-- [ ] Configure rate limiting appropriately
-- [ ] Enable HTTPS (via reverse proxy)
-- [ ] Set up database connection pooling
-- [ ] Configure health check monitoring
-
-## Contributing
-
-1. Follow the existing code style
-2. Add tests for new features
-3. Update OpenAPI spec for new endpoints
-4. Update this README for significant changes
-
-## License
-
-MIT
+- [ ] `NODE_ENV=production`
+- [ ] `CORS_ORIGINS` set to production domains
+- [ ] `API_AUTH_KEY` set for write endpoint protection
+- [ ] Helius API key configured
+- [ ] Supabase credentials set
+- [ ] `WS_AUTH_REQUIRED=true` if streaming sensitive data
+- [ ] Railway health check pointed at `/health`
