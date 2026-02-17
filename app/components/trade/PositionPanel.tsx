@@ -10,7 +10,7 @@ import { useTrade } from "@/hooks/useTrade";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { AccountKind } from "@percolator/core";
-import { formatTokenAmount, formatLiqPrice } from "@/lib/format";
+import { formatTokenAmount, formatLiqPrice, formatUsd } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {
   computeMarkPnl,
