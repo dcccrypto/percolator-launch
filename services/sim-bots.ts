@@ -136,9 +136,11 @@ function positionHoldMs(): number {
 }
 
 function sizeToBigInt(usdSize: number, priceE6: bigint, leverage: number): bigint {
-  // size in e6 = usdSize * leverage * 1e6 / price... actually percolator size is notional in e6
-  // notional = usd * leverage, as e6
-  return BigInt(Math.round(usdSize * leverage * 1_000_000));
+  // percolator position_size is in base-asset units at 6-decimal scale
+  // notional_e6 = position_size * price_e6 / 1e6
+  // => position_size = usdNotional * 1e12 / price_e6
+  const usdNotional = usdSize * leverage;
+  return BigInt(Math.round(usdNotional * 1_000_000_000_000 / Number(priceE6)));
 }
 
 // ─── Bot Strategy Logic ───────────────────────────────────────────────────────
