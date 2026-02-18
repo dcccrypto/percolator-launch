@@ -246,6 +246,7 @@ export async function pushAndCrank(
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
 
+  // Step 1: Push oracle price (always succeeds if authority is valid)
   const pushData = encodePushOraclePrice({
     priceE6: priceE6.toString(),
     timestamp: now.toString(),
@@ -255,21 +256,29 @@ export async function pushAndCrank(
     slabPk,
   ]);
 
+  const pushTx = new Transaction();
+  pushTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
+  pushTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
+  pushTx.add(buildIx({ programId: PROGRAM_ID, keys: pushKeys, data: pushData }));
+  await sendAndConfirmTransaction(connection, pushTx, [payer], {
+    commitment: "confirmed",
+    skipPreflight: true,
+  });
+
+  // Step 2: Crank (reads freshly-pushed authority price — no Pyth fallback)
   const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
   const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
     payer.publicKey,
     slabPk,
     SYSVAR_CLOCK_PUBKEY,
-    slabPk, // admin oracle: oracle = slab
+    slabPk, // admin oracle: oracle = slab (not read when authority price valid)
   ]);
 
-  const tx = new Transaction();
-  tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
-  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
-  tx.add(buildIx({ programId: PROGRAM_ID, keys: pushKeys, data: pushData }));
-  tx.add(buildIx({ programId: PROGRAM_ID, keys: crankKeys, data: crankData }));
-
-  const sig = await sendAndConfirmTransaction(connection, tx, [payer], {
+  const crankTx = new Transaction();
+  crankTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
+  crankTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
+  crankTx.add(buildIx({ programId: PROGRAM_ID, keys: crankKeys, data: crankData }));
+  const sig = await sendAndConfirmTransaction(connection, crankTx, [payer], {
     commitment: "confirmed",
     skipPreflight: true,
   });
