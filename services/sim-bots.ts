@@ -107,8 +107,10 @@ interface BotState {
   userIdx: number | null;
   positionSize: bigint; // +long, -short, 0 = flat
   positionOpenedAt: number; // timestamp ms
+  entryPrice: number;   // USD price when position opened
   nextTradeAt: number;   // scheduled next trade
   priceHistory: PriceHistory[];
+  tradeCount: number;    // total trades for leaderboard
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -408,6 +410,22 @@ async function executeTrade(
 
 // ─── BotFleet ─────────────────────────────────────────────────────────────────
 
+// Bot display names for leaderboard
+const BOT_NAMES: Record<BotType, string> = {
+  trend_follower: "🔥 TrendBot",
+  mean_reverter: "🔄 MeanRevBot",
+  market_maker: "⚖️ MarketMaker",
+};
+
+// Supabase REST helper
+function supabaseHeaders(serviceKey: string) {
+  return {
+    "Content-Type": "application/json",
+    "apikey": serviceKey,
+    "Authorization": `Bearer ${serviceKey}`,
+  };
+}
+
 export class BotFleet {
   private connection: Connection;
   private adminKeypair: Keypair;
@@ -416,15 +434,29 @@ export class BotFleet {
   private markets: SimMarketsConfig;
   private running = false;
   private activeScenario: ActiveScenario | null = null;
+  private supabaseUrl: string;
+  private serviceKey: string;
+  private leaderboardBuffer: Array<{
+    wallet: string;
+    display_name: string;
+    pnl_delta: number;
+    deposited_delta: number;
+    is_win: boolean;
+  }> = [];
+  private lastLeaderboardFlush = 0;
 
   constructor(opts: {
     rpcUrl: string;
     adminKeypair: Keypair;
     oracle: SimOracle;
+    supabaseUrl: string;
+    serviceKey: string;
   }) {
     this.connection = new Connection(opts.rpcUrl, "confirmed");
     this.adminKeypair = opts.adminKeypair;
     this.oracle = opts.oracle;
+    this.supabaseUrl = opts.supabaseUrl;
+    this.serviceKey = opts.serviceKey;
 
     this.markets = JSON.parse(fs.readFileSync(SIM_CONFIG_PATH, "utf-8")) as SimMarketsConfig;
 
@@ -459,8 +491,10 @@ export class BotFleet {
         userIdx: null,
         positionSize: 0n,
         positionOpenedAt: 0,
+        entryPrice: 0,
         nextTradeAt: Date.now() + randInt(5, 30) * 1_000,
         priceHistory: [],
+        tradeCount: 0,
       });
     }
     console.log(`[bots] Loaded ${this.bots.length} bot wallets`);
@@ -489,6 +523,11 @@ export class BotFleet {
           bot.nextTradeAt = now + nextTradeDelay();
         }
       }
+
+      // Flush leaderboard updates
+      await this.flushLeaderboard().catch((err) =>
+        console.error("[bots] leaderboard flush error:", err),
+      );
 
       await sleep(1_000);
     }
@@ -575,6 +614,8 @@ export class BotFleet {
       const sig = await executeTrade(this.connection, this.adminKeypair, bot, slabPk, size, slabPk);
       bot.positionSize = size;
       bot.positionOpenedAt = now;
+      bot.entryPrice = price.adjustedPrice;
+      bot.tradeCount++;
       console.log(
         `[bots] ${bot.wallet.botId} (${bot.wallet.type}) ${size > 0n ? "LONG" : "SHORT"} ${bot.wallet.market} @ ${price.adjustedPrice.toFixed(2)} sig=${sig.slice(0, 12)}...`,
       );
@@ -585,17 +626,114 @@ export class BotFleet {
 
   private async closePosition(bot: BotState, slabPk: PublicKey): Promise<void> {
     if (bot.positionSize === 0n || bot.userIdx === null) return;
-    // Close by trading in opposite direction with same size
+
+    const exitPrice = this.oracle.latestPrices.get(bot.wallet.market)?.adjustedPrice ?? 0;
     const closeSize = -bot.positionSize;
+
     try {
       const sig = await executeTrade(this.connection, this.adminKeypair, bot, slabPk, closeSize, slabPk);
+
+      // Calculate PnL
+      const isLong = bot.positionSize > 0n;
+      const absSize = Number(isLong ? bot.positionSize : -bot.positionSize) / 1e6;
+      const priceDiff = exitPrice - bot.entryPrice;
+      const pnl = isLong ? (priceDiff / bot.entryPrice) * absSize : (-priceDiff / bot.entryPrice) * absSize;
+      const pnlRounded = Math.round(pnl * 1e6); // in token units (6 decimals)
+
       console.log(
-        `[bots] ${bot.wallet.botId} CLOSED position sig=${sig.slice(0, 12)}...`,
+        `[bots] ${bot.wallet.botId} CLOSED ${isLong ? "LONG" : "SHORT"} @ ${exitPrice.toFixed(2)} pnl=${pnl.toFixed(2)} sig=${sig.slice(0, 12)}...`,
       );
+
+      // Buffer leaderboard update
+      const idx = bot.wallet.botId.split("_").pop() ?? "1";
+      this.leaderboardBuffer.push({
+        wallet: bot.keypair.publicKey.toBase58(),
+        display_name: `${BOT_NAMES[bot.wallet.type]} #${idx}`,
+        pnl_delta: pnlRounded,
+        deposited_delta: Math.round(absSize * 1e6),
+        is_win: pnl > 0,
+      });
+
       bot.positionSize = 0n;
       bot.positionOpenedAt = 0;
+      bot.entryPrice = 0;
+      bot.tradeCount++;
     } catch (err) {
       console.error(`[bots] close failed for ${bot.wallet.botId}:`, err);
     }
   }
+
+  /** Flush buffered leaderboard updates to Supabase */
+  private async flushLeaderboard(): Promise<void> {
+    if (this.leaderboardBuffer.length === 0) return;
+    const now = Date.now();
+    if (now - this.lastLeaderboardFlush < 15_000 && this.leaderboardBuffer.length < 10) return;
+
+    const batch = this.leaderboardBuffer.splice(0, 20);
+    this.lastLeaderboardFlush = now;
+
+    const weekStart = currentWeekStart();
+
+    for (const entry of batch) {
+      try {
+        // Upsert: try to get existing row, then update or insert
+        const url = `${this.supabaseUrl}/rest/v1/sim_leaderboard?wallet=eq.${entry.wallet}&week_start=eq.${encodeURIComponent(weekStart)}`;
+        const existing = await fetch(url, {
+          headers: supabaseHeaders(this.serviceKey),
+        }).then((r) => r.json()) as Array<Record<string, number | string | null>>;
+
+        if (existing && existing.length > 0) {
+          const row = existing[0];
+          await fetch(`${this.supabaseUrl}/rest/v1/sim_leaderboard?wallet=eq.${entry.wallet}&week_start=eq.${encodeURIComponent(weekStart)}`, {
+            method: "PATCH",
+            headers: { ...supabaseHeaders(this.serviceKey), "Prefer": "return=minimal" },
+            body: JSON.stringify({
+              total_pnl: ((row.total_pnl as number) ?? 0) + entry.pnl_delta,
+              total_deposited: ((row.total_deposited as number) ?? 0) + entry.deposited_delta,
+              trade_count: ((row.trade_count as number) ?? 0) + 1,
+              win_count: ((row.win_count as number) ?? 0) + (entry.is_win ? 1 : 0),
+              best_trade: Math.max((row.best_trade as number) ?? -Infinity, entry.pnl_delta),
+              worst_trade: Math.min((row.worst_trade as number) ?? Infinity, entry.pnl_delta),
+              last_trade_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }),
+          });
+        } else {
+          await fetch(`${this.supabaseUrl}/rest/v1/sim_leaderboard`, {
+            method: "POST",
+            headers: { ...supabaseHeaders(this.serviceKey), "Prefer": "return=minimal" },
+            body: JSON.stringify({
+              wallet: entry.wallet,
+              display_name: entry.display_name,
+              total_pnl: entry.pnl_delta,
+              total_deposited: entry.deposited_delta,
+              trade_count: 1,
+              win_count: entry.is_win ? 1 : 0,
+              liquidation_count: 0,
+              best_trade: entry.pnl_delta,
+              worst_trade: entry.pnl_delta,
+              week_start: weekStart,
+              last_trade_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }),
+          });
+        }
+      } catch (err) {
+        console.error(`[bots] leaderboard write failed:`, err);
+      }
+    }
+    if (batch.length > 0) {
+      console.log(`[bots] flushed ${batch.length} leaderboard entries`);
+    }
+  }
+}
+
+function currentWeekStart(): string {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const diffToMonday = (day + 6) % 7;
+  const monday = new Date(now);
+  monday.setUTCDate(now.getUTCDate() - diffToMonday);
+  monday.setUTCHours(0, 0, 0, 0);
+  return monday.toISOString();
 }
