@@ -50,6 +50,9 @@ lerna-debug.log*
 # Supabase CLI temp files
 supabase/.temp/
 
+# Simulator — sensitive bot keypairs
+config/sim-bot-wallets.json
+
 Percolator-Deck-Final.pdf
 Percolator-Deck-v2.pdf
 Percolator-Pitch-Deck.pdf
