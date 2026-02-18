@@ -364,11 +364,21 @@ function slabLayout(maxAccounts: number) {
 
 // Detect maxAccounts from slab data length
 export function detectLayout(dataLen: number) {
-  // Try each known tier
+  // Try each known tier with aligned offsets
   for (const n of [64, 256, 1024, 4096]) {
     const layout = slabLayout(n);
     const expectedLen = ENGINE_OFF + layout.accountsOff + n * ACCOUNT_SIZE;
     if (dataLen === expectedLen) return layout;
+  }
+  // Try unaligned variant (some program builds don't pad accountsOff to 16)
+  for (const n of [64, 256, 1024, 4096]) {
+    const bitmapWords = Math.ceil(n / 64);
+    const bitmapBytes = bitmapWords * 8;
+    const postBitmap = 24;
+    const nextFreeBytes = n * 2;
+    const accountsOff = 408 + bitmapBytes + postBitmap + nextFreeBytes; // no alignment
+    const expectedLen = ENGINE_OFF + accountsOff + n * ACCOUNT_SIZE;
+    if (dataLen === expectedLen) return { bitmapWords, accountsOff, maxAccounts: n };
   }
   // Fallback: compute from params (will read maxAccounts from data)
   return null;
