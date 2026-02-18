@@ -107,6 +107,7 @@ interface BotState {
   userIdx: number | null;
   positionSize: bigint; // +long, -short, 0 = flat
   positionOpenedAt: number; // timestamp ms
+  holdTarget: number;   // ms to hold before closing (set once on open)
   entryPrice: number;   // USD price when position opened
   nextTradeAt: number;   // scheduled next trade
   priceHistory: PriceHistory[];
@@ -525,6 +526,7 @@ export class BotFleet {
         userIdx: null,
         positionSize: 0n,
         positionOpenedAt: 0,
+        holdTarget: 0,
         entryPrice: 0,
         nextTradeAt: Date.now() + randInt(5, 30) * 1_000,
         priceHistory: [],
@@ -621,7 +623,8 @@ export class BotFleet {
             const onChainPos = readPositionSize(slabInfo.data, existingIdx);
             if (onChainPos !== 0n) {
               bot.positionSize = onChainPos;
-              bot.positionOpenedAt = Date.now() - 5 * 60_000; // assume held 5 min (triggers close soon)
+              bot.holdTarget = 5_000; // close recovered positions quickly (5s)
+              bot.positionOpenedAt = Date.now() - 10_000; // triggers close on next tick
               bot.entryPrice = price.adjustedPrice; // approximate
               console.log(`[bots] ${bot.wallet.botId} RECOVERED existing account (userIdx=${existingIdx}, pos=${onChainPos > 0n ? "LONG" : "SHORT"})`);
             } else {
@@ -650,21 +653,18 @@ export class BotFleet {
       }
     }
 
-    // Check if position should be closed (time or stop loss)
+    // Check if position should be closed (hold timer expired)
     const now = Date.now();
     if (bot.positionSize !== 0n && bot.positionOpenedAt > 0) {
       const holdTime = now - bot.positionOpenedAt;
-      const holdLimit = positionHoldMs();
-      // Stop loss: 5% adverse move
-      // (simplified: just close after hold time)
-      if (holdTime >= holdLimit) {
+      if (holdTime >= bot.holdTarget) {
         await this.closePosition(bot, slabPk);
         return;
       }
     }
 
-    // Skip if already positioned (only market makers double-side)
-    if (bot.positionSize !== 0n && bot.wallet.type !== "market_maker") return;
+    // Skip if already positioned — wait for hold timer to close first
+    if (bot.positionSize !== 0n) return;
 
     // Decide trade
     const size = botDecision(bot, price, this.activeScenario);
@@ -674,6 +674,7 @@ export class BotFleet {
       const sig = await executeTrade(this.connection, this.adminKeypair, bot, slabPk, size, slabPk);
       bot.positionSize = size;
       bot.positionOpenedAt = now;
+      bot.holdTarget = positionHoldMs();
       bot.entryPrice = price.adjustedPrice;
       bot.tradeCount++;
       console.log(
@@ -716,6 +717,7 @@ export class BotFleet {
 
       bot.positionSize = 0n;
       bot.positionOpenedAt = 0;
+      bot.holdTarget = 0;
       bot.entryPrice = 0;
       bot.tradeCount++;
     } catch (err) {
