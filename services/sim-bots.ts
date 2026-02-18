@@ -260,7 +260,11 @@ function findUserIdx(slabData: Buffer, owner: PublicKey): number {
 
   for (let i = 0; i < maxAccounts; i++) {
     const base = accountsBase + i * ACCOUNT_SIZE;
+    if (base + ACCOUNT_SIZE > slabData.length) break;
+    const acctId = slabData.readBigUInt64LE(base); // account_id at offset 0
+    if (acctId === 0n) continue; // empty slot
     const acctOwner = slabData.subarray(base + ACCT_OWNER_OFF, base + ACCT_OWNER_OFF + 32);
+    console.log(`[findUserIdx] slot ${i}: id=${acctId} owner=${Buffer.from(acctOwner).toString('hex').slice(0,16)}... looking for ${ownerBytes.toString('hex').slice(0,16)}...`);
     if (acctOwner.equals(ownerBytes)) return i;
   }
   return -1;
