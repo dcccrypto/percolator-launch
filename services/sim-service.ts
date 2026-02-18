@@ -152,6 +152,8 @@ async function main() {
       rpcUrl,
       adminKeypair,
       oracle,
+      supabaseUrl,
+      serviceKey,
     });
     botsRef = fleet;
   }
