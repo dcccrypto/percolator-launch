@@ -255,16 +255,30 @@ function slabAccountsOffset(maxAccounts: number): number {
   return Math.ceil(preAccountsLen / 16) * 16;
 }
 
+/** Try both aligned and unaligned layouts (some builds don't pad to 16) */
+function detectSlabLayout(dataLen: number): { maxAccounts: number; accountsOff: number } {
+  for (const n of [64, 256, 1024, 4096]) {
+    // Aligned variant
+    const aligned = slabAccountsOffset(n);
+    if (dataLen === ENGINE_OFF + aligned + n * ACCOUNT_SIZE) {
+      return { maxAccounts: n, accountsOff: aligned };
+    }
+    // Unaligned variant (small builds)
+    const bitmapWords = Math.ceil(n / 64);
+    const bitmapBytes = bitmapWords * 8;
+    const unaligned = 408 + bitmapBytes + 24 + n * 2;
+    if (dataLen === ENGINE_OFF + unaligned + n * ACCOUNT_SIZE) {
+      return { maxAccounts: n, accountsOff: unaligned };
+    }
+  }
+  // Fallback: assume 64 aligned
+  return { maxAccounts: 64, accountsOff: slabAccountsOffset(64) };
+}
+
 /** Find a user's account index in the slab by owner pubkey */
 function findUserIdx(slabData: Buffer, owner: PublicKey): number {
   const ownerBytes = owner.toBuffer();
-  // Detect maxAccounts from data length
-  const maxAccounts = [64, 256, 1024, 4096].find((n) => {
-    const accountsOff = slabAccountsOffset(n);
-    return slabData.length === ENGINE_OFF + accountsOff + n * ACCOUNT_SIZE;
-  }) ?? 64;
-
-  const accountsOff = slabAccountsOffset(maxAccounts);
+  const { maxAccounts, accountsOff } = detectSlabLayout(slabData.length);
   const accountsBase = ENGINE_OFF + accountsOff;
 
   for (let i = 0; i < maxAccounts; i++) {
@@ -290,10 +304,7 @@ function readI128LE(buf: Buffer, offset: number): bigint {
 
 /** Read a bot's on-chain position size from slab data */
 function readPositionSize(slabData: Buffer, userIdx: number): bigint {
-  const maxAccounts = [64, 256, 1024, 4096].find((n) => {
-    return slabData.length === ENGINE_OFF + slabAccountsOffset(n) + n * ACCOUNT_SIZE;
-  }) ?? 64;
-  const accountsOff = slabAccountsOffset(maxAccounts);
+  const { accountsOff } = detectSlabLayout(slabData.length);
   const base = ENGINE_OFF + accountsOff + userIdx * ACCOUNT_SIZE;
   if (base + ACCOUNT_SIZE > slabData.length) return 0n;
   return readI128LE(slabData, base + ACCT_POSITION_SIZE_OFF);
@@ -301,10 +312,7 @@ function readPositionSize(slabData: Buffer, userIdx: number): bigint {
 
 /** Read LP account's matcher program and context from slab data */
 function readLpMatcherInfo(slabData: Buffer, lpIdx: number): { matcherProg: PublicKey; matcherCtx: PublicKey; lpOwner: PublicKey } {
-  const maxAccounts = [64, 256, 1024, 4096].find((n) => {
-    return slabData.length === ENGINE_OFF + slabAccountsOffset(n) + n * ACCOUNT_SIZE;
-  }) ?? 64;
-  const accountsOff = slabAccountsOffset(maxAccounts);
+  const { accountsOff } = detectSlabLayout(slabData.length);
   const base = ENGINE_OFF + accountsOff + lpIdx * ACCOUNT_SIZE;
   return {
     matcherProg: new PublicKey(slabData.subarray(base + ACCT_MATCHER_PROG_OFF, base + ACCT_MATCHER_PROG_OFF + 32)),
