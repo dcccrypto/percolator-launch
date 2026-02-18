@@ -22,12 +22,12 @@ import {
   encodePushOraclePrice,
   encodeKeeperCrank,
   buildAccountMetas,
-  buildIx,
 } from "../packages/core/src/abi/index.js";
 import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_KEEPER_CRANK,
 } from "../packages/core/src/abi/accounts.js";
+import { buildIx } from "../packages/core/src/runtime/tx.js";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -36,8 +36,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const PROGRAM_ID = new PublicKey("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
-const TICK_MS = 2_000;
+// Read program ID from deploy config (sim program, not production)
+const simConfig = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "../config/sim-markets.json"), "utf-8"),
+);
+const PROGRAM_ID = new PublicKey(simConfig.programId);
+const TICK_MS = 5_000; // 5s between oracle pushes (devnet rate limits)
 const PRIORITY_FEE = 50_000;
 
 const PYTH_FEEDS: Record<string, string> = {

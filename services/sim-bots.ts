@@ -20,6 +20,7 @@ import {
 } from "@solana/web3.js";
 import {
   getOrCreateAssociatedTokenAccount,
+  getAssociatedTokenAddress,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import {
@@ -27,8 +28,8 @@ import {
   encodeDepositCollateral,
   encodeTradeNoCpi,
   buildAccountMetas,
-  buildIx,
 } from "../packages/core/src/abi/index.js";
+import { buildIx } from "../packages/core/src/runtime/tx.js";
 import {
   ACCOUNTS_INIT_USER,
   ACCOUNTS_DEPOSIT_COLLATERAL,
@@ -44,7 +45,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const PROGRAM_ID = new PublicKey("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
+// Read program ID from deploy config (sim program, not production)
+const simConfig = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "../config/sim-markets.json"), "utf-8"),
+);
+const PROGRAM_ID = new PublicKey(simConfig.programId);
 const PRIORITY_FEE = 30_000;
 const INITIAL_DEPOSIT_RAW = 1_000_000_000n; // 1,000 simUSDC (6 decimals)
 const LP_IDX = 0; // LP slot 0 is the sim LP
@@ -428,6 +433,8 @@ export class BotFleet {
     const slabPk = new PublicKey(market.slab);
     const mintPk = new PublicKey(this.markets.simUSDC.mint);
     const [vaultPda] = deriveVaultAuthority(PROGRAM_ID, slabPk);
+    // Vault ATA = associated token account owned by vaultPda
+    const vaultAta = await getAssociatedTokenAddress(mintPk, vaultPda, true);
 
     // Initialize bot on first run
     if (!bot.initialized) {
@@ -438,7 +445,7 @@ export class BotFleet {
           bot,
           slabPk,
           mintPk,
-          vaultPda,
+          vaultAta,
         );
         bot.userIdx = userIdx;
         bot.ata = ata;
@@ -497,8 +504,4 @@ export class BotFleet {
       console.error(`[bots] close failed for ${bot.wallet.botId}:`, err);
     }
   }
-}
-
-function randInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
