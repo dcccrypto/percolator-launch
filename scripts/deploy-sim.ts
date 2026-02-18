@@ -227,7 +227,7 @@ async function createSimMarket(
   const initMarketData = encodeInitMarket({
     admin: payer.publicKey,
     collateralMint: mint,
-    indexFeedId: "0".repeat(64), // admin oracle — no Pyth
+    indexFeedId: "0100000000000000000000000000000000000000000000000000000000000000", // non-zero to disable hyperp mode; prices pushed via admin oracle
     maxStalenessSecs: "3600",
     confFilterBps: 0,
     invert: 0,

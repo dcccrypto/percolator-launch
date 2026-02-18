@@ -27,18 +27,16 @@ import {
 import {
   encodeInitUser,
   encodeDepositCollateral,
-  encodeTradeCpi,
-  encodeKeeperCrank,
+  encodeTradeNoCpi,
   buildAccountMetas,
 } from "../packages/core/src/abi/index.js";
 import { buildIx } from "../packages/core/src/runtime/tx.js";
 import {
   ACCOUNTS_INIT_USER,
   ACCOUNTS_DEPOSIT_COLLATERAL,
-  ACCOUNTS_TRADE_CPI,
-  ACCOUNTS_KEEPER_CRANK,
+  ACCOUNTS_TRADE_NOCPI,
 } from "../packages/core/src/abi/accounts.js";
-import { deriveVaultAuthority, deriveLpPda } from "../packages/core/src/solana/pda.js";
+import { deriveVaultAuthority } from "../packages/core/src/solana/pda.js";
 import type { SimOracle, OraclePrice, ActiveScenario } from "./sim-oracle.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -370,6 +368,7 @@ async function initBot(
 
 async function executeTrade(
   connection: Connection,
+  payer: Keypair,        // admin (LP owner) — must sign TradeNoCpi
   bot: BotState,
   slab: PublicKey,
   size: bigint,
@@ -377,53 +376,28 @@ async function executeTrade(
 ): Promise<string> {
   if (bot.userIdx === null) throw new Error("Bot not initialized");
 
-  // Read LP matcher info from slab (LP at index 0)
-  const slabInfo = await connection.getAccountInfo(slab);
-  if (!slabInfo) throw new Error("Slab account not found");
-  const { matcherProg, matcherCtx, lpOwner } = readLpMatcherInfo(slabInfo.data, LP_IDX);
+  const tradeData = encodeTradeNoCpi({
+    lpIdx: LP_IDX,
+    userIdx: bot.userIdx,
+    size: size.toString(),
+  });
 
-  // Derive LP PDA
-  const [lpPda] = deriveLpPda(PROGRAM_ID, slab, LP_IDX);
+  // TradeNoCpi: user(signer), lp(signer=LP owner=payer), slab, clock, oracle
+  const tradeKeys = buildAccountMetas(ACCOUNTS_TRADE_NOCPI, [
+    bot.keypair.publicKey,
+    payer.publicKey,   // LP owner must sign
+    slab,
+    SYSVAR_CLOCK_PUBKEY,
+    oracleSlab,
+  ]);
 
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
-  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }));
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
+  tx.add(buildIx({ programId: PROGRAM_ID, keys: tradeKeys, data: tradeData }));
 
-  // 1. Permissionless crank (advances global state)
-  const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
-    bot.keypair.publicKey,
-    slab,
-    SYSVAR_CLOCK_PUBKEY,
-    oracleSlab,
-  ]);
-  tx.add(buildIx({
-    programId: PROGRAM_ID,
-    keys: crankKeys,
-    data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
-  }));
-
-  // 2. TradeCpi — goes through matcher program
-  const tradeKeys = buildAccountMetas(ACCOUNTS_TRADE_CPI, [
-    bot.keypair.publicKey,
-    lpOwner,
-    slab,
-    SYSVAR_CLOCK_PUBKEY,
-    oracleSlab,
-    matcherProg,
-    matcherCtx,
-    lpPda,
-  ]);
-  tx.add(buildIx({
-    programId: PROGRAM_ID,
-    keys: tradeKeys,
-    data: encodeTradeCpi({
-      lpIdx: LP_IDX,
-      userIdx: bot.userIdx,
-      size: size.toString(),
-    }),
-  }));
-
-  const sig = await sendAndConfirmTransaction(connection, tx, [bot.keypair], {
+  // Both bot (user) and admin (LP owner) must sign
+  const sig = await sendAndConfirmTransaction(connection, tx, [bot.keypair, payer], {
     commitment: "confirmed",
     skipPreflight: true,
   });
@@ -596,7 +570,7 @@ export class BotFleet {
     if (!size) return;
 
     try {
-      const sig = await executeTrade(this.connection, bot, slabPk, size, slabPk);
+      const sig = await executeTrade(this.connection, this.adminKeypair, bot, slabPk, size, slabPk);
       bot.positionSize = size;
       bot.positionOpenedAt = now;
       console.log(
@@ -612,7 +586,7 @@ export class BotFleet {
     // Close by trading in opposite direction with same size
     const closeSize = -bot.positionSize;
     try {
-      const sig = await executeTrade(this.connection, bot, slabPk, closeSize, slabPk);
+      const sig = await executeTrade(this.connection, this.adminKeypair, bot, slabPk, closeSize, slabPk);
       console.log(
         `[bots] ${bot.wallet.botId} CLOSED position sig=${sig.slice(0, 12)}...`,
       );
