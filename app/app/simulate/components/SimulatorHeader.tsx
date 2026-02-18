@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { TourHelpButton } from "./GuidedWalkthrough";
 
 const SCENARIOS: Record<string, { label: string; color: string; icon: string }> = {
   "flash-crash":    { label: "Flash Crash",    color: "text-[var(--short)]",   icon: "📉" },
@@ -77,6 +78,9 @@ export function SimulatorHeader({ markets, selectedMarket, onMarketChange, activ
               </span>
               <span className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Devnet</span>
             </div>
+
+            {/* Guided tour */}
+            <TourHelpButton />
           </div>
         </div>
       </div>
