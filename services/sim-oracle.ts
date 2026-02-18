@@ -37,9 +37,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 // Read program ID from deploy config (sim program, not production)
-const simConfig = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "../config/sim-markets.json"), "utf-8"),
-);
+function findSimConfig(): string {
+  const candidates = [
+    path.resolve(__dirname, "../config/sim-markets.json"),
+    path.resolve(__dirname, "../app/config/sim-markets.json"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error(`sim-markets.json not found in: ${candidates.join(", ")}`);
+}
+const SIM_CONFIG_PATH = findSimConfig();
+const simConfig = JSON.parse(fs.readFileSync(SIM_CONFIG_PATH, "utf-8"));
 const PROGRAM_ID = new PublicKey(simConfig.programId);
 const TICK_MS = 5_000; // 5s between oracle pushes (devnet rate limits)
 const PRIORITY_FEE = 50_000;
@@ -293,8 +302,7 @@ export class SimOracle {
     this.supabaseUrl = opts.supabaseUrl;
     this.serviceKey = opts.serviceKey;
 
-    const configPath = path.resolve(__dirname, "../app/config/sim-markets.json");
-    this.markets = JSON.parse(fs.readFileSync(configPath, "utf-8")) as SimMarketsConfig;
+    this.markets = JSON.parse(fs.readFileSync(SIM_CONFIG_PATH, "utf-8")) as SimMarketsConfig;
 
     console.log(`[oracle] Admin: ${this.payer.publicKey.toBase58()}`);
     console.log(`[oracle] Markets: ${Object.keys(this.markets.markets).join(", ")}`);
