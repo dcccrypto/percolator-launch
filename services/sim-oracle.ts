@@ -305,6 +305,14 @@ export class SimOracle {
 
   /** Last computed prices (for bots to read) */
   public latestPrices = new Map<string, OraclePrice>();
+  private priceWriteBuffer: Array<{
+    slab_address: string;
+    price_e6: number;
+    model: string;
+  }> = [];
+  private lastFlush = 0;
+  private readonly FLUSH_INTERVAL_MS = 10_000; // flush to DB every 10s
+  private readonly MAX_BUFFER = 50;
 
   constructor(opts: {
     rpcUrl: string;
@@ -380,9 +388,78 @@ export class SimOracle {
         console.log(
           `[oracle] ${symbol} raw=${rawPrice.toFixed(2)} adj=${adjustedPrice.toFixed(2)} priceE6=${priceE6} sig=${sig.slice(0, 12)}...`,
         );
+
+        // Buffer price for DB persistence
+        this.priceWriteBuffer.push({
+          slab_address: market.slab,
+          price_e6: Number(priceE6),
+          model: this.activeScenario?.type ?? "pyth",
+        });
       } catch (err) {
         console.error(`[oracle] push/crank failed for ${symbol}:`, err);
       }
+    }
+
+    // Flush price history to Supabase periodically
+    await this.flushPriceHistory();
+  }
+
+  private async flushPriceHistory(): Promise<void> {
+    const now = Date.now();
+    if (
+      this.priceWriteBuffer.length === 0 ||
+      (now - this.lastFlush < this.FLUSH_INTERVAL_MS &&
+        this.priceWriteBuffer.length < this.MAX_BUFFER)
+    ) {
+      return;
+    }
+
+    const batch = this.priceWriteBuffer.splice(0, this.MAX_BUFFER);
+    this.lastFlush = now;
+
+    try {
+      const url = `${this.supabaseUrl}/rest/v1/simulation_price_history`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          ...supabaseHeaders(this.serviceKey),
+          "Prefer": "return=minimal",
+        },
+        body: JSON.stringify(batch),
+      });
+      if (!resp.ok) {
+        console.error(`[oracle] price history flush failed: ${resp.status} ${await resp.text()}`);
+        // Put rows back for retry (drop if buffer too large)
+        if (this.priceWriteBuffer.length < 200) {
+          this.priceWriteBuffer.unshift(...batch);
+        }
+      } else {
+        console.log(`[oracle] flushed ${batch.length} prices to DB`);
+      }
+    } catch (err) {
+      console.error("[oracle] price history flush error:", err);
+      if (this.priceWriteBuffer.length < 200) {
+        this.priceWriteBuffer.unshift(...batch);
+      }
+    }
+
+    // Cleanup old data: keep last 24h per slab (run every ~5 minutes)
+    if (now % 300_000 < this.FLUSH_INTERVAL_MS) {
+      await this.cleanupOldPrices().catch((err) =>
+        console.error("[oracle] cleanup error:", err)
+      );
+    }
+  }
+
+  private async cleanupOldPrices(): Promise<void> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const url = `${this.supabaseUrl}/rest/v1/simulation_price_history?timestamp=lt.${cutoff}`;
+    const resp = await fetch(url, {
+      method: "DELETE",
+      headers: supabaseHeaders(this.serviceKey),
+    });
+    if (resp.ok) {
+      console.log("[oracle] cleaned up prices older than 24h");
     }
   }
 }

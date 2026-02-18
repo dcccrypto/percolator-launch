@@ -21,13 +21,31 @@ export async function GET(
       return NextResponse.json({ prices: [] });
     }
 
-    // Try to get price history from market_stats
     const db = getServiceClient();
     if (!db) {
       return NextResponse.json({ prices: [] });
     }
 
-    // Query oracle_prices table if it exists, otherwise fall back to market_stats
+    // 1. Check simulation_price_history first (simulator oracle writes here)
+    const { data: simPrices, error: simError } = await (db as any)
+      .from("simulation_price_history")
+      .select("price_e6, timestamp")
+      .eq("slab_address", slab)
+      .order("timestamp", { ascending: true })
+      .limit(1000);
+
+    if (!simError && simPrices && simPrices.length > 0) {
+      return NextResponse.json({
+        prices: simPrices.map((p: any) => ({
+          price_e6: String(p.price_e6),
+          timestamp: typeof p.timestamp === "string"
+            ? new Date(p.timestamp).getTime()
+            : p.timestamp,
+        })),
+      });
+    }
+
+    // 2. Check oracle_prices (production stats collector writes here)
     const { data: oraclePrices, error: oracleError } = await (db as any)
       .from("oracle_prices")
       .select("price_e6, timestamp")
@@ -44,7 +62,7 @@ export async function GET(
       });
     }
 
-    // Fallback: try market_stats for the most recent price
+    // 3. Fallback: market_stats for the most recent price
     const { data: stats } = await (db as any)
       .from("market_stats")
       .select("mark_price_e6, last_updated")
