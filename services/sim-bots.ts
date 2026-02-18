@@ -357,13 +357,24 @@ export class BotFleet {
   }
 
   private loadBotWallets(): void {
-    const walletsPath = path.resolve(__dirname, "../config/sim-bot-wallets.json");
-    if (!fs.existsSync(walletsPath)) {
-      console.warn("[bots] sim-bot-wallets.json not found — run setup-sim-bots.ts first");
-      return;
+    // Try env var first (for Docker/Railway), then file
+    let config: BotWalletsConfig;
+    const envWallets = process.env.SIM_BOT_WALLETS;
+    if (envWallets) {
+      config = JSON.parse(envWallets) as BotWalletsConfig;
+      console.log("[bots] Loaded bot wallets from SIM_BOT_WALLETS env var");
+    } else {
+      const candidates = [
+        path.resolve(__dirname, "../config/sim-bot-wallets.json"),
+        path.resolve(__dirname, "../app/config/sim-bot-wallets.json"),
+      ];
+      const walletsPath = candidates.find((p) => fs.existsSync(p));
+      if (!walletsPath) {
+        console.warn("[bots] sim-bot-wallets.json not found and SIM_BOT_WALLETS env not set — run setup-sim-bots.ts first");
+        return;
+      }
+      config = JSON.parse(fs.readFileSync(walletsPath, "utf-8")) as BotWalletsConfig;
     }
-
-    const config = JSON.parse(fs.readFileSync(walletsPath, "utf-8")) as BotWalletsConfig;
     for (const wallet of config.bots) {
       const keypair = Keypair.fromSecretKey(Uint8Array.from(wallet.secretKey));
       this.bots.push({
