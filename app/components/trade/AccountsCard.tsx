@@ -38,20 +38,27 @@ export const AccountsCard: FC = () => {
   const oraclePrice = livePriceE6 ?? mktConfig?.lastEffectivePriceE6 ?? 0n;
   const maintBps = params?.maintenanceMarginBps ?? 500n;
 
+  // Sentinel returned by computeLiqPrice for unliquidatable positions (≥100% maintenance margin).
+  // Equals u64::MAX — display as "∞" and treat health as 100%.
+  const LIQ_PRICE_INFINITY = 18446744073709551615n;
+
   const rows: AccountRow[] = useMemo(() => {
     return accounts.map(({ idx, account }) => {
       const direction: "LONG" | "SHORT" | "IDLE" = account.positionSize > 0n ? "LONG" : account.positionSize < 0n ? "SHORT" : "IDLE";
       const liqPrice = computeLiqPrice(account.entryPrice, account.capital, account.positionSize, maintBps);
       let liqHealthPct = 100;
-      if (account.positionSize !== 0n && liqPrice > 0n && oraclePrice > 0n) {
+      // u64::MAX sentinel means the position is effectively unliquidatable — health stays at 100%.
+      // Skip the BigInt→Number conversion that would otherwise lose precision on very large values.
+      if (account.positionSize !== 0n && liqPrice > 0n && liqPrice < LIQ_PRICE_INFINITY && oraclePrice > 0n) {
         if (account.positionSize > 0n) {
           const range = Number(account.entryPrice - liqPrice);
           const dist = Number(oraclePrice - liqPrice);
-          liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
+          liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 100;
         } else {
           const range = Number(liqPrice - account.entryPrice);
           const dist = Number(liqPrice - oraclePrice);
-          liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
+          // Guard: range=0 means liqPrice==entryPrice, i.e. position is at-the-money unliquidatable.
+          liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 100;
         }
       }
       const computedPnl = account.positionSize !== 0n && oraclePrice > 0n
@@ -175,7 +182,9 @@ export const AccountsCard: FC = () => {
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">
                         {row.positionSize !== 0n ? (
                           <div className="flex items-center justify-end gap-1">
-                            <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsd(row.liqPrice)}</span>
+                            <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+                              {row.liqPrice >= LIQ_PRICE_INFINITY ? "∞" : formatUsd(row.liqPrice)}
+                            </span>
                             <div className="h-1 w-8 shrink-0 bg-[var(--border)]/50">
                               <div className={`h-1 ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
                             </div>

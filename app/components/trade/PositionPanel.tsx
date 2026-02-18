@@ -91,6 +91,10 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     priceUsd !== null && currentPriceE6 > 0n ? (Number(pnlTokens) / 1e6) * priceUsd : null;
   const roe = currentPriceE6 > 0n ? computePnlPercent(pnlTokens, displayData.capital) : 0;
 
+  // Sentinel returned by computeLiqPrice for unliquidatable positions (≥100% maintenance margin).
+  // Equals u64::MAX — display as "∞" to avoid showing "$18,446,744,073,709.55".
+  const LIQ_PRICE_INFINITY = 18446744073709551615n;
+
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const liqPriceE6 = computeLiqPrice(
     entryPriceE6,
@@ -244,7 +248,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div className="flex items-center justify-between py-1.5">
               <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Liq. Price</span>
               <span className="text-[11px] text-[var(--warning)]" style={{ fontFamily: "var(--font-mono)" }}>
-                {liqPriceE6 > 0n ? formatUsd(liqPriceE6) : "-"}
+                {liqPriceE6 >= LIQ_PRICE_INFINITY ? "∞" : liqPriceE6 > 0n ? formatUsd(liqPriceE6) : "-"}
               </span>
             </div>
             <div className="flex items-center justify-between py-1.5">
