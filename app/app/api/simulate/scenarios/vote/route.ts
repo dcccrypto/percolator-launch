@@ -56,7 +56,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = getServiceClient() as any;
 
     // Fetch the proposal
     const { data: scenario, error: fetchError } = await db
