@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase } from "@/lib/supabase";
+import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const period = searchParams.get("period") ?? "weekly";
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = getSupabase() as any;
+    const db = getServiceClient() as any;
 
     let query = db
       .from("sim_leaderboard")
