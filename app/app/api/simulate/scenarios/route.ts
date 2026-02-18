@@ -40,7 +40,8 @@ const PROPOSAL_TTL_MS = 5 * 60 * 1_000;    // 5 min to collect votes
 
 export async function GET() {
   try {
-    const db = getServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = getServiceClient() as any;
 
     // Expire stale voting proposals
     await db
@@ -70,8 +71,10 @@ export async function GET() {
       return NextResponse.json({ error: "Database error" }, { status: 500 });
     }
 
-    const active = data?.filter((s) => s.status === "active") ?? [];
-    const voting = data?.filter((s) => s.status === "voting") ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const active = data?.filter((s: any) => s.status === "active") ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const voting = data?.filter((s: any) => s.status === "voting") ?? [];
 
     return NextResponse.json({
       active,
@@ -116,7 +119,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = getServiceClient() as any;
 
     // Check cooldown: has any scenario been active in the last 5 minutes?
     const { data: recentActive } = await db
