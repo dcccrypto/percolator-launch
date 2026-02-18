@@ -209,4 +209,3 @@ main().catch((err) => {
   console.error("[service] Fatal error:", err);
   process.exit(1);
 });
-# trigger rebuild
