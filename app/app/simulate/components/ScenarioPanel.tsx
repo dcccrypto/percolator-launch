@@ -279,7 +279,7 @@ export function ScenarioPanel({ onScenarioChange }: Props) {
     Object.fromEntries(
       Object.keys(SCENARIO_META).map((id) => [
         id,
-        { id, votes: Math.floor(Math.random() * 40 + 5), active: false },
+        { id, votes: 0, active: false },
       ])
     )
   );

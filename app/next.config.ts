@@ -57,14 +57,15 @@ const nextConfig: NextConfig = {
     // still proxy to the Railway API service.
     return {
       beforeFiles: [],
-      afterFiles: [
-        // Data routes → API service (only if no local route.ts exists)
+      afterFiles: [],
+      // fallback: checked AFTER local Next.js dynamic routes (e.g. [slab]/route.ts).
+      // This ensures local API stubs and sim routes serve first;
+      // only unmatched paths proxy to the Railway API service.
+      fallback: [
         { source: "/api/markets/:slab/trades", destination: `${API_URL}/markets/:slab/trades` },
         { source: "/api/markets/:slab/prices", destination: `${API_URL}/markets/:slab/prices` },
         { source: "/api/markets/:slab/stats", destination: `${API_URL}/markets/:slab/stats` },
         { source: "/api/markets/:slab/volume", destination: `${API_URL}/markets/:slab/volume` },
-        // NOTE: Do NOT rewrite /api/markets/:slab/logo — that stays in Next.js (file upload)
-        // NOTE: Do NOT rewrite /api/markets/:slab (single market) — keep in Next.js for now
         { source: "/api/funding/:slab/history", destination: `${API_URL}/funding/:slab/history` },
         { source: "/api/funding/:slab", destination: `${API_URL}/funding/:slab` },
         { source: "/api/insurance/:slab", destination: `${API_URL}/insurance/:slab` },
@@ -74,7 +75,6 @@ const nextConfig: NextConfig = {
         { source: "/api/trades/recent", destination: `${API_URL}/trades/recent` },
         { source: "/api/oracle/:path*", destination: `${API_URL}/oracle/:path*` },
       ],
-      fallback: [],
     };
   },
   webpack: (config, { isServer }) => {

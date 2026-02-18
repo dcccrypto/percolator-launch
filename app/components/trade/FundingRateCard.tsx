@@ -54,7 +54,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
   const [showExplainer, setShowExplainer] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
-  // Fetch funding data from API
+  // Fetch funding data from API, fall back to on-chain data
   useEffect(() => {
     if (mockMode) return;
     
@@ -62,21 +62,20 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
       try {
         setLoading(true);
         const res = await fetch(`/api/funding/${slabAddress}`);
-        if (!res.ok) throw new Error("Failed to fetch funding data");
+        if (!res.ok) throw new Error("API unavailable");
         const data = await res.json();
         setFundingData({
           ...data,
           netLpPosition: BigInt(data.netLpPosition ?? 0),
         });
         setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-        // Fallback to on-chain data when API unavailable
+      } catch {
+        // Silently fall back to on-chain data — no error shown to user
         if (engine && fundingRate !== null) {
           const rate = Number(fundingRate);
-          const hourly = (rate * 9000) / 10000; // bps/slot × slots/hr / 10000 = %/hr
+          const hourly = (rate * 9000) / 10000;
           const apr = hourly * 24 * 365;
-          const netLp = engine.netLpPos ?? 0n;
+          const netLp = engine?.netLpPos ?? 0n;
           setFundingData({
             currentRateBpsPerSlot: rate,
             hourlyRatePercent: hourly,
@@ -86,6 +85,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
             netLpPosition: netLp,
             currentSlot: 0,
           });
+          setError(null); // Clear error — on-chain data is valid
         }
       } finally {
         setLoading(false);
@@ -93,7 +93,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     };
 
     fetchFunding();
-    const interval = setInterval(fetchFunding, 30000); // Refresh every 30s
+    const interval = setInterval(fetchFunding, 30000);
     return () => clearInterval(interval);
   }, [slabAddress, mockMode, engine, fundingRate]);
 
@@ -242,11 +242,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
           </div>
         )}
 
-        {error && !mockMode && (
-          <div className="mt-2 text-[9px] text-[var(--warning)]">
-            {error} (using on-chain data)
-          </div>
-        )}
+        {/* Error display removed — on-chain fallback is seamless */}
       </div>
 
       {/* Explainer Modal */}
