@@ -30,7 +30,9 @@ function truncateWallet(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
-function fmtPnl(pnl: number): string {
+function fmtPnl(rawPnl: number): string {
+  // DB stores PnL in 6-decimal token units (1_000_000 = $1.00 simUSDC)
+  const pnl = rawPnl / 1_000_000;
   const sign = pnl >= 0 ? "+" : "";
   const abs = Math.abs(pnl);
   if (abs >= 1_000_000) return `${sign}$${(pnl / 1_000_000).toFixed(1)}M`;
