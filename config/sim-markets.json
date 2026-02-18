@@ -1,28 +1,28 @@
 {
   "network": "devnet",
-  "deployedAt": "2026-02-18T07:41:57.333Z",
+  "deployedAt": "2026-02-18T13:39:16.493Z",
   "admin": "DHd11N5JVQmGdMBWf6Mnu1daFGn8j3ChCHwwYAcseD5N",
   "programId": "DxoMuuiUy5TymJRwALizxb5X8GwnQB7pUv1x2z3oLjDJ",
   "matcherProgramId": "4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy",
   "simUSDC": {
-    "mint": "FWirEmBKBSJLk3rnGxREZXuMzU812y3vLPAtLrKv83R",
+    "mint": "2ruZ9ESkn7XAx1c94McDv4QKTMcUasADsxsGSJW1LenF",
     "decimals": 6
   },
   "markets": {
     "SOL/USD": {
-      "slab": "9o6KbCvdVpE4q8CVB3HCq2PS28tEQYQQ8yqZMEHcyKEu",
+      "slab": "AtzJQmxUQitYAuGHeCTbupDkEsv5wDH44hv6ZmDJ8ufR",
       "name": "SIM-SOL/USD",
       "initialPriceUsd": 180,
       "oracleMode": "admin"
     },
     "BTC/USD": {
-      "slab": "Cun4fYuNE1CGoZAVqfmywJyC2r5KfAUzJ8QK1JpRfRvV",
+      "slab": "9U5C3cn5CswQZhbajgJzp4NnQLPksE2w1wuVJEx3wTN3",
       "name": "SIM-BTC/USD",
       "initialPriceUsd": 95000,
       "oracleMode": "admin"
     },
     "ETH/USD": {
-      "slab": "4mV28yoATQP9tnDSh88qgMvsDsb3yZfQk5er3fgdEzcX",
+      "slab": "FRGYFH1LshhBNrRRJUadugyBoTG21Ujjvv29uKHmWPj",
       "name": "SIM-ETH/USD",
       "initialPriceUsd": 3200,
       "oracleMode": "admin"
