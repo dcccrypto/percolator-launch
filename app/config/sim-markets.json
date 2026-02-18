@@ -1,20 +1,21 @@
 {
   "network": "devnet",
+  "programId": "DxoMuuiUy5TymJRwALizxb5X8GwnQB7pUv1x2z3oLjDJ",
   "simUSDC": {
-    "mint": "",
+    "mint": "FWirEmBKBSJLk3rnGxREZXuMzU812y3vLPAtLrKv83R",
     "decimals": 6
   },
   "markets": {
     "SOL/USD": {
-      "slab": "",
+      "slab": "9o6KbCvdVpE4q8CVB3HCq2PS28tEQYQQ8yqZMEHcyKEu",
       "name": "SIM-SOL/USD"
     },
     "BTC/USD": {
-      "slab": "",
+      "slab": "Cun4fYuNE1CGoZAVqfmywJyC2r5KfAUzJ8QK1JpRfRvV",
       "name": "SIM-BTC/USD"
     },
     "ETH/USD": {
-      "slab": "",
+      "slab": "4mV28yoATQP9tnDSh88qgMvsDsb3yZfQk5er3fgdEzcX",
       "name": "SIM-ETH/USD"
     }
   }
