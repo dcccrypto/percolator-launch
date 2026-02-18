@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabase } from "@/lib/supabase";
+import { getServiceClient } from "@/lib/supabase";
 
 export const runtime = "edge";
 export const revalidate = 0;
@@ -20,7 +20,7 @@ interface ScenarioRow {
  */
 export async function GET() {
   try {
-    const db = getSupabase();
+    const db = getServiceClient();
 
     const { data, error } = await db
       .from("sim_scenarios" as never)

@@ -27,16 +27,19 @@ export async function GET(
     }
 
     // 1. Check simulation_price_history first (simulator oracle writes here)
+    // Fetch most recent 1000, descending, then reverse for chronological chart display
     const { data: simPrices, error: simError } = await (db as any)
       .from("simulation_price_history")
       .select("price_e6, timestamp")
       .eq("slab_address", slab)
-      .order("timestamp", { ascending: true })
+      .order("timestamp", { ascending: false })
       .limit(1000);
 
     if (!simError && simPrices && simPrices.length > 0) {
+      // Reverse to chronological order (oldest → newest) for chart rendering
+      const chronological = simPrices.reverse();
       return NextResponse.json({
-        prices: simPrices.map((p: any) => ({
+        prices: chronological.map((p: any) => ({
           price_e6: String(p.price_e6),
           timestamp: typeof p.timestamp === "string"
             ? new Date(p.timestamp).getTime()
