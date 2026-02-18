@@ -5,11 +5,11 @@ WORKDIR /app
 # Install tsx globally for running TypeScript
 RUN npm install -g tsx
 
-# Copy just what we need — no pnpm workspace resolution
+# Copy root package.json (has all deps incl. dotenv, @solana/web3.js etc)
 COPY package.json ./
 
-# Install deps directly with npm (avoids pnpm workspace lockfile issues)
-RUN npm install --omit=dev --ignore-scripts 2>/dev/null || npm install --ignore-scripts
+# Install all deps (including devDeps like dotenv, tsx)
+RUN npm install --ignore-scripts
 
 # Copy source
 COPY packages/core/ packages/core/
