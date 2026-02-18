@@ -27,16 +27,18 @@ import {
 import {
   encodeInitUser,
   encodeDepositCollateral,
-  encodeTradeNoCpi,
+  encodeTradeCpi,
+  encodeKeeperCrank,
   buildAccountMetas,
 } from "../packages/core/src/abi/index.js";
 import { buildIx } from "../packages/core/src/runtime/tx.js";
 import {
   ACCOUNTS_INIT_USER,
   ACCOUNTS_DEPOSIT_COLLATERAL,
-  ACCOUNTS_TRADE_NOCPI,
+  ACCOUNTS_TRADE_CPI,
+  ACCOUNTS_KEEPER_CRANK,
 } from "../packages/core/src/abi/accounts.js";
-import { deriveVaultAuthority } from "../packages/core/src/solana/pda.js";
+import { deriveVaultAuthority, deriveLpPda } from "../packages/core/src/solana/pda.js";
 import type { SimOracle, OraclePrice, ActiveScenario } from "./sim-oracle.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -235,7 +237,9 @@ function botDecision(
 // ─── Slab layout constants ────────────────────────────────────────────────────
 const ENGINE_OFF = 392;
 const ACCOUNT_SIZE = 240;
-const ACCT_OWNER_OFF = 176;  // empirically verified from devnet slab data
+const ACCT_MATCHER_PROG_OFF = 112; // matcher_program [u8;32]
+const ACCT_MATCHER_CTX_OFF = 144;  // matcher_context [u8;32]
+const ACCT_OWNER_OFF = 176;        // owner [u8;32] — empirically verified
 
 function slabAccountsOffset(maxAccounts: number): number {
   const bitmapWords = Math.ceil(maxAccounts / 64);
@@ -265,6 +269,20 @@ function findUserIdx(slabData: Buffer, owner: PublicKey): number {
     if (acctOwner.equals(ownerBytes)) return i;
   }
   return -1;
+}
+
+/** Read LP account's matcher program and context from slab data */
+function readLpMatcherInfo(slabData: Buffer, lpIdx: number): { matcherProg: PublicKey; matcherCtx: PublicKey; lpOwner: PublicKey } {
+  const maxAccounts = [64, 256, 1024, 4096].find((n) => {
+    return slabData.length === ENGINE_OFF + slabAccountsOffset(n) + n * ACCOUNT_SIZE;
+  }) ?? 64;
+  const accountsOff = slabAccountsOffset(maxAccounts);
+  const base = ENGINE_OFF + accountsOff + lpIdx * ACCOUNT_SIZE;
+  return {
+    matcherProg: new PublicKey(slabData.subarray(base + ACCT_MATCHER_PROG_OFF, base + ACCT_MATCHER_PROG_OFF + 32)),
+    matcherCtx: new PublicKey(slabData.subarray(base + ACCT_MATCHER_CTX_OFF, base + ACCT_MATCHER_CTX_OFF + 32)),
+    lpOwner: new PublicKey(slabData.subarray(base + ACCT_OWNER_OFF, base + ACCT_OWNER_OFF + 32)),
+  };
 }
 
 const INIT_FEE_RAW = 1_000_000n;  // 1 simUSDC — must match on-chain new_account_fee
@@ -359,27 +377,52 @@ async function executeTrade(
 ): Promise<string> {
   if (bot.userIdx === null) throw new Error("Bot not initialized");
 
-  const tradeData = encodeTradeNoCpi({
-    lpIdx: LP_IDX,
-    userIdx: bot.userIdx,
-    size: size.toString(),
-  });
+  // Read LP matcher info from slab (LP at index 0)
+  const slabInfo = await connection.getAccountInfo(slab);
+  if (!slabInfo) throw new Error("Slab account not found");
+  const { matcherProg, matcherCtx, lpOwner } = readLpMatcherInfo(slabInfo.data, LP_IDX);
 
-  // For TradeNoCpi: user, lp (we use payer as LP signer placeholder), slab, clock, oracle
-  // Note: actual LP keypair would be needed; for sim we use the bot keypair as user
-  // and a separate LP keypair. For simplicity, the admin acts as LP proxy.
-  const tradeKeys = buildAccountMetas(ACCOUNTS_TRADE_NOCPI, [
+  // Derive LP PDA
+  const [lpPda] = deriveLpPda(PROGRAM_ID, slab, LP_IDX);
+
+  const tx = new Transaction();
+  tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }));
+
+  // 1. Permissionless crank (advances global state)
+  const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
     bot.keypair.publicKey,
-    bot.keypair.publicKey, // LP signer (sim: same keypair for demo)
     slab,
     SYSVAR_CLOCK_PUBKEY,
     oracleSlab,
   ]);
+  tx.add(buildIx({
+    programId: PROGRAM_ID,
+    keys: crankKeys,
+    data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
+  }));
 
-  const tx = new Transaction();
-  tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
-  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
-  tx.add(buildIx({ programId: PROGRAM_ID, keys: tradeKeys, data: tradeData }));
+  // 2. TradeCpi — goes through matcher program
+  const tradeKeys = buildAccountMetas(ACCOUNTS_TRADE_CPI, [
+    bot.keypair.publicKey,
+    lpOwner,
+    slab,
+    SYSVAR_CLOCK_PUBKEY,
+    oracleSlab,
+    matcherProg,
+    matcherCtx,
+    lpPda,
+  ]);
+  tx.add(buildIx({
+    programId: PROGRAM_ID,
+    keys: tradeKeys,
+    data: encodeTradeCpi({
+      lpIdx: LP_IDX,
+      userIdx: bot.userIdx,
+      size: size.toString(),
+    }),
+  }));
+
   const sig = await sendAndConfirmTransaction(connection, tx, [bot.keypair], {
     commitment: "confirmed",
     skipPreflight: true,
