@@ -21,6 +21,7 @@ import {
 import {
   getOrCreateAssociatedTokenAccount,
   getAssociatedTokenAddress,
+  mintTo,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import {
@@ -231,6 +232,43 @@ function botDecision(
 
 // ─── On-chain interactions ────────────────────────────────────────────────────
 
+// ─── Slab layout constants ────────────────────────────────────────────────────
+const ENGINE_OFF = 392;
+const ACCOUNT_SIZE = 240;
+const ACCT_OWNER_OFF = 184;
+
+function slabAccountsOffset(maxAccounts: number): number {
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const bitmapBytes = bitmapWords * 8;
+  const postBitmap = 24;
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = 408 + bitmapBytes + postBitmap + nextFreeBytes;
+  return Math.ceil(preAccountsLen / 16) * 16;
+}
+
+/** Find a user's account index in the slab by owner pubkey */
+function findUserIdx(slabData: Buffer, owner: PublicKey): number {
+  const ownerBytes = owner.toBuffer();
+  // Detect maxAccounts from data length
+  const maxAccounts = [64, 256, 1024, 4096].find((n) => {
+    const accountsOff = slabAccountsOffset(n);
+    return slabData.length === ENGINE_OFF + accountsOff + n * ACCOUNT_SIZE;
+  }) ?? 64;
+
+  const accountsOff = slabAccountsOffset(maxAccounts);
+  const accountsBase = ENGINE_OFF + accountsOff;
+
+  for (let i = 0; i < maxAccounts; i++) {
+    const base = accountsBase + i * ACCOUNT_SIZE;
+    const acctOwner = slabData.subarray(base + ACCT_OWNER_OFF, base + ACCT_OWNER_OFF + 32);
+    if (acctOwner.equals(ownerBytes)) return i;
+  }
+  return -1;
+}
+
+const INIT_FEE_RAW = 1_000_000n;  // 1 simUSDC — must match on-chain new_account_fee
+const BOT_INITIAL_MINT = INITIAL_DEPOSIT_RAW + INIT_FEE_RAW; // deposit + fee
+
 async function initBot(
   connection: Connection,
   payer: Keypair, // admin pays for bot init
@@ -248,8 +286,18 @@ async function initBot(
   );
   bot.ata = ataInfo.address;
 
-  // InitUser — bot keypair must sign
-  const initData = encodeInitUser({ feePayment: 0n });
+  // Mint simUSDC to bot's ATA (fee + initial deposit)
+  await mintTo(
+    connection,
+    payer,        // payer for tx
+    mintPk,       // simUSDC mint
+    ataInfo.address, // bot's ATA
+    payer,        // mint authority = admin
+    BOT_INITIAL_MINT,
+  );
+
+  // InitUser — bot keypair must sign, fee_payment must match new_account_fee
+  const initData = encodeInitUser({ feePayment: INIT_FEE_RAW });
   const initKeys = buildAccountMetas(ACCOUNTS_INIT_USER, [
     bot.keypair.publicKey,
     slab,
@@ -267,14 +315,21 @@ async function initBot(
     skipPreflight: true,
   });
 
-  // Derive userIdx from on-chain state (for now: sequential from slot)
-  // We'll track it via the order bots are initialized
-  const userIdx = 1; // placeholder; real impl reads slab state
+  // Read slab to find the bot's userIdx (just assigned by InitUser)
+  const slabInfo = await connection.getAccountInfo(slab);
+  if (!slabInfo) throw new Error("Slab account not found after InitUser");
+  // num_used_accounts is at a known offset in RiskEngine (after params)
+  // For small slabs: magic(4) + version(4) + ... we need to find the bot's index
+  // The bot was the last user added, so userIdx = num_used_accounts - 1
+  // num_used_accounts is a u16 at offset in EngineState
+  // For now, scan accounts to find ours by pubkey match
+  const userIdx = findUserIdx(slabInfo.data, bot.keypair.publicKey);
+  if (userIdx < 0) throw new Error("Could not find bot's userIdx in slab after InitUser");
 
-  // Deposit initial collateral (admin signs on behalf for sim)
+  // Deposit initial collateral — bot must sign (tokens come from bot's ATA)
   const depositData = encodeDepositCollateral({ userIdx, amount: INITIAL_DEPOSIT_RAW.toString() });
   const depositKeys = buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
-    payer.publicKey,
+    bot.keypair.publicKey,
     slab,
     ataInfo.address,
     vault,
@@ -286,7 +341,7 @@ async function initBot(
   depositTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
   depositTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
   depositTx.add(buildIx({ programId: PROGRAM_ID, keys: depositKeys, data: depositData }));
-  await sendAndConfirmTransaction(connection, depositTx, [payer], {
+  await sendAndConfirmTransaction(connection, depositTx, [payer, bot.keypair], {
     commitment: "confirmed",
     skipPreflight: true,
   });
