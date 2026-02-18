@@ -15,6 +15,7 @@ const WalletMultiButton = dynamic(
 
 const navLinks = [
   { href: "/markets", label: "Markets" },
+  { href: "/simulate", label: "Simulator" },
   { href: "/create", label: "Create" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/my-markets", label: "Admin" },
