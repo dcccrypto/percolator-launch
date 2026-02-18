@@ -90,6 +90,12 @@ interface SimMarketsConfig {
 // ─── Scenario Engine ─────────────────────────────────────────────────────────
 
 const SCENARIO_DURATIONS_MS: Record<string, number> = {
+  "flash-crash":     60_000,
+  "short-squeeze":  120_000,
+  "black-swan":     600_000,
+  "high-vol":       300_000,
+  "gentle-trend":  1_800_000,
+  // Legacy underscore format (backwards compat)
   flash_crash:     60_000,
   short_squeeze:  120_000,
   black_swan:     600_000,
@@ -101,23 +107,29 @@ const SCENARIO_DURATIONS_MS: Record<string, number> = {
  * Returns a multiplier in [0, ∞) based on scenario type and elapsed time.
  * t = elapsed fraction (0..1) through the scenario duration.
  */
-function scenarioMultiplier(type: string, t: number): number {
+/** Normalize scenario type to kebab-case (DB canonical format) */
+function normalizeScenarioType(type: string): string {
+  return type.replace(/_/g, "-");
+}
+
+function scenarioMultiplier(rawType: string, t: number): number {
+  const type = normalizeScenarioType(rawType);
   switch (type) {
-    case "flash_crash": {
+    case "flash-crash": {
       // crash 30% then recover 70% of that drop
       if (t < 0.5) return 1 - 0.30 * (t / 0.5);
       const recovery = 0.30 * 0.70;
       return (1 - 0.30) + recovery * ((t - 0.5) / 0.5);
     }
-    case "short_squeeze":
+    case "short-squeeze":
       return 1 + 0.50 * t;
-    case "black_swan":
+    case "black-swan":
       return 1 - 0.60 * Math.min(t, 1);
-    case "high_volatility": {
+    case "high-vol": {
       const rand = (Math.random() * 2 - 1) * 0.20;
       return 1 + rand;
     }
-    case "gentle_trend":
+    case "gentle-trend":
       return 1 + 0.15 * t;
     default:
       return 1;

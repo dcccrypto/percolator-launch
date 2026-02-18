@@ -161,7 +161,8 @@ function trendFollowerDecision(
   const pctChange = (price.adjustedPrice - old.price) / old.price;
 
   // Trend followers go aggressive on squeeze
-  const aggressiveMode = scenario?.type === "short_squeeze" || scenario?.type === "gentle_trend";
+    const t = scenario?.type?.replace(/_/g, "-") ?? "";
+    const aggressiveMode = t === "short-squeeze" || t === "gentle-trend";
   const threshold = aggressiveMode ? 0.005 : 0.01;
 
   const leverage = aggressiveMode ? 5 : rand(3, 5);
@@ -237,11 +238,13 @@ function botDecision(
 // ─── On-chain interactions ────────────────────────────────────────────────────
 
 // ─── Slab layout constants ────────────────────────────────────────────────────
+// Offsets from packages/core/src/solana/slab.ts (authoritative source)
 const ENGINE_OFF = 392;
 const ACCOUNT_SIZE = 240;
-const ACCT_MATCHER_PROG_OFF = 112; // matcher_program [u8;32]
-const ACCT_MATCHER_CTX_OFF = 144;  // matcher_context [u8;32]
-const ACCT_OWNER_OFF = 176;        // owner [u8;32] — empirically verified
+const ACCT_POSITION_SIZE_OFF = 80;   // position_size (I128, 16 bytes)
+const ACCT_MATCHER_PROG_OFF = 120;   // matcher_program [u8;32]
+const ACCT_MATCHER_CTX_OFF = 152;    // matcher_context [u8;32]
+const ACCT_OWNER_OFF = 184;          // owner [u8;32]
 
 function slabAccountsOffset(maxAccounts: number): number {
   const bitmapWords = Math.ceil(maxAccounts / 64);
@@ -271,6 +274,29 @@ function findUserIdx(slabData: Buffer, owner: PublicKey): number {
     if (acctOwner.equals(ownerBytes)) return i;
   }
   return -1;
+}
+
+/** Read I128 (signed, little-endian) from buffer */
+function readI128LE(buf: Buffer, offset: number): bigint {
+  const lo = buf.readBigUInt64LE(offset);
+  const hi = buf.readBigUInt64LE(offset + 8);
+  const unsigned = (hi << 64n) | lo;
+  const SIGN_BIT = 1n << 127n;
+  if (unsigned >= SIGN_BIT) {
+    return unsigned - (1n << 128n);
+  }
+  return unsigned;
+}
+
+/** Read a bot's on-chain position size from slab data */
+function readPositionSize(slabData: Buffer, userIdx: number): bigint {
+  const maxAccounts = [64, 256, 1024, 4096].find((n) => {
+    return slabData.length === ENGINE_OFF + slabAccountsOffset(n) + n * ACCOUNT_SIZE;
+  }) ?? 64;
+  const accountsOff = slabAccountsOffset(maxAccounts);
+  const base = ENGINE_OFF + accountsOff + userIdx * ACCOUNT_SIZE;
+  if (base + ACCOUNT_SIZE > slabData.length) return 0n;
+  return readI128LE(slabData, base + ACCT_POSITION_SIZE_OFF);
 }
 
 /** Read LP account's matcher program and context from slab data */
@@ -569,9 +595,35 @@ export class BotFleet {
     // Vault ATA = associated token account owned by vaultPda
     const vaultAta = await getAssociatedTokenAddress(mintPk, vaultPda, true);
 
-    // Initialize bot on first run
+    // Initialize bot on first run — recover existing account if possible
     if (!bot.initialized) {
       try {
+        // Check if bot already has an account on-chain (e.g., after service restart)
+        const slabInfo = await this.connection.getAccountInfo(slabPk);
+        if (slabInfo) {
+          const existingIdx = findUserIdx(slabInfo.data, bot.keypair.publicKey);
+          if (existingIdx >= 0) {
+            // Recover existing account — skip InitUser
+            const ata = await getAssociatedTokenAddress(mintPk, bot.keypair.publicKey);
+            bot.userIdx = existingIdx;
+            bot.ata = ata;
+            bot.initialized = true;
+
+            // Recover on-chain position state
+            const onChainPos = readPositionSize(slabInfo.data, existingIdx);
+            if (onChainPos !== 0n) {
+              bot.positionSize = onChainPos;
+              bot.positionOpenedAt = Date.now() - 5 * 60_000; // assume held 5 min (triggers close soon)
+              bot.entryPrice = price.adjustedPrice; // approximate
+              console.log(`[bots] ${bot.wallet.botId} RECOVERED existing account (userIdx=${existingIdx}, pos=${onChainPos > 0n ? "LONG" : "SHORT"})`);
+            } else {
+              console.log(`[bots] ${bot.wallet.botId} recovered (userIdx=${existingIdx}, flat)`);
+            }
+            return; // skip trading this tick, start fresh next tick
+          }
+        }
+
+        // No existing account — initialize fresh
         const { userIdx, ata } = await initBot(
           this.connection,
           this.adminKeypair,
@@ -583,7 +635,7 @@ export class BotFleet {
         bot.userIdx = userIdx;
         bot.ata = ata;
         bot.initialized = true;
-        console.log(`[bots] ${bot.wallet.botId} initialized (userIdx=${userIdx})`);
+        console.log(`[bots] ${bot.wallet.botId} initialized fresh (userIdx=${userIdx})`);
       } catch (err) {
         console.error(`[bots] init failed for ${bot.wallet.botId}:`, err);
         return;
