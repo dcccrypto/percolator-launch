@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { UsdToggleProvider } from "@/components/providers/UsdToggleProvider";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -9,8 +10,18 @@ import { TradeForm } from "@/components/trade/TradeForm";
 import { PositionPanel } from "@/components/trade/PositionPanel";
 import { AccountsCard } from "@/components/trade/AccountsCard";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
+import { TradingChart } from "@/components/trade/TradingChart";
+import { TradeHistory } from "@/components/trade/TradeHistory";
+import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
+import { MarketBookCard } from "@/components/trade/MarketBookCard";
+import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
+import { FundingRateCard } from "@/components/trade/FundingRateCard";
+import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
+import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
+import { SystemCapitalCard } from "@/components/trade/SystemCapitalCard";
+import { InsuranceLPPanel } from "@/components/trade/InsuranceLPPanel";
 import { SimulatorHeader } from "./components/SimulatorHeader";
-import { SimRiskDashboard } from "./components/SimRiskDashboard";
+import { SimulatorHero } from "./components/SimulatorHero";
 import { SimLeaderboard } from "./components/SimLeaderboard";
 import { ScenarioPanel } from "./components/ScenarioPanel";
 import { SimExplainer } from "./components/SimExplainer";
@@ -20,7 +31,10 @@ import { GuidedWalkthrough, TourHelpButton } from "./components/GuidedWalkthroug
 
 // Lazy-load SimOnboarding (uses wallet hooks)
 const SimOnboarding = dynamic(
-  () => import("./components/SimOnboarding").then((m) => ({ default: m.SimOnboarding })),
+  () =>
+    import("./components/SimOnboarding").then((m) => ({
+      default: m.SimOnboarding,
+    })),
   { ssr: false }
 );
 
@@ -49,7 +63,7 @@ function Tabs({
   const [active, setActive] = useState(defaultTab);
   return (
     <div>
-      <div className="flex border-b border-[var(--border)]/50">
+      <div className="flex border-b border-[var(--border)]/50 bg-transparent">
         {tabs.map((label, i) => (
           <button
             key={label}
@@ -69,6 +83,37 @@ function Tabs({
   );
 }
 
+/* ── Collapsible ─────────────────────────────────────────── */
+function Collapsible({
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)] transition-colors hover:text-[var(--text-secondary)]"
+      >
+        <span>{title}</span>
+        <span
+          className={`text-[9px] text-[var(--text-dim)] transition-transform duration-200 ${
+            open ? "rotate-180" : ""
+          }`}
+        >
+          ▾
+        </span>
+      </button>
+      <div className={open ? "block" : "hidden"}>{children}</div>
+    </div>
+  );
+}
+
 /* ── Inner page — inside SlabProvider context ────────────── */
 function SimulatorInner({
   marketKey,
@@ -78,14 +123,18 @@ function SimulatorInner({
   slabAddress: string;
 }) {
   const { accounts, loading } = useSlabState();
+  const { connected } = useWallet();
 
-  // Determine if user has traded (has any accounts with capital or position)
   const hasCapital = accounts.some(
     (a) => a.account.capital > 0n || a.account.positionSize !== 0n
   );
   const hasTraded = accounts.some((a) => a.account.positionSize !== 0n);
+  const defaultLeftTab = hasCapital ? 0 : 2;
 
-  // Empty slab (placeholder address) — show a friendly "not deployed" state
+  // Show hero when wallet not connected and no capital
+  const showHero = !connected && !hasCapital;
+
+  // Empty slab (placeholder address)
   const isEmpty = !slabAddress || slabAddress === "";
 
   if (isEmpty) {
@@ -93,14 +142,13 @@ function SimulatorInner({
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4">
         <div className="border border-[var(--border)] bg-[var(--bg-elevated)] p-6 text-center max-w-md">
           <div className="mb-3 text-3xl">🚧</div>
-          <h2 className="mb-2 text-sm font-semibold text-[var(--text)]">Sim Market Not Yet Deployed</h2>
+          <h2 className="mb-2 text-sm font-semibold text-[var(--text)]">
+            Sim Market Not Yet Deployed
+          </h2>
           <p className="text-[11px] text-[var(--text-secondary)]">
-            The simulated {marketKey} market hasn&apos;t been deployed to devnet yet.
-            Check back soon — we&apos;re deploying them now!
+            The simulated {marketKey} market hasn&apos;t been deployed to devnet
+            yet. Check back soon!
           </p>
-          <div className="mt-4 text-[10px] text-[var(--text-dim)]">
-            Address: <span className="font-mono text-[var(--text-secondary)]">(pending)</span>
-          </div>
         </div>
       </div>
     );
@@ -108,6 +156,9 @@ function SimulatorInner({
 
   return (
     <>
+      {/* Hero — only before user engages */}
+      {showHero && <SimulatorHero />}
+
       {/* Onboarding wizard */}
       <SimOnboarding
         hasBalance={hasCapital}
@@ -116,54 +167,86 @@ function SimulatorInner({
       />
 
       {/* Guided walkthrough overlay */}
-      <GuidedWalkthrough autoStart={!hasCapital} />
+      <GuidedWalkthrough autoStart={!hasCapital && connected} />
 
       {/* ════════════════════════════════════════════════════════
-          MOBILE LAYOUT  (< lg) — Single column
+          MOBILE LAYOUT  (< lg) — Single column trading terminal
           ════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col gap-2 px-3 py-3 lg:hidden">
+      <div className="flex flex-col gap-1.5 px-2 pt-2 pb-4 lg:hidden min-w-0 w-full">
+        {/* Chart — the star of the show */}
+        <ErrorBoundary label="TradingChart">
+          <div className="w-full overflow-hidden" data-tour="price-chart">
+            <TradingChart slabAddress={slabAddress} />
+          </div>
+        </ErrorBoundary>
+
         {/* Trade form */}
         <ErrorBoundary label="TradeForm">
-          <TradeForm slabAddress={slabAddress} />
+          <div data-tour="trade-form">
+            <TradeForm slabAddress={slabAddress} />
+          </div>
         </ErrorBoundary>
 
-        {/* Position */}
+        {/* Position — collapsible */}
         <ErrorBoundary label="PositionPanel">
-          <PositionPanel slabAddress={slabAddress} />
+          <Collapsible title="Position" defaultOpen={true}>
+            <PositionPanel slabAddress={slabAddress} />
+          </Collapsible>
         </ErrorBoundary>
 
-        {/* Tabs: Risk | Scenarios | Explainer | Account */}
-        <Tabs tabs={["Risk", "Scenarios", "Insights", "Feed", "Account"]}>
-          <ErrorBoundary label="SimRiskDashboard">
-            <div className="pt-2" data-tour="risk-dashboard">
-              <SimRiskDashboard slabAddress={slabAddress} />
+        {/* Deposit / Withdraw — collapsible */}
+        <ErrorBoundary label="DepositWithdrawCard">
+          <Collapsible
+            title="Deposit / Withdraw"
+            defaultOpen={!hasCapital}
+          >
+            <div data-tour="deposit-card">
+              <DepositWithdrawCard slabAddress={slabAddress} />
+            </div>
+          </Collapsible>
+        </ErrorBoundary>
+
+        {/* Tabs: Stats | Trades | Risk | Scenarios | Book */}
+        <Tabs
+          tabs={["Stats", "Trades", "Risk", "Scenarios", "Book"]}
+        >
+          <ErrorBoundary label="MarketStatsCard">
+            <MarketStatsCard />
+          </ErrorBoundary>
+          <ErrorBoundary label="TradeHistory">
+            <TradeHistory slabAddress={slabAddress} />
+          </ErrorBoundary>
+          <ErrorBoundary label="RiskDashboard">
+            <div className="space-y-2 pt-2" data-tour="risk-dashboard">
+              <EngineHealthCard />
+              <FundingRateCard slabAddress={slabAddress} />
+              <div className="grid grid-cols-2 gap-1.5">
+                <CrankHealthCard />
+                <SystemCapitalCard />
+              </div>
+              <LiquidationAnalytics />
+              <InsuranceLPPanel />
             </div>
           </ErrorBoundary>
-          <ErrorBoundary label="ScenarioPanel">
-            <div className="pt-2" data-tour="scenario-panel">
+          <ErrorBoundary label="Scenarios">
+            <div className="space-y-2 pt-2" data-tour="scenario-panel">
               <ScenarioPanel />
-            </div>
-          </ErrorBoundary>
-          <ErrorBoundary label="SimExplainerAndConcepts">
-            <div className="pt-2 space-y-2">
               <SimExplainer />
               <RiskConceptCards />
-            </div>
-          </ErrorBoundary>
-          <ErrorBoundary label="EventFeed">
-            <div className="pt-2">
               <EventFeed />
             </div>
           </ErrorBoundary>
-          <ErrorBoundary label="AccountsCard">
-            <div className="pt-2" data-tour="deposit-card">
-              <AccountsCard />
-              <div className="mt-2">
-                <DepositWithdrawCard slabAddress={slabAddress} />
-              </div>
-            </div>
+          <ErrorBoundary label="MarketBookCard">
+            <MarketBookCard />
           </ErrorBoundary>
         </Tabs>
+
+        {/* Account details — collapsible */}
+        <ErrorBoundary label="AccountsCard">
+          <Collapsible title="Positions & Liqs" defaultOpen={false}>
+            <AccountsCard />
+          </Collapsible>
+        </ErrorBoundary>
 
         {/* Leaderboard */}
         <ErrorBoundary label="SimLeaderboard">
@@ -173,14 +256,12 @@ function SimulatorInner({
 
       {/* ════════════════════════════════════════════════════════
           DESKTOP LAYOUT  (≥ lg)
-          Left: trade panel | Center: risk dashboard | Right col: scenarios + explainer
-          Bottom: leaderboard
+          3-col: Left trade panel | Center chart+data | Right scenarios
           ════════════════════════════════════════════════════════ */}
       <div className="hidden lg:block">
-        {/* Three-column main area */}
-        <div className="grid grid-cols-[340px_1fr_320px] gap-2 px-4 py-3">
+        <div className="grid grid-cols-[300px_1fr_300px] gap-1.5 px-3 pb-3 pt-1.5">
           {/* ── Left: Trade panel ── */}
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-1.5">
             {/* Trade form — sticky */}
             <div className="sticky top-0 z-20" data-tour="trade-form">
               <ErrorBoundary label="TradeForm">
@@ -188,8 +269,11 @@ function SimulatorInner({
               </ErrorBoundary>
             </div>
 
-            {/* Position + account tabs */}
-            <Tabs tabs={["Position", "Account", "Deposit"]} defaultTab={hasCapital ? 0 : 2}>
+            {/* Position / Account / Deposit tabs */}
+            <Tabs
+              tabs={["Position", "Account", "Deposit"]}
+              defaultTab={defaultLeftTab}
+            >
               <ErrorBoundary label="PositionPanel">
                 <PositionPanel slabAddress={slabAddress} />
               </ErrorBoundary>
@@ -197,20 +281,55 @@ function SimulatorInner({
                 <AccountsCard />
               </ErrorBoundary>
               <ErrorBoundary label="DepositWithdrawCard">
-                <DepositWithdrawCard slabAddress={slabAddress} />
+                <div data-tour="deposit-card">
+                  <DepositWithdrawCard slabAddress={slabAddress} />
+                </div>
               </ErrorBoundary>
             </Tabs>
           </div>
 
-          {/* ── Center: Risk dashboard ── */}
-          <div className="min-w-0" data-tour="risk-dashboard">
-            <ErrorBoundary label="SimRiskDashboard">
-              <SimRiskDashboard slabAddress={slabAddress} />
+          {/* ── Center: Chart + Market data ── */}
+          <div className="min-w-0 space-y-1.5">
+            {/* The chart — main visual */}
+            <ErrorBoundary label="TradingChart">
+              <div data-tour="price-chart">
+                <TradingChart slabAddress={slabAddress} />
+              </div>
             </ErrorBoundary>
+
+            {/* Market data tabs */}
+            <Tabs tabs={["Stats", "Trades", "Risk", "Book"]}>
+              <ErrorBoundary label="MarketStatsCard">
+                <MarketStatsCard />
+              </ErrorBoundary>
+              <ErrorBoundary label="TradeHistory">
+                <TradeHistory slabAddress={slabAddress} />
+              </ErrorBoundary>
+              <ErrorBoundary label="RiskDashboard">
+                <div
+                  className="space-y-1.5 pt-1"
+                  data-tour="risk-dashboard"
+                >
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <EngineHealthCard />
+                    <FundingRateCard slabAddress={slabAddress} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <CrankHealthCard />
+                    <SystemCapitalCard />
+                    <InsuranceLPPanel />
+                  </div>
+                  <LiquidationAnalytics />
+                </div>
+              </ErrorBoundary>
+              <ErrorBoundary label="MarketBookCard">
+                <MarketBookCard />
+              </ErrorBoundary>
+            </Tabs>
           </div>
 
-          {/* ── Right: Scenarios + Explainer + Event Feed + Concepts ── */}
-          <div className="space-y-2">
+          {/* ── Right: Scenarios + Insights ── */}
+          <div className="min-w-0 space-y-1.5">
             <ErrorBoundary label="ScenarioPanel">
               <div data-tour="scenario-panel">
                 <ScenarioPanel />
@@ -228,8 +347,8 @@ function SimulatorInner({
           </div>
         </div>
 
-        {/* Bottom: Leaderboard */}
-        <div className="px-4 pb-6">
+        {/* Bottom: Leaderboard — full width */}
+        <div className="px-3 pb-6">
           <ErrorBoundary label="SimLeaderboard">
             <SimLeaderboard marketKey={marketKey} />
           </ErrorBoundary>
@@ -265,7 +384,10 @@ function SimulatorWithMarket() {
       {slabAddress ? (
         <SlabProvider slabAddress={slabAddress}>
           <UsdToggleProvider>
-            <SimulatorInner marketKey={selectedMarket} slabAddress={slabAddress} />
+            <SimulatorInner
+              marketKey={selectedMarket}
+              slabAddress={slabAddress}
+            />
           </UsdToggleProvider>
         </SlabProvider>
       ) : (
