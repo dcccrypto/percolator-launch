@@ -59,7 +59,8 @@ playwright.config.ts
 
 # Misc
 .keys
-services
+# services — needed for sim-oracle-bots Dockerfile.sim
+# services
 supabase
 scripts
 render-*.cjs
