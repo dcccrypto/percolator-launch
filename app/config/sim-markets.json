@@ -1,0 +1,21 @@
+{
+  "network": "devnet",
+  "simUSDC": {
+    "mint": "",
+    "decimals": 6
+  },
+  "markets": {
+    "SOL/USD": {
+      "slab": "",
+      "name": "SIM-SOL/USD"
+    },
+    "BTC/USD": {
+      "slab": "",
+      "name": "SIM-BTC/USD"
+    },
+    "ETH/USD": {
+      "slab": "",
+      "name": "SIM-ETH/USD"
+    }
+  }
+}
