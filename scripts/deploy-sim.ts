@@ -65,18 +65,19 @@ dotenv.config();
 // CONSTANTS
 // ============================================================================
 
-const PROGRAM_ID = new PublicKey("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
+// Sim program: test-build with MAX_ACCOUNTS=64 (small slabs, ~0.44 SOL rent each)
+const PROGRAM_ID = new PublicKey("DxoMuuiUy5TymJRwALizxb5X8GwnQB7pUv1x2z3oLjDJ");
 const MATCHER_PROGRAM_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
-const SLAB_SIZE = 992_560;
+const SLAB_SIZE = 16_320; // MAX_ACCOUNTS=64 test build (0x3fc0)
 const PRIORITY_FEE = 50_000;
 
 // simUSDC: 6 decimals
 const SIM_USDC_DECIMALS = 6;
-// Initial LP + insurance per market (1,000,000 simUSDC each = 1_000_000_000_000 raw)
-const LP_COLLATERAL = BigInt(1_000_000_000_000); // 1,000,000 simUSDC (6 dec)
-const INSURANCE_AMOUNT = BigInt(1_000_000_000_000); // 1,000,000 simUSDC (6 dec)
-// Mint 5M simUSDC to admin to fund all 3 markets
-const ADMIN_MINT_AMOUNT = BigInt(5_000_000_000_000_000); // 5,000,000 simUSDC (6 dec)
+// Initial LP + insurance per market (100,000 simUSDC each)
+const LP_COLLATERAL = BigInt(100_000_000_000); // 100,000 simUSDC (6 dec)
+const INSURANCE_AMOUNT = BigInt(100_000_000_000); // 100,000 simUSDC (6 dec)
+// Mint 1M simUSDC to admin to fund all 3 markets
+const ADMIN_MINT_AMOUNT = BigInt(1_000_000_000_000); // 1,000,000 simUSDC (6 dec)
 
 const MARKETS = [
   {
@@ -236,7 +237,7 @@ async function createSimMarket(
     maintenanceMarginBps: (market.initialMarginBps / 2n).toString(),
     initialMarginBps: market.initialMarginBps.toString(),
     tradingFeeBps: market.tradingFeeBps.toString(),
-    maxAccounts: "4096",
+    maxAccounts: "64",
     newAccountFee: "1000000", // 1 simUSDC
     riskReductionThreshold: "0",
     maintenanceFeePerSlot: "0",
@@ -276,7 +277,7 @@ async function createSimMarket(
   const initLpData = encodeInitLP({
     matcherProgram: SystemProgram.programId,
     matcherContext: SystemProgram.programId,
-    feePayment: "0",
+    feePayment: "2000000", // 2 simUSDC (required LP init fee)
   });
   const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
     payer.publicKey,
@@ -432,9 +433,9 @@ async function main() {
   const balance = await connection.getBalance(payer.publicKey);
   console.log(`Balance: ${(balance / 1e9).toFixed(4)} SOL`);
 
-  if (balance < 5e9) {
+  if (balance < 2e9) {
     console.warn(
-      "\n⚠  Warning: Low SOL balance. You may need at least 5 SOL for rent + fees.",
+      "\n⚠  Warning: Low SOL balance. You may need at least 2 SOL for rent + fees.",
     );
   }
 
