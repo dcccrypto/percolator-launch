@@ -46,9 +46,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 // Read program ID from deploy config (sim program, not production)
-const simConfig = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "../config/sim-markets.json"), "utf-8"),
-);
+function findSimConfig(): string {
+  const candidates = [
+    path.resolve(__dirname, "../config/sim-markets.json"),
+    path.resolve(__dirname, "../app/config/sim-markets.json"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error(`sim-markets.json not found in: ${candidates.join(", ")}`);
+}
+const SIM_CONFIG_PATH = findSimConfig();
+const simConfig = JSON.parse(fs.readFileSync(SIM_CONFIG_PATH, "utf-8"));
 const PROGRAM_ID = new PublicKey(simConfig.programId);
 const PRIORITY_FEE = 30_000;
 const INITIAL_DEPOSIT_RAW = 1_000_000_000n; // 1,000 simUSDC (6 decimals)
@@ -342,8 +351,7 @@ export class BotFleet {
     this.adminKeypair = opts.adminKeypair;
     this.oracle = opts.oracle;
 
-    const configPath = path.resolve(__dirname, "../app/config/sim-markets.json");
-    this.markets = JSON.parse(fs.readFileSync(configPath, "utf-8")) as SimMarketsConfig;
+    this.markets = JSON.parse(fs.readFileSync(SIM_CONFIG_PATH, "utf-8")) as SimMarketsConfig;
 
     this.loadBotWallets();
   }
