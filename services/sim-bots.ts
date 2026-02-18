@@ -164,19 +164,19 @@ function trendFollowerDecision(
   // Trend followers go aggressive on squeeze
   const t = scenario?.type?.replace(/_/g, "-") ?? "";
   const aggressiveMode = t === "short-squeeze" || t === "gentle-trend";
-  const threshold = aggressiveMode ? 0.002 : 0.005; // lower threshold = more trades
+  const threshold = aggressiveMode ? 0.001 : 0.002; // very low = always trading
 
   const leverage = aggressiveMode ? 8 : rand(4, 8);
   const usdSize = rand(500, 2000);
 
   if (pctChange >= threshold) {
-    // Price up → go long (positive size)
     return sizeToBigInt(usdSize, price.priceE6, leverage);
   } else if (pctChange <= -threshold) {
-    // Price down → go short (negative size)
     return -sizeToBigInt(usdSize, price.priceE6, leverage);
   }
-  return null;
+  // Fallback: follow micro-trend direction even below threshold
+  const size = sizeToBigInt(usdSize, price.priceE6, leverage);
+  return pctChange >= 0 ? size : -size;
 }
 
 function meanReverterDecision(
@@ -197,14 +197,16 @@ function meanReverterDecision(
   const leverage = rand(3, 6);
   const usdSize = rand(500, 1500);
 
-  if (pctDev >= 0.005) {
-    // Price too high → short (fade the move)
+  if (pctDev >= 0.001) {
+    // Price above average → short (fade the move)
     return -sizeToBigInt(usdSize, price.priceE6, leverage);
-  } else if (pctDev <= -0.005) {
-    // Price too low → long
+  } else if (pctDev <= -0.001) {
+    // Price below average → long
     return sizeToBigInt(usdSize, price.priceE6, leverage);
   }
-  return null;
+  // Fallback: trade anyway with slight contrarian bias
+  const size = sizeToBigInt(usdSize, price.priceE6, leverage);
+  return pctDev >= 0 ? -size : size;
 }
 
 function marketMakerDecision(
