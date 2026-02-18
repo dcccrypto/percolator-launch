@@ -127,14 +127,14 @@ function randInt(min: number, max: number): number {
   return Math.floor(rand(min, max + 1));
 }
 
-// 30–120 second jitter for next trade
+// 5–15 second jitter for next trade (aggressive for demo activity)
 function nextTradeDelay(): number {
-  return randInt(30, 120) * 1_000;
+  return randInt(5, 15) * 1_000;
 }
 
-// 5–30 minute position hold time
+// 30s–3 minute position hold time (fast cycling for visible leaderboard)
 function positionHoldMs(): number {
-  return randInt(5, 30) * 60_000;
+  return randInt(30, 180) * 1_000;
 }
 
 function sizeToBigInt(usdSize: number, priceE6: bigint, leverage: number): bigint {
@@ -155,18 +155,18 @@ function trendFollowerDecision(
   const history = state.priceHistory;
   if (history.length < 2) return null;
 
-  // 5-min price change
-  const fiveMinAgo = Date.now() - 5 * 60_000;
-  const old = history.find((h) => h.ts <= fiveMinAgo) ?? history[0];
+  // 1-min price change (fast response for active trading)
+  const oneMinAgo = Date.now() - 60_000;
+  const old = history.find((h) => h.ts <= oneMinAgo) ?? history[0];
   const pctChange = (price.adjustedPrice - old.price) / old.price;
 
   // Trend followers go aggressive on squeeze
-    const t = scenario?.type?.replace(/_/g, "-") ?? "";
-    const aggressiveMode = t === "short-squeeze" || t === "gentle-trend";
-  const threshold = aggressiveMode ? 0.005 : 0.01;
+  const t = scenario?.type?.replace(/_/g, "-") ?? "";
+  const aggressiveMode = t === "short-squeeze" || t === "gentle-trend";
+  const threshold = aggressiveMode ? 0.002 : 0.005; // lower threshold = more trades
 
-  const leverage = aggressiveMode ? 5 : rand(3, 5);
-  const usdSize = rand(100, 500);
+  const leverage = aggressiveMode ? 8 : rand(4, 8);
+  const usdSize = rand(500, 2000);
 
   if (pctChange >= threshold) {
     // Price up → go long (positive size)
@@ -186,20 +186,20 @@ function meanReverterDecision(
   const history = state.priceHistory;
   if (history.length < 5) return null;
 
-  // 5-min average
-  const fiveMinAgo = Date.now() - 5 * 60_000;
-  const recent = history.filter((h) => h.ts >= fiveMinAgo);
+  // 1-min average (fast response)
+  const oneMinAgo = Date.now() - 60_000;
+  const recent = history.filter((h) => h.ts >= oneMinAgo);
   if (recent.length < 2) return null;
   const avg = recent.reduce((s, h) => s + h.price, 0) / recent.length;
   const pctDev = (price.adjustedPrice - avg) / avg;
 
-  const leverage = rand(2, 3);
-  const usdSize = rand(200, 600);
+  const leverage = rand(3, 6);
+  const usdSize = rand(500, 1500);
 
-  if (pctDev >= 0.02) {
+  if (pctDev >= 0.005) {
     // Price too high → short (fade the move)
     return -sizeToBigInt(usdSize, price.priceE6, leverage);
-  } else if (pctDev <= -0.02) {
+  } else if (pctDev <= -0.005) {
     // Price too low → long
     return sizeToBigInt(usdSize, price.priceE6, leverage);
   }
@@ -211,9 +211,9 @@ function marketMakerDecision(
   price: OraclePrice,
   _scenario: ActiveScenario | null,
 ): bigint | null {
-  // Market makers alternate sides with small sizes, 2x leverage
-  const usdSize = rand(50, 150);
-  const leverage = 2;
+  // Market makers alternate sides with decent sizes
+  const usdSize = rand(300, 1000);
+  const leverage = rand(2, 4);
   // Alternate long/short each trade
   const isLong = Math.random() > 0.5;
   const size = sizeToBigInt(usdSize, price.priceE6, leverage);
