@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
@@ -11,144 +11,93 @@ import { PositionPanel } from "@/components/trade/PositionPanel";
 import { AccountsCard } from "@/components/trade/AccountsCard";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { TradingChart } from "@/components/trade/TradingChart";
-import { TradeHistory } from "@/components/trade/TradeHistory";
-import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { MarketBookCard } from "@/components/trade/MarketBookCard";
 import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
 import { FundingRateCard } from "@/components/trade/FundingRateCard";
-import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
-import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
-import { SystemCapitalCard } from "@/components/trade/SystemCapitalCard";
-import { InsuranceLPPanel } from "@/components/trade/InsuranceLPPanel";
-import { SimulatorHeader } from "./components/SimulatorHeader";
-import { SimulatorHero } from "./components/SimulatorHero";
 import { SimLeaderboard } from "./components/SimLeaderboard";
 import { ScenarioPanel } from "./components/ScenarioPanel";
-import { SimExplainer } from "./components/SimExplainer";
 import { EventFeed } from "./components/EventFeed";
-import { RiskConceptCards } from "./components/RiskConceptCards";
-import { GuidedWalkthrough, TourHelpButton } from "./components/GuidedWalkthrough";
 
-// Lazy-load SimOnboarding (uses wallet hooks)
 const SimOnboarding = dynamic(
-  () =>
-    import("./components/SimOnboarding").then((m) => ({
-      default: m.SimOnboarding,
-    })),
+  () => import("./components/SimOnboarding").then((m) => ({ default: m.SimOnboarding })),
   { ssr: false }
 );
 
 import simMarkets from "@/config/sim-markets.json";
 
-/* ── Type helpers ────────────────────────────────────────── */
-type MarketKey = keyof typeof simMarkets.markets;
-
-interface MarketConfig {
-  slab: string;
-  name: string;
-}
-
+interface MarketConfig { slab: string; name: string }
 const MARKETS = simMarkets.markets as Record<string, MarketConfig>;
+const MARKET_KEYS = Object.keys(MARKETS);
 
-/* ── Tabs ────────────────────────────────────────────────── */
-function Tabs({
-  tabs,
-  children,
-  defaultTab = 0,
-}: {
-  tabs: string[];
-  children: React.ReactNode[];
-  defaultTab?: number;
-}) {
-  const [active, setActive] = useState(defaultTab);
+/* ── Tab component ─────────────────────────────────────── */
+function TabBar({ tabs, active, onChange }: { tabs: string[]; active: number; onChange: (i: number) => void }) {
   return (
-    <div>
-      <div className="flex border-b border-[var(--border)]/50 bg-transparent">
-        {tabs.map((label, i) => (
-          <button
-            key={label}
-            onClick={() => setActive(i)}
-            className={`px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.15em] transition-colors border-b-2 ${
-              active === i
-                ? "border-[var(--accent)] text-[var(--accent)]"
-                : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border)]"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div>{children[active]}</div>
-    </div>
-  );
-}
-
-/* ── Collapsible ─────────────────────────────────────────── */
-function Collapsible({
-  title,
-  defaultOpen = true,
-  children,
-}: {
-  title: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)] transition-colors hover:text-[var(--text-secondary)]"
-      >
-        <span>{title}</span>
-        <span
-          className={`text-[9px] text-[var(--text-dim)] transition-transform duration-200 ${
-            open ? "rotate-180" : ""
+    <div className="flex border-b border-[var(--border)]/40">
+      {tabs.map((t, i) => (
+        <button
+          key={t}
+          onClick={() => onChange(i)}
+          className={`px-3 py-2 text-[10px] font-semibold uppercase tracking-widest transition-colors border-b-2 ${
+            active === i
+              ? "border-[var(--accent)] text-[var(--accent)]"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
           }`}
         >
-          ▾
-        </span>
-      </button>
-      <div className={open ? "block" : "hidden"}>{children}</div>
+          {t}
+        </button>
+      ))}
     </div>
   );
 }
 
-/* ── Inner page — inside SlabProvider context ────────────── */
-function SimulatorInner({
-  marketKey,
-  slabAddress,
+/* ── Market selector pills ─────────────────────────────── */
+function MarketPills({
+  selected,
+  onChange,
 }: {
-  marketKey: string;
-  slabAddress: string;
+  selected: string;
+  onChange: (k: string) => void;
 }) {
-  const { accounts, loading } = useSlabState();
-  const { connected } = useWallet();
-
-  const hasCapital = accounts.some(
-    (a) => a.account.capital > 0n || a.account.positionSize !== 0n
+  return (
+    <div className="flex gap-1">
+      {MARKET_KEYS.map((k) => {
+        const m = MARKETS[k];
+        const active = k === selected;
+        return (
+          <button
+            key={k}
+            onClick={() => onChange(k)}
+            className={`px-3 py-1.5 text-[11px] font-semibold tracking-wide transition-all ${
+              active
+                ? "bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/30"
+                : "text-[var(--text-muted)] border border-transparent hover:text-[var(--text-secondary)] hover:border-[var(--border)]/40"
+            }`}
+          >
+            {k}
+          </button>
+        );
+      })}
+    </div>
   );
+}
+
+/* ── Inner page (inside SlabProvider) ──────────────────── */
+function SimInner({ slabAddress, marketKey }: { slabAddress: string; marketKey: string }) {
+  const { accounts } = useSlabState();
+  const { connected } = useWallet();
+  const [leftTab, setLeftTab] = useState(0);
+  const [bottomTab, setBottomTab] = useState(0);
+
+  const hasCapital = accounts.some((a) => a.account.capital > 0n || a.account.positionSize !== 0n);
   const hasTraded = accounts.some((a) => a.account.positionSize !== 0n);
-  const defaultLeftTab = hasCapital ? 0 : 2;
 
-  // Show hero when wallet not connected and no capital
-  const showHero = !connected && !hasCapital;
-
-  // Empty slab (placeholder address)
-  const isEmpty = !slabAddress || slabAddress === "";
-
-  if (isEmpty) {
+  if (!slabAddress) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4">
-        <div className="border border-[var(--border)] bg-[var(--bg-elevated)] p-6 text-center max-w-md">
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="border border-[var(--border)] bg-[var(--bg-elevated)] p-8 text-center max-w-sm">
           <div className="mb-3 text-3xl">🚧</div>
-          <h2 className="mb-2 text-sm font-semibold text-[var(--text)]">
-            Sim Market Not Yet Deployed
-          </h2>
-          <p className="text-[11px] text-[var(--text-secondary)]">
-            The simulated {marketKey} market hasn&apos;t been deployed to devnet
-            yet. Check back soon!
-          </p>
+          <p className="text-sm font-semibold text-[var(--text)]">Market Not Deployed</p>
+          <p className="mt-1 text-xs text-[var(--text-dim)]">This sim market isn&apos;t on devnet yet.</p>
         </div>
       </div>
     );
@@ -156,200 +105,130 @@ function SimulatorInner({
 
   return (
     <>
-      {/* Hero — only before user engages */}
-      {showHero && <SimulatorHero />}
+      {/* Onboarding (only shows when needed) */}
+      <SimOnboarding hasBalance={hasCapital} hasTraded={hasTraded} onDismiss={() => {}} />
 
-      {/* Onboarding wizard */}
-      <SimOnboarding
-        hasBalance={hasCapital}
-        hasTraded={hasTraded}
-        onDismiss={() => {}}
-      />
-
-      {/* Guided walkthrough overlay */}
-      <GuidedWalkthrough autoStart={!hasCapital && connected} />
-
-      {/* ════════════════════════════════════════════════════════
-          MOBILE LAYOUT  (< lg) — Single column trading terminal
-          ════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col gap-1.5 px-2 pt-2 pb-4 lg:hidden min-w-0 w-full">
-        {/* Chart — the star of the show */}
-        <ErrorBoundary label="TradingChart">
-          <div className="w-full overflow-hidden" data-tour="price-chart">
-            <TradingChart slabAddress={slabAddress} />
-          </div>
+      {/* ═══════════ MOBILE ═══════════ */}
+      <div className="flex flex-col gap-2 p-2 lg:hidden">
+        <ErrorBoundary label="Chart">
+          <TradingChart slabAddress={slabAddress} />
         </ErrorBoundary>
-
-        {/* Trade form */}
-        <ErrorBoundary label="TradeForm">
-          <div data-tour="trade-form">
-            <TradeForm slabAddress={slabAddress} />
-          </div>
+        <ErrorBoundary label="Trade">
+          <TradeForm slabAddress={slabAddress} />
         </ErrorBoundary>
-
-        {/* Position — collapsible */}
-        <ErrorBoundary label="PositionPanel">
-          <Collapsible title="Position" defaultOpen={true}>
+        {hasCapital && (
+          <ErrorBoundary label="Position">
             <PositionPanel slabAddress={slabAddress} />
-          </Collapsible>
+          </ErrorBoundary>
+        )}
+        <ErrorBoundary label="Deposit">
+          <DepositWithdrawCard slabAddress={slabAddress} />
         </ErrorBoundary>
-
-        {/* Deposit / Withdraw — collapsible */}
-        <ErrorBoundary label="DepositWithdrawCard">
-          <Collapsible
-            title="Deposit / Withdraw"
-            defaultOpen={!hasCapital}
-          >
-            <div data-tour="deposit-card">
-              <DepositWithdrawCard slabAddress={slabAddress} />
+        <TabBar tabs={["Engine", "Scenarios", "Book"]} active={bottomTab} onChange={setBottomTab} />
+        <div className="min-h-[200px]">
+          {bottomTab === 0 && (
+            <div className="space-y-2">
+              <ErrorBoundary label="Health"><EngineHealthCard /></ErrorBoundary>
+              <ErrorBoundary label="Funding"><FundingRateCard slabAddress={slabAddress} /></ErrorBoundary>
             </div>
-          </Collapsible>
-        </ErrorBoundary>
-
-        {/* Tabs: Stats | Trades | Risk | Scenarios | Book */}
-        <Tabs
-          tabs={["Stats", "Trades", "Risk", "Scenarios", "Book"]}
-        >
-          <ErrorBoundary label="MarketStatsCard">
-            <MarketStatsCard />
-          </ErrorBoundary>
-          <ErrorBoundary label="TradeHistory">
-            <TradeHistory slabAddress={slabAddress} />
-          </ErrorBoundary>
-          <ErrorBoundary label="RiskDashboard">
-            <div className="space-y-2 pt-2" data-tour="risk-dashboard">
-              <EngineHealthCard />
-              <FundingRateCard slabAddress={slabAddress} />
-              <div className="grid grid-cols-2 gap-1.5">
-                <CrankHealthCard />
-                <SystemCapitalCard />
-              </div>
-              <LiquidationAnalytics />
-              <InsuranceLPPanel />
+          )}
+          {bottomTab === 1 && (
+            <div className="space-y-2">
+              <ErrorBoundary label="Scenarios"><ScenarioPanel /></ErrorBoundary>
+              <ErrorBoundary label="Events"><EventFeed /></ErrorBoundary>
             </div>
-          </ErrorBoundary>
-          <ErrorBoundary label="Scenarios">
-            <div className="space-y-2 pt-2" data-tour="scenario-panel">
-              <ScenarioPanel />
-              <SimExplainer />
-              <RiskConceptCards />
-              <EventFeed />
-            </div>
-          </ErrorBoundary>
-          <ErrorBoundary label="MarketBookCard">
-            <MarketBookCard />
-          </ErrorBoundary>
-        </Tabs>
-
-        {/* Account details — collapsible */}
-        <ErrorBoundary label="AccountsCard">
-          <Collapsible title="Positions & Liqs" defaultOpen={false}>
-            <AccountsCard />
-          </Collapsible>
-        </ErrorBoundary>
-
-        {/* Leaderboard */}
-        <ErrorBoundary label="SimLeaderboard">
+          )}
+          {bottomTab === 2 && (
+            <ErrorBoundary label="Book"><MarketBookCard /></ErrorBoundary>
+          )}
+        </div>
+        <ErrorBoundary label="Leaderboard">
           <SimLeaderboard marketKey={marketKey} />
         </ErrorBoundary>
       </div>
 
-      {/* ════════════════════════════════════════════════════════
-          DESKTOP LAYOUT  (≥ lg)
-          3-col: Left trade panel | Center chart+data | Right scenarios
-          ════════════════════════════════════════════════════════ */}
+      {/* ═══════════ DESKTOP (3-col) ═══════════ */}
       <div className="hidden lg:block">
-        <div className="grid grid-cols-[300px_1fr_300px] gap-1.5 px-3 pb-3 pt-1.5">
-          {/* ── Left: Trade panel ── */}
-          <div className="min-w-0 space-y-1.5">
-            {/* Trade form — sticky */}
-            <div className="sticky top-0 z-20" data-tour="trade-form">
-              <ErrorBoundary label="TradeForm">
+        <div className="grid grid-cols-[280px_1fr_280px] gap-px bg-[var(--border)]/20 min-h-[calc(100vh-120px)]">
+
+          {/* ── LEFT COL: Trade + Position ── */}
+          <div className="bg-[var(--bg)] flex flex-col">
+            <div className="sticky top-0 z-10 flex flex-col gap-0">
+              <ErrorBoundary label="Trade">
                 <TradeForm slabAddress={slabAddress} />
               </ErrorBoundary>
             </div>
 
-            {/* Position / Account / Deposit tabs */}
-            <Tabs
+            <TabBar
               tabs={["Position", "Account", "Deposit"]}
-              defaultTab={defaultLeftTab}
-            >
-              <ErrorBoundary label="PositionPanel">
-                <PositionPanel slabAddress={slabAddress} />
-              </ErrorBoundary>
-              <ErrorBoundary label="AccountsCard">
-                <AccountsCard />
-              </ErrorBoundary>
-              <ErrorBoundary label="DepositWithdrawCard">
-                <div data-tour="deposit-card">
+              active={leftTab}
+              onChange={setLeftTab}
+            />
+            <div className="flex-1 overflow-auto">
+              {leftTab === 0 && (
+                <ErrorBoundary label="Position">
+                  <PositionPanel slabAddress={slabAddress} />
+                </ErrorBoundary>
+              )}
+              {leftTab === 1 && (
+                <ErrorBoundary label="Accounts">
+                  <AccountsCard />
+                </ErrorBoundary>
+              )}
+              {leftTab === 2 && (
+                <ErrorBoundary label="Deposit">
                   <DepositWithdrawCard slabAddress={slabAddress} />
-                </div>
-              </ErrorBoundary>
-            </Tabs>
+                </ErrorBoundary>
+              )}
+            </div>
           </div>
 
-          {/* ── Center: Chart + Market data ── */}
-          <div className="min-w-0 space-y-1.5">
-            {/* The chart — main visual */}
-            <ErrorBoundary label="TradingChart">
-              <div data-tour="price-chart">
+          {/* ── CENTER COL: Chart + Data ── */}
+          <div className="bg-[var(--bg)] flex flex-col">
+            <ErrorBoundary label="Chart">
+              <div className="border-b border-[var(--border)]/30">
                 <TradingChart slabAddress={slabAddress} />
               </div>
             </ErrorBoundary>
 
-            {/* Market data tabs */}
-            <Tabs tabs={["Stats", "Trades", "Risk", "Book"]}>
-              <ErrorBoundary label="MarketStatsCard">
-                <MarketStatsCard />
-              </ErrorBoundary>
-              <ErrorBoundary label="TradeHistory">
-                <TradeHistory slabAddress={slabAddress} />
-              </ErrorBoundary>
-              <ErrorBoundary label="RiskDashboard">
-                <div
-                  className="space-y-1.5 pt-1"
-                  data-tour="risk-dashboard"
-                >
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <EngineHealthCard />
-                    <FundingRateCard slabAddress={slabAddress} />
-                  </div>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <CrankHealthCard />
-                    <SystemCapitalCard />
-                    <InsuranceLPPanel />
-                  </div>
-                  <LiquidationAnalytics />
-                </div>
-              </ErrorBoundary>
-              <ErrorBoundary label="MarketBookCard">
-                <MarketBookCard />
-              </ErrorBoundary>
-            </Tabs>
+            <TabBar
+              tabs={["Engine", "Funding", "Book"]}
+              active={bottomTab}
+              onChange={setBottomTab}
+            />
+            <div className="flex-1 overflow-auto p-2">
+              {bottomTab === 0 && (
+                <ErrorBoundary label="Health">
+                  <EngineHealthCard />
+                </ErrorBoundary>
+              )}
+              {bottomTab === 1 && (
+                <ErrorBoundary label="Funding">
+                  <FundingRateCard slabAddress={slabAddress} />
+                </ErrorBoundary>
+              )}
+              {bottomTab === 2 && (
+                <ErrorBoundary label="Book">
+                  <MarketBookCard />
+                </ErrorBoundary>
+              )}
+            </div>
           </div>
 
-          {/* ── Right: Scenarios + Insights ── */}
-          <div className="min-w-0 space-y-1.5">
-            <ErrorBoundary label="ScenarioPanel">
-              <div data-tour="scenario-panel">
-                <ScenarioPanel />
-              </div>
+          {/* ── RIGHT COL: Scenarios + Events ── */}
+          <div className="bg-[var(--bg)] flex flex-col overflow-auto">
+            <ErrorBoundary label="Scenarios">
+              <ScenarioPanel />
             </ErrorBoundary>
-            <ErrorBoundary label="SimExplainer">
-              <SimExplainer />
-            </ErrorBoundary>
-            <ErrorBoundary label="RiskConceptCards">
-              <RiskConceptCards />
-            </ErrorBoundary>
-            <ErrorBoundary label="EventFeed">
+            <ErrorBoundary label="Events">
               <EventFeed />
             </ErrorBoundary>
           </div>
         </div>
 
-        {/* Bottom: Leaderboard — full width */}
-        <div className="px-3 pb-6">
-          <ErrorBoundary label="SimLeaderboard">
+        {/* ── BOTTOM: Leaderboard ── */}
+        <div className="border-t border-[var(--border)]/30 px-4 py-4">
+          <ErrorBoundary label="Leaderboard">
             <SimLeaderboard marketKey={marketKey} />
           </ErrorBoundary>
         </div>
@@ -358,46 +237,55 @@ function SimulatorInner({
   );
 }
 
-/* ── Market selector state ───────────────────────────────── */
-function SimulatorWithMarket() {
-  const [selectedMarket, setSelectedMarket] = useState<string>("SOL/USD");
-  const [activeScenario, setActiveScenario] = useState<string | null>(null);
-
-  const marketList = Object.entries(MARKETS).map(([key, cfg]) => ({
-    key,
-    name: cfg.name,
-    slab: cfg.slab,
-  }));
-
-  const currentMarket = MARKETS[selectedMarket] ?? MARKETS["SOL/USD"];
-  const slabAddress = currentMarket?.slab ?? "";
+/* ── Page wrapper ────────────────────────────────────────── */
+export default function SimulatePage() {
+  const [market, setMarket] = useState("SOL/USD");
+  const current = MARKETS[market] ?? MARKETS["SOL/USD"];
+  const slab = current?.slab ?? "";
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      <SimulatorHeader
-        markets={marketList.map((m) => ({ key: m.key, name: m.name }))}
-        selectedMarket={selectedMarket}
-        onMarketChange={setSelectedMarket}
-        activeScenario={activeScenario}
-      />
+      {/* ── Top bar ── */}
+      <header className="border-b border-[var(--border)]/40 bg-[var(--bg)]/95 backdrop-blur-sm">
+        <div className="flex items-center justify-between px-4 py-2.5">
+          {/* Left: Title + Markets */}
+          <div className="flex items-center gap-6">
+            <div>
+              <h1 className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
+                Simulator
+              </h1>
+              <span className="text-[9px] uppercase tracking-[0.2em] text-[var(--text-dim)]">
+                Risk Engine
+              </span>
+            </div>
+            <MarketPills selected={market} onChange={setMarket} />
+          </div>
 
-      {slabAddress ? (
-        <SlabProvider slabAddress={slabAddress}>
+          {/* Right: Status */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 border border-[var(--border)]/40">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              </span>
+              <span className="text-[9px] font-medium uppercase tracking-widest text-[var(--text-dim)]">
+                Devnet
+              </span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Content ── */}
+      {slab ? (
+        <SlabProvider slabAddress={slab}>
           <UsdToggleProvider>
-            <SimulatorInner
-              marketKey={selectedMarket}
-              slabAddress={slabAddress}
-            />
+            <SimInner slabAddress={slab} marketKey={market} />
           </UsdToggleProvider>
         </SlabProvider>
       ) : (
-        <SimulatorInner marketKey={selectedMarket} slabAddress="" />
+        <SimInner slabAddress="" marketKey={market} />
       )}
     </div>
   );
-}
-
-/* ── Page export ─────────────────────────────────────────── */
-export default function SimulatePage() {
-  return <SimulatorWithMarket />;
 }
