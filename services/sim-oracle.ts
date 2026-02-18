@@ -244,11 +244,13 @@ export async function pushAndCrank(
   slabPk: PublicKey,
   priceE6: bigint,
 ): Promise<string> {
-  // Subtract 2s buffer to avoid clock skew between local time and Solana's
-  // clock.unix_timestamp. If our timestamp is even 1s ahead, the on-chain
-  // read_authority_price() rejects it as "from the future" (age < 0) and
-  // falls back to Pyth oracle → IllegalOwner since oracle account = slab.
-  const now = Math.floor(Date.now() / 1000) - 2;
+  // Use Solana cluster time to avoid clock skew between local and on-chain.
+  // Local Date.now() can be ahead of Solana's clock.unix_timestamp, making
+  // the pushed timestamp appear "from the future" (age < 0) → stale rejection
+  // → Pyth fallback → IllegalOwner. Fetching the actual slot timestamp avoids this.
+  const slot = await connection.getSlot("confirmed");
+  const blockTime = await connection.getBlockTime(slot);
+  const now = blockTime ?? Math.floor(Date.now() / 1000);
 
   // Step 1: Push oracle price (always succeeds if authority is valid)
   const pushData = encodePushOraclePrice({
