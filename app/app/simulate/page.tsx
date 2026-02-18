@@ -14,6 +14,9 @@ import { SimRiskDashboard } from "./components/SimRiskDashboard";
 import { SimLeaderboard } from "./components/SimLeaderboard";
 import { ScenarioPanel } from "./components/ScenarioPanel";
 import { SimExplainer } from "./components/SimExplainer";
+import { EventFeed } from "./components/EventFeed";
+import { RiskConceptCards } from "./components/RiskConceptCards";
+import { GuidedWalkthrough, TourHelpButton } from "./components/GuidedWalkthrough";
 
 // Lazy-load SimOnboarding (uses wallet hooks)
 const SimOnboarding = dynamic(
@@ -112,6 +115,9 @@ function SimulatorInner({
         onDismiss={() => {}}
       />
 
+      {/* Guided walkthrough overlay */}
+      <GuidedWalkthrough autoStart={!hasCapital} />
+
       {/* ════════════════════════════════════════════════════════
           MOBILE LAYOUT  (< lg) — Single column
           ════════════════════════════════════════════════════════ */}
@@ -127,24 +133,30 @@ function SimulatorInner({
         </ErrorBoundary>
 
         {/* Tabs: Risk | Scenarios | Explainer | Account */}
-        <Tabs tabs={["Risk", "Scenarios", "Insights", "Account"]}>
+        <Tabs tabs={["Risk", "Scenarios", "Insights", "Feed", "Account"]}>
           <ErrorBoundary label="SimRiskDashboard">
-            <div className="pt-2">
+            <div className="pt-2" data-tour="risk-dashboard">
               <SimRiskDashboard slabAddress={slabAddress} />
             </div>
           </ErrorBoundary>
           <ErrorBoundary label="ScenarioPanel">
-            <div className="pt-2">
+            <div className="pt-2" data-tour="scenario-panel">
               <ScenarioPanel />
             </div>
           </ErrorBoundary>
-          <ErrorBoundary label="SimExplainer">
-            <div className="pt-2">
+          <ErrorBoundary label="SimExplainerAndConcepts">
+            <div className="pt-2 space-y-2">
               <SimExplainer />
+              <RiskConceptCards />
+            </div>
+          </ErrorBoundary>
+          <ErrorBoundary label="EventFeed">
+            <div className="pt-2">
+              <EventFeed />
             </div>
           </ErrorBoundary>
           <ErrorBoundary label="AccountsCard">
-            <div className="pt-2">
+            <div className="pt-2" data-tour="deposit-card">
               <AccountsCard />
               <div className="mt-2">
                 <DepositWithdrawCard slabAddress={slabAddress} />
@@ -170,7 +182,7 @@ function SimulatorInner({
           {/* ── Left: Trade panel ── */}
           <div className="space-y-2">
             {/* Trade form — sticky */}
-            <div className="sticky top-0 z-20">
+            <div className="sticky top-0 z-20" data-tour="trade-form">
               <ErrorBoundary label="TradeForm">
                 <TradeForm slabAddress={slabAddress} />
               </ErrorBoundary>
@@ -191,19 +203,27 @@ function SimulatorInner({
           </div>
 
           {/* ── Center: Risk dashboard ── */}
-          <div className="min-w-0">
+          <div className="min-w-0" data-tour="risk-dashboard">
             <ErrorBoundary label="SimRiskDashboard">
               <SimRiskDashboard slabAddress={slabAddress} />
             </ErrorBoundary>
           </div>
 
-          {/* ── Right: Scenarios + Explainer ── */}
+          {/* ── Right: Scenarios + Explainer + Event Feed + Concepts ── */}
           <div className="space-y-2">
             <ErrorBoundary label="ScenarioPanel">
-              <ScenarioPanel />
+              <div data-tour="scenario-panel">
+                <ScenarioPanel />
+              </div>
             </ErrorBoundary>
             <ErrorBoundary label="SimExplainer">
               <SimExplainer />
+            </ErrorBoundary>
+            <ErrorBoundary label="RiskConceptCards">
+              <RiskConceptCards />
+            </ErrorBoundary>
+            <ErrorBoundary label="EventFeed">
+              <EventFeed />
             </ErrorBoundary>
           </div>
         </div>
