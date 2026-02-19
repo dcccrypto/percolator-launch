@@ -7,8 +7,7 @@ export const dynamic = "force-dynamic";
  * GET /api/markets/[slab]/trades
  *
  * Returns recent trades for a market from Supabase trades table.
- * For sim markets where no webhook indexer runs, the sim-bots service
- * writes trades directly via the sim trade logger.
+ * Reads from Supabase trades table.
  */
 export async function GET(
   req: NextRequest,

@@ -53,7 +53,7 @@ const nextConfig: NextConfig = {
   async rewrites() {
     // Use afterFiles so that local Next.js API routes (e.g. /api/funding/[slab]/route.ts,
     // /api/markets/[slab]/prices/route.ts) take priority over these proxy rewrites.
-    // This lets simulator routes serve from Next.js while production data routes
+    // Production data routes are proxied through the API
     // still proxy to the Railway API service.
     return {
       beforeFiles: [],
