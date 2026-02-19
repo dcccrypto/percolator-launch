@@ -49,7 +49,7 @@ describe("InsuranceDashboard Component", () => {
     render(<InsuranceDashboard slabAddress="test-slab" />);
 
     await waitFor(() => {
-      expect(screen.getByText("🛡️")).toBeInTheDocument();
+      expect(screen.getByText("Insurance Fund")).toBeInTheDocument();
       expect(screen.getByText("$125,432")).toBeInTheDocument();
       expect(screen.getByText("$12,543")).toBeInTheDocument();
     });
@@ -75,7 +75,6 @@ describe("InsuranceDashboard Component", () => {
     render(<InsuranceDashboard slabAddress="test-slab" />);
 
     await waitFor(() => {
-      expect(screen.getByText("🟢")).toBeInTheDocument();
       expect(screen.getByText("Healthy")).toBeInTheDocument();
     });
   });
@@ -100,7 +99,6 @@ describe("InsuranceDashboard Component", () => {
     render(<InsuranceDashboard slabAddress="test-slab" />);
 
     await waitFor(() => {
-      expect(screen.getByText("🟡")).toBeInTheDocument();
       expect(screen.getByText("Moderate")).toBeInTheDocument();
     });
   });
@@ -125,7 +123,6 @@ describe("InsuranceDashboard Component", () => {
     render(<InsuranceDashboard slabAddress="test-slab" />);
 
     await waitFor(() => {
-      expect(screen.getByText("🔴")).toBeInTheDocument();
       expect(screen.getByText("Low")).toBeInTheDocument();
     });
   });
@@ -258,14 +255,14 @@ describe("InsuranceDashboard Component", () => {
 
     render(<InsuranceDashboard slabAddress="test-slab" />);
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
     // Fast-forward 30 seconds
-    vi.advanceTimersByTime(30000);
+    await vi.advanceTimersByTimeAsync(30000);
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 

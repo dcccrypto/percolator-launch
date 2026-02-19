@@ -26,10 +26,10 @@ export async function GET(
       return NextResponse.json({ prices: [] });
     }
 
-    // 1. Check simulation_price_history first (simulator oracle writes here)
+    // 1. Check sim_price_history first (simulator oracle writes here)
     // Fetch most recent 1000, descending, then reverse for chronological chart display
     const { data: simPrices, error: simError } = await (db as any)
-      .from("simulation_price_history")
+      .from("sim_price_history")
       .select("price_e6, timestamp")
       .eq("slab_address", slab)
       .order("timestamp", { ascending: false })

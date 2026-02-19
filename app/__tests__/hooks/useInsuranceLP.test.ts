@@ -62,7 +62,6 @@ describe("useInsuranceLP", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.useFakeTimers();
 
     // Mock connection
     mockConnection = {
@@ -102,12 +101,12 @@ describe("useInsuranceLP", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
   describe("H3: Infinite Loop Fix", () => {
     it("should not cause infinite re-renders with auto-refresh", async () => {
+      vi.useFakeTimers();
       // Mock mint exists
       mockConnection.getAccountInfo.mockResolvedValue({
         data: Buffer.alloc(82), // Standard mint account size
@@ -135,19 +134,22 @@ describe("useInsuranceLP", () => {
 
       // Fast-forward 10 seconds (auto-refresh interval)
       await act(async () => {
-        vi.advanceTimersByTime(10000);
+        await vi.advanceTimersByTimeAsync(10000);
       });
 
       // Should have called getAccountInfo again for auto-refresh
-      await waitFor(() => {
+      await vi.waitFor(() => {
         expect(mockConnection.getAccountInfo.mock.calls.length).toBeGreaterThan(callCount);
       });
 
       // Should NOT have excessive calls (would indicate infinite loop)
       expect(mockConnection.getAccountInfo.mock.calls.length).toBeLessThan(callCount + 10);
+      
+      vi.useRealTimers();
     });
 
     it("should use stable wallet public key reference to prevent re-render loop", async () => {
+      vi.useFakeTimers();
       mockConnection.getAccountInfo.mockResolvedValue(null); // Mint doesn't exist
 
       const refreshSpy = vi.fn();
@@ -170,14 +172,17 @@ describe("useInsuranceLP", () => {
 
       // Should stabilize and not loop infinitely
       await act(async () => {
-        vi.advanceTimersByTime(1000);
+        await vi.advanceTimersByTimeAsync(1000);
       });
 
       // Verify no excessive re-renders
       expect(mockConnection.getAccountInfo.mock.calls.length).toBeLessThan(20);
+      
+      vi.useRealTimers();
     });
 
     it("should cleanup interval on unmount", async () => {
+      vi.useFakeTimers();
       mockConnection.getAccountInfo.mockResolvedValue(null);
 
       const { result, unmount } = renderHook(() => useInsuranceLP());
@@ -192,10 +197,12 @@ describe("useInsuranceLP", () => {
       unmount();
 
       // Advance time after unmount
-      vi.advanceTimersByTime(20000);
+      await vi.advanceTimersByTimeAsync(20000);
 
       // Should NOT have called getAccountInfo again
       expect(mockConnection.getAccountInfo.mock.calls.length).toBe(callsBefore);
+      
+      vi.useRealTimers();
     });
   });
 

@@ -58,7 +58,7 @@ describe("OpenInterestCard Component", () => {
     render(<OpenInterestCard slabAddress="test-slab" />);
 
     await waitFor(() => {
-      expect(screen.getByText("📊")).toBeInTheDocument();
+      expect(screen.getByText("Open Interest")).toBeInTheDocument();
       expect(screen.getByText("$5,234,123")).toBeInTheDocument();
     });
   });
@@ -317,14 +317,14 @@ describe("OpenInterestCard Component", () => {
 
     render(<OpenInterestCard slabAddress="test-slab" />);
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
     // Fast-forward 30 seconds
-    vi.advanceTimersByTime(30000);
+    await vi.advanceTimersByTimeAsync(30000);
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
