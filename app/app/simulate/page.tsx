@@ -20,7 +20,6 @@ import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
 import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
 import { SystemCapitalCard } from "@/components/trade/SystemCapitalCard";
 import { InsuranceLPPanel } from "@/components/trade/InsuranceLPPanel";
-import { SimLeaderboard } from "./components/SimLeaderboard";
 import { ScenarioPanel } from "./components/ScenarioPanel";
 import { EventFeed } from "./components/EventFeed";
 import { RiskConceptCards } from "./components/RiskConceptCards";
@@ -226,9 +225,6 @@ function SimInner({
           )}
         </div>
 
-        <ErrorBoundary label="Leaderboard">
-          <SimLeaderboard marketKey={marketKey} />
-        </ErrorBoundary>
       </div>
 
       {/* ══════════════════════════════════════════════════════
@@ -329,12 +325,6 @@ function SimInner({
           </div>
         </div>
 
-        {/* ── BOTTOM: Leaderboard ── */}
-        <div className="border-t border-[var(--border)]/30 px-4 py-4">
-          <ErrorBoundary label="Leaderboard">
-            <SimLeaderboard marketKey={marketKey} />
-          </ErrorBoundary>
-        </div>
       </div>
     </>
   );

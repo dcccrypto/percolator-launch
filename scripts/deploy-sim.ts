@@ -19,6 +19,7 @@ import {
   Keypair,
   PublicKey,
   Transaction,
+  TransactionInstruction,
   sendAndConfirmTransaction,
   ComputeBudgetProgram,
   SystemProgram,
@@ -45,6 +46,7 @@ import {
   encodeKeeperCrank,
   encodeSetOracleAuthority,
   encodePushOraclePrice,
+  encodeInitVamm,
 } from "../packages/core/src/abi/instructions.js";
 import {
   ACCOUNTS_INIT_MARKET,
@@ -56,7 +58,7 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
   buildAccountMetas,
 } from "../packages/core/src/abi/accounts.js";
-import { deriveVaultAuthority } from "../packages/core/src/solana/pda.js";
+import { deriveVaultAuthority, deriveLpPda } from "../packages/core/src/solana/pda.js";
 import { buildIx } from "../packages/core/src/runtime/tx.js";
 
 dotenv.config();
@@ -69,6 +71,7 @@ dotenv.config();
 const PROGRAM_ID = new PublicKey("DxoMuuiUy5TymJRwALizxb5X8GwnQB7pUv1x2z3oLjDJ");
 const MATCHER_PROGRAM_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
 const SLAB_SIZE = 16_320; // MAX_ACCOUNTS=64 test build (0x3fc0)
+const MATCHER_CTX_SIZE = 320;
 const PRIORITY_FEE = 50_000;
 
 // simUSDC: 6 decimals
@@ -273,10 +276,47 @@ async function createSimMarket(
   });
   console.log("  Market initialized");
 
-  // ── InitLP ──
+  // ── Create matcher context account + InitLP with vAMM ──
+  const matcherCtxKp = Keypair.generate();
+  const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(MATCHER_CTX_SIZE);
+
+  // Derive LP PDA for index 0
+  const [lpPda] = deriveLpPda(PROGRAM_ID, slabKp.publicKey, 0);
+
+  // 1. Create matcher context account (owned by matcher program)
+  const createCtxIx = SystemProgram.createAccount({
+    fromPubkey: payer.publicKey,
+    newAccountPubkey: matcherCtxKp.publicKey,
+    lamports: matcherCtxRent,
+    space: MATCHER_CTX_SIZE,
+    programId: MATCHER_PROGRAM_ID,
+  });
+
+  // 2. Initialize vAMM matcher
+  const initVammData = encodeInitVamm({
+    mode: 0,
+    tradingFeeBps: 30,                    // 0.3% fee
+    baseSpreadBps: 20,                    // 0.2% spread
+    maxTotalBps: 200,                     // 2% max spread
+    impactKBps: 0,                        // no impact
+    liquidityNotionalE6: "50000000000000", // $50M notional
+    maxFillAbs: "0",                      // unlimited
+    maxInventoryAbs: "0",                 // unlimited
+  });
+
+  const initMatcherIx = new TransactionInstruction({
+    programId: MATCHER_PROGRAM_ID,
+    keys: [
+      { pubkey: lpPda, isSigner: false, isWritable: false },
+      { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
+    ],
+    data: Buffer.from(initVammData),
+  });
+
+  // 3. InitLP with real matcher program + context
   const initLpData = encodeInitLP({
-    matcherProgram: SystemProgram.programId,
-    matcherContext: SystemProgram.programId,
+    matcherProgram: MATCHER_PROGRAM_ID,
+    matcherContext: matcherCtxKp.publicKey,
     feePayment: "2000000", // 2 simUSDC (required LP init fee)
   });
   const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
@@ -289,14 +329,17 @@ async function createSimMarket(
 
   const initLpTx = new Transaction();
   addPriorityFee(initLpTx);
-  initLpTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
+  initLpTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
+  initLpTx.add(createCtxIx);
+  initLpTx.add(initMatcherIx);
   initLpTx.add(
     buildIx({ programId: PROGRAM_ID, keys: initLpKeys, data: initLpData }),
   );
-  await sendAndConfirmTransaction(connection, initLpTx, [payer], {
+  await sendAndConfirmTransaction(connection, initLpTx, [payer, matcherCtxKp], {
     commitment: "confirmed",
   });
-  console.log("  LP initialized (index 0)");
+  console.log("  LP initialized with vAMM matcher (index 0)");
+  console.log(`  Matcher context: ${matcherCtxKp.publicKey.toBase58()}`);
 
   // ── DepositCollateral (LP funding) ──
   const depositData = encodeDepositCollateral({
