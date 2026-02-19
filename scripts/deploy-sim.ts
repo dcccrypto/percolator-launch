@@ -551,6 +551,11 @@ async function main() {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log(`\nConfig saved → ${configPath}`);
 
+  // Auto-sync to app/config so the frontend reads the same addresses
+  const appConfigPath = path.resolve(__dirname, "../app/config/sim-markets.json");
+  fs.writeFileSync(appConfigPath, JSON.stringify(config, null, 2));
+  console.log(`Config synced → ${appConfigPath}`);
+
   // ── Summary ──
   console.log("\n" + "=".repeat(70));
   console.log("DEPLOY COMPLETE ✓");
