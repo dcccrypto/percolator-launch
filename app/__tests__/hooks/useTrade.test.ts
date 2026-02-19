@@ -155,101 +155,14 @@ describe("useTrade", () => {
     });
   });
 
-  describe("H4: RPC Cancellation on Wallet Disconnect", () => {
-    it("should cancel pending RPC calls when wallet disconnects", async () => {
-      // When an AbortError is thrown from the RPC call, the hook should
-      // gracefully handle it without sending a transaction
-      const abortError = new Error("The operation was aborted");
-      abortError.name = "AbortError";
-      mockConnection.getAccountInfo.mockRejectedValue(abortError);
-
-      const { result } = renderHook(() => useTrade(mockSlabAddress));
-
-      await act(async () => {
-        await result.current.trade({
-          lpIdx: 0,
-          userIdx: 1,
-          size: 1000000n,
-        }).catch(() => {}); // Catch expected cancellation
-      });
-
-      // Transaction should NOT have been sent since RPC was aborted
-      expect(sendTx).not.toHaveBeenCalled();
-    });
-
-    it("should handle AbortError gracefully", async () => {
-      const abortError = new Error("AbortError");
-      abortError.name = "AbortError";
-      mockConnection.getAccountInfo.mockRejectedValue(abortError);
-
-      const { result } = renderHook(() => useTrade(mockSlabAddress));
-
-      await act(async () => {
-        await result.current.trade({
-          lpIdx: 0,
-          userIdx: 1,
-          size: 1000000n,
-        }).catch(() => {}); // Expect no error thrown
-      });
-
-      // Should not set error state for abort
-      expect(result.current.error).toBeNull();
-    });
-  });
-
-  describe("C2: Stale Preview Prevention", () => {
-    it("should fetch fresh matcher context before trade", async () => {
-      const { result } = renderHook(() => useTrade(mockSlabAddress));
-
-      await act(async () => {
-        await result.current.trade({
-          lpIdx: 0,
-          userIdx: 1,
-          size: 1000000n,
-        });
-      });
-
-      // Verify getAccountInfo was called to validate matcher context
-      expect(mockConnection.getAccountInfo).toHaveBeenCalledWith(
-        mockMatcherContext,
-        expect.any(Object)
-      );
-    });
-
-    it("should reject trade if matcher context doesn't exist", async () => {
-      mockConnection.getAccountInfo.mockResolvedValue(null);
-
-      const { result } = renderHook(() => useTrade(mockSlabAddress));
-
-      await act(async () => {
-        await expect(
-          result.current.trade({
-            lpIdx: 0,
-            userIdx: 1,
-            size: 1000000n,
-          })
-        ).rejects.toThrow("Matcher context account not found");
-      });
-
-      expect(result.current.error).toContain("Matcher context");
-    });
-
-    it("should reject trade if matcher context is default pubkey", async () => {
-      mockSlabState.accounts[0].account.matcherContext = PublicKey.default;
-
-      const { result } = renderHook(() => useTrade(mockSlabAddress));
-
-      await act(async () => {
-        await expect(
-          result.current.trade({
-            lpIdx: 0,
-            userIdx: 1,
-            size: 1000000n,
-          })
-        ).rejects.toThrow("no vAMM liquidity provider");
-      });
-    });
-  });
+  // NOTE: H4 (RPC cancellation) and C2 (stale preview prevention) tests removed.
+  // The matcher context validation in useTrade was intentionally disabled — all current
+  // markets have default matcher context which is valid for non-vAMM LPs.
+  // The program returns proper errors if matcher context is invalid, so client-side
+  // validation is no longer needed. See useTrade.ts comments for details.
+  //
+  // If matcher context validation is re-enabled in the future, restore these tests
+  // from git history (commit before this change).
 
   describe("Error Handling", () => {
     it("should throw error if wallet not connected", async () => {
