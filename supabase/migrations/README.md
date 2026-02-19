@@ -43,6 +43,9 @@ Migrations are automatically applied when pushed to the linked Supabase project 
 | 018 | `performance_indexes.sql` | Performance indexes for common query patterns (funding, trades, oracle prices, etc.) |
 | 019 | `ideas_table.sql` | User-submitted feature ideas and feedback table |
 | 020 | `job_applications_table.sql` | Beta tester and team member applications with CV uploads |
+| 021 | `fix_rls_policies.sql` | Fix write policies to require service_role (was open to anon) |
+| 022 | `insurance_tables.sql` | Insurance snapshots and LP events tables |
+| 023 | `drop_simulation_tables.sql` | Drop simulation tables (feature removed in PRs #225-#227) |
 
 ## Database Schema Overview
 
@@ -94,19 +97,6 @@ Time-series tracking of open interest and LP aggregate metrics
 - **FK:** `market_slab` → market_stats
 - **Unique:** (market_slab, slot)
 - **Key fields:** total_oi, net_lp_pos, lp_sum_abs, lp_max_abs, slot, timestamp
-
-### Simulation Tables
-
-#### `simulation_sessions`
-Simulation test sessions with different price models and scenarios
-- **PK:** `id` (BIGSERIAL)
-- **Key fields:** slab_address, scenario, model, start_price_e6, current_price_e6, status, updates_count, config (JSONB)
-
-#### `simulation_price_history`
-Records all price updates during simulation sessions
-- **PK:** `id` (BIGSERIAL)
-- **FK:** `session_id` → simulation_sessions
-- **Key fields:** slab_address, price_e6, model, timestamp
 
 ### User-Generated Content Tables
 
@@ -173,12 +163,6 @@ idx_insurance_history_slab_slot ON insurance_history(market_slab, slot DESC)
 idx_oi_history_slab_time ON oi_history(market_slab, timestamp DESC)
 idx_oi_history_slab_slot ON oi_history(market_slab, slot DESC)
 
--- Simulation
-idx_simulation_sessions_slab ON simulation_sessions(slab_address, started_at DESC)
-idx_simulation_sessions_status ON simulation_sessions(status, started_at DESC)
-idx_sim_price_history_session ON simulation_price_history(session_id, timestamp DESC)
-idx_sim_price_history_slab ON simulation_price_history(slab_address, timestamp DESC)
-
 -- Bug Reports
 idx_bug_reports_status ON bug_reports(status)
 idx_bug_reports_severity ON bug_reports(severity)
@@ -217,7 +201,7 @@ Returns: (insurance_deleted, oi_deleted)
 
 ## Schema Versioning
 
-Current schema version: **020** (as of 2026-02-16)
+Current schema version: **023** (as of 2026-02-19)
 
 Migrations are applied sequentially and should NEVER be modified after being deployed to production.
 New schema changes must be added as new migration files with the next sequential number.

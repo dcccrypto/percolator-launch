@@ -109,30 +109,9 @@ VALUES (
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
--- 4. Example Simulation Session (for testing simulation UI)
+-- 4. Simulation tables removed (PRs #225-#227, 2026-02-19)
 -- ============================================================================
-
-INSERT INTO simulation_sessions (
-  slab_address,
-  scenario,
-  model,
-  start_price_e6,
-  current_price_e6,
-  status,
-  updates_count,
-  config
-)
-VALUES (
-  'DevMarket1111111111111111111111111111111',
-  'calm',
-  'random-walk',
-  100000000,
-  100500000,
-  'completed',
-  100,
-  '{"volatility": 0.02, "drift": 0.0001}'::jsonb
-)
-ON CONFLICT DO NOTHING;
+-- simulation_sessions and simulation_price_history no longer exist
 
 -- ============================================================================
 -- 5. Solana Program IDs (Reference Data - if needed by the app)
