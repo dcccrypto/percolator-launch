@@ -437,12 +437,25 @@ async function executeTrade(
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
   tx.add(buildIx({ programId: PROGRAM_ID, keys: tradeKeys, data: tradeData }));
 
-  // Both bot (user) and admin (LP owner) must sign
-  const sig = await sendAndConfirmTransaction(connection, tx, [bot.keypair, payer], {
-    commitment: "confirmed",
-    skipPreflight: true,
-  });
-  return sig;
+  // Both bot (user) and admin (LP owner) must sign — retry once on timeout
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const sig = await sendAndConfirmTransaction(connection, tx, [bot.keypair, payer], {
+        commitment: "confirmed",
+        skipPreflight: true,
+      });
+      return sig;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (attempt === 0 && (msg.includes("expired") || msg.includes("Blockhash") || msg.includes("blockhash"))) {
+        // Refresh blockhash and retry
+        tx.recentBlockhash = (await connection.getLatestBlockhash("confirmed")).blockhash;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Trade failed after retries");
 }
 
 // ─── BotFleet ─────────────────────────────────────────────────────────────────
@@ -682,6 +695,17 @@ export class BotFleet {
       console.log(
         `[bots] ${bot.wallet.botId} (${bot.wallet.type}) ${size > 0n ? "LONG" : "SHORT"} ${bot.wallet.market} @ ${price.adjustedPrice.toFixed(2)} sig=${sig.slice(0, 12)}...`,
       );
+      // Log trade to DB for frontend display
+      const absSize = Number(size > 0n ? size : -size);
+      this.logTrade({
+        slabAddress: slabPk.toBase58(),
+        trader: bot.keypair.publicKey.toBase58(),
+        side: size > 0n ? "long" : "short",
+        size: absSize,
+        price: price.adjustedPrice,
+        fee: 0,
+        txSignature: sig,
+      });
     } catch (err) {
       console.error(`[bots] trade failed for ${bot.wallet.botId}:`, err);
     }
@@ -706,6 +730,17 @@ export class BotFleet {
       console.log(
         `[bots] ${bot.wallet.botId} CLOSED ${isLong ? "LONG" : "SHORT"} @ ${exitPrice.toFixed(2)} pnl=${pnl.toFixed(2)} sig=${sig.slice(0, 12)}...`,
       );
+      // Log close trade to DB
+      const closeAbsSize = Number(closeSize > 0n ? closeSize : -closeSize);
+      this.logTrade({
+        slabAddress: slabPk.toBase58(),
+        trader: bot.keypair.publicKey.toBase58(),
+        side: closeSize > 0n ? "long" : "short",
+        size: closeAbsSize,
+        price: exitPrice,
+        fee: 0,
+        txSignature: sig,
+      });
 
       // Buffer leaderboard update
       const idx = bot.wallet.botId.split("_").pop() ?? "1";
@@ -724,6 +759,35 @@ export class BotFleet {
       bot.tradeCount++;
     } catch (err) {
       console.error(`[bots] close failed for ${bot.wallet.botId}:`, err);
+    }
+  }
+
+  /** Log a trade to the Supabase trades table so the frontend can display it */
+  private async logTrade(opts: {
+    slabAddress: string;
+    trader: string;
+    side: "long" | "short";
+    size: number;
+    price: number;
+    fee: number;
+    txSignature: string;
+  }): Promise<void> {
+    try {
+      await fetch(`${this.supabaseUrl}/rest/v1/trades`, {
+        method: "POST",
+        headers: { ...supabaseHeaders(this.serviceKey), "Prefer": "return=minimal" },
+        body: JSON.stringify({
+          slab_address: opts.slabAddress,
+          trader: opts.trader,
+          side: opts.side,
+          size: opts.size,
+          price: opts.price,
+          fee: opts.fee,
+          tx_signature: opts.txSignature,
+        }),
+      });
+    } catch (err) {
+      console.error("[bots] trade log failed:", err);
     }
   }
 

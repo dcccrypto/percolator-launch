@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/markets/[slab]/trades
  *
- * Returns recent trades for a market. For sim markets, reads from on-chain
- * trade history. Falls back to empty array when no data is available.
+ * Returns recent trades for a market from Supabase trades table.
+ * For sim markets where no webhook indexer runs, the sim-bots service
+ * writes trades directly via the sim trade logger.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ slab: string }> }
 ) {
   try {
@@ -18,10 +20,27 @@ export async function GET(
       return NextResponse.json({ trades: [] });
     }
 
-    // For now, return empty — trades will appear from on-chain indexing
-    // The TradeHistory component handles empty state gracefully
-    return NextResponse.json({ trades: [] });
-  } catch {
+    const limit = Math.min(
+      parseInt(req.nextUrl.searchParams.get("limit") ?? "25", 10),
+      100
+    );
+
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from("trades")
+      .select("*")
+      .eq("slab_address", slab)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error("[/api/trades] Supabase error:", error);
+      return NextResponse.json({ trades: [] });
+    }
+
+    return NextResponse.json({ trades: data ?? [] });
+  } catch (e) {
+    console.error("[/api/trades] Error:", e);
     return NextResponse.json({ trades: [] });
   }
 }
