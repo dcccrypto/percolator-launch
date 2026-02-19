@@ -26,6 +26,9 @@ function currentWeekStart(): string {
   return monday.toISOString();
 }
 
+// Faucet claim = 10,000 simUSDC (6 decimals) — the initial deposit every user starts with
+const FAUCET_AMOUNT = 10_000 * 1_000_000; // 10,000,000,000
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -79,10 +82,7 @@ export async function GET(req: NextRequest) {
         liquidation_count: row.liquidation_count ?? 0,
         best_trade: row.best_trade ?? null,
         worst_trade: row.worst_trade ?? null,
-        roi_pct:
-          row.total_deposited > 0
-            ? (row.total_pnl / row.total_deposited) * 100
-            : 0,
+        roi_pct: (row.total_pnl / FAUCET_AMOUNT) * 100,
         win_rate:
           row.trade_count > 0
             ? (row.win_count / row.trade_count) * 100

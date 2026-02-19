@@ -134,6 +134,18 @@ export function useTrade(slabAddress: string) {
         return await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        // Detect stale oracle / program errors and show a user-friendly message
+        if (
+          msg.includes("Account must be writable") ||
+          msg.includes("custom program error") ||
+          msg.includes("stale") ||
+          msg.includes("IllegalOwner")
+        ) {
+          const friendly =
+            "Oracle prices are stale — the simulator oracle service may be down. Trades will resume when prices are refreshed.";
+          setError(friendly);
+          throw new Error(friendly);
+        }
         setError(msg);
         throw e;
       } finally {
