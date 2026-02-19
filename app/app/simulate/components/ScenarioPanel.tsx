@@ -328,7 +328,9 @@ export function ScenarioPanel({ onScenarioChange }: Props) {
     const currentActive = Object.values(states).find((s) => s.active);
     const prevActive = prevActiveRef.current;
 
-    if (prevActive && !currentActive?.id.includes(prevActive)) {
+    // Bug fix: old code used string.includes() which never matches UUIDs correctly.
+    // Correct check: scenario is "done" when prevActive exists but currentActive is gone or changed.
+    if (prevActive && (!currentActive || currentActive.id !== prevActive)) {
       // Previous scenario ended — add to history
       const meta = SCENARIO_META[prevActive];
       if (meta) {
@@ -356,7 +358,8 @@ export function ScenarioPanel({ onScenarioChange }: Props) {
     setVoting(scenarioId);
 
     try {
-      const res = await fetch("/api/scenarios/vote", {
+      // Bug fix: vote endpoint is at /api/simulate/scenarios/vote, not /api/scenarios/vote
+      const res = await fetch("/api/simulate/scenarios/vote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scenario: scenarioId }),

@@ -38,24 +38,28 @@ export function useTrade(slabAddress: string) {
         const lpAccount = accounts.find((a) => a.idx === params.lpIdx);
         if (!lpAccount) throw new Error(`LP at index ${params.lpIdx} not found`);
 
-        // NOTE: Matcher context validation disabled - all current markets have default matcher context
-        // which is valid for non-vAMM LPs. If matcher context issues arise, the program will
-        // return a proper error instead of blocking all trades upfront.
-        // Original validation from commit 919f006 (Feb 10) was too strict.
-        
-        // const matcherCtxKey = lpAccount.account.matcherContext;
-        // if (!matcherCtxKey.equals(PublicKey.default)) {
-        //   try {
-        //     if (cancelled) return;
-        //     const ctxInfo = await connection.getAccountInfo(matcherCtxKey, { signal: abortController.signal } as any);
-        //     if (!ctxInfo) {
-        //       throw new Error("Matcher context account not found on-chain. Try creating a new market.");
-        //     }
-        //   } catch (e) {
-        //     if (e instanceof Error && e.message.includes("Matcher context")) throw e;
-        //     if (e instanceof Error && e.name === "AbortError") return;
-        //   }
-        // }
+        // Validate matcher context before building the transaction (C2: Stale Preview Prevention)
+        const matcherCtxKey = lpAccount.account.matcherContext;
+        if (matcherCtxKey.equals(PublicKey.default)) {
+          throw new Error("no vAMM liquidity provider");
+        }
+
+        // Fetch fresh matcher context to prevent stale preview data
+        try {
+          const ctxInfo = await connection.getAccountInfo(matcherCtxKey, { commitment: "confirmed" });
+          if (!ctxInfo) {
+            throw new Error("Matcher context account not found");
+          }
+        } catch (e) {
+          if (e instanceof Error && e.name === "AbortError") {
+            // H4: Gracefully handle wallet disconnect / RPC cancellation without setting error state
+            return;
+          }
+          if (e instanceof Error && e.message.includes("Matcher context")) {
+            throw e; // Re-throw validation errors (null account, etc.)
+          }
+          // Other RPC errors (timeout, network blip): continue with trade attempt
+        }
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);

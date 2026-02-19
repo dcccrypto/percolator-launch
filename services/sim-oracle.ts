@@ -319,8 +319,11 @@ export class SimOracle {
   public latestPrices = new Map<string, OraclePrice>();
   private priceWriteBuffer: Array<{
     slab_address: string;
-    price_e6: number;
-    model: string;
+    symbol: string;
+    price_e6: string;        // text column in sim_price_history
+    raw_price_e6: string;    // pre-scenario price
+    scenario_type: string | null;
+    timestamp: number;       // bigint (unix ms)
   }> = [];
   private lastFlush = 0;
   private readonly FLUSH_INTERVAL_MS = 10_000; // flush to DB every 10s
@@ -401,11 +404,14 @@ export class SimOracle {
           `[oracle] ${symbol} raw=${rawPrice.toFixed(2)} adj=${adjustedPrice.toFixed(2)} priceE6=${priceE6} sig=${sig.slice(0, 12)}...`,
         );
 
-        // Buffer price for DB persistence
+        // Buffer price for DB persistence (writes to sim_price_history)
         this.priceWriteBuffer.push({
           slab_address: market.slab,
-          price_e6: Number(priceE6),
-          model: this.activeScenario?.type ?? "pyth",
+          symbol,
+          price_e6: priceE6.toString(),
+          raw_price_e6: BigInt(Math.round(rawPrice * 1_000_000)).toString(),
+          scenario_type: this.activeScenario?.type ?? null,
+          timestamp: Date.now(),
         });
       } catch (err) {
         console.error(`[oracle] push/crank failed for ${symbol}:`, err);
@@ -430,7 +436,8 @@ export class SimOracle {
     this.lastFlush = now;
 
     try {
-      const url = `${this.supabaseUrl}/rest/v1/simulation_price_history`;
+      // Bug fix: table is sim_price_history (migration 024), not simulation_price_history (migration 011)
+      const url = `${this.supabaseUrl}/rest/v1/sim_price_history`;
       const resp = await fetch(url, {
         method: "POST",
         headers: {
@@ -464,8 +471,11 @@ export class SimOracle {
   }
 
   private async cleanupOldPrices(): Promise<void> {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const url = `${this.supabaseUrl}/rest/v1/simulation_price_history?timestamp=lt.${cutoff}`;
+    // Bug fix: sim_price_history.timestamp is bigint (unix ms), not timestamptz.
+    // Use numeric epoch ms comparison, not ISO date string.
+    // Bug fix: correct table name is sim_price_history, not simulation_price_history.
+    const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
+    const url = `${this.supabaseUrl}/rest/v1/sim_price_history?timestamp=lt.${cutoffMs}`;
     const resp = await fetch(url, {
       method: "DELETE",
       headers: supabaseHeaders(this.serviceKey),

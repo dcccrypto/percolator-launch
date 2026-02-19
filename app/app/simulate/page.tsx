@@ -24,6 +24,10 @@ import { SimLeaderboard } from "./components/SimLeaderboard";
 import { ScenarioPanel } from "./components/ScenarioPanel";
 import { EventFeed } from "./components/EventFeed";
 import { RiskConceptCards } from "./components/RiskConceptCards";
+import { SimulatorHeader } from "./components/SimulatorHeader";
+import { SimulatorHero } from "./components/SimulatorHero";
+import { SimExplainer } from "./components/SimExplainer";
+import { GuidedWalkthrough } from "./components/GuidedWalkthrough";
 
 const SimOnboarding = dynamic(
   () => import("./components/SimOnboarding").then((m) => ({ default: m.SimOnboarding })),
@@ -99,9 +103,11 @@ function MarketPills({
 function SimInner({
   slabAddress,
   marketKey,
+  onScenarioChange,
 }: {
   slabAddress: string;
   marketKey: string;
+  onScenarioChange?: (scenario: string | null) => void;
 }) {
   const { accounts } = useSlabState();
   const { connected } = useWallet();
@@ -137,6 +143,14 @@ function SimInner({
         hasTraded={hasTraded}
         onDismiss={() => {}}
       />
+
+      {/* Bug fix: GuidedWalkthrough inside SlabProvider so hasCapital is available */}
+      {connected && (
+        <GuidedWalkthrough autoStart={!hasCapital} />
+      )}
+
+      {/* Bug fix: SimExplainer provides live engine-state contextual education */}
+      <SimExplainer />
 
       {/* ══════════════════════════════════════════════════════
           MOBILE  (< lg)
@@ -176,6 +190,8 @@ function SimInner({
               <TradeHistory slabAddress={slabAddress} />
             </ErrorBoundary>
           )}
+          {/* Bug fix: mobile Risk tab was missing CrankHealthCard, SystemCapitalCard,
+              InsuranceLPPanel, LiquidationAnalytics — incomplete vs desktop panel */}
           {mobileTab === 2 && (
             <div className="space-y-2">
               <ErrorBoundary label="Health">
@@ -184,12 +200,24 @@ function SimInner({
               <ErrorBoundary label="Funding">
                 <FundingRateCard slabAddress={slabAddress} />
               </ErrorBoundary>
+              <ErrorBoundary label="CrankHealth">
+                <CrankHealthCard />
+              </ErrorBoundary>
+              <ErrorBoundary label="SystemCapital">
+                <SystemCapitalCard />
+              </ErrorBoundary>
+              <ErrorBoundary label="InsuranceLP">
+                <InsuranceLPPanel />
+              </ErrorBoundary>
+              <ErrorBoundary label="LiqAnalytics">
+                <LiquidationAnalytics />
+              </ErrorBoundary>
             </div>
           )}
           {mobileTab === 3 && (
             <div className="space-y-2">
               <ErrorBoundary label="Scenarios">
-                <ScenarioPanel />
+                <ScenarioPanel onScenarioChange={onScenarioChange} />
               </ErrorBoundary>
               <ErrorBoundary label="Events">
                 <EventFeed />
@@ -290,7 +318,7 @@ function SimInner({
           {/* ── RIGHT: Scenarios + Events + Concepts ── */}
           <div className="bg-[var(--bg)] flex flex-col overflow-auto">
             <ErrorBoundary label="Scenarios">
-              <ScenarioPanel />
+              <ScenarioPanel onScenarioChange={onScenarioChange} />
             </ErrorBoundary>
             <ErrorBoundary label="Events">
               <EventFeed />
@@ -315,50 +343,39 @@ function SimInner({
 /* ─── Page export ────────────────────────────────────────── */
 export default function SimulatePage() {
   const [market, setMarket] = useState("SOL/USD");
+  const [activeScenario, setActiveScenario] = useState<string | null>(null);
+  const { connected } = useWallet();
   const current = MARKETS[market] ?? MARKETS["SOL/USD"];
   const slab = current?.slab ?? "";
 
+  // Build market list for header
+  const marketList = MARKET_KEYS.map((k) => ({ key: k, name: MARKETS[k].name }));
+
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      {/* Header */}
-      <header className="border-b border-[var(--border)]/40 bg-[var(--bg)]/95 backdrop-blur-sm">
-        <div className="flex items-center justify-between px-4 py-2.5">
-          <div className="flex items-center gap-6">
-            <div>
-              <h1
-                className="text-sm font-bold text-[var(--text)]"
-                style={{ fontFamily: "var(--font-display)" }}
-              >
-                Risk Engine Simulator
-              </h1>
-              <span className="text-[9px] uppercase tracking-[0.2em] text-[var(--text-dim)]">
-                Trade on real Percolator markets with simulated funds
-              </span>
-            </div>
-            <MarketPills selected={market} onChange={setMarket} />
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 border border-[var(--border)]/40">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              </span>
-              <span className="text-[9px] font-medium uppercase tracking-widest text-[var(--text-dim)]">
-                Devnet
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
+      {/* Bug fix: use SimulatorHeader component (previously inline JSX with no testids or market props) */}
+      <SimulatorHeader
+        markets={marketList}
+        selectedMarket={market}
+        onMarketChange={setMarket}
+        activeScenario={activeScenario}
+      />
+
+      {/* Bug fix: SimulatorHero shown only when wallet not connected */}
+      {!connected && <SimulatorHero />}
 
       {slab ? (
         <SlabProvider slabAddress={slab}>
           <UsdToggleProvider>
-            <SimInner slabAddress={slab} marketKey={market} />
+            <SimInner
+              slabAddress={slab}
+              marketKey={market}
+              onScenarioChange={setActiveScenario}
+            />
           </UsdToggleProvider>
         </SlabProvider>
       ) : (
-        <SimInner slabAddress="" marketKey={market} />
+        <SimInner slabAddress="" marketKey={market} onScenarioChange={setActiveScenario} />
       )}
     </div>
   );

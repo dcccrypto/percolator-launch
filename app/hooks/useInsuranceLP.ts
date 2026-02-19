@@ -12,6 +12,8 @@ import {
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
+  unpackMint,
+  unpackAccount,
 } from '@solana/spl-token';
 import {
   encodeCreateInsuranceMint,
@@ -101,8 +103,7 @@ export function useInsuranceLP() {
       let userLpBalance = 0n;
 
       if (mintExists) {
-        // Read supply from mint
-        const { unpackMint } = await import('@solana/spl-token');
+        // Read supply from mint (using static import — dynamic import breaks vi.mock in tests)
         const mint = unpackMint(lpMintInfo.mintPda, mintInfo);
         lpSupply = mint.supply;
 
@@ -116,7 +117,6 @@ export function useInsuranceLP() {
             );
             const ataInfo = await connection.getAccountInfo(userLpAta);
             if (ataInfo) {
-              const { unpackAccount } = await import('@solana/spl-token');
               const account = unpackAccount(userLpAta, ataInfo);
               userLpBalance = account.amount;
             }
