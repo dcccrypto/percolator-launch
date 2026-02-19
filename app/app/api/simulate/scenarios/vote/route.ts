@@ -109,22 +109,52 @@ export async function POST(req: NextRequest) {
     const newVoteCount = newVotes.length;
     const shouldActivate = newVoteCount >= VOTES_TO_ACTIVATE;
 
-    // Check cooldown before activation
+    // Check cooldown before activation.
+    // Bug fix: the old check only looked for scenarios activated within COOLDOWN_MS.
+    // That misses (a) scenarios still active that were activated > COOLDOWN_MS ago,
+    // and (b) scenarios that expired within the last COOLDOWN_MS.
+    // Correct logic: block if ANY scenario is currently active, OR if any scenario
+    // expired within the last COOLDOWN_MS.
     if (shouldActivate) {
-      const { data: recentActive } = await db
+      const now = Date.now();
+      const cooldownCutoff = new Date(now - COOLDOWN_MS).toISOString();
+
+      // Case 1: any currently active scenario
+      const { data: anyActive } = await db
         .from("sim_scenarios")
-        .select("id, activated_at")
+        .select("id, expires_at")
         .eq("status", "active")
-        .gte("activated_at", new Date(Date.now() - COOLDOWN_MS).toISOString())
         .limit(1);
 
-      if (recentActive && recentActive.length > 0) {
-        const activatedAt = new Date(recentActive[0].activated_at!).getTime();
-        const cooldownRemaining = Math.ceil((COOLDOWN_MS - (Date.now() - activatedAt)) / 1_000);
+      if (anyActive && anyActive.length > 0) {
+        const expiresAt = anyActive[0].expires_at
+          ? new Date(anyActive[0].expires_at).getTime()
+          : now;
+        const cooldownRemaining = Math.ceil((expiresAt + COOLDOWN_MS - now) / 1_000);
         return NextResponse.json(
           {
-            error: "Cannot activate — cooldown is active from a recently activated scenario",
-            cooldownRemainingSeconds: cooldownRemaining,
+            error: "Cannot activate — a scenario is currently active",
+            cooldownRemainingSeconds: Math.max(0, cooldownRemaining),
+          },
+          { status: 429 },
+        );
+      }
+
+      // Case 2: any scenario that expired within COOLDOWN_MS (status = completed/expired)
+      const { data: recentlyEnded } = await db
+        .from("sim_scenarios")
+        .select("id, expires_at")
+        .in("status", ["completed", "expired"])
+        .gte("expires_at", cooldownCutoff)
+        .limit(1);
+
+      if (recentlyEnded && recentlyEnded.length > 0) {
+        const expiresAt = new Date(recentlyEnded[0].expires_at!).getTime();
+        const cooldownRemaining = Math.ceil((expiresAt + COOLDOWN_MS - now) / 1_000);
+        return NextResponse.json(
+          {
+            error: "Cannot activate — cooldown is active from a recently ended scenario",
+            cooldownRemainingSeconds: Math.max(0, cooldownRemaining),
           },
           { status: 429 },
         );

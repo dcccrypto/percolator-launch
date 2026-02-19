@@ -1,25 +1,26 @@
+import { vi, describe, it, expect, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { WarmupProgress } from "@/components/trade/WarmupProgress";
 import "@testing-library/jest-dom";
 
 // Mock the hooks and dependencies
-jest.mock("@/lib/mock-mode", () => ({
-  isMockMode: jest.fn(() => false),
+vi.mock("@/lib/mock-mode", () => ({
+  isMockMode: vi.fn(() => false),
 }));
 
-jest.mock("@/lib/mock-trade-data", () => ({
-  isMockSlab: jest.fn(() => false),
+vi.mock("@/lib/mock-trade-data", () => ({
+  isMockSlab: vi.fn(() => false),
 }));
 
-global.fetch = jest.fn();
+global.fetch = vi.fn();
 
 describe("WarmupProgress Component", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("should not render when no warmup is active (404 response)", async () => {
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: false,
       status: 404,
     });
@@ -34,7 +35,7 @@ describe("WarmupProgress Component", () => {
   });
 
   it("should render loading state initially", () => {
-    (global.fetch as jest.Mock).mockImplementation(
+    (global.fetch as any).mockImplementation(
       () => new Promise(() => {}) // Never resolves
     );
 
@@ -54,7 +55,7 @@ describe("WarmupProgress Component", () => {
       lockedAmount: "78190000",
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockWarmupData,
     });
@@ -84,7 +85,7 @@ describe("WarmupProgress Component", () => {
       lockedAmount: "0",
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockWarmupData,
     });
@@ -108,7 +109,7 @@ describe("WarmupProgress Component", () => {
       lockedAmount: "78190000",
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockWarmupData,
     });
@@ -122,7 +123,7 @@ describe("WarmupProgress Component", () => {
   });
 
   it("should handle API errors gracefully and fall back to mock data", async () => {
-    (global.fetch as jest.Mock).mockRejectedValueOnce(
+    (global.fetch as any).mockRejectedValueOnce(
       new Error("Network error")
     );
 
@@ -135,7 +136,7 @@ describe("WarmupProgress Component", () => {
   });
 
   it("should refresh data every 5 seconds", async () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
 
     const mockWarmupData = {
       warmupStartedAtSlot: 280000000,
@@ -147,7 +148,7 @@ describe("WarmupProgress Component", () => {
       lockedAmount: "78190000",
     };
 
-    (global.fetch as jest.Mock).mockResolvedValue({
+    (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => mockWarmupData,
     });
@@ -159,13 +160,13 @@ describe("WarmupProgress Component", () => {
     });
 
     // Fast-forward 5 seconds
-    jest.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(5000);
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it("should open explainer modal when 'Why?' is clicked", async () => {
@@ -179,7 +180,7 @@ describe("WarmupProgress Component", () => {
       lockedAmount: "78190000",
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockWarmupData,
     });

@@ -122,21 +122,44 @@ export async function POST(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = getServiceClient() as any;
 
-    // Check cooldown: has any scenario been active in the last 5 minutes?
-    const { data: recentActive } = await db
+    // Check cooldown: block if any scenario is currently active, or ended within COOLDOWN_MS.
+    const now = Date.now();
+    const cooldownCutoff = new Date(now - COOLDOWN_MS).toISOString();
+
+    const { data: anyActive } = await db
       .from("sim_scenarios")
-      .select("id, activated_at")
+      .select("id, expires_at")
       .eq("status", "active")
-      .gte("activated_at", new Date(Date.now() - COOLDOWN_MS).toISOString())
       .limit(1);
 
-    if (recentActive && recentActive.length > 0) {
-      const activatedAt = new Date(recentActive[0].activated_at!).getTime();
-      const cooldownRemaining = Math.ceil((COOLDOWN_MS - (Date.now() - activatedAt)) / 1_000);
+    if (anyActive && anyActive.length > 0) {
+      const expiresAt = anyActive[0].expires_at
+        ? new Date(anyActive[0].expires_at).getTime()
+        : now;
+      const cooldownRemaining = Math.ceil((expiresAt + COOLDOWN_MS - now) / 1_000);
       return NextResponse.json(
         {
-          error: "Cooldown active — another scenario was recently activated",
-          cooldownRemainingSeconds: cooldownRemaining,
+          error: "Cooldown active — a scenario is currently running",
+          cooldownRemainingSeconds: Math.max(0, cooldownRemaining),
+        },
+        { status: 429 },
+      );
+    }
+
+    const { data: recentlyEnded } = await db
+      .from("sim_scenarios")
+      .select("id, expires_at")
+      .in("status", ["completed", "expired"])
+      .gte("expires_at", cooldownCutoff)
+      .limit(1);
+
+    if (recentlyEnded && recentlyEnded.length > 0) {
+      const expiresAt = new Date(recentlyEnded[0].expires_at!).getTime();
+      const cooldownRemaining = Math.ceil((expiresAt + COOLDOWN_MS - now) / 1_000);
+      return NextResponse.json(
+        {
+          error: "Cooldown active — another scenario was recently active",
+          cooldownRemainingSeconds: Math.max(0, cooldownRemaining),
         },
         { status: 429 },
       );

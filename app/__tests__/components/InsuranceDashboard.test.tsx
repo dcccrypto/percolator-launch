@@ -1,24 +1,25 @@
+import { vi, describe, it, expect, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { InsuranceDashboard } from "@/components/market/InsuranceDashboard";
 import "@testing-library/jest-dom";
 
-jest.mock("@/lib/mock-mode", () => ({
-  isMockMode: jest.fn(() => false),
+vi.mock("@/lib/mock-mode", () => ({
+  isMockMode: vi.fn(() => false),
 }));
 
-jest.mock("@/lib/mock-trade-data", () => ({
-  isMockSlab: jest.fn(() => false),
+vi.mock("@/lib/mock-trade-data", () => ({
+  isMockSlab: vi.fn(() => false),
 }));
 
-global.fetch = jest.fn();
+global.fetch = vi.fn();
 
 describe("InsuranceDashboard Component", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("should render loading state initially", () => {
-    (global.fetch as jest.Mock).mockImplementation(
+    (global.fetch as any).mockImplementation(
       () => new Promise(() => {})
     );
 
@@ -40,7 +41,7 @@ describe("InsuranceDashboard Component", () => {
       ],
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockInsuranceData,
     });
@@ -66,7 +67,7 @@ describe("InsuranceDashboard Component", () => {
       ],
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockInsuranceData,
     });
@@ -91,7 +92,7 @@ describe("InsuranceDashboard Component", () => {
       ],
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockInsuranceData,
     });
@@ -116,7 +117,7 @@ describe("InsuranceDashboard Component", () => {
       ],
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockInsuranceData,
     });
@@ -148,7 +149,7 @@ describe("InsuranceDashboard Component", () => {
       ],
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockInsuranceData,
     });
@@ -175,7 +176,7 @@ describe("InsuranceDashboard Component", () => {
       ],
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockInsuranceData,
     });
@@ -205,7 +206,7 @@ describe("InsuranceDashboard Component", () => {
       ],
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => mockInsuranceData,
     });
@@ -224,7 +225,7 @@ describe("InsuranceDashboard Component", () => {
   });
 
   it("should handle API errors gracefully", async () => {
-    (global.fetch as jest.Mock).mockRejectedValueOnce(
+    (global.fetch as any).mockRejectedValueOnce(
       new Error("Network error")
     );
 
@@ -237,7 +238,7 @@ describe("InsuranceDashboard Component", () => {
   });
 
   it("should refresh data every 30 seconds", async () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
 
     const mockInsuranceData = {
       balance: "125432000000",
@@ -250,7 +251,7 @@ describe("InsuranceDashboard Component", () => {
       ],
     };
 
-    (global.fetch as jest.Mock).mockResolvedValue({
+    (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => mockInsuranceData,
     });
@@ -262,12 +263,12 @@ describe("InsuranceDashboard Component", () => {
     });
 
     // Fast-forward 30 seconds
-    jest.advanceTimersByTime(30000);
+    vi.advanceTimersByTime(30000);
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 });
