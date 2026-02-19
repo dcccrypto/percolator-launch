@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "node:http";
 import type { IncomingMessage } from "node:http";
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { eventBus, getSupabase, createLogger, sanitizeSlabAddress } from "@percolator/shared";
 
 const logger = createLogger("api:ws");
@@ -15,19 +15,31 @@ const MAX_GLOBAL_SUBSCRIPTIONS = 1000; // Global subscription cap to prevent DoS
 const MAX_CONNECTIONS_PER_IP = 5; // Max concurrent connections per IP
 
 // Authentication settings
-const WS_AUTH_REQUIRED = process.env.WS_AUTH_REQUIRED === "true";
+// In production, WS_AUTH_REQUIRED must be explicitly set. Defaults to true unless NODE_ENV=development.
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const WS_AUTH_REQUIRED = process.env.WS_AUTH_REQUIRED !== undefined
+  ? process.env.WS_AUTH_REQUIRED === "true"
+  : IS_PRODUCTION; // Default: required in production, optional in development
 const WS_AUTH_SECRET = process.env.WS_AUTH_SECRET;
 const AUTH_TIMEOUT_MS = 5_000; // 5 seconds to authenticate
 
 // Validate WS auth configuration at startup
-if (WS_AUTH_REQUIRED && !WS_AUTH_SECRET) {
-  logger.error("FATAL: WS_AUTH_REQUIRED=true but WS_AUTH_SECRET is not set");
-  logger.error("Please set WS_AUTH_SECRET environment variable or disable WS_AUTH_REQUIRED");
+if (IS_PRODUCTION && !WS_AUTH_SECRET) {
+  logger.error("FATAL: WS_AUTH_SECRET must be set in production");
   process.exit(1);
 }
 
+if (WS_AUTH_REQUIRED && !WS_AUTH_SECRET) {
+  logger.error("FATAL: WS_AUTH_REQUIRED=true but WS_AUTH_SECRET is not set");
+  process.exit(1);
+}
+
+if (!WS_AUTH_SECRET) {
+  logger.warn("WS_AUTH_SECRET not set — using dev-only fallback. DO NOT use in production.");
+}
+
 // Use a fallback secret only for development when auth is not required
-const WS_SECRET = WS_AUTH_SECRET || "percolator-ws-dev-secret-not-for-production";
+const WS_SECRET = WS_AUTH_SECRET || (IS_PRODUCTION ? "" : "percolator-ws-dev-secret-not-for-production");
 
 // BH2: Heartbeat configuration
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
@@ -157,7 +169,9 @@ function verifyWsToken(token: string, expectedSlab?: string): { isValid: boolean
     hmac.update(payload);
     const expectedSignature = hmac.digest("hex");
     
-    if (signature !== expectedSignature) {
+    const sigBuf = Buffer.from(signature, "utf8");
+    const expectedBuf = Buffer.from(expectedSignature, "utf8");
+    if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) {
       return { isValid: false, slabAddress: null };
     }
     
