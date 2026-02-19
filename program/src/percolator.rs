@@ -66,6 +66,7 @@ pub mod constants {
     pub const DEFAULT_FUNDING_MAX_PREMIUM_BPS: i64 = 500;          // cap premium at 5.00%
     pub const DEFAULT_FUNDING_MAX_BPS_PER_SLOT: i64 = 5;           // cap per-slot funding
     pub const DEFAULT_HYPERP_PRICE_CAP_E2BPS: u64 = 10_000;       // 1% per slot max price change for Hyperp
+    pub const DEFAULT_DEX_ORACLE_PRICE_CAP_E2BPS: u64 = 50_000;  // 5% per slot max price change for DEX oracle markets
 
     // Matcher call ABI offsets (67-byte layout)
     // byte 0: tag (u8)
@@ -2486,6 +2487,15 @@ pub mod oracle {
     /// Read oracle price with circuit-breaker clamping.
     /// Reads raw price via `read_price_with_authority`, clamps it against
     /// `config.last_effective_price_e6`, and updates that field to the post-clamped value.
+    /// Returns true if the oracle account is owned by a DEX program (PumpSwap, Raydium CLMM, Meteora DLMM).
+    /// DEX spot prices are vulnerable to flash-loan manipulation and require circuit breaker protection.
+    #[inline]
+    pub fn is_dex_oracle(price_ai: &AccountInfo) -> bool {
+        *price_ai.owner == PUMPSWAP_PROGRAM_ID
+            || *price_ai.owner == RAYDIUM_CLMM_PROGRAM_ID
+            || *price_ai.owner == METEORA_DLMM_PROGRAM_ID
+    }
+
     pub fn read_price_clamped(
         config: &mut super::state::MarketConfig,
         price_ai: &AccountInfo,
@@ -2493,7 +2503,14 @@ pub mod oracle {
         remaining_accounts: &[AccountInfo],
     ) -> Result<u64, ProgramError> {
         let raw = read_price_with_authority(config, price_ai, now_unix_ts, remaining_accounts)?;
-        let clamped = clamp_oracle_price(config.last_effective_price_e6, raw, config.oracle_price_cap_e2bps);
+        // For DEX oracles, enforce minimum circuit breaker cap to mitigate flash-loan attacks.
+        // This protects existing markets that were initialized with cap=0 (pre-fix default).
+        let effective_cap = if is_dex_oracle(price_ai) && config.oracle_price_cap_e2bps < DEFAULT_DEX_ORACLE_PRICE_CAP_E2BPS {
+            DEFAULT_DEX_ORACLE_PRICE_CAP_E2BPS
+        } else {
+            config.oracle_price_cap_e2bps
+        };
+        let clamped = clamp_oracle_price(config.last_effective_price_e6, raw, effective_cap);
         config.last_effective_price_e6 = clamped;
         Ok(clamped)
     }
@@ -3173,8 +3190,9 @@ pub mod processor {
                     authority_timestamp: 0, // In Hyperp mode: stores funding rate (bps per slot)
                     // Oracle price circuit breaker
                     // In Hyperp mode: used for rate-limited index smoothing AND mark price clamping
-                    // Default: disabled for non-Hyperp, 1% per slot for Hyperp
-                    oracle_price_cap_e2bps: if is_hyperp { DEFAULT_HYPERP_PRICE_CAP_E2BPS } else { 0 },
+                    // Non-Hyperp: 5% per slot cap protects against flash-loan manipulation on DEX oracles
+                    // (also harmless for Pyth/Chainlink which already have staleness/confidence checks)
+                    oracle_price_cap_e2bps: if is_hyperp { DEFAULT_HYPERP_PRICE_CAP_E2BPS } else { DEFAULT_DEX_ORACLE_PRICE_CAP_E2BPS },
                     last_effective_price_e6: if is_hyperp { initial_mark_price_e6 } else { 0 },
                 };
                 state::write_config(&mut data, &config);
