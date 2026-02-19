@@ -144,11 +144,13 @@ export const Header: FC = () => {
             ref={badgeRef}
             onClick={handleNetworkSwitch}
             disabled
+            title={network === "devnet" ? "Devnet — test environment, no real funds" : "Mainnet"}
+            aria-label={`Network: ${network}`}
             className={[
-              "rounded-sm px-2 py-1 text-[11px] font-semibold uppercase tracking-wider border transition-all duration-200 cursor-not-allowed opacity-60",
+              "rounded-sm px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider border-2 transition-all duration-200 cursor-not-allowed",
               network === "devnet"
-                ? "text-[var(--warning)]/80 border-[var(--warning)]/15 bg-[var(--warning)]/[0.04]"
-                : "text-[var(--accent)]/80 border-[var(--accent)]/15 bg-[var(--accent)]/[0.04]",
+                ? "text-[var(--warning)] border-[var(--warning)]/40 bg-[var(--warning)]/[0.08]"
+                : "text-[var(--accent)] border-[var(--accent)]/30 bg-[var(--accent)]/[0.06]",
             ].join(" ")}
           >
             {network}

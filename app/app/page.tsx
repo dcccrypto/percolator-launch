@@ -89,6 +89,7 @@ export default function Home() {
   const prefersReduced = usePrefersReducedMotion();
   const [scrollY, setScrollY] = useState(0);
   const [network, setNet] = useState(getConfig().network);
+  const [sysStatus, setSysStatus] = useState<"online" | "degraded" | "offline" | "loading">("loading");
 
   // Hero stagger animation on mount
   useEffect(() => {
@@ -142,6 +143,26 @@ export default function Home() {
     loadStats();
   }, []);
 
+  // Health check for sys.online badge (bug 62549a6c)
+  useEffect(() => {
+    async function checkHealth() {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          setSysStatus(data.status as "online" | "degraded" | "offline");
+        } else {
+          setSysStatus("offline");
+        }
+      } catch {
+        setSysStatus("offline");
+      }
+    }
+    checkHealth();
+    const interval = setInterval(checkHealth, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
   const hasStats = stats.markets > 0;
   const hasMarkets = featured.length > 0 && featured.some((m) => m.volume_24h > 0);
 
@@ -172,15 +193,33 @@ export default function Home() {
             opacity: Math.max(0, 1 - scrollY / 700),
           } : undefined}
         >
-          {/* System status */}
+          {/* System status — dynamic health check (bug 62549a6c) */}
           <div className="hero-stagger mb-5" style={{ opacity: prefersReduced ? 1 : 0 }}>
             <div className="inline-flex items-center gap-3 border border-[var(--border)] bg-[var(--bg)]/80 px-4 py-2 backdrop-blur-sm">
               <span className="relative flex h-1.5 w-1.5">
-                <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 ${network === "mainnet" ? "bg-[var(--long)]" : "bg-[var(--accent)]"}`} />
-                <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${network === "mainnet" ? "bg-[var(--long)]" : "bg-[var(--accent)]"}`} />
+                {sysStatus === "online" && (
+                  <>
+                    <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 ${network === "mainnet" ? "bg-[var(--long)]" : "bg-[var(--accent)]"}`} />
+                    <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${network === "mainnet" ? "bg-[var(--long)]" : "bg-[var(--accent)]"}`} />
+                  </>
+                )}
+                {sysStatus === "degraded" && (
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
+                )}
+                {(sysStatus === "offline" || sysStatus === "loading") && (
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--short)]" />
+                )}
               </span>
-              <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
-                sys.online
+              <span className={`text-[9px] font-medium uppercase tracking-[0.2em] ${
+                sysStatus === "online" ? "text-[var(--text-dim)]" :
+                sysStatus === "degraded" ? "text-[var(--warning)]/70" :
+                sysStatus === "offline" ? "text-[var(--short)]/70" :
+                "text-[var(--text-dim)]"
+              }`}>
+                {sysStatus === "online" ? "sys.online" :
+                 sysStatus === "degraded" ? "sys.degraded" :
+                 sysStatus === "offline" ? "sys.offline" :
+                 "sys.checking"}
               </span>
               <span className="h-2.5 w-px bg-[var(--border)]" />
               <span className="text-[9px] font-medium tracking-[0.15em] text-[var(--text-muted)]">

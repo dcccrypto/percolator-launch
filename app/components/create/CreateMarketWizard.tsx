@@ -514,7 +514,21 @@ const CreationProgress: FC<{
           <div className="mt-6 border border-[var(--accent)]/20 bg-[var(--accent)]/[0.04] p-6 text-center">
             <h3 className="mb-1 text-[15px] font-bold text-white">Market is Live</h3>
             <p className="mb-1 text-[12px] text-[var(--text-secondary)]">Your perpetual futures market has been deployed.</p>
-            <p className="mb-4 font-mono text-[10px] text-[var(--text-dim)] break-all">{state.slabAddress}</p>
+            <div className="mb-3 flex items-center justify-center gap-2">
+              <code className="font-mono text-[10px] text-[var(--accent)]/80 bg-[var(--bg)] border border-[var(--border)] px-3 py-1.5 rounded-sm break-all">
+                {state.slabAddress}
+              </code>
+            </div>
+            <div className="mb-4 flex items-center justify-center gap-3">
+              <a
+                href={`https://explorer.solana.com/address/${state.slabAddress}?cluster=devnet`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] underline transition-colors"
+              >
+                View on Explorer →
+              </a>
+            </div>
             <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
               <Link href={`/trade/${state.slabAddress}`} className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-6 py-2.5 text-[12px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hud-btn-corners hover:bg-[var(--accent)]/[0.15]">
                 Start Trading →

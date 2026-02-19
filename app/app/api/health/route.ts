@@ -1,47 +1,55 @@
 import { NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/supabase";
-import { Connection } from "@solana/web3.js";
-import { getConfig } from "@/lib/config";
 export const dynamic = "force-dynamic";
 
-/**
- * GET /api/health — Extended health check for monitoring
- */
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://percolator-api1-production.up.railway.app";
+
+const RPC_URL =
+  process.env.HELIUS_API_KEY
+    ? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+    : process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
+      "https://api.devnet.solana.com";
+
+async function checkWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 3000
+): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function GET() {
-  const start = Date.now();
-  const checks: Record<string, { status: "ok" | "error"; latencyMs?: number; error?: string }> = {};
+  const [apiOk, rpcOk] = await Promise.all([
+    checkWithTimeout(`${API_URL}/health`, {}, 3000),
+    checkWithTimeout(
+      RPC_URL,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth" }),
+      },
+      3000
+    ),
+  ]);
 
-  try {
-    const t0 = Date.now();
-    const supabase = getServiceClient();
-    const { error } = await supabase.from("markets").select("slab_address", { count: "exact", head: true });
-    checks.supabase = error
-      ? { status: "error", error: error.message, latencyMs: Date.now() - t0 }
-      : { status: "ok", latencyMs: Date.now() - t0 };
-  } catch (e) {
-    checks.supabase = { status: "error", error: e instanceof Error ? e.message : "Unknown" };
-  }
-
-  try {
-    const t0 = Date.now();
-    const cfg = getConfig();
-    const conn = new Connection(cfg.rpcUrl, "confirmed");
-    const slot = await conn.getSlot();
-    checks.solanaRpc = { status: slot > 0 ? "ok" : "error", latencyMs: Date.now() - t0 };
-  } catch (e) {
-    checks.solanaRpc = { status: "error", error: e instanceof Error ? e.message : "Unknown" };
-  }
-
-  const allOk = Object.values(checks).every((c) => c.status === "ok");
+  const status = apiOk && rpcOk ? "online" : apiOk ? "degraded" : "offline";
 
   return NextResponse.json(
+    { status, api: apiOk, rpc: rpcOk, ts: Date.now() },
     {
-      status: allOk ? "healthy" : "degraded",
-      version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "dev",
-      uptime: process.uptime(),
-      checks,
-      totalLatencyMs: Date.now() - start,
-    },
-    { status: allOk ? 200 : 503 }
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    }
   );
 }
