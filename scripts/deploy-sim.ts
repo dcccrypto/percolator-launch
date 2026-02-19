@@ -231,7 +231,7 @@ async function createSimMarket(
     admin: payer.publicKey,
     collateralMint: mint,
     indexFeedId: "0100000000000000000000000000000000000000000000000000000000000000", // non-zero to disable hyperp mode; prices pushed via admin oracle
-    maxStalenessSecs: "3600",
+    maxStalenessSecs: "86400",  // 24h — lenient for sim (oracle may go down)
     confFilterBps: 0,
     invert: 0,
     unitScale: 0,
@@ -299,9 +299,9 @@ async function createSimMarket(
     baseSpreadBps: 20,                    // 0.2% spread
     maxTotalBps: 200,                     // 2% max spread
     impactKBps: 0,                        // no impact
-    liquidityNotionalE6: "50000000000000", // $50M notional
-    maxFillAbs: "0",                      // unlimited
-    maxInventoryAbs: "0",                 // unlimited
+    liquidityNotionalE6: "50000000000000",    // $50M notional
+    maxFillAbs: "100000000000000000",        // 100M units — effectively unlimited for sim
+    maxInventoryAbs: "0",                    // 0 = unlimited inventory
   });
 
   const initMatcherIx = new TransactionInstruction({

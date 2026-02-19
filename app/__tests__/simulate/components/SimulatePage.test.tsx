@@ -363,7 +363,8 @@ describe("SimulatePage", () => {
       expect(screen.getAllByTestId("scenario-panel").length).toBeGreaterThanOrEqual(1);
     });
 
-    it("renders SimLeaderboard with correct market key", () => {
+    // Leaderboard removed from simulate page — focus on core trading UX
+    it.skip("renders SimLeaderboard with correct market key", () => {
       render(<SimulatePage />);
       const boards = screen.getAllByTestId("leaderboard");
       expect(boards.some((b) => b.textContent?.includes("SOL/USD"))).toBe(true);

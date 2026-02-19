@@ -51,8 +51,8 @@ const DEFAULT_VAMM: Required<VammConfig> = {
   maxTotalBps: 200,
   impactKBps: 0,
   liquidityNotionalE6: "10000000000000",
-  maxFillAbs: "0",
-  maxInventoryAbs: "0",
+  maxFillAbs: "100000000000000000",  // effectively unlimited
+  maxInventoryAbs: "0",              // 0 = unlimited inventory
 };
 
 /**
