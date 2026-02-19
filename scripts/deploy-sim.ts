@@ -439,13 +439,29 @@ async function createSimMarket(
   pushCrankTx.add(
     buildIx({ programId: PROGRAM_ID, keys: crankKeys, data: crankData }),
   );
-  await sendAndConfirmTransaction(connection, pushCrankTx, [payer], {
-    commitment: "confirmed",
-    skipPreflight: true,
-  });
-  console.log(
-    `  Initial price pushed: ${Number(market.initialPriceE6) / 1e6} USD`,
-  );
+  // Retry push+crank up to 3 times (devnet can be flaky)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      pushCrankTx.recentBlockhash = blockhash;
+      pushCrankTx.feePayer = payer.publicKey;
+      await sendAndConfirmTransaction(connection, pushCrankTx, [payer], {
+        commitment: "confirmed",
+        skipPreflight: true,
+      });
+      console.log(
+        `  Initial price pushed: ${Number(market.initialPriceE6) / 1e6} USD`,
+      );
+      break;
+    } catch (e) {
+      console.warn(`  Push+crank attempt ${attempt + 1} failed: ${e instanceof Error ? e.message.slice(0, 80) : e}`);
+      if (attempt === 2) {
+        console.warn("  ⚠ Skipping initial crank — oracle service will crank on startup");
+      } else {
+        await sleep(3000);
+      }
+    }
+  }
 
   return slabKp.publicKey.toBase58();
 }
