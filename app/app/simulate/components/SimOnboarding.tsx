@@ -11,10 +11,10 @@ import { getAssociatedTokenAddress } from "@solana/spl-token";
 
 const DISMISS_KEY = "percolator_sim_onboarding_dismissed";
 
-// Read simUSDC mint from env or fall back to empty
-// In production this comes from the config. We guard against empty safely.
+// Read simUSDC mint from config (single source of truth)
+import simMarkets from "@/config/sim-markets.json";
 function getSimMint(): string {
-  return process.env.NEXT_PUBLIC_SIM_USDC_MINT ?? "";
+  return simMarkets.simUSDC?.mint ?? process.env.NEXT_PUBLIC_SIM_USDC_MINT ?? "";
 }
 
 /* ── Checkmark animation ─────────────────────────────────── */
