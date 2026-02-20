@@ -5,8 +5,8 @@ import {
   ConnectionProvider,
   WalletProvider as SolanaWalletProvider,
 } from "@solana/wallet-adapter-react";
-import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import "@solana/wallet-adapter-react-ui/styles.css";
+import { AccessibleWalletModalProvider } from "@/components/wallet/AccessibleWalletModalProvider";
 import { getConfig } from "@/lib/config";
 
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
@@ -21,7 +21,7 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   return (
     <ConnectionProvider endpoint={rpcUrl}>
       <SolanaWalletProvider wallets={wallets} autoConnect>
-        <WalletModalProvider>{children}</WalletModalProvider>
+        <AccessibleWalletModalProvider>{children}</AccessibleWalletModalProvider>
       </SolanaWalletProvider>
     </ConnectionProvider>
   );
