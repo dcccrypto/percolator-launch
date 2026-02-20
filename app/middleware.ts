@@ -60,19 +60,35 @@ export function middleware(request: NextRequest) {
     return response;
   }
 
-  const response = NextResponse.next();
-  addSecurityHeaders(response);
+  // Generate a per-request nonce for CSP using Web Crypto API (Edge Runtime compatible)
+  const nonceBytes = new Uint8Array(16);
+  crypto.getRandomValues(nonceBytes);
+  const nonce = btoa(String.fromCharCode(...nonceBytes));
+
+  // Forward nonce to layout.tsx via request headers
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  addSecurityHeaders(response, nonce);
   return response;
 }
 
-function addSecurityHeaders(response: NextResponse) {
+function addSecurityHeaders(response: NextResponse, nonce?: string) {
+  // CSP with nonce-based inline script protection
+  // - 'unsafe-eval': Required by Solana wallet adapters (Phantom, Solflare) which use
+  //   Function() for transaction serialization. Accepted risk.
+  // - 'unsafe-inline': Fallback for browsers that don't support nonces.
+  //   When nonce is present, CSP2+ browsers ignore 'unsafe-inline' for scripts.
+  // - style-src 'unsafe-inline': Required by Next.js for inline style injection.
+  const scriptNonce = nonce ? `'nonce-${nonce}' ` : "";
   const csp = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.vercel-insights.com",
+    `script-src 'self' ${scriptNonce}'unsafe-eval' 'unsafe-inline' https://cdn.vercel-insights.com`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
-    "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app blob:",
+    "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app https://token.jup.ag blob:",
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
