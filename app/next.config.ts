@@ -27,15 +27,14 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              // Next.js requires unsafe-inline and unsafe-eval; wallet adapters add more
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com",
+              // unsafe-eval: Required by Solana wallet adapters (Function() for tx serialization)
+              // unsafe-inline: Fallback for non-CSP2 browsers; nonce from middleware takes precedence
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.vercel-insights.com https://cdn.jsdelivr.net https://unpkg.com",
+              // unsafe-inline for styles: Required by Next.js inline style injection
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' data: https://fonts.gstatic.com",
-              // Images from various sources (explorer, token logos, CDNs)
               "img-src 'self' data: blob: https:",
-              // RPC calls, Supabase, Helius, Railway API, Pyth, Sentry, Phantom/Solflare
               "connect-src 'self' https: wss: ws://localhost:* ws://127.0.0.1:*",
-              // Wallet adapter popups/iframes
               "frame-src 'self' https://phantom.app https://solflare.com",
               "worker-src 'self' blob:",
               "frame-ancestors 'none'",
