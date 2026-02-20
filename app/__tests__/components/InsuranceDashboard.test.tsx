@@ -191,7 +191,7 @@ describe("InsuranceDashboard Component", () => {
     // Modal should open (would need to verify modal content in real test)
   });
 
-  it("should open top-up modal when 'Top Up Insurance' is clicked", async () => {
+  it("should show disabled top-up button with 'Coming Soon' label", async () => {
     const mockInsuranceData = {
       balance: "125432000000",
       feeRevenue: "12543000000",
@@ -211,14 +211,12 @@ describe("InsuranceDashboard Component", () => {
     render(<InsuranceDashboard slabAddress="test-slab" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Top Up Insurance")).toBeInTheDocument();
+      expect(screen.getByText("Top Up (Coming Soon)")).toBeInTheDocument();
     });
 
-    // Click "Top Up Insurance" button
-    const topUpButton = screen.getByText("Top Up Insurance");
-    fireEvent.click(topUpButton);
-
-    // Modal should open (would verify modal content in real test)
+    // Button should be disabled — insurance top-up not yet implemented
+    const topUpButton = screen.getByText("Top Up (Coming Soon)");
+    expect(topUpButton).toBeDisabled();
   });
 
   it("should handle API errors gracefully", async () => {

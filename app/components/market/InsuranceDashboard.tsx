@@ -290,10 +290,11 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
         {/* Action Buttons */}
         <div className="flex gap-2">
           <button
-            onClick={() => setShowTopUp(true)}
-            className="flex-1 rounded-none border border-[var(--accent)]/30 bg-[var(--accent)]/10 py-2 text-[10px] font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/20"
+            disabled
+            title="Insurance top-up coming soon"
+            className="flex-1 rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)]/50 py-2 text-[10px] font-medium text-[var(--text-dim)] cursor-not-allowed opacity-50"
           >
-            Top Up Insurance
+            Top Up (Coming Soon)
           </button>
           <button
             onClick={() => setShowExplainer(true)}

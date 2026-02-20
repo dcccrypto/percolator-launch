@@ -20,8 +20,86 @@ const KNOWN_TOKENS: Record<string, { symbol: string; name: string }> = {
   A16Gd8AfaPnG6rohE6iPFDf6mr9gk519d6aMUJAperc: { symbol: "PERC", name: "Percolator" },
 };
 
+/** Format a truncated mint address for display (e.g. "A16G...perc") */
+function shortenMint(mint: string): string {
+  if (mint.length <= 8) return mint;
+  return mint.slice(0, 4) + "..." + mint.slice(-4);
+}
+
 /**
- * Fetch token metadata: decimals from on-chain mint, symbol/name from Jupiter.
+ * Extract the Helius RPC URL from a Connection object.
+ * Returns the endpoint URL which contains the API key.
+ */
+function getHeliusRpcUrl(connection: Connection): string | null {
+  try {
+    const endpoint = connection.rpcEndpoint;
+    if (endpoint.includes("helius-rpc.com")) {
+      return endpoint;
+    }
+  } catch {
+    // Not a Helius connection
+  }
+  return null;
+}
+
+/**
+ * Fetch token metadata via Helius DAS API (getAsset).
+ * Uses the same RPC URL we already have — no extra API key needed.
+ */
+async function fetchViaHeliusDAS(
+  rpcUrl: string,
+  mintAddress: string
+): Promise<{ symbol: string; name: string; decimals: number } | null> {
+  try {
+    const res = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: `das-${mintAddress}`,
+        method: "getAsset",
+        params: { id: mintAddress, options: { showFungible: true } },
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) return null;
+
+    const json = await res.json();
+    const result = json?.result;
+    if (!result) return null;
+
+    // DAS returns content.metadata for NFTs and token_info for fungibles
+    const metadata = result.content?.metadata;
+    const tokenInfo = result.token_info;
+
+    const symbol = metadata?.symbol || tokenInfo?.symbol || "";
+    const name = metadata?.name || "";
+    const decimals = tokenInfo?.decimals ?? 6;
+
+    if (symbol && name) {
+      return { symbol, name, decimals };
+    }
+    // Partial match is still useful
+    if (symbol || name) {
+      return { symbol: symbol || shortenMint(mintAddress), name: name || shortenMint(mintAddress), decimals };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch token metadata: decimals from on-chain mint, symbol/name from multiple sources.
+ *
+ * Resolution order:
+ * 1. Well-known tokens (hardcoded)
+ * 2. Helius DAS API (getAsset) — uses existing RPC connection, no extra key
+ * 3. On-chain Metaplex metadata (manual buffer parsing)
+ * 4. Truncated mint address (fallback — never shows "Unknown Token")
+ *
  * Results are cached in-memory.
  */
 export async function fetchTokenMeta(
@@ -39,13 +117,28 @@ export async function fetchTokenMeta(
     decimals = mintInfo.value.data.parsed.info.decimals ?? 6;
   }
 
-  // Check well-known tokens first
+  // 1. Check well-known tokens first
   const known = KNOWN_TOKENS[key];
-  let symbol = known?.symbol ?? key.slice(0, 4) + "...";
-  let name = known?.name ?? "Unknown Token";
+  let symbol = known?.symbol ?? "";
+  let name = known?.name ?? "";
+  let resolved = !!known;
 
-  if (!known) {
-    // Try on-chain Metaplex metadata (works for most SPL tokens)
+  // 2. Try Helius DAS API (preferred — comprehensive, uses existing RPC key)
+  if (!resolved) {
+    const heliusUrl = getHeliusRpcUrl(connection);
+    if (heliusUrl) {
+      const dasMeta = await fetchViaHeliusDAS(heliusUrl, key);
+      if (dasMeta) {
+        symbol = dasMeta.symbol;
+        name = dasMeta.name;
+        decimals = dasMeta.decimals;
+        resolved = true;
+      }
+    }
+  }
+
+  // 3. Fallback: on-chain Metaplex metadata (manual buffer parsing)
+  if (!resolved) {
     const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
     const [metadataPDA] = PublicKey.findProgramAddressSync(
       [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
@@ -57,39 +150,44 @@ export async function fetchTokenMeta(
         const data = metadataAccount.data;
         const MAX_NAME_LEN = 256;
         const MAX_SYM_LEN = 32;
-        
-        // Check minimum buffer size for name length field
+
         if (data.length < 69) {
           throw new Error("Buffer too small for name length");
         }
-        
+
         const nameLen = data.readUInt32LE(65);
         if (nameLen > MAX_NAME_LEN || data.length < 69 + nameLen) {
           throw new Error("Invalid name length or buffer too small");
         }
-        
+
         const nameRaw = data.slice(69, 69 + nameLen).toString("utf8").replace(/\0/g, "").trim();
         const symOffset = 69 + nameLen;
-        
-        // Check buffer size for symbol length field
+
         if (data.length < symOffset + 4) {
           throw new Error("Buffer too small for symbol length");
         }
-        
+
         const symLen = data.readUInt32LE(symOffset);
         if (symLen > MAX_SYM_LEN || data.length < symOffset + 4 + symLen) {
           throw new Error("Invalid symbol length or buffer too small");
         }
-        
+
         const symRaw = data.slice(symOffset + 4, symOffset + 4 + symLen).toString("utf8").replace(/\0/g, "").trim();
         if (nameRaw && symRaw) {
           symbol = symRaw;
           name = nameRaw;
+          resolved = true;
         }
       }
     } catch {
-      // Use fallback defaults (truncated mint address)
+      // Metaplex lookup failed — use fallback
     }
+  }
+
+  // 4. Fallback — show truncated mint address instead of "Unknown Token"
+  if (!resolved) {
+    symbol = shortenMint(key);
+    name = shortenMint(key);
   }
 
   // R2-S14: Sanitize metadata — strip unsafe characters, limit length
