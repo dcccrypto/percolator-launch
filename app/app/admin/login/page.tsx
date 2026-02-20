@@ -60,7 +60,7 @@ export default function AdminLoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className={inputStyle}
-              placeholder="admin@percolator.com"
+              placeholder="email@example.com"
               required
             />
           </div>

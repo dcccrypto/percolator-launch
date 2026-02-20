@@ -8,6 +8,39 @@ export interface TokenMeta {
 
 const cache = new Map<string, TokenMeta>();
 
+// Jupiter token list cache (populated lazily on first miss)
+let jupiterTokenMap: Map<string, { symbol: string; name: string }> | null = null;
+let jupiterFetchPromise: Promise<void> | null = null;
+
+async function loadJupiterTokenList(): Promise<Map<string, { symbol: string; name: string }>> {
+  if (jupiterTokenMap) return jupiterTokenMap;
+  if (jupiterFetchPromise) {
+    await jupiterFetchPromise;
+    return jupiterTokenMap ?? new Map();
+  }
+  jupiterFetchPromise = (async () => {
+    try {
+      const res = await fetch("https://token.jup.ag/all", {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`Jupiter API ${res.status}`);
+      const tokens = (await res.json()) as Array<{ address: string; symbol: string; name: string }>;
+      jupiterTokenMap = new Map();
+      for (const t of tokens) {
+        jupiterTokenMap.set(t.address, { symbol: t.symbol, name: t.name });
+      }
+    } catch {
+      // Jupiter unavailable — use empty map, retry next time
+      jupiterTokenMap = new Map();
+      // Allow retry after 60s
+      setTimeout(() => { jupiterTokenMap = null; jupiterFetchPromise = null; }, 60_000);
+    }
+  })();
+  await jupiterFetchPromise;
+  jupiterFetchPromise = null;
+  return jupiterTokenMap ?? new Map();
+}
+
 /** Strip unsafe characters from token metadata strings */
 function sanitizeTokenString(input: string, maxLen: number): string {
   // M6: Allow alphanumeric, spaces, dashes, dots, underscores, parentheses, $, #, &, and emoji
@@ -41,8 +74,8 @@ export async function fetchTokenMeta(
 
   // Check well-known tokens first
   const known = KNOWN_TOKENS[key];
-  let symbol = known?.symbol ?? key.slice(0, 4) + "...";
-  let name = known?.name ?? "Unknown Token";
+  let symbol = known?.symbol ?? "";
+  let name = known?.name ?? "";
 
   if (!known) {
     // Try on-chain Metaplex metadata (works for most SPL tokens)
@@ -88,8 +121,26 @@ export async function fetchTokenMeta(
         }
       }
     } catch {
-      // Use fallback defaults (truncated mint address)
+      // Metaplex lookup failed — will try Jupiter next
     }
+
+    // If Metaplex didn't resolve, try Jupiter token list
+    if (!symbol || !name) {
+      try {
+        const jupTokens = await loadJupiterTokenList();
+        const jupMeta = jupTokens.get(key);
+        if (jupMeta) {
+          symbol = symbol || jupMeta.symbol;
+          name = name || jupMeta.name;
+        }
+      } catch {
+        // Jupiter unavailable — continue to fallback
+      }
+    }
+
+    // Final fallback: show truncated mint address instead of "Unknown Token"
+    if (!symbol) symbol = key.slice(0, 4) + "…" + key.slice(-4);
+    if (!name) name = key.slice(0, 4) + "…" + key.slice(-4);
   }
 
   // R2-S14: Sanitize metadata — strip unsafe characters, limit length
