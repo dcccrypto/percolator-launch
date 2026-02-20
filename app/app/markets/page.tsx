@@ -171,10 +171,11 @@ function MarketsPageInner() {
           m.mintAddress.toLowerCase().includes(q);
       });
     }
-    // Leverage filter
+    // Leverage filter — exclude markets with invalid leverage (0, NaN, Infinity)
+    // when a filter is active (credit: PhotizoAi #228 for the isFinite guard idea)
     if (leverageFilter !== "all") {
-      const maxLev = parseInt(leverageFilter);
-      list = list.filter((m) => m.maxLeverage >= maxLev);
+      const minLev = parseInt(leverageFilter);
+      list = list.filter((m) => Number.isFinite(m.maxLeverage) && m.maxLeverage >= minLev);
     }
     // Oracle filter
     if (oracleFilter === "admin") {
