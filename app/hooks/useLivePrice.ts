@@ -86,7 +86,18 @@ export function useLivePrice(): PriceState {
       if (!WS_URL) return;
       // Close any existing connection to prevent zombie WS
       if (wsRef.current) {
-        try { wsRef.current.close(); } catch { /* ignore */ }
+        try {
+          // Suppress "closed before established" warning by only closing OPEN/CLOSING sockets
+          if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CLOSING) {
+            wsRef.current.close();
+          } else {
+            // CONNECTING state — attach close-on-open handler to prevent leak
+            const stale = wsRef.current;
+            stale.onopen = () => { try { stale.close(); } catch { /* ignore */ } };
+            stale.onerror = () => {};
+            stale.onmessage = () => {};
+          }
+        } catch { /* ignore */ }
         wsRef.current = null;
       }
       try {
@@ -184,14 +195,22 @@ export function useLivePrice(): PriceState {
       wsConnected.current = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (wsRef.current) {
-        // Unsubscribe before closing to clean up server-side state
+        const sock = wsRef.current;
+        wsRef.current = null;
         try {
-          if (wsRef.current.readyState === WebSocket.OPEN && capturedSlabAddr) {
-            wsRef.current.send(JSON.stringify({ type: "unsubscribe", slabAddress: capturedSlabAddr }));
+          if (sock.readyState === WebSocket.OPEN) {
+            // Unsubscribe before closing to clean up server-side state
+            if (capturedSlabAddr) {
+              sock.send(JSON.stringify({ type: "unsubscribe", slabAddress: capturedSlabAddr }));
+            }
+            sock.close();
+          } else if (sock.readyState === WebSocket.CONNECTING) {
+            // Not yet open — close once it opens to avoid "closed before established" warning
+            sock.onopen = () => { try { sock.close(); } catch { /* ignore */ } };
+            sock.onerror = () => {};
+            sock.onmessage = () => {};
           }
         } catch { /* ignore */ }
-        wsRef.current.close();
-        wsRef.current = null;
       }
     };
   }, [slabAddr]);

@@ -31,8 +31,10 @@ const MOCK_FUNDING: FundingData = {
 };
 
 function formatCountdown(slots: number): string {
+  if (!Number.isFinite(slots) || slots <= 0) return "—";
   // Solana slots ~400ms each → roughly 2.5 slots per second
-  const seconds = Math.floor((slots * 0.4));
+  const seconds = Math.floor(slots * 0.4);
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
@@ -101,9 +103,19 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
   useEffect(() => {
     if (!fundingData) return;
     
+    const { nextFundingSlot, currentSlot } = fundingData;
+    // Skip countdown when slot data is missing/invalid (e.g. on-chain fallback sets both to 0)
+    if (!nextFundingSlot || !currentSlot || !Number.isFinite(nextFundingSlot) || !Number.isFinite(currentSlot)) {
+      setCountdown(0);
+      return;
+    }
+
+    const initialRemaining = nextFundingSlot - currentSlot;
+    setCountdown(Math.max(0, initialRemaining));
+    
+    // Decrement by ~2.5 slots per second (Solana's ~400ms slot time)
     const interval = setInterval(() => {
-      const remaining = fundingData.nextFundingSlot - fundingData.currentSlot;
-      setCountdown(Math.max(0, remaining));
+      setCountdown((prev) => Math.max(0, prev - 2.5));
     }, 1000);
     
     return () => clearInterval(interval);

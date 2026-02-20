@@ -31,7 +31,7 @@ export default function NotFound() {
         </div>
         
         <h1 className="mb-3 text-2xl font-semibold text-white" style={{ fontFamily: "var(--font-heading)" }}>
-          Market Not Found
+          Page Not Found
         </h1>
         
         <p className="mb-8 text-[13px] leading-relaxed text-[var(--text-secondary)]">
