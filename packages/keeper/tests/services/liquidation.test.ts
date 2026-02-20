@@ -104,6 +104,16 @@ vi.mock('@percolator/shared', () => ({
   eventBus: {
     publish: vi.fn(),
   },
+  acquireToken: vi.fn(async () => {}),
+  getFallbackConnection: vi.fn(() => ({
+    getAccountInfo: vi.fn(),
+    getLatestBlockhash: vi.fn(async () => ({
+      blockhash: 'mock-blockhash',
+      lastValidBlockHeight: 1000000,
+    })),
+    sendRawTransaction: vi.fn(async () => 'mock-tx-signature'),
+  })),
+  backoffMs: vi.fn(() => 100),
 }));
 
 import { PublicKey, ComputeBudgetProgram } from '@solana/web3.js';

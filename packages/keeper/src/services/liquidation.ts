@@ -18,10 +18,46 @@ import {
   derivePythPushOraclePDA,
   type DiscoveredMarket,
 } from "@percolator/core";
-import { config, getConnection, loadKeypair, sendWithRetry, pollSignatureStatus, getRecentPriorityFees, checkTransactionSize, eventBus, createLogger, sendWarningAlert } from "@percolator/shared";
+import { config, getConnection, loadKeypair, sendWithRetry, pollSignatureStatus, getRecentPriorityFees, checkTransactionSize, eventBus, createLogger, sendWarningAlert, acquireToken, getFallbackConnection, backoffMs } from "@percolator/shared";
 import { OracleService } from "./oracle.js";
 
 const logger = createLogger("keeper:liquidation");
+
+/**
+ * Rate-limited fetchSlab with automatic fallback to secondary RPC.
+ * Retries up to 3 times with exponential backoff on rate-limit (429) or
+ * transient network errors, falling back to the secondary RPC on 429.
+ */
+async function fetchSlabWithRetry(
+  slabPubkey: PublicKey,
+  maxRetries = 3,
+): Promise<Uint8Array> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const conn = attempt === 0 ? getConnection() : getFallbackConnection();
+    try {
+      await acquireToken();
+      return await fetchSlab(conn, slabPubkey);
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      const isRetryable = msg.includes("429") || msg.includes("too many requests")
+        || msg.includes("rate limit") || msg.includes("timeout")
+        || msg.includes("socket") || msg.includes("econnrefused")
+        || msg.includes("502") || msg.includes("503");
+      if (!isRetryable || attempt >= maxRetries - 1) break;
+      const delay = backoffMs(attempt, 500, 8_000);
+      logger.warn("fetchSlab retrying", {
+        slabAddress: slabPubkey.toBase58(),
+        attempt: attempt + 1,
+        delayMs: Math.round(delay),
+        error: msg.slice(0, 120),
+      });
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
 
 // BL2: Extract magic numbers to named constants
 const PRICE_E6_DIVISOR = 1_000_000n; // Price precision divisor (6 decimals)
@@ -60,11 +96,10 @@ export class LiquidationService {
    * Scan a single market for undercollateralized accounts.
    */
   async scanMarket(market: DiscoveredMarket): Promise<LiquidationCandidate[]> {
-    const connection = getConnection();
     const slabAddress = market.slabAddress.toBase58();
 
     try {
-      const data = await fetchSlab(connection, market.slabAddress);
+      const data = await fetchSlabWithRetry(market.slabAddress);
       const engine = parseEngine(data);
       const params = parseParams(data);
       const cfg = parseConfig(data);
@@ -231,7 +266,7 @@ export class LiquidationService {
 
       // Bug 3: Re-read slab data and verify account before submitting
       {
-        const freshData = await fetchSlab(connection, slabAddress);
+        const freshData = await fetchSlabWithRetry(slabAddress);
         const freshEngine = parseEngine(freshData);
         const freshParams = parseParams(freshData);
         const freshCfg = parseConfig(freshData);
@@ -380,14 +415,38 @@ export class LiquidationService {
     let candidateCount = 0;
     let liquidated = 0;
 
-    for (const [, state] of markets) {
-      const candidates = await this.scanMarket(state.market);
-      scanned++;
-      candidateCount += candidates.length;
+    // Process markets in batches to avoid RPC rate-limit bursts.
+    // Batch size of 10 keeps us well within Helius free-tier (100 req/10s).
+    const BATCH_SIZE = 10;
+    const BATCH_DELAY_MS = 1_200; // ~1.2s pause between batches
+    const entries = Array.from(markets.values());
 
-      for (const candidate of candidates) {
-        const sig = await this.liquidate(state.market, candidate.accountIdx);
-        if (sig) liquidated++;
+    for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+      const batch = entries.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.allSettled(
+        batch.map((state) => this.scanMarket(state.market)),
+      );
+
+      for (let j = 0; j < batchResults.length; j++) {
+        scanned++;
+        const result = batchResults[j]!;
+        if (result.status === "rejected") {
+          logger.error("Market scan rejected", { error: result.reason });
+          continue;
+        }
+        const candidates = result.value;
+        candidateCount += candidates.length;
+
+        // Liquidations are sequential (each is a transaction)
+        for (const candidate of candidates) {
+          const sig = await this.liquidate(batch[j]!.market, candidate.accountIdx);
+          if (sig) liquidated++;
+        }
+      }
+
+      // Pause between batches (skip after last batch)
+      if (i + BATCH_SIZE < entries.length) {
+        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
       }
     }
 
