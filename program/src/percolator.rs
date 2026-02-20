@@ -1686,6 +1686,7 @@ pub mod units {
 pub mod oracle {
     use solana_program::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
     use crate::error::PercolatorError;
+    use crate::constants::DEFAULT_DEX_ORACLE_PRICE_CAP_E2BPS;
 
     // SECURITY (H5): The "devnet" feature disables critical oracle safety checks:
     // - Staleness validation (stale prices accepted)
@@ -2910,7 +2911,7 @@ pub mod processor {
         constants::{MAGIC, VERSION, SLAB_LEN, CONFIG_LEN, MATCHER_CONTEXT_LEN, MATCHER_CALL_TAG, MATCHER_CALL_LEN, MATCHER_CONTEXT_PREFIX_LEN,
             DEFAULT_FUNDING_HORIZON_SLOTS, DEFAULT_FUNDING_K_BPS, DEFAULT_FUNDING_INV_SCALE_NOTIONAL_E6, DEFAULT_FUNDING_MAX_PREMIUM_BPS, DEFAULT_FUNDING_MAX_BPS_PER_SLOT,
             DEFAULT_THRESH_FLOOR, DEFAULT_THRESH_RISK_BPS, DEFAULT_THRESH_UPDATE_INTERVAL_SLOTS, DEFAULT_THRESH_STEP_BPS, DEFAULT_THRESH_ALPHA_BPS, DEFAULT_THRESH_MIN, DEFAULT_THRESH_MAX, DEFAULT_THRESH_MIN_STEP,
-            DEFAULT_HYPERP_PRICE_CAP_E2BPS},
+            DEFAULT_HYPERP_PRICE_CAP_E2BPS, DEFAULT_DEX_ORACLE_PRICE_CAP_E2BPS},
         error::{PercolatorError, map_risk_error},
         oracle,
         collateral,
