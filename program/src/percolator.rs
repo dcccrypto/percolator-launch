@@ -1146,6 +1146,49 @@ pub mod ix {
         UnpauseMarket,
         /// Two-step admin transfer: Step 2 — pending admin accepts the role.
         AcceptAdmin,
+
+        /// Set the insurance withdrawal policy on a resolved market (Tag 30).
+        ///
+        /// Admin only. Creates/updates an `InsuranceWithdrawPolicy` PDA account at
+        /// `[b"ins_policy", slab_key]` with the given parameters.
+        ///
+        /// Accounts:
+        ///   0. `[signer, writable]` Admin (payer for policy account creation)
+        ///   1. `[writable]` Slab account
+        ///   2. `[writable]` Policy PDA (derived: [b"ins_policy", slab_key], created if needed)
+        ///   3. `[]` System program (for account creation)
+        SetInsuranceWithdrawPolicy {
+            /// Pubkey authorized to call `WithdrawInsuranceLimited`
+            authority: Pubkey,
+            /// Minimum withdrawal amount in base token lamports
+            min_withdraw_base: u64,
+            /// Maximum withdrawal per epoch as bps of insurance balance (10_000 = 100%)
+            max_withdraw_bps: u16,
+            /// Minimum slots between withdrawals (cooldown)
+            cooldown_slots: u64,
+        },
+
+        /// Withdraw a limited amount from the insurance fund (Tag 31).
+        ///
+        /// Callable by the policy authority (not necessarily admin). Requires:
+        ///   - Market is RESOLVED
+        ///   - SetInsuranceWithdrawPolicy called first
+        ///   - Cooldown elapsed since last withdrawal
+        ///   - Amount within per-epoch bps cap
+        ///
+        /// Accounts:
+        ///   0. `[signer]` Authority (must match policy.authority)
+        ///   1. `[writable]` Slab account
+        ///   2. `[writable]` Authority's token account (destination)
+        ///   3. `[writable]` Insurance vault token account (source)
+        ///   4. `[]` Token program
+        ///   5. `[]` Vault authority PDA
+        ///   6. `[writable]` Policy PDA (updated: last_withdraw_slot, epoch_drawn)
+        ///   7. `[]` Clock sysvar
+        WithdrawInsuranceLimited {
+            /// Amount to withdraw in base token lamports
+            amount: u64,
+        },
     }
 
     impl Instruction {
@@ -1298,6 +1341,44 @@ pub mod ix {
                 TAG_PAUSE_MARKET => Ok(Instruction::PauseMarket),
                 TAG_UNPAUSE_MARKET => Ok(Instruction::UnpauseMarket),
                 TAG_ACCEPT_ADMIN => Ok(Instruction::AcceptAdmin),
+                TAG_SET_INSURANCE_WITHDRAW_POLICY => {
+                    // SetInsuranceWithdrawPolicy (Tag 30):
+                    // authority(32) + min_withdraw_base(8) + max_withdraw_bps(2) + cooldown_slots(8) = 50 bytes
+                    if rest.len() < 50 {
+                        return Err(ProgramError::InvalidInstructionData);
+                    }
+                    let authority = {
+                        let arr: [u8; 32] = rest[..32]
+                            .try_into()
+                            .map_err(|_| ProgramError::InvalidInstructionData)?;
+                        Pubkey::from(arr)
+                    };
+                    let min_withdraw_base = u64::from_le_bytes(
+                        rest[32..40].try_into().map_err(|_| ProgramError::InvalidInstructionData)?
+                    );
+                    let max_withdraw_bps = u16::from_le_bytes(
+                        rest[40..42].try_into().map_err(|_| ProgramError::InvalidInstructionData)?
+                    );
+                    let cooldown_slots = u64::from_le_bytes(
+                        rest[42..50].try_into().map_err(|_| ProgramError::InvalidInstructionData)?
+                    );
+                    Ok(Instruction::SetInsuranceWithdrawPolicy {
+                        authority,
+                        min_withdraw_base,
+                        max_withdraw_bps,
+                        cooldown_slots,
+                    })
+                }
+                TAG_WITHDRAW_INSURANCE_LIMITED => {
+                    // WithdrawInsuranceLimited (Tag 31): amount(8 bytes)
+                    if rest.len() < 8 {
+                        return Err(ProgramError::InvalidInstructionData);
+                    }
+                    let amount = u64::from_le_bytes(
+                        rest[..8].try_into().map_err(|_| ProgramError::InvalidInstructionData)?
+                    );
+                    Ok(Instruction::WithdrawInsuranceLimited { amount })
+                }
                 _ => Err(ProgramError::InvalidInstructionData),
             }
         }
@@ -5098,6 +5179,269 @@ pub mod processor {
                 header.pending_admin = [0u8; 32];
                 state::write_header(&mut data, &header);
                 msg!("Admin transfer accepted");
+            }
+
+            Instruction::SetInsuranceWithdrawPolicy {
+                authority,
+                min_withdraw_base,
+                max_withdraw_bps,
+                cooldown_slots,
+            } => {
+                // SetInsuranceWithdrawPolicy (Tag 30) — admin only.
+                // Creates or updates an InsuranceWithdrawPolicy PDA account.
+                // PDA seeds: [b"ins_policy", slab_key]
+                //
+                // Accounts:
+                //   0. [signer, writable] Admin (rent payer)
+                //   1. [writable]         Slab
+                //   2. [writable]         Policy PDA (ins_policy, created if needed)
+                //   3. []                 System program
+                accounts::expect_len(accounts, 4)?;
+                let a_admin  = &accounts[0];
+                let a_slab   = &accounts[1];
+                let a_policy = &accounts[2];
+                let a_system = &accounts[3];
+
+                accounts::expect_signer(a_admin)?;
+                accounts::expect_writable(a_slab)?;
+                accounts::expect_writable(a_policy)?;
+
+                // Verify system program
+                if *a_system.key != solana_program::system_program::id() {
+                    return Err(ProgramError::IncorrectProgramId);
+                }
+
+                let data = state::slab_data_mut(a_slab)?;
+                slab_guard(program_id, a_slab, &data)?;
+                require_initialized(&data)?;
+
+                let header = state::read_header(&data);
+                require_admin(header.admin, a_admin.key)?;
+
+                // Market must be resolved before a policy can be set
+                if !state::is_resolved(&data) {
+                    return Err(ProgramError::InvalidAccountData);
+                }
+                drop(data);
+
+                // Validate params: bps must be <= 10_000 (100%)
+                if max_withdraw_bps > 10_000 {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+                // authority must not be the default pubkey
+                if authority == Pubkey::default() {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+
+                // Derive policy PDA
+                let policy_seeds: &[&[u8]] = &[b"ins_policy", a_slab.key.as_ref()];
+                let (expected_policy, policy_bump) =
+                    Pubkey::find_program_address(policy_seeds, program_id);
+                if *a_policy.key != expected_policy {
+                    return Err(ProgramError::InvalidArgument);
+                }
+
+                // InsuranceWithdrawPolicy layout (49 bytes):
+                //   [0..32]  authority
+                //   [32..40] min_withdraw_base (u64 LE)
+                //   [40..42] max_withdraw_bps (u16 LE)
+                //   [42..50] cooldown_slots (u64 LE)
+                //   [50..58] last_withdraw_slot (u64 LE, starts at 0)
+                //   [58..66] epoch_drawn (u64 LE, starts at 0)
+                //   [66]     bump (u8)
+                const POLICY_LEN: usize = 67;
+
+                let is_new = a_policy.data_is_empty();
+                if is_new {
+                    // Create the account
+                    let lamports = solana_program::rent::Rent::get()?.minimum_balance(POLICY_LEN);
+                    let bump_bytes = [policy_bump];
+                    let signer_seeds: &[&[u8]] = &[b"ins_policy", a_slab.key.as_ref(), &bump_bytes];
+                    solana_program::program::invoke_signed(
+                        &solana_program::system_instruction::create_account(
+                            a_admin.key,
+                            &expected_policy,
+                            lamports,
+                            POLICY_LEN as u64,
+                            program_id,
+                        ),
+                        &[a_admin.clone(), a_policy.clone()],
+                        &[signer_seeds],
+                    )?;
+                }
+
+                // Write policy fields
+                let mut pdata = a_policy.try_borrow_mut_data()?;
+                if pdata.len() < POLICY_LEN {
+                    return Err(ProgramError::AccountDataTooSmall);
+                }
+                pdata[0..32].copy_from_slice(authority.as_ref());
+                pdata[32..40].copy_from_slice(&min_withdraw_base.to_le_bytes());
+                pdata[40..42].copy_from_slice(&max_withdraw_bps.to_le_bytes());
+                pdata[42..50].copy_from_slice(&cooldown_slots.to_le_bytes());
+                // On fresh creation: initialise tracking fields to zero.
+                // On update: preserve last_withdraw_slot and epoch_drawn (don't reset cooldown).
+                if is_new {
+                    pdata[50..58].copy_from_slice(&0u64.to_le_bytes()); // last_withdraw_slot
+                    pdata[58..66].copy_from_slice(&0u64.to_le_bytes()); // epoch_drawn
+                }
+                pdata[66] = policy_bump;
+
+                msg!("InsuranceWithdrawPolicy set: authority={}, min={}, max_bps={}, cooldown={}",
+                    authority, min_withdraw_base, max_withdraw_bps, cooldown_slots);
+            }
+
+            Instruction::WithdrawInsuranceLimited { amount } => {
+                // WithdrawInsuranceLimited (Tag 31) — policy authority only.
+                // Withdraws up to `amount` base tokens from the insurance vault,
+                // subject to policy constraints (cooldown, bps cap).
+                //
+                // Accounts:
+                //   0. [signer]    Authority (must match policy.authority)
+                //   1. [writable]  Slab
+                //   2. [writable]  Authority's token account (destination)
+                //   3. [writable]  Insurance vault token account (source)
+                //   4. []          Token program
+                //   5. []          Vault authority PDA
+                //   6. [writable]  Policy PDA
+                //   7. []          Clock sysvar
+                accounts::expect_len(accounts, 8)?;
+                let a_auth      = &accounts[0];
+                let a_slab      = &accounts[1];
+                let a_dest      = &accounts[2];
+                let a_vault     = &accounts[3];
+                let a_token     = &accounts[4];
+                let a_vault_pda = &accounts[5];
+                let a_policy    = &accounts[6];
+                let a_clock     = &accounts[7];
+
+                accounts::expect_signer(a_auth)?;
+                accounts::expect_writable(a_slab)?;
+                accounts::expect_writable(a_policy)?;
+                verify_token_program(a_token)?;
+
+                let clock = Clock::from_account_info(a_clock)?;
+
+                // Read and validate slab
+                let mut slab_data = state::slab_data_mut(a_slab)?;
+                slab_guard(program_id, a_slab, &slab_data)?;
+                require_initialized(&slab_data)?;
+
+                // Must be resolved
+                if !state::is_resolved(&slab_data) {
+                    return Err(ProgramError::InvalidAccountData);
+                }
+
+                let config = state::read_config(&slab_data);
+                let mint = Pubkey::new_from_array(config.collateral_mint);
+                let (vault_auth, _) = accounts::derive_vault_authority(program_id, a_slab.key);
+                verify_vault(a_vault, &vault_auth, &mint, &Pubkey::new_from_array(config.vault_pubkey))?;
+                verify_token_account(a_dest, a_auth.key, &mint)?;
+                accounts::expect_key(a_vault_pda, &vault_auth)?;
+
+                // Derive and validate policy PDA
+                let (expected_policy, _) =
+                    Pubkey::find_program_address(&[b"ins_policy", a_slab.key.as_ref()], program_id);
+                if *a_policy.key != expected_policy {
+                    return Err(ProgramError::InvalidArgument);
+                }
+
+                // Read policy
+                const POLICY_LEN: usize = 67;
+                let mut pdata = a_policy.try_borrow_mut_data()?;
+                if pdata.len() < POLICY_LEN {
+                    return Err(ProgramError::AccountDataTooSmall);
+                }
+
+                let policy_authority = Pubkey::from(<[u8; 32]>::try_from(&pdata[0..32]).map_err(|_| ProgramError::InvalidAccountData)?);
+                let min_withdraw_base = u64::from_le_bytes(pdata[32..40].try_into().map_err(|_| ProgramError::InvalidAccountData)?);
+                let max_withdraw_bps  = u16::from_le_bytes(pdata[40..42].try_into().map_err(|_| ProgramError::InvalidAccountData)?);
+                let cooldown_slots    = u64::from_le_bytes(pdata[42..50].try_into().map_err(|_| ProgramError::InvalidAccountData)?);
+                let last_withdraw_slot= u64::from_le_bytes(pdata[50..58].try_into().map_err(|_| ProgramError::InvalidAccountData)?);
+                let epoch_drawn       = u64::from_le_bytes(pdata[58..66].try_into().map_err(|_| ProgramError::InvalidAccountData)?);
+
+                // Verify authority
+                if *a_auth.key != policy_authority {
+                    return Err(ProgramError::MissingRequiredSignature);
+                }
+
+                // Cooldown check
+                if clock.slot < last_withdraw_slot.saturating_add(cooldown_slots) {
+                    msg!("Withdrawal cooldown not elapsed: slot={}, last={}, cooldown={}",
+                        clock.slot, last_withdraw_slot, cooldown_slots);
+                    return Err(ProgramError::InvalidAccountData);
+                }
+
+                // Minimum amount check
+                if amount < min_withdraw_base {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+
+                // --- Phase 1: Compute actual_amount inside a block, then release slab borrow ---
+                let (actual_amount, new_balance, vault_bump) = {
+                    let engine = zc::engine_mut(&mut slab_data)?;
+                    let insurance_units: u128 = engine.insurance_fund.balance.get();
+                    let insurance_base = crate::units::units_to_base_checked(
+                        if insurance_units > u64::MAX as u128 { u64::MAX } else { insurance_units as u64 },
+                        config.unit_scale,
+                    ).ok_or(PercolatorError::EngineOverflow)?;
+
+                    // Per-epoch bps cap
+                    let is_new_epoch = last_withdraw_slot == 0
+                        || clock.slot >= last_withdraw_slot.saturating_add(cooldown_slots);
+                    let current_epoch_drawn = if is_new_epoch { 0u64 } else { epoch_drawn };
+                    let epoch_cap = if max_withdraw_bps == 0 {
+                        u64::MAX
+                    } else {
+                        (insurance_base as u128)
+                            .saturating_mul(max_withdraw_bps as u128)
+                            .saturating_div(10_000) as u64
+                    };
+
+                    let remaining_cap = epoch_cap.saturating_sub(current_epoch_drawn);
+                    let actual = amount.min(remaining_cap).min(insurance_base);
+
+                    if actual == 0 {
+                        msg!("Nothing to withdraw (cap exhausted or insurance empty)");
+                        return Ok(());
+                    }
+
+                    // Deduct from insurance fund
+                    let (units_to_deduct, _dust) = crate::units::base_to_units(actual, config.unit_scale);
+                    let new_bal = insurance_units.saturating_sub(units_to_deduct as u128);
+                    engine.insurance_fund.balance = percolator::U128::new(new_bal);
+
+                    // Pre-compute updated epoch_drawn for later
+                    let new_epoch_drawn = current_epoch_drawn.saturating_add(actual);
+                    (actual, (new_bal, new_epoch_drawn), config.vault_authority_bump)
+                };
+                let (new_ins_balance, new_epoch_drawn) = new_balance;
+
+                // --- Phase 2: CPI transfer (no slab borrow held) ---
+                let seed1: &[u8] = b"vault";
+                let seed2: &[u8] = a_slab.key.as_ref();
+                let bump_bytes = [vault_bump];
+                let seed3: &[u8] = &bump_bytes;
+                let seeds: [&[u8]; 3] = [seed1, seed2, seed3];
+                let signer_seeds: [&[&[u8]]; 1] = [&seeds];
+
+                drop(slab_data); // release slab borrow before CPI
+
+                collateral::withdraw(
+                    a_token,
+                    a_vault,
+                    a_dest,
+                    a_vault_pda,
+                    actual_amount,
+                    &signer_seeds,
+                )?;
+
+                // --- Phase 3: Update policy state ---
+                pdata[50..58].copy_from_slice(&clock.slot.to_le_bytes()); // last_withdraw_slot
+                pdata[58..66].copy_from_slice(&new_epoch_drawn.to_le_bytes()); // epoch_drawn
+
+                msg!("WithdrawInsuranceLimited: withdrew {} base tokens, insurance_units_remaining={}",
+                    actual_amount, new_ins_balance);
             }
         }
         Ok(())

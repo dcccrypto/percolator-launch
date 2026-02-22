@@ -41,9 +41,9 @@ pub const TAG_UNPAUSE_MARKET: u8 = 28;
 // ═══════════════════════════════════════════════════════════════
 /// Two-step admin transfer: new admin accepts the proposal.
 pub const TAG_ACCEPT_ADMIN: u8 = 29;
-/// Reserved for percolator-stake CPI — not yet implemented.
+/// Set insurance withdrawal policy on a resolved market (PERC-110).
 pub const TAG_SET_INSURANCE_WITHDRAW_POLICY: u8 = 30;
-/// Reserved for percolator-stake CPI — not yet implemented.
+/// Withdraw limited amount from insurance fund per policy (PERC-110).
 pub const TAG_WITHDRAW_INSURANCE_LIMITED: u8 = 31;
 
 #[cfg(test)]
@@ -67,6 +67,7 @@ mod tests {
             TAG_CREATE_INSURANCE_MINT, TAG_DEPOSIT_INSURANCE_LP,
             TAG_WITHDRAW_INSURANCE_LP, TAG_PAUSE_MARKET, TAG_UNPAUSE_MARKET,
             TAG_ACCEPT_ADMIN,
+            TAG_SET_INSURANCE_WITHDRAW_POLICY, TAG_WITHDRAW_INSURANCE_LIMITED,
         ];
 
         for i in 0..tags.len() {
@@ -93,6 +94,7 @@ mod tests {
             TAG_CREATE_INSURANCE_MINT, TAG_DEPOSIT_INSURANCE_LP,
             TAG_WITHDRAW_INSURANCE_LP, TAG_PAUSE_MARKET, TAG_UNPAUSE_MARKET,
             TAG_ACCEPT_ADMIN,
+            TAG_SET_INSURANCE_WITHDRAW_POLICY, TAG_WITHDRAW_INSURANCE_LIMITED,
         ];
 
         for (i, &tag) in tags.iter().enumerate() {
