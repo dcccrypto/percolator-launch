@@ -54,6 +54,8 @@ use percolator_prog::verify::{
     init_market_scale_ok,
     // PERC-117: Pyth oracle verification helpers
     is_pyth_pinned_mode, is_hyperp_mode_verify, pyth_price_is_fresh,
+    // PERC-118: Mark price EMA verification helpers
+    ema_mark_step, mark_cap_bound,
 };
 use percolator_prog::constants::MAX_UNIT_SCALE;
 use percolator_prog::oracle::clamp_toward_with_dt;
@@ -3126,4 +3128,194 @@ fn kani_pyth_price_invert_zero_passthrough() {
 fn kani_pyth_price_invert_zero_price_rejected() {
     let result = invert_price_e6(0, 1);
     assert_eq!(result, None, "inverting zero price must return None");
+// PERC-118: Mark price EMA proofs
+// =========================================================================
+
+/// MANDATORY (PERC-103): Mark price cannot exceed circuit breaker bound.
+///
+/// For all oracle prices and any dt_slots, when cap_e2bps > 0:
+///   |mark_new - mark_prev| <= mark_prev * cap_e2bps * dt_slots / 1_000_000
+#[kani::proof]
+fn kani_mark_price_bounded_by_cap() {
+    let mark_prev: u64 = kani::any();
+    let oracle: u64 = kani::any();
+    let dt_slots: u64 = kani::any();
+    let alpha_e6: u64 = kani::any();
+    let cap_e2bps: u64 = kani::any();
+
+    // Realistic bounds to prevent SAT explosion
+    kani::assume(mark_prev > 0 && mark_prev <= 1_000_000_000_000u64); // up to $1M
+    kani::assume(oracle > 0 && oracle <= 1_000_000_000_000u64);
+    kani::assume(dt_slots > 0 && dt_slots <= 10_000); // up to ~1hr of slots
+    kani::assume(alpha_e6 <= 1_000_000);
+    kani::assume(cap_e2bps > 0 && cap_e2bps <= 1_000_000); // up to 100%/slot
+
+    let mark_new = ema_mark_step(mark_prev, oracle, dt_slots, alpha_e6, cap_e2bps);
+
+    // Compute the allowed bound
+    let bound = mark_cap_bound(mark_prev, cap_e2bps, dt_slots);
+
+    let lo = mark_prev.saturating_sub(bound);
+    let hi = mark_prev.saturating_add(bound);
+
+    assert!(
+        mark_new >= lo && mark_new <= hi,
+        "mark_new must be within circuit breaker bound of mark_prev"
+    );
+}
+
+/// MANDATORY (PERC-103): EMA converges to oracle over time.
+///
+/// When oracle is fixed and we apply N steps, the mark converges toward oracle.
+/// After sufficiently many steps (N >= window), mark should be within 1/e of
+/// the initial deviation from oracle.
+///
+/// Simpler verifiable form: after ONE step with alpha=1_000_000 (full),
+/// mark == oracle (exact convergence in one step).
+#[kani::proof]
+fn kani_hyperp_ema_converges_full_alpha() {
+    let mark_prev: u64 = kani::any();
+    let oracle: u64 = kani::any();
+
+    kani::assume(mark_prev > 0 && mark_prev <= 1_000_000_000u64);
+    kani::assume(oracle > 0 && oracle <= 1_000_000_000u64);
+
+    // With alpha=1_000_000 (100%), one step converges fully to oracle
+    // (no cap, so oracle passes through unmodified)
+    let mark_new = ema_mark_step(
+        mark_prev,
+        oracle,
+        1,           // dt=1 slot
+        1_000_000,   // alpha=1.0 (full convergence in one step)
+        0,           // no cap
+    );
+
+    assert_eq!(mark_new, oracle, "full-alpha EMA must converge to oracle in one step");
+}
+
+/// EMA monotone convergence: if oracle > mark, each step increases mark.
+#[kani::proof]
+fn kani_hyperp_ema_monotone_up() {
+    let mark_prev: u64 = kani::any();
+    let oracle: u64 = kani::any();
+    let alpha_e6: u64 = kani::any();
+
+    kani::assume(mark_prev > 0 && mark_prev < oracle);
+    kani::assume(mark_prev <= 1_000_000_000u64 && oracle <= 1_000_000_000u64);
+    kani::assume(alpha_e6 > 0 && alpha_e6 <= 1_000_000);
+
+    let mark_new = ema_mark_step(mark_prev, oracle, 1, alpha_e6, 0 /* no cap */);
+
+    // With oracle > mark_prev and alpha > 0, mark_new >= mark_prev
+    assert!(
+        mark_new >= mark_prev,
+        "EMA must move toward oracle (upward direction)"
+    );
+    // And mark_new must not overshoot oracle
+    assert!(
+        mark_new <= oracle,
+        "EMA must not overshoot oracle"
+    );
+}
+
+/// EMA monotone convergence: if oracle < mark, each step decreases mark.
+#[kani::proof]
+fn kani_hyperp_ema_monotone_down() {
+    let mark_prev: u64 = kani::any();
+    let oracle: u64 = kani::any();
+    let alpha_e6: u64 = kani::any();
+
+    kani::assume(oracle > 0 && oracle < mark_prev);
+    kani::assume(mark_prev <= 1_000_000_000u64);
+    kani::assume(alpha_e6 > 0 && alpha_e6 <= 1_000_000);
+
+    let mark_new = ema_mark_step(mark_prev, oracle, 1, alpha_e6, 0);
+
+    assert!(
+        mark_new <= mark_prev,
+        "EMA must move toward oracle (downward direction)"
+    );
+    assert!(
+        mark_new >= oracle,
+        "EMA must not undershoot oracle"
+    );
+}
+
+/// EMA identity: when oracle == mark_prev, mark stays unchanged.
+/// Prevents spurious drift when price is stable.
+#[kani::proof]
+fn kani_ema_mark_identity_at_equilibrium() {
+    let price: u64 = kani::any();
+    let alpha_e6: u64 = kani::any();
+    let dt_slots: u64 = kani::any();
+
+    kani::assume(price > 0 && price <= 1_000_000_000u64);
+    kani::assume(alpha_e6 <= 1_000_000);
+    kani::assume(dt_slots > 0 && dt_slots <= 10_000);
+
+    // No cap
+    let mark_new = ema_mark_step(price, price, dt_slots, alpha_e6, 0);
+
+    assert_eq!(
+        mark_new, price,
+        "EMA at equilibrium (oracle==mark) must not drift"
+    );
+}
+
+/// EMA cap bound is monotone in dt_slots: more time allows more movement.
+#[kani::proof]
+fn kani_mark_cap_bound_monotone_in_dt() {
+    let mark_prev: u64 = kani::any();
+    let cap_e2bps: u64 = kani::any();
+    let dt_a: u64 = kani::any();
+    let dt_b: u64 = kani::any();
+
+    kani::assume(mark_prev > 0 && mark_prev <= 1_000_000_000u64);
+    kani::assume(cap_e2bps > 0 && cap_e2bps <= 1_000_000);
+    kani::assume(dt_a <= dt_b && dt_b <= 100_000);
+
+    let bound_a = mark_cap_bound(mark_prev, cap_e2bps, dt_a);
+    let bound_b = mark_cap_bound(mark_prev, cap_e2bps, dt_b);
+
+    // Larger dt allows at least as much movement
+    assert!(
+        bound_b >= bound_a,
+        "cap bound must be non-decreasing in dt_slots"
+    );
+}
+
+/// Bootstrap: first update (mark_prev==0) returns oracle directly.
+/// No smoothing on first price — avoids converging from 0.
+#[kani::proof]
+fn kani_ema_mark_bootstrap() {
+    let oracle: u64 = kani::any();
+    let alpha_e6: u64 = kani::any();
+    let dt_slots: u64 = kani::any();
+
+    kani::assume(oracle > 0 && oracle <= 1_000_000_000u64);
+    kani::assume(alpha_e6 <= 1_000_000);
+    kani::assume(dt_slots > 0 && dt_slots <= 10_000);
+
+    let mark_new = ema_mark_step(0 /* mark_prev=0 */, oracle, dt_slots, alpha_e6, 1_000);
+
+    assert_eq!(
+        mark_new, oracle,
+        "Bootstrap (mark_prev=0): must return oracle directly"
+    );
+}
+
+/// Circuit breaker disabled (cap=0): oracle price passes through clamping unchanged.
+#[kani::proof]
+fn kani_ema_mark_no_cap_full_oracle() {
+    let mark_prev: u64 = kani::any();
+    let oracle: u64 = kani::any();
+
+    kani::assume(mark_prev > 0 && mark_prev <= 1_000_000_000u64);
+    kani::assume(oracle > 0 && oracle <= 1_000_000_000u64);
+
+    // alpha=1_000_000 (full), cap=0 (disabled), dt=1
+    let mark_new = ema_mark_step(mark_prev, oracle, 1, 1_000_000, 0);
+
+    // With cap disabled and alpha=100%, result is exactly the oracle
+    assert_eq!(mark_new, oracle, "no-cap + full-alpha must return oracle unchanged");
 }

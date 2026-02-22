@@ -596,6 +596,78 @@ export async function derivePythPriceUpdateAccount(
 // Add SetPythOracle to the tag registry
 (IX_TAG as Record<string, number>)['SetPythOracle'] = 32;
 
+// PERC-118: Mark Price EMA Instructions
+// ============================================================================
+
+// Tag 33 — permissionless mark price EMA crank
+(IX_TAG as Record<string, number>)['UpdateMarkPrice'] = 33;
+
+/**
+ * UpdateMarkPrice (Tag 33) — permissionless EMA mark price crank.
+ *
+ * Reads the current oracle price on-chain, applies 8-hour EMA smoothing
+ * with circuit breaker, and writes result to authority_price_e6.
+ *
+ * Instruction data: 1 byte (tag only — all params read from on-chain state)
+ *
+ * Accounts:
+ *   0. [writable] Slab
+ *   1. []         Oracle account (Pyth PriceUpdateV2 / Chainlink / DEX AMM)
+ *   2. []         Clock sysvar (SysvarC1ock11111111111111111111111111111111)
+ *   3..N []       Remaining accounts (PumpSwap vaults, etc. if needed)
+ */
+export function encodeUpdateMarkPrice(): Uint8Array {
+  return new Uint8Array([33]);
+}
+
+/**
+ * Mark price EMA parameters (must match program/src/percolator.rs constants).
+ *
+ * EMA alpha = 2 / (window + 1) per slot.
+ * 8-hour window at ~400ms/slot = 72_000 slots.
+ * alpha_e6 = 2_000_000 / 72_001 ≈ 27 (in e-6 units).
+ */
+export const MARK_PRICE_EMA_WINDOW_SLOTS = 72_000n;
+export const MARK_PRICE_EMA_ALPHA_E6 = 2_000_000n / (MARK_PRICE_EMA_WINDOW_SLOTS + 1n);
+
+/**
+ * Compute the next EMA mark price step (TypeScript mirror of the on-chain function).
+ * Useful for keeper simulation and UI display.
+ *
+ * @param markPrevE6    Previous mark price (0 = bootstrap: returns oracle directly)
+ * @param oracleE6      Current oracle price (after circuit-breaker clamping)
+ * @param dtSlots       Elapsed slots since last mark update
+ * @param alphaE6       Per-slot EMA alpha in e-6 units (default: MARK_PRICE_EMA_ALPHA_E6)
+ * @param capE2bps      Circuit breaker cap in e-2bps (0 = disabled); applied BEFORE EMA
+ */
+export function computeEmaMarkPrice(
+  markPrevE6: bigint,
+  oracleE6: bigint,
+  dtSlots: bigint,
+  alphaE6 = MARK_PRICE_EMA_ALPHA_E6,
+  capE2bps = 0n,
+): bigint {
+  if (oracleE6 === 0n) return markPrevE6;
+  if (markPrevE6 === 0n || dtSlots === 0n) return oracleE6;
+
+  // Step 1: Apply circuit breaker to oracle before EMA
+  let oracleClamped = oracleE6;
+  if (capE2bps > 0n) {
+    const maxDelta = (markPrevE6 * capE2bps * dtSlots) / 1_000_000n;
+    const lo = markPrevE6 > maxDelta ? markPrevE6 - maxDelta : 0n;
+    const hi = markPrevE6 + maxDelta;
+    if (oracleClamped < lo) oracleClamped = lo;
+    if (oracleClamped > hi) oracleClamped = hi;
+  }
+
+  // Step 2: Compound alpha for dt_slots
+  const effectiveAlpha = alphaE6 * dtSlots > 1_000_000n ? 1_000_000n : alphaE6 * dtSlots;
+  const oneMinusAlpha = 1_000_000n - effectiveAlpha;
+
+  // Step 3: EMA
+  return (oracleClamped * effectiveAlpha + markPrevE6 * oneMinusAlpha) / 1_000_000n;
+}
+
 // ============================================================================
 // MATCHER INSTRUCTIONS (sent to matcher program, not percolator)
 // ============================================================================
