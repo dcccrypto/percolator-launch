@@ -372,6 +372,37 @@ pub mod verify {
         expected == provided
     }
 
+    /// Detect Pyth-pinned mode from config fields.
+    ///
+    /// A market is Pyth-pinned when:
+    ///   - oracle_authority == [0;32]  (PushOraclePrice disabled)
+    ///   - index_feed_id != [0;32]     (not Hyperp mode)
+    ///
+    /// In this mode, every price read goes directly to read_pyth_price_e6()
+    /// with on-chain staleness + confidence + feed-ID validation. No fallback.
+    ///
+    /// This function is a pure boolean predicate exposed for Kani proofs.
+    #[inline]
+    pub fn is_pyth_pinned_mode(oracle_authority: [u8; 32], index_feed_id: [u8; 32]) -> bool {
+        oracle_authority == [0u8; 32] && index_feed_id != [0u8; 32]
+    }
+
+    /// Detect Hyperp mode: index_feed_id is all-zeros.
+    #[inline]
+    pub fn is_hyperp_mode_verify(index_feed_id: [u8; 32]) -> bool {
+        index_feed_id == [0u8; 32]
+    }
+
+    /// Staleness check predicate — mirrors the on-chain gate in read_pyth_price_e6.
+    /// Returns true if the price is fresh (not stale).
+    ///
+    /// age = now - publish_time (signed; negative = price from future, always stale)
+    #[inline]
+    pub fn pyth_price_is_fresh(publish_time: i64, now_unix_ts: i64, max_staleness_secs: u64) -> bool {
+        let age = now_unix_ts.saturating_sub(publish_time);
+        !(age < 0 || age as u64 > max_staleness_secs)
+    }
+
     /// Slab shape validation.
     /// Slab must be owned by this program and have correct length.
     #[derive(Clone, Copy)]
@@ -1189,6 +1220,14 @@ pub mod ix {
             /// Amount to withdraw in base token lamports
             amount: u64,
         },
+
+        /// Configure on-chain Pyth oracle for this market (Tag 32).
+        /// Admin-only. Switches to Pyth-pinned mode.
+        SetPythOracle {
+            feed_id: [u8; 32],
+            max_staleness_secs: u64,
+            conf_filter_bps: u16,
+        },
     }
 
     impl Instruction {
@@ -1378,6 +1417,13 @@ pub mod ix {
                         rest[..8].try_into().map_err(|_| ProgramError::InvalidInstructionData)?
                     );
                     Ok(Instruction::WithdrawInsuranceLimited { amount })
+                }
+                TAG_SET_PYTH_ORACLE => {
+                    if rest.len() < 42 { return Err(ProgramError::InvalidInstructionData); }
+                    let feed_id: [u8; 32] = rest[..32].try_into().map_err(|_| ProgramError::InvalidInstructionData)?;
+                    let max_staleness_secs = u64::from_le_bytes(rest[32..40].try_into().map_err(|_| ProgramError::InvalidInstructionData)?);
+                    let conf_filter_bps = u16::from_le_bytes(rest[40..42].try_into().map_err(|_| ProgramError::InvalidInstructionData)?);
+                    Ok(Instruction::SetPythOracle { feed_id, max_staleness_secs, conf_filter_bps })
                 }
                 _ => Err(ProgramError::InvalidInstructionData),
             }
@@ -2546,7 +2592,34 @@ pub mod oracle {
         now_unix_ts: i64,
         remaining_accounts: &[AccountInfo],
     ) -> Result<u64, ProgramError> {
-        // Try authority price first
+        // Pyth-pinned mode: oracle_authority is all-zeros AND index_feed_id is non-zero.
+        // In this mode we NEVER use authority_price (PushOraclePrice is disabled).
+        // We go directly to on-chain Pyth validation with hard rejection on staleness.
+        let is_pyth_pinned = config.oracle_authority == [0u8; 32]
+            && config.index_feed_id != [0u8; 32];
+
+        if is_pyth_pinned {
+            // SECURITY: enforce that the oracle account is owned by an approved oracle program.
+            // This prevents substituting an attacker-controlled account for a real Pyth feed.
+            if !is_approved_oracle_program(price_ai) {
+                return Err(super::error::PercolatorError::OracleInvalid.into());
+            }
+            // Read directly from Pyth — staleness, confidence, and feed-ID validated on-chain.
+            // OracleStale / OracleInvalid are returned as hard errors; no fallback to cache.
+            return read_engine_price_e6(
+                price_ai,
+                &config.index_feed_id,
+                now_unix_ts,
+                config.max_staleness_secs,
+                config.conf_filter_bps,
+                config.invert,
+                config.unit_scale,
+                remaining_accounts,
+            );
+        }
+
+        // Non-pinned mode (admin oracle or legacy markets):
+        // Try authority price first; fall back to Pyth/Chainlink/DEX if absent/stale.
         if let Some(authority_price) = read_authority_price(config, now_unix_ts, config.max_staleness_secs) {
             return Ok(authority_price);
         }
@@ -2562,6 +2635,17 @@ pub mod oracle {
             config.unit_scale,
             remaining_accounts,
         )
+    }
+
+    /// Returns true if the account is owned by an approved on-chain oracle program.
+    /// Used in Pyth-pinned mode to prevent account substitution attacks.
+    #[inline]
+    pub fn is_approved_oracle_program(price_ai: &AccountInfo) -> bool {
+        *price_ai.owner == PYTH_RECEIVER_PROGRAM_ID
+            || *price_ai.owner == CHAINLINK_OCR2_PROGRAM_ID
+            || *price_ai.owner == PUMPSWAP_PROGRAM_ID
+            || *price_ai.owner == RAYDIUM_CLMM_PROGRAM_ID
+            || *price_ai.owner == METEORA_DLMM_PROGRAM_ID
     }
 
     /// Clamp `raw_price` so it cannot move more than `max_change_e2bps` from `last_price`.
@@ -5442,6 +5526,34 @@ pub mod processor {
 
                 msg!("WithdrawInsuranceLimited: withdrew {} base tokens, insurance_units_remaining={}",
                     actual_amount, new_ins_balance);
+            }
+
+            Instruction::SetPythOracle { feed_id, max_staleness_secs, conf_filter_bps } => {
+                accounts::expect_len(accounts, 2)?;
+                let a_admin = &accounts[0];
+                let a_slab  = &accounts[1];
+                accounts::expect_signer(a_admin)?;
+                accounts::expect_writable(a_slab)?;
+                let mut data = state::slab_data_mut(a_slab)?;
+                slab_guard(program_id, a_slab, &data)?;
+                require_initialized(&data)?;
+                let header = state::read_header(&data);
+                require_admin(header.admin, a_admin.key)?;
+                if feed_id == [0u8; 32] { return Err(ProgramError::InvalidInstructionData); }
+                if max_staleness_secs == 0 { return Err(ProgramError::InvalidInstructionData); }
+                let mut config = state::read_config(&data);
+                if oracle::is_hyperp_mode(&config) {
+                    return Err(ProgramError::InvalidAccountData);
+                }
+                config.index_feed_id = feed_id;
+                config.max_staleness_secs = max_staleness_secs;
+                config.conf_filter_bps = conf_filter_bps;
+                config.oracle_authority = [0u8; 32];
+                config.authority_price_e6 = 0;
+                config.authority_timestamp = 0;
+                config.last_effective_price_e6 = 0;
+                state::write_config(&mut data, &config);
+                msg!("SetPythOracle: Pyth-pinned, staleness={}s, conf_bps={}", max_staleness_secs, conf_filter_bps);
             }
         }
         Ok(())

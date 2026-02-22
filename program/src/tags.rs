@@ -45,6 +45,8 @@ pub const TAG_ACCEPT_ADMIN: u8 = 29;
 pub const TAG_SET_INSURANCE_WITHDRAW_POLICY: u8 = 30;
 /// Withdraw limited amount from insurance fund per policy (PERC-110).
 pub const TAG_WITHDRAW_INSURANCE_LIMITED: u8 = 31;
+/// Configure on-chain Pyth oracle for a market (PERC-117).
+pub const TAG_SET_PYTH_ORACLE: u8 = 32;
 
 #[cfg(test)]
 mod tests {
