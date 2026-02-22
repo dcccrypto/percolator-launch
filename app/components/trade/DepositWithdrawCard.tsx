@@ -2,8 +2,8 @@
 import { explorerTxUrl } from "@/lib/config";
 
 import { FC, useState, useEffect, useRef } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
+import { useConnectionCompat as useConnection } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useDeposit } from "@/hooks/useDeposit";

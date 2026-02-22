@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useEffect, useState, useRef, useCallback } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
+import { useConnectionCompat as useConnection } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "./useMarketDiscovery";
 import { parseAllAccounts, AccountKind } from "@percolator/core";
 import { fetchTokenMeta } from "@/lib/tokenMeta";

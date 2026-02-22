@@ -2,7 +2,7 @@
 
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection } from "@/hooks/useWalletCompat";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { useEffect, useState } from "react";
 

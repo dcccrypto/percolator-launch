@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { AccountKind, type Account } from "@percolator/core";
 

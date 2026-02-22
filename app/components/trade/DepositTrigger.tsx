@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useState, useEffect, useRef } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";

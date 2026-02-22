@@ -7,7 +7,7 @@ import {
   SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection, useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import { 
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,

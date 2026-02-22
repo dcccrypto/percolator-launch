@@ -3,7 +3,7 @@
 import { FC, useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import gsap from "gsap";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection, useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import { PublicKey } from "@solana/web3.js";
 import { useMyMarkets, type MyMarket } from "@/hooks/useMyMarkets";
 import { useAdminActions } from "@/hooks/useAdminActions";

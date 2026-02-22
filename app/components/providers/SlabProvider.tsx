@@ -11,7 +11,7 @@ import {
   useCallback,
 } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection } from "@/hooks/useWalletCompat";
 import {
   parseHeader,
   parseConfig,

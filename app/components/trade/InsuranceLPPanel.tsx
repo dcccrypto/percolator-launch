@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useInsuranceLP } from '../../hooks/useInsuranceLP';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWalletCompat as useWallet } from '@/hooks/useWalletCompat';
 import { useSlabState } from '../providers/SlabProvider';
 import { useTokenMeta } from '../../hooks/useTokenMeta';
 import { formatTokenAmount } from '../../lib/format';

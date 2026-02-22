@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import * as Sentry from "@sentry/nextjs";
 
 /**

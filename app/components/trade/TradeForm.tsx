@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet, useConnectionCompat as useConnection } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import gsap from "gsap";
 import { useTrade } from "@/hooks/useTrade";
@@ -17,7 +17,7 @@ import { PreTradeSummary } from "@/components/trade/PreTradeSummary";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { useWalletModal } from "@/components/wallet/AccessibleWalletModal";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 

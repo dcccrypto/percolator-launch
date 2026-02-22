@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import { usePortfolio, getLiquidationSeverity } from "@/hooks/usePortfolio";
 import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
-import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
@@ -13,10 +12,7 @@ import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 
-const WalletMultiButton = dynamic(
-  () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
-  { ssr: false }
-);
+import { WalletButton as WalletMultiButton } from "@/components/wallet/WalletButton";
 
 function formatPnl(pnl: bigint | undefined | null, decimals = 6): string {
   const safePnl = pnl ?? 0n;

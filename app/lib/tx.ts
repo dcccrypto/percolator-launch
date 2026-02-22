@@ -1,6 +1,11 @@
 import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram } from "@solana/web3.js";
-import type { WalletContextState } from "@solana/wallet-adapter-react";
-import type { Signer } from "@solana/web3.js";
+import type { Signer, PublicKey } from "@solana/web3.js";
+
+/** Minimal wallet interface compatible with both Privy compat and wallet-adapter */
+export interface WalletContextState {
+  publicKey: PublicKey | null;
+  signTransaction: ((tx: Transaction) => Promise<Transaction>) | null;
+}
 import { getConfig } from "./config";
 
 export interface SendTxParams {

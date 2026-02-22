@@ -7,7 +7,7 @@ import {
   SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection, useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import {
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
@@ -125,7 +125,7 @@ export function useCreateMarket() {
 
   const create = useCallback(
     async (params: CreateMarketParams, retryFromStep?: number) => {
-      if (!wallet.publicKey || !wallet.sendTransaction) {
+      if (!wallet.publicKey || !wallet.signTransaction) {
         setState((s) => ({ ...s, error: "Wallet not connected" }));
         return;
       }

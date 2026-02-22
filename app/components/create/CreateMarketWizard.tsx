@@ -2,7 +2,7 @@
 
 import { FC, useState, useMemo, useEffect } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection, useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
 import Link from "next/link";
 import { useCreateMarket, type CreateMarketParams } from "@/hooks/useCreateMarket";

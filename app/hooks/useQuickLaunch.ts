@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection } from "@/hooks/useWalletCompat";
 import { PublicKey } from "@solana/web3.js";
 import { useDexPoolSearch, type DexPoolResult } from "./useDexPoolSearch";
 import { fetchTokenMeta } from "@/lib/tokenMeta";

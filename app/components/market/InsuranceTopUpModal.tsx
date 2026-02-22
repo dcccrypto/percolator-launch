@@ -3,7 +3,7 @@
 import { FC, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";

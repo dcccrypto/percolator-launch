@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection } from "@/hooks/useWalletCompat";
 import { discoverMarkets, type DiscoveredMarket } from "@percolator/core";
 import { getConfig } from "@/lib/config";
 

@@ -3,15 +3,11 @@
 import { FC, useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import dynamic from "next/dynamic";
 import gsap from "gsap";
 import { type Network, getConfig, setNetwork } from "@/lib/config";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
-const WalletMultiButton = dynamic(
-  () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
-  { ssr: false }
-);
+import { WalletButton as WalletMultiButton } from "@/components/wallet/WalletButton";
 
 const navLinks = [
   { href: "/markets", label: "Markets" },

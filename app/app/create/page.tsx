@@ -1,17 +1,13 @@
 "use client";
 
 import { Suspense } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import { useSearchParams } from "next/navigation";
-import dynamic from "next/dynamic";
 import { CreateMarketWizard } from "@/components/create/CreateMarketWizard";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
-const WalletMultiButton = dynamic(
-  () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
-  { ssr: false }
-);
+import { WalletButton as WalletMultiButton } from "@/components/wallet/WalletButton";
 
 /** Inner component that reads search params (needs Suspense boundary) */
 function CreatePageInner() {

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection } from "@solana/wallet-adapter-react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnectionCompat as useConnection } from "@/hooks/useWalletCompat";
+import { useWalletCompat as useWallet } from "@/hooks/useWalletCompat";
 import {
   discoverMarkets,
   fetchSlab,
