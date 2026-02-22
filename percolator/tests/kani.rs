@@ -6885,3 +6885,131 @@ fn proof_NEGATIVE_bypass_set_pnl_breaks_invariant() {
         "EXPECTED TO FAIL: bypassing set_pnl breaks pnl_pos_tot invariant"
     );
 }
+
+// ============================================================================
+// PERC-121: Kani proofs for premium funding rate
+// ============================================================================
+
+/// Proof: compute_premium_funding_bps_per_slot output is always within [-max, +max].
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(2)]
+fn kani_premium_funding_rate_bounded() {
+    let mark: u64 = kani::any();
+    let index: u64 = kani::any();
+    let dampening: u64 = kani::any();
+    let max_bps: i64 = kani::any();
+
+    // Constrain to realistic ranges to keep proof tractable
+    kani::assume(mark <= 1_000_000_000_000); // 1M USD at 1e6 scale
+    kani::assume(index <= 1_000_000_000_000);
+    kani::assume(dampening <= 100_000_000); // 100x dampening
+    kani::assume(max_bps >= 0 && max_bps <= 10_000);
+
+    let rate = RiskEngine::compute_premium_funding_bps_per_slot(
+        mark, index, dampening, max_bps,
+    );
+
+    let max_abs = max_bps.unsigned_abs() as i64;
+    kani::assert(
+        rate >= -max_abs && rate <= max_abs,
+        "premium funding rate must be bounded by max_bps_per_slot"
+    );
+}
+
+/// Proof: compute_premium_funding_bps_per_slot returns 0 when any input is 0.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(2)]
+fn kani_premium_funding_rate_zero_inputs() {
+    let mark: u64 = kani::any();
+    let index: u64 = kani::any();
+    let dampening: u64 = kani::any();
+    let max_bps: i64 = kani::any();
+    kani::assume(max_bps >= 0 && max_bps <= 10_000);
+
+    // If mark is zero → rate must be 0
+    let rate_mark_zero = RiskEngine::compute_premium_funding_bps_per_slot(
+        0, index, dampening, max_bps,
+    );
+    kani::assert(rate_mark_zero == 0, "mark=0 must return 0");
+
+    // If index is zero → rate must be 0
+    let rate_index_zero = RiskEngine::compute_premium_funding_bps_per_slot(
+        mark, 0, dampening, max_bps,
+    );
+    kani::assert(rate_index_zero == 0, "index=0 must return 0");
+
+    // If dampening is zero → rate must be 0
+    let rate_damp_zero = RiskEngine::compute_premium_funding_bps_per_slot(
+        mark, index, 0, max_bps,
+    );
+    kani::assert(rate_damp_zero == 0, "dampening=0 must return 0");
+}
+
+/// Proof: compute_combined_funding_rate is bounded between inventory and premium rates.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(2)]
+fn kani_combined_funding_rate_bounded() {
+    let inv_rate: i64 = kani::any();
+    let prem_rate: i64 = kani::any();
+    let weight: u64 = kani::any();
+
+    // Constrain to valid ranges
+    kani::assume(inv_rate >= -10_000 && inv_rate <= 10_000);
+    kani::assume(prem_rate >= -10_000 && prem_rate <= 10_000);
+    kani::assume(weight <= 10_000);
+
+    let combined = RiskEngine::compute_combined_funding_rate(
+        inv_rate, prem_rate, weight,
+    );
+
+    let lo = core::cmp::min(inv_rate, prem_rate);
+    let hi = core::cmp::max(inv_rate, prem_rate);
+
+    kani::assert(
+        combined >= lo && combined <= hi,
+        "combined rate must be between inventory and premium rates (convex combination)"
+    );
+}
+
+/// Proof: weight=0 means pure inventory, weight=10000 means pure premium.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(2)]
+fn kani_combined_funding_rate_extremes() {
+    let inv_rate: i64 = kani::any();
+    let prem_rate: i64 = kani::any();
+
+    kani::assume(inv_rate >= -10_000 && inv_rate <= 10_000);
+    kani::assume(prem_rate >= -10_000 && prem_rate <= 10_000);
+
+    // weight=0 → pure inventory
+    let r0 = RiskEngine::compute_combined_funding_rate(inv_rate, prem_rate, 0);
+    kani::assert(r0 == inv_rate, "weight=0 must return inventory rate");
+
+    // weight=10000 → pure premium
+    let r1 = RiskEngine::compute_combined_funding_rate(inv_rate, prem_rate, 10_000);
+    kani::assert(r1 == prem_rate, "weight=10000 must return premium rate");
+}
+
+/// Proof: mark == index → premium rate is zero (no premium).
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(2)]
+fn kani_premium_funding_rate_zero_premium() {
+    let price: u64 = kani::any();
+    let dampening: u64 = kani::any();
+    let max_bps: i64 = kani::any();
+
+    kani::assume(price > 0 && price <= 1_000_000_000_000);
+    kani::assume(dampening > 0 && dampening <= 100_000_000);
+    kani::assume(max_bps >= 0 && max_bps <= 10_000);
+
+    // mark == index → premium = 0
+    let rate = RiskEngine::compute_premium_funding_bps_per_slot(
+        price, price, dampening, max_bps,
+    );
+    kani::assert(rate == 0, "equal mark and index must give zero premium");
+}
