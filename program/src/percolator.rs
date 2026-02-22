@@ -1144,6 +1144,8 @@ pub mod ix {
         PauseMarket,
         /// Unpause the market. Admin only. Restores normal operation.
         UnpauseMarket,
+        /// Two-step admin transfer: Step 2 — pending admin accepts the role.
+        AcceptAdmin,
     }
 
     impl Instruction {
@@ -1295,6 +1297,7 @@ pub mod ix {
                 },
                 TAG_PAUSE_MARKET => Ok(Instruction::PauseMarket),
                 TAG_UNPAUSE_MARKET => Ok(Instruction::UnpauseMarket),
+                TAG_ACCEPT_ADMIN => Ok(Instruction::AcceptAdmin),
                 _ => Err(ProgramError::InvalidInstructionData),
             }
         }
@@ -1451,14 +1454,16 @@ pub mod state {
         pub bump: u8,
         pub _padding: [u8; 3], // _padding[0] = flags byte (bit 0: resolved, bit 1: paused)
         pub admin: [u8; 32],
+        /// Pending admin for two-step admin transfer. All zeros = no pending transfer.
+        pub pending_admin: [u8; 32],
         pub _reserved: [u8; 24], // [0..8]=nonce, [8..16]=last_thr_slot, [16..24]=dust_base
     }
 
     /// Offset of _reserved field in SlabHeader, derived from offset_of! for correctness.
     pub const RESERVED_OFF: usize = offset_of!(SlabHeader, _reserved);
 
-    // Portable compile-time assertion that RESERVED_OFF is 48 (expected layout)
-    const _: [(); 48] = [(); RESERVED_OFF];
+    // Portable compile-time assertion that RESERVED_OFF is 80 (expected layout)
+    const _: [(); 80] = [(); RESERVED_OFF];
 
     #[repr(C)]
     #[derive(Clone, Copy, Pod, Zeroable)]
@@ -3209,6 +3214,7 @@ pub mod processor {
                     bump,
                     _padding: [0; 3],
                     admin: a_admin.key.to_bytes(),
+                    pending_admin: [0; 32],
                     _reserved: [0; 24],
                 };
                 state::write_header(&mut data, &new_header);
@@ -4233,11 +4239,21 @@ pub mod processor {
                 let header = state::read_header(&data);
                 require_admin(header.admin, a_admin.key)?;
 
+                // Bounds: threshold is in e18 units representing a percentage.
+                // Min: 0 (disabled). Max: 100% = 1e18 (full risk reduction).
+                const MAX_THRESHOLD: u128 = 1_000_000_000_000_000_000; // 100% in e18
+                if new_threshold > MAX_THRESHOLD {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+
                 let engine = zc::engine_mut(&mut data)?;
                 engine.set_risk_reduction_threshold(new_threshold);
             }
 
             Instruction::UpdateAdmin { new_admin } => {
+                // Two-step admin transfer: Step 1 — PROPOSE new admin.
+                // Current admin proposes; new admin must call AcceptAdmin to complete.
+                // This prevents accidental lockout from admin key typos.
                 accounts::expect_len(accounts, 2)?;
                 let a_admin = &accounts[0];
                 let a_slab = &accounts[1];
@@ -4252,7 +4268,12 @@ pub mod processor {
                 let mut header = state::read_header(&data);
                 require_admin(header.admin, a_admin.key)?;
 
-                header.admin = new_admin.to_bytes();
+                // Cannot propose the zero address
+                if new_admin == Pubkey::default() {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+
+                header.pending_admin = new_admin.to_bytes();
                 state::write_header(&mut data, &header);
             }
 
@@ -4373,6 +4394,13 @@ pub mod processor {
 
                 let header = state::read_header(&data);
                 require_admin(header.admin, a_admin.key)?;
+
+                // Cap: max 0.01% per slot ≈ 43% per day at 400ms slots.
+                // 0.01% = 1e14 in e18 units. This prevents griefing by malicious admin.
+                const MAX_FEE_PER_SLOT: u128 = 100_000_000_000_000; // 0.01% in e18
+                if new_fee > MAX_FEE_PER_SLOT {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
 
                 let engine = zc::engine_mut(&mut data)?;
                 engine.params.maintenance_fee_per_slot = percolator::U128::new(new_fee);
@@ -5039,6 +5067,37 @@ pub mod processor {
 
                 state::set_paused(&mut data, false);
                 msg!("Market unpaused by admin");
+            }
+
+            Instruction::AcceptAdmin => {
+                // Two-step admin transfer: Step 2 — pending admin accepts.
+                accounts::expect_len(accounts, 2)?;
+                let a_new_admin = &accounts[0];
+                let a_slab = &accounts[1];
+
+                accounts::expect_signer(a_new_admin)?;
+                accounts::expect_writable(a_slab)?;
+
+                let mut data = state::slab_data_mut(a_slab)?;
+                slab_guard(program_id, a_slab, &data)?;
+                require_initialized(&data)?;
+
+                let mut header = state::read_header(&data);
+
+                // Must have a pending admin proposal
+                if header.pending_admin == [0u8; 32] {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+
+                // Signer must be the pending admin
+                if header.pending_admin != a_new_admin.key.to_bytes() {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+
+                header.admin = header.pending_admin;
+                header.pending_admin = [0u8; 32];
+                state::write_header(&mut data, &header);
+                msg!("Admin transfer accepted");
             }
         }
         Ok(())

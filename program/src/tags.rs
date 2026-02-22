@@ -39,10 +39,12 @@ pub const TAG_UNPAUSE_MARKET: u8 = 28;
 // ═══════════════════════════════════════════════════════════════
 // Future instructions — append here, never reorder above
 // ═══════════════════════════════════════════════════════════════
+/// Two-step admin transfer: new admin accepts the proposal.
+pub const TAG_ACCEPT_ADMIN: u8 = 29;
 /// Reserved for percolator-stake CPI — not yet implemented.
-pub const TAG_SET_INSURANCE_WITHDRAW_POLICY: u8 = 29;
+pub const TAG_SET_INSURANCE_WITHDRAW_POLICY: u8 = 30;
 /// Reserved for percolator-stake CPI — not yet implemented.
-pub const TAG_WITHDRAW_INSURANCE_LIMITED: u8 = 30;
+pub const TAG_WITHDRAW_INSURANCE_LIMITED: u8 = 31;
 
 #[cfg(test)]
 mod tests {
@@ -64,6 +66,7 @@ mod tests {
             TAG_UPDATE_RISK_PARAMS, TAG_RENOUNCE_ADMIN,
             TAG_CREATE_INSURANCE_MINT, TAG_DEPOSIT_INSURANCE_LP,
             TAG_WITHDRAW_INSURANCE_LP, TAG_PAUSE_MARKET, TAG_UNPAUSE_MARKET,
+            TAG_ACCEPT_ADMIN,
         ];
 
         for i in 0..tags.len() {
@@ -89,6 +92,7 @@ mod tests {
             TAG_UPDATE_RISK_PARAMS, TAG_RENOUNCE_ADMIN,
             TAG_CREATE_INSURANCE_MINT, TAG_DEPOSIT_INSURANCE_LP,
             TAG_WITHDRAW_INSURANCE_LP, TAG_PAUSE_MARKET, TAG_UNPAUSE_MARKET,
+            TAG_ACCEPT_ADMIN,
         ];
 
         for (i, &tag) in tags.iter().enumerate() {
