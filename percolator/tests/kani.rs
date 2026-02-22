@@ -5018,6 +5018,10 @@ fn params_for_inline_kani() -> RiskParams {
 
         liquidation_buffer_bps: 0,
         min_liquidation_abs: U128::new(0),
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 1_000_000,
+        funding_premium_max_bps_per_slot: 5,
     }
 }
 

@@ -18,6 +18,10 @@ fn default_params() -> RiskParams {
         liquidation_fee_cap: U128::new(100_000), // Cap at 100k units
         liquidation_buffer_bps: 100,             // 1% buffer above maintenance
         min_liquidation_abs: U128::new(100_000), // Minimum 0.1 units
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 1_000_000,
+        funding_premium_max_bps_per_slot: 5,
     }
 }
 

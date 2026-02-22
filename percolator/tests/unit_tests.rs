@@ -67,6 +67,10 @@ fn default_params() -> RiskParams {
         liquidation_fee_cap: U128::new(100_000), // Cap at 100k units
         liquidation_buffer_bps: 100,             // 1% buffer above maintenance
         min_liquidation_abs: U128::new(100_000), // Minimum 0.1 units (scaled by 1e6)
+        funding_premium_weight_bps: 0,           // Disabled by default
+        funding_settlement_interval_slots: 0,    // Disabled by default
+        funding_premium_dampening_e6: 1_000_000, // 1x dampening (safe default)
+        funding_premium_max_bps_per_slot: 5,     // Conservative cap
     }
 }
 
@@ -3567,6 +3571,10 @@ fn params_for_inline_tests() -> RiskParams {
 
         liquidation_buffer_bps: 0,
         min_liquidation_abs: U128::new(0),
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 1_000_000,
+        funding_premium_max_bps_per_slot: 5,
     }
 }
 
@@ -4714,4 +4722,30 @@ fn test_set_margin_params_does_not_update_on_error() {
     let _ = engine.set_margin_params(500, 1000); // maintenance > initial → error
     assert_eq!(engine.params.initial_margin_bps, orig_initial);
     assert_eq!(engine.params.maintenance_margin_bps, orig_maint);
+}
+
+// ==============================================================================
+// admin_force_close bounds & existence guards
+// ==============================================================================
+
+#[test]
+fn test_admin_force_close_oob_index_returns_account_not_found() {
+    let mut engine = RiskEngine::new(default_params());
+    let result = engine.admin_force_close(u16::MAX, 100, 1_000_000);
+    assert_eq!(result, Err(RiskError::AccountNotFound));
+}
+
+#[test]
+fn test_admin_force_close_unused_slot_returns_account_not_found() {
+    let mut engine = RiskEngine::new(default_params());
+    let result = engine.admin_force_close(0, 100, 1_000_000);
+    assert_eq!(result, Err(RiskError::AccountNotFound));
+}
+
+#[test]
+fn test_admin_force_close_valid_zero_position_returns_ok() {
+    let mut engine = RiskEngine::new(default_params());
+    let idx = engine.add_user(0).unwrap();
+    // Force close on zero position should succeed (no-op)
+    assert!(engine.admin_force_close(idx, 100, 1_000_000).is_ok());
 }

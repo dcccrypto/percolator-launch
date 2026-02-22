@@ -291,6 +291,25 @@ pub struct RiskParams {
     /// Prevents dust positions that are uneconomical to maintain or re-liquidate.
     /// Denominated in base units (same scale as position_size.abs()).
     pub min_liquidation_abs: U128,
+
+    // ========================================
+    // Funding Rate Parameters (PERC-121)
+    // ========================================
+    /// Weight of premium component in funding rate (basis points, 0–10_000).
+    /// 0 = premium-based funding disabled.
+    pub funding_premium_weight_bps: u64,
+
+    /// Funding settlement interval in slots.
+    /// 0 = funding settlement disabled.
+    pub funding_settlement_interval_slots: u64,
+
+    /// Dampening factor for premium-based funding (fixed-point ×1e6).
+    /// Must be non-zero when funding_premium_weight_bps > 0.
+    pub funding_premium_dampening_e6: u64,
+
+    /// Maximum absolute funding rate per slot (basis points).
+    /// Caps the premium-based rate to prevent extreme funding.
+    pub funding_premium_max_bps_per_slot: i64,
 }
 
 impl RiskParams {
@@ -324,6 +343,14 @@ impl RiskParams {
         }
         // Liquidation buffer cannot exceed 100%
         if self.liquidation_buffer_bps > 10_000 {
+            return Err(RiskError::Overflow);
+        }
+        // Funding premium weight cannot exceed 100%
+        if self.funding_premium_weight_bps > 10_000 {
+            return Err(RiskError::Overflow);
+        }
+        // If funding premium is enabled, dampening must be non-zero
+        if self.funding_premium_weight_bps > 0 && self.funding_premium_dampening_e6 == 0 {
             return Err(RiskError::Overflow);
         }
         Ok(())
@@ -1121,7 +1148,7 @@ impl RiskEngine {
 
             // Credit back what was paid
             self.accounts[idx as usize].fee_credits =
-                self.accounts[idx as usize].fee_credits.saturating_add(pay as i128);
+                self.accounts[idx as usize].fee_credits.saturating_add(u128_to_i128_clamped(pay));
             paid_from_capital = pay;
         }
 
@@ -1182,7 +1209,7 @@ impl RiskEngine {
             self.insurance_fund.fee_revenue = self.insurance_fund.fee_revenue + pay;
 
             self.accounts[idx as usize].fee_credits =
-                self.accounts[idx as usize].fee_credits.saturating_add(pay as i128);
+                self.accounts[idx as usize].fee_credits.saturating_add(u128_to_i128_clamped(pay));
             paid_from_capital = pay;
         }
 
@@ -1214,7 +1241,7 @@ impl RiskEngine {
                 self.insurance_fund.balance = self.insurance_fund.balance + pay;
                 self.insurance_fund.fee_revenue = self.insurance_fund.fee_revenue + pay;
                 self.accounts[idx as usize].fee_credits =
-                    self.accounts[idx as usize].fee_credits.saturating_add(pay as i128);
+                    self.accounts[idx as usize].fee_credits.saturating_add(u128_to_i128_clamped(pay));
             }
         }
     }
@@ -1322,6 +1349,14 @@ impl RiskEngine {
     /// Skips margin checks — intended for emergency admin use only.
     /// Settles mark PnL first, then closes position.
     pub fn admin_force_close(&mut self, idx: u16, now_slot: u64, oracle_price: u64) -> Result<()> {
+        // Bounds check: prevent OOB panic / DoS
+        if (idx as usize) >= MAX_ACCOUNTS {
+            return Err(RiskError::AccountNotFound);
+        }
+        // Existence check: account must be in use
+        if !self.is_used(idx as usize) {
+            return Err(RiskError::AccountNotFound);
+        }
         self.current_slot = now_slot;
         if self.accounts[idx as usize].position_size.is_zero() {
             return Ok(());
@@ -2512,7 +2547,7 @@ impl RiskEngine {
             self.insurance_fund.fee_revenue = self.insurance_fund.fee_revenue + pay;
 
             // Credit back what was paid
-            account.fee_credits = account.fee_credits.saturating_add(pay as i128);
+            account.fee_credits = account.fee_credits.saturating_add(u128_to_i128_clamped(pay));
         }
 
         // Vault gets full deposit (tokens received)
@@ -3252,7 +3287,7 @@ impl RiskEngine {
 
             if pay > 0 {
                 self.set_capital(idx as usize, capital - pay);
-                self.set_pnl(idx as usize, pnl.saturating_add(pay as i128));
+                self.set_pnl(idx as usize, pnl.saturating_add(u128_to_i128_clamped(pay)));
             }
 
             // Write off any remaining negative PnL (spec §6.1 step 4)
@@ -3285,7 +3320,7 @@ impl RiskEngine {
 
             if pay > 0 {
                 self.set_capital(idx as usize, capital - pay);
-                self.set_pnl(idx as usize, pnl.saturating_add(pay as i128));
+                self.set_pnl(idx as usize, pnl.saturating_add(u128_to_i128_clamped(pay)));
             }
 
             // Write off any remaining negative PnL (spec §6.1 step 4)

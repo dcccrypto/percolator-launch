@@ -178,6 +178,10 @@ fn params_regime_a() -> RiskParams {
         liquidation_fee_cap: U128::new(100_000),
         liquidation_buffer_bps: 100,
         min_liquidation_abs: U128::new(100_000),
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 1_000_000,
+        funding_premium_max_bps_per_slot: 5,
     }
 }
 
@@ -197,6 +201,10 @@ fn params_regime_b() -> RiskParams {
         liquidation_fee_cap: U128::new(100_000),
         liquidation_buffer_bps: 100,
         min_liquidation_abs: U128::new(100_000),
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 1_000_000,
+        funding_premium_max_bps_per_slot: 5,
     }
 }
 
