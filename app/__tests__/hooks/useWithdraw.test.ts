@@ -16,9 +16,9 @@ import { PublicKey } from "@solana/web3.js";
 import { useWithdraw } from "../../hooks/useWithdraw";
 
 // Mock dependencies
-vi.mock("@solana/wallet-adapter-react", () => ({
-  useConnection: vi.fn(),
-  useWallet: vi.fn(),
+vi.mock("@/hooks/useWalletCompat", () => ({
+  useConnectionCompat: vi.fn(),
+  useWalletCompat: vi.fn(),
 }));
 
 vi.mock("@/components/providers/SlabProvider", () => ({
@@ -46,7 +46,7 @@ vi.mock("@percolator/core", async () => {
   };
 });
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { sendTx } from "@/lib/tx";
 import { getAta } from "@percolator/core";
@@ -97,8 +97,8 @@ describe("useWithdraw", () => {
       programId: mockProgramId,
     };
 
-    (useConnection as any).mockReturnValue({ connection: mockConnection });
-    (useWallet as any).mockReturnValue(mockWallet);
+    ( useConnectionCompat as any).mockReturnValue({ connection: mockConnection });
+    ( useWalletCompat as any).mockReturnValue(mockWallet);
     (useSlabState as any).mockReturnValue(mockSlabState);
     (sendTx as any).mockResolvedValue({ signature: "mock-signature" });
     (getAta as any).mockResolvedValue(mockUserAta);
@@ -390,7 +390,7 @@ describe("useWithdraw", () => {
 
   describe("Error Handling", () => {
     it("should throw error if wallet not connected", async () => {
-      (useWallet as any).mockReturnValue({ publicKey: null, connected: false });
+      ( useWalletCompat as any).mockReturnValue({ publicKey: null, connected: false });
 
       const { result } = renderHook(() => useWithdraw(mockSlabAddress));
 

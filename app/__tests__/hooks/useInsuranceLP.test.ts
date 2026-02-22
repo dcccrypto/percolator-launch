@@ -16,9 +16,9 @@ import { PublicKey } from "@solana/web3.js";
 import { useInsuranceLP } from "../../hooks/useInsuranceLP";
 
 // Mock dependencies
-vi.mock("@solana/wallet-adapter-react", () => ({
-  useConnection: vi.fn(),
-  useWallet: vi.fn(),
+vi.mock("@/hooks/useWalletCompat", () => ({
+  useConnectionCompat: vi.fn(),
+  useWalletCompat: vi.fn(),
 }));
 
 vi.mock("@/components/providers/SlabProvider", () => ({
@@ -64,7 +64,7 @@ vi.mock("@solana/spl-token", () => ({
   unpackAccount: vi.fn(),
 }));
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useParams } from "next/navigation";
 import { sendTx } from "@/lib/tx";
@@ -115,8 +115,8 @@ describe("useInsuranceLP", () => {
       },
     };
 
-    (useConnection as any).mockReturnValue({ connection: mockConnection });
-    (useWallet as any).mockReturnValue(mockWallet);
+    ( useConnectionCompat as any).mockReturnValue({ connection: mockConnection });
+    ( useWalletCompat as any).mockReturnValue(mockWallet);
     (useSlabState as any).mockReturnValue(mockSlabState);
     (useParams as any).mockReturnValue({ slab: mockSlabAddress });
     (sendTx as any).mockResolvedValue("mock-signature");
@@ -178,7 +178,7 @@ describe("useInsuranceLP", () => {
 
       // Mock wallet with new PublicKey instance on each call (simulating unstable reference)
       let callCount = 0;
-      (useWallet as any).mockImplementation(() => ({
+      ( useWalletCompat as any).mockImplementation(() => ({
         publicKey: callCount++ < 5 
           ? new PublicKey(mockWalletPubkey.toBase58()) // New instance each time
           : mockWalletPubkey, // Stable after 5 calls
@@ -450,7 +450,7 @@ describe("useInsuranceLP", () => {
     });
 
     it("should set error when wallet not connected", async () => {
-      (useWallet as any).mockReturnValue({
+      ( useWalletCompat as any).mockReturnValue({
         publicKey: null,
         signTransaction: null,
         connected: false,

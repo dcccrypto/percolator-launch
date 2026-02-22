@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PortfolioPage from "@/app/portfolio/page";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { PublicKey } from "@solana/web3.js";
@@ -32,7 +32,7 @@ vi.mock("next/dynamic", () => ({
 }));
 
 // Mock hooks
-vi.mock("@solana/wallet-adapter-react");
+vi.mock("@/hooks/useWalletCompat");
 vi.mock("@/hooks/usePortfolio");
 vi.mock("@/hooks/useMultiTokenMeta");
 vi.mock("@/components/ui/ScrollReveal", () => ({
@@ -61,7 +61,7 @@ describe("Portfolio Component Tests", () => {
 
   describe("PORT-001: Display positions with null PnL (CRITICAL)", () => {
     it("should display 0.00 for null PnL without crashing", () => {
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -106,7 +106,7 @@ describe("Portfolio Component Tests", () => {
     });
 
     it("should handle undefined PnL", () => {
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -151,7 +151,7 @@ describe("Portfolio Component Tests", () => {
     });
 
     it("should correctly display negative PnL", () => {
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -200,7 +200,7 @@ describe("Portfolio Component Tests", () => {
     it("should call refresh function when refresh button is clicked", async () => {
       const mockRefresh = vi.fn();
 
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -226,7 +226,7 @@ describe("Portfolio Component Tests", () => {
     it("should disable refresh button while loading", () => {
       const mockRefresh = vi.fn();
 
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -252,7 +252,7 @@ describe("Portfolio Component Tests", () => {
     it("should automatically refresh every 15 seconds", async () => {
       const mockRefresh = vi.fn();
 
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -287,7 +287,7 @@ describe("Portfolio Component Tests", () => {
       const mockRefresh = vi.fn();
 
       // Start connected
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -305,7 +305,7 @@ describe("Portfolio Component Tests", () => {
       const { rerender } = render(<PortfolioPage />);
 
       // Now disconnect
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: false,
         publicKey: null,
       });
@@ -324,7 +324,7 @@ describe("Portfolio Component Tests", () => {
 
   describe("PORT-004: Token metadata loading", () => {
     it("should show skeleton while token metadata is loading", () => {
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -371,7 +371,7 @@ describe("Portfolio Component Tests", () => {
     });
 
     it("should display position after metadata loads", () => {
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -419,7 +419,7 @@ describe("Portfolio Component Tests", () => {
 
   describe("PORT-005: Empty portfolio state", () => {
     it('should show "No positions yet" message when user has no positions', () => {
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -441,7 +441,7 @@ describe("Portfolio Component Tests", () => {
     });
 
     it("should show Browse Markets button when empty", () => {
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: true,
         publicKey: mockPublicKey,
       });
@@ -464,7 +464,7 @@ describe("Portfolio Component Tests", () => {
     });
 
     it("should show wallet connection prompt when not connected", () => {
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: false,
         publicKey: null,
       });

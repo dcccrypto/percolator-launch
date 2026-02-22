@@ -1,363 +1,136 @@
 /**
- * useWallet Hook Tests
+ * useWalletCompat Hook Tests
  * 
- * Tests wallet adapter integration:
+ * Tests Privy wallet compatibility layer:
  * - Connection detection
  * - Disconnection detection
- * - Public key changes
+ * - Public key derivation
  * - Wallet state transitions
  * 
- * Note: This tests integration with @solana/wallet-adapter-react
+ * Note: This tests integration with @privy-io/react-auth via useWalletCompat
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
-import { act } from "react";
+import { renderHook } from "@testing-library/react";
 import { PublicKey } from "@solana/web3.js";
 
-// Mock wallet adapter
-const mockUseWallet = vi.fn();
-const mockUseConnection = vi.fn();
+// Mock Privy hooks
+const mockUsePrivy = vi.fn();
+const mockUseWallets = vi.fn();
+const mockUseSignTransaction = vi.fn();
 
-vi.mock("@solana/wallet-adapter-react", () => ({
-  useWallet: () => mockUseWallet(),
-  useConnection: () => mockUseConnection(),
-  WalletProvider: ({ children }: any) => children,
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => mockUsePrivy(),
 }));
 
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+vi.mock("@privy-io/react-auth/solana", () => ({
+  useWallets: () => mockUseWallets(),
+  useSignTransaction: () => mockUseSignTransaction(),
+}));
 
-describe("Wallet Adapter Integration", () => {
-  const mockWalletPubkey = new PublicKey("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
-  const mockConnection = {
-    rpcEndpoint: "https://api.devnet.solana.com",
-    commitment: "confirmed",
-  };
+vi.mock("@/lib/config", () => ({
+  getConfig: () => ({
+    rpcUrl: "https://api.devnet.solana.com",
+    network: "devnet",
+    programId: "test",
+  }),
+}));
+
+import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
+
+describe("useWalletCompat", () => {
+  const mockAddress = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseConnection.mockReturnValue({ connection: mockConnection });
+    mockUseSignTransaction.mockReturnValue({ signTransaction: vi.fn() });
   });
 
-  describe("Connection Detection", () => {
-    it("should detect when wallet is connected", () => {
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        connecting: false,
-        disconnecting: false,
-      });
+  describe("Connection State", () => {
+    it("should report connected=false when not authenticated", () => {
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: false, user: null, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({ wallets: [] });
 
-      const { result } = renderHook(() => useWallet());
-
-      expect(result.current.connected).toBe(true);
-      expect(result.current.publicKey).toEqual(mockWalletPubkey);
-    });
-
-    it("should detect when wallet is disconnected", () => {
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        connecting: false,
-        disconnecting: false,
-      });
-
-      const { result } = renderHook(() => useWallet());
-
+      const { result } = renderHook(() => useWalletCompat());
       expect(result.current.connected).toBe(false);
       expect(result.current.publicKey).toBeNull();
     });
 
-    it("should detect connecting state", () => {
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        connecting: true,
-        disconnecting: false,
-      });
+    it("should report connected=true when authenticated with wallet", () => {
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({ wallets: [{ address: mockAddress, standardWallet: { name: "Phantom" } }] });
 
-      const { result } = renderHook(() => useWallet());
+      const { result } = renderHook(() => useWalletCompat());
+      expect(result.current.connected).toBe(true);
+      expect(result.current.publicKey).toEqual(new PublicKey(mockAddress));
+    });
 
+    it("should report connecting=true when Privy is not ready", () => {
+      mockUsePrivy.mockReturnValue({ ready: false, authenticated: false, user: null, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({ wallets: [] });
+
+      const { result } = renderHook(() => useWalletCompat());
       expect(result.current.connecting).toBe(true);
-      expect(result.current.connected).toBe(false);
-    });
-  });
-
-  describe("Disconnection Detection", () => {
-    it("should detect when wallet disconnects mid-session", () => {
-      // Start connected
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        connecting: false,
-        disconnecting: false,
-      });
-
-      const { result, rerender } = renderHook(() => useWallet());
-
-      expect(result.current.connected).toBe(true);
-
-      // Simulate disconnect
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        connecting: false,
-        disconnecting: true,
-      });
-
-      rerender();
-
-      expect(result.current.disconnecting).toBe(true);
-      expect(result.current.publicKey).toBeNull();
     });
 
-    it("should handle graceful disconnect", () => {
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        disconnect: vi.fn().mockResolvedValue(undefined),
-      });
+    it("should report connecting=false when Privy is ready", () => {
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: false, user: null, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({ wallets: [] });
 
-      const { result } = renderHook(() => useWallet());
-
-      act(() => {
-        result.current.disconnect?.();
-      });
-
-      expect(result.current.disconnect).toHaveBeenCalled();
-    });
-  });
-
-  describe("Public Key Changes", () => {
-    it("should detect wallet change (different public key)", () => {
-      const firstWallet = new PublicKey("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
-      const secondWallet = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
-
-      // First wallet
-      mockUseWallet.mockReturnValue({
-        publicKey: firstWallet,
-        connected: true,
-      });
-
-      const { result, rerender } = renderHook(() => useWallet());
-
-      expect(result.current.publicKey?.toBase58()).toBe(firstWallet.toBase58());
-
-      // Switch to second wallet
-      mockUseWallet.mockReturnValue({
-        publicKey: secondWallet,
-        connected: true,
-      });
-
-      rerender();
-
-      expect(result.current.publicKey?.toBase58()).toBe(secondWallet.toBase58());
-    });
-
-    it("should handle null to connected transition", () => {
-      // Start disconnected
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-      });
-
-      const { result, rerender } = renderHook(() => useWallet());
-
-      expect(result.current.publicKey).toBeNull();
-
-      // Connect wallet
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-      });
-
-      rerender();
-
-      expect(result.current.publicKey).toEqual(mockWalletPubkey);
-      expect(result.current.connected).toBe(true);
-    });
-  });
-
-  describe("Wallet Methods", () => {
-    it("should expose signTransaction method when connected", () => {
-      const mockSignTransaction = vi.fn();
-      
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        signTransaction: mockSignTransaction,
-      });
-
-      const { result } = renderHook(() => useWallet());
-
-      expect(result.current.signTransaction).toBeDefined();
-      expect(typeof result.current.signTransaction).toBe("function");
-    });
-
-    it("should expose signAllTransactions method when connected", () => {
-      const mockSignAllTransactions = vi.fn();
-      
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        signAllTransactions: mockSignAllTransactions,
-      });
-
-      const { result } = renderHook(() => useWallet());
-
-      expect(result.current.signAllTransactions).toBeDefined();
-      expect(typeof result.current.signAllTransactions).toBe("function");
-    });
-
-    it("should expose sendTransaction method when available", () => {
-      const mockSendTransaction = vi.fn();
-      
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        sendTransaction: mockSendTransaction,
-      });
-
-      const { result } = renderHook(() => useWallet());
-
-      expect(result.current.sendTransaction).toBeDefined();
-      expect(typeof result.current.sendTransaction).toBe("function");
-    });
-  });
-
-  describe("Error States", () => {
-    it("should handle wallet adapter errors", () => {
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        connecting: false,
-        disconnecting: false,
-      });
-
-      const { result } = renderHook(() => useWallet());
-
-      expect(result.current.publicKey).toBeNull();
-      expect(result.current.connected).toBe(false);
-    });
-
-    it("should handle wallet not installed", () => {
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        wallet: null,
-      });
-
-      const { result } = renderHook(() => useWallet());
-
-      expect(result.current.wallet).toBeNull();
-      expect(result.current.connected).toBe(false);
-    });
-  });
-
-  describe("Wallet Ready State", () => {
-    it("should indicate when wallet is ready to use", () => {
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        connecting: false,
-        disconnecting: false,
-        wallet: { adapter: { name: "Phantom" } },
-      });
-
-      const { result } = renderHook(() => useWallet());
-
-      // Wallet is ready if connected and has publicKey
-      const isReady = result.current.connected && result.current.publicKey !== null;
-      expect(isReady).toBe(true);
-    });
-
-    it("should indicate wallet is not ready when disconnected", () => {
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        connecting: false,
-        disconnecting: false,
-        wallet: null,
-      });
-
-      const { result } = renderHook(() => useWallet());
-
-      const isReady = result.current.connected && result.current.publicKey !== null;
-      expect(isReady).toBe(false);
-    });
-  });
-
-  describe("Connection State Management", () => {
-    it("should track connection lifecycle: disconnected → connecting → connected", () => {
-      // Start disconnected
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        connecting: false,
-        disconnecting: false,
-      });
-
-      const { result, rerender } = renderHook(() => useWallet());
-      expect(result.current.connected).toBe(false);
-
-      // Transition to connecting
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        connecting: true,
-        disconnecting: false,
-      });
-
-      rerender();
-      expect(result.current.connecting).toBe(true);
-
-      // Transition to connected
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        connecting: false,
-        disconnecting: false,
-      });
-
-      rerender();
-      expect(result.current.connected).toBe(true);
+      const { result } = renderHook(() => useWalletCompat());
       expect(result.current.connecting).toBe(false);
     });
 
-    it("should track disconnection lifecycle: connected → disconnecting → disconnected", () => {
-      // Start connected
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        connecting: false,
-        disconnecting: false,
-      });
+    it("should return null publicKey when no wallets connected", () => {
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({ wallets: [] });
 
-      const { result, rerender } = renderHook(() => useWallet());
-      expect(result.current.connected).toBe(true);
-
-      // Transition to disconnecting
-      mockUseWallet.mockReturnValue({
-        publicKey: mockWalletPubkey,
-        connected: true,
-        connecting: false,
-        disconnecting: true,
-      });
-
-      rerender();
-      expect(result.current.disconnecting).toBe(true);
-
-      // Transition to disconnected
-      mockUseWallet.mockReturnValue({
-        publicKey: null,
-        connected: false,
-        connecting: false,
-        disconnecting: false,
-      });
-
-      rerender();
+      const { result } = renderHook(() => useWalletCompat());
+      expect(result.current.publicKey).toBeNull();
       expect(result.current.connected).toBe(false);
-      expect(result.current.disconnecting).toBe(false);
     });
+
+    it("should prefer external wallet over embedded (Privy) wallet", () => {
+      const externalAddr = "9xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({
+        wallets: [
+          { address: mockAddress, standardWallet: { name: "Privy" } },
+          { address: externalAddr, standardWallet: { name: "Phantom" } },
+        ],
+      });
+
+      const { result } = renderHook(() => useWalletCompat());
+      expect(result.current.publicKey?.toBase58()).toBe(externalAddr);
+    });
+
+    it("should fall back to embedded wallet when no external wallet", () => {
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({
+        wallets: [{ address: mockAddress, standardWallet: { name: "Privy" } }],
+      });
+
+      const { result } = renderHook(() => useWalletCompat());
+      expect(result.current.publicKey?.toBase58()).toBe(mockAddress);
+    });
+  });
+
+  describe("Disconnect", () => {
+    it("should expose logout as disconnect", () => {
+      const mockLogout = vi.fn();
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: mockLogout });
+      mockUseWallets.mockReturnValue({ wallets: [{ address: mockAddress, standardWallet: { name: "Phantom" } }] });
+
+      const { result } = renderHook(() => useWalletCompat());
+      expect(result.current.disconnect).toBe(mockLogout);
+    });
+  });
+});
+
+describe("useConnectionCompat", () => {
+  it("should return a Connection object", () => {
+    const { result } = renderHook(() => useConnectionCompat());
+    expect(result.current.connection).toBeDefined();
+    expect(result.current.connection.rpcEndpoint).toContain("solana.com");
   });
 });

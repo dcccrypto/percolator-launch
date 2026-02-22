@@ -39,9 +39,9 @@ const mockUseMarketDiscovery = vi.fn(() => ({
   error: null,
 }));
 
-vi.mock('@solana/wallet-adapter-react', () => ({
-  useWallet: () => mockUseWallet(),
-  useConnection: () => mockUseConnection(),
+vi.mock('@/hooks/useWalletCompat', () => ({
+  useWalletCompat: () => mockUseWallet(),
+  useConnectionCompat: () => mockUseConnection(),
 }));
 
 vi.mock('../../hooks/useMarketDiscovery', () => ({

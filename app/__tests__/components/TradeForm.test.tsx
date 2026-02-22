@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TradeForm } from "@/components/trade/TradeForm";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useTrade } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useEngineState } from "@/hooks/useEngineState";
@@ -21,10 +21,15 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 import { AccountKind } from "@percolator/core";
 import { PublicKey } from "@solana/web3.js";
 
+// Mock Privy (used directly by TradeForm for login)
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => ({ login: vi.fn(), ready: true, authenticated: true }),
+}));
+
 // Mock all hooks
-vi.mock("@solana/wallet-adapter-react", () => ({
-  useWallet: vi.fn(),
-  useConnection: vi.fn(() => ({
+vi.mock("@/hooks/useWalletCompat", () => ({
+  useWalletCompat: vi.fn(),
+  useConnectionCompat: vi.fn(() => ({
     connection: {
       getBalance: vi.fn().mockResolvedValue(0),
       getAccountInfo: vi.fn().mockResolvedValue(null),
@@ -71,7 +76,7 @@ describe("TradeForm Component Tests", () => {
     vi.clearAllMocks();
     
     // Default mock implementations
-    (useWallet as any).mockReturnValue({
+    (useWalletCompat as any).mockReturnValue({
       connected: true,
       publicKey: mockPublicKey,
     });
@@ -380,7 +385,7 @@ describe("TradeForm Component Tests", () => {
       await user.type(input, "5");
       
       // Simulate wallet disconnect
-      (useWallet as any).mockReturnValue({
+      (useWalletCompat as any).mockReturnValue({
         connected: false,
         publicKey: null,
       });

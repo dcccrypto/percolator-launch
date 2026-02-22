@@ -28,8 +28,8 @@ const mockGetAccountInfo = vi.fn();
 const mockGetParsedAccountInfo = vi.fn();
 const mockRequestAirdrop = vi.fn();
 
-vi.mock('@solana/wallet-adapter-react', () => ({
-  useWallet: () => mockUseWallet(),
+vi.mock('@/hooks/useWalletCompat', () => ({
+  useWalletCompat: () => mockUseWallet(),
 }));
 
 vi.mock('@solana/web3.js', async (importOriginal) => {
