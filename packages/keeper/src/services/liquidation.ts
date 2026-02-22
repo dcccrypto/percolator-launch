@@ -203,7 +203,11 @@ export class LiquidationService {
 
       return candidates;
     } catch (err) {
-      logger.error("Market scan failed", { slabAddress, error: err });
+      logger.error("Market scan failed", {
+        slabAddress,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
       return [];
     }
   }
@@ -387,12 +391,13 @@ export class LiquidationService {
       
       return sig!;
     } catch (err) {
-      logger.error("Liquidation failed", { 
-        error: err,
+      logger.error("Liquidation failed", {
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
         slabAddress: slabAddress.toBase58(),
         accountIdx,
         market: slabAddress.toBase58(),
-        programId: market.programId.toBase58()
+        programId: market.programId.toBase58(),
       });
       
       eventBus.publish("liquidation.failure", slabAddress.toBase58(), {
@@ -475,7 +480,10 @@ export class LiquidationService {
           });
         }
       } catch (err) {
-        logger.error("Liquidation cycle failed", { error: err });
+        logger.error("Liquidation cycle failed", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
       } finally {
         this._scanning = false;
       }

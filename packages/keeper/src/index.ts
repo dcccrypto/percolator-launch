@@ -121,7 +121,7 @@ async function start() {
 }
 
 start().catch((err) => {
-  logger.error("Failed to start keeper", { error: err });
+  logger.error("Failed to start keeper", { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
   process.exit(1);
 });
 
@@ -157,7 +157,7 @@ async function shutdown(signal: string): Promise<void> {
     logger.info("Shutdown complete");
     process.exit(0);
   } catch (err) {
-    logger.error("Error during shutdown", { error: err });
+    logger.error("Error during shutdown", { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
     process.exit(1);
   }
 }

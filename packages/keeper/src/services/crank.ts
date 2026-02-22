@@ -225,12 +225,13 @@ export class CrankService {
         state.isActive = false;
       }
       
-      logger.error("Crank failed", { 
-        slabAddress, 
-        error: err,
+      logger.error("Crank failed", {
+        slabAddress,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
         consecutiveFailures: state.consecutiveFailures,
         market: market.slabAddress.toBase58(),
-        programId: market.programId.toBase58()
+        programId: market.programId.toBase58(),
       });
       
       // Alert on 5+ consecutive failures
@@ -308,7 +309,7 @@ export class CrankService {
     this.discover().then(markets => {
       logger.info("Initial discovery complete", { marketCount: markets.length });
     }).catch(err => {
-      logger.error("Initial discovery failed", { error: err });
+      logger.error("Initial discovery failed", { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
     });
 
     this.timer = setInterval(async () => {

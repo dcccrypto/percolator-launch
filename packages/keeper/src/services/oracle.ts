@@ -324,12 +324,13 @@ export class OracleService {
       });
       return true;
     } catch (err) {
-      logger.error("Failed to push oracle price", { 
-        slabAddress, 
-        error: err,
+      logger.error("Failed to push oracle price", {
+        slabAddress,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
         mint,
         priceE6: priceEntry?.priceE6.toString(),
-        source: priceEntry?.source
+        source: priceEntry?.source,
       });
       
       return false;
