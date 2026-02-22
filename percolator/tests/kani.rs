@@ -7013,3 +7013,55 @@ fn kani_premium_funding_rate_zero_premium() {
     );
     kani::assert(rate == 0, "equal mark and index must give zero premium");
 }
+
+/// Proof: premium rate sign correctness.
+/// mark > index → rate >= 0 (longs pay), mark < index → rate <= 0 (shorts pay).
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(2)]
+fn kani_premium_funding_rate_sign_correctness() {
+    let mark: u64 = kani::any();
+    let index: u64 = kani::any();
+    let dampening: u64 = kani::any();
+    let max_bps: i64 = kani::any();
+
+    kani::assume(mark > 0 && mark <= 1_000_000_000_000);
+    kani::assume(index > 0 && index <= 1_000_000_000_000);
+    kani::assume(dampening > 0 && dampening <= 100_000_000);
+    kani::assume(max_bps > 0 && max_bps <= 10_000);
+
+    let rate = RiskEngine::compute_premium_funding_bps_per_slot(
+        mark, index, dampening, max_bps,
+    );
+
+    if mark > index {
+        kani::assert(rate >= 0, "mark > index must give non-negative rate");
+    } else if mark < index {
+        kani::assert(rate <= 0, "mark < index must give non-positive rate");
+    } else {
+        kani::assert(rate == 0, "mark == index must give zero rate");
+    }
+}
+
+/// Proof: combined rate is a convex combination (bounded between inputs).
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(2)]
+fn kani_combined_funding_rate_convex() {
+    let inv_rate: i64 = kani::any();
+    let prem_rate: i64 = kani::any();
+    let weight: u64 = kani::any();
+
+    kani::assume(inv_rate >= -10_000 && inv_rate <= 10_000);
+    kani::assume(prem_rate >= -10_000 && prem_rate <= 10_000);
+    kani::assume(weight <= 10_000);
+
+    let combined = RiskEngine::compute_combined_funding_rate(inv_rate, prem_rate, weight);
+    let lo = core::cmp::min(inv_rate, prem_rate);
+    let hi = core::cmp::max(inv_rate, prem_rate);
+
+    kani::assert(
+        combined >= lo && combined <= hi,
+        "combined rate must be between inventory and premium rates (convex combination)"
+    );
+}
