@@ -28,6 +28,9 @@ const isProd = process.env.NODE_ENV === "production";
  * message, name, stack, and cause into a plain object.
  */
 function serializeValue(value: unknown): unknown {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
   if (value instanceof Error) {
     const obj: Record<string, unknown> = {
       message: value.message,

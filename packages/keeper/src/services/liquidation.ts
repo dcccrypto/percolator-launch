@@ -118,7 +118,7 @@ export class LiquidationService {
       if (priceAge > 60n) {
         // Only log for markets with actual positions (reduce noise)
         if (engine.totalOpenInterest > 0n) {
-          logger.warn("Stale oracle price, skipping", { slabAddress, priceAgeSeconds: priceAge, maxAge: 60 });
+          logger.warn("Stale oracle price, skipping", { slabAddress, priceAgeSeconds: Number(priceAge), maxAge: 60 });
         }
         return []; // Don't liquidate with stale prices
       }
