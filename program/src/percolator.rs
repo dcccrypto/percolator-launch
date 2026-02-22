@@ -1588,6 +1588,11 @@ pub mod ix {
             liquidation_fee_cap: U128::new(read_u128(input)?),
             liquidation_buffer_bps: read_u64(input)?,
             min_liquidation_abs: U128::new(read_u128(input)?),
+            // PERC-121: Funding rate params (default to safe values for backward compat)
+            funding_premium_weight_bps: 0,
+            funding_settlement_interval_slots: 0,
+            funding_premium_dampening_e6: 1_000_000,
+            funding_premium_max_bps_per_slot: 5,
         })
     }
 }
