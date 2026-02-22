@@ -324,6 +324,28 @@ pub struct RiskParams {
     pub partial_liquidation_cooldown_slots: u64,
     /// Use mark price (not oracle) for liquidation trigger.
     pub use_mark_price_for_liquidation: bool,
+
+    // ========================================
+    // Dynamic Fee Parameters (PERC-120)
+    // ========================================
+    /// Tier 2 trading fee in basis points (higher than base trading_fee_bps).
+    pub fee_tier2_bps: u64,
+    /// Tier 3 trading fee in basis points (highest tier).
+    pub fee_tier3_bps: u64,
+    /// Notional threshold for Tier 2 fees (in capital units, e6 scale).
+    /// 0 = tiered fees disabled.
+    pub fee_tier2_threshold: u128,
+    /// Notional threshold for Tier 3 fees (in capital units, e6 scale).
+    pub fee_tier3_threshold: u128,
+    /// Fee split: LP vault share in basis points (0–10_000).
+    pub fee_split_lp_bps: u64,
+    /// Fee split: protocol treasury share in basis points.
+    pub fee_split_protocol_bps: u64,
+    /// Fee split: market creator share in basis points.
+    /// Note: fee_split_lp_bps + fee_split_protocol_bps + fee_split_creator_bps must == 10_000.
+    pub fee_split_creator_bps: u64,
+    /// Utilization-based fee multiplier ceiling (bps above base). 0 = disabled.
+    pub fee_utilization_surge_bps: u64,
 }
 
 impl RiskParams {
@@ -369,6 +391,24 @@ impl RiskParams {
         }
         if self.partial_liquidation_bps > 10_000 {
             return Err(RiskError::Overflow);
+        }
+        // Fee tiers must be monotonically increasing
+        if self.fee_tier2_bps > 10_000 || self.fee_tier3_bps > 10_000 {
+            return Err(RiskError::Overflow);
+        }
+        if self.fee_tier2_threshold > 0 && self.fee_tier3_threshold > 0
+            && self.fee_tier3_threshold <= self.fee_tier2_threshold
+        {
+            return Err(RiskError::Overflow);
+        }
+        // Fee split must sum to 10_000
+        if self.fee_split_lp_bps > 0 || self.fee_split_protocol_bps > 0 || self.fee_split_creator_bps > 0 {
+            let total = self.fee_split_lp_bps
+                .saturating_add(self.fee_split_protocol_bps)
+                .saturating_add(self.fee_split_creator_bps);
+            if total != 10_000 {
+                return Err(RiskError::Overflow);
+            }
         }
         Ok(())
     }
@@ -3021,6 +3061,83 @@ impl RiskEngine {
     /// This helper is retained for reporting, PnL display, and test assertions that
     /// specifically need realized-only equity.
     #[inline]
+    // ========================================
+    // Dynamic Fee Computation (PERC-120)
+    // ========================================
+
+    /// Compute the effective trading fee in basis points for a given notional.
+    ///
+    /// Uses tiered fee schedule if configured:
+    /// - notional < tier2_threshold → trading_fee_bps (Tier 1)
+    /// - notional < tier3_threshold → fee_tier2_bps (Tier 2)
+    /// - notional >= tier3_threshold → fee_tier3_bps (Tier 3)
+    ///
+    /// If fee_tier2_threshold == 0, tiered fees are disabled (flat rate).
+    ///
+    /// Then applies utilization-based surge:
+    /// - surge = fee_utilization_surge_bps * utilization_ratio
+    /// - utilization_ratio = OI / (2 * vault), capped at 1.0
+    /// - effective = base_tier_fee + surge
+    pub fn compute_dynamic_fee_bps(&self, notional: u128) -> u64 {
+        // Step 1: Determine tier fee
+        let base_fee = if self.params.fee_tier2_threshold == 0 {
+            // Tiered fees disabled → flat rate
+            self.params.trading_fee_bps
+        } else if notional >= self.params.fee_tier3_threshold && self.params.fee_tier3_threshold > 0 {
+            self.params.fee_tier3_bps
+        } else if notional >= self.params.fee_tier2_threshold {
+            self.params.fee_tier2_bps
+        } else {
+            self.params.trading_fee_bps
+        };
+
+        // Step 2: Utilization-based surge
+        if self.params.fee_utilization_surge_bps == 0 {
+            return base_fee;
+        }
+
+        let vault = self.vault.get();
+        if vault == 0 {
+            return base_fee;
+        }
+
+        let oi = self.total_open_interest.get();
+        // utilization = OI / (2 * vault), capped at 1.0 (expressed as bps / 10_000)
+        let vault_2x = vault.saturating_mul(2);
+        let util_bps = if oi >= vault_2x {
+            10_000u64 // Fully utilized
+        } else {
+            // (oi * 10_000 / vault_2x) as u64
+            ((oi as u128).saturating_mul(10_000) / (vault_2x as u128).max(1)) as u64
+        };
+
+        // surge = fee_utilization_surge_bps * util_bps / 10_000
+        let surge = (self.params.fee_utilization_surge_bps as u128 * util_bps as u128 / 10_000) as u64;
+
+        base_fee.saturating_add(surge)
+    }
+
+    /// Compute the fee split for a given total fee amount.
+    ///
+    /// Returns (lp_share, protocol_share, creator_share).
+    /// If fee split params are all 0, 100% goes to LP vault (legacy behavior).
+    pub fn compute_fee_split(&self, total_fee: u128) -> (u128, u128, u128) {
+        if self.params.fee_split_lp_bps == 0
+            && self.params.fee_split_protocol_bps == 0
+            && self.params.fee_split_creator_bps == 0
+        {
+            // Legacy: 100% to LP vault
+            return (total_fee, 0, 0);
+        }
+
+        let lp = mul_u128(total_fee, self.params.fee_split_lp_bps as u128) / 10_000;
+        let protocol = mul_u128(total_fee, self.params.fee_split_protocol_bps as u128) / 10_000;
+        // Creator gets the remainder to avoid rounding loss
+        let creator = total_fee.saturating_sub(lp).saturating_sub(protocol);
+
+        (lp, protocol, creator)
+    }
+
     pub fn account_equity(&self, account: &Account) -> u128 {
         let cap_i = u128_to_i128_clamped(account.capital.get());
         let eq_i = cap_i.saturating_add(account.pnl.get());

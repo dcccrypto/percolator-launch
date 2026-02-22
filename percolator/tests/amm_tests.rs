@@ -22,9 +22,20 @@ fn default_params() -> RiskParams {
         funding_settlement_interval_slots: 0,
         funding_premium_dampening_e6: 1_000_000,
         funding_premium_max_bps_per_slot: 5,
+<<<<<<< HEAD
         partial_liquidation_bps: 2000,
         partial_liquidation_cooldown_slots: 30,
         use_mark_price_for_liquidation: false,
+=======
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 0,
+        fee_split_protocol_bps: 0,
+        fee_split_creator_bps: 0,
+        fee_utilization_surge_bps: 0,
+>>>>>>> 7233b7f (feat(PERC-120): dynamic fee model — tiered fees, utilization surge, fee split)
     }
 }
 

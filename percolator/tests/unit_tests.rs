@@ -74,6 +74,14 @@ fn default_params() -> RiskParams {
         partial_liquidation_bps: 2000,
         partial_liquidation_cooldown_slots: 30,
         use_mark_price_for_liquidation: false,
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 0,
+        fee_split_protocol_bps: 0,
+        fee_split_creator_bps: 0,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -3584,6 +3592,14 @@ fn params_for_inline_tests() -> RiskParams {
         partial_liquidation_bps: 2000,
         partial_liquidation_cooldown_slots: 30,
         use_mark_price_for_liquidation: false,
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 0,
+        fee_split_protocol_bps: 0,
+        fee_split_creator_bps: 0,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -5047,4 +5063,119 @@ fn test_mark_price_liq_oob() {
     let mut engine = Box::new(RiskEngine::new(params));
     engine.mark_price_e6 = 1_000_000;
     assert_eq!(engine.liquidate_with_mark_price(u16::MAX, 100, 1_000_000), Ok(false));
+}
+// PERC-120: Dynamic fee model tests
+// ==============================================================================
+
+#[test]
+fn test_dynamic_fee_flat_when_tiers_disabled() {
+    let mut params = default_params();
+    params.trading_fee_bps = 10; // 0.1%
+    params.fee_tier2_threshold = 0; // disabled
+    let engine = Box::new(RiskEngine::new(params));
+    // Any notional → flat rate
+    assert_eq!(engine.compute_dynamic_fee_bps(1_000), 10);
+    assert_eq!(engine.compute_dynamic_fee_bps(1_000_000_000), 10);
+}
+
+#[test]
+fn test_dynamic_fee_tiered() {
+    let mut params = default_params();
+    params.trading_fee_bps = 5;  // Tier 1: 0.05%
+    params.fee_tier2_bps = 8;    // Tier 2: 0.08%
+    params.fee_tier3_bps = 10;   // Tier 3: 0.10%
+    params.fee_tier2_threshold = 1_000_000; // 1M
+    params.fee_tier3_threshold = 10_000_000; // 10M
+    let engine = Box::new(RiskEngine::new(params));
+
+    assert_eq!(engine.compute_dynamic_fee_bps(500_000), 5);     // Tier 1
+    assert_eq!(engine.compute_dynamic_fee_bps(1_000_000), 8);   // Tier 2
+    assert_eq!(engine.compute_dynamic_fee_bps(5_000_000), 8);   // Tier 2
+    assert_eq!(engine.compute_dynamic_fee_bps(10_000_000), 10); // Tier 3
+    assert_eq!(engine.compute_dynamic_fee_bps(100_000_000), 10); // Tier 3
+}
+
+#[test]
+fn test_dynamic_fee_utilization_surge() {
+    let mut params = default_params();
+    params.trading_fee_bps = 10;
+    params.fee_utilization_surge_bps = 20; // max 20bps surge at 100% utilization
+    let mut engine = Box::new(RiskEngine::new(params));
+
+    // No vault → no surge
+    assert_eq!(engine.compute_dynamic_fee_bps(1_000), 10);
+
+    // Set vault and OI
+    engine.vault = U128::new(1_000_000);
+    engine.total_open_interest = U128::new(0);
+    assert_eq!(engine.compute_dynamic_fee_bps(1_000), 10); // 0% utilization
+
+    engine.total_open_interest = U128::new(1_000_000); // 50% util (OI / 2*vault)
+    assert_eq!(engine.compute_dynamic_fee_bps(1_000), 20); // 10 + 20*0.5 = 20
+
+    engine.total_open_interest = U128::new(2_000_000); // 100% util
+    assert_eq!(engine.compute_dynamic_fee_bps(1_000), 30); // 10 + 20 = 30
+}
+
+#[test]
+fn test_fee_split_legacy() {
+    let engine = Box::new(RiskEngine::new(default_params()));
+    let (lp, proto, creator) = engine.compute_fee_split(10_000);
+    assert_eq!(lp, 10_000);     // 100% to LP
+    assert_eq!(proto, 0);
+    assert_eq!(creator, 0);
+}
+
+#[test]
+fn test_fee_split_configured() {
+    let mut params = default_params();
+    params.fee_split_lp_bps = 8000;      // 80%
+    params.fee_split_protocol_bps = 1200; // 12%
+    params.fee_split_creator_bps = 800;   // 8%
+    let engine = Box::new(RiskEngine::new(params));
+
+    let (lp, proto, creator) = engine.compute_fee_split(10_000);
+    assert_eq!(lp, 8000);
+    assert_eq!(proto, 1200);
+    assert_eq!(creator, 800);
+}
+
+#[test]
+fn test_fee_split_rounding_goes_to_creator() {
+    let mut params = default_params();
+    params.fee_split_lp_bps = 8000;
+    params.fee_split_protocol_bps = 1200;
+    params.fee_split_creator_bps = 800;
+    let engine = Box::new(RiskEngine::new(params));
+
+    // 33 is not evenly divisible
+    let (lp, proto, creator) = engine.compute_fee_split(33);
+    assert_eq!(lp + proto + creator, 33); // Conservation: total preserved
+}
+
+#[test]
+fn test_fee_params_validation() {
+    let mut params = default_params();
+
+    // Valid tiered config
+    params.fee_tier2_bps = 8;
+    params.fee_tier3_bps = 10;
+    params.fee_tier2_threshold = 1_000_000;
+    params.fee_tier3_threshold = 10_000_000;
+    assert!(params.validate().is_ok());
+
+    // Invalid: tier3 threshold <= tier2 threshold
+    params.fee_tier3_threshold = 500_000;
+    assert!(params.validate().is_err());
+
+    // Fix thresholds, test fee split
+    params.fee_tier3_threshold = 10_000_000;
+    params.fee_split_lp_bps = 8000;
+    params.fee_split_protocol_bps = 1200;
+    params.fee_split_creator_bps = 800;
+    assert!(params.validate().is_ok());
+
+    // Invalid: fee split doesn't sum to 10_000
+    params.fee_split_creator_bps = 900;
+    assert!(params.validate().is_err());
 }

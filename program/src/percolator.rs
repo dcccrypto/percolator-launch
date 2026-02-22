@@ -11,8 +11,12 @@
 // features are accidentally enabled in production builds.
 
 /// C2: unsafe_close skips ALL CloseSlab validation — test environments only!
+/// PERC-136 #309: Guard against accidental enabling outside test builds.
 #[cfg(all(feature = "unsafe_close", feature = "mainnet"))]
 compile_error!("unsafe_close MUST NOT be enabled on mainnet builds!");
+
+#[cfg(all(feature = "unsafe_close", not(feature = "test"), not(test)))]
+compile_error!("unsafe_close MUST ONLY be enabled with the 'test' feature — it is a drain-all backdoor!");
 
 /// H2: devnet disables oracle staleness/confidence checks — not safe for mainnet!
 #[cfg(all(feature = "devnet", feature = "mainnet"))]
@@ -73,6 +77,16 @@ pub mod constants {
     /// unit_scale=0 disables scaling (1:1 base tokens to units, dust=0 always).
     /// unit_scale=1..=1_000_000_000 enables scaling with dust tracking.
     pub const MAX_UNIT_SCALE: u32 = 1_000_000_000;
+
+    /// Minimum seed deposit for InitMarket (in base token lamports/atoms).
+    /// Prevents spam-market creation. Enforced on-chain, not just UI.
+    /// For USDC (6 decimals): 500_000_000 = 500 USDC.
+    /// For SOL (9 decimals): 500_000_000 = 0.5 SOL — admin must fund via separate deposit.
+    /// Set to 0 in test feature to allow tests with zero seed.
+    #[cfg(not(feature = "test"))]
+    pub const MIN_INIT_MARKET_SEED: u64 = 500_000_000; // 500 USDC at 6 decimals
+    #[cfg(feature = "test")]
+    pub const MIN_INIT_MARKET_SEED: u64 = 0; // Allow zero seed in tests
 
     // Default funding parameters (used at init_market, can be changed via update_config)
     pub const DEFAULT_FUNDING_HORIZON_SLOTS: u64 = 500;            // ~4 min @ ~2 slots/sec
@@ -1068,6 +1082,10 @@ pub mod error {
         InsuranceSupplyMismatch,
         /// Market is paused — trading, deposits, and withdrawals are disabled
         MarketPaused,
+        /// InitMarket seed deposit below minimum (PERC-136 #299)
+        InsufficientSeed,
+        /// RenounceAdmin called on non-resolved market (PERC-136 #312)
+        AdminRenounceNotAllowed,
     }
 
     impl From<PercolatorError> for ProgramError {
@@ -1558,6 +1576,15 @@ pub mod ix {
             partial_liquidation_bps: 2000,
             partial_liquidation_cooldown_slots: 30,
             use_mark_price_for_liquidation: false,
+            // PERC-120: Dynamic fee params (defaults = flat fee, no split, no surge)
+            fee_tier2_bps: 0,
+            fee_tier3_bps: 0,
+            fee_tier2_threshold: 0,
+            fee_tier3_threshold: 0,
+            fee_split_lp_bps: 0,
+            fee_split_protocol_bps: 0,
+            fee_split_creator_bps: 0,
+            fee_utilization_surge_bps: 0,
         })
     }
 }
@@ -3390,6 +3417,23 @@ pub mod processor {
                     let _ = Mint::unpack(&mint_data)?;
                 }
 
+                // SECURITY (#299): Enforce minimum seed deposit to prevent market spam.
+                // Check vault token account balance >= MIN_INIT_MARKET_SEED.
+                // The admin must fund the vault BEFORE calling InitMarket.
+                {
+                    let vault_data = a_vault.try_borrow_data()?;
+                    // SPL Token Account: amount is at offset 64..72 (u64 LE)
+                    if vault_data.len() >= 72 {
+                        let amount = u64::from_le_bytes(
+                            vault_data[64..72].try_into().unwrap_or([0u8; 8])
+                        );
+                        if amount < crate::constants::MIN_INIT_MARKET_SEED {
+                            msg!("InitMarket: seed deposit {} < minimum {}", amount, crate::constants::MIN_INIT_MARKET_SEED);
+                            return Err(PercolatorError::InsufficientSeed.into());
+                        }
+                    }
+                }
+
                 // Validate unit_scale: reject huge values that make most deposits credit 0 units
                 if !crate::verify::init_market_scale_ok(unit_scale) {
                     return Err(ProgramError::InvalidInstructionData);
@@ -5002,6 +5046,8 @@ pub mod processor {
 
             Instruction::RenounceAdmin => {
                 // Renounce admin: set admin to all zeros (irreversible).
+                // PERC-136 #312: Only allowed after market is RESOLVED to prevent
+                // admin abandonment while users still have open positions.
                 // Accounts: [admin(signer), slab(writable)]
                 accounts::expect_len(accounts, 2)?;
                 let a_admin = &accounts[0];
@@ -5013,6 +5059,11 @@ pub mod processor {
                 let mut data = state::slab_data_mut(a_slab)?;
                 slab_guard(program_id, a_slab, &data)?;
                 require_initialized(&data)?;
+
+                // Guard: market must be RESOLVED before admin can renounce (PERC-136 #312)
+                if !state::is_resolved(&data) {
+                    return Err(PercolatorError::AdminRenounceNotAllowed.into());
+                }
 
                 let header = state::read_header(&data);
                 require_admin(header.admin, a_admin.key)?;

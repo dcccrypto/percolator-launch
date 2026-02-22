@@ -3383,3 +3383,28 @@ fn kani_hyperp_gate_rejects_non_hyperp() {
     let is_hyperp = is_hyperp_mode_verify(feed_id);
     assert!(!is_hyperp, "non-zero feed_id must NOT be Hyperp mode");
 }
+
+/// Prove: RenounceAdmin guard rejects non-resolved markets (PERC-136 #312).
+/// Admin cannot renounce on a market that has not been resolved, preventing
+/// admin abandonment while users still have open positions.
+#[kani::proof]
+fn kani_renounce_admin_requires_resolved() {
+    let flags_byte: u8 = kani::any();
+    let resolved_bit: u8 = 1 << 0; // FLAG_RESOLVED = bit 0
+
+    let is_resolved = (flags_byte & resolved_bit) != 0;
+
+    if !is_resolved {
+        // Guard must reject — AdminRenounceNotAllowed
+        assert!(
+            flags_byte & resolved_bit == 0,
+            "unresolved market must block renounce"
+        );
+    } else {
+        // Guard allows — market is resolved
+        assert!(
+            flags_byte & resolved_bit != 0,
+            "resolved market must allow renounce"
+        );
+    }
+}

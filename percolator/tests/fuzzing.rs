@@ -185,6 +185,14 @@ fn params_regime_a() -> RiskParams {
         partial_liquidation_bps: 2000,
         partial_liquidation_cooldown_slots: 30,
         use_mark_price_for_liquidation: false,
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 0,
+        fee_split_protocol_bps: 0,
+        fee_split_creator_bps: 0,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -211,6 +219,14 @@ fn params_regime_b() -> RiskParams {
         partial_liquidation_bps: 2000,
         partial_liquidation_cooldown_slots: 30,
         use_mark_price_for_liquidation: false,
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 0,
+        fee_split_protocol_bps: 0,
+        fee_split_creator_bps: 0,
+        fee_utilization_surge_bps: 0,
     }
 }
 
