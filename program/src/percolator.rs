@@ -58,6 +58,12 @@ pub mod constants {
     /// Sentinel value for permissionless crank (no caller account required)
     pub const CRANK_NO_CALLER: u16 = u16::MAX;
 
+    // ── Instruction tags (single source of truth) ──────────────────────────
+    // Keep in sync with program/src/tags.rs when that file exists (PERC-112).
+    // Add new tags here AND to tags.rs.
+    pub const TAG_SET_PYTH_ORACLE: u8 = 32;
+    pub const TAG_MARK_PRICE_CRANK: u8 = 33; // PERC-118 — reserved for next PR
+
     /// Maximum allowed unit_scale for InitMarket.
     /// unit_scale=0 disables scaling (1:1 base tokens to units, dust=0 always).
     /// unit_scale=1..=1_000_000_000 enables scaling with dust tracking.
