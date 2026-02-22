@@ -4749,3 +4749,224 @@ fn test_admin_force_close_valid_zero_position_returns_ok() {
     // Force close on zero position should succeed (no-op)
     assert!(engine.admin_force_close(idx, 100, 1_000_000).is_ok());
 }
+
+// ==============================================================================
+// PERC-121: Premium Funding Rate Tests
+// ==============================================================================
+
+#[test]
+fn test_premium_funding_zero_when_mark_equals_index() {
+    let rate = RiskEngine::compute_premium_funding_bps_per_slot(
+        1_000_000, // mark = 1.0
+        1_000_000, // index = 1.0
+        1_000_000, // dampening = 1.0x
+        100,       // max 100 bps/slot
+    );
+    assert_eq!(rate, 0, "No premium when mark == index");
+}
+
+#[test]
+fn test_premium_funding_positive_when_mark_above_index() {
+    // mark = 1.01 (1% above index)
+    let rate = RiskEngine::compute_premium_funding_bps_per_slot(
+        1_010_000, // mark = 1.01
+        1_000_000, // index = 1.0
+        1_000_000, // dampening = 1.0x (no dampening)
+        100,       // max 100 bps/slot
+    );
+    // premium = (1.01 - 1.0) / 1.0 = 1% = 100 bps
+    // rate = 100 bps / dampening(1.0) = 100 bps/slot
+    assert!(rate > 0, "Longs should pay when mark > index");
+    assert_eq!(rate, 100, "1% premium with 1.0x dampening = 100 bps");
+}
+
+#[test]
+fn test_premium_funding_negative_when_mark_below_index() {
+    // mark = 0.99 (1% below index)
+    let rate = RiskEngine::compute_premium_funding_bps_per_slot(
+        990_000,   // mark = 0.99
+        1_000_000, // index = 1.0
+        1_000_000, // dampening = 1.0x
+        100,       // max
+    );
+    assert!(rate < 0, "Shorts should pay when mark < index");
+    assert_eq!(rate, -100);
+}
+
+#[test]
+fn test_premium_funding_clamped_to_max() {
+    // mark = 1.10 (10% above index) but max is 5 bps
+    let rate = RiskEngine::compute_premium_funding_bps_per_slot(
+        1_100_000, // mark = 1.10
+        1_000_000, // index = 1.0
+        1_000_000, // dampening = 1.0x
+        5,         // max 5 bps/slot
+    );
+    assert_eq!(rate, 5, "Should clamp to max");
+}
+
+#[test]
+fn test_premium_funding_with_dampening() {
+    // mark = 1.01 (1% above), dampening = 8_000_000 (8x)
+    let rate = RiskEngine::compute_premium_funding_bps_per_slot(
+        1_010_000, // mark = 1.01
+        1_000_000, // index = 1.0
+        8_000_000, // dampening = 8.0x
+        100,       // max
+    );
+    // premium = 100 bps, rate = 100 / 8 = 12 bps/slot
+    assert_eq!(rate, 12);
+}
+
+#[test]
+fn test_premium_funding_zero_inputs() {
+    assert_eq!(RiskEngine::compute_premium_funding_bps_per_slot(0, 1_000_000, 1_000_000, 5), 0);
+    assert_eq!(RiskEngine::compute_premium_funding_bps_per_slot(1_000_000, 0, 1_000_000, 5), 0);
+    assert_eq!(RiskEngine::compute_premium_funding_bps_per_slot(1_000_000, 1_000_000, 0, 5), 0);
+}
+
+#[test]
+fn test_combined_funding_rate_pure_inventory() {
+    let combined = RiskEngine::compute_combined_funding_rate(
+        10,    // inventory rate
+        50,    // premium rate
+        0,     // weight = 0 (pure inventory)
+    );
+    assert_eq!(combined, 10);
+}
+
+#[test]
+fn test_combined_funding_rate_pure_premium() {
+    let combined = RiskEngine::compute_combined_funding_rate(
+        10,     // inventory rate
+        50,     // premium rate
+        10_000, // weight = 100% (pure premium)
+    );
+    assert_eq!(combined, 50);
+}
+
+#[test]
+fn test_combined_funding_rate_50_50() {
+    let combined = RiskEngine::compute_combined_funding_rate(
+        10,    // inventory rate
+        50,    // premium rate
+        5_000, // weight = 50%
+    );
+    // (10 * 5000 + 50 * 5000) / 10000 = 300000 / 10000 = 30
+    assert_eq!(combined, 30);
+}
+
+#[test]
+fn test_accrue_funding_combined_respects_interval() {
+    let mut params = default_params();
+    params.funding_premium_weight_bps = 5_000; // 50% premium
+    params.funding_settlement_interval_slots = 100;
+    params.funding_premium_dampening_e6 = 1_000_000;
+    params.funding_premium_max_bps_per_slot = 50;
+    let mut engine = Box::new(RiskEngine::new(params));
+    engine.mark_price_e6 = 1_010_000; // 1% above index
+
+    // Slot 50: below interval, should not accrue
+    engine.last_funding_slot = 0;
+    engine.funding_rate_bps_per_slot_last = 10;
+    let result = engine.accrue_funding_combined(50, 1_000_000, 5);
+    assert!(result.is_ok());
+    // Funding index should be unchanged (skipped due to interval)
+    assert_eq!(engine.funding_index_qpb_e6.get(), 0);
+    assert_eq!(engine.last_funding_slot, 0); // Not updated
+
+    // Slot 100: at interval, should accrue
+    let result = engine.accrue_funding_combined(100, 1_000_000, 5);
+    assert!(result.is_ok());
+    assert_ne!(engine.last_funding_slot, 0); // Updated
+}
+
+#[test]
+fn test_set_mark_price() {
+    let mut engine = Box::new(RiskEngine::new(default_params()));
+    assert_eq!(engine.mark_price_e6, 0);
+    engine.set_mark_price(1_500_000);
+    assert_eq!(engine.mark_price_e6, 1_500_000);
+}
+
+#[test]
+fn test_premium_funding_params_validation() {
+    let mut params = default_params();
+    // Valid: premium weight = 50%, dampening = 8x
+    params.funding_premium_weight_bps = 5_000;
+    params.funding_premium_dampening_e6 = 8_000_000;
+    assert!(params.validate().is_ok());
+
+    // Invalid: premium weight > 100%
+    params.funding_premium_weight_bps = 10_001;
+    assert!(params.validate().is_err());
+
+    // Invalid: premium weight > 0 but dampening = 0
+    params.funding_premium_weight_bps = 5_000;
+    params.funding_premium_dampening_e6 = 0;
+    assert!(params.validate().is_err());
+}
+
+// ==============================================================================
+// Funding freeze/unfreeze tests (PERC-121 security)
+// ==============================================================================
+
+#[test]
+fn test_freeze_funding_snapshots_rate() {
+    let mut engine = Box::new(RiskEngine::new(default_params()));
+    engine.funding_rate_bps_per_slot_last = 42;
+    assert!(!engine.is_funding_frozen());
+
+    // Freeze
+    assert!(engine.freeze_funding().is_ok());
+    assert!(engine.is_funding_frozen());
+    assert_eq!(engine.funding_frozen_rate_snapshot, 42);
+
+    // Double-freeze should fail
+    assert!(engine.freeze_funding().is_err());
+}
+
+#[test]
+fn test_unfreeze_funding() {
+    let mut engine = Box::new(RiskEngine::new(default_params()));
+    // Can't unfreeze what isn't frozen
+    assert!(engine.unfreeze_funding().is_err());
+
+    engine.funding_rate_bps_per_slot_last = 10;
+    engine.freeze_funding().unwrap();
+
+    // Unfreeze
+    assert!(engine.unfreeze_funding().is_ok());
+    assert!(!engine.is_funding_frozen());
+    assert_eq!(engine.funding_frozen_rate_snapshot, 0);
+}
+
+#[test]
+fn test_frozen_funding_ignores_rate_updates() {
+    let mut engine = Box::new(RiskEngine::new(default_params()));
+    engine.funding_rate_bps_per_slot_last = 10;
+    engine.freeze_funding().unwrap();
+
+    // Try to set a new rate — should be ignored
+    engine.set_funding_rate_for_next_interval(999);
+    assert_eq!(engine.funding_rate_bps_per_slot_last, 10); // Unchanged
+}
+
+#[test]
+fn test_frozen_funding_uses_snapshot_rate_on_accrue() {
+    let mut engine = Box::new(RiskEngine::new(default_params()));
+    engine.funding_rate_bps_per_slot_last = 5;
+    engine.last_funding_slot = 0;
+
+    // Freeze with rate = 5
+    engine.freeze_funding().unwrap();
+
+    // Change the stored rate (simulating external mutation) — should not matter
+    engine.funding_rate_bps_per_slot_last = 999;
+
+    // Accrue 100 slots at oracle price 1_000_000
+    engine.accrue_funding(100, 1_000_000).unwrap();
+
+    // ΔF = price * rate * dt / 10_000 = 1_000_000 * 5 * 100 / 10_000 = 50_000
+    assert_eq!(engine.funding_index_qpb_e6.get(), 50_000);
+}

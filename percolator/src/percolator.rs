@@ -385,6 +385,21 @@ pub struct RiskEngine {
     pub funding_rate_bps_per_slot_last: i64,
 
     // ========================================
+    // Premium Funding State (PERC-121)
+    // ========================================
+    /// Current mark price (EMA-smoothed), scaled by 1e6.
+    /// Updated by wrapper after oracle/mark price computation.
+    pub mark_price_e6: u64,
+
+    /// Whether funding rate is frozen (emergency freeze by admin).
+    /// When true: accrue_funding still runs using the frozen rate snapshot,
+    /// but no new rate is computed or applied.
+    pub funding_frozen: bool,
+
+    /// Snapshot of funding rate at freeze time (used while frozen).
+    pub funding_frozen_rate_snapshot: i64,
+
+    // ========================================
     // Keeper Crank Tracking
     // ========================================
     /// Last slot when keeper crank was executed
@@ -725,6 +740,9 @@ impl RiskEngine {
             funding_index_qpb_e6: I128::ZERO,
             last_funding_slot: 0,
             funding_rate_bps_per_slot_last: 0,
+            mark_price_e6: 0,
+            funding_frozen: false,
+            funding_frozen_rate_snapshot: 0,
             last_crank_slot: 0,
             max_crank_staleness_slots: params.max_crank_staleness_slots,
             total_open_interest: U128::ZERO,
@@ -2243,7 +2261,12 @@ impl RiskEngine {
         }
 
         // Use the STORED rate (anti-retroactivity: rate was set at start of interval)
-        let funding_rate = self.funding_rate_bps_per_slot_last;
+        // If frozen, use the snapshot rate (no drift from external rate changes)
+        let funding_rate = if self.funding_frozen {
+            self.funding_frozen_rate_snapshot
+        } else {
+            self.funding_rate_bps_per_slot_last
+        };
 
         // Cap funding rate at 10000 bps (100%) per slot as sanity bound
         // Real-world funding rates should be much smaller (typically < 1 bps/slot)
@@ -2291,6 +2314,10 @@ impl RiskEngine {
     /// This implements the "rate-change rule" from the spec: state changes at slot t
     /// can only affect funding for slots >= t.
     pub fn set_funding_rate_for_next_interval(&mut self, new_rate_bps_per_slot: i64) {
+        // If funding is frozen, ignore rate updates (frozen rate snapshot is used instead)
+        if self.funding_frozen {
+            return;
+        }
         self.funding_rate_bps_per_slot_last = new_rate_bps_per_slot;
     }
 
@@ -2309,8 +2336,167 @@ impl RiskEngine {
         self.accrue_funding(now_slot, oracle_price)
     }
 
+    // ========================================
+    // Premium-based Funding (PERC-121)
+    // ========================================
+
+    /// Set the current mark price (EMA-smoothed). Called by wrapper after oracle update.
+    pub fn set_mark_price(&mut self, mark_price_e6: u64) {
+        self.mark_price_e6 = mark_price_e6;
+    }
+
+    /// Compute premium-based funding rate (bps per slot).
+    ///
+    /// premium = (mark_price - index_price) / index_price
+    /// rate = premium * 10_000 / dampening_factor
+    ///
+    /// Sign convention: positive rate => longs pay shorts (mark > index means
+    /// longs are paying a premium, so they should pay funding to push price down).
+    ///
+    /// Returns 0 if mark or index is zero, or if dampening is zero.
+    pub fn compute_premium_funding_bps_per_slot(
+        mark_price_e6: u64,
+        index_price_e6: u64,
+        dampening_e6: u64,
+        max_bps_per_slot: i64,
+    ) -> i64 {
+        if mark_price_e6 == 0 || index_price_e6 == 0 || dampening_e6 == 0 {
+            return 0;
+        }
+
+        // premium_bps = (mark - index) * 10_000 / index
+        // Then divide by dampening to get per-slot rate.
+        //
+        // Use i128 to avoid overflow:
+        // mark_price_e6 is u64 (~1.8e19 max), so i128 has plenty of room.
+        let mark = mark_price_e6 as i128;
+        let index = index_price_e6 as i128;
+        let damp = dampening_e6 as i128;
+
+        // premium_bps_e6 = (mark - index) * 10_000 * 1_000_000 / index
+        // Then divide by dampening_e6:
+        // rate = premium_bps_e6 / dampening_e6 / 1_000_000
+        //      = (mark - index) * 10_000 / index / dampening_e6 * 1_000_000
+        //
+        // Simplify: rate = (mark - index) * 10_000_000_000 / (index * damp)
+        let numerator = (mark - index)
+            .checked_mul(10_000_000_000_i128) // 10_000 * 1e6
+            .unwrap_or(0);
+        let denominator = index.checked_mul(damp).unwrap_or(1).max(1); // never divide by 0
+
+        let rate_unclamped = numerator / denominator;
+
+        // Clamp to max_bps_per_slot
+        let max_abs = max_bps_per_slot.unsigned_abs() as i128;
+        let clamped = rate_unclamped.clamp(-(max_abs as i128), max_abs as i128);
+
+        clamped as i64
+    }
+
+    /// Compute the combined (blended) funding rate from inventory-based and premium-based.
+    ///
+    /// blended = (1 - weight) * inventory_rate + weight * premium_rate
+    ///
+    /// weight is `funding_premium_weight_bps` in basis points (0–10_000).
+    pub fn compute_combined_funding_rate(
+        inventory_rate_bps: i64,
+        premium_rate_bps: i64,
+        premium_weight_bps: u64,
+    ) -> i64 {
+        if premium_weight_bps == 0 {
+            return inventory_rate_bps;
+        }
+        if premium_weight_bps >= 10_000 {
+            return premium_rate_bps;
+        }
+
+        // blended = inv * (10000 - w) / 10000 + prem * w / 10000
+        let inv = inventory_rate_bps as i128;
+        let prem = premium_rate_bps as i128;
+        let w = premium_weight_bps as i128;
+        let inv_w = 10_000i128 - w;
+
+        let blended = (inv * inv_w + prem * w) / 10_000;
+
+        // Clamp to i64 range (should always fit given inputs are i64)
+        blended.clamp(i64::MIN as i128, i64::MAX as i128) as i64
+    }
+
+    /// Freeze funding rate (emergency admin action).
+    ///
+    /// Snapshots the current rate so accrue_funding still applies it (no drift),
+    /// but prevents any new rate computation from taking effect.
+    pub fn freeze_funding(&mut self) -> Result<()> {
+        if self.funding_frozen {
+            return Err(RiskError::Overflow); // Already frozen
+        }
+        self.funding_frozen = true;
+        self.funding_frozen_rate_snapshot = self.funding_rate_bps_per_slot_last;
+        Ok(())
+    }
+
+    /// Unfreeze funding rate (admin).
+    /// After unfreezing, the next crank can set a new rate.
+    pub fn unfreeze_funding(&mut self) -> Result<()> {
+        if !self.funding_frozen {
+            return Err(RiskError::Overflow); // Not frozen
+        }
+        self.funding_frozen = false;
+        self.funding_frozen_rate_snapshot = 0;
+        Ok(())
+    }
+
+    /// Check whether funding is frozen.
+    pub fn is_funding_frozen(&self) -> bool {
+        self.funding_frozen
+    }
+
     /// Settle funding for an account (lazy update).
     /// Uses set_pnl helper to maintain pnl_pos_tot aggregate (spec §4.2).
+    /// Full funding accrual with combined rate (inventory + premium).
+    ///
+    /// 1. Respects settlement interval (batched accrual)
+    /// 2. Accrues using the stored rate (anti-retroactivity)
+    /// 3. Computes new combined rate for next interval
+    /// 4. Stores the new rate
+    pub fn accrue_funding_combined(
+        &mut self,
+        now_slot: u64,
+        index_price_e6: u64,
+        inventory_rate_bps: i64,
+    ) -> Result<()> {
+        let dt = now_slot.saturating_sub(self.last_funding_slot);
+        let interval = self.params.funding_settlement_interval_slots;
+
+        // If interval > 0, only accrue when enough slots have elapsed
+        if interval > 0 && dt < interval {
+            return Ok(());
+        }
+
+        // Step 1: Accrue using the STORED rate (anti-retroactivity)
+        self.accrue_funding(now_slot, index_price_e6)?;
+
+        // Step 2: Compute premium rate from current mark vs index
+        let premium_rate = Self::compute_premium_funding_bps_per_slot(
+            self.mark_price_e6,
+            index_price_e6,
+            self.params.funding_premium_dampening_e6,
+            self.params.funding_premium_max_bps_per_slot,
+        );
+
+        // Step 3: Blend inventory and premium components
+        let combined = Self::compute_combined_funding_rate(
+            inventory_rate_bps,
+            premium_rate,
+            self.params.funding_premium_weight_bps,
+        );
+
+        // Step 4: Store for next interval (anti-retroactivity)
+        self.set_funding_rate_for_next_interval(combined);
+
+        Ok(())
+    }
+
     fn settle_account_funding(&mut self, idx: usize) -> Result<()> {
         let global_fi = self.funding_index_qpb_e6;
         let account = &self.accounts[idx];
