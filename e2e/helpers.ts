@@ -26,7 +26,9 @@ export async function waitForHydration(page: Page) {
  * Navigate to a page and wait for hydration.
  */
 export async function navigateTo(page: Page, path: string) {
-  await page.goto(path);
+  // Use 'domcontentloaded' to avoid hanging on lazy-loaded resources,
+  // then wait for React hydration separately.
+  await page.goto(path, { waitUntil: 'domcontentloaded' });
   await waitForHydration(page);
 }
 

@@ -45,8 +45,10 @@ test.describe("Bug report pages", () => {
 test.describe("Guide page", () => {
   test("loads and displays content", async ({ page }) => {
     await navigateTo(page, "/guide");
-    const mainContent = page.locator("main");
-    const text = await mainContent.textContent();
+    // The guide page content is inside the root layout <main>. Use first()
+    // in case any inner element also uses a <main> tag (strict-mode safety).
+    const mainContent = page.locator("main").first();
+    const text = await mainContent.textContent({ timeout: 10000 });
     expect(text?.trim().length).toBeGreaterThan(10);
   });
 });

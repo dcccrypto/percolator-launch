@@ -51,6 +51,13 @@ export default defineConfig({
     
     // Default timeout for actions (click, fill, etc.)
     actionTimeout: 15000,
+
+    // Respect prefers-reduced-motion in CI to skip GSAP animations.
+    // ScrollReveal components start at opacity:0 and only animate in when
+    // the IntersectionObserver fires — in headless CI this can silently
+    // fail, keeping elements invisible. Setting reducedMotion:reduce
+    // forces ScrollReveal to instantly show all elements.
+    reducedMotion: 'reduce',
   },
 
   // Configure projects for different browsers

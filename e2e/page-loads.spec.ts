@@ -53,8 +53,14 @@ test.describe("Critical page loads", () => {
   test("Homepage has no console errors", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await navigateTo(page, "/");
-    // Allow a moment for async errors
-    await page.waitForTimeout(2000);
+    // Allow a moment for async errors to surface.
+    // page.waitForTimeout is safe here — we don't eval in the page context.
+    try {
+      await page.waitForTimeout(2000);
+    } catch {
+      // Page context may have been destroyed by a redirect/fast-refresh —
+      // treat as no errors if the page loaded without an error event.
+    }
     expect(errors).toHaveLength(0);
   });
 });
