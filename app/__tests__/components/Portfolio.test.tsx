@@ -26,7 +26,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("next/dynamic", () => ({
   default: (fn: any) => {
-    const Component = () => <button>WalletMultiButton</button>;
+    const Component = () => <button>ConnectButton</button>;
     return Component;
   },
 }));

@@ -138,6 +138,9 @@ jobs:
       BASE_URL: http://localhost:3000
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      # Privy requires a valid-format app ID to initialise; use the secret when
+      # available, otherwise fall back to a dummy value so the server starts in CI.
+      NEXT_PUBLIC_PRIVY_APP_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_APP_ID || 'clxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' }}
     
     steps:
       - name: Checkout code

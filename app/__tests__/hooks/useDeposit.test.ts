@@ -66,11 +66,15 @@ describe("useDeposit", () => {
       }),
     };
 
-    // Mock wallet
+    // Mock wallet — shape must match useWalletCompat return value:
+    // { publicKey, connected, connecting, wallet, signTransaction, disconnect }
     mockWallet = {
       publicKey: mockWalletPubkey,
-      signTransaction: vi.fn(),
       connected: true,
+      connecting: false,
+      wallet: { address: mockWalletPubkey.toBase58() },
+      signTransaction: vi.fn(),
+      disconnect: vi.fn(),
     };
 
     // Mock slab state
@@ -291,7 +295,7 @@ describe("useDeposit", () => {
 
   describe("Error Handling", () => {
     it("should throw error if wallet not connected", async () => {
-      ( useWalletCompat as any).mockReturnValue({ publicKey: null, connected: false });
+      ( useWalletCompat as any).mockReturnValue({ publicKey: null, connected: false, connecting: false, wallet: null, signTransaction: undefined, disconnect: vi.fn() });
 
       const { result } = renderHook(() => useDeposit(mockSlabAddress));
 

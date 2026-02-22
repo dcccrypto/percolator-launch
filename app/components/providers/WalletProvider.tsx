@@ -15,9 +15,15 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   const solanaConnectors = useMemo(() => toSolanaWalletConnectors(), []);
 
+  // Fall back to a placeholder in test/CI environments where the secret is not set.
+  // Privy will still refuse connections but the server will start without crashing.
+  const privyAppId =
+    process.env.NEXT_PUBLIC_PRIVY_APP_ID ||
+    "clxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
   return (
     <PrivyProvider
-      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID!}
+      appId={privyAppId}
       config={{
         appearance: {
           walletChainType: "solana-only",
