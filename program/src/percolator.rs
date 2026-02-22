@@ -1147,6 +1147,11 @@ pub mod ix {
             thresh_min: u128,
             thresh_max: u128,
             thresh_min_step: u128,
+            // PERC-121: Premium funding params
+            funding_premium_weight_bps: u64,
+            funding_settlement_interval_slots: u64,
+            funding_premium_dampening_e6: u64,
+            funding_premium_max_bps_per_slot: i64,
         },
         /// Set maintenance fee per slot (admin only)
         SetMaintenanceFee { new_fee: u128 },
@@ -1355,11 +1360,18 @@ pub mod ix {
                     let thresh_min = read_u128(&mut rest)?;
                     let thresh_max = read_u128(&mut rest)?;
                     let thresh_min_step = read_u128(&mut rest)?;
+                    // PERC-121: Premium funding params (optional for backward compat)
+                    let funding_premium_weight_bps = read_u64(&mut rest).unwrap_or(0);
+                    let funding_settlement_interval_slots = read_u64(&mut rest).unwrap_or(0);
+                    let funding_premium_dampening_e6 = read_u64(&mut rest).unwrap_or(1_000_000);
+                    let funding_premium_max_bps_per_slot = read_i64(&mut rest).unwrap_or(5);
                     Ok(Instruction::UpdateConfig {
                         funding_horizon_slots, funding_k_bps, funding_inv_scale_notional_e6,
                         funding_max_premium_bps, funding_max_bps_per_slot,
                         thresh_floor, thresh_risk_bps, thresh_update_interval_slots,
                         thresh_step_bps, thresh_alpha_bps, thresh_min, thresh_max, thresh_min_step,
+                        funding_premium_weight_bps, funding_settlement_interval_slots,
+                        funding_premium_dampening_e6, funding_premium_max_bps_per_slot,
                     })
                 },
                 TAG_SET_MAINTENANCE_FEE => { // SetMaintenanceFee
@@ -1657,6 +1669,18 @@ pub mod state {
         pub funding_max_premium_bps: i64,
         /// Max funding rate per slot in basis points
         pub funding_max_bps_per_slot: i64,
+
+        // ========================================
+        // Premium Funding Parameters (PERC-121)
+        // ========================================
+        /// Weight of premium (mark-index) component (0..10_000 bps)
+        pub funding_premium_weight_bps: u64,
+        /// Settlement interval in slots (0 = every slot)
+        pub funding_settlement_interval_slots: u64,
+        /// Dampening factor for premium rate (e6 units, 1_000_000 = 1.0x)
+        pub funding_premium_dampening_e6: u64,
+        /// Max premium funding rate per slot (bps)
+        pub funding_premium_max_bps_per_slot: i64,
 
         // ========================================
         // Threshold Parameters (configurable)
@@ -3431,6 +3455,11 @@ pub mod processor {
                     funding_inv_scale_notional_e6: DEFAULT_FUNDING_INV_SCALE_NOTIONAL_E6,
                     funding_max_premium_bps: DEFAULT_FUNDING_MAX_PREMIUM_BPS,
                     funding_max_bps_per_slot: DEFAULT_FUNDING_MAX_BPS_PER_SLOT,
+                    // PERC-121: Premium funding defaults (pure inventory-based)
+                    funding_premium_weight_bps: 0,
+                    funding_settlement_interval_slots: 0,
+                    funding_premium_dampening_e6: 1_000_000,
+                    funding_premium_max_bps_per_slot: 5,
                     // Threshold parameters (defaults)
                     thresh_floor: DEFAULT_THRESH_FLOOR,
                     thresh_risk_bps: DEFAULT_THRESH_RISK_BPS,
@@ -3871,23 +3900,37 @@ pub mod processor {
                     )
                 };
 
+                // PERC-121: Sync mark price into engine for premium funding
+                engine.mark_price_e6 = config.authority_price_e6;
+
+                // PERC-121: Blend inventory + premium funding rates
+                let blended_funding_rate = if config.funding_premium_weight_bps > 0 {
+                    let premium_rate = percolator::RiskEngine::compute_premium_funding_bps_per_slot(
+                        engine.mark_price_e6,
+                        price, // index/oracle price
+                        config.funding_premium_dampening_e6,
+                        config.funding_premium_max_bps_per_slot,
+                    );
+                    percolator::RiskEngine::compute_combined_funding_rate(
+                        raw_funding_rate,
+                        premium_rate,
+                        config.funding_premium_weight_bps,
+                    )
+                } else {
+                    raw_funding_rate
+                };
+
                 // F5: Funding rate dampening on low-liquidity markets.
-                // Scale funding by min(1, total_OI / (2 * vault)) to prevent extreme rates
-                // on thin markets where a single position dominates.
                 let effective_funding_rate = {
                     let oi = engine.total_open_interest.get();
                     let vault = engine.vault.get();
                     if vault == 0 || oi == 0 {
-                        raw_funding_rate // no dampening when no positions or empty vault
+                        blended_funding_rate
                     } else {
                         let oi_x10000 = (oi as u128).saturating_mul(10_000);
                         let vault_x2 = (vault as u128).saturating_mul(2);
                         let scale_bps = core::cmp::min(oi_x10000 / vault_x2.max(1), 10_000) as i64;
-                        // scale_bps: 0..10000 where 10000 = full rate, 0 = fully dampened
-                        // When OI >= 2*vault: scale_bps = 10000 (no dampening)
-                        // When OI = vault: scale_bps = 5000 (50% rate)
-                        // When OI = 0: handled above
-                        (raw_funding_rate as i128 * scale_bps as i128 / 10_000) as i64
+                        (blended_funding_rate as i128 * scale_bps as i128 / 10_000) as i64
                     }
                 };
                 #[cfg(feature = "cu-audit")]
@@ -4579,6 +4622,8 @@ pub mod processor {
                 funding_max_premium_bps, funding_max_bps_per_slot,
                 thresh_floor, thresh_risk_bps, thresh_update_interval_slots,
                 thresh_step_bps, thresh_alpha_bps, thresh_min, thresh_max, thresh_min_step,
+                funding_premium_weight_bps, funding_settlement_interval_slots,
+                funding_premium_dampening_e6, funding_premium_max_bps_per_slot,
             } => {
                 accounts::expect_len(accounts, 2)?;
                 let a_admin = &accounts[0];
@@ -4607,6 +4652,13 @@ pub mod processor {
                 if thresh_min > thresh_max {
                     return Err(PercolatorError::InvalidConfigParam.into());
                 }
+                // PERC-121: Validate premium funding params
+                if funding_premium_weight_bps > 10_000 {
+                    return Err(PercolatorError::InvalidConfigParam.into());
+                }
+                if funding_premium_weight_bps > 0 && funding_premium_dampening_e6 == 0 {
+                    return Err(PercolatorError::InvalidConfigParam.into());
+                }
 
                 // Read existing config and update
                 let mut config = state::read_config(&data);
@@ -4623,6 +4675,11 @@ pub mod processor {
                 config.thresh_min = thresh_min;
                 config.thresh_max = thresh_max;
                 config.thresh_min_step = thresh_min_step;
+                // PERC-121: Premium funding params
+                config.funding_premium_weight_bps = funding_premium_weight_bps;
+                config.funding_settlement_interval_slots = funding_settlement_interval_slots;
+                config.funding_premium_dampening_e6 = funding_premium_dampening_e6;
+                config.funding_premium_max_bps_per_slot = funding_premium_max_bps_per_slot;
                 state::write_config(&mut data, &config);
             }
 

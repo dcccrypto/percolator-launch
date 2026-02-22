@@ -130,6 +130,10 @@ fn encode_init_market_with_params(
     data.extend_from_slice(&1_000_000_000_000u128.to_le_bytes()); // liquidation_fee_cap
     data.extend_from_slice(&100u64.to_le_bytes()); // liquidation_buffer_bps
     data.extend_from_slice(&0u128.to_le_bytes());  // min_liquidation_abs
+    data.extend_from_slice(&0u64.to_le_bytes());   // funding_premium_weight_bps
+    data.extend_from_slice(&0u64.to_le_bytes());   // funding_settlement_interval_slots
+    data.extend_from_slice(&1_000_000u64.to_le_bytes()); // funding_premium_dampening_e6
+    data.extend_from_slice(&5i64.to_le_bytes());   // funding_premium_max_bps_per_slot
     data
 }
 
