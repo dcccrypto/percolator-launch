@@ -47,6 +47,10 @@ pub const TAG_SET_INSURANCE_WITHDRAW_POLICY: u8 = 30;
 pub const TAG_WITHDRAW_INSURANCE_LIMITED: u8 = 31;
 /// Configure on-chain Pyth oracle for a market (PERC-117).
 pub const TAG_SET_PYTH_ORACLE: u8 = 32;
+/// Update mark price EMA (PERC-118, reserved).
+pub const TAG_UPDATE_MARK_PRICE: u8 = 33;
+/// Update Hyperp mark from DEX oracle (PERC-119).
+pub const TAG_UPDATE_HYPERP_MARK: u8 = 34;
 
 #[cfg(test)]
 mod tests {
@@ -70,6 +74,7 @@ mod tests {
             TAG_WITHDRAW_INSURANCE_LP, TAG_PAUSE_MARKET, TAG_UNPAUSE_MARKET,
             TAG_ACCEPT_ADMIN,
             TAG_SET_INSURANCE_WITHDRAW_POLICY, TAG_WITHDRAW_INSURANCE_LIMITED,
+            TAG_SET_PYTH_ORACLE, TAG_UPDATE_MARK_PRICE, TAG_UPDATE_HYPERP_MARK,
         ];
 
         for i in 0..tags.len() {
@@ -97,6 +102,7 @@ mod tests {
             TAG_WITHDRAW_INSURANCE_LP, TAG_PAUSE_MARKET, TAG_UNPAUSE_MARKET,
             TAG_ACCEPT_ADMIN,
             TAG_SET_INSURANCE_WITHDRAW_POLICY, TAG_WITHDRAW_INSURANCE_LIMITED,
+            TAG_SET_PYTH_ORACLE, TAG_UPDATE_MARK_PRICE, TAG_UPDATE_HYPERP_MARK,
         ];
 
         for (i, &tag) in tags.iter().enumerate() {

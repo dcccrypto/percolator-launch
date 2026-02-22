@@ -622,23 +622,12 @@ export function encodeUpdateMarkPrice(): Uint8Array {
 
 /**
  * Mark price EMA parameters (must match program/src/percolator.rs constants).
- *
- * EMA alpha = 2 / (window + 1) per slot.
- * 8-hour window at ~400ms/slot = 72_000 slots.
- * alpha_e6 = 2_000_000 / 72_001 ≈ 27 (in e-6 units).
  */
 export const MARK_PRICE_EMA_WINDOW_SLOTS = 72_000n;
 export const MARK_PRICE_EMA_ALPHA_E6 = 2_000_000n / (MARK_PRICE_EMA_WINDOW_SLOTS + 1n);
 
 /**
  * Compute the next EMA mark price step (TypeScript mirror of the on-chain function).
- * Useful for keeper simulation and UI display.
- *
- * @param markPrevE6    Previous mark price (0 = bootstrap: returns oracle directly)
- * @param oracleE6      Current oracle price (after circuit-breaker clamping)
- * @param dtSlots       Elapsed slots since last mark update
- * @param alphaE6       Per-slot EMA alpha in e-6 units (default: MARK_PRICE_EMA_ALPHA_E6)
- * @param capE2bps      Circuit breaker cap in e-2bps (0 = disabled); applied BEFORE EMA
  */
 export function computeEmaMarkPrice(
   markPrevE6: bigint,
@@ -650,7 +639,6 @@ export function computeEmaMarkPrice(
   if (oracleE6 === 0n) return markPrevE6;
   if (markPrevE6 === 0n || dtSlots === 0n) return oracleE6;
 
-  // Step 1: Apply circuit breaker to oracle before EMA
   let oracleClamped = oracleE6;
   if (capE2bps > 0n) {
     const maxDelta = (markPrevE6 * capE2bps * dtSlots) / 1_000_000n;
@@ -660,12 +648,38 @@ export function computeEmaMarkPrice(
     if (oracleClamped > hi) oracleClamped = hi;
   }
 
-  // Step 2: Compound alpha for dt_slots
   const effectiveAlpha = alphaE6 * dtSlots > 1_000_000n ? 1_000_000n : alphaE6 * dtSlots;
   const oneMinusAlpha = 1_000_000n - effectiveAlpha;
 
-  // Step 3: EMA
   return (oracleClamped * effectiveAlpha + markPrevE6 * oneMinusAlpha) / 1_000_000n;
+}
+
+// PERC-119: Hyperp EMA Oracle for Permissionless Tokens
+// ============================================================================
+
+// Tag 34 — permissionless Hyperp mark price oracle (reads DEX AMM pool)
+(IX_TAG as Record<string, number>)['UpdateHyperpMark'] = 34;
+
+/**
+ * UpdateHyperpMark (Tag 34) — permissionless Hyperp EMA oracle crank.
+ *
+ * Reads the spot price from a PumpSwap, Raydium CLMM, or Meteora DLMM pool,
+ * applies 8-hour EMA smoothing with circuit breaker, and writes the new mark
+ * to authority_price_e6 on the slab.
+ *
+ * This is the core mechanism for permissionless token markets — no Pyth or
+ * Chainlink feed is needed. The DEX AMM IS the oracle.
+ *
+ * Instruction data: 1 byte (tag only)
+ *
+ * Accounts:
+ *   0. [writable] Slab
+ *   1. []         DEX pool account (PumpSwap / Raydium CLMM / Meteora DLMM)
+ *   2. []         Clock sysvar (SysvarC1ock11111111111111111111111111111111)
+ *   3..N []       Remaining accounts (e.g. PumpSwap vault0 + vault1)
+ */
+export function encodeUpdateHyperpMark(): Uint8Array {
+  return new Uint8Array([34]);
 }
 
 // ============================================================================

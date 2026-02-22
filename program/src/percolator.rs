@@ -63,20 +63,10 @@ pub mod constants {
     // Add new tags here AND to tags.rs.
     pub const TAG_SET_PYTH_ORACLE: u8 = 32;
     pub const TAG_MARK_PRICE_CRANK: u8 = 33; // PERC-118 — reserved for next PR
-    // ── Instruction tag constants ───────────────────────────────────────────
-    // Keep in sync with program/src/tags.rs when that file exists.
-    /// Tag 33: UpdateMarkPrice — permissionless crank to update EMA mark price
-    pub const TAG_UPDATE_MARK_PRICE: u8 = 33;
-
-    // ── Mark price EMA parameters ───────────────────────────────────────────
-    /// Solana target slot rate: 400ms/slot → ~150 slots/min → ~9000 slots/hr
-    pub const SLOTS_PER_HOUR: u64 = 9_000;
-    /// 8-hour EMA window in slots (8 * 9000 = 72_000 slots ≈ 8 hours)
+    // ── Mark price EMA parameters (PERC-118/119) ───────────────────────────
+    /// 8-hour EMA window in slots (~400ms/slot → 72_000 slots ≈ 8 hours)
     pub const MARK_PRICE_EMA_WINDOW_SLOTS: u64 = 72_000;
-    /// EMA alpha expressed as bps of the window fraction.
-    /// For EMA with window W: α ≈ 2/(W+1). Here we use per-slot step fraction.
-    /// alpha_e6 = 2_000_000 / (MARK_PRICE_EMA_WINDOW_SLOTS + 1) ≈ 27 (in e6 units)
-    /// i.e. α per slot ≈ 27 / 1_000_000 ≈ 0.0000277 (standard EMA coefficient)
+    /// Per-slot EMA alpha in e-6 units: 2/(72_000+1) ≈ 27
     pub const MARK_PRICE_EMA_ALPHA_E6: u64 = 2_000_000 / (MARK_PRICE_EMA_WINDOW_SLOTS + 1);
 
     /// Maximum allowed unit_scale for InitMarket.
@@ -886,41 +876,6 @@ pub mod verify {
         unit_scale <= crate::constants::MAX_UNIT_SCALE
     }
 
-    // =========================================================================
-    // PERC-118: Mark price EMA verification helpers (pure functions for Kani)
-    // =========================================================================
-
-    /// Pure EMA mark price step — mirrors oracle::compute_ema_mark_price.
-    /// Exposed in verify for Kani proofs (no AccountInfo dependencies).
-    ///
-    /// Properties verified:
-    /// 1. When cap_e2bps > 0, mark cannot move more than cap per slot
-    /// 2. When alpha → 1 (one-step), mark converges to oracle in finite slots
-    /// 3. mark_new is always in [0, u64::MAX] (no overflow)
-    /// 4. When oracle == mark_prev, mark_new == mark_prev (identity / no drift)
-    #[inline]
-    pub fn ema_mark_step(
-        mark_prev_e6: u64,
-        oracle_e6: u64,
-        dt_slots: u64,
-        alpha_e6: u64,
-        cap_e2bps: u64,
-    ) -> u64 {
-        crate::oracle::compute_ema_mark_price(mark_prev_e6, oracle_e6, dt_slots, alpha_e6, cap_e2bps)
-    }
-
-    /// Check that the mark price circuit breaker bound holds.
-    /// Returns the max allowed mark movement in absolute price units for `dt_slots`.
-    #[inline]
-    pub fn mark_cap_bound(mark_prev_e6: u64, cap_e2bps: u64, dt_slots: u64) -> u64 {
-        if cap_e2bps == 0 || mark_prev_e6 == 0 { return u64::MAX; }
-        let max_delta = (mark_prev_e6 as u128)
-            .saturating_mul(cap_e2bps as u128)
-            .saturating_mul(dt_slots as u128)
-            / 1_000_000u128;
-        max_delta.min(mark_prev_e6 as u128) as u64
-    }
-
 }
 
 // 2. mod zc (Zero-Copy unsafe island)
@@ -1284,28 +1239,24 @@ pub mod ix {
             max_staleness_secs: u64,
             conf_filter_bps: u16,
         },
-
-        /// Update the EMA mark price for a market (Tag 33).
+        /// Update the Hyperp mark price from a DEX oracle (Tag 34).
         ///
-        /// Permissionless — anyone can call this to advance the mark price EMA.
-        /// Reads the current oracle price on-chain and applies exponential smoothing:
+        /// **Permissionless** — anyone can call. This is the core Hyperp EMA oracle
+        /// mechanism for permissionless token markets (no Pyth/Chainlink needed).
         ///
-        ///   mark_new = α·oracle + (1-α)·mark_prev
+        /// Reads the current spot price from a PumpSwap, Raydium CLMM, or
+        /// Meteora DLMM pool account, applies 8-hour EMA smoothing with circuit
+        /// breaker, and writes the new mark to `authority_price_e6`.
         ///
-        /// where α = 2/(W+1), W = MARK_PRICE_EMA_WINDOW_SLOTS (~8h).
-        ///
-        /// **Circuit breaker**: mark cannot move more than oracle_price_cap_e2bps per slot.
-        /// Enforced BEFORE the EMA update to prevent sustained manipulation.
-        ///
-        /// For Hyperp markets: advances the index toward the stored mark (same as KeeperCrank).
-        /// For Pyth-pinned markets: updates authority_price_e6 as the EMA mark.
-        /// For admin-oracle markets: updates authority_price_e6 as the EMA mark.
+        /// Requires: market is in Hyperp mode (`index_feed_id == [0;32]`).
+        /// The DEX oracle account must be owned by an approved DEX program.
         ///
         /// Accounts:
         ///   0. [writable] Slab
-        ///   1. []         Oracle account (Pyth/Chainlink/DEX/Hyperp mark)
+        ///   1. []         DEX pool account (PumpSwap / Raydium CLMM / Meteora DLMM)
         ///   2. []         Clock sysvar
-        UpdateMarkPrice,
+        ///   3..N []       Remaining accounts (PumpSwap vault0, vault1 for price calc)
+        UpdateHyperpMark,
     }
 
     impl Instruction {
@@ -1503,9 +1454,7 @@ pub mod ix {
                     let conf_filter_bps = u16::from_le_bytes(rest[40..42].try_into().map_err(|_| ProgramError::InvalidInstructionData)?);
                     Ok(Instruction::SetPythOracle { feed_id, max_staleness_secs, conf_filter_bps })
                 }
-                27 => Ok(Instruction::PauseMarket),
-                28 => Ok(Instruction::UnpauseMarket),
-                33 => Ok(Instruction::UpdateMarkPrice),
+                TAG_UPDATE_HYPERP_MARK => Ok(Instruction::UpdateHyperpMark),
                 _ => Err(ProgramError::InvalidInstructionData),
             }
         }
@@ -1588,7 +1537,7 @@ pub mod ix {
             liquidation_fee_cap: U128::new(read_u128(input)?),
             liquidation_buffer_bps: read_u64(input)?,
             min_liquidation_abs: U128::new(read_u128(input)?),
-            // PERC-121: Funding rate params (default to safe values for backward compat)
+            // PERC-121: Funding rate params (defaults for backward compat)
             funding_premium_weight_bps: 0,
             funding_settlement_interval_slots: 0,
             funding_premium_dampening_e6: 1_000_000,
@@ -2847,29 +2796,16 @@ pub mod oracle {
         read_price_clamped(config, a_oracle, now_unix_ts, remaining_accounts)
     }
 
-    // =========================================================================
-    // PERC-118: Mark Price EMA
-    // =========================================================================
-
-    /// Compute the next mark price EMA step.
+    /// Compute premium-based funding rate (Hyperp funding model).
+    /// Premium = (mark - index) / index, converted to bps per slot.
+    /// Returns signed bps per slot (positive = longs pay shorts).
+    /// Compute the next EMA mark price step.
     ///
-    /// Implements standard exponential moving average:
-    ///   mark_new = oracle * alpha_e6 / 1_000_000  +  mark_prev * (1_000_000 - alpha_e6) / 1_000_000
+    /// mark_new = oracle_clamped * alpha + mark_prev * (1-alpha)
     ///
-    /// `dt_slots`: number of slots elapsed since last mark update.
-    /// When dt_slots > 1, the alpha is compounded: effective_alpha = 1 - (1-α)^dt.
-    /// For small α this approximates: effective_alpha ≈ α * dt_slots (capped at 1_000_000).
-    ///
-    /// Security: circuit breaker applied first — oracle price clamped against last mark
-    /// before EMA computation. This prevents a single oracle spike from immediately
-    /// moving the mark by more than oracle_price_cap_e2bps per slot.
-    ///
-    /// # Arguments
-    /// * `mark_prev_e6`      — Previous mark price (0 = bootstrap: return oracle directly)
-    /// * `oracle_e6`         — Current oracle price (after read_price_clamped circuit breaker)
-    /// * `dt_slots`          — Elapsed slots since last mark update (0 = no change)
-    /// * `alpha_e6`          — Per-slot EMA alpha (in units of 1e-6); default = MARK_PRICE_EMA_ALPHA_E6
-    /// * `cap_e2bps`         — Max mark move per slot in e2bps (0 = disabled); applied BEFORE EMA
+    /// Circuit breaker applied BEFORE EMA: oracle clamped to ±cap_e2bps*dt per slot.
+    /// dt_slots compounding: effective_alpha ≈ min(alpha*dt, 1_000_000).
+    /// Bootstrap: mark_prev==0 returns oracle directly.
     pub fn compute_ema_mark_price(
         mark_prev_e6: u64,
         oracle_e6: u64,
@@ -2877,45 +2813,38 @@ pub mod oracle {
         alpha_e6: u64,
         cap_e2bps: u64,
     ) -> u64 {
-        // Edge cases
         if oracle_e6 == 0 { return mark_prev_e6; }
         if mark_prev_e6 == 0 || dt_slots == 0 { return oracle_e6; }
 
-        // Step 1: Apply circuit breaker to oracle price BEFORE EMA.
-        // This limits how far the oracle can move the mark in a single crank.
+        // Circuit breaker: clamp oracle toward prev mark
         let oracle_clamped = if cap_e2bps > 0 {
             let max_delta = (mark_prev_e6 as u128)
                 .saturating_mul(cap_e2bps as u128)
                 .saturating_mul(dt_slots as u128)
                 / 1_000_000u128;
-            let max_delta = max_delta.min(mark_prev_e6 as u128) as u64; // cap at 100%
-            let lo = mark_prev_e6.saturating_sub(max_delta);
-            let hi = mark_prev_e6.saturating_add(max_delta);
-            oracle_e6.clamp(lo, hi)
+            let max_delta = max_delta.min(mark_prev_e6 as u128) as u64;
+            oracle_e6.clamp(
+                mark_prev_e6.saturating_sub(max_delta),
+                mark_prev_e6.saturating_add(max_delta),
+            )
         } else {
             oracle_e6
         };
 
-        // Step 2: Compute effective alpha for this time step.
-        // Approximate compound: effective_alpha_e6 ≈ min(alpha_e6 * dt_slots, 1_000_000)
-        let effective_alpha_e6 = (alpha_e6 as u128)
+        // EMA with compound alpha
+        let eff_alpha = (alpha_e6 as u128)
             .saturating_mul(dt_slots as u128)
             .min(1_000_000u128) as u64;
+        let one_minus = 1_000_000u64.saturating_sub(eff_alpha);
 
-        let one_minus_alpha = 1_000_000u64.saturating_sub(effective_alpha_e6);
-
-        // Step 3: EMA = alpha * oracle_clamped + (1-alpha) * mark_prev
         let ema = (oracle_clamped as u128)
-            .saturating_mul(effective_alpha_e6 as u128)
-            .saturating_add((mark_prev_e6 as u128).saturating_mul(one_minus_alpha as u128))
+            .saturating_mul(eff_alpha as u128)
+            .saturating_add((mark_prev_e6 as u128).saturating_mul(one_minus as u128))
             / 1_000_000u128;
 
         ema.min(u64::MAX as u128) as u64
     }
 
-    /// Compute premium-based funding rate (Hyperp funding model).
-    /// Premium = (mark - index) / index, converted to bps per slot.
-    /// Returns signed bps per slot (positive = longs pay shorts).
     pub fn compute_premium_funding_bps_per_slot(
         mark_e6: u64,
         index_e6: u64,
@@ -3477,7 +3406,7 @@ pub mod processor {
                 // Initialize engine in-place (zero-copy) to avoid stack overflow.
                 // The data is already zeroed above, so init_in_place only sets non-zero fields.
                 let engine = zc::engine_mut(&mut data)?;
-                engine.init_in_place(risk_params).map_err(map_risk_error)?;
+                engine.init_in_place(risk_params);
 
                 // Initialize slot fields to current slot to prevent overflow on first crank
                 // (accrue_funding checks dt < 31_536_000, which fails if last_funding_slot=0)
@@ -5002,7 +4931,7 @@ pub mod processor {
                 }
 
                 let engine = zc::engine_mut(&mut data)?;
-                engine.set_margin_params(initial_margin_bps, maintenance_margin_bps).map_err(map_risk_error)?;
+                engine.set_margin_params(initial_margin_bps, maintenance_margin_bps);
 
                 // Update trading fee if provided (backwards compatible)
                 if let Some(fee) = trading_fee_bps {
@@ -5708,25 +5637,25 @@ pub mod processor {
                 msg!("SetPythOracle: Pyth-pinned, staleness={}s, conf_bps={}", max_staleness_secs, conf_filter_bps);
             }
 
-            Instruction::UpdateMarkPrice => {
-                // UpdateMarkPrice (Tag 33) — permissionless EMA mark price crank.
+            Instruction::UpdateHyperpMark => {
+                // UpdateHyperpMark (Tag 34) — permissionless Hyperp EMA oracle.
                 //
-                // Reads the current oracle price on-chain, applies exponential smoothing,
-                // enforces circuit breaker, and writes result to authority_price_e6.
-                //
-                // For Pyth-pinned markets: oracle is Pyth PriceUpdateV2 account.
-                // For Hyperp markets: uses stored authority_price_e6 as oracle ("mark").
-                // For admin-oracle markets: re-smooths the authority-pushed price.
+                // This is the core mechanism for permissionless token markets:
+                // reads the spot price from a DEX AMM pool (PumpSwap/Raydium/Meteora),
+                // applies 8-hour EMA smoothing with circuit breaker, and writes the
+                // new mark price. No Pyth/Chainlink feed needed — the DEX IS the oracle.
                 //
                 // Accounts:
                 //   0. [writable] Slab
-                //   1. []         Oracle account (Pyth / Chainlink / DEX / ignored for Hyperp)
+                //   1. []         DEX pool account (PumpSwap/Raydium CLMM/Meteora DLMM)
                 //   2. []         Clock sysvar
-                //   3..N. []      Remaining accounts (e.g. PumpSwap vaults)
-                accounts::expect_len(accounts, 3)?;
-                let a_slab   = &accounts[0];
-                let a_oracle = &accounts[1];
-                let a_clock  = &accounts[2];
+                //   3..N []       Remaining accounts (PumpSwap vaults for price calc)
+                if accounts.len() < 3 {
+                    return Err(ProgramError::NotEnoughAccountKeys);
+                }
+                let a_slab      = &accounts[0];
+                let a_dex_pool  = &accounts[1];
+                let a_clock     = &accounts[2];
 
                 accounts::expect_writable(a_slab)?;
 
@@ -5736,67 +5665,76 @@ pub mod processor {
                 require_initialized(&data)?;
                 require_not_paused(&data)?;
 
-                // Block on resolved market — no mark price updates needed
+                // Only Hyperp markets can use this instruction
+                let mut config = state::read_config(&data);
+                if !oracle::is_hyperp_mode(&config) {
+                    msg!("UpdateHyperpMark: not a Hyperp market");
+                    return Err(ProgramError::InvalidAccountData);
+                }
+
+                // SECURITY: Bootstrap guard — admin must seed initial mark via
+                // PushOraclePrice before permissionless cranking is allowed.
+                // When prev_mark==0 the circuit breaker is bypassed (no reference
+                // price to clamp against), so a thin-pool attacker could set an
+                // arbitrary initial mark. Reject until admin bootstraps.
+                if config.authority_price_e6 == 0 {
+                    msg!("UpdateHyperpMark: market not bootstrapped (prev_mark==0), use PushOraclePrice first");
+                    return Err(PercolatorError::OracleInvalid.into());
+                }
+
+                // Resolved markets don't need mark updates
                 if state::is_resolved(&data) {
                     return Ok(());
                 }
 
-                let mut config = state::read_config(&data);
-                let is_hyperp = oracle::is_hyperp_mode(&config);
-
-                // ── Read last mark update slot from engine ────────────────
-                let last_mark_slot = {
+                // Read last update slot from engine
+                let last_slot = {
                     let engine = zc::engine_ref(&data)?;
                     engine.current_slot
                 };
-                let dt_slots = clock.slot.saturating_sub(last_mark_slot);
-
-                // Skip if same slot — nothing to update
+                let dt_slots = clock.slot.saturating_sub(last_slot);
                 if dt_slots == 0 {
-                    return Ok(());
+                    return Ok(()); // same slot — no-op
                 }
 
-                // ── Read oracle price ─────────────────────────────────────
-                let oracle_price = if is_hyperp {
-                    // Hyperp: oracle is the stored mark (authority_price_e6).
-                    // This path is handled by KeeperCrank for index advancement;
-                    // UpdateMarkPrice doesn't re-process Hyperp mark separately.
-                    if config.authority_price_e6 == 0 {
-                        return Err(PercolatorError::OracleInvalid.into());
-                    }
-                    config.authority_price_e6
-                } else {
-                    // Read from on-chain oracle with staleness + confidence checks
-                    let remaining = &accounts[3..];
-                    oracle::read_price_clamped(&mut config, a_oracle, clock.unix_timestamp, remaining)?
-                };
+                // SECURITY: verify the DEX pool account is owned by an approved DEX program
+                let is_dex = *a_dex_pool.owner == crate::oracle::PUMPSWAP_PROGRAM_ID
+                    || *a_dex_pool.owner == crate::oracle::RAYDIUM_CLMM_PROGRAM_ID
+                    || *a_dex_pool.owner == crate::oracle::METEORA_DLMM_PROGRAM_ID;
+                if !is_dex {
+                    msg!("UpdateHyperpMark: oracle account not owned by approved DEX program");
+                    return Err(PercolatorError::OracleInvalid.into());
+                }
 
-                // ── Compute EMA mark price ────────────────────────────────
-                // Circuit breaker applied INSIDE compute_ema_mark_price (before EMA)
+                // Read spot price from the DEX pool
+                let remaining = &accounts[3..];
+                let dex_price = oracle::read_engine_price_e6(
+                    a_dex_pool,
+                    &[0u8; 32], // empty feed_id — DEX reading doesn't need it
+                    clock.unix_timestamp,
+                    3600, // 1hr staleness for DEX (permissive — circuit breaker handles the rest)
+                    0,    // no confidence check for DEX
+                    config.invert,
+                    config.unit_scale,
+                    remaining,
+                )?;
+
+                // Apply EMA smoothing with circuit breaker
                 let prev_mark = config.authority_price_e6;
                 let new_mark = oracle::compute_ema_mark_price(
                     prev_mark,
-                    oracle_price,
+                    dex_price,
                     dt_slots,
                     crate::constants::MARK_PRICE_EMA_ALPHA_E6,
                     config.oracle_price_cap_e2bps,
                 );
 
-                // ── Write updated mark price ──────────────────────────────
-                // For Pyth-pinned and admin-oracle markets: authority_price_e6 stores the EMA mark.
-                // For Hyperp markets: authority_price_e6 is the pushed mark (skip — KeeperCrank owns it).
-                if !is_hyperp {
-                    config.authority_price_e6 = new_mark;
-                    config.last_effective_price_e6 = new_mark;
-                    // authority_timestamp: record current unix time for downstream staleness checks
-                    config.authority_timestamp = clock.unix_timestamp;
-                }
-
+                config.authority_price_e6 = new_mark;
                 state::write_config(&mut data, &config);
 
                 msg!(
-                    "UpdateMarkPrice: oracle={} prev_mark={} new_mark={} dt={}",
-                    oracle_price, prev_mark, new_mark, dt_slots
+                    "UpdateHyperpMark: dex_price={} prev_mark={} new_mark={} dt={}",
+                    dex_price, prev_mark, new_mark, dt_slots
                 );
             }
         }
