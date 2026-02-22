@@ -25,6 +25,10 @@ use solana_program::declare_id;
 
 declare_id!("Perco1ator111111111111111111111111111111111");
 
+/// Instruction tag constants — single source of truth for CPI callers.
+#[path = "tags.rs"]
+pub mod tags;
+
 // 1. mod constants
 pub mod constants {
     use core::mem::{size_of, align_of};
@@ -1146,8 +1150,9 @@ pub mod ix {
         pub fn decode(input: &[u8]) -> Result<Self, ProgramError> {
             let (&tag, mut rest) = input.split_first().ok_or(ProgramError::InvalidInstructionData)?;
             
+            use crate::tags::*;
             match tag {
-                0 => { // InitMarket
+                TAG_INIT_MARKET => { // InitMarket
                     let admin = read_pubkey(&mut rest)?;
                     let collateral_mint = read_pubkey(&mut rest)?;
                     let index_feed_id = read_bytes32(&mut rest)?;
@@ -1163,67 +1168,67 @@ pub mod ix {
                         initial_mark_price_e6, risk_params
                     })
                 },
-                1 => { // InitUser
+                TAG_INIT_USER => { // InitUser
                     let fee_payment = read_u64(&mut rest)?;
                     Ok(Instruction::InitUser { fee_payment })
                 },
-                2 => { // InitLP
+                TAG_INIT_LP => { // InitLP
                     let matcher_program = read_pubkey(&mut rest)?;
                     let matcher_context = read_pubkey(&mut rest)?;
                     let fee_payment = read_u64(&mut rest)?;
                     Ok(Instruction::InitLP { matcher_program, matcher_context, fee_payment })
                 },
-                3 => { // Deposit
+                TAG_DEPOSIT_COLLATERAL => { // Deposit
                     let user_idx = read_u16(&mut rest)?;
                     let amount = read_u64(&mut rest)?;
                     Ok(Instruction::DepositCollateral { user_idx, amount })
                 },
-                4 => { // Withdraw
+                TAG_WITHDRAW_COLLATERAL => { // Withdraw
                     let user_idx = read_u16(&mut rest)?;
                     let amount = read_u64(&mut rest)?;
                     Ok(Instruction::WithdrawCollateral { user_idx, amount })
                 },
-                5 => { // KeeperCrank
+                TAG_KEEPER_CRANK => { // KeeperCrank
                     let caller_idx = read_u16(&mut rest)?;
                     let allow_panic = read_u8(&mut rest)?;
                     Ok(Instruction::KeeperCrank { caller_idx, allow_panic })
                 },
-                6 => { // TradeNoCpi
+                TAG_TRADE_NO_CPI => { // TradeNoCpi
                     let lp_idx = read_u16(&mut rest)?;
                     let user_idx = read_u16(&mut rest)?;
                     let size = read_i128(&mut rest)?;
                     Ok(Instruction::TradeNoCpi { lp_idx, user_idx, size })
                 },
-                7 => { // LiquidateAtOracle
+                TAG_LIQUIDATE_AT_ORACLE => { // LiquidateAtOracle
                     let target_idx = read_u16(&mut rest)?;
                     Ok(Instruction::LiquidateAtOracle { target_idx })
                 },
-                8 => { // CloseAccount
+                TAG_CLOSE_ACCOUNT => { // CloseAccount
                     let user_idx = read_u16(&mut rest)?;
                     Ok(Instruction::CloseAccount { user_idx })
                 },
-                9 => { // TopUpInsurance
+                TAG_TOP_UP_INSURANCE => { // TopUpInsurance
                     let amount = read_u64(&mut rest)?;
                     Ok(Instruction::TopUpInsurance { amount })
                 },
-                10 => { // TradeCpi
+                TAG_TRADE_CPI => { // TradeCpi
                     let lp_idx = read_u16(&mut rest)?;
                     let user_idx = read_u16(&mut rest)?;
                     let size = read_i128(&mut rest)?;
                     Ok(Instruction::TradeCpi { lp_idx, user_idx, size })
                 },
-                11 => { // SetRiskThreshold
+                TAG_SET_RISK_THRESHOLD => { // SetRiskThreshold
                     let new_threshold = read_u128(&mut rest)?;
                     Ok(Instruction::SetRiskThreshold { new_threshold })
                 },
-                12 => { // UpdateAdmin
+                TAG_UPDATE_ADMIN => { // UpdateAdmin
                     let new_admin = read_pubkey(&mut rest)?;
                     Ok(Instruction::UpdateAdmin { new_admin })
                 },
-                13 => { // CloseSlab
+                TAG_CLOSE_SLAB => { // CloseSlab
                     Ok(Instruction::CloseSlab)
                 },
-                14 => { // UpdateConfig
+                TAG_UPDATE_CONFIG => { // UpdateConfig
                     let funding_horizon_slots = read_u64(&mut rest)?;
                     let funding_k_bps = read_u64(&mut rest)?;
                     let funding_inv_scale_notional_e6 = read_u128(&mut rest)?;
@@ -1244,30 +1249,30 @@ pub mod ix {
                         thresh_step_bps, thresh_alpha_bps, thresh_min, thresh_max, thresh_min_step,
                     })
                 },
-                15 => { // SetMaintenanceFee
+                TAG_SET_MAINTENANCE_FEE => { // SetMaintenanceFee
                     let new_fee = read_u128(&mut rest)?;
                     Ok(Instruction::SetMaintenanceFee { new_fee })
                 },
-                16 => { // SetOracleAuthority
+                TAG_SET_ORACLE_AUTHORITY => { // SetOracleAuthority
                     let new_authority = read_pubkey(&mut rest)?;
                     Ok(Instruction::SetOracleAuthority { new_authority })
                 },
-                17 => { // PushOraclePrice
+                TAG_PUSH_ORACLE_PRICE => { // PushOraclePrice
                     let price_e6 = read_u64(&mut rest)?;
                     let timestamp = read_i64(&mut rest)?;
                     Ok(Instruction::PushOraclePrice { price_e6, timestamp })
                 },
-                18 => { // SetOraclePriceCap
+                TAG_SET_ORACLE_PRICE_CAP => { // SetOraclePriceCap
                     let max_change_e2bps = read_u64(&mut rest)?;
                     Ok(Instruction::SetOraclePriceCap { max_change_e2bps })
                 },
-                19 => Ok(Instruction::ResolveMarket),
-                20 => Ok(Instruction::WithdrawInsurance),
-                21 => { // AdminForceClose
+                TAG_RESOLVE_MARKET => Ok(Instruction::ResolveMarket),
+                TAG_WITHDRAW_INSURANCE => Ok(Instruction::WithdrawInsurance),
+                TAG_ADMIN_FORCE_CLOSE => { // AdminForceClose
                     let target_idx = read_u16(&mut rest)?;
                     Ok(Instruction::AdminForceClose { target_idx })
                 },
-                22 => { // UpdateRiskParams
+                TAG_UPDATE_RISK_PARAMS => { // UpdateRiskParams
                     let initial_margin_bps = read_u64(&mut rest)?;
                     let maintenance_margin_bps = read_u64(&mut rest)?;
                     // Optional: trading_fee_bps (backwards compatible — old clients send 17 bytes, new send 25)
@@ -1278,18 +1283,18 @@ pub mod ix {
                     };
                     Ok(Instruction::UpdateRiskParams { initial_margin_bps, maintenance_margin_bps, trading_fee_bps })
                 },
-                23 => Ok(Instruction::RenounceAdmin),
-                24 => Ok(Instruction::CreateInsuranceMint),
-                25 => { // DepositInsuranceLP
+                TAG_RENOUNCE_ADMIN => Ok(Instruction::RenounceAdmin),
+                TAG_CREATE_INSURANCE_MINT => Ok(Instruction::CreateInsuranceMint),
+                TAG_DEPOSIT_INSURANCE_LP => { // DepositInsuranceLP
                     let amount = read_u64(&mut rest)?;
                     Ok(Instruction::DepositInsuranceLP { amount })
                 },
-                26 => { // WithdrawInsuranceLP
+                TAG_WITHDRAW_INSURANCE_LP => { // WithdrawInsuranceLP
                     let lp_amount = read_u64(&mut rest)?;
                     Ok(Instruction::WithdrawInsuranceLP { lp_amount })
                 },
-                27 => Ok(Instruction::PauseMarket),
-                28 => Ok(Instruction::UnpauseMarket),
+                TAG_PAUSE_MARKET => Ok(Instruction::PauseMarket),
+                TAG_UNPAUSE_MARKET => Ok(Instruction::UnpauseMarket),
                 _ => Err(ProgramError::InvalidInstructionData),
             }
         }
