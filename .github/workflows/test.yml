@@ -136,11 +136,9 @@ jobs:
       RPC_URL: ${{ secrets.DEVNET_RPC_URL || 'https://api.devnet.solana.com' }}
       TEST_WALLET_PRIVATE_KEY: ${{ secrets.TEST_WALLET_PRIVATE_KEY }}
       BASE_URL: http://localhost:3000
-      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-      # Privy requires a valid-format app ID to initialise; use the secret when
-      # available, otherwise fall back to a dummy value so the server starts in CI.
-      NEXT_PUBLIC_PRIVY_APP_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_APP_ID || 'clxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' }}
+      # Privy validates appId.length === 25 exactly; use the secret when available,
+      # otherwise fall back to a 25-char placeholder so the server starts in CI.
+      NEXT_PUBLIC_PRIVY_APP_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_APP_ID || 'cltestappid00000000000000' }}
     
     steps:
       - name: Checkout code

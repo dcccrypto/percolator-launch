@@ -15,11 +15,12 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   const solanaConnectors = useMemo(() => toSolanaWalletConnectors(), []);
 
-  // Fall back to a placeholder in test/CI environments where the secret is not set.
-  // Privy will still refuse connections but the server will start without crashing.
+  // Fall back to a 25-char placeholder in test/CI environments where the secret
+  // is not set. Privy validates appId.length === 25 so this must be exact.
+  // The provider will still refuse auth connections, but the server won't crash.
   const privyAppId =
     process.env.NEXT_PUBLIC_PRIVY_APP_ID ||
-    "clxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    "cltestappid00000000000000";
 
   return (
     <PrivyProvider
