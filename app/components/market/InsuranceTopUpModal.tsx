@@ -3,7 +3,7 @@
 import { FC, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
@@ -34,7 +34,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
   const prefersReduced = usePrefersReducedMotion();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
 
-  const wallet = useWallet();
+  const wallet = useWalletCompat();
   const { deposit, state: lpState, loading: lpLoading, error: lpError } = useInsuranceLP();
 
   const [amount, setAmount] = useState("");

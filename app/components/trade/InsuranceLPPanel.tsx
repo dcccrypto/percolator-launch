@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useInsuranceLP } from '../../hooks/useInsuranceLP';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWalletCompat } from '@/hooks/useWalletCompat';
 import { useSlabState } from '../providers/SlabProvider';
 import { useTokenMeta } from '../../hooks/useTokenMeta';
 import { formatTokenAmount } from '../../lib/format';
@@ -22,7 +22,7 @@ function formatRate(rateE6: bigint): string {
 }
 
 export function InsuranceLPPanel() {
-  const { publicKey } = useWallet();
+  const { publicKey } = useWalletCompat();
   const slabState = useSlabState();
   const tokenMeta = useTokenMeta(slabState?.config?.collateralMint ?? null);
   const tokenSymbol = tokenMeta?.symbol ?? 'Token';

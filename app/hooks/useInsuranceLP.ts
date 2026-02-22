@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
   PublicKey,
   SystemProgram,
@@ -51,8 +51,8 @@ export interface InsuranceLPState {
 }
 
 export function useInsuranceLP() {
-  const { connection } = useConnection();
-  const wallet = useWallet();
+  const { connection } = useConnectionCompat();
+  const wallet = useWalletCompat();
   const slabState = useSlabState();
   const params = useParams();
   const slabAddress = params?.slab as string | undefined;

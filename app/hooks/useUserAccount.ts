@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { AccountKind, type Account } from "@percolator/core";
 
@@ -11,7 +11,7 @@ export interface UserAccountInfo {
 }
 
 export function useUserAccount(): UserAccountInfo | null {
-  const { publicKey } = useWallet();
+  const { publicKey } = useWalletCompat();
   const { accounts } = useSlabState();
 
   return useMemo(() => {

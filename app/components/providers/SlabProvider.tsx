@@ -11,7 +11,7 @@ import {
   useCallback,
 } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   parseHeader,
   parseConfig,
@@ -61,7 +61,7 @@ export const useSlabState = () => useContext(SlabContext);
 const POLL_INTERVAL_MS = 3000;
 
 export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({ children, slabAddress }) => {
-  const { connection } = useConnection();
+  const { connection } = useConnectionCompat();
   const [state, setState] = useState<SlabState>({ ...defaultState, slabAddress });
   const wsActive = useRef(false);
   const fetchRef = useRef<() => void>(() => {});

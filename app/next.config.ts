@@ -35,8 +35,8 @@ const nextConfig: NextConfig = {
               "img-src 'self' data: blob: https:",
               // RPC calls, Supabase, Helius, Railway API, Pyth, Sentry, Phantom/Solflare
               "connect-src 'self' https: wss: ws://localhost:* ws://127.0.0.1:*",
-              // Wallet adapter popups/iframes
-              "frame-src 'self' https://phantom.app https://solflare.com",
+              // Privy auth + wallet adapter popups/iframes
+              "frame-src 'self' https://auth.privy.io https://phantom.app https://solflare.com",
               "worker-src 'self' blob:",
               "frame-ancestors 'none'",
             ].join("; "),

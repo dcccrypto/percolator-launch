@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   encodeWithdrawCollateral,
   encodeKeeperCrank,
@@ -21,8 +21,8 @@ import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 
 export function useWithdraw(slabAddress: string) {
-  const { connection } = useConnection();
-  const wallet = useWallet();
+  const { connection } = useConnectionCompat();
+  const wallet = useWalletCompat();
   const { config: mktConfig, programId: slabProgramId } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
   Connection,
   Keypair,
@@ -43,7 +43,7 @@ const HELIUS_RPC =
 const PUBLIC_DEVNET_RPC = "https://api.devnet.solana.com";
 
 const DevnetMintContent: FC = () => {
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useWalletCompat();
   const prefersReducedMotion = usePrefersReducedMotion();
   const successCardRef = useRef<HTMLDivElement>(null);
 

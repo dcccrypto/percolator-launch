@@ -1,11 +1,16 @@
 import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram } from "@solana/web3.js";
-import type { WalletContextState } from "@solana/wallet-adapter-react";
-import type { Signer } from "@solana/web3.js";
+import type { PublicKey, Signer } from "@solana/web3.js";
 import { getConfig } from "./config";
+
+/** Wallet shape compatible with both old wallet-adapter and Privy compat layer */
+export interface WalletLike {
+  publicKey: PublicKey | null;
+  signTransaction?: (tx: Transaction) => Promise<Transaction>;
+}
 
 export interface SendTxParams {
   connection: Connection;
-  wallet: WalletContextState;
+  wallet: WalletLike;
   instructions: TransactionInstruction[];
   computeUnits?: number;
   signers?: Signer[];

@@ -2,13 +2,13 @@
 
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { useEffect, useState } from "react";
 
 export const CrankHealthCard: FC = () => {
   const { engine, loading } = useEngineState();
-  const { connection } = useConnection();
+  const { connection } = useConnectionCompat();
   const [currentSlot, setCurrentSlot] = useState<number | null>(null);
 
   useEffect(() => {

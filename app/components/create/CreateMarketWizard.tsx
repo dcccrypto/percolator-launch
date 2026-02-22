@@ -2,7 +2,7 @@
 
 import { FC, useState, useMemo, useEffect } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
 import Link from "next/link";
 import { useCreateMarket, type CreateMarketParams } from "@/hooks/useCreateMarket";
@@ -92,8 +92,8 @@ const QuickLaunchPanel: FC<{
   onFallbackToManual: (mint: string, pool: DexPoolResult | null) => void;
   initialMint?: string;
 }> = ({ onFallbackToManual, initialMint }) => {
-  const { publicKey } = useWallet();
-  const { connection } = useConnection();
+  const { publicKey } = useWalletCompat();
+  const { connection } = useConnectionCompat();
   const { state, create, reset } = useCreateMarket();
   const [quickMint, setQuickMint] = useState(initialMint ?? "");
   const [quickSlabTier, setQuickSlabTier] = useState<SlabTierKey>("small");
@@ -560,8 +560,8 @@ const CreationProgress: FC<{
 
 /* ─── Main Wizard ─── */
 export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }) => {
-  const { publicKey } = useWallet();
-  const { connection } = useConnection();
+  const { publicKey } = useWalletCompat();
+  const { connection } = useConnectionCompat();
   const { state, create, reset } = useCreateMarket();
 
   const [wizardMode, setWizardMode] = useState<"quick" | "manual">("quick");

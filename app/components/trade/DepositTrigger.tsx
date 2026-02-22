@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useState, useEffect, useRef } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -15,7 +15,7 @@ function lsKey(slabAddress: string) {
 }
 
 export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey } = useWalletCompat();
   const realUserAccount = useUserAccount();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);

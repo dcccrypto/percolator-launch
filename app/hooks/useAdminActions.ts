@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
@@ -31,8 +31,8 @@ import { sendTx } from "@/lib/tx";
 import type { DiscoveredMarket } from "@percolator/core";
 
 export function useAdminActions() {
-  const { connection } = useConnection();
-  const wallet = useWallet();
+  const { connection } = useConnectionCompat();
+  const wallet = useWalletCompat();
   const [loading, setLoading] = useState<string | null>(null);
 
   const setOracleAuthority = useCallback(

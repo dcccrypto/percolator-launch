@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { fetchTokenMeta, type TokenMeta } from "@/lib/tokenMeta";
 
 /**
@@ -10,7 +10,7 @@ import { fetchTokenMeta, type TokenMeta } from "@/lib/tokenMeta";
  * Returns a Map keyed by base58 mint address.
  */
 export function useMultiTokenMeta(mints: PublicKey[]): Map<string, TokenMeta> {
-  const { connection } = useConnection();
+  const { connection } = useConnectionCompat();
   const [metaMap, setMetaMap] = useState<Map<string, TokenMeta>>(new Map());
 
   // Stable key for the mints array

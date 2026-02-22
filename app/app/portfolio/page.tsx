@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio, getLiquidationSeverity } from "@/hooks/usePortfolio";
 import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
 import dynamic from "next/dynamic";
@@ -13,8 +13,8 @@ import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 
-const WalletMultiButton = dynamic(
-  () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
+const ConnectButton = dynamic(
+  () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
   { ssr: false }
 );
 
@@ -32,7 +32,7 @@ function formatPnlPct(pct: number): string {
 
 export default function PortfolioPage() {
   useEffect(() => { document.title = "Portfolio — Percolator"; }, []);
-  const { connected: walletConnected } = useWallet();
+  const { connected: walletConnected } = useWalletCompat();
   const mockMode = isMockMode();
   const connected = walletConnected || mockMode;
   const portfolio = usePortfolio();
@@ -76,7 +76,7 @@ export default function PortfolioPage() {
           <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">View all your positions across markets</p>
           <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
             <p className="mb-4 text-[13px] text-[var(--text-secondary)]">Connect your wallet to view positions</p>
-            <WalletMultiButton />
+            <ConnectButton />
           </div>
         </div>
       </div>

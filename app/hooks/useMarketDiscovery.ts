@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { discoverMarkets, type DiscoveredMarket } from "@percolator/core";
 import { getConfig } from "@/lib/config";
 
@@ -22,7 +22,7 @@ function getAllProgramIds(): PublicKey[] {
  * Discovers all Percolator markets across all known program deployments.
  */
 export function useMarketDiscovery() {
-  const { connection } = useConnection();
+  const { connection } = useConnectionCompat();
   const [markets, setMarkets] = useState<DiscoveredMarket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import gsap from "gsap";
 import { useTrade } from "@/hooks/useTrade";
@@ -17,7 +17,7 @@ import { PreTradeSummary } from "@/components/trade/PreTradeSummary";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { usePrivy } from "@privy-io/react-auth";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 
@@ -46,8 +46,8 @@ function abs(n: bigint): bigint {
 }
 
 export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { connected: walletConnected, publicKey } = useWallet();
-  const { connection } = useConnection();
+  const { connected: walletConnected, publicKey } = useWalletCompat();
+  const { connection } = useConnectionCompat();
   const realUserAccount = useUserAccount();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const connected = walletConnected || mockMode;
@@ -57,7 +57,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { accounts, config: mktConfig, header } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
-  const { setVisible: openWalletModal } = useWalletModal();
+  const { login: openWalletModal } = usePrivy();
   const symbol = tokenMeta?.symbol ?? "Token";
   
   // BUG FIX: Fetch on-chain decimals from token account (like DepositWithdrawCard)
@@ -391,7 +391,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Submit */}
       {needsWallet ? (
         <button
-          onClick={() => openWalletModal(true)}
+          onClick={() => openWalletModal()}
           className="w-full rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] bg-[var(--accent)] hover:brightness-110 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] focus-visible:ring-[var(--accent)]"
         >
           Connect Wallet

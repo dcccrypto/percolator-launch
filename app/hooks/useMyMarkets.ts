@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useEffect, useState, useRef, useCallback } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "./useMarketDiscovery";
 import { parseAllAccounts, AccountKind } from "@percolator/core";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
@@ -26,8 +26,8 @@ export interface MyMarket extends DiscoveredMarket {
  * Capped at 30 markets to avoid excessive RPC usage.
  */
 export function useMyMarkets() {
-  const { publicKey } = useWallet();
-  const { connection } = useConnection();
+  const { publicKey } = useWalletCompat();
+  const { connection } = useConnectionCompat();
   const { markets, loading: discoveryLoading, error } = useMarketDiscovery();
 
   // Token label cache: mint → symbol (persists across re-renders)

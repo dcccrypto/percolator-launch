@@ -1,21 +1,21 @@
 "use client";
 
 import { Suspense } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { CreateMarketWizard } from "@/components/create/CreateMarketWizard";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
-const WalletMultiButton = dynamic(
-  () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
+const ConnectButton = dynamic(
+  () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
   { ssr: false }
 );
 
 /** Inner component that reads search params (needs Suspense boundary) */
 function CreatePageInner() {
-  const { connected } = useWallet();
+  const { connected } = useWalletCompat();
   const searchParams = useSearchParams();
   
   // P-CRITICAL-4: Validate mint URL parameter before use
@@ -74,7 +74,7 @@ function CreatePageInner() {
                 Connect your wallet to continue.
               </p>
             </div>
-            <WalletMultiButton />
+            <ConnectButton />
           </div>
         )}
 

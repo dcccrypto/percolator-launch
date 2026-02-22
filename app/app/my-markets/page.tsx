@@ -3,7 +3,7 @@
 import { FC, useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import gsap from "gsap";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { PublicKey } from "@solana/web3.js";
 import { useMyMarkets, type MyMarket } from "@/hooks/useMyMarkets";
 import { useAdminActions } from "@/hooks/useAdminActions";
@@ -129,7 +129,7 @@ const MarketCard: FC<{
 }> = ({ market, insuranceMintExists, insuranceMintChecking }) => {
   const { toast } = useToast();
   const actions = useAdminActions();
-  const wallet = useWallet();
+  const wallet = useWalletCompat();
   const cfg = getConfig();
 
   const slab = market.slabAddress.toBase58();
@@ -396,7 +396,7 @@ const MyMarketsPage: FC = () => {
   const mockMarkets = useMemo(() => mockMode ? getMockMyMarkets() : [], [mockMode]);
   const myMarkets = (realMyMarkets.length === 0 && mockMode ? mockMarkets : realMyMarkets) as MyMarket[];
   const loading = mockMode ? false : realLoading;
-  const { connection } = useConnection();
+  const { connection } = useConnectionCompat();
   const [filter, setFilter] = useState<"all" | "admin" | "lp" | "trader">("all");
   const [insuranceMintMap, setInsuranceMintMap] = useState<Record<string, boolean>>({});
   const [insuranceMintChecking, setInsuranceMintChecking] = useState(true);

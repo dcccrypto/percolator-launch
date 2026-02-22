@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { fetchTokenMeta, type TokenMeta } from "@/lib/tokenMeta";
 import { getMockSymbol } from "@/lib/mock-trade-data";
 
@@ -11,7 +11,7 @@ import { getMockSymbol } from "@/lib/mock-trade-data";
  * Returns null while loading or if mint is null.
  */
 export function useTokenMeta(mint: PublicKey | null): TokenMeta | null {
-  const { connection } = useConnection();
+  const { connection } = useConnectionCompat();
   const [meta, setMeta] = useState<TokenMeta | null>(null);
 
   useEffect(() => {

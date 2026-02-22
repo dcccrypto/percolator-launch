@@ -7,7 +7,7 @@ import {
   SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { 
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -59,8 +59,8 @@ const DEFAULT_VAMM: Required<VammConfig> = {
  * Hook for vAMM LP operations: initialize LP, trade via CPI, and detect existing LPs.
  */
 export function useVAMM(slabAddress: string) {
-  const { connection } = useConnection();
-  const wallet = useWallet();
+  const { connection } = useConnectionCompat();
+  const wallet = useWalletCompat();
   const { config: mktConfig, accounts, programId: slabProgramId } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

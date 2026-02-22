@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnection } from "@solana/wallet-adapter-react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
   discoverMarkets,
   fetchSlab,
@@ -70,8 +70,8 @@ export interface PortfolioData {
  * Enriches each position with liquidation price, PnL %, and leverage.
  */
 export function usePortfolio(): PortfolioData {
-  const { connection } = useConnection();
-  const { publicKey } = useWallet();
+  const { connection } = useConnectionCompat();
+  const { publicKey } = useWalletCompat();
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [totalPnl, setTotalPnl] = useState<bigint>(0n);
   const [totalDeposited, setTotalDeposited] = useState<bigint>(0n);

@@ -8,8 +8,8 @@ import gsap from "gsap";
 import { type Network, getConfig, setNetwork } from "@/lib/config";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
-const WalletMultiButton = dynamic(
-  () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
+const ConnectButton = dynamic(
+  () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
   { ssr: false }
 );
 
@@ -156,7 +156,7 @@ export const Header: FC = () => {
           </button>
 
           <div className="h-4 w-px bg-[var(--border)]" />
-          <WalletMultiButton />
+          <ConnectButton />
 
           {/* Mobile menu toggle */}
           <button

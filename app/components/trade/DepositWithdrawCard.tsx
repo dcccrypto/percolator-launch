@@ -2,8 +2,8 @@
 import { explorerTxUrl } from "@/lib/config";
 
 import { FC, useState, useEffect, useRef } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useDeposit } from "@/hooks/useDeposit";
@@ -17,8 +17,8 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 
 export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { connected: walletConnected, publicKey } = useWallet();
-  const { connection } = useConnection();
+  const { connected: walletConnected, publicKey } = useWalletCompat();
+  const { connection } = useConnectionCompat();
   const realUserAccount = useUserAccount();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const connected = walletConnected || mockMode;
