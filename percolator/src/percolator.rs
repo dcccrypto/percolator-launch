@@ -788,6 +788,12 @@ impl RiskEngine {
                 .saturating_sub(old_pos),
         );
         self.accounts[idx].pnl = I128::new(new_pnl);
+        // §INV PA1: Clamp reserved_pnl to max(new_pnl, 0) so invariant
+        // reserved_pnl <= max(pnl, 0) is maintained whenever PnL decreases.
+        let max_reserved = if new_pnl > 0 { new_pnl as u64 } else { 0 };
+        if self.accounts[idx].reserved_pnl > max_reserved {
+            self.accounts[idx].reserved_pnl = max_reserved;
+        }
     }
 
     /// Helper: set account capital and maintain c_tot aggregate (spec §4.1).
@@ -3084,6 +3090,15 @@ impl RiskEngine {
         } else if new_user_position == 0 {
             user.reserved_pnl = 0; // Clear on close
         }
+        // §INV PA1: Clamp reserved_pnl to max(pnl, 0) to maintain invariant.
+        // Trade PnL may reduce pnl below reserved_pnl; without clamping,
+        // valid_state() / canonical_inv() PA1 check fails (Kani finding).
+        {
+            let max_reserved = if new_user_pnl > 0 { new_user_pnl as u64 } else { 0 };
+            if user.reserved_pnl > max_reserved {
+                user.reserved_pnl = max_reserved;
+            }
+        }
         user.position_size = I128::new(new_user_position);
         user.entry_price = oracle_price;
         // Commit fee deduction from user capital (spec §8.1)
@@ -3095,6 +3110,13 @@ impl RiskEngine {
             lp.reserved_pnl = oracle_price;
         } else if new_lp_position == 0 {
             lp.reserved_pnl = 0;
+        }
+        // §INV PA1: Clamp reserved_pnl for LP as well
+        {
+            let max_reserved = if new_lp_pnl > 0 { new_lp_pnl as u64 } else { 0 };
+            if lp.reserved_pnl > max_reserved {
+                lp.reserved_pnl = max_reserved;
+            }
         }
         lp.position_size = I128::new(new_lp_position);
         lp.entry_price = oracle_price;
