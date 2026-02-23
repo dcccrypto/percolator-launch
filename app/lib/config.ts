@@ -6,8 +6,12 @@ export type Network = "mainnet" | "devnet";
 
 function getNetwork(): Network {
   if (typeof window !== "undefined") {
-    const override = localStorage.getItem("percolator-network") as Network | null;
-    if (override === "mainnet" || override === "devnet") return override;
+    try {
+      const override = localStorage.getItem("percolator-network") as Network | null;
+      if (override === "mainnet" || override === "devnet") return override;
+    } catch {
+      // localStorage may be unavailable (SSR, iframes, or test environments)
+    }
   }
   // Trim env var to handle trailing whitespace/newlines (Vercel env var copy-paste issue)
   const envNet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
@@ -89,7 +93,11 @@ export function getConfig() {
 
 export function setNetwork(network: Network) {
   if (typeof window !== "undefined") {
-    localStorage.setItem("percolator-network", network);
+    try {
+      localStorage.setItem("percolator-network", network);
+    } catch {
+      // localStorage may be unavailable (iframes with restrictive policies)
+    }
     window.location.reload();
   }
 }

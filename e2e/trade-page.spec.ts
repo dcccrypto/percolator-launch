@@ -109,8 +109,10 @@ test.describe("Trade page", () => {
     test.skip(!validTradeUrl, "No markets available on devnet");
     await navigateTo(page, validTradeUrl!);
 
-    // Wait for any funding-related elements to render
-    await page.waitForTimeout(3000);
+    // Wait for the page to finish loading dynamic content
+    await page.waitForLoadState("networkidle").catch(() => {});
+    // Extra buffer for client-side hydration of funding countdown
+    await page.waitForTimeout(1000);
 
     // Check for NaN in the page content (regression for issue #236)
     const bodyText = await page.locator("body").textContent();

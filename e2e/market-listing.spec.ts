@@ -69,9 +69,9 @@ test.describe("Market listing page", () => {
     const count = await searchInput.count();
     if (count > 0) {
       await searchInput.first().fill("SOL");
-      // After typing, the market list should filter (or at least not crash)
-      await page.waitForTimeout(500);
-      // Page should still have content
+      // After typing, wait for the market list to re-render (debounce + filter)
+      await page.waitForLoadState("networkidle").catch(() => {});
+      // Page should still have content (filter didn't crash)
       await expect(page.locator(selectors.mainContent)).toBeVisible();
     }
   });

@@ -38,6 +38,8 @@ vi.mock("@/lib/config", () => ({
     network: "devnet",
     programId: "test",
   }),
+  getWsEndpoint: () => undefined,
+  getRpcEndpoint: () => "https://example.com/api/rpc",
 }));
 
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
