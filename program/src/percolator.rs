@@ -1588,6 +1588,8 @@ pub mod ix {
             partial_liquidation_bps: 2000,
             partial_liquidation_cooldown_slots: 30,
             use_mark_price_for_liquidation: false,
+            // Issue #300: Emergency cooldown bypass (default = half maintenance margin)
+            emergency_liquidation_margin_bps: 0, // 0 = auto (maintenance_margin_bps / 2)
             // PERC-120: Dynamic fee params (defaults = flat fee, no split, no surge)
             fee_tier2_bps: 0,
             fee_tier3_bps: 0,

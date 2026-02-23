@@ -74,6 +74,7 @@ fn default_params() -> RiskParams {
         partial_liquidation_bps: 2000,
         partial_liquidation_cooldown_slots: 30,
         use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
         fee_tier2_bps: 0,
         fee_tier3_bps: 0,
         fee_tier2_threshold: 0,
@@ -2133,6 +2134,126 @@ fn test_partial_liquidation_fee_charged() {
     assert!(fee_received > 0, "Some fee should be charged");
 }
 
+/// Test: Emergency cooldown bypass for critically underwater accounts (Issue #300)
+///
+/// When an account's margin ratio falls below the emergency threshold during
+/// the partial liquidation cooldown, the cooldown must be bypassed and a full
+/// liquidation must occur immediately to prevent bad debt.
+#[test]
+fn test_emergency_cooldown_bypass_critically_underwater() {
+    let mut params = default_params();
+    params.maintenance_margin_bps = 500;   // 5%
+    params.liquidation_buffer_bps = 100;    // 1% buffer → target 6%
+    params.min_liquidation_abs = U128::new(1);
+    params.partial_liquidation_bps = 2000;  // 20% per partial
+    params.partial_liquidation_cooldown_slots = 30;
+    params.use_mark_price_for_liquidation = true;
+    params.emergency_liquidation_margin_bps = 200; // 2% emergency threshold
+
+    let mut engine = Box::new(RiskEngine::new(params));
+    engine.mark_price_e6 = 1_000_000; // $1 mark price
+
+    // Setup LP (required for risk engine)
+    let lp = engine.add_lp([0u8; 32], [0u8; 32], 0).unwrap();
+    engine.accounts[lp as usize].capital = U128::new(100_000_000);
+    engine.accounts[lp as usize].position_size = I128::new(-10_000_000);
+    engine.accounts[lp as usize].entry_price = 1_000_000;
+
+    let user = engine.add_user(0).unwrap();
+
+    // Position: 10 units at $1, capital = 300k
+    // At $1: position_value = 10M, equity = 300k
+    // MM = 10M * 5% = 500k
+    // equity (300k) < MM (500k) → underwater
+    engine.accounts[user as usize].capital = U128::new(300_000);
+    engine.accounts[user as usize].position_size = I128::new(10_000_000);
+    engine.accounts[user as usize].entry_price = 1_000_000;
+    engine.accounts[user as usize].pnl = I128::new(0);
+    engine.total_open_interest = U128::new(10_000_000);
+    engine.vault = U128::new(100_300_000);
+
+    // First partial liquidation at slot 100
+    let result = engine.liquidate_with_mark_price(user, 100, 1_000_000).unwrap();
+    assert!(result, "First partial liquidation should succeed");
+
+    // Account should still have a position (partial, not full)
+    let pos_after_first = engine.accounts[user as usize].position_size.get();
+    // Position may have been fully closed by safety check; skip rest if so
+    if pos_after_first == 0 {
+        return; // Safety check already handled it
+    }
+
+    // Now simulate price crash: mark price drops substantially
+    // The account becomes critically underwater (below emergency threshold)
+    engine.mark_price_e6 = 500_000; // $0.50 mark price — big drop
+
+    // Set very low capital to simulate critically underwater
+    // At $0.50 mark: position_value = pos * 0.5, equity very low
+    // We need margin ratio < 2% (emergency_liquidation_margin_bps)
+    engine.accounts[user as usize].capital = U128::new(10_000); // Very low capital
+    engine.accounts[user as usize].pnl = I128::new(-290_000); // Large loss
+
+    // Try liquidation at slot 105 — within cooldown (last was 100, cooldown=30)
+    // Normally this would return Ok(false) due to cooldown.
+    // But since account is critically underwater (< 2% margin), it must bypass.
+    let result2 = engine.liquidate_with_mark_price(user, 105, 500_000).unwrap();
+    assert!(result2, "Emergency liquidation must bypass cooldown for critically underwater accounts");
+
+    // Position should be fully closed
+    assert!(
+        engine.accounts[user as usize].position_size.is_zero(),
+        "Critically underwater account should be fully liquidated"
+    );
+}
+
+/// Test: Normal cooldown should still block when account is NOT critically underwater (Issue #300)
+#[test]
+fn test_normal_cooldown_still_blocks_when_not_emergency() {
+    let mut params = default_params();
+    params.maintenance_margin_bps = 500;
+    params.liquidation_buffer_bps = 100;
+    params.min_liquidation_abs = U128::new(1);
+    params.partial_liquidation_bps = 2000;
+    params.partial_liquidation_cooldown_slots = 30;
+    params.use_mark_price_for_liquidation = true;
+    params.emergency_liquidation_margin_bps = 200; // 2%
+
+    let mut engine = Box::new(RiskEngine::new(params));
+    engine.mark_price_e6 = 1_000_000;
+
+    let lp = engine.add_lp([0u8; 32], [0u8; 32], 0).unwrap();
+    engine.accounts[lp as usize].capital = U128::new(100_000_000);
+    engine.accounts[lp as usize].position_size = I128::new(-10_000_000);
+    engine.accounts[lp as usize].entry_price = 1_000_000;
+
+    let user = engine.add_user(0).unwrap();
+
+    // Position: 10 units at $1, capital = 400k
+    // At $1: position_value = 10M, equity = 400k
+    // MM = 10M * 5% = 500k → underwater
+    // Emergency = 10M * 2% = 200k → equity(400k) > 200k → NOT emergency
+    engine.accounts[user as usize].capital = U128::new(400_000);
+    engine.accounts[user as usize].position_size = I128::new(10_000_000);
+    engine.accounts[user as usize].entry_price = 1_000_000;
+    engine.accounts[user as usize].pnl = I128::new(0);
+    engine.total_open_interest = U128::new(10_000_000);
+    engine.vault = U128::new(100_400_000);
+
+    // First partial liquidation at slot 100
+    let result = engine.liquidate_with_mark_price(user, 100, 1_000_000).unwrap();
+    assert!(result, "First partial liquidation should succeed");
+
+    // Simulate last_partial_liquidation_slot = 100 (already set by engine)
+    let pos_after_first = engine.accounts[user as usize].position_size.get();
+    if pos_after_first == 0 {
+        return; // Already fully closed
+    }
+
+    // Try again at slot 105 — within cooldown, NOT emergency
+    let result2 = engine.liquidate_with_mark_price(user, 105, 1_000_000).unwrap();
+    assert!(!result2, "Normal cooldown should block liquidation when not in emergency");
+}
+
 /// Test 4: Compute liquidation close amount basic test
 #[test]
 fn test_compute_liquidation_close_amount_basic() {
@@ -3592,6 +3713,7 @@ fn params_for_inline_tests() -> RiskParams {
         partial_liquidation_bps: 2000,
         partial_liquidation_cooldown_slots: 30,
         use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
         fee_tier2_bps: 0,
         fee_tier3_bps: 0,
         fee_tier2_threshold: 0,

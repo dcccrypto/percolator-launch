@@ -5025,6 +5025,7 @@ fn params_for_inline_kani() -> RiskParams {
         partial_liquidation_bps: 2000,
         partial_liquidation_cooldown_slots: 30,
         use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
         fee_tier2_bps: 0,
         fee_tier3_bps: 0,
         fee_tier2_threshold: 0,

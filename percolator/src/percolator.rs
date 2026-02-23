@@ -324,6 +324,12 @@ pub struct RiskParams {
     pub partial_liquidation_cooldown_slots: u64,
     /// Use mark price (not oracle) for liquidation trigger.
     pub use_mark_price_for_liquidation: bool,
+    /// Emergency liquidation margin threshold (bps). If an account's margin ratio
+    /// falls below this level, cooldown is bypassed and full liquidation occurs
+    /// immediately. Prevents bad debt from critically underwater accounts waiting
+    /// on cooldown. Set to 0 to disable (defaults to maintenance_margin_bps / 2).
+    /// Issue #300: must be < maintenance_margin_bps.
+    pub emergency_liquidation_margin_bps: u64,
 
     // ========================================
     // Dynamic Fee Parameters (PERC-120)
@@ -392,6 +398,13 @@ impl RiskParams {
         if self.partial_liquidation_bps > 10_000 {
             return Err(RiskError::Overflow);
         }
+        // Emergency margin must be less than maintenance margin (when set).
+        // 0 = auto mode (uses maintenance_margin_bps / 2).
+        if self.emergency_liquidation_margin_bps > 0
+            && self.emergency_liquidation_margin_bps >= self.maintenance_margin_bps
+        {
+            return Err(RiskError::Overflow);
+        }
         // Fee tiers must be monotonically increasing
         if self.fee_tier2_bps > 10_000 || self.fee_tier3_bps > 10_000 {
             return Err(RiskError::Overflow);
@@ -411,6 +424,17 @@ impl RiskParams {
             }
         }
         Ok(())
+    }
+
+    /// Effective emergency liquidation margin (bps).
+    /// 0 = auto mode → maintenance_margin_bps / 2.
+    #[inline]
+    pub fn effective_emergency_margin_bps(&self) -> u64 {
+        if self.emergency_liquidation_margin_bps > 0 {
+            self.emergency_liquidation_margin_bps
+        } else {
+            self.maintenance_margin_bps / 2
+        }
     }
 }
 
@@ -2285,7 +2309,16 @@ impl RiskEngine {
             let batch = batch.max(self.params.min_liquidation_abs.get());
             if batch >= pos_abs { (pos_abs, true) } else { (batch, false) }
         } else if cooldown > 0 && now_slot.saturating_sub(last_partial) < cooldown {
-            return Ok(false); // Cooldown not elapsed
+            // Issue #300: Cooldown not elapsed — check if critically underwater.
+            // If margin ratio is below emergency threshold, bypass cooldown
+            // and do full liquidation to prevent bad debt accumulation.
+            let emergency_bps = self.params.effective_emergency_margin_bps();
+            if !self.is_above_margin_bps_mtm(&self.accounts[idx as usize], mark_price, emergency_bps) {
+                // Critically underwater — bypass cooldown, full liquidation
+                (pos_abs, true)
+            } else {
+                return Ok(false); // Normal cooldown — account is not in emergency
+            }
         } else {
             (pos_abs, true)
         };
