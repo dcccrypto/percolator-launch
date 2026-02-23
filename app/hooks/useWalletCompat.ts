@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useWallets, useSignTransaction } from "@privy-io/react-auth/solana";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
-import { getConfig } from "@/lib/config";
+import { getConfig, getWsEndpoint } from "@/lib/config";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 
 /**
@@ -92,7 +92,11 @@ function useWalletCompatInner() {
 export function useConnectionCompat() {
   const connection = useMemo(() => {
     const url = getConfig().rpcUrl;
-    return new Connection(url, "confirmed");
+    const wsEndpoint = getWsEndpoint();
+    return new Connection(url, {
+      commitment: "confirmed",
+      ...(wsEndpoint ? { wsEndpoint } : {}),
+    });
   }, []);
 
   return { connection };

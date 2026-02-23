@@ -36,6 +36,22 @@ export function getRpcEndpoint(): string {
   return process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
 }
 
+/**
+ * Get WebSocket endpoint for Solana Connection subscriptions.
+ * The HTTP proxy at /api/rpc doesn't support WebSocket upgrades,
+ * so we connect directly to Helius WSS for real-time subscriptions.
+ * Returns undefined if no Helius key is configured (disables WS subscriptions).
+ */
+export function getWsEndpoint(): string | undefined {
+  const apiKey = process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? "";
+  if (!apiKey) return undefined;
+
+  const net = getNetwork();
+  return net === "mainnet"
+    ? `wss://mainnet.helius-rpc.com/?api-key=${apiKey}`
+    : `wss://devnet.helius-rpc.com/?api-key=${apiKey}`;
+}
+
 const CONFIGS = {
   mainnet: {
     get rpcUrl() { return getRpcEndpoint(); },
