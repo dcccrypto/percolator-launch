@@ -17,7 +17,7 @@ const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
 }) => {
   const rpcUrl = useMemo(() => {
     const url = getConfig().rpcUrl;
-    if (!url || !url.startsWith("http")) return "https://api.devnet.solana.com";
+    if (!url) return "https://api.devnet.solana.com";
     return url;
   }, []);
 
