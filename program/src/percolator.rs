@@ -78,6 +78,10 @@ pub mod constants {
     /// unit_scale=1..=1_000_000_000 enables scaling with dust tracking.
     pub const MAX_UNIT_SCALE: u32 = 1_000_000_000;
 
+    /// Magic confirmation code for RenounceAdmin (prevents accidental calls).
+    /// "RENOUNCE" in ASCII = 0x52454E4F554E4345
+    pub const RENOUNCE_ADMIN_CONFIRMATION: u64 = 0x52454E4F554E4345;
+
     /// Minimum seed deposit for InitMarket (in base token lamports/atoms).
     /// Prevents spam-market creation. Enforced on-chain, not just UI.
     /// For USDC (6 decimals): 500_000_000 = 500 USDC.
@@ -87,6 +91,8 @@ pub mod constants {
     pub const MIN_INIT_MARKET_SEED: u64 = 500_000_000; // 500 USDC at 6 decimals
     #[cfg(feature = "test")]
     pub const MIN_INIT_MARKET_SEED: u64 = 0; // Allow zero seed in tests
+    /// Alias for backwards compatibility with PERC-136 references.
+    pub const MIN_INIT_MARKET_SEED_LAMPORTS: u64 = 1_000_000;
 
     // Default funding parameters (used at init_market, can be changed via update_config)
     pub const DEFAULT_FUNDING_HORIZON_SLOTS: u64 = 500;            // ~4 min @ ~2 slots/sec
@@ -1082,10 +1088,12 @@ pub mod error {
         InsuranceSupplyMismatch,
         /// Market is paused — trading, deposits, and withdrawals are disabled
         MarketPaused,
-        /// InitMarket seed deposit below minimum (PERC-136 #299)
-        InsufficientSeed,
-        /// RenounceAdmin called on non-resolved market (PERC-136 #312)
+        /// #312: RenounceAdmin not allowed — market must be RESOLVED first
         AdminRenounceNotAllowed,
+        /// #312: Invalid confirmation code for RenounceAdmin
+        InvalidConfirmation,
+        /// #299: InitMarket vault seed below minimum (PERC-136)
+        InsufficientSeed,
     }
 
     impl From<PercolatorError> for ProgramError {
@@ -1194,7 +1202,8 @@ pub mod ix {
         /// Update initial and maintenance margin BPS. Admin only.
         UpdateRiskParams { initial_margin_bps: u64, maintenance_margin_bps: u64, trading_fee_bps: Option<u64> },
         /// Renounce admin: set admin to all zeros (irreversible). Admin only.
-        RenounceAdmin,
+        /// Renounce admin permanently. Requires market RESOLVED and confirmation code.
+        RenounceAdmin { confirmation: u64 },
         /// Create the insurance LP SPL mint for this market. Admin only, once per market.
         /// Mint PDA: ["ins_lp", slab_pubkey]. Authority: vault PDA.
         CreateInsuranceMint,
@@ -1426,7 +1435,10 @@ pub mod ix {
                     };
                     Ok(Instruction::UpdateRiskParams { initial_margin_bps, maintenance_margin_bps, trading_fee_bps })
                 },
-                TAG_RENOUNCE_ADMIN => Ok(Instruction::RenounceAdmin),
+                TAG_RENOUNCE_ADMIN => {
+                    let confirmation = read_u64(&mut rest)?;
+                    Ok(Instruction::RenounceAdmin { confirmation })
+                },
                 TAG_CREATE_INSURANCE_MINT => Ok(Instruction::CreateInsuranceMint),
                 TAG_DEPOSIT_INSURANCE_LP => { // DepositInsuranceLP
                     let amount = read_u64(&mut rest)?;
@@ -3473,6 +3485,18 @@ pub mod processor {
                 let (auth, bump) = accounts::derive_vault_authority(program_id, a_slab.key);
                 verify_vault(a_vault, &auth, a_mint.key, a_vault.key)?;
 
+                // SECURITY (#299): Enforce minimum seed deposit in vault.
+                // Prevents market spam when InitMarket is permissionless.
+                // The vault must be pre-funded before calling InitMarket.
+                #[cfg(not(feature = "test"))]
+                {
+                    let vault_data = a_vault.try_borrow_data()?;
+                    let vault_tok = spl_token::state::Account::unpack(&vault_data)?;
+                    if vault_tok.amount < crate::constants::MIN_INIT_MARKET_SEED_LAMPORTS {
+                        return Err(PercolatorError::InsufficientSeed.into());
+                    }
+                }
+
                 for b in data.iter_mut() { *b = 0; }
 
                 // Initialize engine in-place (zero-copy) to avoid stack overflow.
@@ -5045,8 +5069,9 @@ pub mod processor {
                 }
             }
 
-            Instruction::RenounceAdmin => {
+            Instruction::RenounceAdmin { confirmation } => {
                 // Renounce admin: set admin to all zeros (irreversible).
+                // SECURITY (#312): Requires market RESOLVED + confirmation code.
                 // PERC-136 #312: Only allowed after market is RESOLVED to prevent
                 // admin abandonment while users still have open positions.
                 // Accounts: [admin(signer), slab(writable)]
@@ -5068,6 +5093,16 @@ pub mod processor {
 
                 let header = state::read_header(&data);
                 require_admin(header.admin, a_admin.key)?;
+
+                // SECURITY (#312): Market must be RESOLVED before admin can renounce
+                if !state::is_resolved(&data) {
+                    return Err(PercolatorError::AdminRenounceNotAllowed.into());
+                }
+
+                // SECURITY (#312): Require confirmation code to prevent accidental calls
+                if confirmation != crate::constants::RENOUNCE_ADMIN_CONFIRMATION {
+                    return Err(PercolatorError::InvalidConfirmation.into());
+                }
 
                 // Set admin to all zeros — irreversible
                 let mut new_header = header;
