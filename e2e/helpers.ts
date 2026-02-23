@@ -76,6 +76,10 @@ export function collectConsoleErrors(page: Page): string[] {
       if (text.includes("ERR_CONNECTION_REFUSED")) return;
       if (text.includes("net::ERR_")) return;
       if (text.includes("Failed to fetch")) return;
+      // HTTP 4xx resource errors in CI (rate limits, missing API keys)
+      if (text.includes("Failed to load resource")) return;
+      if (text.includes("429")) return;
+      if (text.includes("400")) return;
       // Hydration warnings (React 19 noise)
       if (text.includes("Hydration")) return;
       if (text.includes("hydrat")) return;
