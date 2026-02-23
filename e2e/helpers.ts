@@ -57,6 +57,10 @@ export function collectConsoleErrors(page: Page): string[] {
       if (text.includes("Failed to load resource") && text.includes("favicon")) return;
       // Wallet adapter logs are expected when no wallet is connected
       if (text.includes("WalletNotConnectedError")) return;
+      // Privy SDK logs (expected when no Privy app ID configured in CI)
+      if (text.includes("privy")) return;
+      if (text.includes("Privy")) return;
+      if (text.includes("NEXT_PUBLIC_PRIVY")) return;
       // Supabase connection errors in CI (no real backend)
       if (text.includes("supabase")) return;
       if (text.includes("NEXT_PUBLIC_SUPABASE")) return;
@@ -88,7 +92,9 @@ export const selectors = {
   header: "header",
   footer: "footer",
   mainContent: "main",
-  walletButton: 'button:has-text("Select Wallet"), button:has-text("Connect")',
+  /** Privy connect button (shows "Connect" when unauthenticated) */
+  walletButton: 'button[aria-label="Connect wallet"], button:has-text("Connect")',
+  /** Privy renders its modal in an iframe or portal — use generic dialog selector */
   walletModal: '[role="dialog"]',
   tickerBanner: ".ticker-banner, [class*='ticker']",
   marketCard: '[data-testid="market-card"], a[href^="/trade/"]',

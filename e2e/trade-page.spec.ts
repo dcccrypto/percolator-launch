@@ -86,6 +86,7 @@ test.describe("Trade page", () => {
       'button:has-text("Long")',
       'button:has-text("Short")',
       'button:has-text("Connect Wallet")',
+      'button[aria-label="Connect wallet"]',
       'button:has-text("Create Account")',
       'button:has-text("Deposit")',
       'input[type="number"]',

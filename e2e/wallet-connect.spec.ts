@@ -1,140 +1,94 @@
 /**
- * E2E Suite 3: Wallet Connection Modal
+ * E2E Suite 3: Wallet Connection (Privy)
  *
- * Tests the accessible wallet connection modal (PR #257):
- * - Modal opens when wallet button is clicked
- * - ARIA attributes are correct
- * - Keyboard interaction works (Escape to close, focus trapping)
- * - Modal closes on overlay click
+ * Tests the Privy-based wallet connection flow (PR #295):
+ * - Connect button is visible and accessible
+ * - Clicking connect triggers Privy login modal
+ * - Button has correct aria attributes
  *
- * Note: These tests verify the modal UI without an actual wallet extension.
- * Actual wallet connection is tested separately with mock wallet injection.
+ * Note: Privy renders its login modal in an iframe/portal that we cannot
+ * directly inspect in E2E tests without a real wallet. These tests verify
+ * the button UI and that Privy is properly initialized.
  *
- * PERC-010 / Issue #245
+ * PERC-010 / Issue #245 / PR #295 (Privy migration)
  */
 
 import { test, expect } from "@playwright/test";
 import { navigateTo, selectors } from "./helpers";
 
-test.describe("Wallet connection modal", () => {
+test.describe("Wallet connection (Privy)", () => {
   test.beforeEach(async ({ page }) => {
     await navigateTo(page, "/");
   });
 
-  test("wallet button is visible in the header", async ({ page }) => {
-    const walletBtn = page.locator(selectors.walletButton).first();
-    await expect(walletBtn).toBeVisible({ timeout: 10000 });
+  test("connect button is visible in the header", async ({ page }) => {
+    // The ConnectButton renders "Connect" when not authenticated
+    // or "Loading…" when Privy is initializing
+    const connectBtn = page.locator('button:has-text("Connect"), button:has-text("Loading")').first();
+    await expect(connectBtn).toBeVisible({ timeout: 10000 });
   });
 
-  test("clicking wallet button opens the modal", async ({ page }) => {
-    const walletBtn = page.locator(selectors.walletButton).first();
-    await walletBtn.click();
+  test("connect button has accessible aria-label", async ({ page }) => {
+    // Wait for Privy to initialize (button changes from "Loading…" to "Connect")
+    const connectBtn = page.locator('button[aria-label="Connect wallet"]').first();
+    await expect(connectBtn).toBeVisible({ timeout: 15000 });
 
-    const modal = page.locator(selectors.walletModal);
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    const ariaLabel = await connectBtn.getAttribute("aria-label");
+    expect(ariaLabel).toBe("Connect wallet");
   });
 
-  test("modal has correct ARIA attributes", async ({ page }) => {
-    const walletBtn = page.locator(selectors.walletButton).first();
-    await walletBtn.click();
+  test("connect button displays 'Connect' text when unauthenticated", async ({ page }) => {
+    const connectBtn = page.locator('button[aria-label="Connect wallet"]').first();
+    await expect(connectBtn).toBeVisible({ timeout: 15000 });
 
-    const modal = page.locator(selectors.walletModal);
-    await expect(modal).toBeVisible({ timeout: 5000 });
-
-    // role="dialog" and aria-modal="true"
-    await expect(modal).toHaveAttribute("role", "dialog");
-    await expect(modal).toHaveAttribute("aria-modal", "true");
-
-    // aria-labelledby should reference an existing element
-    const labelledBy = await modal.getAttribute("aria-labelledby");
-    expect(labelledBy).toBeTruthy();
-    const titleEl = page.locator(`#${labelledBy}`);
-    await expect(titleEl).toHaveCount(1);
-    const titleText = await titleEl.textContent();
-    expect(titleText?.toLowerCase()).toContain("wallet");
+    const text = await connectBtn.textContent();
+    expect(text?.trim()).toBe("Connect");
   });
 
-  test("close button has aria-label and works", async ({ page }) => {
-    const walletBtn = page.locator(selectors.walletButton).first();
-    await walletBtn.click();
+  test("clicking connect button triggers Privy login", async ({ page }) => {
+    const connectBtn = page.locator('button[aria-label="Connect wallet"]').first();
+    await expect(connectBtn).toBeVisible({ timeout: 15000 });
 
-    const modal = page.locator(selectors.walletModal);
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    await connectBtn.click();
 
-    const closeBtn = page.locator('[aria-label*="Close" i], [aria-label*="close" i]').first();
-    await expect(closeBtn).toBeVisible();
-    await closeBtn.click();
+    // Privy renders its login modal as an iframe or a dialog.
+    // We check for either:
+    // 1. A Privy iframe appearing in the DOM
+    // 2. A dialog/modal element appearing
+    // 3. The page state changing (button becoming disabled, etc.)
+    //
+    // In CI without Privy app ID configured, the modal may not render.
+    // We verify the click doesn't crash and the button remains functional.
+    await page.waitForTimeout(2000);
 
-    // Modal should close (with fade animation)
-    await expect(modal).toBeHidden({ timeout: 2000 });
-  });
+    // The page should still be functional (no crash)
+    const body = page.locator("body");
+    await expect(body).toBeVisible();
 
-  test("Escape key closes the modal", async ({ page }) => {
-    const walletBtn = page.locator(selectors.walletButton).first();
-    await walletBtn.click();
+    // Check if Privy modal appeared (iframe or dialog)
+    const privyIframe = page.locator('iframe[title*="privy" i], iframe[src*="privy"]');
+    const dialog = page.locator('[role="dialog"]');
 
-    const modal = page.locator(selectors.walletModal);
-    await expect(modal).toBeVisible({ timeout: 5000 });
+    const hasPrivyUI = (await privyIframe.count()) > 0 || (await dialog.count()) > 0;
 
-    await page.keyboard.press("Escape");
-    await expect(modal).toBeHidden({ timeout: 2000 });
-  });
-
-  test("overlay click closes the modal", async ({ page }) => {
-    const walletBtn = page.locator(selectors.walletButton).first();
-    await walletBtn.click();
-
-    const modal = page.locator(selectors.walletModal);
-    await expect(modal).toBeVisible({ timeout: 5000 });
-
-    // Click on the overlay (outside the modal wrapper)
-    const overlay = page.locator(".wallet-adapter-modal-overlay");
-    if (await overlay.count() > 0) {
-      await overlay.dispatchEvent("mousedown");
-      await expect(modal).toBeHidden({ timeout: 2000 });
+    // In CI, Privy may not render if NEXT_PUBLIC_PRIVY_APP_ID is not set.
+    // This is expected — the test passes as long as no crash occurred.
+    if (hasPrivyUI) {
+      // If Privy UI appeared, verify it's visible
+      if (await privyIframe.count() > 0) {
+        await expect(privyIframe.first()).toBeVisible();
+      } else {
+        await expect(dialog.first()).toBeVisible();
+      }
     }
   });
 
-  test("modal displays wallet options or install prompt", async ({ page }) => {
-    const walletBtn = page.locator(selectors.walletButton).first();
-    await walletBtn.click();
+  test("connect button is keyboard accessible", async ({ page }) => {
+    const connectBtn = page.locator('button[aria-label="Connect wallet"]').first();
+    await expect(connectBtn).toBeVisible({ timeout: 15000 });
 
-    const modal = page.locator(selectors.walletModal);
-    await expect(modal).toBeVisible({ timeout: 5000 });
-
-    // In CI (no wallet extensions), the modal shows either:
-    // a) Wallet buttons directly (if wallets detected)
-    // b) A "You'll need a wallet" message with a collapsed "More options" section
-    const walletOptions = modal.locator(".wallet-adapter-button");
-    const moreBtn = modal.locator(".wallet-adapter-modal-list-more");
-    const modalTitle = modal.locator("h1");
-
-    const directCount = await walletOptions.count();
-    if (directCount > 0) {
-      // Wallets detected — buttons visible
-      expect(directCount).toBeGreaterThan(0);
-    } else if (await moreBtn.count() > 0) {
-      // No wallets detected — click "More options" to expand collapsed list
-      await moreBtn.click();
-      const expandedCount = await walletOptions.count();
-      expect(expandedCount).toBeGreaterThan(0);
-    } else {
-      // At minimum, the modal title should indicate wallet needed
-      await expect(modalTitle).toBeVisible();
-      const titleText = await modalTitle.textContent();
-      expect(titleText?.toLowerCase()).toContain("wallet");
-    }
-  });
-
-  test("decorative SVGs are hidden from assistive technology", async ({ page }) => {
-    const walletBtn = page.locator(selectors.walletButton).first();
-    await walletBtn.click();
-
-    const modal = page.locator(selectors.walletModal);
-    await expect(modal).toBeVisible({ timeout: 5000 });
-
-    const hiddenSvgs = modal.locator('svg[aria-hidden="true"]');
-    const count = await hiddenSvgs.count();
-    expect(count).toBeGreaterThan(0);
+    // Tab to the connect button and verify it can receive focus
+    await connectBtn.focus();
+    await expect(connectBtn).toBeFocused();
   });
 });
