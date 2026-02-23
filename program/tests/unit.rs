@@ -178,19 +178,23 @@ fn encode_init_market(fixture: &MarketFixture, crank_staleness: u64) -> Vec<u8> 
     data.push(0u8); // invert (0 = no inversion)
     encode_u32(0, &mut data); // unit_scale (0 = no scaling)
 
-    encode_u64(0, &mut data);
-    encode_u64(0, &mut data);
-    encode_u64(0, &mut data);
-    encode_u64(0, &mut data);
-    encode_u64(64, &mut data);
-    encode_u128(0, &mut data);
-    encode_u128(0, &mut data);
-    encode_u128(0, &mut data);
-    encode_u64(crank_staleness, &mut data);
-    encode_u64(0, &mut data);
-    encode_u128(0, &mut data);
-    encode_u64(0, &mut data);
-    encode_u128(0, &mut data);
+    // initial_mark_price_e6
+    encode_u64(0, &mut data);  // initial_mark_price_e6
+
+    // RiskParams (must match read_risk_params order)
+    encode_u64(0, &mut data);     // warmup_period_slots
+    encode_u64(500, &mut data);   // maintenance_margin_bps (5%)
+    encode_u64(1000, &mut data);  // initial_margin_bps (10%)
+    encode_u64(30, &mut data);    // trading_fee_bps (0.3%)
+    encode_u64(64, &mut data);    // max_accounts
+    encode_u128(0, &mut data);    // new_account_fee
+    encode_u128(0, &mut data);    // risk_reduction_threshold
+    encode_u128(0, &mut data);    // maintenance_fee_per_slot
+    encode_u64(crank_staleness, &mut data); // max_crank_staleness_slots
+    encode_u64(0, &mut data);     // liquidation_fee_bps
+    encode_u128(0, &mut data);    // liquidation_fee_cap
+    encode_u64(0, &mut data);     // liquidation_buffer_bps
+    encode_u128(0, &mut data);    // min_liquidation_abs
     data
 }
 
@@ -204,19 +208,23 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
     data.push(invert);
     encode_u32(unit_scale, &mut data);
 
-    encode_u64(0, &mut data);
-    encode_u64(0, &mut data);
-    encode_u64(0, &mut data);
-    encode_u64(0, &mut data);
-    encode_u64(64, &mut data);
-    encode_u128(0, &mut data);
-    encode_u128(0, &mut data);
-    encode_u128(0, &mut data);
-    encode_u64(crank_staleness, &mut data);
-    encode_u64(0, &mut data);
-    encode_u128(0, &mut data);
-    encode_u64(0, &mut data);
-    encode_u128(0, &mut data);
+    // initial_mark_price_e6
+    encode_u64(0, &mut data);  // initial_mark_price_e6
+
+    // RiskParams (must match read_risk_params order)
+    encode_u64(0, &mut data);     // warmup_period_slots
+    encode_u64(500, &mut data);   // maintenance_margin_bps (5%)
+    encode_u64(1000, &mut data);  // initial_margin_bps (10%)
+    encode_u64(30, &mut data);    // trading_fee_bps (0.3%)
+    encode_u64(64, &mut data);    // max_accounts
+    encode_u128(0, &mut data);    // new_account_fee
+    encode_u128(0, &mut data);    // risk_reduction_threshold
+    encode_u128(0, &mut data);    // maintenance_fee_per_slot
+    encode_u64(crank_staleness, &mut data); // max_crank_staleness_slots
+    encode_u64(0, &mut data);     // liquidation_fee_bps
+    encode_u128(0, &mut data);    // liquidation_fee_cap
+    encode_u64(0, &mut data);     // liquidation_buffer_bps
+    encode_u128(0, &mut data);    // min_liquidation_abs
     data
 }
 
@@ -397,7 +405,7 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
     #[cfg(feature = "test")]
     fn test_deposit_withdraw() {
         let mut f = setup_market();
-        let init_data = encode_init_market(&f, 0); 
+        let init_data = encode_init_market(&f, u64::MAX); 
         {
             let mut dummy_ata = TestAccount::new(Pubkey::new_unique(), Pubkey::default(), 0, vec![]);
             let init_accounts = vec![
@@ -515,7 +523,7 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
     #[cfg(feature = "test")]
     fn test_withdraw_wrong_signer() {
         let mut f = setup_market();
-        let init_data = encode_init_market(&f, 0);
+        let init_data = encode_init_market(&f, u64::MAX);
         {
             let mut dummy = TestAccount::new(Pubkey::new_unique(), Pubkey::default(), 0, vec![]);
             let accs = vec![
@@ -566,7 +574,7 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
     #[test]
     fn test_trade_wrong_signer() {
         let mut f = setup_market();
-        let init_data = encode_init_market(&f, 0);
+        let init_data = encode_init_market(&f, u64::MAX);
         {
             let mut dummy = TestAccount::new(Pubkey::new_unique(), Pubkey::default(), 0, vec![]);
             let accs = vec![
@@ -1345,10 +1353,22 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
         let new_admin_b = Pubkey::new_unique();
         let mut admin_b_account = TestAccount::new(new_admin_b, solana_program::system_program::id(), 0, vec![]).signer();
 
-        // Admin A rotates to admin B
+        // Admin A proposes admin B (two-step transfer)
         {
             let accounts = vec![f.admin.to_info(), f.slab.to_info()];
             process_instruction(&f.program_id, &accounts, &encode_update_admin(&new_admin_b)).unwrap();
+        }
+
+        // Verify admin is still A (pending transfer)
+        let header = state::read_header(&f.slab.data);
+        assert_eq!(header.admin, f.admin.key.to_bytes());
+        assert_eq!(header.pending_admin, new_admin_b.to_bytes());
+
+        // Admin B accepts the transfer (TAG_ACCEPT_ADMIN = 29)
+        let accept_admin_data = vec![29u8];
+        {
+            let accounts = vec![admin_b_account.to_info(), f.slab.to_info()];
+            process_instruction(&f.program_id, &accounts, &accept_admin_data).unwrap();
         }
 
         // Verify admin is now B
@@ -1357,11 +1377,18 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
 
         // Create new admin C
         let new_admin_c = Pubkey::new_unique();
+        let mut admin_c_account = TestAccount::new(new_admin_c, solana_program::system_program::id(), 0, vec![]).signer();
 
-        // Admin B rotates to admin C (proves rotation actually took effect)
+        // Admin B proposes admin C
         {
             let accounts = vec![admin_b_account.to_info(), f.slab.to_info()];
             process_instruction(&f.program_id, &accounts, &encode_update_admin(&new_admin_c)).unwrap();
+        }
+
+        // Admin C accepts
+        {
+            let accounts = vec![admin_c_account.to_info(), f.slab.to_info()];
+            process_instruction(&f.program_id, &accounts, &accept_admin_data).unwrap();
         }
 
         // Verify admin is now C
@@ -1401,7 +1428,9 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
     }
 
     #[test]
-    fn test_burn_admin_to_zero() {
+    fn test_update_admin_rejects_zero_address() {
+        // PERC-136 #312: UpdateAdmin now rejects zero address.
+        // Admin burn requires RenounceAdmin (which requires RESOLVED market).
         let mut f = setup_market();
         let init_data = encode_init_market(&f, 100);
 
@@ -1415,20 +1444,50 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
             process_instruction(&f.program_id, &accounts, &init_data).unwrap();
         }
 
-        // Admin burns to zero (Pubkey::default())
+        // UpdateAdmin(zero) must be rejected
         let zero_admin = Pubkey::default();
         {
             let accounts = vec![f.admin.to_info(), f.slab.to_info()];
-            process_instruction(&f.program_id, &accounts, &encode_update_admin(&zero_admin)).unwrap();
+            let res = process_instruction(&f.program_id, &accounts, &encode_update_admin(&zero_admin));
+            assert_eq!(res, Err(ProgramError::InvalidInstructionData));
         }
 
-        // Verify admin is now all zeros
+        // Admin should remain unchanged
         let header = state::read_header(&f.slab.data);
-        assert_eq!(header.admin, [0u8; 32]);
+        assert_eq!(header.admin, f.admin.key.to_bytes());
     }
 
     #[test]
-    fn test_after_burn_admin_ops_disabled() {
+    fn test_renounce_admin_requires_resolved() {
+        // PERC-136 #312: RenounceAdmin must be rejected on non-resolved market.
+        let mut f = setup_market();
+        let init_data = encode_init_market(&f, 100);
+
+        // Init market
+        {
+            let mut dummy_ata = TestAccount::new(Pubkey::new_unique(), Pubkey::default(), 0, vec![]);
+            let accounts = vec![
+                f.admin.to_info(), f.slab.to_info(), f.mint.to_info(), f.vault.to_info(),
+                f.token_prog.to_info(), f.clock.to_info(), f.rent.to_info(), dummy_ata.to_info(), f.system.to_info(),
+            ];
+            process_instruction(&f.program_id, &accounts, &init_data).unwrap();
+        }
+
+        // RenounceAdmin on non-resolved market must fail
+        let renounce_data = vec![23u8]; // TAG_RENOUNCE_ADMIN
+        {
+            let accounts = vec![f.admin.to_info(), f.slab.to_info()];
+            let res = process_instruction(&f.program_id, &accounts, &renounce_data);
+            assert_eq!(res, Err(PercolatorError::AdminRenounceNotAllowed.into()));
+        }
+
+        // Admin should remain unchanged
+        let header = state::read_header(&f.slab.data);
+        assert_eq!(header.admin, f.admin.key.to_bytes());
+    }
+
+    #[test]
+    fn test_non_admin_ops_rejected() {
         let mut f = setup_market();
         let init_data = encode_init_market(&f, 100);
 
@@ -1442,34 +1501,21 @@ fn encode_init_market_invert(fixture: &MarketFixture, crank_staleness: u64, inve
             process_instruction(&f.program_id, &accounts, &init_data).unwrap();
         }
 
-        // Admin burns to zero
-        let zero_admin = Pubkey::default();
-        {
-            let accounts = vec![f.admin.to_info(), f.slab.to_info()];
-            process_instruction(&f.program_id, &accounts, &encode_update_admin(&zero_admin)).unwrap();
-        }
-
-        // Attempt UpdateAdmin signed by anyone (including zero pubkey signer) → must fail
+        // Non-admin cannot do admin ops
         let anyone = Pubkey::new_unique();
         let mut anyone_account = TestAccount::new(anyone, solana_program::system_program::id(), 0, vec![]).signer();
+
+        // Attempt UpdateAdmin signed by non-admin → must fail
         {
             let accounts = vec![anyone_account.to_info(), f.slab.to_info()];
             let res = process_instruction(&f.program_id, &accounts, &encode_update_admin(&Pubkey::new_unique()));
             assert_eq!(res, Err(PercolatorError::EngineUnauthorized.into()));
         }
 
-        // Attempt SetRiskThreshold signed by anyone → must fail
+        // Attempt SetRiskThreshold signed by non-admin → must fail
         {
             let accounts = vec![anyone_account.to_info(), f.slab.to_info()];
             let res = process_instruction(&f.program_id, &accounts, &encode_set_risk_threshold(12345));
-            assert_eq!(res, Err(PercolatorError::EngineUnauthorized.into()));
-        }
-
-        // Even original admin cannot do admin ops anymore
-        let original_admin_key = f.admin.key; // capture before mutable borrow
-        {
-            let accounts = vec![f.admin.to_info(), f.slab.to_info()];
-            let res = process_instruction(&f.program_id, &accounts, &encode_update_admin(&original_admin_key));
             assert_eq!(res, Err(PercolatorError::EngineUnauthorized.into()));
         }
     }

@@ -3128,6 +3128,8 @@ fn kani_pyth_price_invert_zero_passthrough() {
 fn kani_pyth_price_invert_zero_price_rejected() {
     let result = invert_price_e6(0, 1);
     assert_eq!(result, None, "inverting zero price must return None");
+}
+
 // PERC-118: Mark price EMA proofs
 // =========================================================================
 
