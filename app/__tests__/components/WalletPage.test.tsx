@@ -1,6 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
+// Mock @/lib/config — avoids localStorage.getItem issues in jsdom
+vi.mock("@/lib/config", () => ({
+  getConfig: () => ({
+    network: "devnet",
+    rpcUrl: "https://api.devnet.solana.com",
+    programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
+    matcherProgramId: "4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy",
+    crankWallet: "2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm",
+    explorerUrl: "https://explorer.solana.com",
+    slabSize: 992560,
+    matcherCtxSize: 320,
+    priorityFee: 50000,
+  }),
+  setNetwork: vi.fn(),
+  getBackendUrl: () => "https://percolator-api-production.up.railway.app",
+  explorerTxUrl: (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`,
+  explorerAccountUrl: (addr: string) => `https://explorer.solana.com/account/${addr}?cluster=devnet`,
+  getRpcEndpoint: () => "https://api.devnet.solana.com",
+}));
+
 let privyAvailable = true;
 let privyState = {
   ready: true,

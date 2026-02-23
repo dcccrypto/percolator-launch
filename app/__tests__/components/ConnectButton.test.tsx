@@ -1,6 +1,21 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 
+vi.mock("@/lib/config", () => ({
+  getConfig: () => ({
+    network: "devnet",
+    rpcUrl: "https://api.devnet.solana.com",
+    programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
+    matcherProgramId: "4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy",
+    crankWallet: "2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm",
+    explorerUrl: "https://explorer.solana.com",
+    slabSize: 992560,
+    matcherCtxSize: 320,
+    priorityFee: 50000,
+  }),
+  getRpcEndpoint: () => "https://api.devnet.solana.com",
+}));
+
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: any) => (
     <a href={href} {...props}>
