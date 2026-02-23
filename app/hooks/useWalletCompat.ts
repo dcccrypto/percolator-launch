@@ -5,14 +5,36 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useWallets, useSignTransaction } from "@privy-io/react-auth/solana";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import { getConfig } from "@/lib/config";
+import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 
 /**
  * Compatibility hook that provides the same interface as @solana/wallet-adapter-react's
  * useWallet() + useConnection(), backed by Privy.
  *
- * This allows incremental migration — hooks can swap one import line.
+ * When Privy is not available (no app ID or init failure), returns safe defaults
+ * so the app runs in read-only mode without crashing.
  */
 export function useWalletCompat() {
+  const privyAvailable = usePrivyAvailable();
+
+  if (!privyAvailable) {
+    return {
+      publicKey: null,
+      connected: false,
+      connecting: false,
+      wallet: null,
+      signTransaction: undefined,
+      disconnect: async () => {},
+    };
+  }
+
+  return useWalletCompatInner();
+}
+
+/**
+ * Inner hook that calls Privy hooks. Only called when PrivyProvider is mounted.
+ */
+function useWalletCompatInner() {
   const { ready, authenticated, user, logout } = usePrivy();
   const { wallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();

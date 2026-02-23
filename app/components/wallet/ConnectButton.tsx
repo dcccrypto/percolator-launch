@@ -3,12 +3,35 @@
 import { FC, useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useWallets } from "@privy-io/react-auth/solana";
+import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 
 /**
  * Privy-backed wallet connect button — replaces WalletMultiButton.
  * Shows truncated address when connected, opens Privy modal when not.
+ * Gracefully degrades when Privy is not available (no app ID).
  */
 export const ConnectButton: FC = () => {
+  const privyAvailable = usePrivyAvailable();
+
+  if (!privyAvailable) {
+    return (
+      <button
+        disabled
+        className="rounded-sm px-4 py-1.5 text-[13px] font-medium text-[var(--text-muted)] border border-[var(--border)] opacity-50"
+        aria-label="Wallet unavailable"
+      >
+        Connect
+      </button>
+    );
+  }
+
+  return <ConnectButtonInner />;
+};
+
+/**
+ * Inner component that uses Privy hooks. Only rendered when PrivyProvider is mounted.
+ */
+const ConnectButtonInner: FC = () => {
   const { ready, authenticated, login, logout } = usePrivy();
   const { wallets } = useWallets();
   const [menuOpen, setMenuOpen] = useState(false);

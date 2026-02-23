@@ -17,7 +17,7 @@ import { PreTradeSummary } from "@/components/trade/PreTradeSummary";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivyLogin } from "@/hooks/usePrivySafe";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 
@@ -57,7 +57,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { accounts, config: mktConfig, header } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
-  const { login: openWalletModal } = usePrivy();
+  const openWalletModal = usePrivyLogin();
   const symbol = tokenMeta?.symbol ?? "Token";
   
   // BUG FIX: Fetch on-chain decimals from token account (like DepositWithdrawCard)
