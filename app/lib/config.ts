@@ -18,8 +18,9 @@ function getNetwork(): Network {
 /** Get RPC URL — uses /api/rpc proxy on client, direct Helius on server */
 function getRpcUrl(network: Network): string {
   // Client-side: use RPC proxy (API key stays server-side)
+  // Must be absolute URL — Solana Connection constructor rejects relative paths
   if (typeof window !== "undefined") {
-    return "/api/rpc";
+    return `${window.location.origin}/api/rpc`;
   }
   
   // Server-side: use direct Helius URL (for SSR/SSG)
