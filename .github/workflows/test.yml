@@ -37,14 +37,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Build dependency order: core → shared → api/keeper/indexer
-      - name: Build core package
-        run: pnpm --filter @percolator/core build
+      # Build dependency order: sdk → shared → api/keeper/indexer
+      - name: Build SDK package
+        run: pnpm --filter @percolator/sdk build
 
       - name: Build shared package
         run: pnpm --filter @percolator/shared build
 
-      - name: Run unit tests (core)
+      - name: Run unit tests (sdk)
         run: cd packages/core && pnpm test
 
       - name: Run unit tests (shared)
@@ -106,8 +106,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Build dependency order before running tests
-      - name: Build core package
-        run: pnpm --filter @percolator/core build
+      - name: Build SDK package
+        run: pnpm --filter @percolator/sdk build
 
       - name: Build shared package
         run: pnpm --filter @percolator/shared build
@@ -281,8 +281,8 @@ jobs:
       # Run audit at high severity only.
       # GHSA-3gc7-fjrx-p6mg (bigint-buffer): transitive via @solana/spl-token,
       # no patched version exists upstream — ignored until Solana publishes a fix.
-      - name: Build core package
-        run: pnpm --filter @percolator/core build
+      - name: Build SDK package
+        run: pnpm --filter @percolator/sdk build
 
       - name: Build shared package
         run: pnpm --filter @percolator/shared build
