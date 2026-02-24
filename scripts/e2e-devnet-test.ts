@@ -59,7 +59,7 @@ import {
   deriveVaultAuthority,
   deriveLpPda,
   SLAB_TIERS,
-} from "@percolator/core";
+} from "@percolator/sdk";
 
 const RPC = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
 const PROGRAM_ID = new PublicKey("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");

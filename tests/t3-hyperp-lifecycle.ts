@@ -48,7 +48,7 @@ import {
   parseUsedIndices,
   parseAccount,
   WELL_KNOWN,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
 import { TestHarness, CRANK_NO_CALLER } from "./harness.js";
