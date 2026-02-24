@@ -47,6 +47,25 @@ fn test_params() -> RiskParams {
         liquidation_fee_cap: U128::new(10_000),
         liquidation_buffer_bps: 100,
         min_liquidation_abs: U128::new(100_000),
+        // PERC-121: Funding rate parameters (disabled by default)
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 1_000_000,
+        funding_premium_max_bps_per_slot: 100,
+        // PERC-122: Partial liquidation parameters (disabled by default)
+        partial_liquidation_bps: 0,
+        partial_liquidation_cooldown_slots: 0,
+        use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
+        // PERC-120: Dynamic fee parameters (disabled by default)
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 10_000,
+        fee_split_protocol_bps: 0,
+        fee_split_creator_bps: 0,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -66,6 +85,25 @@ fn test_params_with_floor() -> RiskParams {
         liquidation_fee_cap: U128::new(10_000),
         liquidation_buffer_bps: 100,
         min_liquidation_abs: U128::new(100_000),
+        // PERC-121: Funding rate parameters (disabled by default)
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 1_000_000,
+        funding_premium_max_bps_per_slot: 100,
+        // PERC-122: Partial liquidation parameters (disabled by default)
+        partial_liquidation_bps: 0,
+        partial_liquidation_cooldown_slots: 0,
+        use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
+        // PERC-120: Dynamic fee parameters (disabled by default)
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 10_000,
+        fee_split_protocol_bps: 0,
+        fee_split_creator_bps: 0,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -85,6 +123,25 @@ fn test_params_with_maintenance_fee() -> RiskParams {
         liquidation_fee_cap: U128::new(10_000),
         liquidation_buffer_bps: 100,
         min_liquidation_abs: U128::new(100_000),
+        // PERC-121: Funding rate parameters (disabled by default)
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 1_000_000,
+        funding_premium_max_bps_per_slot: 100,
+        // PERC-122: Partial liquidation parameters (disabled by default)
+        partial_liquidation_bps: 0,
+        partial_liquidation_cooldown_slots: 0,
+        use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
+        // PERC-120: Dynamic fee parameters (disabled by default)
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 10_000,
+        fee_split_protocol_bps: 0,
+        fee_split_creator_bps: 0,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -2036,6 +2093,7 @@ fn fast_account_equity_computes_correctly() {
         owner: [0; 32],
         fee_credits: I128::ZERO,
         last_fee_slot: 0,
+        last_partial_liquidation_slot: 0,
     };
 
     let equity = engine.account_equity(&account);
