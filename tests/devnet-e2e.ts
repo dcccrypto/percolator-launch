@@ -40,7 +40,7 @@ const RPC_URL = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API
 // Use centralized config instead of hard-coded ID
 import { getProgramId } from "../packages/core/src/config/program-ids.js";
 const PROGRAM_ID = getProgramId("devnet");
-const MATCHER_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
+const MATCHER_ID = new PublicKey("93BiJ7abUKwJmSvqqPJa7X7YqVCCt2Ai9u3wTxZJYevm");
 const CRANK_WALLET = new PublicKey("2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm");
 const MINT = new PublicKey("DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs");
 const DEPLOYER_KP = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync("/tmp/deployer.json", "utf8"))));

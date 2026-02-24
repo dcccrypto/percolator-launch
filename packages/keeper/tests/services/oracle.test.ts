@@ -340,7 +340,7 @@ describe('OracleService', () => {
         }),
       } as any);
 
-      const slab = 'FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD';
+      const slab = '4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih';
 
       // First push should succeed
       const result1 = await oracleService.pushPrice(slab, mockMarketConfig);
@@ -364,7 +364,7 @@ describe('OracleService', () => {
         }),
       } as any);
 
-      const slab = 'FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn';
+      const slab = 'p9F84kJm39fQP3AwZSta2tB7oudUKPQd7zFuNHR7vas';
 
       // First push
       await oracleService.pushPrice(slab, mockMarketConfig);

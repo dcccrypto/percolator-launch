@@ -6,12 +6,12 @@ const env = validateEnv();
 
 export const config = {
   rpcUrl: env.RPC_URL ?? `https://devnet.helius-rpc.com/?api-key=${env.HELIUS_API_KEY ?? ""}`,
-  programId: env.PROGRAM_ID ?? "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
+  programId: env.PROGRAM_ID ?? "4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih",
   /** Comma-separated list of all program IDs to scan for markets */
   allProgramIds: (env.ALL_PROGRAM_IDS ?? [
-    "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-    "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
-    "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
+    "4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih",
+    "p9F84kJm39fQP3AwZSta2tB7oudUKPQd7zFuNHR7vas",
+    "6oLLu8wLe6tmEkcGhHfNXNEBZFgKBzcZFheNtgJvZQaS",
   ].join(",")).split(",").filter(Boolean),
   crankKeypair: env.CRANK_KEYPAIR ?? "",
   supabaseUrl: env.SUPABASE_URL ?? "",

@@ -62,8 +62,8 @@ import {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const RPC_URL = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
-const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID ?? "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
-const MATCHER_PROGRAM_ID = new PublicKey(process.env.MATCHER_PROGRAM_ID ?? "4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
+const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID ?? "4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih");
+const MATCHER_PROGRAM_ID = new PublicKey(process.env.MATCHER_PROGRAM_ID ?? "93BiJ7abUKwJmSvqqPJa7X7YqVCCt2Ai9u3wTxZJYevm");
 const SLAB_SIZE = Number(process.env.SLAB_SIZE ?? 62_808);
 const MATCHER_CTX_SIZE = 320;
 

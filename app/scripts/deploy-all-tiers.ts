@@ -53,13 +53,13 @@ import {
 
 // Use public devnet RPC to avoid Helius rate limits (crank service uses the Helius key)
 const RPC = "https://api.devnet.solana.com";
-const MATCHER_PROGRAM_ID = new PublicKey("4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy");
+const MATCHER_PROGRAM_ID = new PublicKey("93BiJ7abUKwJmSvqqPJa7X7YqVCCt2Ai9u3wTxZJYevm");
 const MATCHER_CTX_SIZE = 320;
 
 const TIERS = [
-  { name: "Small",  programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD", maxAccounts: 256,  dataSize: 62_808 },
-  { name: "Medium", programId: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn", maxAccounts: 1024, dataSize: 248_760 },
-  { name: "Large",  programId: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in", maxAccounts: 4096, dataSize: 992_568 },
+  { name: "Small",  programId: "4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih", maxAccounts: 256,  dataSize: 62_808 },
+  { name: "Medium", programId: "p9F84kJm39fQP3AwZSta2tB7oudUKPQd7zFuNHR7vas", maxAccounts: 1024, dataSize: 248_760 },
+  { name: "Large",  programId: "6oLLu8wLe6tmEkcGhHfNXNEBZFgKBzcZFheNtgJvZQaS", maxAccounts: 4096, dataSize: 992_568 },
 ];
 
 const conn = new Connection(RPC, "confirmed");

@@ -43,8 +43,8 @@ import type { MarketProvider } from '../../src/services/StatsCollector.js';
 import * as core from '@percolator/sdk';
 import * as shared from '@percolator/shared';
 
-const SLAB1 = 'FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD';
-const SLAB2 = 'FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn';
+const SLAB1 = '4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih';
+const SLAB2 = 'p9F84kJm39fQP3AwZSta2tB7oudUKPQd7zFuNHR7vas';
 
 function makeEngineState(overrides: Record<string, any> = {}) {
   return {

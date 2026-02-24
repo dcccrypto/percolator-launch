@@ -38,11 +38,11 @@ describe("config", () => {
     const { config } = await import("../src/config.js");
 
     expect(config.rpcUrl).toBe("https://devnet.helius-rpc.com/?api-key=");
-    expect(config.programId).toBe("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
+    expect(config.programId).toBe("4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih");
     expect(config.allProgramIds).toEqual([
-      "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-      "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
-      "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
+      "4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih",
+      "p9F84kJm39fQP3AwZSta2tB7oudUKPQd7zFuNHR7vas",
+      "6oLLu8wLe6tmEkcGhHfNXNEBZFgKBzcZFheNtgJvZQaS",
     ]);
     expect(config.crankKeypair).toBe("");
     expect(config.supabaseUrl).toBe("");
@@ -156,9 +156,9 @@ describe("config", () => {
     // Default program IDs must be an array of 3 known program addresses
     expect(Array.isArray(config.allProgramIds)).toBe(true);
     expect(config.allProgramIds).toHaveLength(3);
-    expect(config.allProgramIds[0]).toBe("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
-    expect(config.allProgramIds[1]).toBe("FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn");
-    expect(config.allProgramIds[2]).toBe("g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in");
+    expect(config.allProgramIds[0]).toBe("4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih");
+    expect(config.allProgramIds[1]).toBe("p9F84kJm39fQP3AwZSta2tB7oudUKPQd7zFuNHR7vas");
+    expect(config.allProgramIds[2]).toBe("6oLLu8wLe6tmEkcGhHfNXNEBZFgKBzcZFheNtgJvZQaS");
   });
 
   it("should reject invalid NODE_ENV values with a clear validation error", async () => {

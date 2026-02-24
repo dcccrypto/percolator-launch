@@ -66,15 +66,15 @@ const CONFIGS = {
   },
   devnet: {
     get rpcUrl() { return getRpcEndpoint(); },
-    programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-    matcherProgramId: "4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy",
+    programId: "4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih",
+    matcherProgramId: "93BiJ7abUKwJmSvqqPJa7X7YqVCCt2Ai9u3wTxZJYevm",
     crankWallet: "2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm",
     explorerUrl: "https://explorer.solana.com",
     // Multiple program deployments for different slab sizes
     programsBySlabTier: {
-      small: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",   // 256 slots
-      medium: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",  // 1024 slots
-      large: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",   // 4096 slots
+      small: "4dvCZrrPHmimQLDUBLme5CRqa81nGVLzGMwKUAPfXKih",   // 256 slots
+      medium: "p9F84kJm39fQP3AwZSta2tB7oudUKPQd7zFuNHR7vas",  // 1024 slots
+      large: "6oLLu8wLe6tmEkcGhHfNXNEBZFgKBzcZFheNtgJvZQaS",   // 4096 slots
     } as Record<string, string>,
   },
 } as const;
