@@ -7,7 +7,7 @@ ensureNetworkConfigValid(process.env);
 
 // Validate environment variables
 const env = validateEnv();
-const networkConfig = validateNetworkConfig(process.env);
+const networkConfig = validateNetworkConfig(process.env as Record<string, string | undefined>);
 
 export const config = {
   // Network is validated above; use the validated RPC URL
