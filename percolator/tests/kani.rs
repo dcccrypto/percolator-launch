@@ -47,6 +47,25 @@ fn test_params() -> RiskParams {
         liquidation_fee_cap: U128::new(10_000),
         liquidation_buffer_bps: 100,
         min_liquidation_abs: U128::new(100_000),
+        // Funding rate parameters (PERC-121) — disabled for basic proofs
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 0,
+        funding_premium_max_bps_per_slot: 0,
+        // Partial liquidation parameters (PERC-122) — disabled for basic proofs
+        partial_liquidation_bps: 0,
+        partial_liquidation_cooldown_slots: 0,
+        use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
+        // Dynamic fee parameters (PERC-120) — disabled for basic proofs
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 3334,
+        fee_split_protocol_bps: 3333,
+        fee_split_creator_bps: 3333,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -66,6 +85,25 @@ fn test_params_with_floor() -> RiskParams {
         liquidation_fee_cap: U128::new(10_000),
         liquidation_buffer_bps: 100,
         min_liquidation_abs: U128::new(100_000),
+        // Funding rate parameters (PERC-121) — disabled
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 0,
+        funding_premium_max_bps_per_slot: 0,
+        // Partial liquidation parameters (PERC-122) — disabled
+        partial_liquidation_bps: 0,
+        partial_liquidation_cooldown_slots: 0,
+        use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
+        // Dynamic fee parameters (PERC-120) — disabled
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 3334,
+        fee_split_protocol_bps: 3333,
+        fee_split_creator_bps: 3333,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -85,6 +123,25 @@ fn test_params_with_maintenance_fee() -> RiskParams {
         liquidation_fee_cap: U128::new(10_000),
         liquidation_buffer_bps: 100,
         min_liquidation_abs: U128::new(100_000),
+        // Funding rate parameters (PERC-121) — disabled
+        funding_premium_weight_bps: 0,
+        funding_settlement_interval_slots: 0,
+        funding_premium_dampening_e6: 0,
+        funding_premium_max_bps_per_slot: 0,
+        // Partial liquidation parameters (PERC-122) — disabled
+        partial_liquidation_bps: 0,
+        partial_liquidation_cooldown_slots: 0,
+        use_mark_price_for_liquidation: false,
+        emergency_liquidation_margin_bps: 0,
+        // Dynamic fee parameters (PERC-120) — disabled
+        fee_tier2_bps: 0,
+        fee_tier3_bps: 0,
+        fee_tier2_threshold: 0,
+        fee_tier3_threshold: 0,
+        fee_split_lp_bps: 3334,
+        fee_split_protocol_bps: 3333,
+        fee_split_creator_bps: 3333,
+        fee_utilization_surge_bps: 0,
     }
 }
 
@@ -2036,6 +2093,7 @@ fn fast_account_equity_computes_correctly() {
         owner: [0; 32],
         fee_credits: I128::ZERO,
         last_fee_slot: 0,
+        last_partial_liquidation_slot: 0,
     };
 
     let equity = engine.account_equity(&account);
@@ -5661,6 +5719,7 @@ struct FullAccountSnapshot {
     warmup_slope_per_step: u128,
     warmup_started_at_slot: u64,
     last_fee_slot: u64,
+    last_partial_liquidation_slot: u64,
 }
 
 fn full_snapshot_account(account: &Account) -> FullAccountSnapshot {
@@ -5674,6 +5733,7 @@ fn full_snapshot_account(account: &Account) -> FullAccountSnapshot {
         warmup_slope_per_step: account.warmup_slope_per_step.get(),
         warmup_started_at_slot: account.warmup_started_at_slot,
         last_fee_slot: account.last_fee_slot,
+        last_partial_liquidation_slot: account.last_partial_liquidation_slot,
     }
 }
 
@@ -5692,6 +5752,7 @@ macro_rules! assert_full_snapshot_eq {
         kani::assert(b.warmup_slope_per_step == a.warmup_slope_per_step, $msg);
         kani::assert(b.warmup_started_at_slot == a.warmup_started_at_slot, $msg);
         kani::assert(b.last_fee_slot == a.last_fee_slot, $msg);
+        kani::assert(b.last_partial_liquidation_slot == a.last_partial_liquidation_slot, $msg);
     }};
 }
 
