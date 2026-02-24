@@ -61,8 +61,6 @@ describe("useTrade", () => {
   let mockConnection: any;
   let mockWallet: any;
   let mockSlabState: any;
-  let mockAbortController: AbortController;
-
   beforeEach(() => {
     vi.clearAllMocks();
 
