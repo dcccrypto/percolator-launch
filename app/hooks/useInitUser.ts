@@ -15,7 +15,7 @@ import {
   WELL_KNOWN,
   buildIx,
   getAta,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 

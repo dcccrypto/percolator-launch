@@ -37,8 +37,8 @@ const mockLpPda = new PublicKey("3yEEksiUkq5K2PmjbRSHpXVN4FJgYuNn7rV31ek3PCwu");
 const mockOraclePda = new PublicKey("8DjWTsU1o8RHTKpRsqGFyYqFMknb8g7z2mjLfVYUyYyF");
 const mockVaultAuth = new PublicKey("DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1");
 
-vi.mock("@percolator/core", async () => {
-  const actual = await vi.importActual("@percolator/core");
+vi.mock("@percolator/sdk", async () => {
+  const actual = await vi.importActual("@percolator/sdk");
   return {
     ...actual,
     deriveLpPda: vi.fn(() => [mockLpPda, 255]),

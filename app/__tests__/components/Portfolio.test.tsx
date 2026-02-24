@@ -17,7 +17,7 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { PublicKey } from "@solana/web3.js";
-import { AccountKind } from "@percolator/core";
+import { AccountKind } from "@percolator/sdk";
 
 // Mock Next.js
 vi.mock("next/link", () => ({

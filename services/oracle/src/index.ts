@@ -12,7 +12,7 @@ import {
   buildAccountMetas,
   buildIx,
   getProgramId,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import * as dotenv from "dotenv";
 
 dotenv.config();

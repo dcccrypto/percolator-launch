@@ -6,7 +6,7 @@ import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
-import { AccountKind } from "@percolator/core";
+import { AccountKind } from "@percolator/sdk";
 import { formatTokenAmount, formatUsd, formatLiqPrice } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {

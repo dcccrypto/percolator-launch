@@ -1,6 +1,6 @@
 import { getSupabase, config, getConnection, createLogger } from "@percolator/shared";
-import { deriveInsuranceLpMint } from "@percolator/core";
-import type { DiscoveredMarket } from "@percolator/core";
+import { deriveInsuranceLpMint } from "@percolator/sdk";
+import type { DiscoveredMarket } from "@percolator/sdk";
 import { PublicKey } from "@solana/web3.js";
 
 const logger = createLogger("indexer:insurance-lp");

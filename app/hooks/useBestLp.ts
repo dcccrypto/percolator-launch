@@ -5,7 +5,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import {
   type VammMatcherParams,
   computeVammQuote,
-} from "@percolator/core";
+} from "@percolator/sdk";
 
 /**
  * Default passive matcher params (50bps spread fallback)

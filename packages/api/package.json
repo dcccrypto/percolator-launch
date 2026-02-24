@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",
-    "@percolator/core": "workspace:*",
+    "@percolator/sdk": "workspace:*",
     "@percolator/shared": "workspace:*",
     "@sentry/node": "^10.39.0",
     "@solana/web3.js": "^1.98.0",

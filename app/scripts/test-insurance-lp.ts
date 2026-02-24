@@ -52,7 +52,7 @@ import {
   parseConfig,
   parseEngine,
   detectLayout,
-} from '@percolator/core';
+} from '@percolator/sdk';
 
 // =============================================================================
 // Config

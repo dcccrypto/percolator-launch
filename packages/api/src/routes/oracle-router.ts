@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { resolvePrice, type PriceRouterResult } from "@percolator/core";
+import { resolvePrice, type PriceRouterResult } from "@percolator/sdk";
 import { createLogger } from "@percolator/shared";
 
 const logger = createLogger("api:oracle-router");

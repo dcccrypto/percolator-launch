@@ -8,7 +8,7 @@ import { formatTokenAmount, shortenAddress } from "@/lib/format";
 import { computeMarketHealth } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
-import type { DiscoveredMarket } from "@percolator/core";
+import type { DiscoveredMarket } from "@percolator/sdk";
 
 const ALL_ZEROS = new PublicKey("11111111111111111111111111111111");
 

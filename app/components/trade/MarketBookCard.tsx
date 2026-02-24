@@ -7,7 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatUsd, formatTokenAmount, shortenAddress } from "@/lib/format";
-import { AccountKind } from "@percolator/core";
+import { AccountKind } from "@percolator/sdk";
 
 export const MarketBookCard: FC = () => {
   const { engine, params, loading } = useEngineState();

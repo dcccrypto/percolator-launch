@@ -19,7 +19,7 @@ import {
   type MarketConfig,
   type RiskParams,
   type DiscoveredMarket,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { 
   getConnection,
   upsertMarketStats, 

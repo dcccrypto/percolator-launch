@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { discoverMarkets, type DiscoveredMarket } from "@percolator/core";
+import { discoverMarkets, type DiscoveredMarket } from "@percolator/sdk";
 import { getConfig } from "@/lib/config";
 
 /** Get all unique program IDs to scan (default + all slab tier programs) */

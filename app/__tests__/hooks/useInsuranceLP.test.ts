@@ -33,7 +33,7 @@ vi.mock("@/lib/tx", () => ({
   sendTx: vi.fn(),
 }));
 
-vi.mock("@percolator/core", async () => {
+vi.mock("@percolator/sdk", async () => {
   const { PublicKey: PK } = await import("@solana/web3.js");
   const lpMint = new PK("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
   const vaultAuth = PK.default; // All-zeros is valid

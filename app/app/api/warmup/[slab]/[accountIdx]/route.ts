@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { fetchSlab, parseAccount, parseEngine, parseParams } from "@percolator/core";
+import { fetchSlab, parseAccount, parseEngine, parseParams } from "@percolator/sdk";
 import { getConfig } from "@/lib/config";
 
 export const dynamic = "force-dynamic";

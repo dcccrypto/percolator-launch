@@ -5,7 +5,7 @@ import { PublicKey } from '@solana/web3.js';
 const mockGetAccountInfo = vi.fn();
 const mockGetMultipleAccountsInfo = vi.fn();
 
-vi.mock('@percolator/core', () => ({
+vi.mock('@percolator/sdk', () => ({
   parseEngine: vi.fn(),
   parseConfig: vi.fn(),
   parseParams: vi.fn(),
@@ -40,7 +40,7 @@ vi.mock('@percolator/shared', () => ({
 
 import { StatsCollector } from '../../src/services/StatsCollector.js';
 import type { MarketProvider } from '../../src/services/StatsCollector.js';
-import * as core from '@percolator/core';
+import * as core from '@percolator/sdk';
 import * as shared from '@percolator/shared';
 
 const SLAB1 = 'FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD';

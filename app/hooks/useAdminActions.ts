@@ -26,9 +26,9 @@ import {
   ACCOUNTS_SET_RISK_THRESHOLD,
   ACCOUNTS_PAUSE_MARKET,
   ACCOUNTS_UNPAUSE_MARKET,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { sendTx } from "@/lib/tx";
-import type { DiscoveredMarket } from "@percolator/core";
+import type { DiscoveredMarket } from "@percolator/sdk";
 
 export function useAdminActions() {
   const { connection } = useConnectionCompat();

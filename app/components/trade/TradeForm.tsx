@@ -12,7 +12,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
-import { AccountKind, computePreTradeLiqPrice } from "@percolator/core";
+import { AccountKind, computePreTradeLiqPrice } from "@percolator/sdk";
 import { PreTradeSummary } from "@/components/trade/PreTradeSummary";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";

@@ -27,7 +27,7 @@ import {
   derivePythPushOraclePDA,
   WELL_KNOWN,
   AccountKind,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 

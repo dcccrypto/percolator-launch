@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import type { EngineState, RiskParams, InsuranceFund } from "@percolator/core";
+import type { EngineState, RiskParams, InsuranceFund } from "@percolator/sdk";
 
 export interface DerivedEngineState {
   engine: EngineState | null;

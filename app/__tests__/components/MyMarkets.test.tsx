@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { PublicKey } from '@solana/web3.js';
 import { useMyMarkets } from '../../hooks/useMyMarkets';
-import type { DiscoveredMarket } from '@percolator/core';
+import type { DiscoveredMarket } from '@percolator/sdk';
 
 // Mock wallet adapter
 const mockPublicKey = new PublicKey('11111111111111111111111111111111');
@@ -147,7 +147,7 @@ function createMockSlabData(
 }
 
 // Mock parseAllAccounts
-vi.mock('@percolator/core', async (importOriginal) => {
+vi.mock('@percolator/sdk', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as any),
@@ -246,7 +246,7 @@ describe.skip('useMyMarkets Hook', () => {
    * Trader Account Discovery
    */
   it('should identify markets where user has trader account', async () => {
-    const { parseAllAccounts, AccountKind } = await import('@percolator/core');
+    const { parseAllAccounts, AccountKind } = await import('@percolator/sdk');
     
     const traderMarket = createMockMarket(
       'TraderMarket111111111111111111111111',
@@ -289,7 +289,7 @@ describe.skip('useMyMarkets Hook', () => {
    * LP Account Discovery
    */
   it('should identify markets where user has LP account', async () => {
-    const { parseAllAccounts, AccountKind } = await import('@percolator/core');
+    const { parseAllAccounts, AccountKind } = await import('@percolator/sdk');
     
     const lpMarket = createMockMarket(
       'LPMarket11111111111111111111111111111',
@@ -416,7 +416,7 @@ describe.skip('useMyMarkets Hook', () => {
    * Deduplication
    */
   it('should deduplicate markets when user has multiple roles', async () => {
-    const { parseAllAccounts, AccountKind } = await import('@percolator/core');
+    const { parseAllAccounts, AccountKind } = await import('@percolator/sdk');
     
     // Market where user is both admin and has a trader account
     const dualRoleMarket = createMockMarket(

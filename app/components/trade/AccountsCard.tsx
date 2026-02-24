@@ -6,7 +6,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatTokenAmount, formatUsd, formatPnl, formatLiqPrice, shortenAddress } from "@/lib/format";
-import { AccountKind, computeMarkPnl, computeLiqPrice } from "@percolator/core";
+import { AccountKind, computeMarkPnl, computeLiqPrice } from "@percolator/sdk";
 import { LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
 
 type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl" | "capital" | "margin";

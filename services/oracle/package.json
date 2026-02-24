@@ -8,7 +8,7 @@
     "build": "echo 'no build step'"
   },
   "dependencies": {
-    "@percolator/core": "workspace:*",
+    "@percolator/sdk": "workspace:*",
     "@solana/web3.js": "^1.98.4",
     "dotenv": "^17.2.4"
   },

@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { AccountKind } from "@percolator/core";
+import { AccountKind } from "@percolator/sdk";
 import { useTrade } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -69,7 +69,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         // Fetch fresh on-chain data to avoid stale position sizes
         let freshPositionSize = userAccount.account.positionSize;
         try {
-          const { fetchSlab, parseAccount } = await import("@percolator/core");
+          const { fetchSlab, parseAccount } = await import("@percolator/sdk");
           const freshData = await fetchSlab(connection, new PublicKey(slabAddress));
           const freshAccount = parseAccount(freshData, userAccount.idx);
           freshPositionSize = freshAccount.positionSize;

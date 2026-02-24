@@ -36,8 +36,8 @@ vi.mock("@/lib/config", () => ({
 const mockVaultAuth = new PublicKey("DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1");
 const mockOraclePda = new PublicKey("8DjWTsU1o8RHTKpRsqGFyYqFMknb8g7z2mjLfVYUyYyF");
 
-vi.mock("@percolator/core", async () => {
-  const actual = await vi.importActual("@percolator/core");
+vi.mock("@percolator/sdk", async () => {
+  const actual = await vi.importActual("@percolator/sdk");
   return {
     ...actual,
     getAta: vi.fn(),
@@ -49,7 +49,7 @@ vi.mock("@percolator/core", async () => {
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { sendTx } from "@/lib/tx";
-import { getAta } from "@percolator/core";
+import { getAta } from "@percolator/sdk";
 
 describe("useWithdraw", () => {
   const mockSlabAddress = "11111111111111111111111111111111";

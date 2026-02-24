@@ -1,4 +1,4 @@
-import type { EngineState } from "@percolator/core";
+import type { EngineState } from "@percolator/sdk";
 
 export type HealthLevel = "healthy" | "caution" | "warning" | "empty";
 

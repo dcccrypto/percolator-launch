@@ -38,11 +38,11 @@ import {
   buildIx,
   deriveVaultAuthority,
   derivePythPushOraclePDA,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { sendTx } from "@/lib/tx";
 import { getConfig } from "@/lib/config";
 
-import { SLAB_TIERS, slabDataSize, deriveLpPda } from "@percolator/core";
+import { SLAB_TIERS, slabDataSize, deriveLpPda } from "@percolator/sdk";
 const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
 const ALL_ZEROS_FEED = "0".repeat(64);
 const MATCHER_CTX_SIZE = 320; // Minimum context size for percolator matcher

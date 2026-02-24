@@ -4,7 +4,7 @@ import { PublicKey } from '@solana/web3.js';
 const mockGetSignaturesForAddress = vi.fn();
 const mockGetParsedTransaction = vi.fn();
 
-vi.mock('@percolator/core', () => ({
+vi.mock('@percolator/sdk', () => ({
   IX_TAG: { TradeNoCpi: 10, TradeCpi: 11 },
 }));
 

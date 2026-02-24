@@ -39,7 +39,7 @@ vi.mock('@solana/web3.js', async () => {
 });
 
 // Mock external dependencies
-vi.mock('@percolator/core', () => ({
+vi.mock('@percolator/sdk', () => ({
   fetchSlab: vi.fn(),
   parseConfig: vi.fn(),
   parseEngine: vi.fn(),
@@ -118,7 +118,7 @@ vi.mock('@percolator/shared', () => ({
 
 import { PublicKey, ComputeBudgetProgram } from '@solana/web3.js';
 import { LiquidationService } from '../../src/services/liquidation.js';
-import * as core from '@percolator/core';
+import * as core from '@percolator/sdk';
 import * as shared from '@percolator/shared';
 
 describe('LiquidationService', () => {

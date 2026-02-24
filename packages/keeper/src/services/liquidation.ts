@@ -17,7 +17,7 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
   derivePythPushOraclePDA,
   type DiscoveredMarket,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { config, getConnection, loadKeypair, sendWithRetry, pollSignatureStatus, getRecentPriorityFees, checkTransactionSize, eventBus, createLogger, sendWarningAlert, acquireToken, getFallbackConnection, backoffMs } from "@percolator/shared";
 import { OracleService } from "./oracle.js";
 

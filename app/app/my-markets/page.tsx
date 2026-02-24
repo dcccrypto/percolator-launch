@@ -9,7 +9,7 @@ import { useMyMarkets, type MyMarket } from "@/hooks/useMyMarkets";
 import { useAdminActions } from "@/hooks/useAdminActions";
 import { useToast } from "@/hooks/useToast";
 import { getConfig, explorerAccountUrl } from "@/lib/config";
-import { deriveInsuranceLpMint } from "@percolator/core";
+import { deriveInsuranceLpMint } from "@percolator/sdk";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockMyMarkets } from "@/lib/mock-trade-data";
 

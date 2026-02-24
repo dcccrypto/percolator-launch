@@ -18,7 +18,7 @@ import {
   type DiscoveredMarket,
   type Account,
   type RiskParams,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { getConfig } from "@/lib/config";
 
 export interface PortfolioPosition {

@@ -1,5 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
-import { discoverMarkets, type DiscoveredMarket } from "@percolator/core";
+import { discoverMarkets, type DiscoveredMarket } from "@percolator/sdk";
 import { config, getConnection, getFallbackConnection, createLogger, captureException } from "@percolator/shared";
 
 const logger = createLogger("indexer:market-discovery");

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
+import { SLAB_TIERS, type SlabTierKey } from "@percolator/sdk";
 import { getRpcEndpoint } from "@/lib/config";
 
 export const dynamic = 'force-dynamic';

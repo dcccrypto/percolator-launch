@@ -3,7 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 import { validateSlab } from "../middleware/validateSlab.js";
 import { cacheMiddleware } from "../middleware/cache.js";
 import { withDbCacheFallback } from "../middleware/db-cache-fallback.js";
-import { fetchSlab, parseHeader, parseConfig, parseEngine } from "@percolator/core";
+import { fetchSlab, parseHeader, parseConfig, parseEngine } from "@percolator/sdk";
 import { getConnection, getSupabase, createLogger, sanitizeSlabAddress } from "@percolator/shared";
 
 const logger = createLogger("api:markets");

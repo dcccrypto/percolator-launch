@@ -1,5 +1,5 @@
 /**
- * Re-export trading math from @percolator/core for backward compatibility.
+ * Re-export trading math from @percolator/sdk for backward compatibility.
  * The canonical implementation lives in packages/core/src/math/trading.ts.
  */
 export {
@@ -12,4 +12,4 @@ export {
   computeFundingRateAnnualized,
   computeRequiredMargin,
   computeMaxLeverage,
-} from "@percolator/core";
+} from "@percolator/sdk";

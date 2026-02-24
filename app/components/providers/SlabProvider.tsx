@@ -23,7 +23,7 @@ import {
   type EngineState,
   type RiskParams,
   type Account,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { isMockSlab, getMockSlabState } from "@/lib/mock-trade-data";
 
 export interface SlabState {

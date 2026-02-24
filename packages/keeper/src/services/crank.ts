@@ -7,7 +7,7 @@ import {
   derivePythPushOraclePDA,
   ACCOUNTS_KEEPER_CRANK,
   type DiscoveredMarket,
-} from "@percolator/core";
+} from "@percolator/sdk";
 import { config, getConnection, getFallbackConnection, loadKeypair, sendWithRetry, rateLimitedCall, eventBus, createLogger, sendCriticalAlert } from "@percolator/shared";
 import { OracleService } from "./oracle.js";
 

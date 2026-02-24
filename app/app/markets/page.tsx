@@ -12,7 +12,7 @@ import { getSupabase } from "@/lib/supabase";
 import type { Database } from "@/lib/database.types";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
-import type { DiscoveredMarket } from "@percolator/core";
+import type { DiscoveredMarket } from "@percolator/sdk";
 import { PublicKey } from "@solana/web3.js";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";

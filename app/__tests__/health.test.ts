@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeMarketHealth } from "../lib/health";
-import type { EngineState } from "@percolator/core";
+import type { EngineState } from "@percolator/sdk";
 
 function makeEngine(overrides: Partial<EngineState> = {}): EngineState {
   return {

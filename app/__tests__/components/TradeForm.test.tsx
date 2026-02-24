@@ -18,7 +18,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
-import { AccountKind } from "@percolator/core";
+import { AccountKind } from "@percolator/sdk";
 import { PublicKey } from "@solana/web3.js";
 
 // Mock Privy (used directly by TradeForm for login)

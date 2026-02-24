@@ -24,7 +24,7 @@ vi.mock("@percolator/shared", () => ({
   config: { supabaseUrl: "http://test", supabaseKey: "test", rpcUrl: "http://test" },
 }));
 
-vi.mock("@percolator/core", () => ({
+vi.mock("@percolator/sdk", () => ({
   fetchSlab: vi.fn(),
   parseHeader: vi.fn(),
   parseConfig: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock("@percolator/core", () => ({
 }));
 
 const { getConnection, getSupabase } = await import("@percolator/shared");
-const { fetchSlab, parseHeader, parseConfig, parseEngine } = await import("@percolator/core");
+const { fetchSlab, parseHeader, parseConfig, parseEngine } = await import("@percolator/sdk");
 
 describe("markets routes", () => {
   let mockConnection: any;

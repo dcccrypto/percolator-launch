@@ -1,5 +1,5 @@
 import { Connection, PublicKey, type ParsedTransactionWithMeta } from "@solana/web3.js";
-import { IX_TAG } from "@percolator/core";
+import { IX_TAG } from "@percolator/sdk";
 import { config, getConnection, insertTrade, tradeExistsBySignature, getMarkets, eventBus, decodeBase58, readU128LE, parseTradeSize, withRetry, createLogger, captureException, addBreadcrumb } from "@percolator/shared";
 
 const logger = createLogger("indexer:trade-indexer");

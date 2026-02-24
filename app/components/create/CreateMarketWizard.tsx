@@ -12,7 +12,7 @@ import { useDexPoolSearch, type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { usePriceRouter, type PriceSource } from "@/hooks/usePriceRouter";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
-import { SLAB_TIERS, type SlabTierKey } from "@percolator/core";
+import { SLAB_TIERS, type SlabTierKey } from "@percolator/sdk";
 import { InfoBanner } from "@/components/ui/InfoBanner";
 import { LogoUpload } from "@/components/create/LogoUpload";
 import { ValidationSummary } from "@/components/create/ValidationSummary";

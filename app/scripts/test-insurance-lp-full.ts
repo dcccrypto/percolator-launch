@@ -63,7 +63,7 @@ import {
   ACCOUNTS_CREATE_INSURANCE_MINT, ACCOUNTS_DEPOSIT_INSURANCE_LP,
   ACCOUNTS_WITHDRAW_INSURANCE_LP, ACCOUNTS_TOPUP_INSURANCE,
   parseHeader, parseConfig, parseEngine, detectLayout,
-} from '@percolator/core';
+} from '@percolator/sdk';
 
 // =============================================================================
 const RPC_URL = 'https://api.devnet.solana.com';

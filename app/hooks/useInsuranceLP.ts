@@ -26,7 +26,7 @@ import {
   ACCOUNTS_CREATE_INSURANCE_MINT,
   ACCOUNTS_DEPOSIT_INSURANCE_LP,
   ACCOUNTS_WITHDRAW_INSURANCE_LP,
-} from '@percolator/core';
+} from '@percolator/sdk';
 import { sendTx } from '../lib/tx';
 import { useSlabState, type SlabState } from '../components/providers/SlabProvider';
 import { useParams } from 'next/navigation';

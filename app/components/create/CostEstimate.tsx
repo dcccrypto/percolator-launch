@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useMemo } from "react";
-import { type SlabTierKey, SLAB_TIERS } from "@percolator/core";
+import { type SlabTierKey, SLAB_TIERS } from "@percolator/sdk";
 
 interface CostEstimateProps {
   slabTier: SlabTierKey;

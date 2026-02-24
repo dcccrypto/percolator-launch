@@ -4,8 +4,8 @@
  * use this data instead of fetching from chain.
  */
 import { PublicKey } from "@solana/web3.js";
-import type { MarketConfig, EngineState, RiskParams, SlabHeader, Account } from "@percolator/core";
-import { AccountKind } from "@percolator/core";
+import type { MarketConfig, EngineState, RiskParams, SlabHeader, Account } from "@percolator/sdk";
+import { AccountKind } from "@percolator/sdk";
 
 interface MockMarketData {
   symbol: string;

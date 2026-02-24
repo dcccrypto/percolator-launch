@@ -28,8 +28,8 @@ vi.mock("@/lib/tx", () => ({
   sendTx: vi.fn(),
 }));
 
-vi.mock("@percolator/core", async () => {
-  const actual = await vi.importActual("@percolator/core");
+vi.mock("@percolator/sdk", async () => {
+  const actual = await vi.importActual("@percolator/sdk");
   return {
     ...actual,
     getAta: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock("@percolator/core", async () => {
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { sendTx } from "@/lib/tx";
-import { getAta } from "@percolator/core";
+import { getAta } from "@percolator/sdk";
 
 describe("useDeposit", () => {
   const mockSlabAddress = "11111111111111111111111111111111";

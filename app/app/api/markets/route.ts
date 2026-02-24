@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 // requireAuth removed from POST — on-chain admin verification is sufficient
 import { Connection, PublicKey } from "@solana/web3.js";
-import { parseHeader } from "@percolator/core";
+import { parseHeader } from "@percolator/sdk";
 import { getServiceClient } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { IX_TAG } from "@percolator/core";
+import { IX_TAG } from "@percolator/sdk";
 import { config, insertTrade, eventBus, decodeBase58, readU128LE, parseTradeSize, createLogger } from "@percolator/shared";
 
 const logger = createLogger("indexer:webhook");
