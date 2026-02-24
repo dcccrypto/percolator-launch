@@ -109,7 +109,11 @@ export function ensureNetworkConfigValid(env: NodeJS.ProcessEnv): void {
       console.error(error.message);
       console.error("=".repeat(70) + "\n");
     }
-    process.exit(1);
+    // Re-throw so callers (including test harnesses) can handle it.
+    // App entry points should catch and exit if needed.
+    throw error instanceof Error
+      ? error
+      : new Error("Network configuration validation failed");
   }
 }
 
