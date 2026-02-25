@@ -5,20 +5,7 @@ import { usePriceRouter } from "@/hooks/usePriceRouter";
 import { usePythFeedSearch } from "@/hooks/usePythFeedSearch";
 import { useDexPoolSearch, type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { OracleBadge } from "./OracleBadge";
-
-function isValidBase58Pubkey(s: string): boolean {
-  try {
-    const { PublicKey } = require("@solana/web3.js");
-    new PublicKey(s);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isValidHex64(s: string): boolean {
-  return /^[0-9a-fA-F]{64}$/.test(s);
-}
+import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 
 interface StepOracleSelectProps {
   mintAddress: string;

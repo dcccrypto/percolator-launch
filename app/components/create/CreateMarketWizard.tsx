@@ -17,19 +17,7 @@ import { StepParameters } from "./StepParameters";
 import { StepReview } from "./StepReview";
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
-
-function isValidBase58Pubkey(s: string): boolean {
-  try {
-    new PublicKey(s);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isValidHex64(s: string): boolean {
-  return /^[0-9a-fA-F]{64}$/.test(s);
-}
+import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -66,7 +54,7 @@ const DEFAULT_STATE: WizardState = {
   pythFeed: null,
   slabTier: "small",
   tradingFeeBps: 30,
-  initialMarginBps: 100,
+  initialMarginBps: 1000,
   lpCollateral: "",
   insuranceAmount: "100",
   adminPrice: "1.000000",
@@ -91,6 +79,17 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Quick launch auto-detection for parameters
   const quickMintForHook = wizard.mode === "quick" && wizard.mintAddress.length >= 32 ? wizard.mintAddress : null;
   const quickLaunch = useQuickLaunch(quickMintForHook);
+
+  // SOL balance for cost check in review step
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  useEffect(() => {
+    if (!publicKey || !connection) { setSolBalance(null); return; }
+    let cancelled = false;
+    connection.getBalance(publicKey).then((lamports) => {
+      if (!cancelled) setSolBalance(lamports / 1_000_000_000);
+    }).catch(() => { if (!cancelled) setSolBalance(null); });
+    return () => { cancelled = true; };
+  }, [publicKey, connection]);
 
   // Apply quick launch defaults to parameters
   useEffect(() => {
@@ -454,8 +453,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             lpCollateral={wizard.lpCollateral}
             insuranceAmount={wizard.insuranceAmount}
             walletConnected={!!publicKey}
-            walletBalanceSol={null}
-            hasSufficientBalance={true}
+            walletBalanceSol={solBalance}
+            hasSufficientBalance={solBalance !== null ? solBalance >= 0.5 : true}
             hasTokens={hasTokens}
             feeConflict={feeConflict}
             onBack={goBack}

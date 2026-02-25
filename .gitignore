@@ -61,3 +61,4 @@ pitch-deck.html
 render-pdf.cjs
 render-pdf.mjs
 .worktrees/
+program/target/

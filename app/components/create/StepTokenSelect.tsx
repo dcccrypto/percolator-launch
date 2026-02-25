@@ -6,15 +6,7 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatHumanAmount } from "@/lib/parseAmount";
-
-function isValidBase58Pubkey(s: string): boolean {
-  try {
-    new PublicKey(s);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 
 interface StepTokenSelectProps {
   mintAddress: string;
