@@ -1017,6 +1017,38 @@ interface StakeAccounts {
         collateralMint: PublicKey;
         percolatorProgram: PublicKey;
     };
+    /** Deposit accounts */
+    deposit: {
+        user: PublicKey;
+        pool: PublicKey;
+        userCollateralAta: PublicKey;
+        vault: PublicKey;
+        lpMint: PublicKey;
+        userLpAta: PublicKey;
+        vaultAuth: PublicKey;
+        depositPda: PublicKey;
+    };
+    /** Withdraw accounts */
+    withdraw: {
+        user: PublicKey;
+        pool: PublicKey;
+        userLpAta: PublicKey;
+        lpMint: PublicKey;
+        vault: PublicKey;
+        userCollateralAta: PublicKey;
+        vaultAuth: PublicKey;
+        depositPda: PublicKey;
+    };
+    /** FlushToInsurance accounts (CPI from stake → percolator) */
+    flushToInsurance: {
+        caller: PublicKey;
+        pool: PublicKey;
+        vault: PublicKey;
+        vaultAuth: PublicKey;
+        slab: PublicKey;
+        wrapperVault: PublicKey;
+        percolatorProgram: PublicKey;
+    };
 }
 /**
  * Build account keys for InitPool instruction.
@@ -1030,16 +1062,7 @@ declare function initPoolAccounts(a: StakeAccounts['initPool']): {
 /**
  * Build account keys for Deposit instruction.
  */
-declare function depositAccounts(a: {
-    user: PublicKey;
-    pool: PublicKey;
-    userCollateralAta: PublicKey;
-    vault: PublicKey;
-    lpMint: PublicKey;
-    userLpAta: PublicKey;
-    vaultAuth: PublicKey;
-    depositPda: PublicKey;
-}): {
+declare function depositAccounts(a: StakeAccounts['deposit']): {
     pubkey: PublicKey;
     isSigner: boolean;
     isWritable: boolean;
@@ -1047,16 +1070,7 @@ declare function depositAccounts(a: {
 /**
  * Build account keys for Withdraw instruction.
  */
-declare function withdrawAccounts(a: {
-    user: PublicKey;
-    pool: PublicKey;
-    userLpAta: PublicKey;
-    lpMint: PublicKey;
-    vault: PublicKey;
-    userCollateralAta: PublicKey;
-    vaultAuth: PublicKey;
-    depositPda: PublicKey;
-}): {
+declare function withdrawAccounts(a: StakeAccounts['withdraw']): {
     pubkey: PublicKey;
     isSigner: boolean;
     isWritable: boolean;
@@ -1064,15 +1078,7 @@ declare function withdrawAccounts(a: {
 /**
  * Build account keys for FlushToInsurance instruction.
  */
-declare function flushToInsuranceAccounts(a: {
-    caller: PublicKey;
-    pool: PublicKey;
-    vault: PublicKey;
-    vaultAuth: PublicKey;
-    slab: PublicKey;
-    wrapperVault: PublicKey;
-    percolatorProgram: PublicKey;
-}): {
+declare function flushToInsuranceAccounts(a: StakeAccounts['flushToInsurance']): {
     pubkey: PublicKey;
     isSigner: boolean;
     isWritable: boolean;
