@@ -124,7 +124,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     wizard.initialMarginBps >= 100 &&
     !feeConflict &&
     parseFloat(wizard.insuranceAmount) >= 100;
-  const allValid = step1Valid && step2Valid && step3Valid && hasTokens;
+  const hasSufficientSol = solBalance !== null && solBalance >= 0.5;
+  const allValid = step1Valid && step2Valid && step3Valid && hasTokens && hasSufficientSol;
 
   // Navigation
   const goToStep = useCallback((step: WizardStep) => {
@@ -454,7 +455,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             insuranceAmount={wizard.insuranceAmount}
             walletConnected={!!publicKey}
             walletBalanceSol={solBalance}
-            hasSufficientBalance={solBalance !== null ? solBalance >= 0.5 : true}
+            hasSufficientBalance={hasSufficientSol}
             hasTokens={hasTokens}
             feeConflict={feeConflict}
             onBack={goBack}
