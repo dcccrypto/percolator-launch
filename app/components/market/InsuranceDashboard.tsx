@@ -2,6 +2,8 @@
 
 import { FC, useState, useEffect, useMemo } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { InsuranceExplainerModal } from "./InsuranceExplainerModal";
 import { InsuranceTopUpModal } from "./InsuranceTopUpModal";
@@ -37,10 +39,10 @@ const MOCK_INSURANCE: InsuranceData = {
   ],
 };
 
-function formatUsdAmount(amountE6: string | bigint): string {
-  const num = typeof amountE6 === "string" ? BigInt(amountE6) : amountE6;
-  const usd = Number(num) / 1e6;
-  return usd.toLocaleString(undefined, {
+function formatUsdAmount(amountRaw: string | bigint, decimals: number = 6): string {
+  const num = typeof amountRaw === "string" ? BigInt(amountRaw) : amountRaw;
+  const value = Number(num) / (10 ** decimals);
+  return value.toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
@@ -51,6 +53,9 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
 }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const { engine, insuranceFund, totalOI } = useEngineState();
+  const { config } = useSlabState();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
 
   const [insuranceData, setInsuranceData] = useState<InsuranceData | null>(
     mockMode ? MOCK_INSURANCE : null
@@ -79,7 +84,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
         const coverageRatio = riskNum > 0 ? balanceNum / riskNum : 0;
         const historicalBalance = (data.historicalBalance ?? data.history ?? []).map((h: { timestamp: string | number; balance: string | number }) => ({
           timestamp: typeof h.timestamp === "string" ? new Date(h.timestamp).getTime() : h.timestamp,
-          balance: typeof h.balance === "string" ? Number(BigInt(h.balance)) / 1e6 : h.balance,
+          balance: typeof h.balance === "string" ? Number(BigInt(h.balance)) / (10 ** decimals) : h.balance,
         }));
         setInsuranceData({
           balance,
@@ -176,8 +181,8 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
     );
   }
 
-  const balanceUsd = formatUsdAmount(insuranceData.balance);
-  const feeRevenueUsd = formatUsdAmount(insuranceData.feeRevenue);
+  const balanceUsd = formatUsdAmount(insuranceData.balance, decimals);
+  const feeRevenueUsd = formatUsdAmount(insuranceData.feeRevenue, decimals);
 
   return (
     <>

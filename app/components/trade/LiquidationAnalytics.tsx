@@ -2,10 +2,12 @@
 
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
 function fmtCompact(n: number): string {
-  if (n >= 1e12) return (n / 1e12).toFixed(2) + "T";
+  if (!isFinite(n) || n < 0 || n > 1e12) return "—"; // sanity guard for absurd values
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(2) + "K";
@@ -14,6 +16,10 @@ function fmtCompact(n: number): string {
 
 export const LiquidationAnalytics: FC = () => {
   const { engine, params, loading } = useEngineState();
+  const { config } = useSlabState();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
+  const divisor = 10 ** decimals;
 
   if (loading || !engine) {
     return (
@@ -25,8 +31,8 @@ export const LiquidationAnalytics: FC = () => {
 
   const lifetimeLiquidations = Number(engine.lifetimeLiquidations ?? 0n);
   const lifetimeForceCloses = Number(engine.lifetimeForceCloses ?? 0n);
-  const insuranceBalance = Number(engine.insuranceFund?.balance ?? 0n) / 1e6;
-  const totalOI = Number(engine.totalOpenInterest ?? 0n) / 1e6;
+  const insuranceBalance = Number(engine.insuranceFund?.balance ?? 0n) / divisor;
+  const totalOI = Number(engine.totalOpenInterest ?? 0n) / divisor;
   const liqFeeBps = params ? Number(params.liquidationFeeBps ?? 0n) : 0;
   const bufferBps = params ? Number(params.liquidationBufferBps ?? 0n) : 0;
 

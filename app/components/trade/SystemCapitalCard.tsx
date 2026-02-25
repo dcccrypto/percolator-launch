@@ -2,10 +2,12 @@
 
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
 function fmtCompact(n: number): string {
-  if (n >= 1e12) return (n / 1e12).toFixed(2) + "T";
+  if (!isFinite(n) || n < 0 || n > 1e12) return "—"; // sanity guard for absurd values
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(2) + "K";
@@ -14,6 +16,10 @@ function fmtCompact(n: number): string {
 
 export const SystemCapitalCard: FC = () => {
   const { engine, loading } = useEngineState();
+  const { config } = useSlabState();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
+  const divisor = 10 ** decimals;
 
   if (loading || !engine) {
     return (
@@ -23,14 +29,14 @@ export const SystemCapitalCard: FC = () => {
     );
   }
 
-  const vault = Number(engine.vault ?? 0n) / 1e6;
-  const cTot = Number(engine.cTot ?? 0n) / 1e6;
-  const pnlPosTot = Number(engine.pnlPosTot ?? 0n) / 1e6;
-  const insurance = Number(engine.insuranceFund?.balance ?? 0n) / 1e6;
-  const totalOI = Number(engine.totalOpenInterest ?? 0n) / 1e6;
-  const netLp = Number(engine.netLpPos ?? 0n) / 1e6;
-  const lpSum = Number(engine.lpSumAbs ?? 0n) / 1e6;
-  const lpMax = Number(engine.lpMaxAbs ?? 0n) / 1e6;
+  const vault = Number(engine.vault ?? 0n) / divisor;
+  const cTot = Number(engine.cTot ?? 0n) / divisor;
+  const pnlPosTot = Number(engine.pnlPosTot ?? 0n) / divisor;
+  const insurance = Number(engine.insuranceFund?.balance ?? 0n) / divisor;
+  const totalOI = Number(engine.totalOpenInterest ?? 0n) / divisor;
+  const netLp = Number(engine.netLpPos ?? 0n) / divisor;
+  const lpSum = Number(engine.lpSumAbs ?? 0n) / divisor;
+  const lpMax = Number(engine.lpMaxAbs ?? 0n) / divisor;
   const accounts = engine.numUsedAccounts ?? 0;
 
   // LP concentration: how much of total LP exposure is one whale

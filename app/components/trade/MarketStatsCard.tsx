@@ -35,14 +35,16 @@ export const MarketStatsCard: FC = () => {
     );
   }
 
+  const decimals = tokenMeta?.decimals ?? 6;
+  const tokenDivisor = 10 ** decimals;
   const totalOI = engine.totalOpenInterest ?? 0n;
   const vault = engine.vault ?? 0n;
   const oiDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(totalOI) / 1e6) * priceUsd)
-    : formatTokenAmount(totalOI);
+    ? formatNum((Number(totalOI) / tokenDivisor) * priceUsd)
+    : formatTokenAmount(totalOI, decimals);
   const vaultDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(vault) / 1e6) * priceUsd)
-    : formatTokenAmount(vault);
+    ? formatNum((Number(vault) / tokenDivisor) * priceUsd)
+    : formatTokenAmount(vault, decimals);
 
   const stats = [
     { label: `${symbol} Price`, value: formatUsd(livePriceE6 ?? config.lastEffectivePriceE6) },

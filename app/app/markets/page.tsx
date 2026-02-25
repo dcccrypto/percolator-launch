@@ -475,6 +475,8 @@ function MarketsPageInner() {
                 {displayedMarkets.map((m, i) => {
                   const health = computeMarketHealth(m.onChain.engine);
                   const lastPrice = m.supabase?.last_price;
+                  const mintDecimals = tokenMetaMap.get(m.mintAddress)?.decimals ?? 6;
+                  const tokenDivisor = 10 ** mintDecimals;
                   
                   // Token amounts
                   const oiTokensRaw = m.onChain.engine.totalOpenInterest;
@@ -483,15 +485,15 @@ function MarketsPageInner() {
                   
                   // Display values (USD or tokens)
                   const oiDisplay = showUsd && lastPrice != null
-                    ? formatNum(Math.round((Number(oiTokensRaw) / 1e6) * lastPrice * 100) / 100)
-                    : formatTokenAmount(oiTokensRaw);
+                    ? formatNum(Math.round((Number(oiTokensRaw) / tokenDivisor) * lastPrice * 100) / 100)
+                    : formatTokenAmount(oiTokensRaw, mintDecimals);
                   const insuranceDisplay = showUsd && lastPrice != null
-                    ? formatNum(Math.round((Number(insuranceTokensRaw) / 1e6) * lastPrice * 100) / 100)
-                    : formatTokenAmount(insuranceTokensRaw);
+                    ? formatNum(Math.round((Number(insuranceTokensRaw) / tokenDivisor) * lastPrice * 100) / 100)
+                    : formatTokenAmount(insuranceTokensRaw, mintDecimals);
                   const volumeDisplay = volume24hRaw != null
                     ? (showUsd && lastPrice != null
-                        ? formatNum(Math.round((Number(volume24hRaw) / 1e6) * lastPrice * 100) / 100)
-                        : formatTokenAmount(volume24hRaw))
+                        ? formatNum(Math.round((Number(volume24hRaw) / tokenDivisor) * lastPrice * 100) / 100)
+                        : formatTokenAmount(volume24hRaw, mintDecimals))
                     : null;
 
                   return (
