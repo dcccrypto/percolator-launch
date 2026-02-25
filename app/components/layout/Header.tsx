@@ -15,6 +15,7 @@ const ConnectButton = dynamic(
 
 const navLinks = [
   { href: "/markets", label: "Markets" },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/create", label: "Create" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/wallet", label: "Wallet" },
