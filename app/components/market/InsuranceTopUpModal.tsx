@@ -8,6 +8,8 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import { useInsuranceLP } from "@/hooks/useInsuranceLP";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 
 interface InsuranceTopUpModalProps {
   slabAddress: string;
@@ -15,9 +17,10 @@ interface InsuranceTopUpModalProps {
   onClose: () => void;
 }
 
-function formatUsdAmount(amountE6: string | bigint): string {
-  const num = typeof amountE6 === "string" ? BigInt(amountE6) : amountE6;
-  const usd = Number(num) / 1e6;
+function formatUsdAmount(amountRaw: string | bigint, decimals: number): string {
+  const num = typeof amountRaw === "string" ? BigInt(amountRaw) : amountRaw;
+  const divisor = 10 ** decimals;
+  const usd = Number(num) / divisor;
   return usd.toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
@@ -36,6 +39,9 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
 
   const wallet = useWalletCompat();
   const { deposit, state: lpState, loading: lpLoading, error: lpError } = useInsuranceLP();
+  const { config } = useSlabState();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
 
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -109,8 +115,8 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
         return;
       }
 
-      // Convert USDC amount to base units (6 decimals for USDC)
-      const amountBaseUnits = BigInt(Math.floor(amountNum * 1e6));
+      // Convert amount to base units using actual token decimals
+      const amountBaseUnits = BigInt(Math.floor(amountNum * (10 ** decimals)));
 
       const signature = await deposit(amountBaseUnits);
 
@@ -134,7 +140,7 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
   };
 
   const isLoading = loading || lpLoading;
-  const currentBalanceUsd = formatUsdAmount(currentBalance);
+  const currentBalanceUsd = formatUsdAmount(currentBalance, decimals);
   const newBalanceUsd =
     amount && parseFloat(amount) > 0
       ? (parseFloat(currentBalanceUsd.replace(/,/g, "")) + parseFloat(amount)).toLocaleString()
@@ -292,10 +298,10 @@ export const InsuranceTopUpModal: FC<InsuranceTopUpModalProps> = ({
                       >
                         {lpState.lpSupply > 0n
                           ? Math.round(
-                              (parseFloat(amount) * 1e6 * Number(lpState.lpSupply)) /
+                              (parseFloat(amount) * (10 ** decimals) * Number(lpState.lpSupply)) /
                               Number(lpState.insuranceBalance || 1n)
                             ).toLocaleString(undefined, { maximumFractionDigits: 2 })
-                          : Math.round(parseFloat(amount) * 1e6).toLocaleString()}{" "}
+                          : Math.round(parseFloat(amount) * (10 ** decimals)).toLocaleString()}{" "}
                         LP
                       </span>
                     </div>

@@ -8,6 +8,7 @@ import { InfoIcon } from "@/components/ui/Tooltip";
 import { FundingExplainerModal } from "./FundingExplainerModal";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 
 interface FundingData {
   currentRateBpsPerSlot: number;
@@ -45,9 +46,11 @@ function formatCountdown(slots: number): string {
 }
 
 export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { params } = useSlabState();
+  const { params, config } = useSlabState();
   const { engine, fundingRate } = useEngineState();
   const userAccount = useUserAccount();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const collateralDecimals = tokenMeta?.decimals ?? 6;
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   
   const [fundingData, setFundingData] = useState<FundingData | null>(mockMode ? MOCK_FUNDING : null);
@@ -155,7 +158,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
 
     // Calculate estimated 24h funding
     // hourlyRate * 24 * positionSize (in tokens)
-    const positionTokens = Number(absPosition) / 1e6;
+    const positionTokens = Number(absPosition) / (10 ** collateralDecimals);
     const estimated24h = (fundingData.hourlyRatePercent / 100) * 24 * positionTokens;
 
     return {
