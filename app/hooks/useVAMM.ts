@@ -14,7 +14,6 @@ import {
 } from "@solana/spl-token";
 import {
   encodeInitLP,
-  encodeInitVamm,
   encodeTradeCpi,
   encodeKeeperCrank,
   ACCOUNTS_INIT_LP,
@@ -142,28 +141,12 @@ export function useVAMM(slabAddress: string) {
           programId: matcherProgramId,
         });
 
-        // 2. Initialize vAMM matcher
-        const initVammData = encodeInitVamm({
-          mode: cfg.mode,
-          tradingFeeBps: cfg.tradingFeeBps,
-          baseSpreadBps: cfg.baseSpreadBps,
-          maxTotalBps: cfg.maxTotalBps,
-          impactKBps: cfg.impactKBps,
-          liquidityNotionalE6: cfg.liquidityNotionalE6,
-          maxFillAbs: cfg.maxFillAbs,
-          maxInventoryAbs: cfg.maxInventoryAbs,
-        });
-
-        const initMatcherIx = new TransactionInstruction({
-          programId: matcherProgramId,
-          keys: [
-            { pubkey: lpPda, isSigner: false, isWritable: false },
-            { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
-          ],
-          data: Buffer.from(initVammData),
-        });
-
-        // 3. InitLP on percolator
+        // 2. InitLP on percolator
+        // NOTE: The new reference AMM matcher (FmTx5yi...) does NOT have an
+        // InitVamm (Tag 2) instruction. It only has Tag 0 (CPI matcher call).
+        // The AMM reads LP config from context bytes 64..68 (spread_bps u16 +
+        // max_fill_pct u16), using defaults (30 bps spread, 100% fill) when
+        // zeroed. No separate initialization instruction is needed.
         const initLpData = encodeInitLP({
           matcherProgram: matcherProgramId,
           matcherContext: matcherCtxKp.publicKey,
@@ -182,7 +165,7 @@ export function useVAMM(slabAddress: string) {
           data: initLpData,
         });
 
-        instructions.push(createCtxIx, initMatcherIx, initLpIx);
+        instructions.push(createCtxIx, initLpIx);
 
         const sig = await sendTx({
           connection,

@@ -219,7 +219,10 @@ async function main() {
 
     const [lpPda] = deriveLpPda(PROGRAM_ID, slab.publicKey, lpIdx);
 
-    // Atomic: createCtx + initVamm + initLP
+    // Atomic: createCtx + initLP
+    // NOTE: The new reference AMM matcher does NOT have an InitVamm (Tag 2)
+    // instruction. It reads LP config from context bytes 64..68, defaulting
+    // to 30 bps spread and 100% fill when zeroed.
     const instructions: TransactionInstruction[] = [];
 
     // 1. Create matcher context
@@ -229,33 +232,7 @@ async function main() {
       programId: MATCHER_PROGRAM_ID,
     }));
 
-    // 2. Init vAMM (Tag 2 on matcher)
-    const vammData = new Uint8Array(66);
-    const dv = new DataView(vammData.buffer);
-    let off = 0;
-    vammData[off] = 2; off += 1;            // Tag 2 = InitVamm
-    vammData[off] = 0; off += 1;            // mode 0 = passive
-    dv.setUint32(off, 50, true); off += 4;  // tradingFeeBps
-    dv.setUint32(off, 50, true); off += 4;  // baseSpreadBps
-    dv.setUint32(off, 200, true); off += 4; // maxTotalBps
-    dv.setUint32(off, 0, true); off += 4;   // impactKBps
-    dv.setBigUint64(off, 10_000_000_000_000n, true); off += 8;
-    dv.setBigUint64(off, 0n, true); off += 8;
-    dv.setBigUint64(off, 1_000_000_000_000n, true); off += 8;
-    dv.setBigUint64(off, 0n, true); off += 8;
-    dv.setBigUint64(off, 0n, true); off += 8;
-    dv.setBigUint64(off, 0n, true); off += 8;
-
-    instructions.push(new TransactionInstruction({
-      programId: MATCHER_PROGRAM_ID,
-      keys: [
-        { pubkey: lpPda, isSigner: false, isWritable: false },
-        { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
-      ],
-      data: Buffer.from(vammData),
-    }));
-
-    // 3. Init LP on percolator program
+    // 2. Init LP on percolator program
     const initLpData = encodeInitLP({
       matcherProgram: MATCHER_PROGRAM_ID,
       matcherContext: matcherCtxKp.publicKey,

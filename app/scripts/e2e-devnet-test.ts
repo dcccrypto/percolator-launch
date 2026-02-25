@@ -218,7 +218,12 @@ async function main() {
     payer.publicKey, slabKp.publicKey, payerAta, vaultAta, WELL_KNOWN.tokenProgram,
   ]);
 
-  // Step 6a: Create matcher context account (owned by matcher program)
+  // Step 6a: Create matcher context account (owned by matcher program).
+  // The new reference AMM matcher (FmTx5yi...) does NOT require an InitVamm
+  // instruction — it only has one instruction (Tag 0, the CPI matcher call).
+  // The AMM reads LP config from the context account's user-data region
+  // (bytes 64..320) and falls back to defaults (30 bps spread, 100% fill)
+  // when the account is zeroed. So we just allocate it.
   const createMatcherTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
     SystemProgram.createAccount({
@@ -231,32 +236,7 @@ async function main() {
   );
   await send(createMatcherTx, [payer, matcherCtxKp], "Create matcher ctx");
 
-  // Step 6b: Initialize vAMM matcher (Tag 2) — required before TradeCpi (#382)
-  const vammData = new Uint8Array(66);
-  const vammDv = new DataView(vammData.buffer);
-  let vOff = 0;
-  vammData[vOff] = 2; vOff += 1;                                          // Tag 2 = InitVamm
-  vammData[vOff] = 0; vOff += 1;                                          // mode 0 = passive
-  vammDv.setUint32(vOff, 50, true); vOff += 4;                            // tradingFeeBps
-  vammDv.setUint32(vOff, 50, true); vOff += 4;                            // baseSpreadBps
-  vammDv.setUint32(vOff, 200, true); vOff += 4;                           // maxTotalBps
-  vammDv.setUint32(vOff, 0, true); vOff += 4;                             // impactKBps
-  vammDv.setBigUint64(vOff, 10_000_000_000_000n, true); vOff += 8;        // virtualBase
-  vammDv.setBigUint64(vOff, 0n, true); vOff += 8;                         // (unused)
-  vammDv.setBigUint64(vOff, 1_000_000_000_000n, true); vOff += 8;         // minLiquidity
-  vammDv.setBigUint64(vOff, 0n, true); vOff += 8;                         // (unused)
-  vammDv.setBigUint64(vOff, 0n, true); vOff += 8;                         // (unused)
-  vammDv.setBigUint64(vOff, 0n, true); vOff += 8;                         // (unused)
-  const initVammTx = new Transaction().add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
-    { programId: MATCHER_PROGRAM_ID, keys: [
-      { pubkey: lpPda, isSigner: false, isWritable: false },
-      { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
-    ], data: Buffer.from(vammData) }
-  );
-  await send(initVammTx, [payer], "Init matcher vAMM (Tag 2)");
-
-  // Step 6c: Init LP in percolator
+  // Step 6b: Init LP in percolator
   const initLpTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }),

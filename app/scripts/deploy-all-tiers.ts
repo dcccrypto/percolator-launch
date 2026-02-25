@@ -172,6 +172,12 @@ async function deployMarket(tier: typeof TIERS[0], mintPk: PublicKey, payerAta: 
   const matcherRent = await conn.getMinimumBalanceForRentExemption(MATCHER_CTX_SIZE);
   const [lpPda] = deriveLpPda(PROGRAM_ID, slabKp.publicKey, 0);
 
+  // Create matcher context account (owned by matcher program).
+  // The new reference AMM matcher (FmTx5yi...) does NOT require an InitVamm
+  // instruction — it only has one instruction (Tag 0, the CPI matcher call).
+  // The AMM reads LP config from the context account's user-data region
+  // (bytes 64..320) and falls back to defaults (30 bps spread, 100% fill)
+  // when the account is zeroed. So we just allocate it.
   const createMatcherTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
     SystemProgram.createAccount({
@@ -183,32 +189,6 @@ async function deployMarket(tier: typeof TIERS[0], mintPk: PublicKey, payerAta: 
     })
   );
   await send(createMatcherTx, [payer, matcherCtxKp], "Matcher ctx");
-
-  // Build 66-byte InitVamm payload (Tag 2)
-  const vammData = new Uint8Array(66);
-  const vammDv = new DataView(vammData.buffer);
-  let off = 0;
-  vammData[off] = 2; off += 1;             // Tag 2 = InitVamm
-  vammData[off] = 0; off += 1;             // mode 0 = passive
-  vammDv.setUint32(off, 50, true); off += 4;   // tradingFeeBps
-  vammDv.setUint32(off, 50, true); off += 4;   // baseSpreadBps
-  vammDv.setUint32(off, 200, true); off += 4;  // maxTotalBps
-  vammDv.setUint32(off, 0, true); off += 4;    // impactKBps
-  vammDv.setBigUint64(off, 10_000_000_000_000n, true); off += 8; // virtualBase
-  vammDv.setBigUint64(off, 0n, true); off += 8;
-  vammDv.setBigUint64(off, 1_000_000_000_000n, true); off += 8; // minLiquidity
-  vammDv.setBigUint64(off, 0n, true); off += 8;
-  vammDv.setBigUint64(off, 0n, true); off += 8;
-  vammDv.setBigUint64(off, 0n, true); off += 8;
-
-  const initMatcherTx = new Transaction().add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
-    { programId: MATCHER_PROGRAM_ID, keys: [
-      { pubkey: lpPda, isSigner: false, isWritable: false },
-      { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
-    ], data: Buffer.from(vammData) }
-  );
-  await send(initMatcherTx, [payer], "Init matcher (Tag 2 / vAMM)");
 
   const initLpData = encodeInitLP({
     matcherProgram: MATCHER_PROGRAM_ID,

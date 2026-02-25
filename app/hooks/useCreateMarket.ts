@@ -396,35 +396,12 @@ export function useCreateMarket() {
                 programId: matcherProgramId,
               });
 
-          // 2. Initialize vAMM matcher (Tag 2, 66 bytes)
-          // Use custom vAMM params if provided, otherwise defaults
-          const vp = params.vammParams;
-          const vammData = new Uint8Array(66);
-          const vammDv = new DataView(vammData.buffer);
-          let off = 0;
-          vammData[off] = 2; off += 1;             // Tag 2 = InitVamm
-          vammData[off] = 0; off += 1;             // mode 0 = passive
-          vammDv.setUint32(off, params.tradingFeeBps, true); off += 4;   // tradingFeeBps
-          vammDv.setUint32(off, vp?.spreadBps ?? 50, true); off += 4;   // baseSpreadBps
-          vammDv.setUint32(off, vp?.maxTotalBps ?? 200, true); off += 4;  // maxTotalBps
-          vammDv.setUint32(off, vp?.impactKBps ?? 0, true); off += 4;    // impactKBps
-          vammDv.setBigUint64(off, BigInt(vp?.liquidityE6 ?? "10000000000000"), true); off += 8;
-          vammDv.setBigUint64(off, 0n, true); off += 8;
-          vammDv.setBigUint64(off, 1_000_000_000_000n, true); off += 8;
-          vammDv.setBigUint64(off, 0n, true); off += 8;
-          vammDv.setBigUint64(off, 0n, true); off += 8;
-          vammDv.setBigUint64(off, 0n, true); off += 8;
-
-          const initMatcherIx = new TransactionInstruction({
-            programId: matcherProgramId,
-            keys: [
-              { pubkey: lpPda, isSigner: false, isWritable: false },
-              { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
-            ],
-            data: Buffer.from(vammData),
-          });
-
-          // 3. Initialize LP
+          // 2. Initialize LP
+          // NOTE: The new reference AMM matcher (FmTx5yi...) does NOT have an
+          // InitVamm (Tag 2) instruction. It only has Tag 0 (CPI matcher call).
+          // The AMM reads LP config from context bytes 64..68 (spread_bps u16 +
+          // max_fill_pct u16), using defaults (30 bps spread, 100% fill) when
+          // zeroed. No separate initialization instruction is needed.
           const initLpData = encodeInitLP({
             matcherProgram: matcherProgramId,
             matcherContext: matcherCtxKp.publicKey,
@@ -436,8 +413,8 @@ export function useCreateMarket() {
           const initLpIx = buildIx({ programId, keys: initLpKeys, data: initLpData });
 
           const lpInstructions = createCtxIx
-            ? [createCtxIx, initMatcherIx, initLpIx]
-            : [initMatcherIx, initLpIx];
+            ? [createCtxIx, initLpIx]
+            : [initLpIx];
           const lpSigners = createCtxIx ? [matcherCtxKp] : [];
 
           const sig = await sendTx({
