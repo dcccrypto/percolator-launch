@@ -71,7 +71,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
     ? computeMarkPnl(account.positionSize, entryPriceE6, currentPriceE6)
     : 0n;
   const pnlUsd = priceUsd !== null && currentPriceE6 > 0n
-    ? (Number(pnlTokens) / 1e6) * priceUsd
+    ? (Number(pnlTokens) / (10 ** decimals)) * priceUsd
     : null;
   const roe = currentPriceE6 > 0n ? computePnlPercent(pnlTokens, account.capital) : 0;
 

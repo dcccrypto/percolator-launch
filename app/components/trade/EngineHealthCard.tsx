@@ -3,6 +3,7 @@
 import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { computeMarketHealth } from "@/lib/health";
@@ -23,7 +24,9 @@ const HEALTH_COLORS: Record<string, string> = {
 
 export const EngineHealthCard: FC = () => {
   const { engine, loading } = useEngineState();
-  const { accounts } = useSlabState();
+  const { accounts, config } = useSlabState();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
   const { showUsd } = useUsdToggle();
   const { priceUsd } = useLivePrice();
 
@@ -48,17 +51,17 @@ export const EngineHealthCard: FC = () => {
     : "0%";
 
   const netLpPosDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(netLpPos < 0n ? -netLpPos : netLpPos) / 1e6) * priceUsd)
-    : formatTokenAmount(netLpPos < 0n ? -netLpPos : netLpPos);
+    ? formatNum((Number(netLpPos < 0n ? -netLpPos : netLpPos) / (10 ** decimals)) * priceUsd)
+    : formatTokenAmount(netLpPos < 0n ? -netLpPos : netLpPos, decimals);
   const lpSumAbsDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(lpSumAbs) / 1e6) * priceUsd)
-    : formatTokenAmount(lpSumAbs);
+    ? formatNum((Number(lpSumAbs) / (10 ** decimals)) * priceUsd)
+    : formatTokenAmount(lpSumAbs, decimals);
   const cTotDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(cTot) / 1e6) * priceUsd)
-    : formatTokenAmount(cTot);
+    ? formatNum((Number(cTot) / (10 ** decimals)) * priceUsd)
+    : formatTokenAmount(cTot, decimals);
   const pnlPosTotDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(pnlPosTot) / 1e6) * priceUsd)
-    : formatTokenAmount(pnlPosTot);
+    ? formatNum((Number(pnlPosTot) / (10 ** decimals)) * priceUsd)
+    : formatTokenAmount(pnlPosTot, decimals);
 
   const metrics = [
     { label: "Crank Age", value: formatSlotAge(engine.currentSlot ?? 0n, engine.lastCrankSlot ?? 0n) },

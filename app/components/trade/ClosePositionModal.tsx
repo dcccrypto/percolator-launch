@@ -102,7 +102,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
     const receive = rawReceive > 0n ? rawReceive : 0n;
 
     const pnlUsd = priceUsd !== null && currentPrice > 0n
-      ? (Number(pnl) / 1e6) * priceUsd
+      ? (Number(pnl) / (10 ** decimals)) * priceUsd
       : null;
 
     return { closeAbs, remainingAbs, pnl, pnlUsd, receive };
