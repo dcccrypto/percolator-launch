@@ -14,6 +14,7 @@ test-results/
 out/
 build/
 dist/
+!packages/core/dist/
 *.tsbuildinfo
 
 # Production

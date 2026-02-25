@@ -39,6 +39,14 @@ jobs:
       # and the subsequent package builds fail with TS2307.
       - name: Build SDK package
         run: pnpm --filter @percolator/sdk build
+
+      - name: Verify SDK dist is up-to-date
+        run: |
+          if ! git diff --quiet packages/core/dist/; then
+            echo "::error::SDK dist is stale! Run 'pnpm --filter @percolator/sdk build' and commit the updated dist."
+            git diff --stat packages/core/dist/
+            exit 1
+          fi
         
       - name: Build shared package
         run: pnpm --filter @percolator/shared build
