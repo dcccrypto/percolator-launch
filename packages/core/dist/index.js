@@ -108,7 +108,14 @@ var IX_TAG = {
   DepositInsuranceLP: 25,
   WithdrawInsuranceLP: 26,
   PauseMarket: 27,
-  UnpauseMarket: 28
+  UnpauseMarket: 28,
+  AcceptAdmin: 29,
+  SetInsuranceWithdrawPolicy: 30,
+  WithdrawInsuranceLimited: 31,
+  SetPythOracle: 32,
+  UpdateMarkPrice: 33,
+  UpdateHyperpMark: 34,
+  TradeCpiV2: 35
 };
 function encodeFeedId(feedId) {
   const hex = feedId.startsWith("0x") ? feedId.slice(2) : feedId;
@@ -208,6 +215,15 @@ function encodeTradeCpi(args) {
     encU16(args.lpIdx),
     encU16(args.userIdx),
     encI128(args.size)
+  );
+}
+function encodeTradeCpiV2(args) {
+  return concatBytes(
+    encU8(IX_TAG.TradeCpiV2),
+    encU16(args.lpIdx),
+    encU16(args.userIdx),
+    encI128(args.size),
+    encU8(args.bump)
   );
 }
 function encodeSetRiskThreshold(args) {
@@ -2380,6 +2396,7 @@ export {
   encodeStakeWithdraw,
   encodeTopUpInsurance,
   encodeTradeCpi,
+  encodeTradeCpiV2,
   encodeTradeNoCpi,
   encodeUnpauseMarket,
   encodeUpdateAdmin,
