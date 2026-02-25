@@ -5,6 +5,7 @@ import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   encodeTradeCpi,
+  encodeTradeCpiV2,
   encodeKeeperCrank,
   encodePushOraclePrice,
   ACCOUNTS_TRADE_CPI,
@@ -59,7 +60,7 @@ export function useTrade(slabAddress: string) {
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
-        const [lpPda] = deriveLpPda(programId, slabPk, params.lpIdx);
+        const [lpPda, lpBump] = deriveLpPda(programId, slabPk, params.lpIdx);
 
         // Determine if this is an admin-oracle market:
         // oracleAuthority != default means an admin has been set (regardless of feedId)
@@ -123,7 +124,7 @@ export function useTrade(slabAddress: string) {
             lpAccount.account.matcherContext,
             lpPda,
           ]),
-          data: encodeTradeCpi({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString() }),
+          data: encodeTradeCpiV2({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString(), bump: lpBump }),
         });
         instructions.push(tradeIx);
 
