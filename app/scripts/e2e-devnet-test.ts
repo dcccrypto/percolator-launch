@@ -26,6 +26,7 @@ import {
   createInitializeMintInstruction,
   createAssociatedTokenAccountInstruction,
   createMintToInstruction,
+  createTransferInstruction,
   getAssociatedTokenAddress,
   getMinimumBalanceForRentExemptMint,
   MINT_SIZE,
@@ -154,6 +155,15 @@ async function main() {
   );
   await send(createVaultTx, [payer], `Vault ATA: ${vaultAta.toBase58().slice(0, 12)}...`);
 
+  // 4b. Seed deposit — program requires vault balance >= 500_000_000 before InitMarket (#374)
+  console.log("Step 4b: Seed deposit to vault");
+  const SEED_AMOUNT = 1_000_000_000n; // 1 token (9 decimals) — well above 500M minimum
+  const seedTx = new Transaction().add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
+    createTransferInstruction(payerAta, vaultAta, payer.publicKey, SEED_AMOUNT)
+  );
+  await send(seedTx, [payer], `Seed deposit: ${SEED_AMOUNT} to vault`);
+
   // 5. InitMarket (admin oracle mode — all zeros feed)
   console.log("Step 5: InitMarket");
   const initMarketData = encodeInitMarket({
@@ -206,7 +216,7 @@ async function main() {
     payer.publicKey, slabKp.publicKey, payerAta, vaultAta, WELL_KNOWN.tokenProgram,
   ]);
 
-  // Step 6a: Create matcher context account
+  // Step 6a: Create matcher context account (owned by matcher program — no separate init needed, #371)
   const createMatcherTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
     SystemProgram.createAccount({
@@ -219,21 +229,7 @@ async function main() {
   );
   await send(createMatcherTx, [payer, matcherCtxKp], "Create matcher ctx");
 
-  // Step 6b: Init matcher context (Tag 1 = passthrough)
-  const initMatcherTx = new Transaction().add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
-    {
-      programId: MATCHER_PROGRAM_ID,
-      keys: [
-        { pubkey: lpPda, isSigner: false, isWritable: false },
-        { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
-      ],
-      data: Buffer.from([1]),
-    }
-  );
-  await send(initMatcherTx, [payer], "Init matcher ctx");
-
-  // Step 6c: Init LP in percolator
+  // Step 6b: Init LP in percolator
   const initLpTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }),

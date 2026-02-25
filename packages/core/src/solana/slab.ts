@@ -23,20 +23,25 @@ function readI64LE(data: Uint8Array, off: number): bigint {
   return dv(data).getBigInt64(off, true);
 }
 
-// Constants from Rust (updated for funding/threshold params 2026-01)
+// Constants from Rust (updated for PERC-120/121/122 struct changes 2026-02)
 const MAGIC: bigint = 0x504552434f4c4154n; // "PERCOLAT"
-const HEADER_LEN = 72;    // SlabHeader: magic(8) + version(4) + bump(1) + _padding(3) + admin(32) + _reserved(24)
+// SlabHeader: magic(8) + version(4) + bump(1) + _padding(3) + admin(32) + pending_admin(32) + _reserved(24) = 104
+const HEADER_LEN = 104;
 const CONFIG_OFFSET = HEADER_LEN;  // MarketConfig starts right after header
 // MarketConfig: collateral_mint(32) + vault_pubkey(32) + index_feed_id(32) + max_staleness_secs(8) +
 //               conf_filter_bps(2) + bump(1) + invert(1) + unit_scale(4) +
 //               funding_horizon_slots(8) + funding_k_bps(8) + funding_inv_scale_notional_e6(16) +
 //               funding_max_premium_bps(8) + funding_max_bps_per_slot(8) +
+//               funding_premium_weight_bps(8) + funding_settlement_interval_slots(8) +
+//               funding_premium_dampening_e6(8) + funding_premium_max_bps_per_slot(8) +
 //               thresh_floor(16) + thresh_risk_bps(8) + thresh_update_interval_slots(8) +
 //               thresh_step_bps(8) + thresh_alpha_bps(8) + thresh_min(16) + thresh_max(16) + thresh_min_step(16) +
 //               oracle_authority(32) + authority_price_e6(8) + authority_timestamp(8) +
 //               oracle_price_cap_e2bps(8) + last_effective_price_e6(8)
-const CONFIG_LEN = 320;
-const RESERVED_OFF = 48;  // Offset of _reserved field within SlabHeader
+//             = 352 bytes
+const CONFIG_LEN = 352;
+// Offset of _reserved field within SlabHeader (magic+version+bump+_padding+admin+pending_admin = 80)
+const RESERVED_OFF = 80;
 
 // Flag bits in header._padding[0] at offset 13
 const FLAG_RESOLVED = 1 << 0;
@@ -289,119 +294,129 @@ export function readLastThrUpdateSlot(data: Uint8Array): bigint {
 }
 
 // =============================================================================
-// RiskEngine Layout Constants (updated for haircut-ratio refactor 2026-02)
-// ENGINE_OFF = HEADER_LEN + CONFIG_LEN = 72 + 320 = 392
+// RiskEngine Layout Constants (updated for PERC-120/121/122 struct changes 2026-02)
+// ENGINE_OFF = align_up(HEADER_LEN + CONFIG_LEN, 8) = align_up(104 + 352, 8) = 456
 //
-// The ADL/socialization system was replaced with O(1) haircut ratio.
-// Removed: loss_accum, risk_reduction_only, warmup_paused, warmed totals,
-//          adl_*_scratch arrays, pending_* deferred socialization fields.
-// Added: c_tot, pnl_pos_tot (O(1) aggregates for haircut calculation).
+// RiskParams grew from 144 → 288 bytes (added: premium funding, partial liq, dynamic fees).
+// Account grew from 240 → 248 bytes (added: last_partial_liquidation_slot).
+// SlabHeader grew from 72 → 104 bytes (added: pending_admin).
+// MarketConfig grew from 320 → 352 bytes (added: premium funding config fields).
 // =============================================================================
-const ENGINE_OFF = 392;
+const ENGINE_OFF = 456;
 // RiskEngine struct layout (repr(C), SBF uses 8-byte alignment for u128):
-// - vault: u128 (16 bytes) at offset 0
-// - insurance_fund: InsuranceFund { balance: u128, fee_revenue: u128 } (32 bytes) at offset 16
-// - params: RiskParams (144 bytes) at offset 48
+// - vault: U128 (16 bytes) at offset 0
+// - insurance_fund: InsuranceFund { balance: U128, fee_revenue: U128 } (32 bytes) at offset 16
+// - params: RiskParams (288 bytes) at offset 48
 const ENGINE_VAULT_OFF = 0;
 const ENGINE_INSURANCE_OFF = 16;
 const ENGINE_PARAMS_OFF = 48;         // RiskParams starts here (after vault+insurance_fund)
-// After RiskParams (at engine offset 48 + 144 = 192):
-const ENGINE_CURRENT_SLOT_OFF = 192;
-const ENGINE_FUNDING_INDEX_OFF = 200;   // I128 (16 bytes)
-const ENGINE_LAST_FUNDING_SLOT_OFF = 216;
-const ENGINE_FUNDING_RATE_BPS_OFF = 224;// i64: funding_rate_bps_per_slot_last (8 bytes) - was missing!
-const ENGINE_LAST_CRANK_SLOT_OFF = 232;
-const ENGINE_MAX_CRANK_STALENESS_OFF = 240;
-const ENGINE_TOTAL_OI_OFF = 248;        // U128 (16 bytes)
-const ENGINE_C_TOT_OFF = 264;           // U128: sum of all account capital
-const ENGINE_PNL_POS_TOT_OFF = 280;     // U128: sum of all positive PnL
-const ENGINE_LIQ_CURSOR_OFF = 296;      // u16
-const ENGINE_GC_CURSOR_OFF = 298;       // u16
+// After RiskParams (at engine offset 48 + 288 = 336):
+const ENGINE_CURRENT_SLOT_OFF = 336;
+const ENGINE_FUNDING_INDEX_OFF = 344;   // I128 (16 bytes)
+const ENGINE_LAST_FUNDING_SLOT_OFF = 360;
+const ENGINE_FUNDING_RATE_BPS_OFF = 368;// i64: funding_rate_bps_per_slot_last (8 bytes)
+// Premium funding state (PERC-121):
+const ENGINE_MARK_PRICE_OFF = 376;      // u64: mark_price_e6
+const ENGINE_FUNDING_FROZEN_OFF = 384;  // bool (1 byte + 7 padding)
+const ENGINE_FROZEN_RATE_OFF = 392;     // i64: funding_frozen_rate_snapshot
+// Keeper crank:
+const ENGINE_LAST_CRANK_SLOT_OFF = 400;
+const ENGINE_MAX_CRANK_STALENESS_OFF = 408;
+const ENGINE_TOTAL_OI_OFF = 416;        // U128 (16 bytes)
+const ENGINE_C_TOT_OFF = 432;           // U128: sum of all account capital
+const ENGINE_PNL_POS_TOT_OFF = 448;     // U128: sum of all positive PnL
+const ENGINE_LIQ_CURSOR_OFF = 464;      // u16
+const ENGINE_GC_CURSOR_OFF = 466;       // u16
 // 4 bytes padding for u64 alignment
-const ENGINE_LAST_SWEEP_START_OFF = 304;
-const ENGINE_LAST_SWEEP_COMPLETE_OFF = 312;
-const ENGINE_CRANK_CURSOR_OFF = 320;    // u16
-const ENGINE_SWEEP_START_IDX_OFF = 322; // u16
+const ENGINE_LAST_SWEEP_START_OFF = 472;
+const ENGINE_LAST_SWEEP_COMPLETE_OFF = 480;
+const ENGINE_CRANK_CURSOR_OFF = 488;    // u16
+const ENGINE_SWEEP_START_IDX_OFF = 490; // u16
 // 4 bytes padding for u64 alignment
-const ENGINE_LIFETIME_LIQUIDATIONS_OFF = 328;
-const ENGINE_LIFETIME_FORCE_CLOSES_OFF = 336;
-// LP Aggregates for funding rate calculation
-const ENGINE_NET_LP_POS_OFF = 344;      // I128
-const ENGINE_LP_SUM_ABS_OFF = 360;      // U128
-const ENGINE_LP_MAX_ABS_OFF = 376;      // U128
-const ENGINE_LP_MAX_ABS_SWEEP_OFF = 392;// U128
-// Bitmap: 64 u64 words = 512 bytes
-const ENGINE_BITMAP_OFF = 408;
-// After bitmap (408 + 512 = 920):
-const ENGINE_NUM_USED_OFF_LARGE = 920;  // u16 — for 4096-slot variant only
-// 6 bytes padding for u64 alignment
-const ENGINE_NEXT_ACCOUNT_ID_OFF = 928; // u64
-const ENGINE_FREE_HEAD_OFF = 936;       // u16
-// _padding_accounts: [u8; 6] at 938-943 for next_free alignment
-// next_free: [u16; 4096] at 944-9135
+const ENGINE_LIFETIME_LIQUIDATIONS_OFF = 496;
+const ENGINE_LIFETIME_FORCE_CLOSES_OFF = 504;
+// LP Aggregates for funding rate calculation (PERC-121)
+const ENGINE_NET_LP_POS_OFF = 512;      // I128
+const ENGINE_LP_SUM_ABS_OFF = 528;      // U128
+const ENGINE_LP_MAX_ABS_OFF = 544;      // U128
+const ENGINE_LP_MAX_ABS_SWEEP_OFF = 560;// U128
+// Bitmap starts at 576
+const ENGINE_BITMAP_OFF = 576;
 // Dynamic layout helpers — bitmap/accounts offsets depend on maxAccounts
 const DEFAULT_MAX_ACCOUNTS = 4096;
 const DEFAULT_BITMAP_WORDS = 64;  // ceil(4096/64)
-const ACCOUNT_SIZE = 240;  // Account._padding removed (was 248)
+const ACCOUNT_SIZE = 248;  // Account now includes last_partial_liquidation_slot (PERC-122)
 
 // For backward compat, keep large default
-const ENGINE_ACCOUNTS_OFF = 9136;       // accounts offset for 4096 variant
+// Large: bitmap(64*8=512) + num_used(2) + pad(6) + next_account_id(8) + free_head(2) + next_free(4096*2=8192) + pad(6) + accounts = 9304 - 576 = ...
+// Actually: engine fixed(576) + bitmap(512) + 18 + 8192 = 9298, align to 8 = 9304
+const ENGINE_ACCOUNTS_OFF = 9304;       // accounts offset for 4096 variant (within engine)
 
 /**
  * Compute bitmap words and accounts offset for a given maxAccounts.
- * Layout: engine_fixed(408) + bitmap(words*8) + post_bitmap(24) + next_free(N*2) + padding + accounts(N*240)
+ * Layout within engine: fixed(576) + bitmap(words*8) + post_bitmap(18) + next_free(N*2) + padding + accounts(N*248)
+ * post_bitmap = num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) = 18
  */
 function slabLayout(maxAccounts: number) {
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
-  const postBitmap = 24; // num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) + pad(6)
+  const postBitmap = 18; // num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2)
   const nextFreeBytes = maxAccounts * 2;
-  // Align to 16 bytes for Account (u128 fields)
-  const preAccountsLen = 408 + bitmapBytes + postBitmap + nextFreeBytes;
-  const accountsOff = Math.ceil(preAccountsLen / 16) * 16;
+  // Align to 8 bytes for Account (SBF: u128 align = 8)
+  const preAccountsLen = ENGINE_BITMAP_OFF + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
   return { bitmapWords, accountsOff, maxAccounts };
 }
 
 // Detect maxAccounts from slab data length
 export function detectLayout(dataLen: number) {
-  // Try each known tier with aligned offsets
+  // Try each known tier
   for (const n of [64, 256, 1024, 4096]) {
     const layout = slabLayout(n);
     const expectedLen = ENGINE_OFF + layout.accountsOff + n * ACCOUNT_SIZE;
     if (dataLen === expectedLen) return layout;
-  }
-  // Try unaligned variant (some program builds don't pad accountsOff to 16)
-  for (const n of [64, 256, 1024, 4096]) {
-    const bitmapWords = Math.ceil(n / 64);
-    const bitmapBytes = bitmapWords * 8;
-    const postBitmap = 24;
-    const nextFreeBytes = n * 2;
-    const accountsOff = 408 + bitmapBytes + postBitmap + nextFreeBytes; // no alignment
-    const expectedLen = ENGINE_OFF + accountsOff + n * ACCOUNT_SIZE;
-    if (dataLen === expectedLen) return { bitmapWords, accountsOff, maxAccounts: n };
   }
   // Fallback: compute from params (will read maxAccounts from data)
   return null;
 }
 
 // =============================================================================
-// RiskParams Layout (144 bytes, repr(C) with 8-byte alignment on SBF)
-// Note: SBF target uses 8-byte alignment for u128, not 16-byte
-// Verified via verify-layout.cjs against devnet 2024-01
+// RiskParams Layout (288 bytes, repr(C) with 8-byte alignment on SBF)
+// Updated for PERC-120 (dynamic fees), PERC-121 (premium funding), PERC-122 (partial liq)
 // =============================================================================
 const PARAMS_WARMUP_PERIOD_OFF = 0;        // u64
 const PARAMS_MAINTENANCE_MARGIN_OFF = 8;   // u64
 const PARAMS_INITIAL_MARGIN_OFF = 16;      // u64
 const PARAMS_TRADING_FEE_OFF = 24;         // u64
 const PARAMS_MAX_ACCOUNTS_OFF = 32;        // u64
-const PARAMS_NEW_ACCOUNT_FEE_OFF = 40;     // u128 (no padding, 8-byte aligned)
-const PARAMS_RISK_THRESHOLD_OFF = 56;      // u128
-const PARAMS_MAINTENANCE_FEE_OFF = 72;     // u128
+const PARAMS_NEW_ACCOUNT_FEE_OFF = 40;     // U128 (no padding, 8-byte aligned)
+const PARAMS_RISK_THRESHOLD_OFF = 56;      // U128
+const PARAMS_MAINTENANCE_FEE_OFF = 72;     // U128
 const PARAMS_MAX_CRANK_STALENESS_OFF = 88; // u64
 const PARAMS_LIQUIDATION_FEE_BPS_OFF = 96; // u64
-const PARAMS_LIQUIDATION_FEE_CAP_OFF = 104;// u128
+const PARAMS_LIQUIDATION_FEE_CAP_OFF = 104;// U128
 const PARAMS_LIQUIDATION_BUFFER_OFF = 120; // u64
-const PARAMS_MIN_LIQUIDATION_OFF = 128;    // u128 (total = 144 bytes)
+const PARAMS_MIN_LIQUIDATION_OFF = 128;    // U128
+// PERC-121: Premium funding params
+const PARAMS_FUNDING_PREMIUM_WEIGHT_OFF = 144; // u64
+const PARAMS_FUNDING_SETTLEMENT_OFF = 152;     // u64
+const PARAMS_FUNDING_DAMPENING_OFF = 160;      // u64
+const PARAMS_FUNDING_PREMIUM_MAX_OFF = 168;    // i64
+// PERC-122: Partial liquidation params
+const PARAMS_PARTIAL_LIQ_BPS_OFF = 176;       // u64
+const PARAMS_PARTIAL_LIQ_COOLDOWN_OFF = 184;  // u64
+const PARAMS_USE_MARK_PRICE_LIQ_OFF = 192;    // bool (1 + 7 padding)
+const PARAMS_EMERGENCY_LIQ_MARGIN_OFF = 200;  // u64
+// PERC-120: Dynamic fee params
+const PARAMS_FEE_TIER2_BPS_OFF = 208;         // u64
+const PARAMS_FEE_TIER3_BPS_OFF = 216;         // u64
+const PARAMS_FEE_TIER2_THRESHOLD_OFF = 224;   // u128
+const PARAMS_FEE_TIER3_THRESHOLD_OFF = 240;   // u128
+const PARAMS_FEE_SPLIT_LP_OFF = 256;          // u64
+const PARAMS_FEE_SPLIT_PROTOCOL_OFF = 264;    // u64
+const PARAMS_FEE_SPLIT_CREATOR_OFF = 272;     // u64
+const PARAMS_FEE_UTILIZATION_SURGE_OFF = 280; // u64
+// Total RiskParams = 288 bytes
 
 // =============================================================================
 // Account Layout (248 bytes, repr(C))
