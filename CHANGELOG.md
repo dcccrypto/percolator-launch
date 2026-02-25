@@ -1,0 +1,125 @@
+# Changelog
+
+All notable changes to the Percolator protocol are documented here.
+
+## Sprint 1–3 (Feb 19–25, 2026)
+
+### On-Chain (Solana Program)
+
+- **feat(PERC-118):** 8-hour EMA mark price formula + `UpdateMarkPrice` instruction (Tag 33) (#308)
+- **feat(PERC-117):** On-chain Pyth oracle CPI — `SetPythOracle` instruction + Pyth-pinned mode (#307)
+- **feat(PERC-119):** Hyperp EMA oracle — permissionless perps via DEX-as-oracle (#311)
+- **feat(PERC-121):** Premium-based funding rate + emergency freeze + combined accrual (#315)
+- **feat(PERC-122):** Mark-price liquidation trigger + partial liquidation with cooldown (#317)
+- **feat(PERC-120):** Dynamic fee model — tiered fees, utilization surge, fee split (#319)
+- **feat(PERC-112):** Wrapper hardening — two-step admin, fee cap, threshold bounds (#304)
+- **feat(PERC-110):** Wrapper tags 30+31 — `SetInsuranceWithdrawPolicy` + `WithdrawInsuranceLimited` (#302)
+- **feat(PERC-109):** Upgrade solana-program to 2.2.1 + spl-token to 6.0 (#301)
+- **fix:** Clamp `reserved_pnl` after PnL mutations (P0 fund safety — Kani finding) (#296)
+- **fix:** Add funding rate params, `admin_force_close` OOB guard, safe `fee_credits` cast (#314)
+- **fix:** Enforce circuit breaker cap for DEX oracle markets (#235)
+- **fix:** Add `Number.isFinite` guard to leverage filter (#240)
+- **fix:** NaN bypasses bounds check in `parseAccount` (#340)
+- **fix:** Validate `idx` as integer in `isAccountUsed` (#355)
+- **fix:** Add `riskparams` validation (#290)
+- **fix:** Strengthen Kani proof suite per audit findings (#344)
+- **fix:** Restore ~306 Kani formal verification proofs (#343)
+
+### Frontend
+
+- **feat(PERC-101):** Migrate from @solana/wallet-adapter to Privy (#295)
+- **feat(PERC-058):** Trade page UI updates (#285)
+- **feat(PERC-045):** Market creation form — validation, cost estimation, preview (#271)
+- **feat(PERC-039):** Portfolio PnL tracking + liquidation warnings (#267)
+- **feat(PERC-036):** Wire up InsuranceTopUpModal to real deposit instruction (#266)
+- **feat(PERC-050):** Loading skeletons for all pages + reusable `PageSkeleton` (#276)
+- **feat(PERC-047):** Complete Sentry integration for frontend & API (#273)
+- **fix:** CSP blocking Privy and WalletConnect — wallet connect broken (#328)
+- **hotfix:** Disable Privy SSR — fix production 500 (#327)
+- **hotfix:** Graceful Privy fallback — prevent site crash on missing app ID (#326)
+- **fix:** RPC routing and wallet management UX (#330)
+- **fix:** Use `/api/rpc` proxy instead of falling back to public devnet (#329)
+- **fix:** Allow Solflare iframe in CSP (#336)
+- **fix:** Privy wallet embed + modal (#335)
+- **fix:** Add WebSocket endpoint for Solana Connection subscriptions (#337)
+- **fix:** Harden `config.ts` localStorage and improve test reliability (#338)
+- **fix:** Pre-mainnet safety — tx simulation before signing + `Math.round()` insurance display (#346)
+- **fix:** Compact number format (T/B/M/K) for protocol metrics (#287)
+- **fix:** Show ∞ for unliquidatable short positions in liq price columns (#217)
+- **fix:** Resolve Unknown Token, remove admin email leak, disable insurance top-up (#254)
+- **fix:** NaN funding countdown, `/faucet` & `/bugs` 404s, WebSocket close warning (#239)
+- **fix:** Relax base58 address length validation (#362)
+- **fix:** Eliminate `act()` test warnings in WarmupProgress, OpenInterestCard, InsuranceDashboard (#363)
+- **a11y:** Accessible wallet connection modal — proper ARIA tree (#257)
+
+### Backend / API / Keeper
+
+- **feat:** Service monitoring with auto Discord alerts (#277)
+- **fix(PERC-134):** BigInt serialization in logger + keeper scan backoff (#320)
+- **fix(PERC-134):** Fix BigInt serialization in keeper logger (#318)
+- **fix(PERC-129):** Serialize Error objects properly in all keeper catch blocks (#305)
+- **fix:** Liquidation scanner — rate-limited RPC with retry/fallback + batched scanning (#256)
+- **fix:** Skip uninitialized markets in keeper crank (#352)
+- **fix(audit-crit-001):** Network validation guard to prevent mainnet operations on devnet (#356)
+- **fix:** Emergency cooldown bypass for critically underwater accounts (#322)
+- **fix:** Security audit fixes for IP spoofing, config validation, mainnet guards (#339)
+- **fix:** Pentest findings — error disclosure, rate limit, CORS (#283)
+- **fix:** Security headers, dynamic `sys.online`, devnet badge visibility (#223)
+- **fix:** Update Railway API URL to `percolator-api1-production` (404 fix) (#222)
+- **fix:** Route devnet-mint RPC through `/api/rpc` proxy (#220)
+- **fix:** Add missing `/api/prices/*` Next.js proxy routes (silent 404) (#218)
+- **fix:** Remove API key auth from `POST /api/markets` (#224)
+- **fix:** Remove leaked secrets, harden WebSocket auth (#234)
+- **fix:** PII exposure via Supabase anon key (3 HIGH + 2 MEDIUM) (#262)
+- **fix:** Cast `process.env` to fix TS2559 in `config.ts` (CI broken) (#360)
+- **refactor(PERC-105):** Dedup keeper/oracle services, fix stale Dockerfiles (Phase 4) (#354)
+- **fix:** SDK slab sizes + e2e seed deposit + matcher init (#375)
+
+### CI / Testing
+
+- **test:** Add 169 unit tests for 6 untested lib modules (#367)
+- **test:** Add 149 unit tests for 7 previously untested modules (#369)
+- **test:** Add 91 unit tests for 4 untested lib modules (#364)
+- **test:** Add 49 trading math unit tests for @percolator/sdk (#365)
+- **test:** Unit tests for api-auth, tokenMeta, tx + fix tokenMeta PDA bug (#368)
+- **test:** Add 65 Playwright E2E tests across 8 suites (#258)
+- **test:** Fix 7 failing E2E tests for CI (#275)
+- **test:** Fix 22 skipped `useInsuranceLP` tests (#269)
+- **test:** Fix monitor test — error rate triggered before consecutive failures (#282)
+- **test:** Remove stale matcher context validation tests (#230)
+- **fix(e2e):** Update wallet E2E tests for Privy migration (#324)
+- **fix(e2e):** Handle no-data gracefully in flaky market-listing test (#351)
+- **fix(e2e):** Filter CI noise and relax content assertions for Privy-dependent pages (#334)
+- **fix(e2e):** E2E devnet test falls back to public RPC when `HELIUS_API_KEY` is unset (#373)
+- **ci:** Enable E2E tests in CI — Playwright webServer + start script (#268)
+- **fix(CI):** Pass Supabase env vars to E2E job (#310)
+- **fix(CI):** Enable Playwright webServer in CI (#272)
+- **ci:** Fix 3 CI warnings — fuzz exit 254, E2E no tests, Codecov upload (#261)
+- **ci:** Fix fuzz test pre-check — skip when script missing (#264)
+- **ci:** Fix `test.yml` workflow file error — secrets context in step if (#263)
+- **fix(E2E):** Resolve 3 recurring CI flakes — guide ERR_ABORTED, homepage context, trade visibility (#306)
+
+### Deployments / Infrastructure
+
+- **PERC-140:** Fresh devnet program deployments (#348)
+- **PERC-140:** Update devnet matcher program ID (#353)
+- **Revert:** PR #348 — wrong upgrade authority used for devnet deploy (#350)
+- **fix:** Mainnet config tests verify safety gate instead of failing (#349)
+- **docs:** DEPLOYMENT.md — program IDs, authorities, deploy procedures (#359)
+
+### Dependencies / Security Hardening
+
+- **deps:** Upgrade hono 4.12.0 — fix timing attack in auth middleware (#265)
+- **fix(#259):** Patch dependency vulnerabilities — bn.js and ajv (#323)
+- **security(PERC-038):** Remediate dependency vulnerabilities (#274)
+- **fix(PERC-136):** Pre-mainnet security blockers (#299, #309, #312) (#321)
+
+### Other
+
+- **feat(PERC-138):** Rename @percolator/core → @percolator/sdk (Phase 1 repo split) (#345)
+- **chore(PERC-090):** Add Apache License 2.0 (#293)
+- **fix:** Clean up simulation table remnants, update Supabase schema docs (#229)
+- **fix:** Remove simulator stub routes that block real Railway data (#227)
+- **remove:** Kill simulator feature (#226)
+- **fix:** Read simUSDC mint from config instead of stale env var (#225)
+- **docs:** Complete OpenAPI spec — add `/ws/stats` endpoint (#270)
