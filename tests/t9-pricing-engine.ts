@@ -69,9 +69,9 @@ const PROGRAM_ID = new PublicKey(
 );
 const SLAB_SIZE = Number(process.env.SLAB_SIZE ?? 62_808);
 
-// Load deployer wallet
+// Load deployer wallet — set DEPLOYER_KP env var to override
 const DEPLOYER_KP_PATH = process.env.DEPLOYER_KP ??
-  "/Users/khubair/.openclaw/percolator/pm/qa-wallet.json";
+  `${process.env.HOME}/.config/solana/id.json`;
 
 interface TestResult { name: string; passed: boolean; error?: string; duration: number }
 const results: TestResult[] = [];
