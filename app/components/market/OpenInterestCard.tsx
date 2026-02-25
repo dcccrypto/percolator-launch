@@ -103,8 +103,8 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     return () => clearInterval(interval);
   }, [slabAddress, mockMode, engine]);
 
-  // Calculate percentages and imbalance
-  const { longPct, shortPct, imbalancePct, imbalanceLabel, imbalanceColor } =
+  // Calculate percentages, imbalance, and OI utilization
+  const { longPct, shortPct, imbalancePct, imbalanceLabel, imbalanceColor, oiUtilPct, oiUtilColor } =
     useMemo(() => {
       if (!oiData) {
         return {
@@ -113,6 +113,8 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
           imbalancePct: 0,
           imbalanceLabel: "Balanced",
           imbalanceColor: "text-[var(--text-muted)]",
+          oiUtilPct: 0,
+          oiUtilColor: "var(--accent)",
         };
       }
 
@@ -123,6 +125,16 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
       const longPercent = totalNum > 0 ? (longNum / totalNum) * 100 : 50;
       const shortPercent = totalNum > 0 ? (shortNum / totalNum) * 100 : 50;
       const imbalance = longPercent - shortPercent;
+
+      // OI Utilization: ratio of total OI to max capacity
+      // Use maxOpenInterest from market data if available, otherwise default to $5M
+      const maxOi = 5_000_000 * 1e6; // $5M in e6 units — placeholder until market.maxOpenInterest is available
+      const utilization = maxOi > 0 ? Math.min(totalNum / maxOi, 1) : 0;
+      // Dynamic color based on utilization level
+      const utilColor =
+        utilization < 0.5 ? "var(--accent)" :     // purple — normal
+        utilization < 0.8 ? "var(--warning)" :     // yellow — elevated
+        "var(--short)";                             // red — near capacity
 
       let label = "Balanced";
       let color = "text-[var(--text-muted)]";
@@ -154,6 +166,8 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
         imbalancePct: imbalance,
         imbalanceLabel: label,
         imbalanceColor: color,
+        oiUtilPct: utilization * 100,
+        oiUtilColor: utilColor,
       };
     }, [oiData]);
 
@@ -205,6 +219,27 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
         >
           ${totalOiUsd}
         </span>
+      </div>
+
+      {/* OI Utilization bar with label */}
+      <div className="mb-1.5">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[9px] uppercase tracking-[0.04em] text-[var(--text-dim)]">
+            OI Utilization
+          </span>
+          <span
+            className="text-[9px] font-medium"
+            style={{ fontFamily: "var(--font-mono)", color: oiUtilColor, fontVariantNumeric: "tabular-nums" }}
+          >
+            {Math.round(oiUtilPct)}%
+          </span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-sm bg-[var(--border)]/30">
+          <div
+            className="h-full transition-all duration-500 ease-out rounded-sm"
+            style={{ width: `${oiUtilPct}%`, backgroundColor: oiUtilColor }}
+          />
+        </div>
       </div>
 
       {/* Long/Short bars — compact inline */}

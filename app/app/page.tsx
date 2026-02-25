@@ -11,6 +11,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GradientText } from "@/components/ui/GradientText";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { OnboardingIcon } from "@/components/icons/OnboardingIcons";
 
 /** Format large numbers compactly: 1.2T / 3.4B / 5.6M / 7.8K */
 function formatCompact(n: number): string {
@@ -28,18 +29,21 @@ const HOW_STEPS = [
     title: "Paste a Token Address",
     desc: "Any Solana token. We auto-detect everything. No approval needed.",
     icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+    brandIcon: "perps" as const,
   },
   {
     number: "02",
     title: "Set Your Terms",
     desc: "Leverage, fees, initial liquidity. Smart defaults if you don't care.",
     icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+    brandIcon: "onchain" as const,
   },
   {
     number: "03",
     title: "Market Goes Live",
     desc: "Your market is deployed instantly on-chain. Share the link. Done.",
     icon: "M13 10V3L4 14h7v7l9-11h-7z",
+    brandIcon: "deploy" as const,
   },
 ];
 
@@ -66,10 +70,8 @@ function HowItWorks() {
                 className="group relative bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]"
               >
                 <div className="mb-4 flex items-start justify-between">
-                  <div className="flex h-10 w-10 items-center justify-center border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] transition-colors duration-200 group-hover:border-[var(--accent)]/30 group-hover:bg-[var(--accent)]/[0.08]">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-[var(--accent)]">
-                      <path d={step.icon} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
+                  <div className="flex h-12 w-12 items-center justify-center border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] transition-colors duration-200 group-hover:border-[var(--accent)]/30 group-hover:bg-[var(--accent)]/[0.08]">
+                    <OnboardingIcon type={step.brandIcon} size={32} />
                   </div>
                   <span className="text-[20px] font-normal tracking-tight text-[var(--border)] transition-colors duration-200 group-hover:text-[var(--accent)]/20" style={{ fontFamily: "var(--font-heading)" }}>
                     {step.number}
