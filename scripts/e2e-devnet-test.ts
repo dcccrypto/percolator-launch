@@ -207,10 +207,11 @@ async function main() {
   const lpIdx = 0;
   const [lpPda] = deriveLpPda(PROGRAM_ID, slabKp.publicKey, lpIdx);
 
+  // feePayment must be >= newAccountFee (1_000_000) set in InitMarket
   const initLpData = encodeInitLP({
     matcherProgram: MATCHER_PROGRAM_ID,
     matcherContext: matcherCtxKp.publicKey,
-    feePayment: "0",
+    feePayment: "1000000",
   });
   const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
     payer.publicKey, slabKp.publicKey, payerAta, vaultAta, WELL_KNOWN.tokenProgram,
