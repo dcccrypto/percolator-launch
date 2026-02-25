@@ -1,5 +1,5 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, act, cleanup } from "@testing-library/react";
 import { OpenInterestCard } from "@/components/market/OpenInterestCard";
 import "@testing-library/jest-dom";
 
@@ -16,6 +16,10 @@ global.fetch = vi.fn();
 describe("OpenInterestCard Component", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("should render loading state initially", () => {
@@ -321,13 +325,17 @@ describe("OpenInterestCard Component", () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    // Fast-forward 30 seconds
-    await vi.advanceTimersByTimeAsync(30000);
+    // Fast-forward 30 seconds — wrap in act so state updates are flushed
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
 
     await vi.waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
+    // Cleanup before restoring timers to prevent async state updates on unmounted component
+    cleanup();
     vi.useRealTimers();
   });
 

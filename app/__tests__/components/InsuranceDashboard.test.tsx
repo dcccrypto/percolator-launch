@@ -1,5 +1,5 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
 import { InsuranceDashboard } from "@/components/market/InsuranceDashboard";
 import "@testing-library/jest-dom";
 
@@ -16,6 +16,10 @@ global.fetch = vi.fn();
 describe("InsuranceDashboard Component", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("should render loading state initially", () => {
@@ -184,9 +188,11 @@ describe("InsuranceDashboard Component", () => {
       expect(screen.getAllByText("more")[0]).toBeInTheDocument();
     });
 
-    // Click one of the "more" buttons
+    // Click one of the "more" buttons — wrap in act for state update
     const learnMoreButtons = screen.getAllByText("more");
-    fireEvent.click(learnMoreButtons[0]);
+    await act(async () => {
+      fireEvent.click(learnMoreButtons[0]);
+    });
 
     // Modal should open (would need to verify modal content in real test)
   });
@@ -253,13 +259,17 @@ describe("InsuranceDashboard Component", () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    // Fast-forward 30 seconds
-    await vi.advanceTimersByTimeAsync(30000);
+    // Fast-forward 30 seconds — wrap in act so state updates are flushed
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
 
     await vi.waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
+    // Cleanup before restoring timers to prevent async state updates on unmounted component
+    cleanup();
     vi.useRealTimers();
   });
 });

@@ -1,5 +1,5 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, act, cleanup } from "@testing-library/react";
 import { WarmupProgress } from "@/components/trade/WarmupProgress";
 import "@testing-library/jest-dom";
 
@@ -17,6 +17,10 @@ global.fetch = vi.fn();
 describe("WarmupProgress Component", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("should not render when no warmup is active (404 response)", async () => {
@@ -161,13 +165,17 @@ describe("WarmupProgress Component", () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    // Fast-forward 5 seconds
-    await vi.advanceTimersByTimeAsync(5000);
+    // Fast-forward 5 seconds — wrap in act so state updates are flushed
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
 
     await vi.waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
+    // Cleanup before restoring timers to prevent async state updates on unmounted component
+    cleanup();
     vi.useRealTimers();
   });
 
@@ -195,9 +203,11 @@ describe("WarmupProgress Component", () => {
       expect(screen.getByText(/Learn more/i)).toBeInTheDocument();
     });
 
-    // Click the "Learn more" button to open explainer
+    // Click the "Learn more" button to open explainer — wrap in act for state update
     const learnMoreBtn = screen.getByText(/Learn more/i);
-    learnMoreBtn.click();
+    await act(async () => {
+      learnMoreBtn.click();
+    });
 
     // Modal should open (mocked, so we just verify the button works)
   });
