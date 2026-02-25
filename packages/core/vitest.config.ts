@@ -12,6 +12,7 @@ export default defineConfig({
       "test/discovery.test.ts",
       "test/price-router.test.ts",
       "src/solana/__tests__/stake.test.ts",
+      "src/solana/__tests__/stake-cpi.test.ts",
     ],
   },
 });

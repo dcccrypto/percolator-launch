@@ -201,6 +201,38 @@ export interface StakeAccounts {
     collateralMint: PublicKey;
     percolatorProgram: PublicKey;
   };
+  /** Deposit accounts */
+  deposit: {
+    user: PublicKey;
+    pool: PublicKey;
+    userCollateralAta: PublicKey;
+    vault: PublicKey;
+    lpMint: PublicKey;
+    userLpAta: PublicKey;
+    vaultAuth: PublicKey;
+    depositPda: PublicKey;
+  };
+  /** Withdraw accounts */
+  withdraw: {
+    user: PublicKey;
+    pool: PublicKey;
+    userLpAta: PublicKey;
+    lpMint: PublicKey;
+    vault: PublicKey;
+    userCollateralAta: PublicKey;
+    vaultAuth: PublicKey;
+    depositPda: PublicKey;
+  };
+  /** FlushToInsurance accounts (CPI from stake → percolator) */
+  flushToInsurance: {
+    caller: PublicKey;
+    pool: PublicKey;
+    vault: PublicKey;
+    vaultAuth: PublicKey;
+    slab: PublicKey;
+    wrapperVault: PublicKey;
+    percolatorProgram: PublicKey;
+  };
 }
 
 /**
@@ -226,16 +258,7 @@ export function initPoolAccounts(a: StakeAccounts['initPool']) {
 /**
  * Build account keys for Deposit instruction.
  */
-export function depositAccounts(a: {
-  user: PublicKey;
-  pool: PublicKey;
-  userCollateralAta: PublicKey;
-  vault: PublicKey;
-  lpMint: PublicKey;
-  userLpAta: PublicKey;
-  vaultAuth: PublicKey;
-  depositPda: PublicKey;
-}) {
+export function depositAccounts(a: StakeAccounts['deposit']) {
   return [
     { pubkey: a.user, isSigner: true, isWritable: false },
     { pubkey: a.pool, isSigner: false, isWritable: true },
@@ -254,16 +277,7 @@ export function depositAccounts(a: {
 /**
  * Build account keys for Withdraw instruction.
  */
-export function withdrawAccounts(a: {
-  user: PublicKey;
-  pool: PublicKey;
-  userLpAta: PublicKey;
-  lpMint: PublicKey;
-  vault: PublicKey;
-  userCollateralAta: PublicKey;
-  vaultAuth: PublicKey;
-  depositPda: PublicKey;
-}) {
+export function withdrawAccounts(a: StakeAccounts['withdraw']) {
   return [
     { pubkey: a.user, isSigner: true, isWritable: false },
     { pubkey: a.pool, isSigner: false, isWritable: true },
@@ -281,15 +295,7 @@ export function withdrawAccounts(a: {
 /**
  * Build account keys for FlushToInsurance instruction.
  */
-export function flushToInsuranceAccounts(a: {
-  caller: PublicKey;
-  pool: PublicKey;
-  vault: PublicKey;
-  vaultAuth: PublicKey;
-  slab: PublicKey;
-  wrapperVault: PublicKey;
-  percolatorProgram: PublicKey;
-}) {
+export function flushToInsuranceAccounts(a: StakeAccounts['flushToInsurance']) {
   return [
     { pubkey: a.caller, isSigner: true, isWritable: false },
     { pubkey: a.pool, isSigner: false, isWritable: true },

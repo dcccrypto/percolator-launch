@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Keypair } from '@solana/web3.js';
 import {
   STAKE_PROGRAM_ID,
   STAKE_IX,
@@ -23,8 +23,6 @@ import {
   withdrawAccounts,
   flushToInsuranceAccounts,
 } from '../stake.js';
-
-import { Keypair } from '@solana/web3.js';
 const slab = Keypair.generate().publicKey;
 const user = Keypair.generate().publicKey;
 
@@ -135,6 +133,22 @@ describe('Instruction encoders', () => {
     expect(buf[10]).toBe(0); // no cap
   });
 
+  it('encodeStakeUpdateConfig — only cooldown set', () => {
+    const buf = encodeStakeUpdateConfig(300n, undefined);
+    expect(buf[1]).toBe(1);            // has_cooldown
+    expect(buf.readBigUInt64LE(2)).toBe(300n);
+    expect(buf[10]).toBe(0);           // no cap
+    expect(buf.readBigUInt64LE(11)).toBe(0n);
+  });
+
+  it('encodeStakeUpdateConfig — only cap set', () => {
+    const buf = encodeStakeUpdateConfig(undefined, 500n);
+    expect(buf[1]).toBe(0);            // no cooldown
+    expect(buf.readBigUInt64LE(2)).toBe(0n);
+    expect(buf[10]).toBe(1);           // has_cap
+    expect(buf.readBigUInt64LE(11)).toBe(500n);
+  });
+
   it('encodeStakeTransferAdmin — tag 5, 1 byte', () => {
     const buf = encodeStakeTransferAdmin();
     expect(buf.length).toBe(1);
@@ -158,10 +172,23 @@ describe('Instruction encoders', () => {
     expect(lo + (hi << 64n)).toBe(12345n);
   });
 
-  it('encodeStakeAdminSetMaintenanceFee — tag 8 + u128', () => {
+  it('encodeStakeAdminSetRiskThreshold — exercises u128 high word', () => {
+    const largeValue = (1n << 64n) + 1n; // requires non-zero high word
+    const buf = encodeStakeAdminSetRiskThreshold(largeValue);
+    const lo = buf.readBigUInt64LE(1);
+    const hi = buf.readBigUInt64LE(9);
+    expect(lo).toBe(1n);
+    expect(hi).toBe(1n);
+    expect(lo + (hi << 64n)).toBe(largeValue);
+  });
+
+  it('encodeStakeAdminSetMaintenanceFee — tag 8 + u128 payload', () => {
     const buf = encodeStakeAdminSetMaintenanceFee(77n);
     expect(buf[0]).toBe(8);
     expect(buf.length).toBe(1 + 16);
+    const lo = buf.readBigUInt64LE(1);
+    const hi = buf.readBigUInt64LE(9);
+    expect(lo + (hi << 64n)).toBe(77n);
   });
 
   it('encodeStakeAdminResolveMarket — tag 9, 1 byte', () => {
