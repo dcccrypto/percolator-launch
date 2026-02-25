@@ -2,6 +2,8 @@
 
 import { FC, useState, useEffect } from "react";
 import { WarmupExplainerModal } from "./WarmupExplainerModal";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 
@@ -34,9 +36,9 @@ function formatCountdown(slots: number): string {
   return `${secs}s`;
 }
 
-function formatUsdAmount(amountE6: string | bigint): string {
-  const num = typeof amountE6 === "string" ? BigInt(amountE6) : amountE6;
-  const usd = Number(num) / 1e6;
+function formatTokenUsd(amountRaw: string | bigint, decimals: number = 6): string {
+  const num = typeof amountRaw === "string" ? BigInt(amountRaw) : amountRaw;
+  const usd = Number(num) / 10 ** decimals;
   return usd.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -48,6 +50,9 @@ export const WarmupProgress: FC<{
   accountIdx: number;
 }> = ({ slabAddress, accountIdx }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
+  const { config } = useSlabState();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
 
   const [warmupData, setWarmupData] = useState<WarmupData | null>(
     mockMode ? MOCK_WARMUP : null
@@ -175,11 +180,11 @@ export const WarmupProgress: FC<{
         {/* Amounts row — compact */}
         <div className="mt-1 flex items-center gap-3 pl-0">
           <span className="text-[9px] text-[var(--text-dim)]">
-            <span className="text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>${formatUsdAmount(warmupData.unlockedAmount)}</span> available
+            <span className="text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>${formatTokenUsd(warmupData.unlockedAmount, decimals)}</span> available
           </span>
           <span className="text-[var(--border)]">·</span>
           <span className="text-[9px] text-[var(--text-dim)]">
-            <span className="text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>${formatUsdAmount(warmupData.lockedAmount)}</span> locked
+            <span className="text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>${formatTokenUsd(warmupData.lockedAmount, decimals)}</span> locked
           </span>
           <button
             onClick={() => setShowExplainer(true)}

@@ -2,6 +2,8 @@
 
 import { FC, useState, useEffect, useMemo } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
@@ -32,18 +34,18 @@ const MOCK_OI: OpenInterestData = {
   ],
 };
 
-function formatUsdAmount(amountE6: string | bigint): string {
-  const num = typeof amountE6 === "string" ? BigInt(amountE6) : amountE6;
-  const usd = Number(num) / 1e6;
+function formatTokenUsd(amountRaw: string | bigint, decimals: number = 6): string {
+  const num = typeof amountRaw === "string" ? BigInt(amountRaw) : amountRaw;
+  const usd = Number(num) / 10 ** decimals;
   return usd.toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
 }
 
-function formatSignedUsdAmount(amountE6: string): string {
-  const num = BigInt(amountE6 ?? "0");
-  const usd = Number(num) / 1e6;
+function formatSignedTokenUsd(amountRaw: string, decimals: number = 6): string {
+  const num = BigInt(amountRaw ?? "0");
+  const usd = Number(num) / 10 ** decimals;
   const formatted = Math.abs(usd).toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
@@ -56,6 +58,9 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
 }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const { engine } = useEngineState();
+  const { config } = useSlabState();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
 
   const [oiData, setOiData] = useState<OpenInterestData | null>(
     mockMode ? MOCK_OI : null
@@ -197,10 +202,10 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     );
   }
 
-  const totalOiUsd = formatUsdAmount(oiData.totalOi);
-  const longOiUsd = formatUsdAmount(oiData.longOi);
-  const shortOiUsd = formatUsdAmount(oiData.shortOi);
-  const lpNetUsd = formatSignedUsdAmount(oiData.netLpPosition);
+  const totalOiUsd = formatTokenUsd(oiData.totalOi, decimals);
+  const longOiUsd = formatTokenUsd(oiData.longOi, decimals);
+  const shortOiUsd = formatTokenUsd(oiData.shortOi, decimals);
+  const lpNetUsd = formatSignedTokenUsd(oiData.netLpPosition, decimals);
   const lpDirection = BigInt(oiData.netLpPosition ?? "0") >= 0n ? "long" : "short";
 
   return (

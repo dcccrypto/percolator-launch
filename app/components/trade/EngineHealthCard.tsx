@@ -5,6 +5,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { computeMarketHealth } from "@/lib/health";
 import { formatTokenAmount, formatSlotAge } from "@/lib/format";
 
@@ -23,9 +24,12 @@ const HEALTH_COLORS: Record<string, string> = {
 
 export const EngineHealthCard: FC = () => {
   const { engine, loading } = useEngineState();
-  const { accounts } = useSlabState();
+  const { accounts, config } = useSlabState();
   const { showUsd } = useUsdToggle();
   const { priceUsd } = useLivePrice();
+  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
+  const divisor = 10 ** decimals;
 
   if (loading || !engine) {
     return (
@@ -48,17 +52,17 @@ export const EngineHealthCard: FC = () => {
     : "0%";
 
   const netLpPosDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(netLpPos < 0n ? -netLpPos : netLpPos) / 1e6) * priceUsd)
-    : formatTokenAmount(netLpPos < 0n ? -netLpPos : netLpPos);
+    ? formatNum((Number(netLpPos < 0n ? -netLpPos : netLpPos) / divisor) * priceUsd)
+    : formatTokenAmount(netLpPos < 0n ? -netLpPos : netLpPos, decimals);
   const lpSumAbsDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(lpSumAbs) / 1e6) * priceUsd)
-    : formatTokenAmount(lpSumAbs);
+    ? formatNum((Number(lpSumAbs) / divisor) * priceUsd)
+    : formatTokenAmount(lpSumAbs, decimals);
   const cTotDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(cTot) / 1e6) * priceUsd)
-    : formatTokenAmount(cTot);
+    ? formatNum((Number(cTot) / divisor) * priceUsd)
+    : formatTokenAmount(cTot, decimals);
   const pnlPosTotDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(pnlPosTot) / 1e6) * priceUsd)
-    : formatTokenAmount(pnlPosTot);
+    ? formatNum((Number(pnlPosTot) / divisor) * priceUsd)
+    : formatTokenAmount(pnlPosTot, decimals);
 
   const metrics = [
     { label: "Crank Age", value: formatSlotAge(engine.currentSlot ?? 0n, engine.lastCrankSlot ?? 0n) },
