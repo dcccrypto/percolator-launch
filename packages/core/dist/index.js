@@ -361,24 +361,6 @@ IX_TAG["UpdateHyperpMark"] = 34;
 function encodeUpdateHyperpMark() {
   return new Uint8Array([34]);
 }
-var MATCHER_IX_TAG = {
-  InitPassive: 0,
-  InitCurve: 1,
-  InitVamm: 2
-};
-function encodeInitVamm(args) {
-  return concatBytes(
-    encU8(MATCHER_IX_TAG.InitVamm),
-    encU8(args.mode),
-    encU32(args.tradingFeeBps),
-    encU32(args.baseSpreadBps),
-    encU32(args.maxTotalBps),
-    encU32(args.impactKBps),
-    encU128(args.liquidityNotionalE6),
-    encU128(args.maxFillAbs),
-    encU128(args.maxInventoryAbs)
-  );
-}
 var VAMM_MAGIC = 0x504552434d415443n;
 var CTX_VAMM_OFFSET = 64;
 var BPS_DENOM = 10000n;
@@ -539,12 +521,6 @@ var ACCOUNTS_WITHDRAW_INSURANCE = [
   { name: "vault", signer: false, writable: true },
   { name: "tokenProgram", signer: false, writable: false },
   { name: "vaultPda", signer: false, writable: false }
-];
-var ACCOUNTS_INIT_VAMM = [
-  { name: "lpOwner", signer: true, writable: true },
-  { name: "matcherCtx", signer: false, writable: true },
-  { name: "slab", signer: false, writable: false },
-  { name: "lpPda", signer: false, writable: false }
 ];
 var ACCOUNTS_PAUSE_MARKET = [
   { name: "admin", signer: true, writable: true },
@@ -2119,7 +2095,6 @@ export {
   ACCOUNTS_INIT_LP,
   ACCOUNTS_INIT_MARKET,
   ACCOUNTS_INIT_USER,
-  ACCOUNTS_INIT_VAMM,
   ACCOUNTS_KEEPER_CRANK,
   ACCOUNTS_LIQUIDATE_AT_ORACLE,
   ACCOUNTS_PAUSE_MARKET,
@@ -2142,7 +2117,6 @@ export {
   IX_TAG,
   MARK_PRICE_EMA_ALPHA_E6,
   MARK_PRICE_EMA_WINDOW_SLOTS,
-  MATCHER_IX_TAG,
   METEORA_DLMM_PROGRAM_ID,
   PERCOLATOR_ERRORS,
   PROGRAM_IDS,
@@ -2199,7 +2173,6 @@ export {
   encodeInitLP,
   encodeInitMarket,
   encodeInitUser,
-  encodeInitVamm,
   encodeKeeperCrank,
   encodeLiquidateAtOracle,
   encodePauseMarket,

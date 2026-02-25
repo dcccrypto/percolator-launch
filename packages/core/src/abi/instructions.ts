@@ -683,52 +683,6 @@ export function encodeUpdateHyperpMark(): Uint8Array {
 }
 
 // ============================================================================
-// MATCHER INSTRUCTIONS (sent to matcher program, not percolator)
-// ============================================================================
-
-/**
- * Matcher instruction tags
- */
-export const MATCHER_IX_TAG = {
-  InitPassive: 0,
-  InitCurve: 1,
-  InitVamm: 2,
-} as const;
-
-/**
- * InitVamm matcher instruction data (66 bytes)
- * Tag 2 — configures a vAMM LP with spread/impact pricing.
- *
- * Layout: tag(1) + mode(1) + tradingFeeBps(4) + baseSpreadBps(4) +
- *         maxTotalBps(4) + impactKBps(4) + liquidityNotionalE6(16) +
- *         maxFillAbs(16) + maxInventoryAbs(16)
- */
-export interface InitVammArgs {
-  mode: number;                         // 0 = passive, 1 = vAMM
-  tradingFeeBps: number;                // Trading fee in bps (e.g. 5 = 0.05%)
-  baseSpreadBps: number;                // Base spread in bps (e.g. 10 = 0.10%)
-  maxTotalBps: number;                  // Max total (spread + impact + fee) in bps
-  impactKBps: number;                   // Impact coefficient at full liquidity
-  liquidityNotionalE6: bigint | string; // Notional liquidity for impact calc (e6)
-  maxFillAbs: bigint | string;          // Max fill per trade (abs units)
-  maxInventoryAbs: bigint | string;     // Max inventory (0 = unlimited)
-}
-
-export function encodeInitVamm(args: InitVammArgs): Uint8Array {
-  return concatBytes(
-    encU8(MATCHER_IX_TAG.InitVamm),
-    encU8(args.mode),
-    encU32(args.tradingFeeBps),
-    encU32(args.baseSpreadBps),
-    encU32(args.maxTotalBps),
-    encU32(args.impactKBps),
-    encU128(args.liquidityNotionalE6),
-    encU128(args.maxFillAbs),
-    encU128(args.maxInventoryAbs),
-  );
-}
-
-// ============================================================================
 // SMART PRICE ROUTER — quote computation for LP selection
 // ============================================================================
 
