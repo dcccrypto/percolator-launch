@@ -155,9 +155,10 @@ async function main() {
   );
   await send(createVaultTx, [payer], `Vault ATA: ${vaultAta.toBase58().slice(0, 12)}...`);
 
-  // 4b. Seed deposit — program requires vault balance >= 500_000_000 before InitMarket (#374)
+  // 4b. Seed deposit — program requires vault balance >= MIN_INIT_MARKET_SEED before InitMarket (#374)
   console.log("Step 4b: Seed deposit to vault");
-  const SEED_AMOUNT = 1_000_000_000n; // 1 token (9 decimals) — well above 500M minimum
+  const MIN_INIT_MARKET_SEED = 500_000_000n; // protocol minimum vault balance for InitMarket
+  const SEED_AMOUNT = MIN_INIT_MARKET_SEED * 2n; // 1 token (9 decimals) — well above minimum
   const seedTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
     createTransferInstruction(payerAta, vaultAta, payer.publicKey, SEED_AMOUNT)

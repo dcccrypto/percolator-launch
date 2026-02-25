@@ -35,7 +35,7 @@ const MAGIC_BYTES = new Uint8Array([0x54, 0x41, 0x4c, 0x4f, 0x43, 0x52, 0x45, 0x
  *
  * Layout: HEADER(104) + CONFIG(352) + RiskEngine(variable by tier)
  *   ENGINE_OFF = align_up(104 + 352, 8) = 456  (SBF: u128 align = 8)
- *   RiskEngine = fixed(576) + bitmap(BW*8) + post_bitmap(~38+pad) + next_free(N*2) + pad + accounts(N*248)
+ *   RiskEngine = fixed(576) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
  *
  * Verified against deployed devnet programs (PERC-131 e2e testing):
  *   Small  (256 slots):  program logs expected = 0xfe40 = 65088
@@ -195,12 +195,35 @@ export async function discoverMarkets(
       }).then(results => results.map(entry => ({ ...entry, maxAccounts: tier.maxAccounts })))
     );
     const results = await Promise.allSettled(queries);
+    let hadRejection = false;
     for (const result of results) {
       if (result.status === "fulfilled") {
         for (const entry of result.value) {
           rawAccounts.push(entry as { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number });
         }
+      } else {
+        hadRejection = true;
+        console.warn(
+          "[discoverMarkets] Tier query rejected:",
+          result.reason instanceof Error ? result.reason.message : result.reason,
+        );
       }
+    }
+    // If any tier queries failed and we found no accounts, fall back to memcmp discovery
+    if (hadRejection && rawAccounts.length === 0) {
+      console.warn("[discoverMarkets] All tier queries failed, falling back to memcmp");
+      const fallback = await connection.getProgramAccounts(programId, {
+        filters: [
+          {
+            memcmp: {
+              offset: 0,
+              bytes: "F6P2QNqpQV5", // base58 of TALOCREP (u64 LE magic)
+            },
+          },
+        ],
+        dataSlice: { offset: 0, length: HEADER_SLICE_LENGTH },
+      });
+      rawAccounts = [...fallback].map(e => ({ ...e, maxAccounts: 4096 })) as { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number }[];
     }
   } catch (err) {
     console.warn(

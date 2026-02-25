@@ -81,6 +81,8 @@ describe("slabDataSize", () => {
       // Total size = ENGINE_OFF(456) + accountsOff + maxAccounts * ACCOUNT_SIZE(248)
       // Verify it's a reasonable positive integer exceeding raw account data
       expect(size).toBeGreaterThan(456 + n * 248); // must exceed raw account data
+      // Verify 8-byte alignment invariant
+      expect(size % 8).toBe(0);
     }
   });
 

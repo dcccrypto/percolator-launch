@@ -235,7 +235,7 @@ async function main() {
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }),
     buildIx({ programId: PROGRAM_ID, keys: initLpKeys, data: initLpData })
   );
-  await send(initLpTx, [payer, matcherCtxKp], "InitLP");
+  await send(initLpTx, [payer], "InitLP");
 
   // 7. Deposit collateral + TopUp insurance
   console.log("Step 7: Deposit + Insurance");
