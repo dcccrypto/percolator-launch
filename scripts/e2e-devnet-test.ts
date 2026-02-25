@@ -217,7 +217,7 @@ async function main() {
     payer.publicKey, slabKp.publicKey, payerAta, vaultAta, WELL_KNOWN.tokenProgram,
   ]);
 
-  // Create matcher context account (owned by matcher program — no separate init needed, #371)
+  // Create matcher context account (owned by matcher program)
   const createMatcherTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
     SystemProgram.createAccount({
@@ -229,6 +229,32 @@ async function main() {
     })
   );
   await send(createMatcherTx, [payer, matcherCtxKp], "Create matcher ctx");
+
+  // Initialize vAMM matcher (Tag 2) — required before TradeCpi (#382)
+  // Without this, the matcher context is zeroed and the matcher rejects CPI trade calls
+  const vammData = new Uint8Array(66);
+  const vammDv = new DataView(vammData.buffer);
+  let vOff = 0;
+  vammData[vOff] = 2; vOff += 1;                                          // Tag 2 = InitVamm
+  vammData[vOff] = 0; vOff += 1;                                          // mode 0 = passive
+  vammDv.setUint32(vOff, 50, true); vOff += 4;                            // tradingFeeBps
+  vammDv.setUint32(vOff, 50, true); vOff += 4;                            // baseSpreadBps
+  vammDv.setUint32(vOff, 200, true); vOff += 4;                           // maxTotalBps
+  vammDv.setUint32(vOff, 0, true); vOff += 4;                             // impactKBps
+  vammDv.setBigUint64(vOff, 10_000_000_000_000n, true); vOff += 8;        // virtualBase
+  vammDv.setBigUint64(vOff, 0n, true); vOff += 8;                         // (unused)
+  vammDv.setBigUint64(vOff, 1_000_000_000_000n, true); vOff += 8;         // minLiquidity
+  vammDv.setBigUint64(vOff, 0n, true); vOff += 8;                         // (unused)
+  vammDv.setBigUint64(vOff, 0n, true); vOff += 8;                         // (unused)
+  vammDv.setBigUint64(vOff, 0n, true); vOff += 8;                         // (unused)
+  const initVammTx = new Transaction().add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
+    { programId: MATCHER_PROGRAM_ID, keys: [
+      { pubkey: lpPda, isSigner: false, isWritable: false },
+      { pubkey: matcherCtxKp.publicKey, isSigner: false, isWritable: true },
+    ], data: Buffer.from(vammData) }
+  );
+  await send(initVammTx, [payer], "Init matcher vAMM (Tag 2)");
 
   // Init LP in percolator
   const initLpTx = new Transaction().add(
