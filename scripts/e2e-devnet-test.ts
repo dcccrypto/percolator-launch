@@ -61,7 +61,10 @@ import {
   SLAB_TIERS,
 } from "@percolator/sdk";
 
-const RPC = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
+const HELIUS_KEY = process.env.HELIUS_API_KEY;
+const RPC = HELIUS_KEY
+  ? `https://devnet.helius-rpc.com/?api-key=${HELIUS_KEY}`
+  : "https://api.devnet.solana.com";
 const PROGRAM_ID = new PublicKey("FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD");
 const MATCHER_PROGRAM_ID = new PublicKey("FmTx5yi62Y3h1ATkxm8ujLNNCwYcc2LTmWRFFWN31Af");
 const MATCHER_CTX_SIZE = 320;
@@ -91,6 +94,7 @@ async function send(tx: Transaction, signers: Keypair[], label: string): Promise
 
 async function main() {
   console.log("🧪 E2E Devnet Test");
+  console.log(`   RPC: ${HELIUS_KEY ? "Helius (devnet)" : "Public Solana devnet"}`);
   console.log(`   Payer: ${payer.publicKey.toBase58()}`);
   console.log(`   Balance: ${(await conn.getBalance(payer.publicKey)) / LAMPORTS_PER_SOL} SOL`);
   console.log(`   Program: ${PROGRAM_ID.toBase58()}`);
