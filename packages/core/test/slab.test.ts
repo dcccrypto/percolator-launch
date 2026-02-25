@@ -19,10 +19,14 @@ function assert(cond: boolean, msg: string): void {
 console.log("Testing slab parsing...\n");
 
 // Create a mock slab buffer
+// Updated for PERC-120/121/122 struct changes:
+//   HEADER_LEN = 104, CONFIG_OFFSET = 104, CONFIG_LEN = 352
+//   RESERVED_OFF = 80 (nonce at 80, lastThrUpdateSlot at 88)
+//   pending_admin field at offset 48 (32 bytes)
 function createMockSlab(): Buffer {
-  const buf = Buffer.alloc(400);  // HEADER_LEN(72) + CONFIG_LEN(256) = 328 minimum
+  const buf = Buffer.alloc(500);  // HEADER_LEN(104) + CONFIG_LEN(352) = 456 minimum
 
-  // Header (72 bytes)
+  // Header (104 bytes)
   // magic: "PERCOLAT" = 0x504552434f4c4154
   buf.writeBigUInt64LE(0x504552434f4c4154n, 0);
   // version: 1
@@ -30,40 +34,43 @@ function createMockSlab(): Buffer {
   // bump: 255
   buf.writeUInt8(255, 12);
   // padding: 3 bytes (skip)
-  // admin: 32 bytes (use zeros, which is valid as a pubkey)
+  // admin: 32 bytes at offset 16
   const adminBytes = Buffer.alloc(32);
   adminBytes[0] = 1; // Make it non-zero
   adminBytes.copy(buf, 16);
-  // reserved: nonce at [48..56], lastThrUpdateSlot at [56..64], then 8 more bytes padding to 72
-  buf.writeBigUInt64LE(42n, 48); // nonce = 42
-  buf.writeBigUInt64LE(12345n, 56); // lastThrUpdateSlot = 12345
+  // pending_admin: 32 bytes at offset 48 (new in PERC-120)
+  const pendingAdminBytes = Buffer.alloc(32);
+  pendingAdminBytes.copy(buf, 48);
+  // _reserved (24 bytes starting at offset 80): nonce at [80..88], lastThrUpdateSlot at [88..96]
+  buf.writeBigUInt64LE(42n, 80); // nonce = 42
+  buf.writeBigUInt64LE(12345n, 88); // lastThrUpdateSlot = 12345
 
-  // MarketConfig (starting at offset 72)
+  // MarketConfig (starting at offset 104)
   // Layout: collateral_mint(32) + vault_pubkey(32) + index_feed_id(32)
   //         + max_staleness_secs(8) + conf_filter_bps(2) + vault_authority_bump(1) + invert(1) + unit_scale(4)
 
-  // collateralMint: 32 bytes at offset 72
+  // collateralMint: 32 bytes at offset 104
   const mintBytes = Buffer.alloc(32);
   mintBytes[0] = 2;
-  mintBytes.copy(buf, 72);
-  // vaultPubkey: 32 bytes at offset 104
+  mintBytes.copy(buf, 104);
+  // vaultPubkey: 32 bytes at offset 136
   const vaultBytes = Buffer.alloc(32);
   vaultBytes[0] = 3;
-  vaultBytes.copy(buf, 104);
-  // index_feed_id: 32 bytes at offset 136
+  vaultBytes.copy(buf, 136);
+  // index_feed_id: 32 bytes at offset 168
   const feedIdBytes = Buffer.alloc(32);
   feedIdBytes[0] = 5;
-  feedIdBytes.copy(buf, 136);
-  // maxStalenessSlots: u64 at offset 168
-  buf.writeBigUInt64LE(100n, 168);
-  // confFilterBps: u16 at offset 176
-  buf.writeUInt16LE(50, 176);
-  // vaultAuthorityBump: u8 at offset 178
-  buf.writeUInt8(254, 178);
-  // invert: u8 at offset 179
-  buf.writeUInt8(1, 179);
-  // unitScale: u32 at offset 180
-  buf.writeUInt32LE(0, 180);
+  feedIdBytes.copy(buf, 168);
+  // maxStalenessSlots: u64 at offset 200
+  buf.writeBigUInt64LE(100n, 200);
+  // confFilterBps: u16 at offset 208
+  buf.writeUInt16LE(50, 208);
+  // vaultAuthorityBump: u8 at offset 210
+  buf.writeUInt8(254, 210);
+  // invert: u8 at offset 211
+  buf.writeUInt8(1, 211);
+  // unitScale: u32 at offset 212
+  buf.writeUInt32LE(0, 212);
 
   return buf;
 }
@@ -158,10 +165,11 @@ console.log("\n✅ All basic slab tests passed!");
 console.log("\nTesting account parsing...\n");
 
 // Constants from slab.ts for testing (keep in sync with slab.ts)
-const ENGINE_OFF = 392;
-const ENGINE_ACCOUNTS_OFF = 9136;
-const ACCOUNT_SIZE = 240;
-const ENGINE_BITMAP_OFF = 408;
+// Updated for PERC-120/121/122 struct changes 2026-02
+const ENGINE_OFF = 456;
+const ENGINE_ACCOUNTS_OFF = 9304;
+const ACCOUNT_SIZE = 248;
+const ENGINE_BITMAP_OFF = 576;
 
 // Account field offsets
 const ACCT_ACCOUNT_ID_OFF = 0;
@@ -191,25 +199,29 @@ function writeI128LE(buf: Buffer, offset: number, value: bigint): void {
 }
 
 // Create a full mock slab with accounts
+// Updated for PERC-120/121/122 struct changes:
+//   HEADER_LEN = 104, RESERVED_OFF = 80, ENGINE_OFF = 456
+//   ENGINE_BITMAP_OFF = 576, ENGINE_ACCOUNTS_OFF = 9304, ACCOUNT_SIZE = 248
 function createFullMockSlab(): Buffer {
   // Need enough space for header + config + engine + bitmap + accounts
   const minSize = ENGINE_OFF + ENGINE_ACCOUNTS_OFF + ACCOUNT_SIZE * 4;
   const buf = Buffer.alloc(minSize);
 
-  // Header (72 bytes)
+  // Header (104 bytes)
   buf.writeBigUInt64LE(0x504552434f4c4154n, 0);  // magic
   buf.writeUInt32LE(1, 8);  // version
   buf.writeUInt8(255, 12);  // bump
   const adminBytes = Buffer.alloc(32);
   adminBytes[0] = 1;
   adminBytes.copy(buf, 16);
-  buf.writeBigUInt64LE(42n, 48);  // nonce
-  buf.writeBigUInt64LE(12345n, 56);  // lastThrUpdateSlot
+  // pending_admin at offset 48 (32 bytes, zeros)
+  buf.writeBigUInt64LE(42n, 80);  // nonce (at RESERVED_OFF = 80)
+  buf.writeBigUInt64LE(12345n, 88);  // lastThrUpdateSlot (at RESERVED_OFF + 8 = 88)
 
-  // MarketConfig - simplified (starts at offset 72)
+  // MarketConfig - simplified (starts at offset 104)
   const mintBytes = Buffer.alloc(32);
   mintBytes[0] = 2;
-  mintBytes.copy(buf, 72);
+  mintBytes.copy(buf, 104);
 
   // Set bitmap - mark accounts 0 and 1 as used
   const bitmapOffset = ENGINE_OFF + ENGINE_BITMAP_OFF;

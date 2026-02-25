@@ -9,8 +9,8 @@ import {
   type RiskParams,
 } from "./slab.js";
 
-/** Bitmap offset within engine struct */
-const ENGINE_BITMAP_OFF = 408;
+/** Bitmap offset within engine struct (updated for PERC-120/121/122 struct changes) */
+const ENGINE_BITMAP_OFF = 576;
 
 /**
  * A discovered Percolator market from on-chain program accounts.
@@ -83,10 +83,10 @@ const ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map(t => t.dataSize);
 /** Legacy constant for backward compat */
 const SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 
-/** We need header(72) + config(320) + engine up to nextAccountId (928+8). Total ~1328. Use 1400 for margin. */
-const HEADER_SLICE_LENGTH = 1400;
+/** We need header(104) + config(352) + engine up to nextAccountId (~1100). Total ~1556. Use 1600 for margin. */
+const HEADER_SLICE_LENGTH = 1600;
 
-const ENGINE_OFF = 392;
+const ENGINE_OFF = 456;
 
 function dv(data: Uint8Array): DataView {
   return new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -134,33 +134,42 @@ function parseEngineLight(data: Uint8Array, maxAccounts: number = 4096): EngineS
   const canReadNumUsed = data.length >= base + numUsedOff + 2;
   const canReadNextId = data.length >= base + nextAccountIdOff + 8;
 
+  // Engine field offsets within engine struct (updated for PERC-120/121/122):
+  // vault(0) + insurance(16,32) + params(48,288) + currentSlot(336) + fundingIndex(344,16)
+  // + lastFundingSlot(360) + fundingRateBps(368) + markPrice(376) + fundingFrozen(384,8)
+  // + frozenRate(392) + lastCrankSlot(400) + maxCrankStaleness(408) + totalOI(416,16)
+  // + cTot(432,16) + pnlPosTot(448,16) + liqCursor(464,2) + gcCursor(466,2)
+  // + lastSweepStart(472) + lastSweepComplete(480) + crankCursor(488,2) + sweepStartIdx(490,2)
+  // + lifetimeLiquidations(496) + lifetimeForceCloses(504)
+  // + netLpPos(512,16) + lpSumAbs(528,16) + lpMaxAbs(544,16) + lpMaxAbsSweep(560,16)
+  // + bitmap(576)
   return {
     vault: readU128LE(data, base + 0),
     insuranceFund: {
       balance: readU128LE(data, base + 16),
       feeRevenue: readU128LE(data, base + 32),
     },
-    currentSlot: readU64LE(data, base + 192),
-    fundingIndexQpbE6: readI128LE(data, base + 200),
-    lastFundingSlot: readU64LE(data, base + 216),
-    fundingRateBpsPerSlotLast: readI64LE(data, base + 224),
-    lastCrankSlot: readU64LE(data, base + 232),
-    maxCrankStalenessSlots: readU64LE(data, base + 240),
-    totalOpenInterest: readU128LE(data, base + 248),
-    cTot: readU128LE(data, base + 264),
-    pnlPosTot: readU128LE(data, base + 280),
-    liqCursor: readU16LE(data, base + 296),
-    gcCursor: readU16LE(data, base + 298),
-    lastSweepStartSlot: readU64LE(data, base + 304),
-    lastSweepCompleteSlot: readU64LE(data, base + 312),
-    crankCursor: readU16LE(data, base + 320),
-    sweepStartIdx: readU16LE(data, base + 322),
-    lifetimeLiquidations: readU64LE(data, base + 328),
-    lifetimeForceCloses: readU64LE(data, base + 336),
-    netLpPos: readI128LE(data, base + 344),
-    lpSumAbs: readU128LE(data, base + 360),
-    lpMaxAbs: readU128LE(data, base + 376),
-    lpMaxAbsSweep: readU128LE(data, base + 392),
+    currentSlot: readU64LE(data, base + 336),
+    fundingIndexQpbE6: readI128LE(data, base + 344),
+    lastFundingSlot: readU64LE(data, base + 360),
+    fundingRateBpsPerSlotLast: readI64LE(data, base + 368),
+    lastCrankSlot: readU64LE(data, base + 400),
+    maxCrankStalenessSlots: readU64LE(data, base + 408),
+    totalOpenInterest: readU128LE(data, base + 416),
+    cTot: readU128LE(data, base + 432),
+    pnlPosTot: readU128LE(data, base + 448),
+    liqCursor: readU16LE(data, base + 464),
+    gcCursor: readU16LE(data, base + 466),
+    lastSweepStartSlot: readU64LE(data, base + 472),
+    lastSweepCompleteSlot: readU64LE(data, base + 480),
+    crankCursor: readU16LE(data, base + 488),
+    sweepStartIdx: readU16LE(data, base + 490),
+    lifetimeLiquidations: readU64LE(data, base + 496),
+    lifetimeForceCloses: readU64LE(data, base + 504),
+    netLpPos: readI128LE(data, base + 512),
+    lpSumAbs: readU128LE(data, base + 528),
+    lpMaxAbs: readU128LE(data, base + 544),
+    lpMaxAbsSweep: readU128LE(data, base + 560),
     numUsedAccounts: canReadNumUsed ? readU16LE(data, base + numUsedOff) : 0,
     nextAccountId: canReadNextId ? readU64LE(data, base + nextAccountIdOff) : 0n,
   };

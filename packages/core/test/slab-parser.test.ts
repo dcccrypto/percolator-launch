@@ -4,9 +4,14 @@ import {
   parseHeader, parseConfig, parseEngine, parseAllAccounts, parseParams,
 } from "../src/solana/slab.js";
 
-/** Build a minimal valid slab buffer for header + config + engine (no accounts). */
+/** Build a minimal valid slab buffer for header + config + engine (no accounts).
+ *  Updated for PERC-120/121/122 struct changes:
+ *    HEADER_LEN = 104, CONFIG_OFFSET = 104, ENGINE_OFF = 456
+ *    ENGINE_BITMAP_OFF = 576, ACCOUNT_SIZE = 248
+ *    RESERVED_OFF = 80 (nonce at 80, lastThrUpdateSlot at 88)
+ */
 function buildMockSlab(): Uint8Array {
-  const size = 992_560;
+  const size = 1_025_568; // large tier (4096 accounts) with new ACCOUNT_SIZE=248
   const buf = new Uint8Array(size);
   const dv = new DataView(buf.buffer);
 
@@ -19,27 +24,29 @@ function buildMockSlab(): Uint8Array {
   buf[12] = 255;
   // admin (32 bytes of 1s at offset 16)
   for (let i = 16; i < 48; i++) buf[i] = 1;
+  // pending_admin (32 bytes at offset 48, zeros)
+  // _reserved: nonce at offset 80, lastThrUpdateSlot at offset 88
 
-  // Config at offset 72
+  // Config at offset 104
   // collateralMint (32 bytes of 2s)
-  for (let i = 72; i < 104; i++) buf[i] = 2;
+  for (let i = 104; i < 136; i++) buf[i] = 2;
   // vaultPubkey (32 bytes of 3s)
-  for (let i = 104; i < 136; i++) buf[i] = 3;
+  for (let i = 136; i < 168; i++) buf[i] = 3;
 
-  // Engine at offset 392
-  const engineBase = 392;
+  // Engine at offset 456
+  const engineBase = 456;
   // vault = 1000000 (U128)
   dv.setBigUint64(engineBase + 0, 1000000n, true);
   // insurance balance = 500000
   dv.setBigUint64(engineBase + 16, 500000n, true);
-  // totalOpenInterest = 100000
-  dv.setBigUint64(engineBase + 248, 100000n, true);
-  // cTot = 800000
-  dv.setBigUint64(engineBase + 264, 800000n, true);
-  // numUsedAccounts = 0
-  dv.setUint16(engineBase + 920, 0, true);
-  // nextAccountId = 1
-  dv.setBigUint64(engineBase + 928, 1n, true);
+  // totalOpenInterest = 100000 (at engine offset 416)
+  dv.setBigUint64(engineBase + 416, 100000n, true);
+  // cTot = 800000 (at engine offset 432)
+  dv.setBigUint64(engineBase + 432, 800000n, true);
+  // numUsedAccounts at bitmap(576) + bitmap_words(64*8=512) = offset 1088
+  dv.setUint16(engineBase + 1088, 0, true);
+  // nextAccountId at aligned offset after numUsedAccounts: ceil((1088+2)/8)*8 = 1096
+  dv.setBigUint64(engineBase + 1096, 1n, true);
 
   // RiskParams at engine offset 48
   const paramsBase = engineBase + 48;
