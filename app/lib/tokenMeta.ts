@@ -139,12 +139,12 @@ export async function fetchTokenMeta(
 
   // 3. Fallback: on-chain Metaplex metadata (manual buffer parsing)
   if (!resolved) {
-    const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-    const [metadataPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-      TOKEN_METADATA_PROGRAM_ID
-    );
     try {
+      const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+      const [metadataPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+        TOKEN_METADATA_PROGRAM_ID
+      );
       const metadataAccount = await connection.getAccountInfo(metadataPDA);
       if (metadataAccount?.data) {
         const data = metadataAccount.data;
@@ -180,7 +180,7 @@ export async function fetchTokenMeta(
         }
       }
     } catch {
-      // Metaplex lookup failed — use fallback
+      // Metaplex lookup failed (PDA derivation or RPC) — use fallback
     }
   }
 
