@@ -257,9 +257,9 @@ function MarketsPageInner() {
   return (
     <div className="min-h-[calc(100vh-48px)] relative">
       {/* Grid background */}
-      <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
+      <div className="absolute inset-x-0 top-0 h-32 bg-grid pointer-events-none" />
 
-      <div className="relative mx-auto max-w-4xl px-4 py-10">
+      <div className="relative mx-auto max-w-4xl px-4 pt-4 pb-10">
         {/* Header */}
         <ScrollReveal>
           <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">

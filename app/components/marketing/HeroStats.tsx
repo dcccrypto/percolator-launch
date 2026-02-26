@@ -62,11 +62,11 @@ export function HeroStats({
       style={{ fontFamily: "var(--font-heading)" }}
     >
       {stats.map((s, i) => (
-        <div key={s.label} className="flex items-center gap-2 text-[13px]">
+        <div key={s.label} className="flex items-center gap-2 text-[13px] font-medium tracking-[0.01em]">
           {i > 0 && (
             <span className="mr-2 hidden text-white/10 md:inline">|</span>
           )}
-          <span className="text-white/40">{s.label}</span>
+          <span className="text-[#9ca3af]">{s.label}</span>
           {s.value}
         </div>
       ))}

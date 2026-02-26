@@ -47,16 +47,16 @@ export function HeroCtaGroup() {
 
       <Link
         href="/markets"
-        className={`hero-cta inline-flex items-center rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition-colors hover:border-purple-400 hover:bg-white/10 ${prefersReduced ? '' : 'gsap-fade'}`}
+        className={`hero-cta inline-flex items-center rounded-xl border-[1.5px] border-white/20 bg-white/[0.06] px-6 py-3 text-[15px] font-semibold text-white transition-all hover:border-white/35 hover:bg-white/10 ${prefersReduced ? '' : 'gsap-fade'}`}
       >
         Trade Now
       </Link>
 
       <Link
         href="#how-it-works"
-        className={`hero-cta text-sm font-medium text-cyan-400 underline underline-offset-4 transition-colors hover:text-cyan-300 ${prefersReduced ? '' : 'gsap-fade'}`}
+        className={`hero-cta inline-flex items-center gap-1 text-[14px] font-medium text-[#22d3ee] border-b border-[#22d3ee]/40 pb-px transition-colors hover:text-[#67e8f9] hover:border-[#67e8f9]/70 ${prefersReduced ? '' : 'gsap-fade'}`}
       >
-        Earn as Creator
+        Earn as Creator <span aria-hidden="true">→</span>
       </Link>
     </div>
   );
