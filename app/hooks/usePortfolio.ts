@@ -251,5 +251,25 @@ export function usePortfolio(): PortfolioData {
 
   const refresh = () => setRefreshCounter((c) => c + 1);
 
+  // Auto-refresh when tab becomes visible (e.g., after closing position on trade page)
+  // and every 30s while visible
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        setRefreshCounter((c) => c + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setRefreshCounter((c) => c + 1);
+      }
+    }, 30_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(interval);
+    };
+  }, []);
+
   return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, atRiskCount, loading, refresh };
 }

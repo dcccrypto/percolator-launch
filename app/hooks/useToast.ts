@@ -26,9 +26,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const MAX_TOASTS = 5;
+
   const toast = useCallback((message: string, type: ToastItem["type"] = "info") => {
     const id = `toast-${++counter}-${Date.now()}`;
-    setToasts((prev) => [...prev, { id, message, type }]);
+    setToasts((prev) => {
+      // Deduplicate: skip if same message+type already visible
+      if (prev.some((t) => t.message === message && t.type === type)) return prev;
+      // Cap at MAX_TOASTS — remove oldest first
+      const updated = [...prev, { id, message, type }];
+      return updated.length > MAX_TOASTS ? updated.slice(-MAX_TOASTS) : updated;
+    });
     // Auto-dismiss after 5 seconds
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));

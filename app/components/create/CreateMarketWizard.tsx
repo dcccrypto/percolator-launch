@@ -123,6 +123,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     wizard.tradingFeeBps <= 1000 &&
     wizard.initialMarginBps >= 100 &&
     !feeConflict &&
+    parseFloat(wizard.lpCollateral || "0") > 0 &&
     parseFloat(wizard.insuranceAmount) >= 100;
   const hasSufficientSol = solBalance !== null && solBalance >= 0.5;
   const allValid = step1Valid && step2Valid && step3Valid && hasTokens && hasSufficientSol;

@@ -72,8 +72,9 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     account.entryPrice,
     currentPriceE6,
   ) : 0n;
-  const pnlUsd =
+  const pnlUsdRaw =
     priceUsd !== null && currentPriceE6 > 0n ? (Number(pnlTokens) / 10 ** decimals) * priceUsd : null;
+  const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
   const roe = currentPriceE6 > 0n ? computePnlPercent(pnlTokens, account.capital) : 0;
 
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;

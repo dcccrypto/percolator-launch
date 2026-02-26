@@ -154,6 +154,16 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     return () => { cancelled = true; };
   }, [publicKey, mktConfig?.collateralMint, connection, mockMode]);
 
+  // Reset form state when switching markets (bug #1a12dab5)
+  useEffect(() => {
+    setDirection("long");
+    setMarginInput("");
+    setLeverage(1);
+    setLastSig(null);
+    setHumanError(null);
+    setTradePhase("idle");
+  }, [slabAddress]);
+
   // Direction toggle GSAP bounce
   useEffect(() => {
     if (prefersReduced) return;
