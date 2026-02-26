@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 
 // Derive WebSocket URL from API URL: https://... → wss://...
 function getWsUrl(): string {
@@ -56,12 +57,8 @@ export function useLivePrice(): PriceState {
   // Seed from on-chain slab data when no live price yet
   useEffect(() => {
     if (!mktConfig) return;
-    // For Pyth-pinned markets (oracleAuthority all zeros), authorityPriceE6 may be stale/garbage.
-    // Prefer lastEffectivePriceE6 which is the on-chain resolved price.
-    const isPythPinned = mktConfig.oracleAuthority?.toBytes?.()?.every((b: number) => b === 0) ?? false;
-    const onChainE6 = isPythPinned
-      ? (mktConfig.lastEffectivePriceE6 ?? 0n)
-      : (mktConfig.authorityPriceE6 ?? mktConfig.lastEffectivePriceE6 ?? 0n);
+    // Use oracle-mode-aware price resolution (handles pyth-pinned, hyperp, and admin modes)
+    const onChainE6 = resolveMarketPriceE6(mktConfig);
     if (onChainE6 === 0n) return;
     setState((prev) => {
       if (prev.price !== null) return prev;

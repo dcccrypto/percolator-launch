@@ -22,6 +22,8 @@ vi.mock('@percolator/shared', () => ({
   getConnection: vi.fn(() => ({
     getAccountInfo: mockGetAccountInfo,
     getMultipleAccountsInfo: mockGetMultipleAccountsInfo,
+    getParsedAccountInfo: vi.fn().mockResolvedValue({ value: null }),
+    rpcEndpoint: 'https://api.devnet.solana.com',
   })),
   upsertMarketStats: vi.fn(),
   insertOraclePrice: vi.fn(),
@@ -85,6 +87,9 @@ function makeConfig(overrides: Record<string, any> = {}) {
     collateralMint: new PublicKey('So11111111111111111111111111111111111111112'),
     oracleAuthority: new PublicKey('SysvarC1ock11111111111111111111111111111111'),
     authorityPriceE6: 1_500_000n,
+    lastEffectivePriceE6: 1_500_000n,
+    // Non-zero indexFeedId = admin oracle mode (not hyperp)
+    indexFeedId: new PublicKey('SysvarC1ock11111111111111111111111111111111'),
     ...overrides,
   } as any;
 }
@@ -98,7 +103,9 @@ function makeMockMarket(slabAddress: string) {
         collateralMint: new PublicKey('So11111111111111111111111111111111111111112'),
         oracleAuthority: new PublicKey('SysvarC1ock11111111111111111111111111111111'),
         authorityPriceE6: 1_500_000n,
-        indexFeedId: { toBytes: () => new Uint8Array(32) },
+        lastEffectivePriceE6: 1_500_000n,
+        // Non-zero indexFeedId = admin oracle mode (uses authorityPriceE6)
+        indexFeedId: new PublicKey('SysvarC1ock11111111111111111111111111111111'),
       },
       params: { maintenanceMarginBps: 500n, initialMarginBps: 1000n },
       header: { admin: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL') },

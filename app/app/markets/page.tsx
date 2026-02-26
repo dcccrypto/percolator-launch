@@ -21,6 +21,7 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { MarketLogo } from "@/components/market/MarketLogo";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { detectOracleMode, resolveMarketPriceE6, priceE6ToUsd } from "@/lib/oraclePrice";
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "\u2014";
@@ -44,7 +45,7 @@ interface MergedMarket {
   name: string | null;
   maxLeverage: number;
   isAdminOracle: boolean;
-  onChain: DiscoveredMarket;
+  onChain: DiscoveredMarket | null;  // null for Supabase-only markets not yet discovered on-chain
   supabase: MarketWithStats | null;
 }
 
@@ -127,24 +128,46 @@ function MarketsPageInner() {
   }, [debouncedSearch, sortBy, leverageFilter, oracleFilter, showUsd, router]);
 
   const merged = useMemo<MergedMarket[]>(() => {
-    return discovered
-      .filter((d) => {
-        // Skip malformed markets with undefined PublicKey fields
-        if (!d?.slabAddress || !d?.config?.collateralMint || !d?.config?.indexFeedId || !d?.params) {
-          console.warn("[Markets] Skipping malformed market:", d);
-          return false;
-        }
-        return true;
-      })
-      .map((d) => {
-        const addr = d.slabAddress.toBase58();
-        const mint = d.config.collateralMint.toBase58();
-        const maxLev = d.params.initialMarginBps > 0n ? Math.floor(10000 / Number(d.params.initialMarginBps)) : 0;
-        const isAdminOracle = d.config.indexFeedId.equals(PublicKey.default);
-        // Fetch stats from Supabase
-        const stats = statsMap.get(addr) || null;
-        return { slabAddress: addr, mintAddress: mint, symbol: null, name: null, maxLeverage: maxLev, isAdminOracle, onChain: d, supabase: stats };
+    const result: MergedMarket[] = [];
+    const seenSlabs = new Set<string>();
+
+    // 1. On-chain discovered markets (enriched with Supabase stats)
+    for (const d of discovered) {
+      if (!d?.slabAddress || !d?.config?.collateralMint || !d?.config?.indexFeedId || !d?.params) {
+        console.warn("[Markets] Skipping malformed market:", d);
+        continue;
+      }
+      const addr = d.slabAddress.toBase58();
+      const mint = d.config.collateralMint.toBase58();
+      const maxLev = d.params.initialMarginBps > 0n ? Math.floor(10000 / Number(d.params.initialMarginBps)) : 0;
+      const oracleMode = detectOracleMode(d.config);
+      const isAdminOracle = oracleMode === "hyperp" || oracleMode === "admin";
+      const stats = statsMap.get(addr) || null;
+      seenSlabs.add(addr);
+      result.push({ slabAddress: addr, mintAddress: mint, symbol: null, name: null, maxLeverage: maxLev, isAdminOracle, onChain: d, supabase: stats });
+    }
+
+    // 2. Supabase-only markets (not discovered on-chain — e.g., different tier, RPC limits)
+    for (const [slabAddr, stats] of statsMap) {
+      if (seenSlabs.has(slabAddr)) continue;
+      // Use Supabase fields for display
+      const mint = stats.mint_address ?? "";
+      const maxLev = stats.max_leverage ?? 10;
+      // Without on-chain data, we can't detect oracle mode — use Supabase oracle_authority hint
+      const isAdminOracle = stats.oracle_authority != null && stats.oracle_authority !== "";
+      result.push({
+        slabAddress: slabAddr,
+        mintAddress: mint,
+        symbol: null,
+        name: null,
+        maxLeverage: maxLev,
+        isAdminOracle,
+        onChain: null,
+        supabase: stats,
       });
+    }
+
+    return result;
   }, [discovered, statsMap]);
 
   // Only show mock data in development (never in production)
@@ -153,8 +176,11 @@ function MarketsPageInner() {
   // Fetch on-chain token metadata for ALL markets (no Supabase)
   const allMints = useMemo(() => {
     return effectiveMarkets
-      .filter(m => m.mintAddress)
-      .map(m => new PublicKey(m.mintAddress));
+      .filter(m => m.mintAddress && m.mintAddress.length >= 32)
+      .map(m => {
+        try { return new PublicKey(m.mintAddress); } catch { return null; }
+      })
+      .filter((pk): pk is PublicKey => pk !== null);
   }, [effectiveMarkets]);
   const tokenMetaMap = useMultiTokenMeta(allMints);
 
@@ -183,19 +209,31 @@ function MarketsPageInner() {
     } else if (oracleFilter === "live") {
       list = list.filter((m) => !m.isAdminOracle);
     }
+    // Helper to get OI (prefer on-chain, fall back to Supabase)
+    const getOI = (m: MergedMarket): bigint => {
+      if (m.onChain) return m.onChain.engine.totalOpenInterest ?? 0n;
+      const supaOI = m.supabase?.total_open_interest
+        ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0));
+      return BigInt(supaOI ?? 0);
+    };
     list = [...list].sort((a, b) => {
       switch (sortBy) {
-        case "volume": 
-          // No Supabase volume data - sort by OI instead
-          const oiA_vol = a.onChain.engine.totalOpenInterest ?? 0n;
-          const oiB_vol = b.onChain.engine.totalOpenInterest ?? 0n;
-          return oiB_vol > oiA_vol ? 1 : oiB_vol < oiA_vol ? -1 : 0;
+        case "volume": {
+          // Prefer Supabase volume, fall back to OI
+          const volA = BigInt(a.supabase?.volume_24h ?? 0) || getOI(a);
+          const volB = BigInt(b.supabase?.volume_24h ?? 0) || getOI(b);
+          return volB > volA ? 1 : volB < volA ? -1 : 0;
+        }
         case "oi": {
-          const oiA = a.onChain.engine.totalOpenInterest ?? 0n;
-          const oiB = b.onChain.engine.totalOpenInterest ?? 0n;
+          const oiA = getOI(a);
+          const oiB = getOI(b);
           return oiB > oiA ? 1 : oiB < oiA ? -1 : 0;
         }
         case "health": {
+          // Markets without on-chain data sort last
+          if (!a.onChain && !b.onChain) return 0;
+          if (!a.onChain) return 1;
+          if (!b.onChain) return -1;
           const ha = computeMarketHealth(a.onChain.engine);
           const hb = computeMarketHealth(b.onChain.engine);
           const order: Record<string, number> = { healthy: 0, caution: 1, warning: 2, empty: 3 };
@@ -256,8 +294,8 @@ function MarketsPageInner() {
 
   return (
     <div className="min-h-[calc(100vh-48px)] relative">
-      {/* Grid background */}
-      <div className="absolute inset-x-0 top-0 h-32 bg-grid pointer-events-none" />
+      {/* Grid background — subtle decorative element */}
+      <div className="absolute inset-x-0 top-0 h-16 bg-grid pointer-events-none opacity-50" />
 
       <div className="relative mx-auto max-w-4xl px-4 pt-4 pb-10">
         {/* Header */}
@@ -473,17 +511,24 @@ function MarketsPageInner() {
                 </div>
 
                 {displayedMarkets.map((m, i) => {
-                  const health = computeMarketHealth(m.onChain.engine);
-                  // Prefer Supabase last_price, fall back to on-chain lastEffectivePriceE6 or authorityPriceE6
-                  const lastPrice = m.supabase?.last_price
-                    ?? (m.onChain.config.lastEffectivePriceE6 > 0n ? Number(m.onChain.config.lastEffectivePriceE6) / 1e6 : null)
-                    ?? (m.onChain.config.authorityPriceE6 > 0n ? Number(m.onChain.config.authorityPriceE6) / 1e6 : null);
+                  // Health: requires on-chain data; Supabase-only markets show "empty"
+                  const health = m.onChain
+                    ? computeMarketHealth(m.onChain.engine)
+                    : { level: "empty" as const, ratio: 0, label: "No data" };
+                  
+                  // Price: prefer Supabase, fall back to oracle-mode-aware on-chain price
+                  const onChainPriceE6 = m.onChain ? resolveMarketPriceE6(m.onChain.config) : 0n;
+                  const lastPrice = m.supabase?.last_price ?? priceE6ToUsd(onChainPriceE6);
                   const mintDecimals = tokenMetaMap.get(m.mintAddress)?.decimals ?? (m.supabase?.decimals ?? 6);
                   const tokenDivisor = 10 ** mintDecimals;
                   
-                  // Token amounts
-                  const oiTokensRaw = m.onChain.engine.totalOpenInterest;
-                  const insuranceTokensRaw = m.onChain.engine.insuranceFund.balance;
+                  // Token amounts: prefer on-chain, fall back to Supabase
+                  const oiTokensRaw = m.onChain
+                    ? m.onChain.engine.totalOpenInterest
+                    : BigInt(m.supabase?.total_open_interest ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0)));
+                  const insuranceTokensRaw = m.onChain
+                    ? m.onChain.engine.insuranceFund.balance
+                    : BigInt(m.supabase?.insurance_balance ?? m.supabase?.insurance_fund ?? 0);
                   const volume24hRaw = m.supabase?.volume_24h != null ? BigInt(m.supabase.volume_24h) : null;
                   
                   // Display values (USD or tokens)
@@ -513,8 +558,21 @@ function MarketsPageInner() {
                           <MarketLogo logoUrl={m.supabase?.logo_url} mintAddress={m.mintAddress} symbol={tokenMetaMap.get(m.mintAddress)?.symbol ?? undefined} size="sm" />
                           <span className="font-semibold text-white text-sm">
                             {(() => {
-                              const sym = tokenMetaMap.get(m.mintAddress)?.symbol
-                                || (m.supabase?.symbol && m.supabase.symbol.length <= 10 && !/^[0-9a-fA-F]{8}$/.test(m.supabase.symbol) ? m.supabase.symbol : null);
+                              // Helper: detect if a symbol is a truncated address (auto-registered placeholder)
+                              const isPlaceholderSymbol = (sym: string | null | undefined, mint: string): boolean => {
+                                if (!sym) return true;
+                                // Reject if it's the first N chars of the mint address (StatsCollector default)
+                                if (mint.startsWith(sym)) return true;
+                                // Reject pure hex-like strings (8 chars)
+                                if (/^[0-9a-fA-F]{8}$/.test(sym)) return true;
+                                // Reject if it looks like a truncated address with ellipsis
+                                if (/^[A-Za-z0-9]{3,6}\.\.\.[A-Za-z0-9]{3,6}$/.test(sym)) return true;
+                                return false;
+                              };
+                              const onChainSym = tokenMetaMap.get(m.mintAddress)?.symbol;
+                              const supabaseSym = m.supabase?.symbol;
+                              const sym = (!isPlaceholderSymbol(onChainSym, m.mintAddress) ? onChainSym : null)
+                                || (!isPlaceholderSymbol(supabaseSym, m.mintAddress) && supabaseSym && supabaseSym.length <= 10 ? supabaseSym : null);
                               return sym ? `${sym}/USD` : shortenAddress(m.slabAddress);
                             })()}
                           </span>
@@ -523,7 +581,22 @@ function MarketsPageInner() {
                           )}
                         </div>
                         <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-                          {(tokenMetaMap.get(m.mintAddress)?.name || m.supabase?.name) ? `${tokenMetaMap.get(m.mintAddress)?.name || m.supabase?.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
+                          {(() => {
+                            const onChainName = tokenMetaMap.get(m.mintAddress)?.name;
+                            const supabaseName = m.supabase?.name;
+                            // Filter out placeholder names like "Market XXXXXXXX"
+                            const isPlaceholderName = (n: string | null | undefined): boolean => {
+                              if (!n) return true;
+                              if (/^Market [A-Za-z0-9]{6,}$/.test(n)) return true;
+                              if (n.length <= 8 && m.mintAddress.startsWith(n)) return true;
+                              // Filter truncated addresses used as names
+                              if (/^[A-Za-z0-9]{3,6}\.\.\.[A-Za-z0-9]{3,6}$/.test(n)) return true;
+                              return false;
+                            };
+                            const name = (!isPlaceholderName(onChainName) ? onChainName : null)
+                              || (!isPlaceholderName(supabaseName) ? supabaseName : null);
+                            return name ? `${name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress);
+                          })()}
                         </div>
                       </div>
                       <div className="text-right truncate">

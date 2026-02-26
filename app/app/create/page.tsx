@@ -35,8 +35,8 @@ function CreatePageInner() {
 
   return (
     <div className="min-h-[calc(100vh-48px)] relative">
-      {/* Grid background */}
-      <div className="absolute inset-x-0 top-0 h-32 bg-grid pointer-events-none" />
+      {/* Grid background — subtle decorative element */}
+      <div className="absolute inset-x-0 top-0 h-16 bg-grid pointer-events-none opacity-50" />
 
       <div className="relative mx-auto max-w-4xl px-4 pt-4 pb-10">
         {/* Page header */}

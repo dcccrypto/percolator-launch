@@ -109,6 +109,7 @@ export class StatsCollector {
       logger.info("New markets found", { count: missingMarkets.length });
 
       // Insert missing markets
+      const connection = getConnection();
       for (const [slabAddress, state] of missingMarkets) {
         try {
           const market = state.market;
@@ -117,18 +118,54 @@ export class StatsCollector {
           const oracleAuthority = market.config.oracleAuthority.toBase58();
           const priceE6 = Number(market.config.authorityPriceE6);
           const initialMarginBps = Number(market.params.initialMarginBps);
-          
-          // Derive fields as specified
-          const symbol = mintAddress.substring(0, 8);
-          const name = `Market ${slabAddress.substring(0, 8)}`;
           const maxLeverage = Math.floor(10000 / initialMarginBps);
+          
+          // Try to resolve token metadata from on-chain (Helius DAS / Metaplex)
+          let symbol = mintAddress.substring(0, 8); // fallback
+          let name = `Market ${slabAddress.substring(0, 8)}`; // fallback
+          let decimals = 9;
+          try {
+            const mintPubkey = new PublicKey(mintAddress);
+            const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
+            if (mintInfo.value?.data && "parsed" in mintInfo.value.data) {
+              decimals = mintInfo.value.data.parsed.info.decimals ?? 9;
+            }
+            // Try Helius DAS API if the RPC endpoint supports it
+            const endpoint = connection.rpcEndpoint;
+            if (endpoint.includes("helius-rpc.com")) {
+              const dasRes = await fetch(endpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: `das-${mintAddress}`,
+                  method: "getAsset",
+                  params: { id: mintAddress, options: { showFungible: true } },
+                }),
+                signal: AbortSignal.timeout(5000),
+              });
+              if (dasRes.ok) {
+                const dasJson = await dasRes.json();
+                const metadata = dasJson?.result?.content?.metadata;
+                const tokenInfo = dasJson?.result?.token_info;
+                const dasSym = metadata?.symbol || tokenInfo?.symbol;
+                const dasName = metadata?.name;
+                const dasDecimals = tokenInfo?.decimals;
+                if (dasSym) symbol = dasSym;
+                if (dasName) name = dasName;
+                if (dasDecimals != null) decimals = dasDecimals;
+              }
+            }
+          } catch (metaErr) {
+            logger.debug("Token metadata resolution failed, using fallback", { mintAddress, error: metaErr instanceof Error ? metaErr.message : metaErr });
+          }
           
           await insertMarket({
             slab_address: slabAddress,
             mint_address: mintAddress,
             symbol,
             name,
-            decimals: 9,
+            decimals,
             deployer: admin,
             oracle_authority: oracleAuthority,
             initial_price_e6: priceE6,
@@ -139,7 +176,7 @@ export class StatsCollector {
             status: "active",
           });
 
-          logger.info("Market registered", { slabAddress, symbol });
+          logger.info("Market registered", { slabAddress, symbol, name });
         } catch (err) {
           logger.warn("Failed to register market", { slabAddress, error: err instanceof Error ? err.message : err });
         }
@@ -224,8 +261,25 @@ export class StatsCollector {
               oiShort = oiLong;
             }
 
-            // Use on-chain price directly (no OracleService dependency)
-            const priceE6 = marketConfig.authorityPriceE6;
+            // Use on-chain price with oracle-mode-aware resolution
+            // Oracle modes:
+            //   - pyth-pinned: oracleAuthority == [0;32] → use lastEffectivePriceE6
+            //   - hyperp: indexFeedId == [0;32] → use lastEffectivePriceE6 (index price)
+            //   - admin: both non-zero → use authorityPriceE6 (authority-pushed price)
+            const zeroKeyBytes = new Uint8Array(32);
+            const isHyperpMode = marketConfig.indexFeedId.equals(new PublicKey(zeroKeyBytes));
+            const isPythPinned = !isHyperpMode && marketConfig.oracleAuthority.equals(new PublicKey(zeroKeyBytes));
+            let priceE6: bigint;
+            if (isPythPinned || isHyperpMode) {
+              // Pyth-pinned and hyperp: use lastEffectivePriceE6 (on-chain resolved price)
+              // For hyperp, authorityPriceE6 is the mark price which can be inflated
+              priceE6 = marketConfig.lastEffectivePriceE6;
+            } else {
+              // Admin oracle: prefer authorityPriceE6, fall back to lastEffectivePriceE6
+              priceE6 = marketConfig.authorityPriceE6 > 0n
+                ? marketConfig.authorityPriceE6
+                : marketConfig.lastEffectivePriceE6;
+            }
             const priceUsd = priceE6 > 0n ? Number(priceE6) / 1_000_000 : null;
 
             // Calculate 24h volume from trades table
