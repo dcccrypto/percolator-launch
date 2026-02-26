@@ -227,7 +227,7 @@ function TradePageInner({ slab }: { slab: string }) {
         <div className="flex items-center justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <MarketLogo logoUrl={logoUrl} symbol={symbol} size="sm" />
+              <MarketLogo logoUrl={logoUrl} mintAddress={config?.collateralMint?.toBase58()} symbol={symbol} size="sm" />
               <h1 className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
                 {symbol}/USD <span className="text-[10px] font-normal uppercase tracking-[0.15em] text-[var(--text-muted)]">PERP</span>
               </h1>
@@ -266,7 +266,7 @@ function TradePageInner({ slab }: { slab: string }) {
       {/* ── DESKTOP: Compact header bar ── */}
       <div className="hidden lg:flex items-center gap-3 border-b border-[var(--border)]/30 px-6 py-1.5">
         {/* Left: pair selector */}
-        <MarketLogo logoUrl={logoUrl} symbol={symbol} size="sm" />
+        <MarketLogo logoUrl={logoUrl} mintAddress={config?.collateralMint?.toBase58()} symbol={symbol} size="sm" />
         <MarketSelector
           currentSlabAddress={slab}
           symbol={symbol}

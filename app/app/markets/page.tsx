@@ -510,7 +510,7 @@ function MarketsPageInner() {
                     >
                       <div>
                         <div className="flex items-center gap-2">
-                          <MarketLogo logoUrl={m.supabase?.logo_url} symbol={tokenMetaMap.get(m.mintAddress)?.symbol ?? undefined} size="sm" />
+                          <MarketLogo logoUrl={m.supabase?.logo_url} mintAddress={m.mintAddress} symbol={tokenMetaMap.get(m.mintAddress)?.symbol ?? undefined} size="sm" />
                           <span className="font-semibold text-white text-sm">
                             {(() => {
                               const sym = tokenMetaMap.get(m.mintAddress)?.symbol
