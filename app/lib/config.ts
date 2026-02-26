@@ -19,16 +19,37 @@ function getNetwork(): Network {
   return "devnet";
 }
 
+/** Solana public fallback RPC (rate-limited, for development/build only) */
+const PUBLIC_DEVNET_RPC = "https://api.devnet.solana.com";
+
+/**
+ * Validate an RPC URL is non-empty and has a valid scheme.
+ * Returns the URL if valid, or null if invalid/empty.
+ */
+function validateRpcUrl(url: string | undefined | null): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  // Must be http(s) — catch misconfigured values like "null", "undefined", empty-ish strings
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    console.warn(`[getRpcEndpoint] Invalid RPC URL (bad scheme): "${trimmed}"`);
+    return null;
+  }
+  return trimmed;
+}
+
 /** Get RPC endpoint — absolute /api/rpc on client, direct RPC on server */
 export function getRpcEndpoint(): string {
   if (typeof window !== "undefined") {
     return new URL("/api/rpc", window.location.origin).toString();
   }
 
-  const explicit = process.env.NEXT_PUBLIC_HELIUS_RPC_URL?.trim();
+  // 1. Explicit full URL override (highest priority)
+  const explicit = validateRpcUrl(process.env.NEXT_PUBLIC_HELIUS_RPC_URL);
   if (explicit) return explicit;
 
-  const apiKey = process.env.HELIUS_API_KEY ?? "";
+  // 2. Build from Helius API key
+  const apiKey = (process.env.HELIUS_API_KEY ?? "").trim();
   if (apiKey) {
     const net = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
     const network = net === "mainnet" ? "mainnet" : "devnet";
@@ -37,7 +58,14 @@ export function getRpcEndpoint(): string {
       : `https://devnet.helius-rpc.com/?api-key=${apiKey}`;
   }
 
-  return process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+  // 3. Generic Solana RPC URL (supports both env var names)
+  const solanaRpc =
+    validateRpcUrl(process.env.NEXT_PUBLIC_SOLANA_RPC_URL) ||
+    validateRpcUrl(process.env.SOLANA_RPC_URL);
+  if (solanaRpc) return solanaRpc;
+
+  // 4. Public fallback (rate-limited but prevents build failures)
+  return PUBLIC_DEVNET_RPC;
 }
 
 /**

@@ -111,7 +111,32 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         const accounts = parseAllAccounts(data);
         setState((s) => ({ slabAddress, raw: data, header, config, engine, params, accounts, loading: false, error: null, programId: owner ?? s.programId }));
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e.message : String(e) }));
+        const msg = e instanceof Error ? e.message : String(e);
+
+        // Detect version/layout mismatch errors that typically occur after a program upgrade.
+        // Common symptoms: unexpected data length, bad discriminator/magic, out-of-range reads.
+        const isLayoutMismatch =
+          msg.includes("out of range") ||
+          msg.includes("offset") ||
+          msg.includes("Invalid") ||
+          msg.includes("discriminator") ||
+          msg.includes("magic") ||
+          msg.includes("unexpected length") ||
+          msg.includes("buffer") ||
+          (data.length > 0 && data.length < 200); // Suspiciously small for a slab
+
+        if (isLayoutMismatch) {
+          setState((s) => ({
+            ...s,
+            loading: false,
+            error:
+              "This market's on-chain data format has changed (likely due to a program upgrade). " +
+              "Please refresh the page. If the issue persists, the market may need migration — " +
+              "contact the market admin or check the Percolator Discord for updates.",
+          }));
+        } else {
+          setState((s) => ({ ...s, loading: false, error: msg }));
+        }
       }
     }
 

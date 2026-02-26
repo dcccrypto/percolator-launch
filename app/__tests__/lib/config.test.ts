@@ -107,7 +107,52 @@ describe("getRpcEndpoint", () => {
     delete process.env.HELIUS_API_KEY;
     delete process.env.NEXT_PUBLIC_HELIUS_API_KEY;
     delete process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+    delete process.env.SOLANA_RPC_URL;
     expect(getRpcEndpoint()).toBe("https://api.devnet.solana.com");
+  });
+
+  it("ignores empty-string NEXT_PUBLIC_SOLANA_RPC_URL (PERC-210 bug 1)", () => {
+    clearWindow();
+    delete process.env.NEXT_PUBLIC_HELIUS_RPC_URL;
+    delete process.env.HELIUS_API_KEY;
+    process.env.NEXT_PUBLIC_SOLANA_RPC_URL = "";
+    delete process.env.SOLANA_RPC_URL;
+    expect(getRpcEndpoint()).toBe("https://api.devnet.solana.com");
+  });
+
+  it("ignores whitespace-only NEXT_PUBLIC_HELIUS_RPC_URL (PERC-210 bug 1)", () => {
+    clearWindow();
+    process.env.NEXT_PUBLIC_HELIUS_RPC_URL = "   ";
+    delete process.env.HELIUS_API_KEY;
+    delete process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+    delete process.env.SOLANA_RPC_URL;
+    expect(getRpcEndpoint()).toBe("https://api.devnet.solana.com");
+  });
+
+  it("ignores non-URL values like 'null' or 'undefined' strings", () => {
+    clearWindow();
+    process.env.NEXT_PUBLIC_HELIUS_RPC_URL = "null";
+    delete process.env.HELIUS_API_KEY;
+    delete process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+    delete process.env.SOLANA_RPC_URL;
+    expect(getRpcEndpoint()).toBe("https://api.devnet.solana.com");
+  });
+
+  it("uses SOLANA_RPC_URL as fallback when NEXT_PUBLIC variant is missing", () => {
+    clearWindow();
+    delete process.env.NEXT_PUBLIC_HELIUS_RPC_URL;
+    delete process.env.HELIUS_API_KEY;
+    delete process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+    process.env.SOLANA_RPC_URL = "https://custom-rpc.example.com";
+    expect(getRpcEndpoint()).toBe("https://custom-rpc.example.com");
+  });
+
+  it("trims whitespace from HELIUS_API_KEY", () => {
+    clearWindow();
+    delete process.env.NEXT_PUBLIC_HELIUS_RPC_URL;
+    process.env.HELIUS_API_KEY = "  my-key  ";
+    process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
+    expect(getRpcEndpoint()).toBe("https://devnet.helius-rpc.com/?api-key=my-key");
   });
 });
 

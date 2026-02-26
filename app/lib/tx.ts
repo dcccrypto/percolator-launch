@@ -57,6 +57,141 @@ async function getPriorityFee(connection: Connection): Promise<number> {
   }
 }
 
+// ============================================================================
+// Clock drift detection
+// ============================================================================
+
+/** Maximum acceptable clock drift in seconds before warning */
+const MAX_CLOCK_DRIFT_SECONDS = 30;
+/** How often to re-check clock drift (ms) */
+const CLOCK_DRIFT_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+let lastClockDriftCheckMs = 0;
+let cachedClockDriftSeconds = 0;
+
+/**
+ * Detect clock drift between the client machine and the Solana cluster.
+ * Large drift causes signature verification failures and blockhash expiry
+ * because the wallet signs with a timestamp that the cluster considers stale.
+ */
+async function checkClockDrift(connection: Connection): Promise<void> {
+  const now = Date.now();
+  if (now - lastClockDriftCheckMs < CLOCK_DRIFT_CHECK_INTERVAL_MS) return;
+  lastClockDriftCheckMs = now;
+
+  try {
+    const beforeMs = Date.now();
+    const slot = await connection.getSlot("confirmed");
+    const blockTime = await connection.getBlockTime(slot);
+    const afterMs = Date.now();
+
+    if (blockTime === null) return; // Some RPC providers don't support getBlockTime
+
+    // Estimate the one-way latency and use midpoint
+    const rttMs = afterMs - beforeMs;
+    const clientTimeSec = Math.floor((beforeMs + rttMs / 2) / 1000);
+    const driftSeconds = Math.abs(clientTimeSec - blockTime);
+    cachedClockDriftSeconds = driftSeconds;
+
+    if (driftSeconds > MAX_CLOCK_DRIFT_SECONDS) {
+      console.warn(
+        `[sendTx] Clock drift detected: ${driftSeconds}s between your machine and Solana cluster. ` +
+        `This may cause signature verification failures. Please sync your system clock.`
+      );
+    }
+  } catch {
+    // Non-critical — don't block transactions if drift check fails
+  }
+}
+
+/**
+ * Get a user-facing clock drift warning message, or null if drift is acceptable.
+ */
+export function getClockDriftWarning(): string | null {
+  if (cachedClockDriftSeconds > MAX_CLOCK_DRIFT_SECONDS) {
+    return (
+      `Your system clock is ${cachedClockDriftSeconds}s out of sync with the Solana network. ` +
+      `This can cause transaction failures. Please sync your system clock ` +
+      `(Settings → Date & Time → Set Automatically).`
+    );
+  }
+  return null;
+}
+
+// ============================================================================
+// Fee estimation
+// ============================================================================
+
+/** Base transaction fee per signature (lamports) */
+const BASE_TX_FEE_LAMPORTS = 5000;
+
+export interface FeeEstimate {
+  /** Base fee in lamports (5000 per signature) */
+  baseFee: number;
+  /** Priority fee in lamports */
+  priorityFee: number;
+  /** Total estimated cost in lamports */
+  total: number;
+  /** Total estimated cost in SOL */
+  totalSol: number;
+}
+
+/**
+ * Estimate total transaction fees before sending.
+ * Accounts for: base tx fee, compute unit price (priority fee), and number of signers.
+ */
+export function estimateFees(
+  computeUnits: number,
+  priorityFeeMicroLamports: number,
+  numSignatures: number = 1,
+): FeeEstimate {
+  const baseFee = BASE_TX_FEE_LAMPORTS * numSignatures;
+  // Priority fee: (computeUnits × microLamports) / 1_000_000
+  const priorityFee = Math.ceil((computeUnits * priorityFeeMicroLamports) / 1_000_000);
+  const total = baseFee + priorityFee;
+  return {
+    baseFee,
+    priorityFee,
+    total,
+    totalSol: total / 1e9,
+  };
+}
+
+/**
+ * Check that the user has enough SOL to cover transaction fees.
+ * Throws an informative error if the balance is insufficient.
+ */
+async function checkSufficientBalance(
+  connection: Connection,
+  payer: PublicKey,
+  feeEstimate: FeeEstimate,
+): Promise<void> {
+  try {
+    const balance = await connection.getBalance(payer);
+    // Add 10% buffer for potential fee fluctuations
+    const requiredWithBuffer = Math.ceil(feeEstimate.total * 1.1);
+
+    if (balance < requiredWithBuffer) {
+      const balanceSol = (balance / 1e9).toFixed(6);
+      const requiredSol = (requiredWithBuffer / 1e9).toFixed(6);
+      throw new Error(
+        `Insufficient SOL for transaction fees. ` +
+        `Balance: ${balanceSol} SOL, Required: ~${requiredSol} SOL ` +
+        `(base fee: ${feeEstimate.baseFee} lamports + priority fee: ${feeEstimate.priorityFee} lamports). ` +
+        `Please add at least ${((requiredWithBuffer - balance) / 1e9).toFixed(6)} SOL to your wallet.`
+      );
+    }
+  } catch (e) {
+    // Rethrow our own insufficient balance error
+    if (e instanceof Error && e.message.includes("Insufficient SOL")) throw e;
+    // Otherwise log and don't block — balance check is advisory
+    console.warn("[checkSufficientBalance] Failed to check balance:", e);
+  }
+}
+
+// ============================================================================
+// Network validation
+// ============================================================================
+
 // Network detection cache — only check once per session
 let networkValidated = false;
 let lastGenesisHash: string | null = null;
@@ -197,6 +332,14 @@ export async function sendTx({
   // Validate network before sending any transactions
   await validateNetwork(connection);
 
+  // Check clock drift (non-blocking, warns in console; cached 5min)
+  await checkClockDrift(connection);
+  const driftWarning = getClockDriftWarning();
+  if (driftWarning) {
+    // Log prominently — UI layer can also call getClockDriftWarning() to display a toast
+    console.warn(`⚠️ ${driftWarning}`);
+  }
+
   let lastError: Error | null = null;
   let lastSignature: string | undefined;
 
@@ -204,6 +347,13 @@ export async function sendTx({
     try {
       // Get dynamic priority fee on first attempt
       const priorityFee = attempt === 0 ? await getPriorityFee(connection) : PRIORITY_FEE_FALLBACK;
+
+      // Pre-flight fee estimation and balance check (first attempt only)
+      if (attempt === 0) {
+        const numSignatures = 1 + signers.length; // wallet + additional signers
+        const fees = estimateFees(computeUnits, priorityFee, numSignatures);
+        await checkSufficientBalance(connection, wallet.publicKey, fees);
+      }
       
       const tx = new Transaction();
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
@@ -268,6 +418,14 @@ export async function sendTx({
         msg.includes("block height exceeded") ||
         msg.includes("Blockhash not found") ||
         msg.includes("has expired");
+
+      // If clock drift is large, enrich the error message for the user
+      if (isBlockhashExpired && cachedClockDriftSeconds > MAX_CLOCK_DRIFT_SECONDS) {
+        lastError = new Error(
+          `${msg} — Your system clock is ${cachedClockDriftSeconds}s out of sync. ` +
+          `Please sync your system clock (Settings → Date & Time → Set Automatically) and retry.`
+        );
+      }
 
       if (isBlockhashExpired && attempt < maxRetries) {
         // R2-S7: Before retrying, check if the original tx actually landed
