@@ -5,7 +5,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
-import { computeMarketHealth } from "@/lib/health";
+import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
 import { getSupabase } from "@/lib/supabase";
@@ -33,6 +33,9 @@ function formatNum(n: number | null | undefined): string {
 function shortenAddress(addr: string, chars = 4): string {
   return `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
 }
+
+/** Returns true if a numeric value looks like a u64::MAX sentinel (≈1.844e19). */
+const isSentinelNum = (v: number) => v > 1e18;
 
 type SortKey = "volume" | "oi" | "recent" | "health";
 type LeverageFilter = "all" | "5x" | "10x" | "20x";
@@ -210,11 +213,12 @@ function MarketsPageInner() {
       list = list.filter((m) => !m.isAdminOracle);
     }
     // Helper to get OI (prefer on-chain, fall back to Supabase)
+    // Sanitizes sentinel values (u64::MAX) to 0
     const getOI = (m: MergedMarket): bigint => {
-      if (m.onChain) return m.onChain.engine.totalOpenInterest ?? 0n;
+      if (m.onChain) return sanitizeOnChainValue(m.onChain.engine.totalOpenInterest ?? 0n);
       const supaOI = m.supabase?.total_open_interest
         ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0));
-      return BigInt(supaOI ?? 0);
+      return BigInt(isSentinelNum(supaOI) ? 0 : Math.max(0, supaOI));
     };
     list = [...list].sort((a, b) => {
       switch (sortBy) {
@@ -230,12 +234,12 @@ function MarketsPageInner() {
           return oiB > oiA ? 1 : oiB < oiA ? -1 : 0;
         }
         case "health": {
-          // Markets without on-chain data sort last
-          if (!a.onChain && !b.onChain) return 0;
-          if (!a.onChain) return 1;
-          if (!b.onChain) return -1;
-          const ha = computeMarketHealth(a.onChain.engine);
-          const hb = computeMarketHealth(b.onChain.engine);
+          const ha = a.onChain
+            ? computeMarketHealth(a.onChain.engine)
+            : (a.supabase ? computeMarketHealthFromStats(a.supabase) : { level: "empty" as const });
+          const hb = b.onChain
+            ? computeMarketHealth(b.onChain.engine)
+            : (b.supabase ? computeMarketHealthFromStats(b.supabase) : { level: "empty" as const });
           const order: Record<string, number> = { healthy: 0, caution: 1, warning: 2, empty: 3 };
           return (order[ha.level] ?? 5) - (order[hb.level] ?? 5);
         }
@@ -511,10 +515,12 @@ function MarketsPageInner() {
                 </div>
 
                 {displayedMarkets.map((m, i) => {
-                  // Health: requires on-chain data; Supabase-only markets show "empty"
+                  // Health: prefer on-chain data, fall back to Supabase stats
                   const health = m.onChain
                     ? computeMarketHealth(m.onChain.engine)
-                    : { level: "empty" as const, ratio: 0, label: "No data" };
+                    : (m.supabase
+                      ? computeMarketHealthFromStats(m.supabase)
+                      : { level: "empty" as const, label: "No data", insuranceRatio: 0, capitalRatio: 0 });
                   
                   // Price: prefer Supabase, fall back to oracle-mode-aware on-chain price
                   const onChainPriceE6 = m.onChain ? resolveMarketPriceE6(m.onChain.config) : 0n;
@@ -523,13 +529,22 @@ function MarketsPageInner() {
                   const tokenDivisor = 10 ** mintDecimals;
                   
                   // Token amounts: prefer on-chain, fall back to Supabase
+                  // Sanitize sentinel values (u64::MAX = uninitialized on-chain) → show as 0
                   const oiTokensRaw = m.onChain
-                    ? m.onChain.engine.totalOpenInterest
-                    : BigInt(m.supabase?.total_open_interest ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0)));
+                    ? sanitizeOnChainValue(m.onChain.engine.totalOpenInterest)
+                    : (() => {
+                        const v = m.supabase?.total_open_interest ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0));
+                        return BigInt(isSentinelNum(v) ? 0 : Math.max(0, v));
+                      })();
                   const insuranceTokensRaw = m.onChain
-                    ? m.onChain.engine.insuranceFund.balance
-                    : BigInt(m.supabase?.insurance_balance ?? m.supabase?.insurance_fund ?? 0);
-                  const volume24hRaw = m.supabase?.volume_24h != null ? BigInt(m.supabase.volume_24h) : null;
+                    ? sanitizeOnChainValue(m.onChain.engine.insuranceFund.balance)
+                    : (() => {
+                        const v = m.supabase?.insurance_balance ?? m.supabase?.insurance_fund ?? 0;
+                        return BigInt(isSentinelNum(v) ? 0 : Math.max(0, v));
+                      })();
+                  const volume24hRaw = m.supabase?.volume_24h != null && !isSentinelNum(m.supabase.volume_24h)
+                    ? BigInt(Math.max(0, m.supabase.volume_24h))
+                    : null;
                   
                   // Display values (USD or tokens)
                   const oiDisplay = showUsd && lastPrice != null

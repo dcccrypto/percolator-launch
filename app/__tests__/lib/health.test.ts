@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMarketHealth } from "../../lib/health";
+import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue } from "../../lib/health";
 import type { HealthLevel } from "../../lib/health";
 
 /** Stub EngineState with only the fields computeMarketHealth uses */
@@ -15,28 +15,71 @@ function makeEngine(overrides: {
   } as any;
 }
 
+describe("sanitizeOnChainValue", () => {
+  it("returns 0n for u64::MAX sentinel", () => {
+    expect(sanitizeOnChainValue(18446744073709551615n)).toBe(0n);
+  });
+
+  it("returns 0n for values near u64::MAX", () => {
+    expect(sanitizeOnChainValue(18100000000000000000n)).toBe(0n);
+  });
+
+  it("returns the value for normal bigints", () => {
+    expect(sanitizeOnChainValue(1_000_000n)).toBe(1_000_000n);
+  });
+
+  it("returns 0n for negative values", () => {
+    expect(sanitizeOnChainValue(-100n)).toBe(0n);
+  });
+
+  it("returns 0n for zero", () => {
+    expect(sanitizeOnChainValue(0n)).toBe(0n);
+  });
+});
+
+describe("isSentinelValue", () => {
+  it("detects u64::MAX as sentinel", () => {
+    expect(isSentinelValue(18446744073709551615n)).toBe(true);
+  });
+
+  it("does not flag normal values", () => {
+    expect(isSentinelValue(1_000_000_000n)).toBe(false);
+  });
+});
+
 describe("computeMarketHealth", () => {
   // ── Empty states ──
-  it('returns "empty" when capital is zero', () => {
-    const result = computeMarketHealth(makeEngine({ cTot: 0n }));
+  it('returns "empty" when all values are zero', () => {
+    const result = computeMarketHealth(makeEngine({ cTot: 0n, insuranceFundBalance: 0n, totalOpenInterest: 0n }));
     expect(result.level).toBe("empty");
     expect(result.label).toBe("Empty");
     expect(result.insuranceRatio).toBe(0);
     expect(result.capitalRatio).toBe(0);
   });
 
-  it('returns "empty" when insurance is zero', () => {
-    const result = computeMarketHealth(makeEngine({ insuranceFundBalance: 0n }));
+  // ── Sentinel values (u64::MAX) treated as zero ──
+  it('returns "empty" when insurance is u64::MAX sentinel and capital/OI are zero', () => {
+    const result = computeMarketHealth(makeEngine({
+      cTot: 0n,
+      insuranceFundBalance: 18446744073709551615n, // u64::MAX
+      totalOpenInterest: 0n,
+    }));
     expect(result.level).toBe("empty");
   });
 
-  it('returns "empty" when both capital and insurance are zero', () => {
-    const result = computeMarketHealth(makeEngine({ cTot: 0n, insuranceFundBalance: 0n }));
-    expect(result.level).toBe("empty");
+  it('returns "warning" when insurance is u64::MAX but OI exists', () => {
+    const result = computeMarketHealth(makeEngine({
+      cTot: 1_000_000n,
+      insuranceFundBalance: 18446744073709551615n, // u64::MAX → sanitized to 0
+      totalOpenInterest: 100_000n,
+    }));
+    // Capital ratio = 10 (healthy), but insurance = 0 → low insurance
+    // insuranceRatio 0 < 0.02 → warning
+    expect(result.level).toBe("warning");
   });
 
   // ── No open interest ──
-  it('returns "healthy" with Infinity ratios when OI is zero', () => {
+  it('returns "healthy" with Infinity ratios when OI is zero but capital/insurance exist', () => {
     const result = computeMarketHealth(
       makeEngine({ cTot: 1_000_000n, insuranceFundBalance: 100_000n, totalOpenInterest: 0n })
     );
@@ -45,14 +88,24 @@ describe("computeMarketHealth", () => {
     expect(result.capitalRatio).toBe(Infinity);
   });
 
+  // ── OI but no capital or insurance ──
+  it('returns "warning" when OI exists but capital and insurance are zero', () => {
+    const result = computeMarketHealth(makeEngine({
+      totalOpenInterest: 1_000_000n,
+      cTot: 0n,
+      insuranceFundBalance: 0n,
+    }));
+    expect(result.level).toBe("warning");
+    expect(result.label).toBe("Low Liquidity");
+  });
+
   // ── Healthy market ──
   it('returns "healthy" when both ratios are above thresholds', () => {
-    // insurance >= 5% of OI, capital >= 80% of OI
     const result = computeMarketHealth(
       makeEngine({
         totalOpenInterest: 1_000_000n,
-        cTot: 1_000_000n,        // 100% capital ratio
-        insuranceFundBalance: 100_000n, // 10% insurance ratio
+        cTot: 1_000_000n,
+        insuranceFundBalance: 100_000n,
       })
     );
     expect(result.level).toBe("healthy");
@@ -66,8 +119,8 @@ describe("computeMarketHealth", () => {
     const result = computeMarketHealth(
       makeEngine({
         totalOpenInterest: 1_000_000n,
-        cTot: 1_000_000n,        // 100% capital ratio → healthy
-        insuranceFundBalance: 30_000n,  // 3% insurance ratio → caution
+        cTot: 1_000_000n,
+        insuranceFundBalance: 30_000n,
       })
     );
     expect(result.level).toBe("caution");
@@ -78,8 +131,8 @@ describe("computeMarketHealth", () => {
     const result = computeMarketHealth(
       makeEngine({
         totalOpenInterest: 1_000_000n,
-        cTot: 600_000n,           // 60% capital ratio → caution
-        insuranceFundBalance: 100_000n, // 10% insurance ratio → healthy
+        cTot: 600_000n,
+        insuranceFundBalance: 100_000n,
       })
     );
     expect(result.level).toBe("caution");
@@ -90,8 +143,8 @@ describe("computeMarketHealth", () => {
     const result = computeMarketHealth(
       makeEngine({
         totalOpenInterest: 1_000_000n,
-        cTot: 1_000_000n,        // 100% capital → healthy
-        insuranceFundBalance: 10_000n,  // 1% insurance → warning
+        cTot: 1_000_000n,
+        insuranceFundBalance: 10_000n,
       })
     );
     expect(result.level).toBe("warning");
@@ -102,8 +155,8 @@ describe("computeMarketHealth", () => {
     const result = computeMarketHealth(
       makeEngine({
         totalOpenInterest: 1_000_000n,
-        cTot: 400_000n,           // 40% capital → warning
-        insuranceFundBalance: 100_000n, // 10% insurance → healthy
+        cTot: 400_000n,
+        insuranceFundBalance: 100_000n,
       })
     );
     expect(result.level).toBe("warning");
@@ -122,7 +175,7 @@ describe("computeMarketHealth", () => {
     expect(result.insuranceRatio).toBeCloseTo(0.05, 3);
   });
 
-  it('considers insurance=0 as "empty" even with high capital', () => {
+  it('returns "warning" when insurance=0 with high capital and OI (low insurance ratio)', () => {
     const result = computeMarketHealth(
       makeEngine({
         totalOpenInterest: 100n,
@@ -130,6 +183,82 @@ describe("computeMarketHealth", () => {
         insuranceFundBalance: 0n,
       })
     );
+    // insuranceRatio = 0 < 0.02 → warning
+    expect(result.level).toBe("warning");
+  });
+});
+
+describe("computeMarketHealthFromStats", () => {
+  it('returns "empty" when all stats are zero', () => {
+    const result = computeMarketHealthFromStats({
+      total_open_interest: 0,
+      insurance_balance: 0,
+      c_tot: 0,
+    });
     expect(result.level).toBe("empty");
+  });
+
+  it('returns "healthy" when ratios are good', () => {
+    const result = computeMarketHealthFromStats({
+      total_open_interest: 1_000_000,
+      insurance_balance: 100_000,
+      c_tot: 1_000_000,
+    });
+    expect(result.level).toBe("healthy");
+  });
+
+  it('returns "empty" when insurance is u64::MAX sentinel (numeric)', () => {
+    const result = computeMarketHealthFromStats({
+      total_open_interest: 0,
+      insurance_balance: 1.8446744073709552e19, // JS number of u64::MAX
+      c_tot: 0,
+    });
+    expect(result.level).toBe("empty");
+  });
+
+  it('returns "healthy" when OI is zero but capital exists', () => {
+    const result = computeMarketHealthFromStats({
+      total_open_interest: 0,
+      insurance_balance: 100_000,
+      c_tot: 500_000,
+    });
+    expect(result.level).toBe("healthy");
+  });
+
+  it('uses open_interest_long + short as fallback for total_open_interest', () => {
+    const result = computeMarketHealthFromStats({
+      open_interest_long: 500_000,
+      open_interest_short: 500_000,
+      insurance_balance: 100_000,
+      c_tot: 1_000_000,
+    });
+    expect(result.level).toBe("healthy");
+  });
+
+  it('uses vault_balance as fallback for c_tot', () => {
+    const result = computeMarketHealthFromStats({
+      total_open_interest: 1_000_000,
+      insurance_balance: 100_000,
+      vault_balance: 1_000_000,
+    });
+    expect(result.level).toBe("healthy");
+  });
+
+  it('returns "warning" when insurance is very low', () => {
+    const result = computeMarketHealthFromStats({
+      total_open_interest: 1_000_000,
+      insurance_balance: 10_000, // 1% < 2% threshold
+      c_tot: 1_000_000,
+    });
+    expect(result.level).toBe("warning");
+  });
+
+  it('returns "caution" when capital ratio is between 50-80%', () => {
+    const result = computeMarketHealthFromStats({
+      total_open_interest: 1_000_000,
+      insurance_balance: 100_000,
+      c_tot: 600_000, // 60% → caution
+    });
+    expect(result.level).toBe("caution");
   });
 });

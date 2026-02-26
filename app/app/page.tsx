@@ -130,29 +130,37 @@ export default function Home() {
           setStats({
             markets: data.length,
             // Convert raw token units to USD using per-market decimals and price
+            // Filter out sentinel values (u64::MAX ≈ 1.844e19)
             volume: data.reduce((s, m) => {
+              const raw = Number(m.volume_24h || 0);
+              if (raw > 1e18 || raw < 0) return s;
               const d = 10 ** (m.decimals ?? 6);
               const price = m.last_price ?? 0;
-              return s + (Number(m.volume_24h || 0) / d) * price;
+              return s + (raw / d) * price;
             }, 0),
             // Convert insurance balance to USD using per-market decimals and price
+            // Filter out u64::MAX sentinel values (≈1.844e19) — means uninitialized on-chain
             insurance: data.reduce((s, m) => {
+              const raw = Number(m.insurance_balance || 0);
+              if (raw > 1e18 || raw < 0) return s; // sentinel or invalid
               const d = 10 ** (m.decimals ?? 6);
               const price = m.last_price ?? 0;
-              return s + (Number(m.insurance_balance || 0) / d) * price;
+              return s + (raw / d) * price;
             }, 0),
           });
           setStatsLoaded(true);
           // Convert to USD first, then sort by converted volume
+          // Filter out sentinel values (u64::MAX ≈ 1.844e19 → uninitialized on-chain)
+          const sanitizeNum = (v: number) => (v > 1e18 || v < 0) ? 0 : v;
           const converted = data.map((m) => {
             const d = 10 ** (m.decimals ?? 6);
             const price = m.last_price ?? 0;
             return {
               slab_address: m.slab_address,
               symbol: m.symbol,
-              volume_24h: (Number(m.volume_24h || 0) / d) * price,
+              volume_24h: (sanitizeNum(Number(m.volume_24h || 0)) / d) * price,
               last_price: m.last_price,
-              total_open_interest: (Number(m.total_open_interest || 0) / d) * price,
+              total_open_interest: (sanitizeNum(Number(m.total_open_interest || 0)) / d) * price,
             };
           });
           const sorted = converted.sort((a, b) => b.volume_24h - a.volume_24h).slice(0, 5);
