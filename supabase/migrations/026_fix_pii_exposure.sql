@@ -45,14 +45,18 @@ GRANT ALL ON job_applications TO service_role;
 -- 3. IDEAS — hide ip, admin_notes, contact from anon
 -- ═══════════════════════════════════════════════════════════════
 
-REVOKE SELECT ON ideas FROM anon;
-
-GRANT SELECT (
-  id, handle, idea, status, created_at
-) ON ideas TO anon;
-
--- Ensure service_role retains full access
-GRANT ALL ON ideas TO service_role;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ideas') THEN
+    REVOKE SELECT ON ideas FROM anon;
+    GRANT SELECT (id, handle, idea, status, created_at) ON ideas TO anon;
+    GRANT ALL ON ideas TO service_role;
+    RAISE NOTICE 'ideas: PII column grants applied';
+  ELSE
+    RAISE NOTICE 'ideas: table does not exist, skipping';
+  END IF;
+END
+$$;
 
 -- ═══════════════════════════════════════════════════════════════
 -- 4. LOCK DOWN exec_sql RPC FUNCTION
@@ -88,14 +92,12 @@ $$;
 
 GRANT SELECT ON bug_reports TO authenticated;
 GRANT SELECT ON job_applications TO authenticated;
-GRANT SELECT ON ideas TO authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ideas') THEN
+    GRANT SELECT ON ideas TO authenticated;
+  END IF;
+END
+$$;
 
--- ═══════════════════════════════════════════════════════════════
--- VERIFICATION COMMENTS
--- ═══════════════════════════════════════════════════════════════
-COMMENT ON POLICY "Anyone can view bugs" ON bug_reports IS
-  'Row-level: allows all rows. Column access restricted via GRANT (migration 024)';
-COMMENT ON POLICY "Applications readable by all (limited fields)" ON job_applications IS
-  'Row-level: allows all rows. Column access restricted via GRANT (migration 024)';
-COMMENT ON POLICY "Ideas readable by all" ON ideas IS
-  'Row-level: allows all rows. Column access restricted via GRANT (migration 024)';
+-- Policy comments skipped — policy names vary by environment
