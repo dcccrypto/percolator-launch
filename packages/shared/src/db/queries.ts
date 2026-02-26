@@ -101,7 +101,8 @@ export async function upsertMarketStats(stats: Partial<MarketStatsRow> & { slab_
   const { error } = await getSupabase()
     .from("market_stats")
     .upsert(stats, { onConflict: "slab_address" });
-  if (error) throw error;
+  // Ignore FK violations (23503) — slab may not be in markets table yet
+  if (error && error.code !== "23503") throw error;
 }
 
 export async function insertTrade(trade: Omit<TradeRow, "id" | "created_at">): Promise<void> {
@@ -130,7 +131,8 @@ export async function insertOraclePrice(price: OraclePriceRow): Promise<void> {
     timestamp: price.timestamp,
     tx_signature: price.tx_signature ?? null,
   });
-  if (error) throw error;
+  // Ignore FK violations (23503) — market may not be in DB yet
+  if (error && error.code !== "23503") throw error;
 }
 
 export async function getRecentTrades(slabAddress: string, limit = 50): Promise<TradeRow[]> {

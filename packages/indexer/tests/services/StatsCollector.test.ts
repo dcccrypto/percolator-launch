@@ -319,4 +319,49 @@ describe('StatsCollector', () => {
       collector.stop();
     });
   });
+
+  describe('bigint overflow protection', () => {
+    it('should skip stats when lifetimeLiquidations exceeds sane threshold', async () => {
+      const markets = new Map([[SLAB1, makeMockMarket(SLAB1)]]);
+      vi.mocked(mockMarketProvider.getMarkets).mockReturnValue(markets);
+      mockGetMultipleAccountsInfo.mockResolvedValue([{ data: new Uint8Array(2048) }]);
+
+      // Value that exceeds PG BIGINT max (9.2e18) — real error case from production
+      vi.mocked(core.parseEngine).mockReturnValue(
+        makeEngineState({ lifetimeLiquidations: 13292928068290159000n })
+      );
+      vi.mocked(core.parseConfig).mockReturnValue(makeConfig());
+      vi.mocked(core.parseParams).mockReturnValue(makeParams());
+
+      statsCollector.start();
+      await vi.advanceTimersByTimeAsync(10_500);
+
+      // Should NOT upsert — isSaneEngine should catch this
+      expect(shared.upsertMarketStats).not.toHaveBeenCalled();
+    });
+
+    it('should handle values near u64 max gracefully', async () => {
+      const markets = new Map([[SLAB1, makeMockMarket(SLAB1)]]);
+      vi.mocked(mockMarketProvider.getMarkets).mockReturnValue(markets);
+      mockGetMultipleAccountsInfo.mockResolvedValue([{ data: new Uint8Array(2048) }]);
+
+      // lifetimeForceCloses at u64::MAX should be treated as sentinel (0)
+      vi.mocked(core.parseEngine).mockReturnValue(
+        makeEngineState({ lifetimeForceCloses: 18446744073709551615n })
+      );
+      vi.mocked(core.parseConfig).mockReturnValue(makeConfig());
+      vi.mocked(core.parseParams).mockReturnValue(makeParams());
+
+      statsCollector.start();
+      await vi.advanceTimersByTimeAsync(10_500);
+
+      // safeBigNum converts U64_MAX → 0, which passes sanity check
+      expect(shared.upsertMarketStats).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slab_address: SLAB1,
+          lifetime_force_closes: 0,
+        })
+      );
+    });
+  });
 });

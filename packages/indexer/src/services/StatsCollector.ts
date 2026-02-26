@@ -303,10 +303,22 @@ export class StatsCollector {
               logger.warn("24h volume calculation failed", { slabAddress, error: volErr instanceof Error ? volErr.message : volErr });
             }
 
-            // Safe bigint→number: treat u64::MAX (≈1.844e19) and u128::MAX as sentinel → 0
+            // Safe bigint→number conversions for PostgreSQL storage.
+            // PG BIGINT is signed 64-bit: max 9223372036854775807 (~9.2e18)
+            // PG NUMERIC is arbitrary precision — use string for those columns.
             const U64_MAX = 18446744073709551615n;
+            const PG_BIGINT_MAX = 9223372036854775807n;
+
+            /** For NUMERIC columns: convert to number, capping at u64::MAX sentinel */
             const safeBigNum = (v: bigint): number => {
               if (v >= U64_MAX || v < 0n) return 0;
+              return Number(v);
+            };
+
+            /** For BIGINT columns: cap at PG signed bigint max to prevent overflow */
+            const safePgBigint = (v: bigint): number => {
+              if (v >= U64_MAX || v < 0n) return 0;
+              if (v > PG_BIGINT_MAX) return Number(PG_BIGINT_MAX);
               return Number(v);
             };
 
@@ -315,11 +327,15 @@ export class StatsCollector {
             // Telltale sign: values like 9.8e34 OI or 1.8e25 insurance.
             // Max sane value: 1e18 (u64::MAX ≈ 1.8e19, so anything near that is suspect)
             const MAX_SANE_VALUE = 1e18;
+            // Max sane counter value: liquidation/force-close counts shouldn't exceed 1e12
+            const MAX_SANE_COUNTER = 1e12;
             const isSaneEngine = (
               safeBigNum(engine.totalOpenInterest) < MAX_SANE_VALUE &&
               safeBigNum(engine.insuranceFund.balance) < MAX_SANE_VALUE &&
               safeBigNum(engine.cTot) < MAX_SANE_VALUE &&
-              safeBigNum(engine.vault) < MAX_SANE_VALUE
+              safeBigNum(engine.vault) < MAX_SANE_VALUE &&
+              safeBigNum(engine.lifetimeLiquidations) < MAX_SANE_COUNTER &&
+              safeBigNum(engine.lifetimeForceCloses) < MAX_SANE_COUNTER
             );
 
             if (!isSaneEngine) {
@@ -329,43 +345,46 @@ export class StatsCollector {
                 insurance: safeBigNum(engine.insuranceFund.balance),
                 cTot: safeBigNum(engine.cTot),
                 vault: safeBigNum(engine.vault),
+                lifetimeLiquidations: safeBigNum(engine.lifetimeLiquidations),
+                lifetimeForceCloses: safeBigNum(engine.lifetimeForceCloses),
               });
               return;
             }
 
             // Upsert market stats with ALL RiskEngine fields (migration 010)
+            // Note: NUMERIC columns use safeBigNum(), BIGINT columns use safePgBigint()
             await upsertMarketStats({
               slab_address: slabAddress,
               last_price: priceUsd,
               mark_price: priceUsd, // Same as last_price for now (no funding adjustment)
               index_price: priceUsd,
-              open_interest_long: safeBigNum(oiLong),
-              open_interest_short: safeBigNum(oiShort),
-              insurance_fund: safeBigNum(engine.insuranceFund.balance),
-              total_accounts: engine.numUsedAccounts,
-              funding_rate: Number(engine.fundingRateBpsPerSlotLast),
-              volume_24h: volume24h,
+              open_interest_long: safeBigNum(oiLong),          // NUMERIC
+              open_interest_short: safeBigNum(oiShort),        // NUMERIC
+              insurance_fund: safeBigNum(engine.insuranceFund.balance), // NUMERIC
+              total_accounts: engine.numUsedAccounts,          // INTEGER
+              funding_rate: Number(engine.fundingRateBpsPerSlotLast), // NUMERIC
+              volume_24h: volume24h,                           // NUMERIC
               // Hidden features (migration 007)
-              total_open_interest: safeBigNum(engine.totalOpenInterest),
-              net_lp_pos: engine.netLpPos.toString(),
-              lp_sum_abs: safeBigNum(engine.lpSumAbs),
-              lp_max_abs: safeBigNum(engine.lpMaxAbs),
-              insurance_balance: safeBigNum(engine.insuranceFund.balance),
-              insurance_fee_revenue: safeBigNum(engine.insuranceFund.feeRevenue),
-              warmup_period_slots: Number(params.warmupPeriodSlots),
+              total_open_interest: safeBigNum(engine.totalOpenInterest), // NUMERIC
+              net_lp_pos: engine.netLpPos.toString(),          // NUMERIC
+              lp_sum_abs: safeBigNum(engine.lpSumAbs),         // NUMERIC
+              lp_max_abs: safeBigNum(engine.lpMaxAbs),         // NUMERIC
+              insurance_balance: safeBigNum(engine.insuranceFund.balance), // NUMERIC
+              insurance_fee_revenue: safeBigNum(engine.insuranceFund.feeRevenue), // NUMERIC
+              warmup_period_slots: safePgBigint(params.warmupPeriodSlots), // BIGINT
               // Complete RiskEngine state fields (migration 010)
-              vault_balance: safeBigNum(engine.vault),
-              lifetime_liquidations: safeBigNum(engine.lifetimeLiquidations),
-              lifetime_force_closes: safeBigNum(engine.lifetimeForceCloses),
-              c_tot: safeBigNum(engine.cTot),
-              pnl_pos_tot: safeBigNum(engine.pnlPosTot),
-              last_crank_slot: Number(engine.lastCrankSlot),
-              max_crank_staleness_slots: Number(engine.maxCrankStalenessSlots),
+              vault_balance: safeBigNum(engine.vault),         // NUMERIC
+              lifetime_liquidations: safeBigNum(engine.lifetimeLiquidations), // NUMERIC (migration 024)
+              lifetime_force_closes: safeBigNum(engine.lifetimeForceCloses),  // NUMERIC (migration 024)
+              c_tot: safeBigNum(engine.cTot),                  // NUMERIC
+              pnl_pos_tot: safeBigNum(engine.pnlPosTot),       // NUMERIC
+              last_crank_slot: safePgBigint(engine.lastCrankSlot), // BIGINT
+              max_crank_staleness_slots: safePgBigint(engine.maxCrankStalenessSlots), // BIGINT
               // RiskParams fields (migration 010)
-              maintenance_fee_per_slot: params.maintenanceFeePerSlot.toString(),
-              liquidation_fee_bps: Number(params.liquidationFeeBps),
-              liquidation_fee_cap: params.liquidationFeeCap.toString(),
-              liquidation_buffer_bps: Number(params.liquidationBufferBps),
+              maintenance_fee_per_slot: params.maintenanceFeePerSlot.toString(), // TEXT
+              liquidation_fee_bps: safePgBigint(params.liquidationFeeBps), // BIGINT
+              liquidation_fee_cap: params.liquidationFeeCap.toString(),    // TEXT
+              liquidation_buffer_bps: safePgBigint(params.liquidationBufferBps), // BIGINT
               updated_at: new Date().toISOString(),
             });
 
@@ -388,19 +407,26 @@ export class StatsCollector {
             }
 
             // Log OI history (rate-limited per market)
+            // History tables have FK to market_stats(slab_address). If the market
+            // hasn't been inserted yet, we get FK violation (23503) — skip gracefully.
             const OI_HISTORY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
             const lastOiLog = this.lastOiHistoryTime.get(slabAddress) ?? 0;
             if (Date.now() - lastOiLog >= OI_HISTORY_INTERVAL_MS) {
               try {
-                await getSupabase().from('oi_history').insert({
+                const { error: oiErr } = await getSupabase().from('oi_history').insert({
                   market_slab: slabAddress,
-                  slot: Number(engine.lastCrankSlot),
-                  total_oi: Number(engine.totalOpenInterest),
-                  net_lp_pos: Number(engine.netLpPos),
-                  lp_sum_abs: Number(engine.lpSumAbs),
-                  lp_max_abs: Number(engine.lpMaxAbs),
+                  slot: safePgBigint(engine.lastCrankSlot),        // BIGINT
+                  total_oi: safeBigNum(engine.totalOpenInterest),  // NUMERIC
+                  net_lp_pos: safeBigNum(engine.netLpPos),         // NUMERIC
+                  lp_sum_abs: safeBigNum(engine.lpSumAbs),         // NUMERIC
+                  lp_max_abs: safeBigNum(engine.lpMaxAbs),         // NUMERIC
                 });
-                this.lastOiHistoryTime.set(slabAddress, Date.now());
+                // Ignore FK violations (23503) and unique constraint violations (23505)
+                if (oiErr && oiErr.code !== '23503' && oiErr.code !== '23505') {
+                  logger.warn("OI history log failed", { slabAddress, error: oiErr.message, code: oiErr.code });
+                } else {
+                  this.lastOiHistoryTime.set(slabAddress, Date.now());
+                }
               } catch (e) {
                 // Non-fatal
                 logger.warn("OI history log failed", { slabAddress, error: e instanceof Error ? e.message : e });
@@ -412,13 +438,17 @@ export class StatsCollector {
             const lastInsLog = this.lastInsHistoryTime.get(slabAddress) ?? 0;
             if (Date.now() - lastInsLog >= INS_HISTORY_INTERVAL_MS) {
               try {
-                await getSupabase().from('insurance_history').insert({
+                const { error: insErr } = await getSupabase().from('insurance_history').insert({
                   market_slab: slabAddress,
-                  slot: Number(engine.lastCrankSlot),
-                  balance: safeBigNum(engine.insuranceFund.balance),
-                  fee_revenue: safeBigNum(engine.insuranceFund.feeRevenue),
+                  slot: safePgBigint(engine.lastCrankSlot),                // BIGINT
+                  balance: safeBigNum(engine.insuranceFund.balance),       // NUMERIC
+                  fee_revenue: safeBigNum(engine.insuranceFund.feeRevenue), // NUMERIC
                 });
-                this.lastInsHistoryTime.set(slabAddress, Date.now());
+                if (insErr && insErr.code !== '23503' && insErr.code !== '23505') {
+                  logger.warn("Insurance history log failed", { slabAddress, error: insErr.message, code: insErr.code });
+                } else {
+                  this.lastInsHistoryTime.set(slabAddress, Date.now());
+                }
               } catch (e) {
                 logger.warn("Insurance history log failed", { slabAddress, error: e instanceof Error ? e.message : e });
               }
@@ -429,17 +459,21 @@ export class StatsCollector {
             const lastFundLog = this.lastFundingHistoryTime.get(slabAddress) ?? 0;
             if (Date.now() - lastFundLog >= FUNDING_HISTORY_INTERVAL_MS) {
               try {
-                await getSupabase().from('funding_history').insert({
+                const { error: fundErr } = await getSupabase().from('funding_history').insert({
                   market_slab: slabAddress,
-                  slot: Number(engine.lastCrankSlot),
-                  rate_bps_per_slot: Number(engine.fundingRateBpsPerSlotLast),
-                  net_lp_pos: Number(engine.netLpPos),
-                  price_e6: Number(priceE6),
-                  funding_index_qpb_e6: engine.fundingIndexQpbE6.toString(),
+                  slot: safePgBigint(engine.lastCrankSlot),                    // BIGINT
+                  rate_bps_per_slot: Number(engine.fundingRateBpsPerSlotLast), // NUMERIC
+                  net_lp_pos: safeBigNum(engine.netLpPos),                     // NUMERIC
+                  price_e6: safeBigNum(priceE6),                               // NUMERIC
+                  funding_index_qpb_e6: engine.fundingIndexQpbE6.toString(),   // TEXT
                 });
-                this.lastFundingHistoryTime.set(slabAddress, Date.now());
+                if (fundErr && fundErr.code !== '23503' && fundErr.code !== '23505') {
+                  logger.warn("Funding history log failed", { slabAddress, error: fundErr.message, code: fundErr.code });
+                } else {
+                  this.lastFundingHistoryTime.set(slabAddress, Date.now());
+                }
               } catch (e) {
-                console.warn(`[StatsCollector] Funding history log failed for ${slabAddress}:`, e instanceof Error ? e.message : e);
+                logger.warn("Funding history log failed", { slabAddress, error: e instanceof Error ? e.message : e });
               }
             }
 
