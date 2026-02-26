@@ -474,8 +474,11 @@ function MarketsPageInner() {
 
                 {displayedMarkets.map((m, i) => {
                   const health = computeMarketHealth(m.onChain.engine);
-                  const lastPrice = m.supabase?.last_price;
-                  const mintDecimals = tokenMetaMap.get(m.mintAddress)?.decimals ?? 6;
+                  // Prefer Supabase last_price, fall back to on-chain lastEffectivePriceE6 or authorityPriceE6
+                  const lastPrice = m.supabase?.last_price
+                    ?? (m.onChain.config.lastEffectivePriceE6 > 0n ? Number(m.onChain.config.lastEffectivePriceE6) / 1e6 : null)
+                    ?? (m.onChain.config.authorityPriceE6 > 0n ? Number(m.onChain.config.authorityPriceE6) / 1e6 : null);
+                  const mintDecimals = tokenMetaMap.get(m.mintAddress)?.decimals ?? (m.supabase?.decimals ?? 6);
                   const tokenDivisor = 10 ** mintDecimals;
                   
                   // Token amounts
@@ -509,14 +512,18 @@ function MarketsPageInner() {
                         <div className="flex items-center gap-2">
                           <MarketLogo logoUrl={m.supabase?.logo_url} symbol={tokenMetaMap.get(m.mintAddress)?.symbol ?? undefined} size="sm" />
                           <span className="font-semibold text-white text-sm">
-                            {tokenMetaMap.get(m.mintAddress)?.symbol ? `${tokenMetaMap.get(m.mintAddress)!.symbol}/USD` : shortenAddress(m.slabAddress)}
+                            {(() => {
+                              const sym = tokenMetaMap.get(m.mintAddress)?.symbol
+                                || (m.supabase?.symbol && m.supabase.symbol.length <= 10 && !/^[0-9a-fA-F]{8}$/.test(m.supabase.symbol) ? m.supabase.symbol : null);
+                              return sym ? `${sym}/USD` : shortenAddress(m.slabAddress);
+                            })()}
                           </span>
                           {m.isAdminOracle && (
                             <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
                           )}
                         </div>
                         <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-                          {tokenMetaMap.get(m.mintAddress)?.name ? `${tokenMetaMap.get(m.mintAddress)!.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
+                          {(tokenMetaMap.get(m.mintAddress)?.name || m.supabase?.name) ? `${tokenMetaMap.get(m.mintAddress)?.name || m.supabase?.name} · ${shortenAddress(m.mintAddress)}` : shortenAddress(m.mintAddress)}
                         </div>
                       </div>
                       <div className="text-right truncate">
