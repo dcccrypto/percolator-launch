@@ -3,13 +3,14 @@ import type { NextRequest } from "next/server";
 
 // In-memory rate limiter (per-IP, resets on deploy)
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
+// RPC requests are cached/deduped server-side, so the higher limit is safe.
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const rpcRateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 120;         // General API endpoints
 const RPC_RATE_LIMIT_MAX = 600;     // /api/rpc — Solana needs many RPC calls per page
 
-function getRateLimit(ip: string, isRpc: boolean): { remaining: number; reset: number } {
+function getRateLimit(ip: string, isRpc: boolean = false): { remaining: number; reset: number } {
   const now = Date.now();
   const map = isRpc ? rpcRateLimitMap : rateLimitMap;
   const max = isRpc ? RPC_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
@@ -111,7 +112,7 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
     "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app https://token.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org blob:",
-    "frame-src 'self' https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org",
+    "frame-src 'self' https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org https://*.vercel.app",
     "frame-ancestors 'self' https://percolatorlaunch.com https://*.percolatorlaunch.com https://percolator-launch.vercel.app https://*.vercel.app",
     "object-src 'none'",
     "base-uri 'self'",

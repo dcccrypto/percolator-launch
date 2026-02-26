@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
  * This prevents exposing HELIUS_API_KEY in the client bundle.
  *
  * Supports both single requests and JSON-RPC batch requests (arrays).
+ * Includes response caching for read-only methods to reduce upstream load.
  *
  * Single request:
  *   POST { jsonrpc: "2.0", id: 1, method: "getHealth", params: [] }
@@ -58,6 +59,69 @@ const ALLOWED_RPC_METHODS = new Set([
 /** Maximum number of requests allowed in a single batch */
 const MAX_BATCH_SIZE = 40;
 
+/**
+ * Methods whose responses can be cached briefly (read-only, non-user-specific).
+ * Cache TTL varies by method — slot/blockhash change every ~400ms, account data less often.
+ */
+const CACHEABLE_METHODS: Record<string, number> = {
+  getHealth: 5_000,
+  getVersion: 60_000,
+  getSlot: 2_000,
+  getBlockHeight: 2_000,
+  getEpochInfo: 10_000,
+  getAccountInfo: 3_000,
+  getMultipleAccounts: 3_000,
+  getBalance: 3_000,
+  getTokenAccountBalance: 3_000,
+  getProgramAccounts: 5_000,
+  getMinimumBalanceForRentExemption: 60_000,
+  getSupply: 10_000,
+  getRecentPrioritizationFees: 5_000,
+};
+
+/** Simple in-memory cache with TTL */
+const cache = new Map<string, { data: unknown; expiresAt: number }>();
+const MAX_CACHE_SIZE = 500;
+
+function getCacheKey(method: string, params: unknown): string {
+  return `${method}:${JSON.stringify(params ?? [])}`;
+}
+
+function getCached(key: string): unknown | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.data;
+}
+
+function setCache(key: string, data: unknown, ttlMs: number): void {
+  // Evict oldest entries if cache is too large
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey !== undefined) cache.delete(firstKey);
+  }
+  cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
+/** Methods that mutate state — never cache, never deduplicate */
+const MUTATING_METHODS = new Set(["sendTransaction", "simulateTransaction"]);
+
+/**
+ * In-flight request deduplication — if the same read request is already being
+ * fetched upstream, return the same promise instead of sending a duplicate.
+ */
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+interface JsonRpcRequest {
+  jsonrpc: string;
+  id: unknown;
+  method: string;
+  params?: unknown;
+}
+
 /** Validate a single JSON-RPC request, return error response or null if valid */
 function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error: { code: number; message: string }; id: unknown } | null {
   const method = req?.method;
@@ -77,6 +141,58 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
     };
   }
   return null;
+}
+
+/**
+ * Process a single validated JSON-RPC request with caching and deduplication.
+ */
+async function processSingleRequest(req: JsonRpcRequest): Promise<unknown> {
+  const method = req.method;
+  const isMutating = MUTATING_METHODS.has(method);
+  const ttl = CACHEABLE_METHODS[method];
+  const cacheKey = !isMutating ? getCacheKey(method, req.params) : "";
+
+  // Check cache for read-only methods
+  if (ttl && !isMutating) {
+    const cached = getCached(cacheKey);
+    if (cached !== undefined) {
+      // Return cached response with the correct request id
+      return { ...(cached as Record<string, unknown>), id: req.id };
+    }
+  }
+
+  // Deduplicate in-flight requests for read-only methods
+  if (!isMutating && inflightRequests.has(cacheKey)) {
+    const result = await inflightRequests.get(cacheKey)!;
+    return { ...(result as Record<string, unknown>), id: req.id };
+  }
+
+  const fetchPromise = (async () => {
+    const response = await fetch(RPC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    return await response.json();
+  })();
+
+  // Register in-flight for dedup
+  if (!isMutating) {
+    inflightRequests.set(cacheKey, fetchPromise);
+  }
+
+  try {
+    const data = await fetchPromise;
+
+    // Cache successful responses
+    if (ttl && !isMutating && !data.error) {
+      setCache(cacheKey, data, ttl);
+    }
+
+    return data;
+  } finally {
+    inflightRequests.delete(cacheKey);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -100,56 +216,16 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Validate all requests in the batch
-      const validRequests: Record<string, unknown>[] = [];
-      const errorResponses: Map<number, { jsonrpc: string; error: { code: number; message: string }; id: unknown }> = new Map();
+      // Validate all requests, process valid ones with caching/dedup
+      const results = await Promise.all(
+        body.map(async (item: Record<string, unknown>) => {
+          const error = validateRequest(item);
+          if (error) return error;
+          return processSingleRequest(item as unknown as JsonRpcRequest);
+        })
+      );
 
-      for (let i = 0; i < body.length; i++) {
-        const error = validateRequest(body[i]);
-        if (error) {
-          errorResponses.set(i, error);
-        } else {
-          validRequests.push(body[i]);
-        }
-      }
-
-      // If all requests are invalid, return errors directly
-      if (validRequests.length === 0) {
-        return NextResponse.json(
-          body.map((_: unknown, i: number) => errorResponses.get(i)),
-          { status: 400 }
-        );
-      }
-
-      // Forward valid requests as a batch to Helius
-      const response = await fetch(RPC_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(validRequests),
-      });
-
-      const rpcResults = await response.json();
-
-      // If there were rejected requests, merge error responses back in order
-      if (errorResponses.size > 0) {
-        // Build a map of id -> result from Helius response
-        const resultById = new Map<unknown, unknown>();
-        if (Array.isArray(rpcResults)) {
-          for (const r of rpcResults) {
-            resultById.set(r?.id, r);
-          }
-        }
-
-        // Reconstruct full response in original order
-        const fullResults = body.map((req: Record<string, unknown>, i: number) => {
-          const err = errorResponses.get(i);
-          if (err) return err;
-          return resultById.get(req.id) ?? { jsonrpc: "2.0", error: { code: -32603, message: "Missing response" }, id: req.id };
-        });
-        return NextResponse.json(fullResults, { status: 200 });
-      }
-
-      return NextResponse.json(rpcResults, { status: response.status });
+      return NextResponse.json(results, { status: 200 });
     }
 
     // --- Single request handling ---
@@ -159,14 +235,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(error, { status });
     }
 
-    const response = await fetch(RPC_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    const result = await processSingleRequest(body as JsonRpcRequest);
+    const hasError = (result as Record<string, unknown>).error;
+    return NextResponse.json(result, { status: hasError ? 400 : 200 });
   } catch (error) {
     console.error("[/api/rpc] Error:", error);
     return NextResponse.json(
