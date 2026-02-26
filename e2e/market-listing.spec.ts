@@ -98,9 +98,23 @@ test.describe("Market navigation from homepage", () => {
 
   test("can navigate from homepage to markets", async ({ page }) => {
     await navigateTo(page, "/");
-    // Target the header nav link specifically to avoid hero content intercepting clicks
-    const marketsLink = page.locator('header a[href="/markets"], header a[href*="markets"]').first();
-    await marketsLink.click({ timeout: 10000 });
+    // The Markets link lives inside a hover-triggered NavDropdown.
+    // In CI (no real cursor), we must hover the trigger to open the dropdown
+    // before clicking the menuitem, otherwise hero content intercepts the click.
+    const dropdownTrigger = page.locator('header button[aria-haspopup="true"]').filter({ hasText: /trade/i }).first();
+    const hasTrigger = await dropdownTrigger.count();
+
+    if (hasTrigger > 0) {
+      // Open dropdown by hovering the trigger button
+      await dropdownTrigger.hover();
+      const marketsLink = page.locator('header a[role="menuitem"][href="/markets"]').first();
+      await expect(marketsLink).toBeVisible({ timeout: 5000 });
+      await marketsLink.click({ timeout: 10000 });
+    } else {
+      // Fallback: direct top-level nav link (no dropdown)
+      const marketsLink = page.locator('header a[href="/markets"]').first();
+      await marketsLink.click({ force: true, timeout: 10000 });
+    }
     await page.waitForURL(/\/markets/, { timeout: 10000 });
   });
 });
