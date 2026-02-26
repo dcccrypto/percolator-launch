@@ -132,6 +132,19 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/* ── Helper: detect placeholder/truncated-address symbols ── */
+
+function isPlaceholderSymbol(sym: string | null | undefined, mint: string): boolean {
+  if (!sym) return true;
+  // Reject if it's the first N chars of the mint address (StatsCollector default)
+  if (mint.startsWith(sym)) return true;
+  // Reject pure hex-like strings (8 chars)
+  if (/^[0-9a-fA-F]{8}$/.test(sym)) return true;
+  // Reject if it looks like a truncated address with ellipsis
+  if (/^[A-Za-z0-9]{3,6}[\u2026.]{1,3}[A-Za-z0-9]{3,6}$/.test(sym)) return true;
+  return false;
+}
+
 /* ── Main inner page ──────────────────────────────────────── */
 
 function TradePageInner({ slab }: { slab: string }) {
@@ -140,18 +153,46 @@ function TradePageInner({ slab }: { slab: string }) {
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
   const pageRef = useRef<HTMLDivElement>(null);
-  const symbol = tokenMeta?.symbol ?? (config?.collateralMint ? `${config.collateralMint.toBase58().slice(0, 4)}…${config.collateralMint.toBase58().slice(-4)}` : "TOKEN");
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
-  // Fetch logo URL
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  // Fetch Supabase market data (symbol, name, logo) as fallback for on-chain resolution
+  const [supabaseMarket, setSupabaseMarket] = useState<{ symbol?: string; name?: string; logo_url?: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/markets/${slab}/logo`).then(r => r.json()).then(d => {
-      if (!cancelled && d.logo_url) setLogoUrl(d.logo_url);
-    }).catch(() => {});
+    fetch(`/api/markets/${slab}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!cancelled && d.market) {
+          setSupabaseMarket({
+            symbol: d.market.symbol ?? undefined,
+            name: d.market.name ?? undefined,
+            logo_url: d.market.logo_url ?? undefined,
+          });
+        }
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [slab]);
+
+  // Resolve symbol: on-chain (useTokenMeta) → Supabase → truncated address
+  const mintAddress = config?.collateralMint?.toBase58() ?? "";
+  const onChainSymbol = tokenMeta?.symbol ?? null;
+  const supabaseSymbol = supabaseMarket?.symbol ?? null;
+  const symbol = (() => {
+    // 1. On-chain symbol (if it's a real name, not a truncated address)
+    if (!isPlaceholderSymbol(onChainSymbol, mintAddress)) return onChainSymbol!;
+    // 2. Supabase symbol (if it's a real name, not a placeholder)
+    if (!isPlaceholderSymbol(supabaseSymbol, mintAddress)) return supabaseSymbol!;
+    // 3. Fallback: truncated mint address
+    if (config?.collateralMint) {
+      const b58 = config.collateralMint.toBase58();
+      return `${b58.slice(0, 4)}…${b58.slice(-4)}`;
+    }
+    return "TOKEN";
+  })();
+
+  // Logo URL from Supabase market data
+  const logoUrl = supabaseMarket?.logo_url ?? null;
 
   // Dynamic page title and meta tags
   useEffect(() => {
