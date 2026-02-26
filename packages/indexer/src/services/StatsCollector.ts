@@ -160,12 +160,14 @@ export class StatsCollector {
             logger.debug("Token metadata resolution failed, using fallback", { mintAddress, error: metaErr instanceof Error ? metaErr.message : metaErr });
           }
           
+          // Clamp decimals to sane range — some on-chain mints have garbage values
+          const clampedDecimals = Math.min(Math.max(decimals, 0), 18);
           await insertMarket({
             slab_address: slabAddress,
             mint_address: mintAddress,
             symbol,
             name,
-            decimals,
+            decimals: clampedDecimals,
             deployer: admin,
             oracle_authority: oracleAuthority,
             initial_price_e6: priceE6,
@@ -292,32 +294,39 @@ export class StatsCollector {
               logger.warn("24h volume calculation failed", { slabAddress, error: volErr instanceof Error ? volErr.message : volErr });
             }
 
+            // Safe bigint→number: treat u64::MAX (≈1.844e19) and u128::MAX as sentinel → 0
+            const U64_MAX = 18446744073709551615n;
+            const safeBigNum = (v: bigint): number => {
+              if (v >= U64_MAX || v < 0n) return 0;
+              return Number(v);
+            };
+
             // Upsert market stats with ALL RiskEngine fields (migration 010)
             await upsertMarketStats({
               slab_address: slabAddress,
               last_price: priceUsd,
               mark_price: priceUsd, // Same as last_price for now (no funding adjustment)
               index_price: priceUsd,
-              open_interest_long: Number(oiLong),
-              open_interest_short: Number(oiShort),
-              insurance_fund: Number(engine.insuranceFund.balance),
+              open_interest_long: safeBigNum(oiLong),
+              open_interest_short: safeBigNum(oiShort),
+              insurance_fund: safeBigNum(engine.insuranceFund.balance),
               total_accounts: engine.numUsedAccounts,
               funding_rate: Number(engine.fundingRateBpsPerSlotLast),
               volume_24h: volume24h,
               // Hidden features (migration 007)
-              total_open_interest: Number(engine.totalOpenInterest),
+              total_open_interest: safeBigNum(engine.totalOpenInterest),
               net_lp_pos: engine.netLpPos.toString(),
-              lp_sum_abs: Number(engine.lpSumAbs),
-              lp_max_abs: Number(engine.lpMaxAbs),
-              insurance_balance: Number(engine.insuranceFund.balance),
-              insurance_fee_revenue: Number(engine.insuranceFund.feeRevenue),
+              lp_sum_abs: safeBigNum(engine.lpSumAbs),
+              lp_max_abs: safeBigNum(engine.lpMaxAbs),
+              insurance_balance: safeBigNum(engine.insuranceFund.balance),
+              insurance_fee_revenue: safeBigNum(engine.insuranceFund.feeRevenue),
               warmup_period_slots: Number(params.warmupPeriodSlots),
               // Complete RiskEngine state fields (migration 010)
-              vault_balance: Number(engine.vault),
-              lifetime_liquidations: Number(engine.lifetimeLiquidations),
-              lifetime_force_closes: Number(engine.lifetimeForceCloses),
-              c_tot: Number(engine.cTot),
-              pnl_pos_tot: Number(engine.pnlPosTot),
+              vault_balance: safeBigNum(engine.vault),
+              lifetime_liquidations: safeBigNum(engine.lifetimeLiquidations),
+              lifetime_force_closes: safeBigNum(engine.lifetimeForceCloses),
+              c_tot: safeBigNum(engine.cTot),
+              pnl_pos_tot: safeBigNum(engine.pnlPosTot),
               last_crank_slot: Number(engine.lastCrankSlot),
               max_crank_staleness_slots: Number(engine.maxCrankStalenessSlots),
               // RiskParams fields (migration 010)
@@ -374,8 +383,8 @@ export class StatsCollector {
                 await getSupabase().from('insurance_history').insert({
                   market_slab: slabAddress,
                   slot: Number(engine.lastCrankSlot),
-                  balance: Number(engine.insuranceFund.balance),
-                  fee_revenue: Number(engine.insuranceFund.feeRevenue),
+                  balance: safeBigNum(engine.insuranceFund.balance),
+                  fee_revenue: safeBigNum(engine.insuranceFund.feeRevenue),
                 });
                 this.lastInsHistoryTime.set(slabAddress, Date.now());
               } catch (e) {

@@ -525,7 +525,8 @@ function MarketsPageInner() {
                   // Price: prefer Supabase, fall back to oracle-mode-aware on-chain price
                   const onChainPriceE6 = m.onChain ? resolveMarketPriceE6(m.onChain.config) : 0n;
                   const lastPrice = m.supabase?.last_price ?? priceE6ToUsd(onChainPriceE6);
-                  const mintDecimals = tokenMetaMap.get(m.mintAddress)?.decimals ?? (m.supabase?.decimals ?? 6);
+                  const rawDecimals = tokenMetaMap.get(m.mintAddress)?.decimals ?? (m.supabase?.decimals ?? 6);
+                  const mintDecimals = Math.min(Math.max(rawDecimals, 0), 18); // clamp to sane range
                   const tokenDivisor = 10 ** mintDecimals;
                   
                   // Token amounts: prefer on-chain, fall back to Supabase

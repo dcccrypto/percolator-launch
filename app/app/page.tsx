@@ -127,42 +127,34 @@ export default function Home() {
       try {
         const { data } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, last_price, total_open_interest, decimals") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; last_price: number | null; total_open_interest: number | null; decimals: number | null }[] | null };
         if (data) {
+          // Sanitize a raw token amount → USD, with guards against corrupted data:
+          // 1. Reject sentinel values (u64::MAX ≈ 1.844e19, or u128 overflow)
+          // 2. Clamp decimals to sane range (0-18) — some on-chain mints have garbage
+          // 3. Cap per-market USD contribution to $10B to prevent overflow from bad data
+          const MAX_PER_MARKET_USD = 10_000_000_000; // $10B cap — no single market should exceed this
+          const toUsd = (raw: number, decimals: number | null, price: number | null): number => {
+            if (raw > 1e18 || raw < 0 || !Number.isFinite(raw)) return 0;
+            const d = Math.min(Math.max(decimals ?? 6, 0), 18); // clamp decimals 0–18
+            const p = price ?? 0;
+            if (p <= 0) return 0;
+            const usd = (raw / 10 ** d) * p;
+            return usd > MAX_PER_MARKET_USD ? 0 : usd; // discard absurd values
+          };
+
           setStats({
             markets: data.length,
-            // Convert raw token units to USD using per-market decimals and price
-            // Filter out sentinel values (u64::MAX ≈ 1.844e19)
-            volume: data.reduce((s, m) => {
-              const raw = Number(m.volume_24h || 0);
-              if (raw > 1e18 || raw < 0) return s;
-              const d = 10 ** (m.decimals ?? 6);
-              const price = m.last_price ?? 0;
-              return s + (raw / d) * price;
-            }, 0),
-            // Convert insurance balance to USD using per-market decimals and price
-            // Filter out u64::MAX sentinel values (≈1.844e19) — means uninitialized on-chain
-            insurance: data.reduce((s, m) => {
-              const raw = Number(m.insurance_balance || 0);
-              if (raw > 1e18 || raw < 0) return s; // sentinel or invalid
-              const d = 10 ** (m.decimals ?? 6);
-              const price = m.last_price ?? 0;
-              return s + (raw / d) * price;
-            }, 0),
+            volume: data.reduce((s, m) => s + toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price), 0),
+            insurance: data.reduce((s, m) => s + toUsd(Number(m.insurance_balance || 0), m.decimals, m.last_price), 0),
           });
           setStatsLoaded(true);
           // Convert to USD first, then sort by converted volume
-          // Filter out sentinel values (u64::MAX ≈ 1.844e19 → uninitialized on-chain)
-          const sanitizeNum = (v: number) => (v > 1e18 || v < 0) ? 0 : v;
-          const converted = data.map((m) => {
-            const d = 10 ** (m.decimals ?? 6);
-            const price = m.last_price ?? 0;
-            return {
-              slab_address: m.slab_address,
-              symbol: m.symbol,
-              volume_24h: (sanitizeNum(Number(m.volume_24h || 0)) / d) * price,
-              last_price: m.last_price,
-              total_open_interest: (sanitizeNum(Number(m.total_open_interest || 0)) / d) * price,
-            };
-          });
+          const converted = data.map((m) => ({
+            slab_address: m.slab_address,
+            symbol: m.symbol,
+            volume_24h: toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price),
+            last_price: m.last_price,
+            total_open_interest: toUsd(Number(m.total_open_interest || 0), m.decimals, m.last_price),
+          }));
           const sorted = converted.sort((a, b) => b.volume_24h - a.volume_24h).slice(0, 5);
           setFeatured(sorted);
         }
