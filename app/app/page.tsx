@@ -143,8 +143,8 @@ export default function Home() {
             }, 0),
           });
           setStatsLoaded(true);
-          const sorted = [...data].sort((a, b) => (b.volume_24h || 0) - (a.volume_24h || 0)).slice(0, 5);
-          setFeatured(sorted.map((m) => {
+          // Convert to USD first, then sort by converted volume
+          const converted = data.map((m) => {
             const d = 10 ** (m.decimals ?? 6);
             const price = m.last_price ?? 0;
             return {
@@ -154,7 +154,9 @@ export default function Home() {
               last_price: m.last_price,
               total_open_interest: (Number(m.total_open_interest || 0) / d) * price,
             };
-          }));
+          });
+          const sorted = converted.sort((a, b) => b.volume_24h - a.volume_24h).slice(0, 5);
+          setFeatured(sorted);
         }
       } catch (err) {
         console.error("Failed to load market stats:", err);
