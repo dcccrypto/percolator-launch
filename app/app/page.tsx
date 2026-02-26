@@ -125,25 +125,36 @@ export default function Home() {
       }
 
       try {
-        const { data } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, last_price, total_open_interest") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; last_price: number | null; total_open_interest: number | null }[] | null };
+        const { data } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, last_price, total_open_interest, decimals") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; last_price: number | null; total_open_interest: number | null; decimals: number | null }[] | null };
         if (data) {
           setStats({
             markets: data.length,
-            // volume_24h is stored as raw token units (e6) — convert to human-readable
-            volume: data.reduce((s, m) => s + Number(m.volume_24h || 0) / 1e6, 0),
-            // insurance_balance is stored as raw token units (e6 for USDC) — convert to human-readable
-            insurance: data.reduce((s, m) => s + Number(m.insurance_balance || 0) / 1e6, 0),
+            // Convert raw token units to USD using per-market decimals and price
+            volume: data.reduce((s, m) => {
+              const d = 10 ** (m.decimals ?? 6);
+              const price = m.last_price ?? 0;
+              return s + (Number(m.volume_24h || 0) / d) * price;
+            }, 0),
+            // Convert insurance balance to USD using per-market decimals and price
+            insurance: data.reduce((s, m) => {
+              const d = 10 ** (m.decimals ?? 6);
+              const price = m.last_price ?? 0;
+              return s + (Number(m.insurance_balance || 0) / d) * price;
+            }, 0),
           });
           setStatsLoaded(true);
           const sorted = [...data].sort((a, b) => (b.volume_24h || 0) - (a.volume_24h || 0)).slice(0, 5);
-          setFeatured(sorted.map((m) => ({
-            slab_address: m.slab_address,
-            symbol: m.symbol,
-            // volume_24h and total_open_interest are stored as raw token units (e6) — convert
-            volume_24h: (m.volume_24h || 0) / 1e6,
-            last_price: m.last_price,
-            total_open_interest: (m.total_open_interest || 0) / 1e6,
-          })));
+          setFeatured(sorted.map((m) => {
+            const d = 10 ** (m.decimals ?? 6);
+            const price = m.last_price ?? 0;
+            return {
+              slab_address: m.slab_address,
+              symbol: m.symbol,
+              volume_24h: (Number(m.volume_24h || 0) / d) * price,
+              last_price: m.last_price,
+              total_open_interest: (Number(m.total_open_interest || 0) / d) * price,
+            };
+          }));
         }
       } catch (err) {
         console.error("Failed to load market stats:", err);
