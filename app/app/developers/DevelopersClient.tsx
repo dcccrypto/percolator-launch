@@ -99,7 +99,7 @@ export const DevelopersClient: FC<Props> = ({
 
         {/* ★ Commit Activity Heatmap */}
         {commitActivity && Object.keys(commitActivity).length > 0 && (
-          <CommitHeatmap activity={commitActivity} />
+          <CommitHeatmap commitActivity={commitActivity} />
         )}
 
         {/* ★ How to Contribute (replaces old CTA strip) */}
