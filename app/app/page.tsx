@@ -265,13 +265,13 @@ export default function Home() {
                       <div className="h-1.5 w-1.5 bg-[var(--long)]/50" />
                     </div>
                     <div className="text-[12px] leading-relaxed">
-                      <div className="text-[var(--text-muted)]">
+                      <div className="text-[var(--text)]">
                         <span className="text-[var(--accent)]">$</span> percolator create --token SOL
                       </div>
-                      <div className="mt-1 text-[var(--text-dim)]">
+                      <div className="mt-1 text-[var(--text-secondary)]">
                         initializing market...
                       </div>
-                      <div className="mt-1 text-[var(--text-dim)]">
+                      <div className="mt-1 text-[var(--text-secondary)]">
                         deploying slab... <span className="text-[var(--accent)]">done</span>
                       </div>
                       <div className="mt-1 text-[var(--long)]">

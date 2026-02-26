@@ -58,7 +58,7 @@ export function TickerBanner() {
   const dotClass = isMainnet ? "text-[var(--accent)]/20" : "text-[var(--warning)]/20";
 
   return (
-    <div className={`ticker-banner relative z-50 overflow-hidden border-b ${borderClass} ${bgClass}`}>
+    <div className={`ticker-banner relative z-40 overflow-hidden border-b ${borderClass} ${bgClass}`}>
       <div className="ticker-track inline-flex">
         <TickerContent items={items} colorClass={colorClass} dotClass={dotClass} />
         <TickerContent items={items} colorClass={colorClass} dotClass={dotClass} />

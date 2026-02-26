@@ -60,11 +60,30 @@ export function ScrollReveal({
       scale: scale ?? 1,
     });
 
+    // Safety net: if observer doesn't fire within 2s (e.g. element is
+    // already in the viewport but rootMargin clips it), reveal anyway.
+    // This prevents invisible "gap" sections at certain viewport sizes.
+    const safetyTimer = setTimeout(() => {
+      if (!hasAnimated.current) {
+        hasAnimated.current = true;
+        gsap.to(el, {
+          opacity: 1,
+          x: 0,
+          y: 0,
+          scale: 1,
+          duration,
+          delay: 0,
+          ease: "power3.out",
+        });
+      }
+    }, 2000);
+
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting && !(once && hasAnimated.current)) {
             hasAnimated.current = true;
+            clearTimeout(safetyTimer);
 
             if (stagger > 0) {
               const childEls = el.children;
@@ -104,11 +123,14 @@ export function ScrollReveal({
           }
         }
       },
-      { threshold: 0.08, rootMargin: "0px 0px -60px 0px" }
+      { threshold: 0.05, rootMargin: "0px 0px -30px 0px" }
     );
 
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      clearTimeout(safetyTimer);
+      observer.disconnect();
+    };
   }, [direction, delay, duration, distance, stagger, once, scale, prefersReduced]);
 
   return (

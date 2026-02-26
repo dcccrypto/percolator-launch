@@ -85,7 +85,7 @@ export function HeroSection() {
   return (
     <section
       ref={containerRef}
-      className="relative flex min-h-[80vh] items-center overflow-hidden"
+      className="relative flex min-h-[60vh] items-center overflow-hidden lg:min-h-[70vh]"
     >
       {/* ── Background layers ── */}
       <div className="absolute inset-x-0 top-0 h-full bg-grid pointer-events-none" />

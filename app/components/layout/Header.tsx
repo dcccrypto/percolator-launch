@@ -111,7 +111,7 @@ export const Header: FC = () => {
         "sticky top-0 z-50 transition-all duration-300",
         scrolled
           ? "border-b border-[var(--border)] bg-[var(--bg)]"
-          : "border-b border-transparent bg-transparent",
+          : "border-b border-transparent bg-[var(--bg)]/80 backdrop-blur-sm",
       ].join(" ")}
     >
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
