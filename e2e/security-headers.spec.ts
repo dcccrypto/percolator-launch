@@ -4,7 +4,7 @@
  * Verifies security headers are set correctly on responses:
  * - Content-Security-Policy is present and well-formed
  * - X-Content-Type-Options: nosniff
- * - X-Frame-Options: DENY
+ * - X-Frame-Options: DENY (or SAMEORIGIN on Vercel preview)
  * - Referrer-Policy set
  * - No leaked secrets or sensitive data in page source
  *
@@ -35,9 +35,12 @@ test.describe("Security headers", () => {
     expect(response?.headers()?.["x-content-type-options"]).toBe("nosniff");
   });
 
-  test("X-Frame-Options is SAMEORIGIN", async ({ page }) => {
+  test("X-Frame-Options blocks framing", async ({ page }) => {
     const response = await page.goto("/");
-    expect(response?.headers()?.["x-frame-options"]).toBe("SAMEORIGIN");
+    const value = response?.headers()?.["x-frame-options"];
+    // Config sets DENY, but Vercel preview overrides to SAMEORIGIN for its
+    // dashboard iframe. Both are acceptable clickjacking protections.
+    expect(value).toMatch(/^(DENY|SAMEORIGIN)$/);
   });
 
   test("Referrer-Policy is set", async ({ page }) => {
