@@ -159,6 +159,15 @@ export class StatsCollector {
           } catch (metaErr) {
             logger.debug("Token metadata resolution failed, using fallback", { mintAddress, error: metaErr instanceof Error ? metaErr.message : metaErr });
           }
+
+          // Validate decimals: SPL tokens use 0-18. Values outside this range
+          // indicate corrupted metadata (wrong byte offset, garbage DAS response).
+          if (decimals < 0 || decimals > 18 || !Number.isInteger(decimals)) {
+            logger.warn("Invalid token decimals detected, clamping to default", {
+              mintAddress, rawDecimals: decimals, fallback: 6,
+            });
+            decimals = 6;
+          }
           
           // Clamp decimals to sane range — some on-chain mints have garbage values
           const clampedDecimals = Math.min(Math.max(decimals, 0), 18);
@@ -300,6 +309,29 @@ export class StatsCollector {
               if (v >= U64_MAX || v < 0n) return 0;
               return Number(v);
             };
+
+            // Sanity-check parsed engine values: if the slab layout detection
+            // failed (wrong tier), the parser reads garbage from wrong offsets.
+            // Telltale sign: values like 9.8e34 OI or 1.8e25 insurance.
+            // Max sane value: 1e18 (u64::MAX ≈ 1.8e19, so anything near that is suspect)
+            const MAX_SANE_VALUE = 1e18;
+            const isSaneEngine = (
+              safeBigNum(engine.totalOpenInterest) < MAX_SANE_VALUE &&
+              safeBigNum(engine.insuranceFund.balance) < MAX_SANE_VALUE &&
+              safeBigNum(engine.cTot) < MAX_SANE_VALUE &&
+              safeBigNum(engine.vault) < MAX_SANE_VALUE
+            );
+
+            if (!isSaneEngine) {
+              logger.warn("Insane engine state values detected (likely wrong slab layout), skipping stats update", {
+                slabAddress,
+                totalOI: safeBigNum(engine.totalOpenInterest),
+                insurance: safeBigNum(engine.insuranceFund.balance),
+                cTot: safeBigNum(engine.cTot),
+                vault: safeBigNum(engine.vault),
+              });
+              return;
+            }
 
             // Upsert market stats with ALL RiskEngine fields (migration 010)
             await upsertMarketStats({
