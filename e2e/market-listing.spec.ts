@@ -98,8 +98,9 @@ test.describe("Market navigation from homepage", () => {
 
   test("can navigate from homepage to markets", async ({ page }) => {
     await navigateTo(page, "/");
-    const marketsLink = page.locator('a[href="/markets"], a[href*="markets"]').first();
-    await marketsLink.click();
+    // Target the header nav link specifically to avoid hero content intercepting clicks
+    const marketsLink = page.locator('header a[href="/markets"], header a[href*="markets"]').first();
+    await marketsLink.click({ timeout: 10000 });
     await page.waitForURL(/\/markets/, { timeout: 10000 });
   });
 });
