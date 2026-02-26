@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { fetchTokenMeta, type TokenMeta } from "@/lib/tokenMeta";
+import { fetchTokenMetaBatch, type TokenMeta } from "@/lib/tokenMeta";
 
 /**
- * Fetch TokenMeta for an array of mints in parallel.
- * Returns a Map keyed by base58 mint address.
+ * Fetch TokenMeta for an array of mints using efficient batch resolution.
+ * Uses Helius DAS getAssetBatch + batched Metaplex PDA lookups instead of
+ * N individual RPC calls. Returns a Map keyed by base58 mint address.
  */
 export function useMultiTokenMeta(mints: PublicKey[]): Map<string, TokenMeta> {
   const { connection } = useConnectionCompat();
@@ -24,26 +25,13 @@ export function useMultiTokenMeta(mints: PublicKey[]): Map<string, TokenMeta> {
 
     let cancelled = false;
 
-    // Deduplicate mints
-    const unique = [...new Set(mints.map((m) => m.toBase58()))];
-
-    Promise.all(
-      unique.map(async (base58) => {
-        try {
-          const meta = await fetchTokenMeta(connection, new PublicKey(base58));
-          return [base58, meta] as const;
-        } catch {
-          return null;
-        }
-      }),
-    ).then((results) => {
-      if (cancelled) return;
-      const map = new Map<string, TokenMeta>();
-      for (const r of results) {
-        if (r) map.set(r[0], r[1]);
-      }
-      setMetaMap(map);
-    });
+    fetchTokenMetaBatch(connection, mints)
+      .then((map) => {
+        if (!cancelled) setMetaMap(map);
+      })
+      .catch(() => {
+        // Keep existing map on error
+      });
 
     return () => { cancelled = true; };
   }, [connection, mintsKey]);
