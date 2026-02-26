@@ -16,10 +16,12 @@ vi.mock('@solana/web3.js', async () => {
 vi.mock('@percolator/sdk', () => ({
   discoverMarkets: vi.fn(),
   encodeKeeperCrank: vi.fn(() => Buffer.from([1, 2, 3])),
+  encodePushOraclePrice: vi.fn(() => Buffer.from([4, 5, 6])),
   buildAccountMetas: vi.fn(() => []),
   buildIx: vi.fn(() => ({})),
   derivePythPushOraclePDA: vi.fn(() => [{ toBase58: () => '11111111111111111111111111111111' }, 0]),
   ACCOUNTS_KEEPER_CRANK: {},
+  ACCOUNTS_PUSH_ORACLE_PRICE: {},
 }));
 
 vi.mock('@percolator/shared', () => ({
@@ -47,6 +49,7 @@ vi.mock('@percolator/shared', () => ({
     secretKey: new Uint8Array(64),
   })),
   sendWithRetry: vi.fn(async () => 'mock-signature-' + Date.now()),
+  sendWithRetryKeeper: vi.fn(async () => 'mock-keeper-sig-' + Date.now()),
   rateLimitedCall: vi.fn((fn) => fn()),
   sendCriticalAlert: vi.fn(),
   eventBus: {
@@ -193,7 +196,7 @@ describe('CrankService', () => {
       const result = await crankService.crankMarket(slabAddress);
 
       expect(result).toBe(true);
-      expect(shared.sendWithRetry).toHaveBeenCalled();
+      expect(shared.sendWithRetryKeeper).toHaveBeenCalled();
       
       const state = crankService.getMarkets().get(slabAddress);
       expect(state?.successCount).toBe(1);
@@ -218,7 +221,7 @@ describe('CrankService', () => {
       vi.mocked(core.discoverMarkets).mockResolvedValue([mockMarket] as any);
       await crankService.discover();
 
-      vi.mocked(shared.sendWithRetry).mockRejectedValue(new Error('Transaction failed'));
+      vi.mocked(shared.sendWithRetryKeeper).mockRejectedValue(new Error('Transaction failed'));
 
       const result = await crankService.crankMarket(slabAddress);
 
@@ -254,14 +257,14 @@ describe('CrankService', () => {
       vi.setSystemTime(startTime);
 
       // One successful crank to set lastCrankTime
-      vi.mocked(shared.sendWithRetry).mockResolvedValue('initial-success');
+      vi.mocked(shared.sendWithRetryKeeper).mockResolvedValue('initial-success');
       await crankService.crankMarket(slabAddress);
       const stateAfterSuccess = crankService.getMarkets().get(slabAddress)!;
       expect(stateAfterSuccess.isActive).toBe(true);
       expect(stateAfterSuccess.lastCrankTime).toBeCloseTo(startTime, -2);
 
       // Now fail 10 consecutive times → market becomes inactive
-      vi.mocked(shared.sendWithRetry).mockRejectedValue(new Error('Transaction failed'));
+      vi.mocked(shared.sendWithRetryKeeper).mockRejectedValue(new Error('Transaction failed'));
       for (let i = 0; i < 10; i++) {
         await crankService.crankMarket(slabAddress);
       }
@@ -308,7 +311,7 @@ describe('CrankService', () => {
       vi.mocked(core.discoverMarkets).mockResolvedValue([mockMarket] as any);
       await crankService.discover();
 
-      vi.mocked(shared.sendWithRetry).mockRejectedValue(new Error('Transaction failed'));
+      vi.mocked(shared.sendWithRetryKeeper).mockRejectedValue(new Error('Transaction failed'));
 
       // Fail 10 times
       for (let i = 0; i < 10; i++) {

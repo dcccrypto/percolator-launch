@@ -95,6 +95,7 @@ vi.mock('@percolator/shared', () => ({
     };
   }),
   sendWithRetry: vi.fn(async () => 'mock-signature'),
+  sendWithRetryKeeper: vi.fn(async () => 'mock-keeper-signature'),
   pollSignatureStatus: vi.fn(async () => true),
   getRecentPriorityFees: vi.fn(async () => ({
     priorityFeeMicroLamports: 5000,

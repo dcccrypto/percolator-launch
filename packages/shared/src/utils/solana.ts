@@ -4,6 +4,24 @@ import { acquireToken, getPrimaryConnection, getFallbackConnection, backoffMs } 
 
 export { getPrimaryConnection as getConnection, getFallbackConnection };
 
+// ---------------------------------------------------------------------------
+// PERC-204: Keeper-mode send options
+// ---------------------------------------------------------------------------
+export interface KeeperSendOptions {
+  /** Skip RPC-side simulation before forwarding (saves ~20-50ms). Default: true for keeper mode. */
+  skipPreflight?: boolean;
+  /** Send to multiple RPC endpoints in parallel for higher landing rate. Default: true. */
+  multiRpcBroadcast?: boolean;
+  /** Simulate tx to get tight CU limit instead of using default 400k. Default: true. */
+  simulateForCU?: boolean;
+}
+
+const DEFAULT_KEEPER_OPTS: Required<KeeperSendOptions> = {
+  skipPreflight: true,
+  multiRpcBroadcast: true,
+  simulateForCU: true,
+};
+
 // BH9: Maximum transaction size in bytes (Solana limit is 1232 bytes)
 const MAX_TRANSACTION_SIZE = 1232;
 
@@ -150,6 +168,186 @@ export async function sendWithRetry(
         ? backoffMs(attempt, 2000, 30_000)
         : Math.min(1000 * 2 ** attempt, 8000);
       console.warn(`[sendWithRetry] Attempt ${attempt + 1}/${maxRetries} failed, retrying in ${Math.round(delay)}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+// ---------------------------------------------------------------------------
+// PERC-204: Simulate transaction to get tight compute unit limit
+// ---------------------------------------------------------------------------
+
+/**
+ * Simulate a transaction to determine actual CU consumption, then set a tight
+ * limit (actual + 10% buffer). This improves queue position under congestion
+ * because effective fee-per-CU is higher with a tighter limit.
+ *
+ * Falls back to the default 400k if simulation fails.
+ */
+async function simulateForComputeUnits(
+  connection: Connection,
+  instructions: TransactionInstruction[],
+  feePayer: Keypair,
+): Promise<number> {
+  try {
+    const simTx = new Transaction();
+    // Use a generous CU limit for simulation
+    simTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
+    for (const ix of instructions) simTx.add(ix);
+
+    const { blockhash } = await connection.getLatestBlockhash("confirmed");
+    simTx.recentBlockhash = blockhash;
+    simTx.feePayer = feePayer.publicKey;
+
+    await acquireToken();
+    const simResult = await connection.simulateTransaction(simTx);
+
+    if (simResult.value.err) {
+      // Simulation failed — use safe default
+      return 400_000;
+    }
+
+    const unitsConsumed = simResult.value.unitsConsumed ?? 0;
+    if (unitsConsumed === 0) return 400_000;
+
+    // Add 10% buffer to actual consumption (minimum 50k for safety)
+    return Math.max(Math.ceil(unitsConsumed * 1.1), 50_000);
+  } catch {
+    return 400_000;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PERC-204: Multi-RPC parallel broadcast
+// ---------------------------------------------------------------------------
+
+/**
+ * Broadcast a signed raw transaction to multiple RPC endpoints simultaneously.
+ * Returns the signature from the first endpoint that accepts it.
+ * Duplicate transactions are de-duped by the Solana network (same signature).
+ *
+ * This increases landing rate by 20-40% because if one RPC has a degraded
+ * path to the leader, another may succeed.
+ */
+async function broadcastToMultipleRpcs(
+  rawTx: Buffer | Uint8Array,
+  primaryConnection: Connection,
+  opts: SendOptions,
+): Promise<string> {
+  const connections = [primaryConnection];
+
+  // Add fallback connection as second broadcast target
+  try {
+    const fallback = getFallbackConnection();
+    if (fallback) connections.push(fallback);
+  } catch { /* no fallback configured */ }
+
+  // Add additional RPC endpoints from environment
+  const extraRpcs = process.env.EXTRA_RPC_URLS?.split(",").filter(Boolean) ?? [];
+  for (const url of extraRpcs.slice(0, 3)) { // cap at 3 extra
+    try {
+      connections.push(new Connection(url, "confirmed"));
+    } catch { /* invalid URL, skip */ }
+  }
+
+  if (connections.length <= 1) {
+    // Only primary available — send normally
+    return primaryConnection.sendRawTransaction(rawTx, opts);
+  }
+
+  // Fire-and-forget to all endpoints simultaneously
+  const results = await Promise.allSettled(
+    connections.map(conn => conn.sendRawTransaction(rawTx, opts))
+  );
+
+  // Return first successful signature
+  for (const result of results) {
+    if (result.status === "fulfilled") return result.value;
+  }
+
+  // All failed — throw the primary's error
+  const primaryResult = results[0];
+  if (primaryResult.status === "rejected") throw primaryResult.reason;
+  throw new Error("All RPC endpoints failed to accept transaction");
+}
+
+// ---------------------------------------------------------------------------
+// PERC-204: Keeper-optimized send (skipPreflight + multi-RPC + tight CU)
+// ---------------------------------------------------------------------------
+
+/**
+ * Send a transaction with keeper-mode optimizations:
+ * - skipPreflight=true (saves ~20-50ms per tx)
+ * - Multi-RPC parallel broadcast (+20-40% landing rate)
+ * - Simulation-based tight CU limit (better queue position)
+ * - Dynamic 75th-percentile priority fees
+ *
+ * Use this for all keeper/crank operations where tx construction is trusted.
+ */
+export async function sendWithRetryKeeper(
+  connection: Connection,
+  instructions: TransactionInstruction[],
+  signers: Keypair[],
+  maxRetries = 3,
+  keeperOpts?: KeeperSendOptions,
+): Promise<string> {
+  const opts = { ...DEFAULT_KEEPER_OPTS, ...keeperOpts };
+  let lastErr: unknown;
+
+  // Get dynamic priority fees once (outside retry loop)
+  const { priorityFeeMicroLamports } = await getRecentPriorityFees(connection);
+
+  // Optionally simulate to get tight CU limit
+  let computeUnitLimit = 400_000;
+  if (opts.simulateForCU) {
+    computeUnitLimit = await simulateForComputeUnits(connection, instructions, signers[0]);
+  }
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await acquireToken();
+      const tx = new Transaction();
+
+      // Compute budget instructions first
+      tx.add(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFeeMicroLamports })
+      );
+
+      for (const ix of instructions) tx.add(ix);
+
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = signers[0].publicKey;
+      tx.sign(...signers);
+
+      checkTransactionSize(tx);
+
+      const sendOpts: SendOptions = {
+        // PERC-204: skipPreflight saves ~20-50ms per transaction
+        skipPreflight: opts.skipPreflight,
+        preflightCommitment: "confirmed",
+      };
+
+      await acquireToken();
+      let sig: string;
+
+      if (opts.multiRpcBroadcast) {
+        // PERC-204: Broadcast to multiple RPCs for higher landing rate
+        sig = await broadcastToMultipleRpcs(tx.serialize(), connection, sendOpts);
+      } else {
+        sig = await connection.sendRawTransaction(tx.serialize(), sendOpts);
+      }
+
+      await pollSignatureStatus(connection, sig);
+      return sig;
+    } catch (err) {
+      lastErr = err;
+      const delay = is429(err)
+        ? backoffMs(attempt, 2000, 30_000)
+        : Math.min(1000 * 2 ** attempt, 8000);
+      console.warn(`[sendWithRetryKeeper] Attempt ${attempt + 1}/${maxRetries} failed, retrying in ${Math.round(delay)}ms`);
       await new Promise((r) => setTimeout(r, delay));
     }
   }

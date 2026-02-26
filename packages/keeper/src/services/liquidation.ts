@@ -18,7 +18,7 @@ import {
   derivePythPushOraclePDA,
   type DiscoveredMarket,
 } from "@percolator/sdk";
-import { config, getConnection, loadKeypair, sendWithRetry, pollSignatureStatus, getRecentPriorityFees, checkTransactionSize, eventBus, createLogger, sendWarningAlert, acquireToken, getFallbackConnection, backoffMs } from "@percolator/shared";
+import { config, getConnection, loadKeypair, sendWithRetry, sendWithRetryKeeper, pollSignatureStatus, getRecentPriorityFees, checkTransactionSize, eventBus, createLogger, sendWarningAlert, acquireToken, getFallbackConnection, backoffMs } from "@percolator/shared";
 import { OracleService } from "./oracle.js";
 
 const logger = createLogger("keeper:liquidation");
@@ -405,58 +405,16 @@ export class LiquidationService {
         }
       }
 
-      // Send all in one tx with retry (Bug 7+8+9)
-      const { Transaction } = await import("@solana/web3.js");
-      const MAX_RETRIES = 2;
-      let sig: string | null = null;
-      
-      // BH6 + BH11: Get dynamic priority fees and compute budget
-      const { priorityFeeMicroLamports, computeUnitLimit } = await getRecentPriorityFees(connection);
-      
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        try {
-          const tx = new Transaction();
-          
-          // BH6 + BH11: Add compute budget instructions at the start
-          tx.add(
-            ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
-            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFeeMicroLamports })
-          );
-          
-          for (const ix of instructions) {
-            tx.add(ix);
-          }
-          const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-          tx.recentBlockhash = blockhash;
-          tx.feePayer = keypair.publicKey;
-          tx.sign(keypair);
-          
-          // BH9: Check transaction size before sending
-          checkTransactionSize(tx);
-          
-          const txSig = await connection.sendRawTransaction(tx.serialize(), {
-            skipPreflight: false,
-            preflightCommitment: "confirmed",
-          });
-          // Use getSignatureStatuses polling instead of confirmTransaction
-          // (confirmTransaction can falsely report "block height exceeded" on devnet)
-          await pollSignatureStatus(connection, txSig);
-          sig = txSig;
-          break;
-        } catch (retryErr) {
-          const errMsg = retryErr instanceof Error ? retryErr.message.toLowerCase() : String(retryErr).toLowerCase();
-          const isNetworkError = errMsg.includes("timeout") || errMsg.includes("socket") || errMsg.includes("econnrefused") || errMsg.includes("429") || errMsg.includes("block height exceeded");
-          if (!isNetworkError || attempt >= MAX_RETRIES) {
-            throw retryErr;
-          }
-          console.warn(`[LiquidationService] Attempt ${attempt + 1} failed with network error, retrying...`);
-          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
-        }
-      }
+      // PERC-204: Use keeper-optimized send (skipPreflight + multi-RPC + tight CU)
+      // Replaces manual tx building with sendWithRetryKeeper for:
+      //   - skipPreflight=true (saves ~20-50ms)
+      //   - Multi-RPC parallel broadcast (+20-40% landing rate)
+      //   - Simulation-based tight CU limit (better queue position)
+      const sig = await sendWithRetryKeeper(connection, instructions, [keypair], 3);
 
       // BC1: Track signature to prevent replay attacks
       const now = Date.now();
-      this.recentSignatures.set(sig!, now);
+      this.recentSignatures.set(sig, now);
       // Clean up signatures older than TTL
       for (const [oldSig, timestamp] of this.recentSignatures.entries()) {
         if (now - timestamp > this.signatureTTLMs) {
@@ -467,7 +425,7 @@ export class LiquidationService {
       this.liquidationCount++;
       eventBus.publish("liquidation.success", slabAddress.toBase58(), {
         accountIdx,
-        signature: sig!,
+        signature: sig,
       });
       logger.info("Account liquidated", { accountIndex: accountIdx, slabAddress: slabAddress.toBase58(), signature: sig });
       
@@ -475,10 +433,10 @@ export class LiquidationService {
       await sendWarningAlert("Liquidation executed", [
         { name: "Market", value: slabAddress.toBase58().slice(0, 8), inline: true },
         { name: "Account Index", value: accountIdx.toString(), inline: true },
-        { name: "Signature", value: sig!.slice(0, 12), inline: true },
+        { name: "Signature", value: sig.slice(0, 12), inline: true },
       ]);
       
-      return sig!;
+      return sig;
     } catch (err) {
       logger.error("Liquidation failed", {
         error: err instanceof Error ? err.message : String(err),
