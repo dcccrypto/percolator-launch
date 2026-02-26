@@ -63,6 +63,64 @@ async function fetchSlabWithRetry(
 const PRICE_E6_DIVISOR = 1_000_000n; // Price precision divisor (6 decimals)
 const BPS_MULTIPLIER = 10_000n; // Basis points multiplier (100% = 10000 bps)
 
+/**
+ * Oracle mode for a market.
+ * - 'pyth-pinned': oracle_authority == [0;32] && index_feed_id != [0;32]
+ *   → staleness enforced on-chain by Pyth CPI
+ * - 'hyperp': index_feed_id == [0;32]
+ *   → DEX oracle, authority_timestamp stores funding rate (not a real timestamp)
+ * - 'admin': oracle_authority != [0;32] && index_feed_id != [0;32]
+ *   → off-chain authority pushes prices; needs staleness check
+ */
+type OracleMode = "pyth-pinned" | "hyperp" | "admin";
+
+/**
+ * Detect oracle mode from market config keys.
+ * Centralizes mode detection so scanMarket and liquidate use identical logic.
+ */
+function detectOracleMode(cfg: { oracleAuthority: PublicKey; indexFeedId: PublicKey }): OracleMode {
+  const zeroKey = new PublicKey(new Uint8Array(32));
+  const isHyperp = cfg.indexFeedId.equals(zeroKey);
+  if (isHyperp) return "hyperp";
+  if (cfg.oracleAuthority.equals(zeroKey)) return "pyth-pinned";
+  return "admin";
+}
+
+/**
+ * Resolve the effective price for a market based on its oracle mode.
+ * Both scanMarket and liquidate call this to ensure identical price selection
+ * logic, including the staleness fallback for admin-oracle markets.
+ *
+ * Returns 0n if no valid price is available.
+ */
+function resolveMarketPrice(
+  cfg: {
+    oracleAuthority: PublicKey;
+    indexFeedId: PublicKey;
+    lastEffectivePriceE6: bigint;
+    authorityPriceE6: bigint;
+    authorityTimestamp: bigint;
+  },
+  mode: OracleMode,
+): { price: bigint; stale: boolean } {
+  if (mode === "pyth-pinned") {
+    return { price: cfg.lastEffectivePriceE6, stale: false };
+  }
+  if (mode === "hyperp") {
+    return { price: cfg.lastEffectivePriceE6, stale: false };
+  }
+  // Admin oracle: try authorityPriceE6 with off-chain staleness check
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  const priceAge = cfg.authorityTimestamp > 0n ? now - cfg.authorityTimestamp : now;
+  const authorityFresh = cfg.authorityPriceE6 > 0n && priceAge <= 60n;
+
+  if (authorityFresh) {
+    return { price: cfg.authorityPriceE6, stale: false };
+  }
+  // Authority stale — fall back to lastEffectivePriceE6 (mirrors on-chain behavior)
+  return { price: cfg.lastEffectivePriceE6, stale: true };
+}
+
 interface LiquidationCandidate {
   slabAddress: string;
   accountIdx: number;
@@ -112,30 +170,16 @@ export class LiquidationService {
       const candidates: LiquidationCandidate[] = [];
       const maintenanceMarginBps = params.maintenanceMarginBps;
 
-      // Determine market oracle mode:
-      // 1. Pyth-pinned: oracle_authority == [0;32] && index_feed_id != [0;32]
-      //    → use lastEffectivePriceE6 (staleness enforced on-chain by Pyth CPI)
-      // 2. Hyperp (DEX oracle): index_feed_id == [0;32]
-      //    → authority_price_e6 = mark, last_effective_price_e6 = index
-      //    → authority_timestamp stores funding rate, NOT a real timestamp
-      //    → use lastEffectivePriceE6 (index price, updated by on-chain crank)
-      // 3. Admin oracle: oracle_authority != [0;32] && index_feed_id != [0;32]
-      //    → use authorityPriceE6 with off-chain staleness check
-      const zeroKey = new PublicKey(new Uint8Array(32));
-      const isPythPinned = cfg.oracleAuthority.equals(zeroKey) && !cfg.indexFeedId.equals(zeroKey);
-      const isHyperp = cfg.indexFeedId.equals(zeroKey);
+      // Determine oracle mode and resolve price via shared helpers
+      const oracleMode = detectOracleMode(cfg);
+      const { price: resolvedPrice, stale } = resolveMarketPrice(cfg, oracleMode);
 
       let price: bigint;
-      if (isPythPinned) {
-        // Pyth-pinned: use lastEffectivePriceE6 (staleness enforced on-chain by Pyth CPI)
-        price = cfg.lastEffectivePriceE6;
+      if (oracleMode === "pyth-pinned") {
+        price = resolvedPrice;
         if (price === 0n) return []; // No price resolved yet
-      } else if (isHyperp) {
-        // Hyperp mode: use index price (lastEffectivePriceE6), which is the on-chain
-        // crank's output from get_engine_oracle_price_e6. This is the price used for
-        // PnL settlement. DO NOT check authorityTimestamp — it stores funding rate,
-        // not a real timestamp.
-        price = cfg.lastEffectivePriceE6;
+      } else if (oracleMode === "hyperp") {
+        price = resolvedPrice;
         if (price === 0n) return []; // Market not bootstrapped yet
 
         // Sanity check: mark price should also be non-zero in a healthy Hyperp market
@@ -146,34 +190,20 @@ export class LiquidationService {
           return [];
         }
       } else {
-        // Authority-pushed: try authorityPriceE6 with off-chain staleness check
-        const now = BigInt(Math.floor(Date.now() / 1000));
-        const priceAge = cfg.authorityTimestamp > 0n ? now - cfg.authorityTimestamp : now;
-        const authorityFresh = cfg.authorityPriceE6 > 0n && priceAge <= 60n;
-
-        if (authorityFresh) {
-          price = cfg.authorityPriceE6;
-        } else {
-          // Authority stale or absent — fall back to lastEffectivePriceE6.
-          // This mirrors the on-chain behavior: read_price_with_authority falls back
-          // to Pyth/Chainlink/DEX when authority is stale. lastEffectivePriceE6 is the
-          // clamped result from the last on-chain oracle resolution (any source).
-          price = cfg.lastEffectivePriceE6;
-          if (price === 0n) {
-            // No effective price at all — market not yet bootstrapped
-            if (engine.totalOpenInterest > 0n) {
-              logger.warn("No valid price (authority stale, no effective price), skipping", {
-                slabAddress,
-                authorityTimestamp: Number(cfg.authorityTimestamp),
-                priceAgeSeconds: Number(priceAge),
-              });
-            }
-            return [];
+        // Admin oracle — resolveMarketPrice handles staleness fallback
+        price = resolvedPrice;
+        if (price === 0n) {
+          if (engine.totalOpenInterest > 0n) {
+            logger.warn("No valid price (authority stale, no effective price), skipping", {
+              slabAddress,
+              authorityTimestamp: Number(cfg.authorityTimestamp),
+            });
           }
-          // Log the fallback at debug level (this is expected for most markets)
+          return [];
+        }
+        if (stale) {
           logger.debug("Authority price stale, using lastEffectivePriceE6", {
             slabAddress,
-            priceAgeSeconds: Number(priceAge),
             lastEffectivePriceE6: price.toString(),
           });
         }
@@ -347,13 +377,10 @@ export class LiquidationService {
           return null;
         }
 
-        // Use the same price source as scanMarket based on market mode
-        const freshZeroKey = new PublicKey(new Uint8Array(32));
-        const freshIsHyperp = freshCfg.indexFeedId.equals(freshZeroKey);
-        const freshIsPythPinned = freshCfg.oracleAuthority.equals(freshZeroKey) && !freshIsHyperp;
-        const freshPrice = (freshIsPythPinned || freshIsHyperp)
-          ? freshCfg.lastEffectivePriceE6
-          : freshCfg.authorityPriceE6;
+        // Use the same price source as scanMarket via shared helpers
+        // (fixes bug where admin-oracle staleness fallback was missing here)
+        const freshMode = detectOracleMode(freshCfg);
+        const { price: freshPrice } = resolveMarketPrice(freshCfg, freshMode);
         if (freshPrice > 0n) {
           const notional = absBI(freshAccount.positionSize) * freshPrice / PRICE_E6_DIVISOR;
           if (notional > 0n) {

@@ -240,6 +240,107 @@ describe('LiquidationService', () => {
       expect(candidates[0].marginRatio).toBeLessThan(5); // Below 5%
     });
 
+    it('should find undercollateralized accounts in Pyth-pinned oracle mode', async () => {
+      const mockMarket = {
+        slabAddress: { toBase58: () => 'MarketPyth1111111111111111111111111111' },
+        programId: { toBase58: () => 'Program11111111111111111111111111111111' },
+        config: {
+          collateralMint: { toBase58: () => 'So11111111111111111111111111111111111111112' },
+          oracleAuthority: { toBase58: () => 'Oracle11111111111111111111111111111111' },
+          indexFeedId: { toBytes: () => new Uint8Array(32) },
+        },
+        params: { maintenanceMarginBps: 500n },
+        header: { admin: { toBase58: () => 'Admin111111111111111111111111111111111' } },
+      };
+
+      const mockSlabData = new Uint8Array(1024);
+
+      vi.mocked(core.fetchSlab).mockResolvedValue(mockSlabData);
+      vi.mocked(core.parseEngine).mockReturnValue({
+        totalOpenInterest: 100_000_000n,
+        numUsedAccounts: 1,
+        vault: 1000_000n,
+        insuranceFund: { balance: 500_000n, feeRevenue: 0n },
+      } as any);
+      vi.mocked(core.parseParams).mockReturnValue({
+        maintenanceMarginBps: 500n,
+      } as any);
+      // Pyth-pinned: oracleAuthority = zero, indexFeedId = non-zero
+      vi.mocked(core.parseConfig).mockReturnValue({
+        oracleAuthority: mockZeroKey(),
+        indexFeedId: mockNonZeroKey('FeedId111111111111111111111111111111111111'),
+        authorityPriceE6: 0n, // Not used in Pyth-pinned
+        lastEffectivePriceE6: 1_000_000n, // This is the price used
+        authorityTimestamp: 0n, // Not relevant for Pyth-pinned
+      } as any);
+      vi.mocked(core.detectLayout).mockReturnValue({ accountsOffset: 0 } as any);
+      vi.mocked(core.parseUsedIndices).mockReturnValue([0]);
+
+      // Undercollateralized account: same as Hyperp test
+      vi.mocked(core.parseAccount).mockReturnValue({
+        kind: 0,
+        owner: { toBase58: () => 'User1111111111111111111111111111111111111' },
+        positionSize: 10_000_000_000n,
+        capital: 100_000_000n,
+        entryPrice: 1_000_000n,
+      } as any);
+
+      const candidates = await liquidationService.scanMarket(mockMarket as any);
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].accountIdx).toBe(0);
+      expect(candidates[0].marginRatio).toBeLessThan(5); // Below 5% maintenance
+    });
+
+    it('should use staleness fallback for admin oracle in scanMarket', async () => {
+      const mockMarket = {
+        slabAddress: { toBase58: () => 'MarketAdmin11111111111111111111111111' },
+        programId: { toBase58: () => 'Program11111111111111111111111111111111' },
+        config: {
+          collateralMint: { toBase58: () => 'So11111111111111111111111111111111111111112' },
+          oracleAuthority: { toBase58: () => 'Oracle11111111111111111111111111111111' },
+          indexFeedId: { toBytes: () => new Uint8Array(32) },
+        },
+        params: { maintenanceMarginBps: 500n },
+        header: { admin: { toBase58: () => 'Admin111111111111111111111111111111111' } },
+      };
+
+      const mockSlabData = new Uint8Array(1024);
+
+      vi.mocked(core.fetchSlab).mockResolvedValue(mockSlabData);
+      vi.mocked(core.parseEngine).mockReturnValue({
+        totalOpenInterest: 100_000_000n,
+      } as any);
+      vi.mocked(core.parseParams).mockReturnValue({
+        maintenanceMarginBps: 500n,
+      } as any);
+      // Admin oracle with stale authority but valid lastEffectivePriceE6
+      vi.mocked(core.parseConfig).mockReturnValue({
+        oracleAuthority: mockNonZeroKey(),
+        indexFeedId: mockNonZeroKey('FeedId111111111111111111111111111111111111'),
+        authorityPriceE6: 2_000_000n, // Stale — timestamp is old
+        lastEffectivePriceE6: 1_000_000n, // Fallback price
+        authorityTimestamp: BigInt(Math.floor(Date.now() / 1000) - 120), // 2 min old (>60s)
+      } as any);
+      vi.mocked(core.detectLayout).mockReturnValue({ accountsOffset: 0 } as any);
+      vi.mocked(core.parseUsedIndices).mockReturnValue([0]);
+
+      // Account undercollateralized at fallback price ($1) but not at authority price ($2)
+      vi.mocked(core.parseAccount).mockReturnValue({
+        kind: 0,
+        owner: { toBase58: () => 'User1111111111111111111111111111111111111' },
+        positionSize: 10_000_000_000n,
+        capital: 100_000_000n,
+        entryPrice: 1_000_000n,
+      } as any);
+
+      const candidates = await liquidationService.scanMarket(mockMarket as any);
+
+      // Should find the candidate using fallback price ($1), not stale authority ($2)
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].accountIdx).toBe(0);
+    });
+
     it('should skip accounts with stale oracle prices', async () => {
       const mockMarket = {
         slabAddress: { toBase58: () => 'Market211111111111111111111111111111111' },
