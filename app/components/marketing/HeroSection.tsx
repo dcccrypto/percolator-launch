@@ -57,7 +57,7 @@ export function HeroSection() {
       try {
         const { data } = await getSupabase()
           .from("markets_with_stats")
-          .select("volume_24h, total_accounts, last_price, decimals");
+          .select("volume_24h, total_accounts, last_price, decimals, total_open_interest, open_interest_long, open_interest_short");
         if (data && data.length > 0) {
           const activeData = data.filter(isActiveMarket);
           const volume = activeData.reduce((s: number, m: { volume_24h: number | null; last_price: number | null; decimals: number | null }) => {

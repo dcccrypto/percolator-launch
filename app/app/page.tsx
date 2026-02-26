@@ -126,7 +126,7 @@ export default function Home() {
       }
 
       try {
-        const { data, error: dbError } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, last_price, total_open_interest, decimals") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; last_price: number | null; total_open_interest: number | null; decimals: number | null }[] | null; error: { message: string } | null };
+        const { data, error: dbError } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, last_price, total_open_interest, open_interest_long, open_interest_short, decimals") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; last_price: number | null; total_open_interest: number | null; open_interest_long: number | null; open_interest_short: number | null; decimals: number | null }[] | null; error: { message: string } | null };
         if (dbError) {
           console.error("Failed to query markets_with_stats:", dbError.message);
           throw new Error(dbError.message);
