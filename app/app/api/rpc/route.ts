@@ -236,8 +236,9 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await processSingleRequest(body as JsonRpcRequest);
-    const hasError = (result as Record<string, unknown>).error;
-    return NextResponse.json(result, { status: hasError ? 400 : 200 });
+    // JSON-RPC errors are application-level, not transport-level — always return HTTP 200.
+    // Returning 400 for RPC errors breaks @solana/web3.js which treats non-2xx as network failures.
+    return NextResponse.json(result, { status: 200 });
   } catch (error) {
     console.error("[/api/rpc] Error:", error);
     return NextResponse.json(
