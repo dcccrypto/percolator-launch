@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { getAllRepos } from "@/lib/github";
+import {
+  getAllRepos,
+  getContributorStats,
+  getAllCommitActivity,
+  getGoodFirstIssues,
+  getAllCIStatuses,
+} from "@/lib/github";
 import { DevelopersClient } from "./DevelopersClient";
 
 export const metadata: Metadata = {
@@ -15,9 +21,39 @@ export const metadata: Metadata = {
 };
 
 export default async function DevelopersPage() {
-  const repos = await getAllRepos();
-  // Check if any repo has live stats (stars > 0 means we got real data)
-  const isLive = repos.some((r) => r.stargazers_count > 0 || r.forks_count > 0);
+  // Fetch all data in parallel — allSettled ensures one failure never breaks the page
+  const [repos, contributorStats, commitActivity, goodFirstIssues, ciStatuses] =
+    await Promise.allSettled([
+      getAllRepos(),
+      getContributorStats(),
+      getAllCommitActivity(),
+      getGoodFirstIssues(),
+      getAllCIStatuses(),
+    ]);
 
-  return <DevelopersClient repos={repos} isLive={isLive} />;
+  const repoData = repos.status === "fulfilled" ? repos.value : [];
+  const isLive = repoData.some(
+    (r) => r.stargazers_count > 0 || r.forks_count > 0
+  );
+
+  return (
+    <DevelopersClient
+      repos={repoData}
+      isLive={isLive}
+      contributorStats={
+        contributorStats.status === "fulfilled"
+          ? contributorStats.value
+          : null
+      }
+      commitActivity={
+        commitActivity.status === "fulfilled" ? commitActivity.value : null
+      }
+      goodFirstIssues={
+        goodFirstIssues.status === "fulfilled" ? goodFirstIssues.value : []
+      }
+      ciStatuses={
+        ciStatuses.status === "fulfilled" ? ciStatuses.value : {}
+      }
+    />
+  );
 }

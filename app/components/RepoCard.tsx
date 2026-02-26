@@ -2,16 +2,18 @@
 
 import { FC } from "react";
 import { RepoLanguageBadge } from "./RepoLanguageBadge";
-import { timeAgo, REPO_DESCRIPTIONS, type RepoData } from "@/lib/github";
+import { RepoHealthBadges } from "./RepoHealthBadges";
+import { timeAgo, REPO_DESCRIPTIONS, type RepoData, type RepoCIStatus } from "@/lib/github";
 
 /** Client-side fallback — mirrors REPO_DESCRIPTIONS for resilience */
 const FALLBACK_DESCRIPTIONS: Record<string, string> = REPO_DESCRIPTIONS;
 
 interface Props {
   repo: RepoData;
+  ciStatus?: RepoCIStatus;
 }
 
-export const RepoCard: FC<Props> = ({ repo }) => {
+export const RepoCard: FC<Props> = ({ repo, ciStatus }) => {
   return (
     <a
       href={repo.html_url}
@@ -44,13 +46,20 @@ export const RepoCard: FC<Props> = ({ repo }) => {
       </h3>
 
       {/* Description */}
-      <p className="mb-5 line-clamp-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+      <p className="mb-4 line-clamp-2 text-sm leading-relaxed text-[var(--text-secondary)]">
         {repo.description && repo.description.trim()
           ? repo.description
           : FALLBACK_DESCRIPTIONS[repo.name] || (
               <span className="text-[var(--text-muted)]">No description</span>
             )}
       </p>
+
+      {/* Health badges */}
+      <RepoHealthBadges
+        license={repo.license}
+        pushedAt={repo.pushed_at || repo.updated_at}
+        ciStatus={ciStatus}
+      />
 
       {/* Divider */}
       <div className="mb-4 border-t border-white/[0.06]" />

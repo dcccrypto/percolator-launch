@@ -2,7 +2,7 @@
 
 import { FC, useState, useMemo } from "react";
 import { RepoCard } from "./RepoCard";
-import type { RepoData } from "@/lib/github";
+import type { RepoData, RepoCIStatus } from "@/lib/github";
 
 type Filter = "All" | "TypeScript" | "Rust";
 
@@ -10,11 +10,13 @@ interface Props {
   repos: RepoData[];
   /** Whether live GitHub data was available */
   isLive: boolean;
+  /** CI status per repo (keyed by repo name) */
+  ciStatuses?: Record<string, RepoCIStatus>;
 }
 
 const filters: Filter[] = ["All", "TypeScript", "Rust"];
 
-export const RepoGrid: FC<Props> = ({ repos, isLive }) => {
+export const RepoGrid: FC<Props> = ({ repos, isLive, ciStatuses }) => {
   const [active, setActive] = useState<Filter>("All");
 
   const filtered = useMemo(() => {
@@ -58,7 +60,7 @@ export const RepoGrid: FC<Props> = ({ repos, isLive }) => {
       {/* Grid */}
       <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {sorted.map((repo) => (
-          <RepoCard key={repo.name} repo={repo} />
+          <RepoCard key={repo.name} repo={repo} ciStatus={ciStatuses?.[repo.name]} />
         ))}
       </div>
     </section>
