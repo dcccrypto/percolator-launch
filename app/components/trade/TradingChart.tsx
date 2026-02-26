@@ -196,7 +196,7 @@ export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const date = new Date(t);
       const x = PAD.left + (i / count) * CHART_W;
       const format =
-        timeframe === "1h" || timeframe === "4h"
+        timeframe === "1h" || timeframe === "4h" || timeframe === "1d"
           ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
           : date.toLocaleDateString([], { month: "short", day: "numeric" });
       labels.push({ x, time: format });
