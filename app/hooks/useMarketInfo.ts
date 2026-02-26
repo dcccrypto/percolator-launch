@@ -25,6 +25,7 @@ export function useMarketInfo(slabAddress: string) {
         if (dbError) {
           setError(dbError.message);
         } else if (!data) {
+          setMarket(null);
           setError("Market not found");
         } else {
           setMarket(data);

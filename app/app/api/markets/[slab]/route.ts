@@ -8,8 +8,8 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ slab: string }> }
 ) {
+  const { slab } = await params;
   try {
-    const { slab } = await params;
     const supabase = getServiceClient();
 
     const { data, error } = await supabase
@@ -31,7 +31,7 @@ export async function GET(
     return NextResponse.json({ market: data });
   } catch (error) {
     Sentry.captureException(error, {
-      tags: { endpoint: "/api/markets/[slab]", method: "GET" },
+      tags: { endpoint: "/api/markets/[slab]", method: "GET", slab },
     });
     return NextResponse.json(
       { error: "Internal server error" },
