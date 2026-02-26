@@ -271,7 +271,7 @@ export function createBatchRpc(config: BatchRpcConfig) {
       return globalThis.fetch(input, init);
     }
 
-    let parsed: { method?: string; params?: unknown };
+    let parsed: { id?: unknown; method?: string; params?: unknown };
     try {
       const bodyStr = typeof init.body === "string" ? init.body : new TextDecoder().decode(init.body as BufferSource);
       parsed = JSON.parse(bodyStr);
@@ -283,9 +283,25 @@ export function createBatchRpc(config: BatchRpcConfig) {
       return globalThis.fetch(input, init);
     }
 
+    // Preserve the caller's original request id (e.g. jayson sends UUID strings).
+    // Our internal batch uses numeric ids, but @solana/web3.js v1 validates
+    // that response.id is a string via superstruct — so we must restore it.
+    const originalId = parsed.id;
     const resultJson = await enqueue(parsed.method, parsed.params ?? []);
 
-    return new Response(resultJson, {
+    // Replace the internal batch id with the caller's original id
+    let finalJson = resultJson;
+    if (originalId !== undefined) {
+      try {
+        const resultObj = JSON.parse(resultJson);
+        resultObj.id = originalId;
+        finalJson = JSON.stringify(resultObj);
+      } catch {
+        // If parse fails, return as-is
+      }
+    }
+
+    return new Response(finalJson, {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
