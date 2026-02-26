@@ -129,17 +129,20 @@ export default function Home() {
         if (data) {
           setStats({
             markets: data.length,
-            volume: data.reduce((s, m) => s + Number(m.volume_24h || 0), 0),
-            insurance: data.reduce((s, m) => s + Number(m.insurance_balance || 0), 0),
+            // volume_24h is stored as raw token units (e6) — convert to human-readable
+            volume: data.reduce((s, m) => s + Number(m.volume_24h || 0) / 1e6, 0),
+            // insurance_balance is stored as raw token units (e6 for USDC) — convert to human-readable
+            insurance: data.reduce((s, m) => s + Number(m.insurance_balance || 0) / 1e6, 0),
           });
           setStatsLoaded(true);
           const sorted = [...data].sort((a, b) => (b.volume_24h || 0) - (a.volume_24h || 0)).slice(0, 5);
           setFeatured(sorted.map((m) => ({
             slab_address: m.slab_address,
             symbol: m.symbol,
-            volume_24h: m.volume_24h || 0,
+            // volume_24h and total_open_interest are stored as raw token units (e6) — convert
+            volume_24h: (m.volume_24h || 0) / 1e6,
             last_price: m.last_price,
-            total_open_interest: m.total_open_interest || 0,
+            total_open_interest: (m.total_open_interest || 0) / 1e6,
           })));
         }
       } catch (err) {
