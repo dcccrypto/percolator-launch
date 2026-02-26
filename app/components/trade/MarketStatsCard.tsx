@@ -7,6 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatTokenAmount, formatUsd, formatBps } from "@/lib/format";
+import { sanitizeOnChainValue } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { FundingRateCard } from "./FundingRateCard";
 import { FundingRateChart } from "./FundingRateChart";
@@ -37,8 +38,9 @@ export const MarketStatsCard: FC = () => {
 
   const decimals = tokenMeta?.decimals ?? 6;
   const tokenDivisor = 10 ** decimals;
-  const totalOI = engine.totalOpenInterest ?? 0n;
-  const vault = engine.vault ?? 0n;
+  // Sanitize sentinel values (u64::MAX) from uninitialized on-chain fields
+  const totalOI = sanitizeOnChainValue(engine.totalOpenInterest ?? 0n);
+  const vault = sanitizeOnChainValue(engine.vault ?? 0n);
   const oiDisplay = showUsd && priceUsd != null
     ? formatNum((Number(totalOI) / tokenDivisor) * priceUsd)
     : formatTokenAmount(totalOI, decimals);

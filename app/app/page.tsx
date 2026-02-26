@@ -146,10 +146,12 @@ export default function Home() {
           };
 
           // Filter out empty/abandoned markets (no price, no volume, no OI)
+          // Also filter sentinel-like values (u64::MAX ≈ 1.844e19 as JS number)
+          const isSane = (v: number) => v > 0 && v < 1e18 && Number.isFinite(v);
           const activeData = data.filter((m) =>
-            (m.last_price ?? 0) > 0 ||
-            (m.volume_24h ?? 0) > 0 ||
-            (m.total_open_interest ?? 0) > 0
+            isSane(m.last_price ?? 0) ||
+            isSane(m.volume_24h ?? 0) ||
+            isSane(m.total_open_interest ?? 0)
           );
           setStats({
             markets: activeData.length,

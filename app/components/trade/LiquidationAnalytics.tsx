@@ -4,6 +4,7 @@ import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { sanitizeOnChainValue } from "@/lib/health";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
 function fmtCompact(n: number): string {
@@ -31,10 +32,11 @@ export const LiquidationAnalytics: FC = () => {
     );
   }
 
-  const lifetimeLiquidations = Number(engine.lifetimeLiquidations ?? 0n);
-  const lifetimeForceCloses = Number(engine.lifetimeForceCloses ?? 0n);
-  const insuranceBalance = Number(engine.insuranceFund?.balance ?? 0n) / divisor;
-  const totalOI = Number(engine.totalOpenInterest ?? 0n) / divisor;
+  // Sanitize sentinel values (u64::MAX from uninitialized on-chain fields)
+  const lifetimeLiquidations = Number(sanitizeOnChainValue(engine.lifetimeLiquidations ?? 0n));
+  const lifetimeForceCloses = Number(sanitizeOnChainValue(engine.lifetimeForceCloses ?? 0n));
+  const insuranceBalance = Number(sanitizeOnChainValue(engine.insuranceFund?.balance ?? 0n)) / divisor;
+  const totalOI = Number(sanitizeOnChainValue(engine.totalOpenInterest ?? 0n)) / divisor;
   const liqFeeBps = params ? Number(params.liquidationFeeBps ?? 0n) : 0;
   const bufferBps = params ? Number(params.liquidationBufferBps ?? 0n) : 0;
 

@@ -4,6 +4,7 @@ import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { sanitizeOnChainValue } from "@/lib/health";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
 function fmtCompact(n: number): string {
@@ -31,14 +32,15 @@ export const SystemCapitalCard: FC = () => {
     );
   }
 
-  const vault = Number(engine.vault ?? 0n) / divisor;
-  const cTot = Number(engine.cTot ?? 0n) / divisor;
-  const pnlPosTot = Number(engine.pnlPosTot ?? 0n) / divisor;
-  const insurance = Number(engine.insuranceFund?.balance ?? 0n) / divisor;
-  const totalOI = Number(engine.totalOpenInterest ?? 0n) / divisor;
-  const netLp = Number(engine.netLpPos ?? 0n) / divisor;
-  const lpSum = Number(engine.lpSumAbs ?? 0n) / divisor;
-  const lpMax = Number(engine.lpMaxAbs ?? 0n) / divisor;
+  // Sanitize sentinel values (u64::MAX from uninitialized on-chain fields)
+  const vault = Number(sanitizeOnChainValue(engine.vault ?? 0n)) / divisor;
+  const cTot = Number(sanitizeOnChainValue(engine.cTot ?? 0n)) / divisor;
+  const pnlPosTot = Number(sanitizeOnChainValue(engine.pnlPosTot ?? 0n)) / divisor;
+  const insurance = Number(sanitizeOnChainValue(engine.insuranceFund?.balance ?? 0n)) / divisor;
+  const totalOI = Number(sanitizeOnChainValue(engine.totalOpenInterest ?? 0n)) / divisor;
+  const netLp = Number(sanitizeOnChainValue(engine.netLpPos ?? 0n)) / divisor;
+  const lpSum = Number(sanitizeOnChainValue(engine.lpSumAbs ?? 0n)) / divisor;
+  const lpMax = Number(sanitizeOnChainValue(engine.lpMaxAbs ?? 0n)) / divisor;
   const accounts = engine.numUsedAccounts ?? 0;
 
   // LP concentration: how much of total LP exposure is one whale

@@ -190,20 +190,22 @@ function MarketsPageInner() {
   // Filter out empty/abandoned markets and flag bogus prices
   // A market is "empty" if it has no meaningful data: no price, no volume, no OI
   const activeMarkets = useMemo(() => {
+    // Helper: treat sentinel-like Supabase numbers (u64::MAX ≈ 1.844e19) as zero
+    const isSaneNum = (v: number) => v > 0 && v < 1e18 && Number.isFinite(v);
     return effectiveMarkets.filter((m) => {
       // Check on-chain price
       const hasOnChainPrice = m.onChain?.config
         ? resolveMarketPriceE6(m.onChain.config) > 0n
         : false;
-      // Check Supabase price
-      const hasSupabasePrice = (m.supabase?.last_price ?? 0) > 0;
-      // Check volume
-      const hasVolume = (m.supabase?.volume_24h ?? 0) > 0;
-      // Check OI
+      // Check Supabase price (with sentinel guard)
+      const hasSupabasePrice = isSaneNum(m.supabase?.last_price ?? 0);
+      // Check volume (with sentinel guard)
+      const hasVolume = isSaneNum(m.supabase?.volume_24h ?? 0);
+      // Check OI (with sentinel guard for both on-chain bigint and Supabase number)
       const hasOI = m.onChain
-        ? (m.onChain.engine?.totalOpenInterest ?? 0n) > 0n
-        : ((m.supabase?.total_open_interest ?? 0) > 0 ||
-           ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0)) > 0);
+        ? sanitizeOnChainValue(m.onChain.engine?.totalOpenInterest ?? 0n) > 0n
+        : (isSaneNum(m.supabase?.total_open_interest ?? 0) ||
+           isSaneNum((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0)));
 
       // Keep market if it has at least a price (on-chain or Supabase)
       return hasOnChainPrice || hasSupabasePrice || hasVolume || hasOI;
