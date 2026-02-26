@@ -108,10 +108,10 @@ export const Header: FC = () => {
     <header
       ref={headerRef}
       className={[
-        "sticky top-0 z-50 transition-all duration-300",
+        "sticky top-0 z-50 isolate transition-all duration-300",
         scrolled
-          ? "border-b border-[var(--border)] bg-[var(--bg)]"
-          : "border-b border-transparent bg-[var(--bg)]/80 backdrop-blur-sm",
+          ? "border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-md shadow-sm shadow-black/20"
+          : "border-b border-transparent bg-transparent",
       ].join(" ")}
     >
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
