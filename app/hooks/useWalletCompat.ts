@@ -6,6 +6,7 @@ import { useWallets, useSignTransaction } from "@privy-io/react-auth/solana";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import { getConfig, getWsEndpoint } from "@/lib/config";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
+import { getBatchRpc } from "@/lib/batchRpc";
 
 /**
  * Compatibility hook that provides the same interface as @solana/wallet-adapter-react's
@@ -88,14 +89,28 @@ function useWalletCompatInner() {
 /**
  * Compatibility hook replacing useConnection() from wallet-adapter.
  * Returns a Connection object using the app's configured RPC URL.
+ *
+ * Uses batching RPC transport on the client to coalesce individual JSON-RPC
+ * calls into batch requests, reducing HTTP request count by 10-30x and
+ * preventing 429 rate limit errors. See lib/batchRpc.ts for details.
  */
 export function useConnectionCompat() {
   const connection = useMemo(() => {
     const url = getConfig().rpcUrl;
     const wsEndpoint = getWsEndpoint();
+
+    // On the client, use batching fetch to coalesce RPC calls
+    const isClient = typeof window !== "undefined";
+    const fetchOption = isClient ? getBatchRpc().batchFetch : undefined;
+
     return new Connection(url, {
       commitment: "confirmed",
       ...(wsEndpoint ? { wsEndpoint } : {}),
+      // Disable web3.js built-in retry — our batch transport handles retries
+      // with proper exponential backoff instead of flat 500ms delays
+      ...(isClient ? { disableRetryOnRateLimit: true } : {}),
+      // Custom fetch that batches multiple RPC calls into single HTTP requests
+      ...(fetchOption ? { fetch: fetchOption as any } : {}),
     });
   }, []);
 

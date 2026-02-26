@@ -1,30 +1,36 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Simple in-memory rate limiter (per-IP, resets on deploy)
+// In-memory rate limiter (per-IP, resets on deploy)
+// Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const rpcRateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX = 120;
+const RATE_LIMIT_MAX = 120;         // General API endpoints
+const RPC_RATE_LIMIT_MAX = 600;     // /api/rpc — Solana needs many RPC calls per page
 
-function getRateLimit(ip: string): { remaining: number; reset: number } {
+function getRateLimit(ip: string, isRpc: boolean): { remaining: number; reset: number } {
   const now = Date.now();
-  let entry = rateLimitMap.get(ip);
+  const map = isRpc ? rpcRateLimitMap : rateLimitMap;
+  const max = isRpc ? RPC_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
+
+  let entry = map.get(ip);
 
   if (!entry || now > entry.resetAt) {
     entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
-    rateLimitMap.set(ip, entry);
+    map.set(ip, entry);
   }
 
   entry.count++;
 
   if (Math.random() < 0.001) {
-    for (const [key, val] of rateLimitMap) {
-      if (now > val.resetAt) rateLimitMap.delete(key);
+    for (const [key, val] of map) {
+      if (now > val.resetAt) map.delete(key);
     }
   }
 
   return {
-    remaining: Math.max(0, RATE_LIMIT_MAX - entry.count),
+    remaining: Math.max(0, max - entry.count),
     reset: Math.ceil((entry.resetAt - now) / 1000),
   };
 }
@@ -48,7 +54,9 @@ export function middleware(request: NextRequest) {
   const isApi = request.nextUrl.pathname.startsWith("/api/");
 
   if (isApi) {
-    const { remaining, reset } = getRateLimit(ip);
+    const isRpc = request.nextUrl.pathname === "/api/rpc";
+    const { remaining, reset } = getRateLimit(ip, isRpc);
+    const limit = isRpc ? RPC_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
 
     if (remaining <= 0) {
       return new NextResponse(
@@ -57,7 +65,7 @@ export function middleware(request: NextRequest) {
           status: 429,
           headers: {
             "Content-Type": "application/json",
-            "X-RateLimit-Limit": String(RATE_LIMIT_MAX),
+            "X-RateLimit-Limit": String(limit),
             "X-RateLimit-Remaining": "0",
             "X-RateLimit-Reset": String(reset),
             "Retry-After": String(reset),
@@ -67,7 +75,7 @@ export function middleware(request: NextRequest) {
     }
 
     const response = NextResponse.next();
-    response.headers.set("X-RateLimit-Limit", String(RATE_LIMIT_MAX));
+    response.headers.set("X-RateLimit-Limit", String(limit));
     response.headers.set("X-RateLimit-Remaining", String(remaining));
     response.headers.set("X-RateLimit-Reset", String(reset));
     addSecurityHeaders(response);
@@ -103,14 +111,17 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
     "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app https://token.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org blob:",
-    "frame-src https://auth.privy.io https://embedded-wallets.privy.io https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org",
+    "frame-src 'self' https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org",
+    "frame-ancestors 'self' https://percolatorlaunch.com https://*.percolatorlaunch.com https://percolator-launch.vercel.app https://*.vercel.app",
     "object-src 'none'",
     "base-uri 'self'",
   ].join("; ");
 
   response.headers.set("Content-Security-Policy", csp);
   response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
+  // SAMEORIGIN allows Privy's embedded wallet iframes to work.
+  // frame-ancestors CSP directive provides more granular control.
+  response.headers.set("X-Frame-Options", "SAMEORIGIN");
   response.headers.set("X-XSS-Protection", "0");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");

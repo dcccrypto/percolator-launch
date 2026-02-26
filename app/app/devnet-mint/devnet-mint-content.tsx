@@ -29,6 +29,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { LogoUpload } from "@/components/create/LogoUpload";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { getBatchRpc } from "@/lib/batchRpc";
 
 /**
  * Use the server-side RPC proxy to avoid exposing HELIUS_API_KEY in the client bundle.
@@ -74,7 +75,13 @@ const DevnetMintContent: FC = () => {
   const [mintAuthError, setMintAuthError] = useState<string | null>(null);
   const [checkingMintAuth, setCheckingMintAuth] = useState(false);
 
-  const connection = useMemo(() => new Connection(HELIUS_RPC, "confirmed"), []);
+  const connection = useMemo(() => {
+    const isClient = typeof window !== "undefined";
+    return new Connection(HELIUS_RPC, {
+      commitment: "confirmed",
+      ...(isClient ? { disableRetryOnRateLimit: true, fetch: getBatchRpc().batchFetch as any } : {}),
+    });
+  }, []);
   const airdropConnection = useMemo(() => new Connection(PUBLIC_DEVNET_RPC, "confirmed"), []);
 
   // Set recipient to connected wallet
