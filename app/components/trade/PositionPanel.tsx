@@ -73,7 +73,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     currentPriceE6,
   ) : 0n;
   const pnlUsd =
-    priceUsd !== null && currentPriceE6 > 0n ? (Number(pnlTokens) / 1e6) * priceUsd : null;
+    priceUsd !== null && currentPriceE6 > 0n ? (Number(pnlTokens) / 10 ** decimals) * priceUsd : null;
   const roe = currentPriceE6 > 0n ? computePnlPercent(pnlTokens, account.capital) : 0;
 
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
@@ -214,7 +214,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <div className="mt-3 border-t border-[var(--border)] pt-3">
             <WarmupProgress 
               slabAddress={slabAddress} 
-              accountIdx={userAccount.idx} 
+              accountIdx={userAccount.idx}
+              tokenDecimals={decimals}
             />
           </div>
 
