@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getSupabase } from "@/lib/supabase";
 import { isMockMode } from "@/lib/mock-mode";
 import { MOCK_SLAB_ADDRESSES, getMockMarketData } from "@/lib/mock-trade-data";
+import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GradientText } from "@/components/ui/GradientText";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -137,7 +138,7 @@ export default function Home() {
           // 3. Cap per-market USD contribution to $10B to prevent overflow from bad data
           const MAX_PER_MARKET_USD = 10_000_000_000; // $10B cap — no single market should exceed this
           const toUsd = (raw: number, decimals: number | null, price: number | null): number => {
-            if (raw > 1e18 || raw < 0 || !Number.isFinite(raw)) return 0;
+            if (!isSaneMarketValue(raw)) return 0;
             const d = Math.min(Math.max(decimals ?? 6, 0), 18); // clamp decimals 0–18
             const p = price ?? 0;
             if (p <= 0) return 0;
@@ -145,14 +146,9 @@ export default function Home() {
             return usd > MAX_PER_MARKET_USD ? 0 : usd; // discard absurd values
           };
 
-          // Filter out empty/abandoned markets (no price, no volume, no OI)
-          // Also filter sentinel-like values (u64::MAX ≈ 1.844e19 as JS number)
-          const isSane = (v: number) => v > 0 && v < 1e18 && Number.isFinite(v);
-          const activeData = data.filter((m) =>
-            isSane(m.last_price ?? 0) ||
-            isSane(m.volume_24h ?? 0) ||
-            isSane(m.total_open_interest ?? 0)
-          );
+          // Filter out empty/abandoned markets using shared active-market filter
+          // (consistent with /api/stats and markets page)
+          const activeData = data.filter(isActiveMarket);
           setStats({
             markets: activeData.length,
             volume: activeData.reduce((s, m) => s + toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price), 0),

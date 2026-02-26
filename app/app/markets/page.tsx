@@ -9,6 +9,7 @@ import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
 import { getSupabase } from "@/lib/supabase";
+import { isActiveMarket } from "@/lib/activeMarketFilter";
 import type { Database } from "@/lib/database.types";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
@@ -96,6 +97,16 @@ function MarketsPageInner() {
   const searchParams = useSearchParams();
   const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();
   const { statsMap, loading: statsLoading } = useAllMarketStats();
+
+  // Canonical "active markets" count from Supabase (single source of truth)
+  // Uses shared isActiveMarket filter — consistent with homepage & /api/stats
+  const totalActiveMarkets = useMemo(() => {
+    let count = 0;
+    for (const m of statsMap.values()) {
+      if (isActiveMarket(m)) count++;
+    }
+    return count;
+  }, [statsMap]);
   
   // P-MED-2: Read filters from URL params
   const [search, setSearch] = useState(searchParams.get("q") || "");
@@ -495,9 +506,11 @@ function MarketsPageInner() {
               </button>
             )}
 
-            {/* Results count */}
+            {/* Results count — show filtered/total when filters are active */}
             <span className="ml-auto text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-              {filtered.length} market{filtered.length !== 1 ? "s" : ""}
+              {(hasSearch || hasActiveFilters) && filtered.length !== totalActiveMarkets
+                ? `${filtered.length} / ${totalActiveMarkets} market${totalActiveMarkets !== 1 ? "s" : ""}`
+                : `${totalActiveMarkets} market${totalActiveMarkets !== 1 ? "s" : ""}`}
             </span>
           </div>
         </ScrollReveal>
