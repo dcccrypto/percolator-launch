@@ -1194,6 +1194,54 @@ declare function computeRequiredMargin(notional: bigint, initialMarginBps: bigin
  * Compute maximum leverage from initial margin bps.
  */
 declare function computeMaxLeverage(initialMarginBps: bigint): number;
+/**
+ * Compute unlocked capital during the warmup period.
+ *
+ * Capital is released linearly over `warmupPeriodSlots` slots starting from
+ * `warmupStartedAtSlot`. Before warmup starts (startSlot === 0) or if the
+ * warmup period is 0, all capital is considered unlocked.
+ *
+ * @param totalCapital    - Total deposited capital (native units).
+ * @param currentSlot     - The current on-chain slot.
+ * @param warmupStartSlot - Slot at which warmup started (0 = not started).
+ * @param warmupPeriodSlots - Total slots in the warmup period.
+ * @returns The amount of capital currently unlocked.
+ */
+declare function computeWarmupUnlockedCapital(totalCapital: bigint, currentSlot: bigint, warmupStartSlot: bigint, warmupPeriodSlots: bigint): bigint;
+/**
+ * Compute the effective maximum leverage during the warmup period.
+ *
+ * During warmup, only unlocked capital can be used as margin. The effective
+ * leverage relative to *total* capital is therefore capped at:
+ *
+ *   effectiveMaxLeverage = maxLeverage × (unlockedCapital / totalCapital)
+ *
+ * This returns a floored integer value (leverage is always a whole number
+ * in the UI), with a minimum of 1x if any capital is unlocked.
+ *
+ * @param initialMarginBps   - Initial margin requirement in basis points.
+ * @param totalCapital       - Total deposited capital (native units).
+ * @param currentSlot        - The current on-chain slot.
+ * @param warmupStartSlot    - Slot at which warmup started (0 = not started).
+ * @param warmupPeriodSlots  - Total slots in the warmup period.
+ * @returns The effective maximum leverage (integer, ≥ 1).
+ */
+declare function computeWarmupLeverageCap(initialMarginBps: bigint, totalCapital: bigint, currentSlot: bigint, warmupStartSlot: bigint, warmupPeriodSlots: bigint): number;
+/**
+ * Compute the maximum position size allowed during warmup.
+ *
+ * This is the unlocked capital multiplied by the base max leverage.
+ * Unlike `computeWarmupLeverageCap` (which gives effective leverage
+ * relative to total capital), this gives the absolute notional cap.
+ *
+ * @param initialMarginBps   - Initial margin requirement in basis points.
+ * @param totalCapital       - Total deposited capital (native units).
+ * @param currentSlot        - The current on-chain slot.
+ * @param warmupStartSlot    - Slot at which warmup started (0 = not started).
+ * @param warmupPeriodSlots  - Total slots in the warmup period.
+ * @returns Maximum position size in native units.
+ */
+declare function computeWarmupMaxPositionSize(initialMarginBps: bigint, totalCapital: bigint, currentSlot: bigint, warmupStartSlot: bigint, warmupPeriodSlots: bigint): bigint;
 
 /**
  * Input validation utilities for CLI commands.
@@ -1312,4 +1360,4 @@ declare function getMatcherProgramId(network?: Network): PublicKey;
  */
 declare function getCurrentNetwork(): Network;
 
-export { ACCOUNTS_CLOSE_ACCOUNT, ACCOUNTS_CLOSE_SLAB, ACCOUNTS_CREATE_INSURANCE_MINT, ACCOUNTS_DEPOSIT_COLLATERAL, ACCOUNTS_DEPOSIT_INSURANCE_LP, ACCOUNTS_INIT_LP, ACCOUNTS_INIT_MARKET, ACCOUNTS_INIT_USER, ACCOUNTS_KEEPER_CRANK, ACCOUNTS_LIQUIDATE_AT_ORACLE, ACCOUNTS_PAUSE_MARKET, ACCOUNTS_PUSH_ORACLE_PRICE, ACCOUNTS_RESOLVE_MARKET, ACCOUNTS_SET_MAINTENANCE_FEE, ACCOUNTS_SET_ORACLE_AUTHORITY, ACCOUNTS_SET_RISK_THRESHOLD, ACCOUNTS_TOPUP_INSURANCE, ACCOUNTS_TRADE_CPI, ACCOUNTS_TRADE_NOCPI, ACCOUNTS_UNPAUSE_MARKET, ACCOUNTS_UPDATE_ADMIN, ACCOUNTS_UPDATE_CONFIG, ACCOUNTS_WITHDRAW_COLLATERAL, ACCOUNTS_WITHDRAW_INSURANCE, ACCOUNTS_WITHDRAW_INSURANCE_LP, type Account, AccountKind, type AccountSpec, type AdminForceCloseArgs, type BuildIxParams, CTX_VAMM_OFFSET, type CloseAccountArgs, type DepositCollateralArgs, type DepositInsuranceLPArgs, type DexPoolInfo, type DexType, type DiscoveredMarket, type EngineState, IX_TAG, type InitLPArgs, type InitMarketArgs, type InitUserArgs, type InsuranceFund, type KeeperCrankArgs, type LiquidateAtOracleArgs, MARK_PRICE_EMA_ALPHA_E6, MARK_PRICE_EMA_WINDOW_SLOTS, METEORA_DLMM_PROGRAM_ID, type MarketConfig, type Network, PERCOLATOR_ERRORS, PROGRAM_IDS, PUMPSWAP_PROGRAM_ID, PYTH_PUSH_ORACLE_PROGRAM_ID, PYTH_RECEIVER_PROGRAM_ID, PYTH_SOLANA_FEEDS, type PriceRouterResult, type PriceSource, type PriceSourceType, type PushOraclePriceArgs, RAYDIUM_CLMM_PROGRAM_ID, type RiskParams, SLAB_TIERS, STAKE_IX, STAKE_PROGRAM_ID, type SetMaintenanceFeeArgs, type SetOracleAuthorityArgs, type SetOraclePriceCapArgs, type SetPythOracleArgs, type SetRiskThresholdArgs, type SimulateOrSendParams, type SlabHeader, type SlabTierKey, type StakeAccounts, TOKEN_2022_PROGRAM_ID, type TopUpInsuranceArgs, type TradeCpiArgs, type TradeCpiV2Args, type TradeNoCpiArgs, type TxResult, type UpdateAdminArgs, type UpdateConfigArgs, type UpdateRiskParamsArgs, VAMM_MAGIC, ValidationError, type VammMatcherParams, WELL_KNOWN, type WithdrawCollateralArgs, type WithdrawInsuranceLPArgs, buildAccountMetas, buildIx, computeDexSpotPriceE6, computeEmaMarkPrice, computeEstimatedEntryPrice, computeFundingRateAnnualized, computeLiqPrice, computeMarkPnl, computeMaxLeverage, computePnlPercent, computePreTradeLiqPrice, computeRequiredMargin, computeTradingFee, computeVammQuote, concatBytes, decodeError, depositAccounts, deriveDepositPda, deriveInsuranceLpMint, deriveLpPda, derivePythPriceUpdateAccount, derivePythPushOraclePDA, deriveStakePool, deriveStakeVaultAuth, deriveVaultAuthority, detectDexType, detectLayout, detectTokenProgram, discoverMarkets, encBool, encI128, encI64, encPubkey, encU128, encU16, encU32, encU64, encU8, encodeAdminForceClose, encodeCloseAccount, encodeCloseSlab, encodeCreateInsuranceMint, encodeDepositCollateral, encodeDepositInsuranceLP, encodeInitLP, encodeInitMarket, encodeInitUser, encodeKeeperCrank, encodeLiquidateAtOracle, encodePauseMarket, encodePushOraclePrice, encodeRenounceAdmin, encodeResolveMarket, encodeSetMaintenanceFee, encodeSetOracleAuthority, encodeSetOraclePriceCap, encodeSetPythOracle, encodeSetRiskThreshold, encodeStakeAdminResolveMarket, encodeStakeAdminSetInsurancePolicy, encodeStakeAdminSetMaintenanceFee, encodeStakeAdminSetOracleAuthority, encodeStakeAdminSetRiskThreshold, encodeStakeAdminWithdrawInsurance, encodeStakeDeposit, encodeStakeFlushToInsurance, encodeStakeInitPool, encodeStakeTransferAdmin, encodeStakeUpdateConfig, encodeStakeWithdraw, encodeTopUpInsurance, encodeTradeCpi, encodeTradeCpiV2, encodeTradeNoCpi, encodeUnpauseMarket, encodeUpdateAdmin, encodeUpdateConfig, encodeUpdateHyperpMark, encodeUpdateMarkPrice, encodeUpdateRiskParams, encodeWithdrawCollateral, encodeWithdrawInsurance, encodeWithdrawInsuranceLP, fetchSlab, fetchTokenAccount, flushToInsuranceAccounts, formatResult, getAta, getAtaSync, getCurrentNetwork, getErrorHint, getErrorName, getMatcherProgramId, getProgramId, initPoolAccounts, isAccountUsed, isStandardToken, isToken2022, maxAccountIndex, parseAccount, parseAllAccounts, parseConfig, parseDexPool, parseEngine, parseErrorFromLogs, parseHeader, parseParams, parseUsedIndices, readLastThrUpdateSlot, readNonce, resolvePrice, simulateOrSend, slabDataSize, validateAmount, validateBps, validateI128, validateI64, validateIndex, validatePublicKey, validateU128, validateU16, validateU64, withdrawAccounts };
+export { ACCOUNTS_CLOSE_ACCOUNT, ACCOUNTS_CLOSE_SLAB, ACCOUNTS_CREATE_INSURANCE_MINT, ACCOUNTS_DEPOSIT_COLLATERAL, ACCOUNTS_DEPOSIT_INSURANCE_LP, ACCOUNTS_INIT_LP, ACCOUNTS_INIT_MARKET, ACCOUNTS_INIT_USER, ACCOUNTS_KEEPER_CRANK, ACCOUNTS_LIQUIDATE_AT_ORACLE, ACCOUNTS_PAUSE_MARKET, ACCOUNTS_PUSH_ORACLE_PRICE, ACCOUNTS_RESOLVE_MARKET, ACCOUNTS_SET_MAINTENANCE_FEE, ACCOUNTS_SET_ORACLE_AUTHORITY, ACCOUNTS_SET_RISK_THRESHOLD, ACCOUNTS_TOPUP_INSURANCE, ACCOUNTS_TRADE_CPI, ACCOUNTS_TRADE_NOCPI, ACCOUNTS_UNPAUSE_MARKET, ACCOUNTS_UPDATE_ADMIN, ACCOUNTS_UPDATE_CONFIG, ACCOUNTS_WITHDRAW_COLLATERAL, ACCOUNTS_WITHDRAW_INSURANCE, ACCOUNTS_WITHDRAW_INSURANCE_LP, type Account, AccountKind, type AccountSpec, type AdminForceCloseArgs, type BuildIxParams, CTX_VAMM_OFFSET, type CloseAccountArgs, type DepositCollateralArgs, type DepositInsuranceLPArgs, type DexPoolInfo, type DexType, type DiscoveredMarket, type EngineState, IX_TAG, type InitLPArgs, type InitMarketArgs, type InitUserArgs, type InsuranceFund, type KeeperCrankArgs, type LiquidateAtOracleArgs, MARK_PRICE_EMA_ALPHA_E6, MARK_PRICE_EMA_WINDOW_SLOTS, METEORA_DLMM_PROGRAM_ID, type MarketConfig, type Network, PERCOLATOR_ERRORS, PROGRAM_IDS, PUMPSWAP_PROGRAM_ID, PYTH_PUSH_ORACLE_PROGRAM_ID, PYTH_RECEIVER_PROGRAM_ID, PYTH_SOLANA_FEEDS, type PriceRouterResult, type PriceSource, type PriceSourceType, type PushOraclePriceArgs, RAYDIUM_CLMM_PROGRAM_ID, type RiskParams, SLAB_TIERS, STAKE_IX, STAKE_PROGRAM_ID, type SetMaintenanceFeeArgs, type SetOracleAuthorityArgs, type SetOraclePriceCapArgs, type SetPythOracleArgs, type SetRiskThresholdArgs, type SimulateOrSendParams, type SlabHeader, type SlabTierKey, type StakeAccounts, TOKEN_2022_PROGRAM_ID, type TopUpInsuranceArgs, type TradeCpiArgs, type TradeCpiV2Args, type TradeNoCpiArgs, type TxResult, type UpdateAdminArgs, type UpdateConfigArgs, type UpdateRiskParamsArgs, VAMM_MAGIC, ValidationError, type VammMatcherParams, WELL_KNOWN, type WithdrawCollateralArgs, type WithdrawInsuranceLPArgs, buildAccountMetas, buildIx, computeDexSpotPriceE6, computeEmaMarkPrice, computeEstimatedEntryPrice, computeFundingRateAnnualized, computeLiqPrice, computeMarkPnl, computeMaxLeverage, computePnlPercent, computePreTradeLiqPrice, computeRequiredMargin, computeTradingFee, computeVammQuote, computeWarmupLeverageCap, computeWarmupMaxPositionSize, computeWarmupUnlockedCapital, concatBytes, decodeError, depositAccounts, deriveDepositPda, deriveInsuranceLpMint, deriveLpPda, derivePythPriceUpdateAccount, derivePythPushOraclePDA, deriveStakePool, deriveStakeVaultAuth, deriveVaultAuthority, detectDexType, detectLayout, detectTokenProgram, discoverMarkets, encBool, encI128, encI64, encPubkey, encU128, encU16, encU32, encU64, encU8, encodeAdminForceClose, encodeCloseAccount, encodeCloseSlab, encodeCreateInsuranceMint, encodeDepositCollateral, encodeDepositInsuranceLP, encodeInitLP, encodeInitMarket, encodeInitUser, encodeKeeperCrank, encodeLiquidateAtOracle, encodePauseMarket, encodePushOraclePrice, encodeRenounceAdmin, encodeResolveMarket, encodeSetMaintenanceFee, encodeSetOracleAuthority, encodeSetOraclePriceCap, encodeSetPythOracle, encodeSetRiskThreshold, encodeStakeAdminResolveMarket, encodeStakeAdminSetInsurancePolicy, encodeStakeAdminSetMaintenanceFee, encodeStakeAdminSetOracleAuthority, encodeStakeAdminSetRiskThreshold, encodeStakeAdminWithdrawInsurance, encodeStakeDeposit, encodeStakeFlushToInsurance, encodeStakeInitPool, encodeStakeTransferAdmin, encodeStakeUpdateConfig, encodeStakeWithdraw, encodeTopUpInsurance, encodeTradeCpi, encodeTradeCpiV2, encodeTradeNoCpi, encodeUnpauseMarket, encodeUpdateAdmin, encodeUpdateConfig, encodeUpdateHyperpMark, encodeUpdateMarkPrice, encodeUpdateRiskParams, encodeWithdrawCollateral, encodeWithdrawInsurance, encodeWithdrawInsuranceLP, fetchSlab, fetchTokenAccount, flushToInsuranceAccounts, formatResult, getAta, getAtaSync, getCurrentNetwork, getErrorHint, getErrorName, getMatcherProgramId, getProgramId, initPoolAccounts, isAccountUsed, isStandardToken, isToken2022, maxAccountIndex, parseAccount, parseAllAccounts, parseConfig, parseDexPool, parseEngine, parseErrorFromLogs, parseHeader, parseParams, parseUsedIndices, readLastThrUpdateSlot, readNonce, resolvePrice, simulateOrSend, slabDataSize, validateAmount, validateBps, validateI128, validateI64, validateIndex, validatePublicKey, validateU128, validateU16, validateU64, withdrawAccounts };
