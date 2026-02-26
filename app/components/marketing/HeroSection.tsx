@@ -6,6 +6,7 @@ import { getConfig } from "@/lib/config";
 import { isMockMode } from "@/lib/mock-mode";
 import { MOCK_SLAB_ADDRESSES } from "@/lib/mock-trade-data";
 import { getSupabase } from "@/lib/supabase";
+import { isActiveMarket } from "@/lib/activeMarketFilter";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { HeroHeadline } from "./HeroHeadline";
 import { HeroStats } from "./HeroStats";
@@ -58,13 +59,14 @@ export function HeroSection() {
           .from("markets_with_stats")
           .select("volume_24h, total_accounts, last_price, decimals");
         if (data && data.length > 0) {
-          const volume = data.reduce((s: number, m: { volume_24h: number | null; last_price: number | null; decimals: number | null }) => {
+          const activeData = data.filter(isActiveMarket);
+          const volume = activeData.reduce((s: number, m: { volume_24h: number | null; last_price: number | null; decimals: number | null }) => {
             const d = 10 ** (m.decimals ?? 6);
             const price = m.last_price ?? 0;
             return s + (Number(m.volume_24h || 0) / d) * price;
           }, 0);
-          const traders = data.reduce((s: number, m: { total_accounts: number | null }) => s + (m.total_accounts ?? 0), 0);
-          setStats({ markets: data.length, volume, traders });
+          const traders = activeData.reduce((s: number, m: { total_accounts: number | null }) => s + (m.total_accounts ?? 0), 0);
+          setStats({ markets: activeData.length, volume, traders });
         }
       } catch {
         // Silently fail — hero stats are non-critical
