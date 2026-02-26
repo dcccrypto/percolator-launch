@@ -7,42 +7,58 @@ import dynamic from "next/dynamic";
 import gsap from "gsap";
 import { type Network, getConfig, setNetwork } from "@/lib/config";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { NavDropdown, type NavItem } from "./NavDropdown";
 
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
   { ssr: false }
 );
 
-const navLinks = [
+/* ── Navigation groups ── */
+const tradeLinks: NavItem[] = [
   { href: "/markets", label: "Markets" },
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/create", label: "Create" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/wallet", label: "Wallet" },
-  { href: "/my-markets", label: "Admin" },
-  { href: "/guide", label: "Guide" },
-  { href: "/agents", label: "Agents" },
-  { href: "/report-bug", label: "Bugs" },
-  { href: "/join", label: "Join Us" },
+];
+
+const buildLinks: NavItem[] = [
+  { href: "/create", label: "Create a Market" },
   { href: "/developers", label: "Developers" },
+  { href: "/guide", label: "Guide" },
+  { href: "/devnet-mint", label: "Faucet" },
+];
+
+const communityLinks: NavItem[] = [
+  { href: "/join", label: "Join Us" },
+  { href: "/agents", label: "Agents" },
+  { href: "/report-bug", label: "Report Bug" },
+];
+
+/* ── All links flat (for mobile) ── */
+const mobileGroups = [
+  { label: "Trade", items: tradeLinks },
+  { label: "Build", items: buildLinks },
+  { label: "Community", items: communityLinks },
 ];
 
 export const Header: FC = () => {
   const [network, setNet] = useState<Network>("devnet");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
   const pathname = usePathname();
   const prefersReduced = usePrefersReducedMotion();
   const headerRef = useRef<HTMLElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
-  const badgeRef = useRef<HTMLButtonElement>(null);
+  const badgeRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => { setNet(getConfig().network); }, []);
 
   // Scroll detection
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
-    onScroll(); // Check initial scroll position on mount (e.g. page refresh while scrolled)
+    onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
@@ -59,12 +75,6 @@ export const Header: FC = () => {
         { height: 0, opacity: 0 },
         { height: "auto", opacity: 1, duration: 0.3, ease: "power2.out" }
       );
-      const links = menu.querySelectorAll("a");
-      gsap.fromTo(
-        links,
-        { opacity: 0, x: -12 },
-        { opacity: 1, x: 0, duration: 0.25, stagger: 0.04, delay: 0.1, ease: "power2.out" }
-      );
     } else {
       gsap.to(menu, {
         height: 0,
@@ -76,14 +86,14 @@ export const Header: FC = () => {
     }
   }, [mobileOpen, prefersReduced]);
 
-  // Network badge pulse — reload required for wallet adapter RPC change
-  const handleNetworkSwitch = () => {
-    setNetwork(network === "mainnet" ? "devnet" : "mainnet");
-    if (badgeRef.current && !prefersReduced) {
-      gsap.fromTo(badgeRef.current, { scale: 1.15 }, { scale: 1, duration: 0.4, ease: "elastic.out(1, 0.5)" });
-    }
-    // RPC endpoint must reload for wallet adapter to pick up new network
-    window.location.reload();
+  // Close mobile on route change
+  useEffect(() => {
+    setMobileOpen(false);
+    setMobileExpanded(null);
+  }, [pathname]);
+
+  const toggleMobileGroup = (label: string) => {
+    setMobileExpanded(mobileExpanded === label ? null : label);
   };
 
   return (
@@ -98,7 +108,7 @@ export const Header: FC = () => {
     >
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
         {/* Left */}
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-6">
           <Link
             href="/"
             className="group flex items-center gap-2"
@@ -111,52 +121,26 @@ export const Header: FC = () => {
             />
           </Link>
 
-          <nav className="hidden items-center gap-0.5 md:flex">
-            {navLinks.map((link) => {
-              const active = pathname === link.href;
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={[
-                    "relative px-3 py-1.5 text-[13px] font-medium rounded-sm transition-all duration-200",
-                    active
-                      ? "text-[var(--accent)] bg-[var(--accent)]/10"
-                      : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent)]/[0.04]",
-                  ].join(" ")}
-                >
-                  {link.label}
-                </Link>
-              );
-            })}
-            {network === "devnet" && (
-              <Link
-                href="/devnet-mint"
-                className="px-3 py-1.5 text-[13px] font-medium text-[var(--warning)]/60 transition-colors hover:text-[var(--warning)]"
-              >
-                Faucet
-              </Link>
-            )}
+          {/* Desktop nav — dropdown groups */}
+          <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main navigation">
+            <NavDropdown label="Trade" items={tradeLinks} />
+            <NavDropdown label="Build" items={buildLinks} />
+            <NavDropdown label="Community" items={communityLinks} />
           </nav>
         </div>
 
         {/* Right */}
         <div className="flex items-center gap-2.5">
-          <button
-            ref={badgeRef}
-            onClick={handleNetworkSwitch}
-            disabled
-            title={network === "devnet" ? "Devnet — test environment, no real funds" : "Mainnet"}
-            aria-label={`Network: ${network}`}
-            className={[
-              "rounded-sm px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider border-2 transition-all duration-200 cursor-not-allowed",
-              network === "devnet"
-                ? "text-[var(--warning)] border-[var(--warning)]/40 bg-[var(--warning)]/[0.08]"
-                : "text-[var(--accent)] border-[var(--accent)]/30 bg-[var(--accent)]/[0.06]",
-            ].join(" ")}
-          >
-            {network}
-          </button>
+          {/* DEVNET badge — non-interactive pill */}
+          {network === "devnet" && (
+            <span
+              ref={badgeRef}
+              title="You are on devnet — no real funds"
+              className="inline-flex items-center gap-1 rounded-full border border-[#fbbf24]/35 bg-[#fbbf24]/[0.12] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.06em] text-[#fbbf24] cursor-default pointer-events-none select-none"
+            >
+              devnet
+            </span>
+          )}
 
           <div className="h-4 w-px bg-[var(--border)]" />
           <ConnectButton />
@@ -179,7 +163,7 @@ export const Header: FC = () => {
         </div>
       </div>
 
-      {/* Mobile nav */}
+      {/* Mobile nav — accordion groups */}
       <nav
         ref={mobileMenuRef}
         className="overflow-hidden border-t border-[var(--border)] bg-[var(--bg)] md:hidden"
@@ -187,30 +171,59 @@ export const Header: FC = () => {
         aria-label="Mobile navigation"
       >
         <div className="flex flex-col gap-0.5 p-3">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              onClick={() => setMobileOpen(false)}
-              className={[
-                "px-3 py-2.5 text-[13px] font-medium rounded-sm transition-all",
-                pathname === link.href
-                  ? "text-[var(--accent)] bg-[var(--accent)]/10"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent)]/[0.04]",
-              ].join(" ")}
-            >
-              {link.label}
-            </Link>
+          {mobileGroups.map((group) => (
+            <div key={group.label}>
+              {/* Group header — accordion trigger */}
+              <button
+                onClick={() => toggleMobileGroup(group.label)}
+                className="flex w-full items-center justify-between px-3 py-2.5 text-[13px] font-bold uppercase tracking-wider text-[#9ca3af]"
+                aria-expanded={mobileExpanded === group.label}
+              >
+                {group.label}
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  fill="none"
+                  className={[
+                    "transition-transform duration-150",
+                    mobileExpanded === group.label ? "rotate-180" : "",
+                  ].join(" ")}
+                >
+                  <path
+                    d="M2.5 3.75L5 6.25L7.5 3.75"
+                    stroke="currentColor"
+                    strokeWidth="1.25"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+
+              {/* Group items */}
+              {mobileExpanded === group.label && (
+                <div className="ml-3 flex flex-col gap-0.5">
+                  {group.items.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={[
+                        "px-3 py-2 text-[13px] font-medium rounded-sm transition-all",
+                        pathname === item.href
+                          ? "text-[#22d3ee] bg-[rgba(34,211,238,0.08)]"
+                          : "text-[#d1d5db] hover:text-white hover:bg-white/[0.06]",
+                      ].join(" ")}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
-          {network === "devnet" && (
-            <Link
-              href="/devnet-mint"
-              onClick={() => setMobileOpen(false)}
-              className="px-3 py-2.5 text-[13px] font-medium text-[var(--warning)]/60 hover:text-[var(--warning)]"
-            >
-              Faucet
-            </Link>
-          )}
+
+          {/* Social links */}
           <div className="mt-1 flex items-center gap-2 border-t border-[var(--border)] px-3 pt-3">
             <a
               href="https://github.com/dcccrypto/percolator-launch"

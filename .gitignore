@@ -62,3 +62,4 @@ render-pdf.cjs
 render-pdf.mjs
 .worktrees/
 program/target/
+percolator/target/
