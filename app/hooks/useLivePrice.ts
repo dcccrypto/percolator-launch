@@ -56,7 +56,12 @@ export function useLivePrice(): PriceState {
   // Seed from on-chain slab data when no live price yet
   useEffect(() => {
     if (!mktConfig) return;
-    const onChainE6 = mktConfig.authorityPriceE6 ?? mktConfig.lastEffectivePriceE6 ?? 0n;
+    // For Pyth-pinned markets (oracleAuthority all zeros), authorityPriceE6 may be stale/garbage.
+    // Prefer lastEffectivePriceE6 which is the on-chain resolved price.
+    const isPythPinned = mktConfig.oracleAuthority?.toBytes?.()?.every((b: number) => b === 0) ?? false;
+    const onChainE6 = isPythPinned
+      ? (mktConfig.lastEffectivePriceE6 ?? 0n)
+      : (mktConfig.authorityPriceE6 ?? mktConfig.lastEffectivePriceE6 ?? 0n);
     if (onChainE6 === 0n) return;
     setState((prev) => {
       if (prev.price !== null) return prev;

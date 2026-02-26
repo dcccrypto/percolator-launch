@@ -5,6 +5,7 @@ import gsap from "gsap";
 import { getConfig } from "@/lib/config";
 import { isMockMode } from "@/lib/mock-mode";
 import { MOCK_SLAB_ADDRESSES } from "@/lib/mock-trade-data";
+import { getSupabase } from "@/lib/supabase";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { HeroHeadline } from "./HeroHeadline";
 import { HeroStats } from "./HeroStats";
@@ -49,8 +50,27 @@ export function HeroSection() {
         volume: 124_000,
         traders: 847,
       });
+      return;
     }
-    // TODO: pull from live API when available
+    async function loadHeroStats() {
+      try {
+        const { data } = await getSupabase()
+          .from("markets_with_stats")
+          .select("volume_24h, total_accounts, last_price, decimals");
+        if (data && data.length > 0) {
+          const volume = data.reduce((s: number, m: { volume_24h: number | null; last_price: number | null; decimals: number | null }) => {
+            const d = 10 ** (m.decimals ?? 6);
+            const price = m.last_price ?? 0;
+            return s + (Number(m.volume_24h || 0) / d) * price;
+          }, 0);
+          const traders = data.reduce((s: number, m: { total_accounts: number | null }) => s + (m.total_accounts ?? 0), 0);
+          setStats({ markets: data.length, volume, traders });
+        }
+      } catch {
+        // Silently fail — hero stats are non-critical
+      }
+    }
+    loadHeroStats();
   }, []);
 
   // Eyebrow + sub fade in
