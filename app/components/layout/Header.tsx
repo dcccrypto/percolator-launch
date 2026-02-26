@@ -66,7 +66,15 @@ export const Header: FC = () => {
   // Mobile menu animation
   useEffect(() => {
     const menu = mobileMenuRef.current;
-    if (!menu || prefersReduced) return;
+    if (!menu) return;
+
+    if (prefersReduced) {
+      // Skip animation but still toggle visibility for reduced-motion users
+      menu.style.display = mobileOpen ? "block" : "none";
+      menu.style.height = mobileOpen ? "auto" : "0px";
+      menu.style.opacity = mobileOpen ? "1" : "0";
+      return;
+    }
 
     if (mobileOpen) {
       menu.style.display = "block";

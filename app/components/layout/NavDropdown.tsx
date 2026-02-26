@@ -28,7 +28,15 @@ export const NavDropdown: FC<NavDropdownProps> = ({ label, items }) => {
   }, []);
 
   const handleMouseLeave = useCallback(() => {
+    clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => setOpen(false), 150);
+  }, []);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(timeoutRef.current);
+    };
   }, []);
 
   // Close on escape
@@ -97,6 +105,7 @@ export const NavDropdown: FC<NavDropdownProps> = ({ label, items }) => {
       {/* Dropdown panel */}
       <div
         role="menu"
+        aria-hidden={!open || undefined}
         className={[
           "absolute left-0 top-full mt-1 min-w-[200px] rounded-xl border border-white/[0.08] bg-[rgba(15,15,20,0.97)] py-2 shadow-[0_8px_32px_rgba(0,0,0,0.48)] transition-all duration-[120ms] ease-out",
           open
@@ -111,6 +120,7 @@ export const NavDropdown: FC<NavDropdownProps> = ({ label, items }) => {
               key={item.href}
               href={item.href}
               role="menuitem"
+              tabIndex={open ? 0 : -1}
               onClick={() => setOpen(false)}
               className={[
                 "block px-4 py-2.5 text-sm transition-colors duration-150",
