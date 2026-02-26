@@ -4,6 +4,8 @@ import {
   sanitizeSlabAddress,
   sanitizePagination,
   sanitizeNumber,
+  sanitizeBigIntForDb,
+  sanitizeBigIntToString,
 } from "../src/sanitize.js";
 
 describe("sanitize", () => {
@@ -273,6 +275,92 @@ describe("sanitize", () => {
     it("should parse scientific notation strings", () => {
       expect(sanitizeNumber("1e5")).toBe(100000);
       expect(sanitizeNumber("2.5e2")).toBe(250);
+    });
+  });
+
+  describe("sanitizeBigIntForDb", () => {
+    const U64_MAX = 18_446_744_073_709_551_615n;
+    const PG_BIGINT_MAX = 9_223_372_036_854_775_807n;
+
+    it("should pass through normal values", () => {
+      expect(sanitizeBigIntForDb(0n)).toBe(0);
+      expect(sanitizeBigIntForDb(1n)).toBe(1);
+      expect(sanitizeBigIntForDb(1_000_000n)).toBe(1_000_000);
+      expect(sanitizeBigIntForDb(-500n)).toBe(-500);
+    });
+
+    it("should replace u64::MAX sentinel with 0", () => {
+      expect(sanitizeBigIntForDb(U64_MAX)).toBe(0);
+    });
+
+    it("should replace near-sentinel values (≥90% of u64::MAX) with 0", () => {
+      // 90% of u64::MAX ≈ 16.6e18
+      const nearSentinel = (U64_MAX * 9n) / 10n;
+      expect(sanitizeBigIntForDb(nearSentinel)).toBe(0);
+      expect(sanitizeBigIntForDb(nearSentinel + 1n)).toBe(0);
+    });
+
+    it("should replace values exceeding PG bigint max with 0", () => {
+      expect(sanitizeBigIntForDb(PG_BIGINT_MAX + 1n)).toBe(0);
+      // This is the exact value from the bug report (after Number() lossy conversion)
+      expect(sanitizeBigIntForDb(13_292_928_068_290_159_000n)).toBe(0);
+    });
+
+    it("should accept values at PG bigint max boundary", () => {
+      expect(sanitizeBigIntForDb(PG_BIGINT_MAX)).toBe(Number(PG_BIGINT_MAX));
+    });
+
+    it("should handle negative sentinel-like values", () => {
+      expect(sanitizeBigIntForDb(-U64_MAX)).toBe(0);
+      const negSentinel = -(U64_MAX * 9n) / 10n;
+      expect(sanitizeBigIntForDb(negSentinel)).toBe(0);
+    });
+
+    it("should handle negative values exceeding PG bigint min", () => {
+      expect(sanitizeBigIntForDb(-PG_BIGINT_MAX - 1n)).toBe(0);
+    });
+
+    it("should use custom fallback when provided", () => {
+      expect(sanitizeBigIntForDb(U64_MAX, -1)).toBe(-1);
+      expect(sanitizeBigIntForDb(U64_MAX, 100)).toBe(100);
+    });
+
+    it("should handle typical on-chain values correctly", () => {
+      // Typical Solana slot number
+      expect(sanitizeBigIntForDb(350_000_000n)).toBe(350_000_000);
+      // Typical token amount (1 SOL in lamports)
+      expect(sanitizeBigIntForDb(1_000_000_000n)).toBe(1_000_000_000);
+      // Large but valid OI value
+      expect(sanitizeBigIntForDb(5_000_000_000_000n)).toBe(5_000_000_000_000);
+    });
+  });
+
+  describe("sanitizeBigIntToString", () => {
+    const U64_MAX = 18_446_744_073_709_551_615n;
+
+    it("should convert normal values to string", () => {
+      expect(sanitizeBigIntToString(0n)).toBe("0");
+      expect(sanitizeBigIntToString(12345n)).toBe("12345");
+      expect(sanitizeBigIntToString(-999n)).toBe("-999");
+    });
+
+    it("should replace u64::MAX sentinel with '0'", () => {
+      expect(sanitizeBigIntToString(U64_MAX)).toBe("0");
+    });
+
+    it("should replace near-sentinel values with '0'", () => {
+      const nearSentinel = (U64_MAX * 95n) / 100n;
+      expect(sanitizeBigIntToString(nearSentinel)).toBe("0");
+    });
+
+    it("should use custom fallback string", () => {
+      expect(sanitizeBigIntToString(U64_MAX, "null")).toBe("null");
+      expect(sanitizeBigIntToString(U64_MAX, "-1")).toBe("-1");
+    });
+
+    it("should preserve full precision for large but valid values", () => {
+      const largeValid = 9_000_000_000_000_000_000n; // < PG max
+      expect(sanitizeBigIntToString(largeValid)).toBe("9000000000000000000");
     });
   });
 });
