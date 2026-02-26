@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue } from "../../lib/health";
+import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue, sanitizeAccountCount } from "../../lib/health";
 import type { HealthLevel } from "../../lib/health";
 
 /** Stub EngineState with only the fields computeMarketHealth uses */
@@ -260,5 +260,41 @@ describe("computeMarketHealthFromStats", () => {
       c_tot: 600_000, // 60% → caution
     });
     expect(result.level).toBe("caution");
+  });
+});
+
+describe("sanitizeAccountCount", () => {
+  it("returns 0 for values exceeding max slab capacity (4096)", () => {
+    expect(sanitizeAccountCount(29807)).toBe(0);
+    expect(sanitizeAccountCount(13837)).toBe(0);
+    expect(sanitizeAccountCount(65535)).toBe(0); // u16::MAX
+  });
+
+  it("returns the value for counts within valid range", () => {
+    expect(sanitizeAccountCount(0)).toBe(0);
+    expect(sanitizeAccountCount(1)).toBe(1);
+    expect(sanitizeAccountCount(42)).toBe(42);
+    expect(sanitizeAccountCount(256)).toBe(256);
+    expect(sanitizeAccountCount(4096)).toBe(4096);
+  });
+
+  it("returns 0 for negative values", () => {
+    expect(sanitizeAccountCount(-1)).toBe(0);
+    expect(sanitizeAccountCount(-100)).toBe(0);
+  });
+
+  it("uses custom maxAccounts cap when provided", () => {
+    // For a 256-slot slab, 300 accounts is invalid
+    expect(sanitizeAccountCount(300, 256)).toBe(0);
+    // But 200 is fine
+    expect(sanitizeAccountCount(200, 256)).toBe(200);
+    // Exactly at the cap is valid
+    expect(sanitizeAccountCount(256, 256)).toBe(256);
+  });
+
+  it("falls back to default cap when maxAccounts is 0 or negative", () => {
+    expect(sanitizeAccountCount(5000, 0)).toBe(0); // default 4096 applies
+    expect(sanitizeAccountCount(5000, -1)).toBe(0);
+    expect(sanitizeAccountCount(3000, 0)).toBe(3000); // under 4096
   });
 });

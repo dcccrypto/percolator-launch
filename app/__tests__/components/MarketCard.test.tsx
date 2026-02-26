@@ -37,6 +37,7 @@ vi.mock("@/lib/health", () => ({
   computeMarketHealth: (engine: any) => ({
     level: engine?.vault > 1000000n ? "healthy" : "warning",
   }),
+  sanitizeAccountCount: (count: number) => (count > 4096 || count < 0 ? 0 : count),
 }));
 
 const mockPublicKey = new PublicKey("11111111111111111111111111111111");

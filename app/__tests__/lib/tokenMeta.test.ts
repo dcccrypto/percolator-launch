@@ -235,4 +235,55 @@ describe("fetchTokenMeta", () => {
     // Should default to 6 decimals
     expect(result.decimals).toBe(6);
   });
+
+  it("uses DAS when rpcEndpoint is the /api/rpc proxy (PERC-198)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          result: {
+            content: { metadata: { symbol: "MATCHA", name: "Matcha" } },
+            token_info: { decimals: 6, symbol: "MATCHA" },
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const conn = mockConnection({
+      rpcEndpoint: "https://percolator.app/api/rpc",
+    });
+    const result = await fetchTokenMeta(conn, new PublicKey(RANDOM_MINT));
+
+    expect(result.symbol).toBe("MATCHA");
+    expect(result.name).toBe("Matcha");
+    expect(result.decimals).toBe(6);
+
+    // Verify DAS was called via the proxy
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://percolator.app/api/rpc",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("getAsset"),
+      }),
+    );
+
+    vi.unstubAllGlobals();
+  });
+
+  it("handles getParsedAccountInfo throwing without crashing (PERC-198)", async () => {
+    vi.resetModules();
+    const mod = await import("@/lib/tokenMeta");
+    fetchTokenMeta = mod.fetchTokenMeta;
+
+    const conn = {
+      rpcEndpoint: "https://api.devnet.solana.com",
+      getParsedAccountInfo: vi.fn().mockRejectedValue(new Error("rate limited")),
+      getAccountInfo: vi.fn().mockResolvedValue(null),
+    } as any;
+
+    // Should not throw — gracefully falls back to truncated address
+    const result = await fetchTokenMeta(conn, new PublicKey(RANDOM_MINT));
+    expect(result.symbol).toBeTruthy();
+    expect(result.decimals).toBe(6); // Default when getParsedAccountInfo fails
+  });
 });

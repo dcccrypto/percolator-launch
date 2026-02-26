@@ -7,7 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatTokenAmount, formatUsd, formatBps } from "@/lib/format";
-import { sanitizeOnChainValue } from "@/lib/health";
+import { sanitizeOnChainValue, sanitizeAccountCount } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { FundingRateCard } from "./FundingRateCard";
 import { FundingRateChart } from "./FundingRateChart";
@@ -54,7 +54,7 @@ export const MarketStatsCard: FC = () => {
     { label: "Vault", value: vaultDisplay },
     { label: "Trading Fee", value: formatBps(params.tradingFeeBps) },
     { label: "Init. Margin", value: formatBps(params.initialMarginBps) },
-    { label: "Accounts", value: (engine.numUsedAccounts ?? 0).toString() },
+    { label: "Accounts", value: sanitizeAccountCount(engine.numUsedAccounts ?? 0, params ? Number(params.maxAccounts) : undefined).toString() },
   ];
 
   return (

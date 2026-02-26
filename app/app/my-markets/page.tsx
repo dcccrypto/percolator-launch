@@ -9,6 +9,7 @@ import { useMyMarkets, type MyMarket } from "@/hooks/useMyMarkets";
 import { useAdminActions } from "@/hooks/useAdminActions";
 import { useToast } from "@/hooks/useToast";
 import { getConfig, explorerAccountUrl } from "@/lib/config";
+import { sanitizeAccountCount } from "@/lib/health";
 import { deriveInsuranceLpMint } from "@percolator/sdk";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockMyMarkets } from "@/lib/mock-trade-data";
@@ -204,7 +205,7 @@ const MarketCard: FC<{
             { label: "last crank", value: timeAgo(lastCrank, currentSlot) },
             { label: "staleness", value: `${staleness} slots` },
             { label: "oracle authority", value: hasOracleAuthority ? shortAddr(oracleAuthority) : "none" },
-            { label: "active accounts", value: market.engine?.numUsedAccounts?.toString() ?? "0" },
+            { label: "active accounts", value: sanitizeAccountCount(market.engine?.numUsedAccounts ?? 0).toString() },
           ].map((s, i) => (
             <div key={s.label} className="border-t border-[var(--border)]/30 px-4 py-3">
               <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">{s.label}</p>

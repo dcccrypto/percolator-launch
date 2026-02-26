@@ -5,6 +5,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { formatTokenAmount, formatUsd, formatBps } from "@/lib/format";
+import { sanitizeAccountCount } from "@/lib/health";
 
 export const MarketStats: FC = () => {
   const { engine, params, loading } = useEngineState();
@@ -24,7 +25,7 @@ export const MarketStats: FC = () => {
     { label: "Vault Balance", value: formatTokenAmount(engine.vault) },
     { label: "Trading Fee", value: formatBps(params.tradingFeeBps) },
     { label: "Maintenance Margin", value: formatBps(params.maintenanceMarginBps) },
-    { label: "Accounts", value: (engine.numUsedAccounts ?? 0).toString() },
+    { label: "Accounts", value: sanitizeAccountCount(engine.numUsedAccounts ?? 0).toString() },
   ];
 
   return (

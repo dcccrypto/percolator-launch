@@ -4,7 +4,7 @@ import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
-import { sanitizeOnChainValue } from "@/lib/health";
+import { sanitizeOnChainValue, sanitizeAccountCount } from "@/lib/health";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
 function fmtCompact(n: number): string {
@@ -41,7 +41,7 @@ export const SystemCapitalCard: FC = () => {
   const netLp = Number(sanitizeOnChainValue(engine.netLpPos ?? 0n)) / divisor;
   const lpSum = Number(sanitizeOnChainValue(engine.lpSumAbs ?? 0n)) / divisor;
   const lpMax = Number(sanitizeOnChainValue(engine.lpMaxAbs ?? 0n)) / divisor;
-  const accounts = engine.numUsedAccounts ?? 0;
+  const accounts = sanitizeAccountCount(engine.numUsedAccounts ?? 0);
 
   // LP concentration: how much of total LP exposure is one whale
   const lpConcentration = lpSum > 0 ? (lpMax / lpSum) * 100 : 0;

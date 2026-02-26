@@ -32,6 +32,26 @@ export function sanitizeOnChainValue(v: bigint): bigint {
 }
 
 /**
+ * Maximum possible account slots across all slab tiers (large slab = 4096).
+ * Any numUsedAccounts value above this is garbage data from an uninitialized slab.
+ */
+const MAX_SLAB_ACCOUNTS = 4096;
+
+/**
+ * Sanitize the numUsedAccounts value from on-chain engine state.
+ * Returns 0 if the value exceeds the maximum slab capacity (garbage/uninitialized data)
+ * or if it's negative.
+ *
+ * Optionally accepts maxAccounts from the slab's risk params for a tighter bound.
+ */
+export function sanitizeAccountCount(count: number, maxAccounts?: number): number {
+  if (count < 0) return 0;
+  const cap = maxAccounts != null && maxAccounts > 0 ? maxAccounts : MAX_SLAB_ACCOUNTS;
+  if (count > cap) return 0;
+  return count;
+}
+
+/**
  * Compute market health from on-chain EngineState.
  * Handles sentinel values (u64::MAX for uninitialized insurance) and
  * treats them as zero rather than showing absurd numbers.

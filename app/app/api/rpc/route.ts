@@ -50,6 +50,9 @@ const ALLOWED_RPC_METHODS = new Set([
   // Misc read
   "getMinimumBalanceForRentExemption",
   "getSupply",
+  // Helius DAS API — token metadata resolution (PERC-198)
+  "getAsset",
+  "getAssetBatch",
 ]);
 
 /** Maximum number of requests allowed in a single batch */

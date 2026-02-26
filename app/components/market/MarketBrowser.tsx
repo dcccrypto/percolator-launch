@@ -5,7 +5,7 @@ import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { formatTokenAmount, shortenAddress } from "@/lib/format";
-import { computeMarketHealth } from "@/lib/health";
+import { computeMarketHealth, sanitizeAccountCount } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import type { DiscoveredMarket } from "@percolator/sdk";
@@ -118,7 +118,7 @@ export const MarketBrowser: FC = () => {
                     <HealthBadge level={computeMarketHealth(m.engine).level} />
                   </td>
                   <td className="px-4 py-3 text-right text-[var(--text)]">
-                    {m.engine.numUsedAccounts}
+                    {sanitizeAccountCount(m.engine.numUsedAccounts)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link

@@ -30,13 +30,24 @@ function shortenMint(mint: string): string {
 }
 
 /**
- * Extract the Helius RPC URL from a Connection object.
- * Returns the endpoint URL which contains the API key.
+ * Extract a URL suitable for Helius DAS API calls from a Connection object.
+ *
+ * On the server the endpoint is the direct Helius URL (contains API key).
+ * On the client the endpoint is /api/rpc (a proxy that forwards to Helius).
+ * Both support the DAS methods (getAsset, getAssetBatch) — the proxy allowlist
+ * includes them as of PERC-198.
+ *
+ * Returns null only if the endpoint is neither Helius nor our proxy.
  */
 function getHeliusRpcUrl(connection: Connection): string | null {
   try {
     const endpoint = connection.rpcEndpoint;
+    // Direct Helius URL (server-side)
     if (endpoint.includes("helius-rpc.com")) {
+      return endpoint;
+    }
+    // Client-side proxy — forwards to Helius including DAS methods
+    if (endpoint.includes("/api/rpc")) {
       return endpoint;
     }
   } catch {
@@ -377,10 +388,14 @@ export async function fetchTokenMeta(
   if (cached) return cached;
 
   // Get decimals from on-chain mint account
-  const mintInfo = await connection.getParsedAccountInfo(mint);
   let decimals = 6;
-  if (mintInfo.value?.data && "parsed" in mintInfo.value.data) {
-    decimals = mintInfo.value.data.parsed.info.decimals ?? 6;
+  try {
+    const mintInfo = await connection.getParsedAccountInfo(mint);
+    if (mintInfo.value?.data && "parsed" in mintInfo.value.data) {
+      decimals = mintInfo.value.data.parsed.info.decimals ?? 6;
+    }
+  } catch {
+    // RPC error (rate limit, network) — continue with default decimals
   }
 
   // 1. Check well-known tokens first
