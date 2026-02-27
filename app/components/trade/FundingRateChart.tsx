@@ -55,7 +55,7 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
         const data = await res.json();
         setHistory(data.history ?? []);
       } catch {
-        // Fallback to mock
+        // No data available — show empty state
         setHistory([]);
       } finally {
         setLoading(false);

@@ -4,6 +4,7 @@ import { FC, useMemo, useState } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { AccountKind } from "@percolator/sdk";
@@ -28,6 +29,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
+  const { engine: engineState, fundingRate } = useEngineState();
   const { accounts, config: mktConfig, params } = useSlabState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -98,6 +100,25 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   if (hasPosition && absPosition > 0n) {
     const healthPct = Number((account.capital * 100n) / absPosition);
     marginHealthStr = `${healthPct.toFixed(1)}%`;
+  }
+
+  // Compute estimated 24h funding from on-chain funding rate
+  let estFunding24hDisplay = "—";
+  let estFundingColor = "text-[var(--text-muted)]";
+  if (hasPosition && fundingRate != null) {
+    const rateBpsPerSlot = Number(fundingRate);
+    const slotsPerHour = 9000; // Solana ~400ms per slot
+    const hourlyRatePercent = (rateBpsPerSlot * slotsPerHour) / 10000;
+    const positionTokens = Number(absPosition) / (10 ** decimals);
+    const est24h = Math.abs((hourlyRatePercent / 100) * 24 * positionTokens);
+    // Determine if user pays or receives
+    const longsPay = rateBpsPerSlot > 0;
+    const userPays = isLong ? longsPay : !longsPay;
+    if (est24h > 0 && rateBpsPerSlot !== 0) {
+      const sign = userPays ? "-" : "+";
+      estFundingColor = userPays ? "text-[var(--short)]" : "text-[var(--long)]";
+      estFunding24hDisplay = `${sign}${est24h < 0.0001 ? est24h.toFixed(6) : est24h.toFixed(4)} ${symbol}`;
+    }
   }
 
   const handleConfirmClose = async (percent: number) => {
@@ -205,8 +226,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
             <div className="flex items-center justify-between py-1.5">
               <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Est. Funding (24h)</span>
-              <span className="text-[11px] font-medium text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
-                -
+              <span className={`text-[11px] font-medium ${estFundingColor}`} style={{ fontFamily: "var(--font-mono)" }}>
+                {estFunding24hDisplay}
               </span>
             </div>
           </div>

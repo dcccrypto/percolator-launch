@@ -24,8 +24,8 @@ import {
   type RiskParams,
   type Account,
 } from "@percolator/sdk";
-import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockSlabState } from "@/lib/mock-trade-data";
+import { isMockMode } from "@/lib/mock-mode";
 
 export interface SlabState {
   /** The slab account address this provider is tracking */
