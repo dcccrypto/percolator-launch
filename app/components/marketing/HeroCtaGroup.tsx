@@ -20,7 +20,7 @@ export function HeroCtaGroup() {
   }, [prefersReduced]);
 
   return (
-    <div ref={ref} className="flex flex-wrap items-center gap-3">
+    <div ref={ref} className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
       <Link
         href="/create"
         className={`hero-cta group relative inline-flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-purple-500 ${prefersReduced ? '' : 'gsap-fade'}`}
