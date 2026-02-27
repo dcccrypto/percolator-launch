@@ -11,6 +11,7 @@ import { sanitizeOnChainValue, sanitizeAccountCount } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { FundingRateCard } from "./FundingRateCard";
 import { FundingRateChart } from "./FundingRateChart";
+import { sanitizeSymbol } from "@/lib/symbol-utils";
 
 function formatNum(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -25,7 +26,8 @@ export const MarketStatsCard: FC = () => {
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const { showUsd } = useUsdToggle();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
-  const symbol = tokenMeta?.symbol ?? "Token";
+  const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
+  const symbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   const [showFundingChart, setShowFundingChart] = useState(false);
 
   if (loading || !engine || !config || !params) {
@@ -64,7 +66,7 @@ export const MarketStatsCard: FC = () => {
         <div className="grid grid-cols-3 gap-px">
           {stats.map((s) => (
             <div key={s.label} className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(3n)]:border-r-0 [&:nth-last-child(-n+3)]:border-b-0">
-              <p className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-dim)] truncate">{s.label}</p>
+              <p className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)] truncate">{s.label}</p>
               <p className="text-[11px] font-medium text-[var(--text)] truncate" style={{ fontFamily: "var(--font-mono)" }}>{s.value}</p>
             </div>
           ))}

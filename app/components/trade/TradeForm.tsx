@@ -20,6 +20,7 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { usePrivyLogin } from "@/hooks/usePrivySafe";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
+import { sanitizeSymbol } from "@/lib/symbol-utils";
 
 const LEVERAGE_PRESETS = [1, 2, 3, 5, 10];
 const MARGIN_PRESETS = [25, 50, 75, 100];
@@ -58,7 +59,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
   const openWalletModal = usePrivyLogin();
-  const symbol = tokenMeta?.symbol ?? "Token";
+  const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
+  const symbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   
   // BUG FIX: Fetch on-chain decimals from token account (like DepositWithdrawCard)
   // Don't rely solely on tokenMeta which may fail for cross-network tokens
@@ -364,7 +366,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           style={{
             background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100}%, rgba(255,255,255,0.03) ${maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100}%, rgba(255,255,255,0.03) 100%)`,
           }}
-          className="mb-3 h-1 w-full cursor-pointer appearance-none accent-[var(--accent)] [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:bg-[var(--accent)]"
+          className="mb-3 h-1.5 w-full cursor-pointer appearance-none accent-[var(--accent)] [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--accent)] [&::-webkit-slider-thumb]:shadow-[0_0_6px_rgba(153,69,255,0.4)] [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--accent)]"
         />
         <div className="flex gap-1">
           {availableLeverage.map((l) => (
@@ -472,11 +474,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
       {/* Coin-margined info */}
       <div className="mt-3 rounded-none border border-[var(--border)]/20 bg-[var(--bg)]/50 p-2.5">
-        <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+        <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">
           Coin-Margined Market
         </p>
         <p className="mt-1 text-[9px] leading-relaxed text-[var(--text-muted)]">
-          Margined in <strong className="text-[var(--text-secondary)]">{symbol}</strong>, not USD. Position value and liquidation risk are affected by {symbol} price movements.
+          Margined in <strong className="text-[var(--text-secondary)]">{symbol}</strong>, not USD. Position value and liquidation risk are affected by the collateral token&apos;s price movements.
           Effective USD leverage: <span className="font-mono text-[var(--text-secondary)]">{leverage > 0 ? `~${leverage * 2}x` : "—"}</span> (nominal {leverage}x × 2 for coin exposure).
         </p>
       </div>

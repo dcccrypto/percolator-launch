@@ -29,6 +29,7 @@ import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
+import { isPlaceholderSymbol } from "@/lib/symbol-utils";
 
 /* ── Reusable tiny components ─────────────────────────────── */
 
@@ -130,19 +131,6 @@ function CopyButton({ text }: { text: string }) {
       )}
     </button>
   );
-}
-
-/* ── Helper: detect placeholder/truncated-address symbols ── */
-
-function isPlaceholderSymbol(sym: string | null | undefined, mint: string): boolean {
-  if (!sym) return true;
-  // Reject if it's the first N chars of the mint address (StatsCollector default)
-  if (mint.startsWith(sym)) return true;
-  // Reject pure hex-like strings (8 chars)
-  if (/^[0-9a-fA-F]{8}$/.test(sym)) return true;
-  // Reject if it looks like a truncated address with ellipsis
-  if (/^[A-Za-z0-9]{3,6}[\u2026.]{1,3}[A-Za-z0-9]{3,6}$/.test(sym)) return true;
-  return false;
 }
 
 /* ── Main inner page ──────────────────────────────────────── */
@@ -278,11 +266,11 @@ function TradePageInner({ slab }: { slab: string }) {
               </h1>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 min-w-0 shrink-0">
+          <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
             <UsdToggleButton />
             {health && <HealthBadge level={health.level} />}
             {priceDisplay && (
-              <span className="truncate text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
+              <span className="shrink-0 text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
             )}
           </div>
         </div>

@@ -18,6 +18,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { WarmupProgress } from "./WarmupProgress";
 import { ClosePositionModal } from "./ClosePositionModal";
+import { sanitizeSymbol } from "@/lib/symbol-utils";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -31,7 +32,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { accounts, config: mktConfig, params } = useSlabState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
-  const symbol = tokenMeta?.symbol ?? "Token";
+  const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
+  const symbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   const decimals = tokenMeta?.decimals ?? 6;
 
   const { closePosition, loading: closeLoading, error: closeError } = useClosePosition(slabAddress);

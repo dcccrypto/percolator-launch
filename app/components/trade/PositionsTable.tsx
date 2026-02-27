@@ -20,6 +20,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { WarmupProgress } from "./WarmupProgress";
+import { sanitizeSymbol } from "@/lib/symbol-utils";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -33,7 +34,8 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   const { accounts, config: mktConfig, params } = useSlabState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
-  const symbol = tokenMeta?.symbol ?? "Token";
+  const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
+  const symbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   const decimals = tokenMeta?.decimals ?? 6;
 
   const { closePosition, loading: closeLoading, error: closeError, phase: closePhase } = useClosePosition(slabAddress);
@@ -45,7 +47,23 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   }, [accounts]);
   const lpUnderfunded = lpEntry !== null && lpEntry.account.capital === 0n;
 
-  if (!userAccount) return null;
+  if (!userAccount) {
+    return (
+      <div className="border border-[var(--border)]/50 bg-[var(--bg)]/80">
+        <div className="py-10 text-center">
+          <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]/30">
+            <svg className="h-4 w-4 text-[var(--text-dim)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
+            </svg>
+          </div>
+          <p className="text-[11px] font-medium text-[var(--text-muted)]">No open positions</p>
+          <p className="mt-1 text-[10px] text-[var(--text-dim)] max-w-[220px] mx-auto leading-relaxed">
+            Connect your wallet and deposit collateral to start trading.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const { account } = userAccount;
   const hasPosition = account.positionSize !== 0n;
@@ -53,8 +71,16 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   if (!hasPosition) {
     return (
       <div className="border border-[var(--border)]/50 bg-[var(--bg)]/80">
-        <div className="py-8 text-center">
-          <p className="text-[11px] text-[var(--text-muted)]">No open positions</p>
+        <div className="py-10 text-center">
+          <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]/30">
+            <svg className="h-4 w-4 text-[var(--text-dim)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
+            </svg>
+          </div>
+          <p className="text-[11px] font-medium text-[var(--text-muted)]">No open positions</p>
+          <p className="mt-1 text-[10px] text-[var(--text-dim)] max-w-[220px] mx-auto leading-relaxed">
+            Use the trade form to open a position.
+          </p>
         </div>
       </div>
     );
@@ -121,7 +147,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
       <div className="overflow-x-auto">
         <table className="min-w-full text-[10px]">
           <thead>
-            <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Market</th>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Side</th>
               <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Size</th>
