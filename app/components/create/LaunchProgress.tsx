@@ -30,7 +30,7 @@ const STEP_LABELS = [
 export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetry }) => {
   return (
     <div
-      className="border border-[var(--border)] bg-[var(--panel-bg)] p-6"
+      className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-label="Market launch progress"
@@ -137,12 +137,12 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
       {state.error && (
         <div className="mt-5 border border-[var(--short)]/20 bg-[var(--short)]/[0.04] p-4">
           <p className="text-[11px] text-[var(--short)]">{state.error}</p>
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {onRetry && (
               <button
                 type="button"
                 onClick={onRetry}
-                className="border border-[var(--short)]/30 bg-[var(--short)]/[0.08] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--short)] hover:bg-[var(--short)]/[0.15] transition-colors"
+                className="border border-[var(--short)]/30 bg-[var(--short)]/[0.08] px-4 py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--short)] hover:bg-[var(--short)]/[0.15] transition-colors min-h-[44px]"
               >
                 Retry Step {state.step + 1}
               </button>
@@ -150,7 +150,7 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
             <button
               type="button"
               onClick={onReset}
-              className="border border-[var(--border)] bg-transparent px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)]"
+              className="border border-[var(--border)] bg-transparent px-4 py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)] min-h-[44px]"
             >
               Start Over
             </button>

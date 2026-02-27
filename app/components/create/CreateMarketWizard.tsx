@@ -17,6 +17,7 @@ import { StepParameters } from "./StepParameters";
 import { StepReview } from "./StepReview";
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
+import { RecoverSolBanner } from "./RecoverSolBanner";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 
 type WizardStep = 1 | 2 | 3 | 4;
@@ -354,7 +355,17 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       : null;
 
   return (
-    <div className="space-y-6 p-5 sm:p-6">
+    <div className="space-y-6 p-4 sm:p-6">
+      {/* Stuck slab recovery banner */}
+      <RecoverSolBanner
+        onResume={(slabAddress) => {
+          // The stuck slab's keypair is already in localStorage —
+          // useCreateMarket will pick it up. Just trigger a retry from step 1.
+          resetCreate();
+          // Start the wizard at step 1 so user can fill in parameters
+        }}
+      />
+
       {/* Mode Selector */}
       <ModeSelector mode={wizard.mode} onModeChange={handleModeChange} />
 

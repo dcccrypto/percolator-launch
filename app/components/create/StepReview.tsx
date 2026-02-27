@@ -33,12 +33,11 @@ interface StepReviewProps {
 }
 
 const TX_STEPS = [
-  "Create slab account",
-  "Initialize market & vault",
-  "Oracle setup & crank",
-  "Initialize LP",
-  "Deposit, insurance & finalize",
-  "Insurance LP mint",
+  { label: "Create slab & initialize market", detail: "Atomic — rolls back if any part fails" },
+  { label: "Oracle setup & crank", detail: "Configure price feed, first crank" },
+  { label: "Initialize LP", detail: "Create liquidity provider pool" },
+  { label: "Deposit, insurance & finalize", detail: "Seed capital + insurance fund" },
+  { label: "Insurance LP mint", detail: "Enable permissionless insurance deposits" },
 ] as const;
 
 /**
@@ -165,14 +164,20 @@ export const StepReview: FC<StepReviewProps> = ({
         </p>
         <div className="border border-[var(--border)] bg-[var(--bg)] px-4 py-3 space-y-2">
           {TX_STEPS.map((step, i) => (
-            <div key={i} className="flex items-center gap-2 text-[12px] text-[var(--text-dim)]">
-              <span className="text-[10px] font-mono text-[var(--text-dim)]">{i + 1}.</span>
-              <span>{step}</span>
+            <div key={i} className="flex items-start gap-2 text-[12px]">
+              <span className="text-[10px] font-mono text-[var(--text-dim)] mt-0.5 flex-shrink-0">{i + 1}.</span>
+              <div className="min-w-0">
+                <span className="text-[var(--text-dim)]">{step.label}</span>
+                <span className="hidden sm:inline text-[10px] text-[var(--text-dim)]/60 ml-2">
+                  — {step.detail}
+                </span>
+              </div>
             </div>
           ))}
         </div>
         <p className="mt-2 text-[10px] text-[var(--text-dim)]">
-          Each step requires a wallet signature.
+          {TX_STEPS.length} transactions — each requires a wallet signature.
+          {" "}Step 1 is atomic: if it fails, no SOL is lost.
         </p>
       </div>
 
