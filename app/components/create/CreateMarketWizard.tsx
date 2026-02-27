@@ -308,7 +308,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // --- Render ---
 
   // Success state
-  if (createState.step >= 6 && createState.slabAddress) {
+  if (createState.step >= 5 && createState.slabAddress) {
     return (
       <LaunchSuccess
         tokenSymbol={symbol}

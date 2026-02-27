@@ -41,6 +41,7 @@ import {
 } from "@percolator/sdk";
 import { sendTx } from "@/lib/tx";
 import { getConfig } from "@/lib/config";
+import { parseMarketCreationError } from "@/lib/parseMarketError";
 
 import { SLAB_TIERS, slabDataSize, deriveLpPda } from "@percolator/sdk";
 const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
@@ -87,8 +88,7 @@ export interface CreateMarketState {
 }
 
 const STEP_LABELS = [
-  "Creating slab account...",
-  "Initializing market & vault...",
+  "Creating slab & initializing market...",
   "Oracle setup & pre-LP crank...",
   "Initializing LP...",
   "Depositing collateral, insurance & final crank...",
@@ -183,20 +183,83 @@ export function useCreateMarket() {
       const [vaultPda] = deriveVaultAuthority(programId, slabPk);
 
       try {
-        // Step 0: Create slab account (idempotent — skips if account already exists)
+        // Step 0: Create slab + vault ATA + InitMarket (ATOMIC — all-or-nothing)
+        // Merged into a single transaction to prevent SOL lock if InitMarket fails.
+        // If any instruction fails, the entire tx rolls back — no stuck lamports.
         if (startStep <= 0) {
           setState((s) => ({ ...s, step: 0, stepLabel: STEP_LABELS[0] }));
+
+          vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
 
           // Check if slab account already exists (previous attempt may have landed)
           const existingAccount = await connection.getAccountInfo(slabKp.publicKey);
           if (existingAccount) {
-            // Account already created — skip to next step
-            setState((s) => ({
-              ...s,
-              txSigs: [...s.txSigs, "skipped-already-exists"],
-              slabAddress: slabKp.publicKey.toBase58(),
-            }));
+            // Slab already created — check if market is initialized
+            const headerMagic = existingAccount.data.length >= 8
+              ? existingAccount.data.readBigUInt64LE(0)
+              : 0n;
+            const isInitialized = headerMagic === 0x504552434f4c4154n; // "PERCOLAT"
+
+            if (isInitialized) {
+              // Market already initialized — skip to step 1
+              setState((s) => ({
+                ...s,
+                txSigs: [...s.txSigs, "skipped-already-initialized"],
+                slabAddress: slabKp.publicKey.toBase58(),
+              }));
+            } else {
+              // Slab exists but NOT initialized — this is the stuck state we want to prevent.
+              // Since we have the keypair, we can't close it (program-owned), but we can
+              // try InitMarket on it. Create vault ATA (idempotent) + InitMarket.
+              const createAtaIx = createAssociatedTokenAccountInstruction(
+                wallet.publicKey, vaultAta, vaultPda, params.mint,
+              );
+
+              const initialMarginBps = BigInt(params.initialMarginBps);
+              const initMarketData = encodeInitMarket({
+                admin: wallet.publicKey,
+                collateralMint: params.mint,
+                indexFeedId: params.oracleFeed,
+                maxStalenessSecs: "86400",
+                confFilterBps: 0,
+                invert: params.invert ? 1 : 0,
+                unitScale: 0,
+                initialMarkPriceE6: params.initialPriceE6.toString(),
+                warmupPeriodSlots: "100",
+                maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+                initialMarginBps: initialMarginBps.toString(),
+                tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
+                maxAccounts: (params.maxAccounts ?? 256).toString(),
+                newAccountFee: "1000000",
+                riskReductionThreshold: "0",
+                maintenanceFeePerSlot: "0",
+                maxCrankStalenessSlots: "400",
+                liquidationFeeBps: "100",
+                liquidationFeeCap: "100000000000",
+                liquidationBufferBps: "50",
+                minLiquidationAbs: "1000000",
+              });
+
+              const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
+                wallet.publicKey, slabPk, params.mint, vaultAta,
+                WELL_KNOWN.tokenProgram, WELL_KNOWN.clock, WELL_KNOWN.rent,
+                vaultPda, WELL_KNOWN.systemProgram,
+              ]);
+              const initMarketIx = buildIx({ programId, keys: initMarketKeys, data: initMarketData });
+
+              const sig = await sendTx({
+                connection, wallet,
+                instructions: [createAtaIx, initMarketIx],
+                computeUnits: 250_000,
+              });
+              setState((s) => ({
+                ...s,
+                txSigs: [...s.txSigs, sig],
+                slabAddress: slabKp.publicKey.toBase58(),
+              }));
+            }
           } else {
+            // Fresh creation — atomic: createAccount + createATA + InitMarket
             const effectiveSlabSize = params.slabDataSize ?? DEFAULT_SLAB_SIZE;
             const slabRent = await connection.getMinimumBalanceForRentExemption(effectiveSlabSize);
             const createAccountIx = SystemProgram.createAccount({
@@ -207,13 +270,49 @@ export function useCreateMarket() {
               programId,
             });
 
+            const createAtaIx = createAssociatedTokenAccountInstruction(
+              wallet.publicKey, vaultAta, vaultPda, params.mint,
+            );
+
+            const initialMarginBps = BigInt(params.initialMarginBps);
+            const initMarketData = encodeInitMarket({
+              admin: wallet.publicKey,
+              collateralMint: params.mint,
+              indexFeedId: params.oracleFeed,
+              maxStalenessSecs: "86400",
+              confFilterBps: 0,
+              invert: params.invert ? 1 : 0,
+              unitScale: 0,
+              initialMarkPriceE6: params.initialPriceE6.toString(),
+              warmupPeriodSlots: "100",
+              maintenanceMarginBps: (initialMarginBps / 2n).toString(),
+              initialMarginBps: initialMarginBps.toString(),
+              tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
+              maxAccounts: (params.maxAccounts ?? 256).toString(),
+              newAccountFee: "1000000",
+              riskReductionThreshold: "0",
+              maintenanceFeePerSlot: "0",
+              maxCrankStalenessSlots: "400",
+              liquidationFeeBps: "100",
+              liquidationFeeCap: "100000000000",
+              liquidationBufferBps: "50",
+              minLiquidationAbs: "1000000",
+            });
+
+            const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
+              wallet.publicKey, slabPk, params.mint, vaultAta,
+              WELL_KNOWN.tokenProgram, WELL_KNOWN.clock, WELL_KNOWN.rent,
+              vaultPda, WELL_KNOWN.systemProgram,
+            ]);
+            const initMarketIx = buildIx({ programId, keys: initMarketKeys, data: initMarketData });
+
             const sig = await sendTx({
               connection,
               wallet,
-              instructions: [createAccountIx],
-              computeUnits: 50_000,
+              instructions: [createAccountIx, createAtaIx, initMarketIx],
+              computeUnits: 300_000,
               signers: [slabKp],
-              maxRetries: 0, // Don't retry createAccount — idempotency check handles it
+              maxRetries: 0, // Don't auto-retry createAccount — use manual retry instead
             });
 
             setState((s) => ({
@@ -222,74 +321,14 @@ export function useCreateMarket() {
               slabAddress: slabKp.publicKey.toBase58(),
             }));
           }
-        }
-
-        // Step 1: Create vault ATA + InitMarket (merged — 1 tx instead of 2)
-        if (startStep <= 1) {
-          setState((s) => ({ ...s, step: 1, stepLabel: STEP_LABELS[1] }));
-
-          vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
-          const createAtaIx = createAssociatedTokenAccountInstruction(
-            wallet.publicKey,
-            vaultAta,
-            vaultPda,
-            params.mint,
-          );
-
-          const initialMarginBps = BigInt(params.initialMarginBps);
-          const initMarketData = encodeInitMarket({
-            admin: wallet.publicKey,
-            collateralMint: params.mint,
-            indexFeedId: params.oracleFeed,
-            maxStalenessSecs: "86400",           // 24h — generous for admin oracle mode
-            confFilterBps: 0,
-            invert: params.invert ? 1 : 0,
-            unitScale: 0,
-            initialMarkPriceE6: params.initialPriceE6.toString(),
-            warmupPeriodSlots: "100",              // Match MidTermDev — warmup before trading
-            maintenanceMarginBps: (initialMarginBps / 2n).toString(),
-            initialMarginBps: initialMarginBps.toString(),
-            tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
-            maxAccounts: (params.maxAccounts ?? 256).toString(),
-            newAccountFee: "1000000",
-            riskReductionThreshold: "0",
-            maintenanceFeePerSlot: "0",
-            maxCrankStalenessSlots: "400",         // Match MidTermDev — more forgiving
-            liquidationFeeBps: "100",
-            liquidationFeeCap: "100000000000",     // Cap liquidation fees (was 0 = uncapped)
-            liquidationBufferBps: "50",
-            minLiquidationAbs: "1000000",          // Prevent dust liquidations
-          });
-
-          const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
-            wallet.publicKey,
-            slabPk,
-            params.mint,
-            vaultAta,
-            WELL_KNOWN.tokenProgram,
-            WELL_KNOWN.clock,
-            WELL_KNOWN.rent,
-            vaultPda,              // dummyAta slot — MidTermDev passes vaultPda here
-            WELL_KNOWN.systemProgram,
-          ]);
-
-          const initMarketIx = buildIx({ programId, keys: initMarketKeys, data: initMarketData });
-          const sig = await sendTx({
-            connection,
-            wallet,
-            instructions: [createAtaIx, initMarketIx],
-            computeUnits: 200_000,
-          });
-
-          setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         } else {
           vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
         }
 
-        // Step 2: Oracle setup + UpdateConfig + pre-LP crank
+        // Step 1: Oracle setup + UpdateConfig + pre-LP crank
         // MidTermDev does this BEFORE InitLP — market must be cranked first
-        if (startStep <= 2) {
-          setState((s) => ({ ...s, step: 2, stepLabel: STEP_LABELS[2] }));
+        if (startStep <= 1) {
+          setState((s) => ({ ...s, step: 1, stepLabel: STEP_LABELS[1] }));
 
           const instructions: TransactionInstruction[] = [];
 
@@ -363,9 +402,9 @@ export function useCreateMarket() {
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
 
-        // Step 3: InitLP with matcher program (atomic: create ctx + init vAMM + init LP)
-        if (startStep <= 3) {
-          setState((s) => ({ ...s, step: 3, stepLabel: STEP_LABELS[3] }));
+        // Step 2: InitLP with matcher program (atomic: create ctx + init vAMM + init LP)
+        if (startStep <= 2) {
+          setState((s) => ({ ...s, step: 2, stepLabel: STEP_LABELS[2] }));
 
           const userAta = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
           const matcherProgramId = new PublicKey(getConfig().matcherProgramId);
@@ -376,7 +415,7 @@ export function useCreateMarket() {
           const existingLp = await connection.getAccountInfo(lpPdaCheck);
           if (existingLp && existingLp.data.length > 0) {
             // LP already initialized — skip to avoid orphaned matcher context
-            setState((s) => ({ ...s, step: 4, stepLabel: STEP_LABELS[4] }));
+            setState((s) => ({ ...s, step: 3, stepLabel: STEP_LABELS[3] }));
           } else {
 
           const matcherCtxKp = Keypair.generate();
@@ -427,9 +466,9 @@ export function useCreateMarket() {
           } // end else (LP not yet initialized)
         }
 
-        // Step 4: DepositCollateral + TopUpInsurance + Final Crank (merged)
-        if (startStep <= 4) {
-          setState((s) => ({ ...s, step: 4, stepLabel: STEP_LABELS[4] }));
+        // Step 3: DepositCollateral + TopUpInsurance + Final Crank (merged)
+        if (startStep <= 3) {
+          setState((s) => ({ ...s, step: 3, stepLabel: STEP_LABELS[3] }));
 
           const userAta = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
 
@@ -485,9 +524,9 @@ export function useCreateMarket() {
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
 
-        // Step 5: Create Insurance LP Mint (permissionless insurance deposits)
-        if (startStep <= 5) {
-          setState((s) => ({ ...s, step: 5, stepLabel: STEP_LABELS[5] }));
+        // Step 4: Create Insurance LP Mint (permissionless insurance deposits)
+        if (startStep <= 4) {
+          setState((s) => ({ ...s, step: 4, stepLabel: STEP_LABELS[4] }));
 
           const [insLpMint] = deriveInsuranceLpMint(programId, slabPk);
           const [vaultAuth] = deriveVaultAuthority(programId, slabPk);
@@ -543,11 +582,11 @@ export function useCreateMarket() {
         setState((s) => ({
           ...s,
           loading: false,
-          step: 6,
+          step: 5,
           stepLabel: "Market created!",
         }));
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = parseMarketCreationError(e);
         setState((s) => ({ ...s, loading: false, error: msg }));
       }
     },
