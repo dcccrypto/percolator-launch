@@ -919,9 +919,9 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Detail panel — scrollable, not sticky */}
+        {/* Detail panel — sticky on desktop so it stays visible while scrolling the bug list */}
         <div
-          className={`${card} lg:w-[400px] lg:shrink-0 overflow-y-auto max-h-[calc(100vh-200px)] lg:self-start`}
+          className={`${card} lg:w-[400px] lg:shrink-0 overflow-y-auto max-h-[calc(100vh-6rem)] lg:sticky lg:top-[5rem]`}
         >
           {!selectedBug ? (
             <div className="text-center text-[var(--text-muted)] text-[12px] py-12 px-4">
