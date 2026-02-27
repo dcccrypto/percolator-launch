@@ -575,24 +575,25 @@ function MarketsPageInner() {
                   
                   // Token amounts: prefer on-chain, fall back to Supabase
                   // Sanitize sentinel values (u64::MAX = uninitialized on-chain) → show as 0
+                  // PERC-234: Supabase values are raw on-chain values (NOT human-readable).
+                  // StatsCollector stores safeBigNum(engine.totalOpenInterest) etc. directly.
+                  // Do NOT multiply by tokenDivisor — that double-counts decimals.
                   const oiTokensRaw = m.onChain
                     ? sanitizeOnChainValue(m.onChain.engine.totalOpenInterest)
                     : (() => {
                         const v = m.supabase?.total_open_interest ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0));
                         const safe = isSentinelNum(v) ? 0 : Math.max(0, v);
-                        return BigInt(Math.round(safe * tokenDivisor));
+                        return BigInt(Math.round(safe));
                       })();
                   const insuranceTokensRaw = m.onChain
                     ? sanitizeOnChainValue(m.onChain.engine.insuranceFund.balance)
                     : (() => {
                         const v = m.supabase?.insurance_balance ?? m.supabase?.insurance_fund ?? 0;
                         const safe = isSentinelNum(v) ? 0 : Math.max(0, v);
-                        // Supabase values are already in human-readable token units (floats).
-                        // Multiply by 10^decimals to convert back to raw token units for formatTokenAmount.
-                        return BigInt(Math.round(safe * tokenDivisor));
+                        return BigInt(Math.round(safe));
                       })();
                   const volume24hRaw = m.supabase?.volume_24h != null && !isSentinelNum(m.supabase.volume_24h) && m.supabase.volume_24h > 0
-                    ? BigInt(Math.round(m.supabase.volume_24h * tokenDivisor))
+                    ? BigInt(Math.round(m.supabase.volume_24h))
                     : null;
                   
                   // Display values (USD or tokens) — cap token display at 2dp for table readability

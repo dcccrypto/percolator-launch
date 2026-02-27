@@ -60,9 +60,11 @@ export function ScrollReveal({
       scale: scale ?? 1,
     });
 
-    // Safety net: if observer doesn't fire within 2s (e.g. element is
-    // already in the viewport but rootMargin clips it), reveal anyway.
-    // This prevents invisible "gap" sections at certain viewport sizes.
+    // Safety net: if observer doesn't fire quickly (e.g. element is
+    // near the viewport edge but rootMargin clips it), reveal anyway.
+    // PERC-234: Reduced from 2000ms to 600ms — at 1440px desktop the
+    // below-hero sections were invisible for too long, creating a
+    // visible "void" on fresh load.
     const safetyTimer = setTimeout(() => {
       if (!hasAnimated.current) {
         hasAnimated.current = true;
@@ -76,7 +78,7 @@ export function ScrollReveal({
           ease: "power3.out",
         });
       }
-    }, 2000);
+    }, 600);
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -123,7 +125,7 @@ export function ScrollReveal({
           }
         }
       },
-      { threshold: 0.05, rootMargin: "0px 0px -30px 0px" }
+      { threshold: 0.01, rootMargin: "0px 0px 50px 0px" }
     );
 
     observer.observe(el);
