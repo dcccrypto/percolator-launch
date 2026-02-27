@@ -14,7 +14,12 @@ export async function GET() {
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from("markets_with_stats")
-      .select("*");
+      .select(
+        "slab_address,mint_address,symbol,name,decimals,deployer,logo_url,max_leverage,trading_fee_bps," +
+        "last_price,mark_price,volume_24h,open_interest_long,open_interest_short,total_open_interest," +
+        "insurance_fund,insurance_balance,total_accounts,funding_rate,net_lp_pos,lp_sum_abs,c_tot," +
+        "vault_balance,created_at,stats_updated_at"
+      );
 
     if (error) {
       Sentry.captureException(error, {
@@ -23,7 +28,11 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ markets: data });
+    return NextResponse.json({ markets: data }, {
+      headers: {
+        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+      },
+    });
   } catch (error) {
     Sentry.captureException(error, {
       tags: { endpoint: "/api/markets", method: "GET" },

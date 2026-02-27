@@ -57,5 +57,9 @@ export async function GET() {
     totalTraders: uniqueTraders,
     trades24h,
     updatedAt: new Date().toISOString(),
+  }, {
+    headers: {
+      "Cache-Control": "public, s-maxage=15, stale-while-revalidate=45",
+    },
   });
 }
