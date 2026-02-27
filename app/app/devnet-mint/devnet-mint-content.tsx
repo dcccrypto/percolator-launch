@@ -484,173 +484,172 @@ const DevnetMintContent: FC = () => {
             </div>
           </ScrollReveal>
 
-          {/* Step 3 — Token Config */}
-          <ScrollReveal delay={0.2}>
-            <div className={cardClass}>
-              <h2 className="mb-4 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">Step 3 · Token Config</h2>
-              <div className="space-y-3">
-                <div className="flex gap-3">
-                  <div className="flex-1">
-                    <label className="mb-1 block text-xs text-[var(--text-secondary)]">Token Name</label>
-                    <input 
-                      type="text" 
-                      value={tokenName} 
-                      onChange={(e) => { setTokenName(e.target.value); setNameError(null); }} 
-                      className={`${inputClass} ${nameError ? "border-[var(--short)]" : ""}`}
-                    />
-                    {nameError && <p className="mt-1 text-xs text-[var(--short)]">{nameError}</p>}
-                  </div>
-                  <div className="flex-1">
-                    <label className="mb-1 block text-xs text-[var(--text-secondary)]">Symbol</label>
-                    <input 
-                      type="text" 
-                      value={tokenSymbol} 
-                      onChange={(e) => { setTokenSymbol(e.target.value.toUpperCase()); setSymbolError(null); }} 
-                      className={`${inputClass} ${symbolError ? "border-[var(--short)]" : ""}`}
-                    />
-                    {symbolError && <p className="mt-1 text-xs text-[var(--short)]">{symbolError}</p>}
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <div className="flex-1">
-                    <label className="mb-1 block text-xs text-[var(--text-secondary)]">Decimals</label>
-                    <input type="number" min={0} max={MAX_DECIMALS} value={decimals} onChange={(e) => {
-                      const val = Math.min(MAX_DECIMALS, Math.max(0, Math.floor(Number(e.target.value) || 0)));
-                      setDecimals(val);
-                    }} className={inputClass} />
-                  </div>
-                  <div className="flex-[2]">
-                    <label className="mb-1 block text-xs text-[var(--text-secondary)]">Supply</label>
-                    <input type="text" value={supply} onChange={(e) => setSupply(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} />
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Recipient Address</label>
-                  <input type="text" value={recipient} onChange={(e) => setRecipient(e.target.value)} className={inputClass} />
-                </div>
-              </div>
-            </div>
-          </ScrollReveal>
-
-          {/* Step 4 — Create & Mint (or show success) */}
-          <ScrollReveal delay={0.3}>
-            {mintAddress ? (
-              /* ── Success card ── */
-              <div ref={successCardRef} className={`${cardClass} border-[var(--accent)]/30`} style={prefersReducedMotion ? undefined : { opacity: 0 }}>
-                <div className="mb-4 flex items-center gap-2">
-                  {mintColor && (
-                    <span className="inline-block h-6 w-6 rounded-full border border-[var(--border)]" style={{ backgroundColor: mintColor }} />
-                  )}
-                  <h2 className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--accent)]">
-                    {tokenName} ({tokenSymbol}) Created
-                  </h2>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 overflow-hidden text-ellipsis bg-[var(--bg)] border border-[var(--border)] px-3 py-2 text-xs text-white">{mintAddress}</code>
-                  <button onClick={copyMint} className="border border-[var(--border)] px-3 py-2 text-xs text-[var(--text-secondary)] transition-all hover:bg-[var(--accent)]/[0.06] hover:text-white active:scale-[0.98]">
-                    {copied ? "Copied!" : "Copy"}
-                  </button>
-                </div>
-
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                  <Link href={`/create?mint=${mintAddress}`} className={`${btnPrimary} text-center`}>
-                    Create Market →
-                  </Link>
-                  <a href={`https://explorer.solana.com/address/${mintAddress}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] underline">
-                    View on Explorer
-                  </a>
-                  {lastTxSig && (
-                    <a href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] underline">
-                      View tx
-                    </a>
-                  )}
-                </div>
-
-                <LogoUpload mintAddress={mintAddress} symbol={tokenSymbol} />
-                <button onClick={() => { setMintAddress(null); setCreateStatus(null); setLastTxSig(null); }} className="mt-4 text-xs text-[var(--text-dim)] hover:text-[var(--text-muted)] underline">
-                  Create another token
-                </button>
-              </div>
-            ) : (
-              /* ── Create button + progress ── */
-              <div className={cardClass}>
-                <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">Step 4 · Create &amp; Mint</h2>
-
-                {!walletReady && (
-                  <p className="mb-3 text-xs text-[var(--warning)]">Connect your wallet first (Step 1).</p>
-                )}
-                {walletReady && lowSol && (
-                  <p className="mb-3 text-xs text-[var(--short)]">Not enough SOL — you need at least 0.01 SOL. Get some in Step 2.</p>
-                )}
-
-                {/* Inline progress */}
-                {loading && createStatus && (
-                  <div className="mb-3 flex items-center gap-2">
-                    <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
-                    <span className="text-xs text-[var(--text-muted)]">{createStatus}</span>
-                  </div>
-                )}
-
-                {/* Error inline */}
-                {!loading && createStatus?.startsWith("Error") && (
-                  <p className="mb-3 text-xs text-[var(--short)]">{createStatus}</p>
-                )}
-
-                <button className={`${btnPrimary} w-full`} onClick={handleCreateAndMint} disabled={loading || !recipient || lowSol || !walletReady}>
-                  {!walletReady ? "Connect Wallet First" : loading ? "Creating..." : `Create Mint + Mint ${Number(supply).toLocaleString()} Tokens`}
-                </button>
-              </div>
+          {/* Step 3 — Token Config (no ScrollReveal — interactive form must always be visible) */}
+          <div className={cardClass}>
+            <h2 className="mb-4 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">Step 3 · Token Config</h2>
+            {!walletReady && (
+              <p className="mb-3 text-xs text-[var(--text-muted)]">Connect your wallet to configure and create tokens.</p>
             )}
-          </ScrollReveal>
-
-          {/* Mint More — existing token */}
-          <ScrollReveal delay={0.4}>
-            <div className={cardClass}>
-              <h2 className="mb-2 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">Mint More (Existing Token)</h2>
-              <p className="mb-3 text-xs text-[var(--text-muted)]">Already created a market? Need more tokens for trading or deposits? Mint more of a token you own.</p>
-              <div className="space-y-3">
-                <div>
-                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Existing Mint Address</label>
-                  <input type="text" value={existingMint} onChange={(e) => setExistingMint(e.target.value.trim())} placeholder="Paste token mint address..." className={inputClass} />
+            <div className={`space-y-3 ${!walletReady ? "opacity-50 pointer-events-none" : ""}`}>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Token Name</label>
+                  <input 
+                    type="text" 
+                    value={tokenName} 
+                    onChange={(e) => { setTokenName(e.target.value); setNameError(null); }} 
+                    className={`${inputClass} ${nameError ? "border-[var(--short)]" : ""}`}
+                    disabled={!walletReady}
+                  />
+                  {nameError && <p className="mt-1 text-xs text-[var(--short)]">{nameError}</p>}
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Amount to Mint</label>
-                  <input type="text" value={mintMoreAmount} onChange={(e) => setMintMoreAmount(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} />
+                <div className="flex-1">
+                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Symbol</label>
+                  <input 
+                    type="text" 
+                    value={tokenSymbol} 
+                    onChange={(e) => { setTokenSymbol(e.target.value.toUpperCase()); setSymbolError(null); }} 
+                    className={`${inputClass} ${symbolError ? "border-[var(--short)]" : ""}`}
+                    disabled={!walletReady}
+                  />
+                  {symbolError && <p className="mt-1 text-xs text-[var(--short)]">{symbolError}</p>}
                 </div>
-                {checkingMintAuth && (
-                  <div className="flex items-center gap-2">
-                    <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
-                    <span className="text-xs text-[var(--text-muted)]">Checking mint authority...</span>
-                  </div>
-                )}
-                {!checkingMintAuth && mintAuthError && <p className="text-[11px] text-[var(--short)]">{mintAuthError}</p>}
-                {mintingMore && mintMoreStatus && (
-                  <div className="flex items-center gap-2">
-                    <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
-                    <span className="text-xs text-[var(--text-muted)]">{mintMoreStatus}</span>
-                  </div>
-                )}
-                {!mintingMore && mintMoreStatus && (
-                  <p className={`text-xs ${mintMoreStatus.startsWith("Error") ? "text-[var(--short)]" : "text-[var(--accent)]"}`}>
-                    {mintMoreStatus}
-                    {lastTxSig && !mintMoreStatus.startsWith("Error") && (
-                      <>
-                        {" "}
-                        <a href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="underline hover:text-white">
-                          View tx →
-                        </a>
-                      </>
-                    )}
-                  </p>
-                )}
-                {/* P-HIGH-4: Disable button during mint authority check */}
-                <button className={`${btnPrimary} w-full`} onClick={handleMintMore} disabled={mintingMore || checkingMintAuth || !existingMint || !mintMoreAmount || !!mintAuthError || !walletReady}>
-                  {!walletReady ? "Connect Wallet First" : checkingMintAuth ? "Checking..." : mintingMore ? "Minting..." : `Mint ${Number(mintMoreAmount).toLocaleString()} More Tokens`}
-                </button>
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Decimals</label>
+                  <input type="number" min={0} max={MAX_DECIMALS} value={decimals} onChange={(e) => {
+                    const val = Math.min(MAX_DECIMALS, Math.max(0, Math.floor(Number(e.target.value) || 0)));
+                    setDecimals(val);
+                  }} className={inputClass} disabled={!walletReady} />
+                </div>
+                <div className="flex-[2]">
+                  <label className="mb-1 block text-xs text-[var(--text-secondary)]">Supply</label>
+                  <input type="text" value={supply} onChange={(e) => setSupply(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} disabled={!walletReady} />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-[var(--text-secondary)]">Recipient Address</label>
+                <input type="text" value={recipient} onChange={(e) => setRecipient(e.target.value)} className={inputClass} disabled={!walletReady} />
               </div>
             </div>
-          </ScrollReveal>
+          </div>
+
+          {/* Step 4 — Create & Mint (no ScrollReveal — interactive form must always be visible) */}
+          {mintAddress ? (
+            /* ── Success card ── */
+            <div ref={successCardRef} className={`${cardClass} border-[var(--accent)]/30`} style={prefersReducedMotion ? undefined : { opacity: 0 }}>
+              <div className="mb-4 flex items-center gap-2">
+                {mintColor && (
+                  <span className="inline-block h-6 w-6 rounded-full border border-[var(--border)]" style={{ backgroundColor: mintColor }} />
+                )}
+                <h2 className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--accent)]">
+                  {tokenName} ({tokenSymbol}) Created
+                </h2>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <code className="flex-1 overflow-hidden text-ellipsis bg-[var(--bg)] border border-[var(--border)] px-3 py-2 text-xs text-white">{mintAddress}</code>
+                <button onClick={copyMint} className="border border-[var(--border)] px-3 py-2 text-xs text-[var(--text-secondary)] transition-all hover:bg-[var(--accent)]/[0.06] hover:text-white active:scale-[0.98]">
+                  {copied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <Link href={`/create?mint=${mintAddress}`} className={`${btnPrimary} text-center`}>
+                  Create Market →
+                </Link>
+                <a href={`https://explorer.solana.com/address/${mintAddress}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] underline">
+                  View on Explorer
+                </a>
+                {lastTxSig && (
+                  <a href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] underline">
+                    View tx
+                  </a>
+                )}
+              </div>
+
+              <LogoUpload mintAddress={mintAddress} symbol={tokenSymbol} />
+              <button onClick={() => { setMintAddress(null); setCreateStatus(null); setLastTxSig(null); }} className="mt-4 text-xs text-[var(--text-dim)] hover:text-[var(--text-muted)] underline">
+                Create another token
+              </button>
+            </div>
+          ) : (
+            /* ── Create button + progress ── */
+            <div className={cardClass}>
+              <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">Step 4 · Create &amp; Mint</h2>
+
+              {!walletReady && (
+                <p className="mb-3 text-xs text-[var(--warning)]">Connect your wallet first (Step 1).</p>
+              )}
+              {walletReady && lowSol && (
+                <p className="mb-3 text-xs text-[var(--short)]">Not enough SOL — you need at least 0.01 SOL. Get some in Step 2.</p>
+              )}
+
+              {/* Inline progress */}
+              {loading && createStatus && (
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
+                  <span className="text-xs text-[var(--text-muted)]">{createStatus}</span>
+                </div>
+              )}
+
+              {/* Error inline */}
+              {!loading && createStatus?.startsWith("Error") && (
+                <p className="mb-3 text-xs text-[var(--short)]">{createStatus}</p>
+              )}
+
+              <button className={`${btnPrimary} w-full`} onClick={handleCreateAndMint} disabled={loading || !recipient || lowSol || !walletReady}>
+                {!walletReady ? "Connect Wallet First" : loading ? "Creating..." : `Create Mint + Mint ${Number(supply).toLocaleString()} Tokens`}
+              </button>
+            </div>
+          )}
+
+          {/* Mint More — existing token (no ScrollReveal — interactive form) */}
+          <div className={cardClass}>
+            <h2 className="mb-2 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">Mint More (Existing Token)</h2>
+            <p className="mb-3 text-xs text-[var(--text-muted)]">Already created a market? Need more tokens for trading or deposits? Mint more of a token you own.</p>
+            <div className={`space-y-3 ${!walletReady ? "opacity-50 pointer-events-none" : ""}`}>
+              <div>
+                <label className="mb-1 block text-xs text-[var(--text-secondary)]">Existing Mint Address</label>
+                <input type="text" value={existingMint} onChange={(e) => setExistingMint(e.target.value.trim())} placeholder="Paste token mint address..." className={inputClass} disabled={!walletReady} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-[var(--text-secondary)]">Amount to Mint</label>
+                <input type="text" value={mintMoreAmount} onChange={(e) => setMintMoreAmount(e.target.value.replace(/[^0-9]/g, ""))} className={inputClass} disabled={!walletReady} />
+              </div>
+              {checkingMintAuth && (
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
+                  <span className="text-xs text-[var(--text-muted)]">Checking mint authority...</span>
+                </div>
+              )}
+              {!checkingMintAuth && mintAuthError && <p className="text-[11px] text-[var(--short)]">{mintAuthError}</p>}
+              {mintingMore && mintMoreStatus && (
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
+                  <span className="text-xs text-[var(--text-muted)]">{mintMoreStatus}</span>
+                </div>
+              )}
+              {!mintingMore && mintMoreStatus && (
+                <p className={`text-xs ${mintMoreStatus.startsWith("Error") ? "text-[var(--short)]" : "text-[var(--accent)]"}`}>
+                  {mintMoreStatus}
+                  {lastTxSig && !mintMoreStatus.startsWith("Error") && (
+                    <>
+                      {" "}
+                      <a href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="underline hover:text-white">
+                        View tx →
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
+              {/* P-HIGH-4: Disable button during mint authority check */}
+              <button className={`${btnPrimary} w-full`} onClick={handleMintMore} disabled={mintingMore || checkingMintAuth || !existingMint || !mintMoreAmount || !!mintAuthError || !walletReady}>
+                {!walletReady ? "Connect Wallet First" : checkingMintAuth ? "Checking..." : mintingMore ? "Minting..." : `Mint ${Number(mintMoreAmount).toLocaleString()} More Tokens`}
+              </button>
+            </div>
+          </div>
 
         </div>
       </div>
