@@ -587,21 +587,21 @@ function MarketsPageInner() {
                         const v = m.supabase?.insurance_balance ?? m.supabase?.insurance_fund ?? 0;
                         return BigInt(isSentinelNum(v) ? 0 : Math.max(0, v));
                       })();
-                  const volume24hRaw = m.supabase?.volume_24h != null && !isSentinelNum(m.supabase.volume_24h)
-                    ? BigInt(Math.max(0, m.supabase.volume_24h))
+                  const volume24hRaw = m.supabase?.volume_24h != null && !isSentinelNum(m.supabase.volume_24h) && m.supabase.volume_24h > 0
+                    ? BigInt(m.supabase.volume_24h)
                     : null;
                   
-                  // Display values (USD or tokens)
+                  // Display values (USD or tokens) — cap token display at 2dp for table readability
                   const oiDisplay = showUsd && lastPrice != null
                     ? formatNum(Math.round((Number(oiTokensRaw) / tokenDivisor) * lastPrice * 100) / 100)
-                    : formatTokenAmount(oiTokensRaw, mintDecimals);
+                    : formatTokenAmount(oiTokensRaw, mintDecimals, 2);
                   const insuranceDisplay = showUsd && lastPrice != null
                     ? formatNum(Math.round((Number(insuranceTokensRaw) / tokenDivisor) * lastPrice * 100) / 100)
-                    : formatTokenAmount(insuranceTokensRaw, mintDecimals);
+                    : formatTokenAmount(insuranceTokensRaw, mintDecimals, 2);
                   const volumeDisplay = volume24hRaw != null
                     ? (showUsd && lastPrice != null
                         ? formatNum(Math.round((Number(volume24hRaw) / tokenDivisor) * lastPrice * 100) / 100)
-                        : formatTokenAmount(volume24hRaw, mintDecimals))
+                        : formatTokenAmount(volume24hRaw, mintDecimals, 2))
                     : null;
 
                   return (
@@ -680,8 +680,9 @@ function MarketsPageInner() {
               
               {/* P-MED-3: Infinite scroll trigger */}
               {displayCount < filtered.length && (
-                <div ref={observerTarget} className="py-4 text-center">
-                  <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                <div ref={observerTarget} className="flex items-center justify-center gap-2 py-4">
+                  <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                  <span className="text-xs text-[var(--text-muted)]">Loading more…</span>
                 </div>
               )}
             </>
@@ -696,8 +697,9 @@ function MarketsPageInner() {
 export default function MarketsPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-[calc(100vh-48px)] flex items-center justify-center">
+      <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+        <span className="text-xs text-[var(--text-muted)]">Loading markets…</span>
       </div>
     }>
       <MarketsPageInner />

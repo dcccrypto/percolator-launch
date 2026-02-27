@@ -105,16 +105,16 @@ export const HowToContribute: FC<Props> = ({
         ))}
       </div>
 
-      {/* Good First Issues */}
-      <div className="mb-10">
-        <h3
-          className="mb-4 text-xs font-medium uppercase tracking-[0.15em] text-white/30"
-          style={{ fontFamily: "var(--font-mono)" }}
-        >
-          Good first issues
-        </h3>
+      {/* Good First Issues — hidden when empty to avoid stale null state */}
+      {goodFirstIssues.length > 0 && (
+        <div className="mb-10">
+          <h3
+            className="mb-4 text-xs font-medium uppercase tracking-[0.15em] text-white/30"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            Good first issues
+          </h3>
 
-        {goodFirstIssues.length > 0 ? (
           <div className="flex flex-wrap gap-3">
             {goodFirstIssues.map((issue) => (
               <a
@@ -140,21 +140,8 @@ export const HowToContribute: FC<Props> = ({
               </a>
             ))}
           </div>
-        ) : (
-          <p className="text-sm italic text-white/30">
-            No open beginner issues right now —{" "}
-            <a
-              href="https://github.com/dcccrypto/percolator-launch/issues"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[#a78bfa] hover:underline"
-            >
-              check GitHub for all issues
-            </a>
-            .
-          </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Bottom CTA */}
       <div className="flex flex-wrap items-center justify-center gap-3">

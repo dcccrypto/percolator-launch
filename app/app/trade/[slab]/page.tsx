@@ -274,11 +274,11 @@ function TradePageInner({ slab }: { slab: string }) {
               </h1>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 min-w-0 shrink-0">
             <UsdToggleButton />
             {health && <HealthBadge level={health.level} />}
             {priceDisplay && (
-              <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
+              <span className="truncate text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
             )}
           </div>
         </div>

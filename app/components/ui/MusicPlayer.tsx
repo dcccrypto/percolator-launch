@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
@@ -31,6 +32,10 @@ const VolDownIcon = () => (
   </svg>
 );
 
+/** Routes where the floating player should be hidden on mobile (<640px)
+ *  to avoid overlaying critical interactive UI (e.g. trade margin inputs). */
+const HIDE_ON_MOBILE_ROUTES = ["/trade"];
+
 export function MusicPlayer() {
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(0.5);
@@ -40,6 +45,10 @@ export function MusicPlayer() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  const pathname = usePathname();
+
+  /* Determine if the player should be hidden on mobile for this route */
+  const hideOnMobile = HIDE_ON_MOBILE_ROUTES.some((r) => pathname?.startsWith(r));
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
@@ -101,7 +110,7 @@ export function MusicPlayer() {
   return (
     <div
       ref={containerRef}
-      className="fixed bottom-3 right-3 z-[90] sm:bottom-5 sm:right-5 gsap-fade"
+      className={`fixed bottom-3 right-3 z-[90] sm:bottom-5 sm:right-5 gsap-fade${hideOnMobile ? " hidden sm:block" : ""}`}
       style={{ opacity: 0 }}
     >
       <audio

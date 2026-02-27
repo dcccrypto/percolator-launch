@@ -212,7 +212,7 @@ export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (filteredPrices.length === 0) {
     return (
-      <div className="flex h-[400px] items-center justify-center rounded-none border border-[var(--border)] bg-[var(--bg)]">
+      <div className="flex h-[200px] sm:h-[400px] items-center justify-center rounded-none border border-[var(--border)] bg-[var(--bg)]">
         <div className="text-center">
           <div className="text-sm text-[var(--text-secondary)]">No price data yet</div>
           <div className="mt-1 text-xs text-[var(--text-dim)]">Prices will appear after trades</div>
@@ -280,7 +280,7 @@ export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       </div>
 
       {/* Chart */}
-      <svg ref={svgRef} width={W} height={H} className="w-full" style={{ maxWidth: "100%" }}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[200px] sm:max-h-[400px]" preserveAspectRatio="xMidYMid meet">
         <defs>
           <linearGradient id="lineGradient" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor={isUp ? "var(--long)" : "var(--short)"} stopOpacity="0.3" />

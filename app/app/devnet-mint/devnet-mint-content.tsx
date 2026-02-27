@@ -413,8 +413,8 @@ const DevnetMintContent: FC = () => {
 
   return (
     <div className="min-h-[calc(100vh-48px)] relative">
-      <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
-      <div className="relative mx-auto max-w-4xl px-4 py-10">
+      <div className="absolute inset-x-0 top-0 h-32 bg-grid pointer-events-none" />
+      <div className="relative mx-auto max-w-4xl px-4 py-6 sm:py-10">
         <ScrollReveal>
           <div className="mb-8 text-center">
             <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// faucet</div>
@@ -449,7 +449,7 @@ const DevnetMintContent: FC = () => {
                 <span className="text-sm text-white">
                   Balance:{" "}
                   <span className={`font-mono ${lowSol ? "text-[var(--short)]" : "text-[var(--accent)]"}`}>
-                    {balance !== null ? `${balance.toFixed(4)} SOL` : "..."}
+                    {balance !== null ? `${balance.toFixed(4)} SOL` : "\u2014"}
                   </span>
                 </span>
                 <button className={btnPrimary} onClick={refreshBalance} disabled={!walletReady}>
