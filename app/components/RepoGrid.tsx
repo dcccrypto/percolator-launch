@@ -41,7 +41,7 @@ export const RepoGrid: FC<Props> = ({ repos, isLive, ciStatuses }) => {
             className={[
               "rounded-full border px-4 py-1.5 font-mono text-[13px] transition-all duration-150",
               active === f
-                ? "border-[rgb(124,58,237)] bg-[rgba(124,58,237,0.35)] text-white font-semibold shadow-[0_0_12px_rgba(124,58,237,0.25)] ring-1 ring-[rgba(124,58,237,0.50)]"
+                ? "border-[rgb(124,58,237)] bg-[rgba(124,58,237,0.35)] text-[var(--text)] font-semibold shadow-[0_0_12px_rgba(124,58,237,0.25)] ring-1 ring-[rgba(124,58,237,0.50)]"
                 : "border-white/[0.08] bg-white/[0.04] text-[var(--text-secondary)] hover:border-white/[0.16] hover:text-[var(--text)]",
             ].join(" ")}
           >
