@@ -579,16 +579,20 @@ function MarketsPageInner() {
                     ? sanitizeOnChainValue(m.onChain.engine.totalOpenInterest)
                     : (() => {
                         const v = m.supabase?.total_open_interest ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0));
-                        return BigInt(isSentinelNum(v) ? 0 : Math.max(0, v));
+                        const safe = isSentinelNum(v) ? 0 : Math.max(0, v);
+                        return BigInt(Math.round(safe * tokenDivisor));
                       })();
                   const insuranceTokensRaw = m.onChain
                     ? sanitizeOnChainValue(m.onChain.engine.insuranceFund.balance)
                     : (() => {
                         const v = m.supabase?.insurance_balance ?? m.supabase?.insurance_fund ?? 0;
-                        return BigInt(isSentinelNum(v) ? 0 : Math.max(0, v));
+                        const safe = isSentinelNum(v) ? 0 : Math.max(0, v);
+                        // Supabase values are already in human-readable token units (floats).
+                        // Multiply by 10^decimals to convert back to raw token units for formatTokenAmount.
+                        return BigInt(Math.round(safe * tokenDivisor));
                       })();
                   const volume24hRaw = m.supabase?.volume_24h != null && !isSentinelNum(m.supabase.volume_24h) && m.supabase.volume_24h > 0
-                    ? BigInt(m.supabase.volume_24h)
+                    ? BigInt(Math.round(m.supabase.volume_24h * tokenDivisor))
                     : null;
                   
                   // Display values (USD or tokens) — cap token display at 2dp for table readability
