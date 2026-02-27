@@ -404,7 +404,7 @@ const DevnetMintContent: FC = () => {
     }
   }, [publicKey, signTransaction, existingMint, mintMoreAmount, recipient, refreshBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cardClass = "bg-[var(--panel-bg)] border border-[var(--border)] p-6";
+  const cardClass = "bg-[var(--panel-bg)] border border-[var(--border)] p-4 sm:p-6";
   const btnPrimary = "border border-[var(--accent)]/40 text-[var(--accent)] bg-transparent px-5 py-2.5 text-sm font-semibold transition-all duration-200 hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.08] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100";
   const inputClass = "w-full bg-[var(--panel-bg)] border border-[var(--border)] px-3 py-2 text-sm text-white placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none transition-shadow duration-200";
 
@@ -418,10 +418,10 @@ const DevnetMintContent: FC = () => {
         <ScrollReveal>
           <div className="mb-8 text-center">
             <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// faucet</div>
-            <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <h1 className="text-lg font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
               <span className="font-normal text-white/50">Devnet </span>Token Factory
             </h1>
-            <p className="mt-2 text-[13px] text-[var(--text-secondary)]">Create SPL tokens on devnet for testing with the launch wizard.</p>
+            <p className="mt-2 text-[12px] leading-relaxed text-[var(--text-secondary)] sm:text-[13px]">Create SPL tokens on devnet for testing with the launch wizard.</p>
           </div>
         </ScrollReveal>
 

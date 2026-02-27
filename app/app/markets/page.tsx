@@ -546,11 +546,11 @@ function MarketsPageInner() {
             <>
               <div className="relative rounded-sm border border-[var(--border)] hud-corners overflow-x-auto">
                 {/* Header row - responsive grid columns */}
-                <div className="grid min-w-[600px] sm:min-w-[700px] grid-cols-[minmax(120px,2fr)_minmax(60px,1fr)_minmax(60px,1fr)_minmax(60px,1fr)_minmax(55px,0.8fr)_minmax(40px,0.5fr)_minmax(45px,0.7fr)] sm:grid-cols-[minmax(140px,2fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(50px,0.7fr)_minmax(50px,0.7fr)] gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+                <div className="grid min-w-[480px] sm:min-w-[700px] grid-cols-[minmax(100px,2fr)_minmax(55px,1fr)_minmax(55px,1fr)_minmax(55px,1fr)_minmax(50px,0.8fr)_minmax(35px,0.5fr)_minmax(40px,0.7fr)] sm:grid-cols-[minmax(140px,2fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(50px,0.7fr)_minmax(50px,0.7fr)] gap-2 sm:gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-3 sm:px-4 py-2.5 text-[9px] sm:text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
                   <div>token</div>
                   <div className="text-right">price</div>
                   <div className="text-right">OI</div>
-                  <div className="text-right">volume</div>
+                  <div className="text-right">vol</div>
                   <div className="text-right"><span className="sm:hidden">ins</span><span className="hidden sm:inline">insurance</span></div>
                   <div className="text-right"><span className="sm:hidden">lev</span><span className="hidden sm:inline">max lev</span></div>
                   <div className="text-right">health</div>
@@ -613,7 +613,7 @@ function MarketsPageInner() {
                       key={m.slabAddress}
                       href={`/trade/${m.slabAddress}`}
                       className={[
-                        "grid min-w-[600px] sm:min-w-[700px] grid-cols-[minmax(120px,2fr)_minmax(60px,1fr)_minmax(60px,1fr)_minmax(60px,1fr)_minmax(55px,0.8fr)_minmax(40px,0.5fr)_minmax(45px,0.7fr)] sm:grid-cols-[minmax(140px,2fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(50px,0.7fr)_minmax(50px,0.7fr)] gap-3 items-center px-4 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.04] hover:border-l-2 hover:border-l-[var(--accent)]/30",
+                        "grid min-w-[480px] sm:min-w-[700px] grid-cols-[minmax(100px,2fr)_minmax(55px,1fr)_minmax(55px,1fr)_minmax(55px,1fr)_minmax(50px,0.8fr)_minmax(35px,0.5fr)_minmax(40px,0.7fr)] sm:grid-cols-[minmax(140px,2fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(70px,1fr)_minmax(50px,0.7fr)_minmax(50px,0.7fr)] gap-2 sm:gap-3 items-center px-3 sm:px-4 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.04] hover:border-l-2 hover:border-l-[var(--accent)]/30",
                         i > 0 ? "border-t border-[var(--border)]" : "",
                       ].join(" ")}
                     >

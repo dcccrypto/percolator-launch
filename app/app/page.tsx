@@ -187,42 +187,40 @@ export default function Home() {
       </ErrorBoundary>
 
       {/* ═══════════════════════ STATS ═══════════════════════ */}
-      {hasStats && (
-        <ErrorBoundary label="Stats Section">
-          <section className="relative py-16">
-            <div className="mx-auto max-w-[1100px] px-6">
-              <ScrollReveal>
-                <div className="mb-10 text-center">
-                  <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
-                    // protocol metrics
-                  </div>
-                  <h2 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
-                    Built <GradientText variant="muted">Different</GradientText>
-                  </h2>
+      <ErrorBoundary label="Stats Section">
+        <section className="relative py-16">
+          <div className="mx-auto max-w-[1100px] px-6">
+            <ScrollReveal>
+              <div className="mb-10 text-center">
+                <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+                  // protocol metrics
                 </div>
-              </ScrollReveal>
+                <h2 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+                  Built <GradientText variant="muted">Different</GradientText>
+                </h2>
+              </div>
+            </ScrollReveal>
 
-              <ScrollReveal stagger={0.08}>
-                <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-4">
-                  {[
-                    { label: "Markets Live", value: statsLoaded ? String(stats.markets) : "—", color: "text-[var(--accent)]" },
-                    { label: "24h Volume", value: statsLoaded ? formatCompact(stats.volume) : "—", color: "text-[var(--long)]" },
-                    { label: "Insurance Fund", value: statsLoaded ? formatCompact(stats.insurance) : "—", color: "text-[var(--accent)]" },
-                    { label: "Access", value: "Open", color: "text-[var(--long)]" },
-                  ].map((stat) => (
-                    <div key={stat.label} className="bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
-                      <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">{stat.label}</p>
-                      <p className={`text-lg sm:text-xl font-semibold tracking-tight tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-heading)" }}>
-                        {stat.value}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </ScrollReveal>
-            </div>
-          </section>
-        </ErrorBoundary>
-      )}
+            <ScrollReveal stagger={0.08}>
+              <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-4">
+                {[
+                  { label: "Markets Live", value: statsLoaded ? String(stats.markets) : "—", color: "text-[var(--accent)]" },
+                  { label: "24h Volume", value: statsLoaded ? formatCompact(stats.volume) : "—", color: "text-[var(--long)]" },
+                  { label: "Insurance Fund", value: statsLoaded ? formatCompact(stats.insurance) : "—", color: "text-[var(--accent)]" },
+                  { label: "Access", value: "Open", color: "text-[var(--long)]" },
+                ].map((stat) => (
+                  <div key={stat.label} className="bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
+                    <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">{stat.label}</p>
+                    <p className={`text-lg sm:text-xl font-semibold tracking-tight tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-heading)" }}>
+                      {stat.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </ScrollReveal>
+          </div>
+        </section>
+      </ErrorBoundary>
 
       {/* ═══════════════════════ HOW IT WORKS ═══════════════════════ */}
       <ErrorBoundary label="How It Works Section">

@@ -74,8 +74,8 @@ export function MiniSparkline({
         >
           ${currentPrice.toFixed(2)}
         </span>
-        <span className="text-xs text-green-400">
-          +{((currentPrice / basePrice - 1) * 100).toFixed(2)}%
+        <span className={`text-xs ${currentPrice >= basePrice ? "text-green-400" : "text-red-400"}`}>
+          {currentPrice >= basePrice ? "+" : ""}{((currentPrice / basePrice - 1) * 100).toFixed(2)}%
         </span>
       </div>
       <svg

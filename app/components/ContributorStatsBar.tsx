@@ -102,7 +102,10 @@ export const ContributorStatsBar: FC<Props> = ({ stats }) => {
             valueNode = cfg.static;
           } else if (cfg.key && stats) {
             const val = stats[cfg.key] as number;
-            valueNode = <AnimatedNumber value={val} visible={visible} />;
+            // Show dash for falsy/NaN/undefined values instead of animating to 0
+            valueNode = val && Number.isFinite(val) && val > 0
+              ? <AnimatedNumber value={val} visible={visible} />
+              : <span>—</span>;
           } else {
             valueNode = "—";
           }

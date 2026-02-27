@@ -221,14 +221,18 @@ function TradePageInner({ slab }: { slab: string }) {
     ? `$${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}`
     : null;
 
+  // Track whether the fade-in animation has already been applied
+  const animatedRef = useRef(false);
+
   useEffect(() => {
-    if (!pageRef.current) return;
+    if (!pageRef.current || animatedRef.current) return;
+    animatedRef.current = true;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       pageRef.current.style.opacity = "1";
       return;
     }
     gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
-  }, []);
+  }); // No deps — runs every render until pageRef is available
 
   // Loading state — show while slab data is being fetched
   if (slabLoading && !engine) {
