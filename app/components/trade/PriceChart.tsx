@@ -4,6 +4,7 @@ import { FC, useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockPriceHistory } from "@/lib/mock-trade-data";
 
 interface PricePoint {
@@ -70,7 +71,7 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }, [config]);
 
   useEffect(() => {
-    if (isMockSlab(slabAddress)) {
+    if (isMockMode() && isMockSlab(slabAddress)) {
       const mockPrices = getMockPriceHistory(slabAddress);
       if (mockPrices.length > 0) setPrices(mockPrices);
       return;
