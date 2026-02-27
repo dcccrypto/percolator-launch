@@ -287,10 +287,14 @@ body::before {
 
 /* ─── Ticker Banner ─── */
 .ticker-banner {
-  height: 28px;
+  height: 32px;
   display: flex;
   align-items: center;
   white-space: nowrap;
+  padding: 0 4px;
+}
+@media (min-width: 768px) {
+  .ticker-banner { height: 28px; padding: 0; }
 }
 .ticker-track {
   display: inline-flex;

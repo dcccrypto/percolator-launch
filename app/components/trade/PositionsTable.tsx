@@ -45,7 +45,16 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   }, [accounts]);
   const lpUnderfunded = lpEntry !== null && lpEntry.account.capital === 0n;
 
-  if (!userAccount) return null;
+  if (!userAccount) {
+    return (
+      <div className="border border-[var(--border)]/50 bg-[var(--bg)]/80">
+        <div className="py-10 text-center space-y-1">
+          <p className="text-[12px] text-[var(--text-muted)]">No positions yet</p>
+          <p className="text-[10px] text-[var(--text-dim)]">Connect your wallet and open a trade to get started</p>
+        </div>
+      </div>
+    );
+  }
 
   const { account } = userAccount;
   const hasPosition = account.positionSize !== 0n;
