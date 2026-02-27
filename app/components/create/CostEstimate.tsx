@@ -49,10 +49,11 @@ export const CostEstimate: FC<CostEstimateProps> = ({
     // Total SOL cost
     const totalSolCost = slabRentSol + tokenAccountRentSol + TX_FEE_ESTIMATE_SOL;
 
-    // Token costs
+    // Token costs (vault seed is 500_000_000 raw = 500 at 6 decimals)
+    const seedAmount = 500_000_000 / Math.pow(10, tokenDecimals);
     const lpNum = parseFloat(lpCollateral) || 0;
     const insNum = parseFloat(insuranceAmount) || 0;
-    const totalTokens = lpNum + insNum;
+    const totalTokens = seedAmount + lpNum + insNum;
 
     // USD values if price available
     const tokenUsdValue = tokenPriceUsd ? totalTokens * tokenPriceUsd : null;
@@ -62,6 +63,7 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       tokenAccountRentSol: tokenAccountRentSol.toFixed(4),
       txFeeSol: TX_FEE_ESTIMATE_SOL.toFixed(4),
       totalSolCost: totalSolCost.toFixed(4),
+      seedTokens: seedAmount,
       lpTokens: lpNum,
       insTokens: insNum,
       totalTokens,
@@ -106,6 +108,12 @@ export const CostEstimate: FC<CostEstimateProps> = ({
 
       {/* Token Costs */}
       <div className="px-4 py-3 space-y-2">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-[var(--text-muted)]">Vault Seed (required)</span>
+          <span className="font-mono text-[var(--text)]">
+            {estimate.seedTokens.toLocaleString()} {tokenSymbol}
+          </span>
+        </div>
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-muted)]">LP Collateral</span>
           <span className="font-mono text-[var(--text)]">

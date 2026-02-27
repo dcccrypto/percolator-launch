@@ -3,7 +3,7 @@
 import { FC, useState, useMemo, useCallback, useEffect } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
-import { useCreateMarket, type CreateMarketParams } from "@/hooks/useCreateMarket";
+import { useCreateMarket, MIN_INIT_MARKET_SEED, type CreateMarketParams } from "@/hooks/useCreateMarket";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
@@ -108,6 +108,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const maxLeverage = Math.floor(10000 / wizard.initialMarginBps);
   const feeConflict = wizard.tradingFeeBps >= wizard.initialMarginBps;
   const hasTokens = wizard.walletBalance !== null && wizard.walletBalance > 0n;
+  const hasSufficientTokensForSeed = wizard.walletBalance !== null && wizard.walletBalance >= MIN_INIT_MARKET_SEED;
   const decimals = wizard.tokenMeta?.decimals ?? 6;
   const symbol = wizard.tokenMeta?.symbol ?? "Token";
 
@@ -138,7 +139,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     return slabRentSol + tokenAccountRentSol + TX_FEE_ESTIMATE_SOL;
   }, [wizard.slabTier]);
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
-  const allValid = step1Valid && step2Valid && step3Valid && hasTokens && hasSufficientSol;
+  const allValid = step1Valid && step2Valid && step3Valid && hasTokens && hasSufficientTokensForSeed && hasSufficientSol;
 
   // Navigation
   const goToStep = useCallback((step: WizardStep) => {
@@ -481,6 +482,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             hasSufficientBalance={hasSufficientSol}
             requiredSol={requiredSol}
             hasTokens={hasTokens}
+            hasSufficientTokensForSeed={hasSufficientTokensForSeed}
             feeConflict={feeConflict}
             onBack={goBack}
             onLaunch={handleLaunch}

@@ -10,7 +10,9 @@ import {
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   createAssociatedTokenAccountInstruction,
+  createTransferInstruction,
   getAssociatedTokenAddress,
+  getAccount,
 } from "@solana/spl-token";
 import {
   encodeInitMarket,
@@ -47,6 +49,9 @@ import { SLAB_TIERS, slabDataSize, deriveLpPda } from "@percolator/sdk";
 const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
 const ALL_ZEROS_FEED = "0".repeat(64);
 const MATCHER_CTX_SIZE = 320; // Minimum context size for percolator matcher
+
+/** Minimum vault seed required by percolator-prog before InitMarket (500_000_000 raw tokens). */
+export const MIN_INIT_MARKET_SEED = 500_000_000n;
 
 export interface VammParams {
   spreadBps: number;
@@ -215,6 +220,12 @@ export function useCreateMarket() {
                 wallet.publicKey, vaultAta, vaultPda, params.mint,
               );
 
+              // Seed the vault — same fix as fresh creation path
+              const userCollateralAtaRecovery = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
+              const seedTransferIxRecovery = createTransferInstruction(
+                userCollateralAtaRecovery, vaultAta, wallet.publicKey, MIN_INIT_MARKET_SEED,
+              );
+
               const initialMarginBps = BigInt(params.initialMarginBps);
               const initMarketData = encodeInitMarket({
                 admin: wallet.publicKey,
@@ -249,7 +260,7 @@ export function useCreateMarket() {
 
               const sig = await sendTx({
                 connection, wallet,
-                instructions: [createAtaIx, initMarketIx],
+                instructions: [createAtaIx, seedTransferIxRecovery, initMarketIx],
                 computeUnits: 250_000,
               });
               setState((s) => ({
@@ -272,6 +283,12 @@ export function useCreateMarket() {
 
             const createAtaIx = createAssociatedTokenAccountInstruction(
               wallet.publicKey, vaultAta, vaultPda, params.mint,
+            );
+
+            // Seed the vault with MIN_INIT_MARKET_SEED tokens — program requires this before InitMarket
+            const userCollateralAta = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
+            const seedTransferIx = createTransferInstruction(
+              userCollateralAta, vaultAta, wallet.publicKey, MIN_INIT_MARKET_SEED,
             );
 
             const initialMarginBps = BigInt(params.initialMarginBps);
@@ -309,7 +326,7 @@ export function useCreateMarket() {
             const sig = await sendTx({
               connection,
               wallet,
-              instructions: [createAccountIx, createAtaIx, initMarketIx],
+              instructions: [createAccountIx, createAtaIx, seedTransferIx, initMarketIx],
               computeUnits: 300_000,
               signers: [slabKp],
               maxRetries: 0, // Don't auto-retry createAccount — use manual retry instead

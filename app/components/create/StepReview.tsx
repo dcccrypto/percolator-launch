@@ -26,6 +26,7 @@ interface StepReviewProps {
   hasSufficientBalance: boolean;
   requiredSol?: number;
   hasTokens: boolean;
+  hasSufficientTokensForSeed: boolean;
   feeConflict: boolean;
   // Actions
   onBack: () => void;
@@ -63,6 +64,7 @@ export const StepReview: FC<StepReviewProps> = ({
   hasSufficientBalance,
   requiredSol,
   hasTokens,
+  hasSufficientTokensForSeed,
   feeConflict,
   onBack,
   onLaunch,
@@ -81,10 +83,11 @@ export const StepReview: FC<StepReviewProps> = ({
   const launchButtonLabel = useMemo(() => {
     if (!walletConnected) return "Connect Wallet to Launch";
     if (!hasTokens) return "No Tokens — Mint First";
+    if (!hasSufficientTokensForSeed) return "Insufficient Tokens for Vault Seed (500)";
     if (feeConflict) return "Fix Parameters to Continue";
     if (!hasSufficientBalance) return "Insufficient SOL";
     return "LAUNCH MARKET";
-  }, [walletConnected, hasTokens, feeConflict, hasSufficientBalance]);
+  }, [walletConnected, hasTokens, hasSufficientTokensForSeed, feeConflict, hasSufficientBalance]);
 
   return (
     <div className="space-y-5">
