@@ -64,6 +64,9 @@ const ALLOWED_RPC_METHODS = new Set([
   // Helius DAS API — token metadata resolution (PERC-198)
   "getAsset",
   "getAssetBatch",
+  // Transaction submission — required for faucet mint + trade execution (PERC-232)
+  "sendTransaction",
+  "simulateTransaction",
 ]);
 
 /** Maximum number of requests allowed in a single batch */
