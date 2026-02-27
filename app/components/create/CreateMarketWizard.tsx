@@ -126,7 +126,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     !feeConflict &&
     parseFloat(wizard.lpCollateral || "0") > 0 &&
     parseFloat(wizard.insuranceAmount) >= 100;
-  const hasSufficientSol = solBalance !== null && solBalance >= 0.5;
+  // Calculate actual SOL required based on slab tier (matching CostEstimate logic)
+  const requiredSol = useMemo(() => {
+    const tier = SLAB_TIERS[wizard.slabTier];
+    const RENT_PER_BYTE = 6960;
+    const RENT_OVERHEAD_BYTES = 128;
+    const LAMPORTS_PER_SOL = 1_000_000_000;
+    const TX_FEE_ESTIMATE_SOL = 0.025;
+    const slabRentSol = Math.ceil((tier.dataSize + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+    const tokenAccountRentSol = (165 * 3 + 82 * 2) * RENT_PER_BYTE / LAMPORTS_PER_SOL;
+    return slabRentSol + tokenAccountRentSol + TX_FEE_ESTIMATE_SOL;
+  }, [wizard.slabTier]);
+  const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
   const allValid = step1Valid && step2Valid && step3Valid && hasTokens && hasSufficientSol;
 
   // Navigation
@@ -468,6 +479,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             walletConnected={!!publicKey}
             walletBalanceSol={solBalance}
             hasSufficientBalance={hasSufficientSol}
+            requiredSol={requiredSol}
             hasTokens={hasTokens}
             feeConflict={feeConflict}
             onBack={goBack}

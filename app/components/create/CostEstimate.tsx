@@ -13,8 +13,8 @@ interface CostEstimateProps {
   className?: string;
 }
 
-/** Lamports per byte for rent exemption (approximation: 6.96 lamports/byte + 128 bytes overhead) */
-const RENT_PER_BYTE = 6.96;
+/** Lamports per byte for rent exemption (approximation: 6960 lamports/byte + 128 bytes overhead) */
+const RENT_PER_BYTE = 6960;
 const RENT_OVERHEAD_BYTES = 128;
 const LAMPORTS_PER_SOL = 1_000_000_000;
 

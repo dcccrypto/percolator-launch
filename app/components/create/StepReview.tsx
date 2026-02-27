@@ -24,6 +24,7 @@ interface StepReviewProps {
   walletConnected: boolean;
   walletBalanceSol: number | null;
   hasSufficientBalance: boolean;
+  requiredSol?: number;
   hasTokens: boolean;
   feeConflict: boolean;
   // Actions
@@ -60,6 +61,7 @@ export const StepReview: FC<StepReviewProps> = ({
   walletConnected,
   walletBalanceSol,
   hasSufficientBalance,
+  requiredSol,
   hasTokens,
   feeConflict,
   onBack,
@@ -150,7 +152,7 @@ export const StepReview: FC<StepReviewProps> = ({
             <>
               <span className="text-[var(--short)]">✗</span>
               <span className="text-[var(--short)]">
-                Insufficient SOL — balance: {walletBalanceSol.toFixed(4)} SOL
+                Insufficient SOL — balance: {walletBalanceSol.toFixed(4)} SOL{requiredSol ? `, need ~${requiredSol.toFixed(4)} SOL` : ""}
               </span>
             </>
           )}
