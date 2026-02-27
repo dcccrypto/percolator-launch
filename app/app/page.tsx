@@ -48,7 +48,7 @@ const HOW_STEPS = [
 
 function HowItWorks() {
   return (
-    <section className="relative overflow-hidden py-16">
+    <section className="relative overflow-hidden py-10">
       <div className="mx-auto max-w-[1100px] px-6">
         <ScrollReveal>
           <div className="mb-10 text-center">
@@ -66,13 +66,13 @@ function HowItWorks() {
             {HOW_STEPS.map((step, i) => (
               <article
                 key={step.number}
-                className="group relative bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]"
+                className="group relative bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] min-h-[160px]"
               >
                 <div className="mb-4 flex items-start justify-between">
                   <div className="flex h-12 w-12 items-center justify-center border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] transition-colors duration-200 group-hover:border-[var(--accent)]/30 group-hover:bg-[var(--accent)]/[0.08]">
                     <OnboardingIcon type={step.brandIcon} size={32} />
                   </div>
-                  <span className="text-[20px] font-normal tracking-tight text-[var(--border)] transition-colors duration-200 group-hover:text-[var(--accent)]/20" style={{ fontFamily: "var(--font-heading)" }}>
+                  <span className="text-[20px] font-normal tracking-tight text-[var(--text-muted)] transition-colors duration-200 group-hover:text-[var(--accent)]/20" style={{ fontFamily: "var(--font-heading)" }}>
                     {step.number}
                   </span>
                 </div>
@@ -188,7 +188,7 @@ export default function Home() {
 
       {/* ═══════════════════════ STATS ═══════════════════════ */}
       <ErrorBoundary label="Stats Section">
-        <section className="relative py-16">
+        <section className="relative py-10">
           <div className="mx-auto max-w-[1100px] px-6">
             <ScrollReveal>
               <div className="mb-10 text-center">
@@ -210,7 +210,7 @@ export default function Home() {
                   { label: "Access", value: "Open", color: "text-[var(--long)]" },
                 ].map((stat) => (
                   <div key={stat.label} className="bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
-                    <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">{stat.label}</p>
+                    <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">{stat.label}</p>
                     <p className={`text-lg sm:text-xl font-semibold tracking-tight tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-heading)" }}>
                       {stat.value}
                     </p>
@@ -229,7 +229,7 @@ export default function Home() {
 
       {/* ═══════════════════════ FEATURES ═══════════════════════ */}
       <ErrorBoundary label="Features Section">
-        <section className="relative overflow-hidden py-16">
+        <section className="relative overflow-hidden py-10">
           <div className="mx-auto max-w-[1100px] px-6">
             <ScrollReveal>
               <div className="mb-10 text-center">
@@ -253,7 +253,7 @@ export default function Home() {
                         <path d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5a17.92 17.92 0 0 1-8.716-2.247m0 0A9 9 0 0 1 3 12c0-1.47.353-2.856.978-4.082" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </div>
-                    <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+                    <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                       PERMISSIONLESS
                     </span>
                   </div>
@@ -320,7 +320,7 @@ export default function Home() {
                         <path d={f.icon} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </div>
-                    <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)] transition-colors duration-200 group-hover:text-[var(--accent)]/40">
+                    <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)] transition-colors duration-200 group-hover:text-[var(--accent)]/40">
                       {f.tag}
                     </span>
                   </div>
@@ -338,7 +338,7 @@ export default function Home() {
       {/* ═══════════════════════ FEATURED MARKETS ═══════════════════════ */}
       {hasMarkets && (
         <ErrorBoundary label="Featured Markets Section">
-        <section className="relative py-16">
+        <section className="relative py-10">
           <div className="mx-auto max-w-[1100px] px-6">
             <ScrollReveal>
               <div className="mb-10 text-center">
