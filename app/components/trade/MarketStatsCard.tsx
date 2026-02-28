@@ -9,6 +9,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatTokenAmount, formatUsd, formatBps } from "@/lib/format";
 import { sanitizeOnChainValue, sanitizeAccountCount } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
+import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { FundingRateCard } from "./FundingRateCard";
 import { FundingRateChart } from "./FundingRateChart";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
@@ -51,7 +52,7 @@ export const MarketStatsCard: FC = () => {
     : formatTokenAmount(vault, decimals);
 
   const stats = [
-    { label: `${symbol} Price`, value: formatUsd(livePriceE6 ?? config.lastEffectivePriceE6) },
+    { label: `${symbol} Price`, value: formatUsd(livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n)) },
     { label: "Open Interest", value: oiDisplay },
     { label: "Vault", value: vaultDisplay },
     { label: "Trading Fee", value: formatBps(params.tradingFeeBps) },

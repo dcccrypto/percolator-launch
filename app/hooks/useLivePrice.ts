@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
+import { resolveMarketPriceE6, sanitizePriceE6 } from "@/lib/oraclePrice";
 
 // Derive WebSocket URL from API URL: https://... → wss://...
 function getWsUrl(): string {
@@ -58,11 +58,10 @@ export function useLivePrice(): PriceState {
   useEffect(() => {
     if (!mktConfig) return;
     // Use oracle-mode-aware price resolution (handles pyth-pinned, hyperp, and admin modes)
+    // resolveMarketPriceE6 now includes sanitization (rejects values > MAX_ORACLE_PRICE)
     const onChainE6 = resolveMarketPriceE6(mktConfig);
     if (onChainE6 === 0n) return;
     const usd = Number(onChainE6) / 1_000_000;
-    // Cap bogus prices — corrupted on-chain data can produce $4.2T values
-    if (usd > 1_000_000) return;
     setState((prev) => {
       if (prev.price !== null) return prev;
       return { ...prev, price: usd, priceUsd: usd, priceE6: onChainE6, loading: false };
@@ -135,7 +134,9 @@ export function useLivePrice(): PriceState {
               console.warn("Invalid price format from WebSocket:", priceStr);
               return;
             }
-            const e6 = BigInt(priceStr);
+            const rawE6 = BigInt(priceStr);
+            const e6 = sanitizePriceE6(rawE6);
+            if (e6 === 0n) return; // Reject corrupt WS prices
             const usd = Number(e6) / 1_000_000;
             if (mountedRef.current) {
               setState((prev) => ({

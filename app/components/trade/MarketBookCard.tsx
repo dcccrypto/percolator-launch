@@ -7,6 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatUsd, formatTokenAmount, shortenAddress } from "@/lib/format";
+import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { AccountKind } from "@percolator/sdk";
 
 export const MarketBookCard: FC = () => {
@@ -30,7 +31,7 @@ export const MarketBookCard: FC = () => {
     );
   }
 
-  const oraclePrice = livePriceE6 ?? config.lastEffectivePriceE6;
+  const oraclePrice = livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n);
   const feeBps = Number(params.tradingFeeBps ?? 0n);
   const bestBid = oraclePrice > 0n ? Number(oraclePrice) * (1 - feeBps / 10000) : 0;
   const bestAsk = oraclePrice > 0n ? Number(oraclePrice) * (1 + feeBps / 10000) : 0;

@@ -127,6 +127,24 @@ describe("formatUsd", () => {
     const result = formatUsd(0n);
     expect(result).toBe("$0.00");
   });
+
+  it("returns '$—' for absurdly large prices (defense-in-depth)", () => {
+    // The $13T bug: raw on-chain value exceeds MAX_ORACLE_PRICE
+    expect(formatUsd(13_065_687_626_137_560_000n)).toBe("$—");
+    // Just over the MAX_ORACLE_PRICE threshold
+    expect(formatUsd(1_000_000_000_000_001n)).toBe("$—");
+  });
+
+  it("returns '$—' for negative prices", () => {
+    expect(formatUsd(-1n)).toBe("$—");
+  });
+
+  it("formats prices at the MAX_ORACLE_PRICE boundary", () => {
+    // Exactly at limit ($1B) — should still format normally
+    const result = formatUsd(1_000_000_000_000_000n);
+    expect(result).not.toBe("$—");
+    expect(result).toContain("1,000,000,000");
+  });
 });
 
 describe("formatLiqPrice", () => {

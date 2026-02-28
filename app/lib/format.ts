@@ -38,6 +38,9 @@ export const LIQ_PRICE_UNLIQUIDATABLE = 18446744073709551615n; // max u64
 
 export function formatUsd(priceE6: bigint | null | undefined): string {
   if (priceE6 == null) return "$0.00";
+  // Defense-in-depth: reject absurd values (matches Rust MAX_ORACLE_PRICE = 1e15)
+  if (priceE6 > 1_000_000_000_000_000n) return "$—";
+  if (priceE6 < 0n) return "$—";
   const val = Number(priceE6) / 1_000_000;
   return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
 }
