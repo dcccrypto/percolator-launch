@@ -1,8 +1,31 @@
 "use client";
 
-import { FC, useMemo, useState } from "react";
+import { FC, useCallback, useEffect, useMemo, useState } from "react";
 import type { CommitActivityMap, WeekActivity } from "@/lib/github";
 import { REPOS } from "@/lib/github";
+
+/** Return the number of heatmap weeks that fit the current viewport */
+function useResponsiveWeeks(): number {
+  const calc = useCallback(() => {
+    if (typeof window === "undefined") return 53;
+    const w = window.innerWidth;
+    // 13px cell + 3px gap = 16px per week, plus 30px day-label column + 48px container padding
+    const available = w - 30 - 48;
+    const fit = Math.floor(available / 16);
+    return Math.max(8, Math.min(fit, 53));
+  }, []);
+
+  const [weeks, setWeeks] = useState(53); // SSR-safe default
+
+  useEffect(() => {
+    setWeeks(calc());
+    const onResize = () => setWeeks(calc());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [calc]);
+
+  return weeks;
+}
 
 interface Props {
   commitActivity: CommitActivityMap | null;
@@ -86,8 +109,9 @@ export const CommitHeatmap: FC<Props> = ({ commitActivity }) => {
     return commitActivity[selectedRepo] || [];
   }, [commitActivity, selectedRepo]);
 
-  /** Determine how many weeks to show (26 on mobile is handled via CSS) */
-  const weeks = weekData.slice(-53);
+  /** Determine how many weeks to show (responsive to viewport) */
+  const visibleCount = useResponsiveWeeks();
+  const weeks = weekData.slice(-visibleCount);
 
   /** Month labels aligned to weeks */
   const monthLabels = useMemo(() => {
@@ -113,7 +137,7 @@ export const CommitHeatmap: FC<Props> = ({ commitActivity }) => {
           style={{ background: "var(--bg-panel, rgba(17,17,24,0.85))" }}
         >
           <div className="mb-4 h-6 w-64 animate-pulse rounded bg-white/[0.06]" />
-          <div className="grid grid-flow-col auto-cols-[13px] gap-[3px]">
+          <div className="grid grid-flow-col auto-cols-[13px] gap-[3px] max-sm:max-w-full max-sm:overflow-hidden">
             {Array.from({ length: 53 }).map((_, col) => (
               <div key={col} className="flex flex-col gap-[3px]">
                 {Array.from({ length: 7 }).map((_, row) => (
@@ -152,16 +176,17 @@ export const CommitHeatmap: FC<Props> = ({ commitActivity }) => {
             className="mt-1 text-xs text-[var(--text-muted,rgba(255,255,255,0.30))]"
             style={{ fontFamily: "var(--font-mono, 'JetBrains Mono')" }}
           >
-            All commits across public repos · last 52 weeks
+            All commits across public repos · last{" "}
+            {visibleCount >= 52 ? "52 weeks" : `${visibleCount} weeks`}
           </p>
         </div>
 
         {/* Repo selector pills */}
-        <div className="mt-4 mb-5 flex flex-wrap gap-2">
+        <div className="mt-4 mb-5 flex flex-wrap gap-2 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:scrollbar-none max-sm:-mx-5 max-sm:px-5">
           <button
             onClick={() => setSelectedRepo("all")}
             className={[
-              "rounded-full border px-3 py-1 text-[12px] transition-all duration-150",
+              "shrink-0 rounded-full border px-3 py-1 text-[12px] whitespace-nowrap transition-all duration-150",
               selectedRepo === "all"
                 ? "border-[rgb(124,58,237)] bg-[rgba(124,58,237,0.35)] text-[var(--text)] font-semibold shadow-[0_0_12px_rgba(124,58,237,0.25)]"
                 : "border-white/[0.08] bg-white/[0.04] text-[var(--text-secondary)] hover:border-white/[0.16]",
@@ -175,7 +200,7 @@ export const CommitHeatmap: FC<Props> = ({ commitActivity }) => {
               key={repo}
               onClick={() => setSelectedRepo(repo)}
               className={[
-                "rounded-full border px-3 py-1 text-[12px] transition-all duration-150",
+                "shrink-0 rounded-full border px-3 py-1 text-[12px] whitespace-nowrap transition-all duration-150",
                 selectedRepo === repo
                   ? "border-[rgb(124,58,237)] bg-[rgba(124,58,237,0.35)] text-[var(--text)] font-semibold shadow-[0_0_12px_rgba(124,58,237,0.25)]"
                   : "border-white/[0.08] bg-white/[0.04] text-[var(--text-secondary)] hover:border-white/[0.16]",
