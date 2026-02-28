@@ -199,9 +199,11 @@ export function useEarnStats() {
       const markets: MarketVaultInfo[] = data
         .filter((m) => m.status === 'active' || m.status === 'Active')
         .map((m) => {
-          const oiLong = m.open_interest_long ?? 0;
-          const oiShort = m.open_interest_short ?? 0;
-          const totalOI = m.total_open_interest ?? oiLong + oiShort;
+          const oiLongRaw = m.open_interest_long ?? 0;
+          const oiShortRaw = m.open_interest_short ?? 0;
+          const totalOIRaw = m.total_open_interest ?? oiLongRaw + oiShortRaw;
+          // OI values are stored in USDC micro-units (6 decimals) — convert to USD
+          const totalOI = totalOIRaw / 1e6;
           const maxLeverage = m.max_leverage ?? 10;
           const vaultBalance = m.lp_collateral ?? 0;
           const tradingFeeBps = m.trading_fee_bps ?? 10;
