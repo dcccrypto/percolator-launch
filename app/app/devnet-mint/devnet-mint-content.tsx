@@ -413,15 +413,18 @@ const DevnetMintContent: FC = () => {
 
   return (
     <div className="min-h-[calc(100vh-48px)] relative">
-      <div className="absolute inset-x-0 top-0 h-32 bg-grid pointer-events-none" />
-      <div className="relative mx-auto max-w-4xl px-4 py-6 sm:py-10">
+      <div className="absolute inset-x-0 top-0 h-16 bg-grid pointer-events-none opacity-50" />
+      <div className="relative mx-auto max-w-4xl px-4 pt-4 pb-6 sm:pb-10">
         <ScrollReveal>
-          <div className="mb-8 text-center">
+          <div className="mb-8">
             <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// faucet</div>
-            <h1 className="text-lg font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <h1 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
               <span className="font-normal text-white/50">Devnet </span>Token Factory
             </h1>
-            <p className="mt-2 text-[12px] leading-relaxed text-[var(--text-secondary)] sm:text-[13px]">Create SPL tokens on devnet for testing with the launch wizard.</p>
+            <p className="mt-2 text-[13px] text-[var(--text-secondary)]">Create SPL tokens on devnet for testing with the launch wizard.</p>
+            <div className="mt-2 text-[11px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+              mint + metadata &middot; ~0.01 SOL &middot; instant
+            </div>
           </div>
         </ScrollReveal>
 
