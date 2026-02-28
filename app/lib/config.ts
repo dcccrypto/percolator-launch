@@ -4,7 +4,7 @@
  */
 export type Network = "mainnet" | "devnet";
 
-function getNetwork(): Network {
+export function getNetwork(): Network {
   if (typeof window !== "undefined") {
     try {
       const override = localStorage.getItem("percolator-network") as Network | null;
