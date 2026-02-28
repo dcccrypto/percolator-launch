@@ -205,7 +205,7 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-4">
                 {[
                   { label: "Markets Live", value: statsLoaded ? String(stats.markets) : "—", color: "text-[var(--accent)]" },
-                  { label: "24h Volume", value: statsLoaded ? (stats.volume > 0 ? formatCompact(stats.volume) : "—") : "—", color: stats.volume > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]" },
+                  { label: "24h Volume", value: statsLoaded ? (stats.volume > 0 ? formatCompact(stats.volume) : "— (devnet)") : "—", color: stats.volume > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]" },
                   { label: "Insurance Fund", value: statsLoaded ? formatCompact(stats.insurance) : "—", color: "text-[var(--accent)]" },
                   { label: "Access", value: "Open", color: "text-[var(--long)]" },
                 ].map((stat) => (
