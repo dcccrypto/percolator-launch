@@ -98,15 +98,15 @@ const CONFIGS = {
     matcherProgramId: "GTRgyTDfrMvBubALAqtHuQwT8tbGyXid7svXZKtWfC9k",
     crankWallet: "2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm",
     explorerUrl: "https://explorer.solana.com",
-    // Multiple program deployments for different slab sizes.
-    // PERC-277: The default build (no --features) compiles for MAX_ACCOUNTS=4096.
-    // The main devnet program FxfD37... is a 4096-account binary (SLAB_LEN=1,025,568).
-    // Until separate small/medium binaries are deployed (see Issue #487),
-    // all tiers fall back to the main programId (4096 accounts).
+    // Multiple program deployments for different slab sizes (PERC-286).
+    // Each tier has its own on-chain program compiled with the appropriate --features flag.
+    // small:  256 slots  (~0.44 SOL rent) — --features small
+    // medium: 1024 slots (~1.8 SOL rent)  — --features medium
+    // large:  4096 slots (~7 SOL rent)    — default build (no features)
     programsBySlabTier: {
-      small: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",   // TODO: deploy small binary (256 slots)
-      medium: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",  // TODO: deploy medium binary (1024 slots)
-      large: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",   // 4096 slots (confirmed)
+      small: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",   // 256 slots
+      medium: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",   // 1024 slots
+      large: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",    // 4096 slots (confirmed working)
     } as Record<string, string>,
   },
 } as const;

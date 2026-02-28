@@ -214,8 +214,8 @@ export default function GuidePage() {
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {[
-                ["Small", "256", "~$65 (~0.44 SOL)", "coming-soon"],
-                ["Medium", "1,024", "~$260 (~1.8 SOL)", "coming-soon"],
+                ["Small", "256", "~$65 (~0.44 SOL)", "available"],
+                ["Medium", "1,024", "~$260 (~1.8 SOL)", "available"],
                 ["Large", "4,096", "~$1,000 (~7 SOL)", "available"],
               ].map(([tier, slots, cost, status]) => (
                 <tr key={tier} className={`transition-colors hover:bg-[var(--bg-elevated)] ${status === "coming-soon" ? "opacity-50" : ""}`}>
