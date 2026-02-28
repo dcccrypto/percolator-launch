@@ -1237,6 +1237,9 @@ function slabDataSize(maxAccounts) {
   const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
   return ENGINE_OFF_LOCAL + accountsOff + maxAccounts * ACCOUNT_SIZE2;
 }
+function validateSlabTierMatch(dataSize, programSlabLen) {
+  return dataSize === programSlabLen;
+}
 var ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map((t) => t.dataSize);
 var SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 var HEADER_SLICE_LENGTH = 1600;
@@ -2475,6 +2478,7 @@ export {
   validateI64,
   validateIndex,
   validatePublicKey,
+  validateSlabTierMatch,
   validateU128,
   validateU16,
   validateU64,
