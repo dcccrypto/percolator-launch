@@ -4,7 +4,6 @@ import { FC, ReactNode, useMemo } from "react";
 import { PrivyProvider, usePrivy, type WalletListEntry } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
-import { getNetwork } from "@/lib/config";
 import { SentryUserContext } from "@/components/providers/SentryUserContext";
 import { PrivyLoginContext } from "@/hooks/usePrivySafe";
 
@@ -25,39 +24,38 @@ const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
   );
 
   // Privy v3 requires explicit Solana RPC config for embedded wallet transactions.
-  // IMPORTANT: only expose the RPC for the CURRENT network. If both solana:mainnet and
-  // solana:devnet are present, Privy defaults to mainnet regardless of app network —
-  // causing 403s when the app is on devnet (public mainnet RPC rejects the request).
+  // IMPORTANT: Privy always needs solana:mainnet RPC present — even in devnet mode —
+  // otherwise initialization fails with "No RPC configuration found for chain solana:mainnet".
+  // We provide BOTH chains so Privy initializes correctly. The correct chain for
+  // transactions is selected via the explicit `chain` parameter on signTransaction /
+  // signAndSendTransaction calls (see useWalletCompat.ts), NOT by limiting rpcs.
   const solanaRpcs = useMemo(() => {
-    const network = getNetwork(); // reads localStorage override or NEXT_PUBLIC_DEFAULT_NETWORK
     const heliusKey = process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? "";
 
     // Derive WSS from HTTPS URL by replacing scheme
     const toWss = (url: string) => url.replace(/^https:\/\//, "wss://");
 
-    if (network === "mainnet") {
-      const rpcUrl =
-        process.env.NEXT_PUBLIC_HELIUS_RPC_URL ||
-        (heliusKey
-          ? `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`
-          : "https://api.mainnet-beta.solana.com");
-      return {
-        "solana:mainnet": {
-          rpc: createSolanaRpc(rpcUrl),
-          rpcSubscriptions: createSolanaRpcSubscriptions(toWss(rpcUrl)),
-          blockExplorerUrl: "https://solscan.io",
-        },
-      };
-    }
+    // Mainnet RPC — always provided for Privy initialization
+    const mainnetRpcUrl =
+      process.env.NEXT_PUBLIC_HELIUS_RPC_URL ||
+      (heliusKey
+        ? `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`
+        : "https://api.mainnet-beta.solana.com");
 
-    // devnet (default)
-    const rpcUrl = heliusKey
+    // Devnet RPC — always provided for Privy initialization
+    const devnetRpcUrl = heliusKey
       ? `https://devnet.helius-rpc.com/?api-key=${heliusKey}`
       : "https://api.devnet.solana.com";
+
     return {
+      "solana:mainnet": {
+        rpc: createSolanaRpc(mainnetRpcUrl),
+        rpcSubscriptions: createSolanaRpcSubscriptions(toWss(mainnetRpcUrl)),
+        blockExplorerUrl: "https://solscan.io",
+      },
       "solana:devnet": {
-        rpc: createSolanaRpc(rpcUrl),
-        rpcSubscriptions: createSolanaRpcSubscriptions(toWss(rpcUrl)),
+        rpc: createSolanaRpc(devnetRpcUrl),
+        rpcSubscriptions: createSolanaRpcSubscriptions(toWss(devnetRpcUrl)),
         blockExplorerUrl: "https://explorer.solana.com?cluster=devnet",
       },
     };

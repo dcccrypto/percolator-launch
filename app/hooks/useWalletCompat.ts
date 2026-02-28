@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useWallets, useSignTransaction } from "@privy-io/react-auth/solana";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
-import { getConfig, getWsEndpoint } from "@/lib/config";
+import { getConfig, getNetwork, getWsEndpoint } from "@/lib/config";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { getBatchRpc } from "@/lib/batchRpc";
 
@@ -68,9 +68,15 @@ function useWalletCompatInner() {
         requireAllSignatures: false,
         verifySignatures: false,
       });
+      // Explicitly pass the chain so Privy uses the correct network's RPC.
+      // Without this, Privy defaults to solana:mainnet which causes 403s
+      // when the app is configured for devnet.
+      const network = getNetwork();
+      const chain = network === "mainnet" ? "solana:mainnet" : "solana:devnet";
       const result = await privySignTransaction({
         transaction: new Uint8Array(serialized),
         wallet: activeWallet,
+        chain: chain as any, // SolanaChain type from Privy
       });
       return Transaction.from(Buffer.from(result.signedTransaction));
     };
