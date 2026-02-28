@@ -14,8 +14,8 @@ import {
   computeWarmupUnlockedCapital,
   computeWarmupLeverageCap,
   computeWarmupMaxPositionSize,
-  computeMaxLeverage,
-} from "../src/math/trading";
+} from "../src/math/warmup";
+import { computeMaxLeverage } from "../src/math/trading";
 
 let passed = 0;
 let failed = 0;

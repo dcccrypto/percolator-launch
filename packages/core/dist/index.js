@@ -1953,6 +1953,26 @@ function computePreTradeLiqPrice(oracleE6, margin, posSize, maintBps, feeBps, di
 function computeTradingFee(notional, tradingFeeBps) {
   return notional * tradingFeeBps / 10000n;
 }
+function computeDynamicFeeBps(notional, config) {
+  if (config.tier2Threshold === 0n) return config.baseBps;
+  if (config.tier3Threshold > 0n && notional >= config.tier3Threshold) return config.tier3Bps;
+  if (notional >= config.tier2Threshold) return config.tier2Bps;
+  return config.baseBps;
+}
+function computeDynamicTradingFee(notional, config) {
+  const feeBps = computeDynamicFeeBps(notional, config);
+  if (notional <= 0n || feeBps <= 0n) return 0n;
+  return (notional * feeBps + 9999n) / 10000n;
+}
+function computeFeeSplit(totalFee, config) {
+  if (config.lpBps === 0n && config.protocolBps === 0n && config.creatorBps === 0n) {
+    return [totalFee, 0n, 0n];
+  }
+  const lp = totalFee * config.lpBps / 10000n;
+  const protocol = totalFee * config.protocolBps / 10000n;
+  const creator = totalFee - lp - protocol;
+  return [lp, protocol, creator];
+}
 function computePnlPercent(pnlTokens, capital) {
   if (capital === 0n) return 0;
   const scaledPct = pnlTokens * 10000n / capital;
@@ -1975,6 +1995,8 @@ function computeMaxLeverage(initialMarginBps) {
   if (initialMarginBps === 0n) return 1;
   return Number(10000n / initialMarginBps);
 }
+
+// src/math/warmup.ts
 function computeWarmupUnlockedCapital(totalCapital, currentSlot, warmupStartSlot, warmupPeriodSlots) {
   if (warmupPeriodSlots === 0n || warmupStartSlot === 0n) return totalCapital;
   if (totalCapital <= 0n) return 0n;
@@ -2413,8 +2435,11 @@ export {
   buildAccountMetas,
   buildIx,
   computeDexSpotPriceE6,
+  computeDynamicFeeBps,
+  computeDynamicTradingFee,
   computeEmaMarkPrice,
   computeEstimatedEntryPrice,
+  computeFeeSplit,
   computeFundingRateAnnualized,
   computeLiqPrice,
   computeMarkPnl,
