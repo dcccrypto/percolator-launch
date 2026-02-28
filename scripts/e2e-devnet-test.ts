@@ -127,9 +127,12 @@ async function main() {
   );
   await send(mintToTx, [payer], `Minted 1M tokens to ${payerAta.toBase58().slice(0, 12)}...`);
 
-  // 3. Create slab account (small tier — smallest available)
+  // 3. Create slab account
+  // PERC-277: The devnet program FxfD37... is compiled with default features (MAX_ACCOUNTS=4096).
+  // Its hardcoded SLAB_LEN = 1,025,568 bytes. Using any other tier size causes error 0x4
+  // (InvalidSlabLen). Must match the program's compiled MAX_ACCOUNTS.
   console.log("Step 3: Create slab");
-  const tier = SLAB_TIERS.small;
+  const tier = SLAB_TIERS.large;
   const slabKp = Keypair.generate();
   const slabRent = await conn.getMinimumBalanceForRentExemption(tier.dataSize);
   console.log(`   Slab rent: ${slabRent / LAMPORTS_PER_SOL} SOL (${tier.label}, ${tier.dataSize} bytes)`);
@@ -179,7 +182,7 @@ async function main() {
     maintenanceMarginBps: "500",
     initialMarginBps: "1000",
     tradingFeeBps: "30",
-    maxAccounts: tier.maxAccounts.toString(),
+    maxAccounts: tier.maxAccounts.toString(),  // Must match program's compiled MAX_ACCOUNTS
     newAccountFee: "1000000",
     riskReductionThreshold: "0",
     maintenanceFeePerSlot: "0",
@@ -191,7 +194,7 @@ async function main() {
   });
   const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
     payer.publicKey, slabKp.publicKey, mintKp.publicKey, vaultAta,
-    WELL_KNOWN.tokenProgram, WELL_KNOWN.clock, WELL_KNOWN.rent, vaultAta, WELL_KNOWN.systemProgram,
+    WELL_KNOWN.tokenProgram, WELL_KNOWN.clock, WELL_KNOWN.rent, vaultPda, WELL_KNOWN.systemProgram,
   ]);
   const initMarketTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),

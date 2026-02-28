@@ -53,7 +53,7 @@ const DEFAULT_STATE: WizardState = {
   oracleFeed: "",
   dexPool: null,
   pythFeed: null,
-  slabTier: "small",
+  slabTier: "large",  // PERC-277: default to large (4096) — matches deployed devnet program
   tradingFeeBps: 30,
   initialMarginBps: 1000,
   lpCollateral: "",

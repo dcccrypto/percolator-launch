@@ -77,6 +77,18 @@ export function slabDataSize(maxAccounts: number): number {
   return ENGINE_OFF_LOCAL + accountsOff + maxAccounts * ACCOUNT_SIZE;
 }
 
+/**
+ * Validate that a slab data size matches one of the known tier sizes.
+ * Use this to catch tier↔program mismatches early (PERC-277).
+ *
+ * @param dataSize - The expected slab data size (from SLAB_TIERS[tier].dataSize)
+ * @param programSlabLen - The program's compiled SLAB_LEN (from on-chain error logs or program introspection)
+ * @returns true if sizes match, false if there's a mismatch
+ */
+export function validateSlabTierMatch(dataSize: number, programSlabLen: number): boolean {
+  return dataSize === programSlabLen;
+}
+
 /** All known slab data sizes for discovery */
 const ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map(t => t.dataSize);
 

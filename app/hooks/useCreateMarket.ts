@@ -69,7 +69,9 @@ export interface CreateMarketParams {
   invert: boolean;
   tradingFeeBps: number;
   initialMarginBps: number;
-  /** Number of trader slots (64, 256, 1024, 4096). Defaults to 4096 if omitted. */
+  /** Number of trader slots (256, 1024, 4096). Defaults to 4096 if omitted.
+   *  IMPORTANT: Must match the compiled MAX_ACCOUNTS of the target program binary.
+   *  The default devnet program is compiled for 4096 accounts. */
   maxAccounts?: number;
   /** Slab data size in bytes. Calculated from maxAccounts if omitted. */
   slabDataSize?: number;
@@ -137,8 +139,11 @@ export function useCreateMarket() {
 
       // Select program based on slab tier — each MAX_ACCOUNTS variant is a separate deployment
       const cfg = getConfig();
+      // PERC-277: Default to 4096 (large) — the main devnet program binary is compiled for
+      // MAX_ACCOUNTS=4096. Using a smaller tier against a 4096-account program causes
+      // InvalidSlabLen (error 0x4) because the program's hardcoded SLAB_LEN won't match.
       const tierMap: Record<number, string> = { 256: "small", 1024: "medium", 4096: "large" };
-      const tierKey = tierMap[params.maxAccounts ?? 256] ?? "small";
+      const tierKey = tierMap[params.maxAccounts ?? 4096] ?? "large";
       const programsByTier = (cfg as Record<string, unknown>).programsBySlabTier as Record<string, string> | undefined;
       const selectedProgramId = programsByTier?.[tierKey] ?? cfg.programId;
       const programId = new PublicKey(selectedProgramId);
@@ -240,7 +245,7 @@ export function useCreateMarket() {
                 maintenanceMarginBps: (initialMarginBps / 2n).toString(),
                 initialMarginBps: initialMarginBps.toString(),
                 tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
-                maxAccounts: (params.maxAccounts ?? 256).toString(),
+                maxAccounts: (params.maxAccounts ?? 4096).toString(),
                 newAccountFee: "1000000",
                 riskReductionThreshold: "0",
                 maintenanceFeePerSlot: "0",
@@ -305,7 +310,7 @@ export function useCreateMarket() {
               maintenanceMarginBps: (initialMarginBps / 2n).toString(),
               initialMarginBps: initialMarginBps.toString(),
               tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
-              maxAccounts: (params.maxAccounts ?? 256).toString(),
+              maxAccounts: (params.maxAccounts ?? 4096).toString(),
               newAccountFee: "1000000",
               riskReductionThreshold: "0",
               maintenanceFeePerSlot: "0",
