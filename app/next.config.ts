@@ -4,7 +4,9 @@ import { withSentryConfig } from "@sentry/nextjs";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://percolator-api1-production.up.railway.app";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@percolator/sdk"],
+  // @solana/kit must be transpiled: its browser export resolves to an ESM .mjs file
+  // that webpack includes verbatim, causing "Unexpected token 'export'" in production bundles.
+  transpilePackages: ["@percolator/sdk", "@solana/kit"],
   async headers() {
     return [
       {

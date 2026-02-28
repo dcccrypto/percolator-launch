@@ -3,6 +3,7 @@
 import { FC, ReactNode, useMemo } from "react";
 import { PrivyProvider, usePrivy, type WalletListEntry } from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
+import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { SentryUserContext } from "@/components/providers/SentryUserContext";
 import { PrivyLoginContext } from "@/hooks/usePrivySafe";
 
@@ -22,6 +23,33 @@ const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
     []
   );
 
+  // Privy v3 requires explicit Solana RPC config for embedded wallet transactions.
+  // Without this, sendTransaction throws "No RPC configuration found for chain solana:mainnet".
+  // We configure both mainnet and devnet so the embedded wallet works in all environments.
+  const solanaRpcs = useMemo(() => {
+    const mainnetUrl =
+      process.env.NEXT_PUBLIC_HELIUS_RPC_URL ||
+      "https://api.mainnet-beta.solana.com";
+    // Helius HTTPS RPC URL → WSS (replace scheme); falls back to public Solana WSS
+    const mainnetWss = mainnetUrl.startsWith("https://")
+      ? mainnetUrl.replace("https://", "wss://")
+      : "wss://api.mainnet-beta.solana.com";
+    return {
+      "solana:mainnet": {
+        rpc: createSolanaRpc(mainnetUrl),
+        rpcSubscriptions: createSolanaRpcSubscriptions(mainnetWss),
+        blockExplorerUrl: "https://solscan.io",
+      },
+      "solana:devnet": {
+        rpc: createSolanaRpc("https://api.devnet.solana.com"),
+        rpcSubscriptions: createSolanaRpcSubscriptions(
+          "wss://api.devnet.solana.com"
+        ),
+        blockExplorerUrl: "https://explorer.solana.com?cluster=devnet",
+      },
+    } as const;
+  }, []);
+
   return (
     <PrivyProvider
       appId={appId}
@@ -37,6 +65,12 @@ const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
           solana: {
             connectors: solanaConnectors,
           },
+        },
+        // Privy v3: solana.rpcs must be at the top-level config.solana key,
+        // not inside embeddedWallets.solana. Provides RPC for all Solana standard
+        // wallet hooks (useStandardSignAndSendTransaction etc.).
+        solana: {
+          rpcs: solanaRpcs,
         },
         embeddedWallets: {
           solana: {
