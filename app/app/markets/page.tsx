@@ -293,11 +293,19 @@ function MarketsPageInner() {
   }, [effectiveMarkets, debouncedSearch, sortBy, leverageFilter, oracleFilter, tokenMetaMap]);
 
   // P-MED-3: Infinite scroll observer
+  // Use refs to avoid stale closures in the IntersectionObserver callback
+  const filteredLengthRef = useRef(filtered.length);
+  filteredLengthRef.current = filtered.length;
+
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && displayCount < filtered.length) {
-          setDisplayCount((prev) => Math.min(prev + 20, filtered.length));
+        if (entries[0].isIntersecting) {
+          setDisplayCount((prev) => {
+            const total = filteredLengthRef.current;
+            if (prev >= total) return prev; // already showing all
+            return Math.min(prev + 20, total);
+          });
         }
       },
       { threshold: 0.1 }
@@ -313,7 +321,7 @@ function MarketsPageInner() {
         observer.unobserve(currentTarget);
       }
     };
-  }, [displayCount, filtered.length]);
+  }, [filtered.length]); // only re-create when total changes
 
   // Reset display count when filters change
   useEffect(() => {
@@ -683,13 +691,26 @@ function MarketsPageInner() {
                 })}
               </div>
               
-              {/* P-MED-3: Infinite scroll trigger */}
-              {displayCount < filtered.length && (
+              {/* P-MED-3: Infinite scroll trigger / end-of-list */}
+              {displayCount < filtered.length ? (
                 <div ref={observerTarget} className="flex items-center justify-center gap-2 py-4">
                   <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
                   <span className="text-xs text-[var(--text-muted)]">Loading more…</span>
                 </div>
-              )}
+              ) : filtered.length > 20 ? (
+                <div className="flex items-center justify-center gap-3 py-4">
+                  <span className="text-[11px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+                    all {filtered.length} market{filtered.length !== 1 ? "s" : ""} loaded
+                  </span>
+                  <button
+                    onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                    className="text-[11px] text-[var(--accent)]/60 hover:text-[var(--accent)] transition-colors"
+                    aria-label="Scroll to top"
+                  >
+                    ↑ top
+                  </button>
+                </div>
+              ) : null}
             </>
           )}
           </ScrollReveal>
