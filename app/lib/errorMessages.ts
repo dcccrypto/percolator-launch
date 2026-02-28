@@ -37,6 +37,17 @@ const ERROR_CODE_MAP: Record<number, string> = {
   31: "Insurance deposit/withdrawal amount must be > 0.",
   32: "Insurance LP supply mismatch.",
   33: "Market is paused — trading, deposits, and withdrawals are disabled by the admin.",
+  34: "Cannot renounce admin — the market must be resolved first.",
+  35: "Invalid confirmation code for admin renouncement.",
+  36: "Vault seed balance too low — deposit more tokens to the vault before creating the market.",
+  37: "DEX pool has insufficient liquidity for safe oracle bootstrapping.",
+  38: "LP vault already exists for this market.",
+  39: "LP vault not yet created — create it first.",
+  40: "LP vault amount must be greater than zero.",
+  41: "LP vault supply/capital mismatch — please report this error.",
+  42: "LP vault withdrawal exceeds available capital (some is reserved for open interest).",
+  43: "LP vault fee share out of range (must be 0–100%).",
+  44: "No new fees to distribute to LP vault yet.",
 };
 
 /** Legacy Anchor error map (unused but kept for compatibility) */

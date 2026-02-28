@@ -115,7 +115,12 @@ var IX_TAG = {
   SetPythOracle: 32,
   UpdateMarkPrice: 33,
   UpdateHyperpMark: 34,
-  TradeCpiV2: 35
+  TradeCpiV2: 35,
+  UnresolveMarket: 36,
+  CreateLpVault: 37,
+  LpVaultDeposit: 38,
+  LpVaultWithdraw: 39,
+  LpVaultCrankFees: 40
 };
 function encodeFeedId(feedId) {
   const hex = feedId.startsWith("0x") ? feedId.slice(2) : feedId;
@@ -520,6 +525,10 @@ var ACCOUNTS_SET_ORACLE_AUTHORITY = [
   { name: "admin", signer: true, writable: true },
   { name: "slab", signer: false, writable: true }
 ];
+var ACCOUNTS_SET_ORACLE_PRICE_CAP = [
+  { name: "admin", signer: true, writable: true },
+  { name: "slab", signer: false, writable: true }
+];
 var ACCOUNTS_PUSH_ORACLE_PRICE = [
   { name: "authority", signer: true, writable: true },
   { name: "slab", signer: false, writable: true }
@@ -731,6 +740,50 @@ var PERCOLATOR_ERRORS = {
   33: {
     name: "MarketPaused",
     hint: "This market is currently paused by the admin. Trading, deposits, and withdrawals are disabled."
+  },
+  34: {
+    name: "AdminRenounceNotAllowed",
+    hint: "Cannot renounce admin \u2014 the market must be RESOLVED first before renouncing admin control."
+  },
+  35: {
+    name: "InvalidConfirmation",
+    hint: "Invalid confirmation code for RenounceAdmin. This is a safety check \u2014 please verify the code."
+  },
+  36: {
+    name: "InsufficientSeed",
+    hint: "Vault seed balance is below the required minimum (500,000,000 raw tokens). Deposit more tokens to the vault before InitMarket."
+  },
+  37: {
+    name: "InsufficientDexLiquidity",
+    hint: "DEX pool has insufficient liquidity for safe Hyperp oracle bootstrapping. The quote-side reserves must meet the minimum threshold."
+  },
+  38: {
+    name: "LpVaultAlreadyExists",
+    hint: "LP vault already created for this market. Each market can only have one LP vault."
+  },
+  39: {
+    name: "LpVaultNotCreated",
+    hint: "LP vault not yet created. Call CreateLpVault first before depositing or withdrawing."
+  },
+  40: {
+    name: "LpVaultZeroAmount",
+    hint: "LP vault deposit or withdrawal amount must be greater than zero."
+  },
+  41: {
+    name: "LpVaultSupplyMismatch",
+    hint: "LP vault supply/capital mismatch \u2014 LP share supply > 0 but vault capital is 0. This is an internal error \u2014 please report it."
+  },
+  42: {
+    name: "LpVaultWithdrawExceedsAvailable",
+    hint: "LP vault withdrawal exceeds available capital. Some capital is reserved for open interest coverage."
+  },
+  43: {
+    name: "LpVaultInvalidFeeShare",
+    hint: "LP vault fee share basis points out of range. Must be 0\u201310,000 (0%\u2013100%)."
+  },
+  44: {
+    name: "LpVaultNoNewFees",
+    hint: "No new fees to distribute to LP vault. Wait for more trading activity to accrue fees."
   }
 };
 function decodeError(code) {
@@ -2326,6 +2379,7 @@ export {
   ACCOUNTS_RESOLVE_MARKET,
   ACCOUNTS_SET_MAINTENANCE_FEE,
   ACCOUNTS_SET_ORACLE_AUTHORITY,
+  ACCOUNTS_SET_ORACLE_PRICE_CAP,
   ACCOUNTS_SET_RISK_THRESHOLD,
   ACCOUNTS_TOPUP_INSURANCE,
   ACCOUNTS_TRADE_CPI,

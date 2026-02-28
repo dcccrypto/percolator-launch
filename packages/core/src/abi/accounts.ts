@@ -203,6 +203,15 @@ export const ACCOUNTS_SET_ORACLE_AUTHORITY: readonly AccountSpec[] = [
 ] as const;
 
 /**
+ * SetOraclePriceCap: 2 accounts
+ * Set oracle price circuit breaker cap (admin only)
+ */
+export const ACCOUNTS_SET_ORACLE_PRICE_CAP: readonly AccountSpec[] = [
+  { name: "admin", signer: true, writable: true },
+  { name: "slab", signer: false, writable: true },
+] as const;
+
+/**
  * PushOraclePrice: 2 accounts
  * Push oracle price (oracle authority only)
  */

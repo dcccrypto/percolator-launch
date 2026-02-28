@@ -75,10 +75,21 @@ export function useWithdraw(slabAddress: string) {
             }
           } catch { /* use existing */ }
           if (priceE6 <= 0n) priceE6 = 1_000_000n;
+          // Use on-chain slot time instead of client Date.now() to avoid clock drift
+          // between client and validator causing signature verification failures
+          let oracleTimestamp: bigint;
+          try {
+            const slot = await connection.getSlot("confirmed");
+            const blockTime = await connection.getBlockTime(slot);
+            oracleTimestamp = BigInt(blockTime ?? Math.floor(Date.now() / 1000));
+          } catch {
+            oracleTimestamp = BigInt(Math.floor(Date.now() / 1000));
+          }
+
           instructions.push(buildIx({
             programId,
             keys: buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [wallet.publicKey, slabPk]),
-            data: encodePushOraclePrice({ priceE6, timestamp: BigInt(Math.floor(Date.now() / 1000)) }),
+            data: encodePushOraclePrice({ priceE6, timestamp: oracleTimestamp }),
           }));
         }
 

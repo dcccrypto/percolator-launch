@@ -14,7 +14,7 @@ import {
 } from "@solana/spl-token";
 import {
   encodeInitLP,
-  encodeTradeCpi,
+  encodeTradeCpiV2,
   encodeKeeperCrank,
   ACCOUNTS_INIT_LP,
   ACCOUNTS_TRADE_CPI,
@@ -232,7 +232,9 @@ export function useVAMM(slabAddress: string) {
         });
         instructions.push(crankIx);
 
-        // TradeCpi instruction (PERC-199: clock sysvar removed — uses Clock::get() syscall)
+        // TradeCpiV2 — uses caller-provided PDA bump to save ~1500 CU (PERC-154)
+        // PERC-199: clock sysvar removed — uses Clock::get() syscall
+        const [, lpBump] = deriveLpPda(programId, slabPk, params.lpIdx);
         const tradeIx = buildIx({
           programId,
           keys: buildAccountMetas(ACCOUNTS_TRADE_CPI, [
@@ -244,10 +246,11 @@ export function useVAMM(slabAddress: string) {
             lpAccount.account.matcherContext,
             lpPda,
           ]),
-          data: encodeTradeCpi({
+          data: encodeTradeCpiV2({
             lpIdx: params.lpIdx,
             userIdx: params.userIdx,
             size: params.size.toString(),
+            bump: lpBump,
           }),
         });
         instructions.push(tradeIx);

@@ -144,6 +144,50 @@ export const PERCOLATOR_ERRORS: Record<number, ErrorInfo> = {
     name: "MarketPaused",
     hint: "This market is currently paused by the admin. Trading, deposits, and withdrawals are disabled.",
   },
+  34: {
+    name: "AdminRenounceNotAllowed",
+    hint: "Cannot renounce admin — the market must be RESOLVED first before renouncing admin control.",
+  },
+  35: {
+    name: "InvalidConfirmation",
+    hint: "Invalid confirmation code for RenounceAdmin. This is a safety check — please verify the code.",
+  },
+  36: {
+    name: "InsufficientSeed",
+    hint: "Vault seed balance is below the required minimum (500,000,000 raw tokens). Deposit more tokens to the vault before InitMarket.",
+  },
+  37: {
+    name: "InsufficientDexLiquidity",
+    hint: "DEX pool has insufficient liquidity for safe Hyperp oracle bootstrapping. The quote-side reserves must meet the minimum threshold.",
+  },
+  38: {
+    name: "LpVaultAlreadyExists",
+    hint: "LP vault already created for this market. Each market can only have one LP vault.",
+  },
+  39: {
+    name: "LpVaultNotCreated",
+    hint: "LP vault not yet created. Call CreateLpVault first before depositing or withdrawing.",
+  },
+  40: {
+    name: "LpVaultZeroAmount",
+    hint: "LP vault deposit or withdrawal amount must be greater than zero.",
+  },
+  41: {
+    name: "LpVaultSupplyMismatch",
+    hint: "LP vault supply/capital mismatch — LP share supply > 0 but vault capital is 0. This is an internal error — please report it.",
+  },
+  42: {
+    name: "LpVaultWithdrawExceedsAvailable",
+    hint: "LP vault withdrawal exceeds available capital. Some capital is reserved for open interest coverage.",
+  },
+  43: {
+    name: "LpVaultInvalidFeeShare",
+    hint: "LP vault fee share basis points out of range. Must be 0–10,000 (0%–100%).",
+  },
+  44: {
+    name: "LpVaultNoNewFees",
+    hint: "No new fees to distribute to LP vault. Wait for more trading activity to accrue fees.",
+  },
 };
 
 /**

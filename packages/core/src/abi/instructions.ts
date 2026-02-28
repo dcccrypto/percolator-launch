@@ -51,6 +51,11 @@ export const IX_TAG = {
   UpdateMarkPrice: 33,
   UpdateHyperpMark: 34,
   TradeCpiV2: 35,
+  UnresolveMarket: 36,
+  CreateLpVault: 37,
+  LpVaultDeposit: 38,
+  LpVaultWithdraw: 39,
+  LpVaultCrankFees: 40,
 } as const;
 
 /**

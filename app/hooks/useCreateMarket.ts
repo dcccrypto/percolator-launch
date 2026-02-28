@@ -33,6 +33,7 @@ import {
   ACCOUNTS_TOPUP_INSURANCE,
   ACCOUNTS_KEEPER_CRANK,
   ACCOUNTS_SET_ORACLE_AUTHORITY,
+  ACCOUNTS_SET_ORACLE_PRICE_CAP,
   ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_UPDATE_CONFIG,
   buildAccountMetas,
@@ -379,7 +380,7 @@ export function useCreateMarket() {
 
             // 3. SetOraclePriceCap — circuit breaker (10_000 = 1% max change per update)
             const priceCapData = encodeSetOraclePriceCap({ maxChangeE2bps: BigInt(10_000) });
-            const priceCapKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_AUTHORITY, [
+            const priceCapKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_PRICE_CAP, [
               wallet.publicKey, slabPk,
             ]);
             instructions.push(buildIx({ programId, keys: priceCapKeys, data: priceCapData }));
