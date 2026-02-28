@@ -27,24 +27,32 @@ const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
   // Without this, sendTransaction throws "No RPC configuration found for chain solana:mainnet".
   // We configure both mainnet and devnet so the embedded wallet works in all environments.
   const solanaRpcs = useMemo(() => {
+    // Priority: explicit RPC URL → build from API key → public fallback (403s on mainnet).
+    // NEXT_PUBLIC_HELIUS_API_KEY is already required by the rest of the app, so this
+    // resolves correctly in production without needing a separate NEXT_PUBLIC_HELIUS_RPC_URL.
+    const heliusKey = process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? "";
     const mainnetUrl =
       process.env.NEXT_PUBLIC_HELIUS_RPC_URL ||
-      "https://api.mainnet-beta.solana.com";
-    // Helius HTTPS RPC URL → WSS (replace scheme); falls back to public Solana WSS
-    const mainnetWss = mainnetUrl.startsWith("https://")
-      ? mainnetUrl.replace("https://", "wss://")
-      : "wss://api.mainnet-beta.solana.com";
+      (heliusKey
+        ? `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`
+        : "https://api.mainnet-beta.solana.com"); // last resort — rate-limited
+    const devnetUrl =
+      heliusKey
+        ? `https://devnet.helius-rpc.com/?api-key=${heliusKey}`
+        : "https://api.devnet.solana.com";
+
+    // Derive WSS from HTTPS URL by replacing scheme
+    const toWss = (url: string) => url.replace(/^https:\/\//, "wss://");
+
     return {
       "solana:mainnet": {
         rpc: createSolanaRpc(mainnetUrl),
-        rpcSubscriptions: createSolanaRpcSubscriptions(mainnetWss),
+        rpcSubscriptions: createSolanaRpcSubscriptions(toWss(mainnetUrl)),
         blockExplorerUrl: "https://solscan.io",
       },
       "solana:devnet": {
-        rpc: createSolanaRpc("https://api.devnet.solana.com"),
-        rpcSubscriptions: createSolanaRpcSubscriptions(
-          "wss://api.devnet.solana.com"
-        ),
+        rpc: createSolanaRpc(devnetUrl),
+        rpcSubscriptions: createSolanaRpcSubscriptions(toWss(devnetUrl)),
         blockExplorerUrl: "https://explorer.solana.com?cluster=devnet",
       },
     } as const;
