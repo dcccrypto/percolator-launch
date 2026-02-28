@@ -292,18 +292,36 @@ function MarketsPageInner() {
     return list;
   }, [effectiveMarkets, debouncedSearch, sortBy, leverageFilter, oracleFilter, tokenMetaMap]);
 
-  // P-MED-3: Infinite scroll observer
-  // Use refs to avoid stale closures in the IntersectionObserver callback
+  // P-MED-3: Progressive reveal + intersection observer backup
+  // Auto-load items in batches via requestAnimationFrame for instant display.
+  // The IntersectionObserver is kept as a secondary trigger for user-initiated scroll.
   const filteredLengthRef = useRef(filtered.length);
   filteredLengthRef.current = filtered.length;
 
+  // Primary: progressive auto-reveal (loads all items within ~200ms)
+  useEffect(() => {
+    if (discoveryLoading || statsLoading) return; // wait for data
+    if (displayCount >= filtered.length) return; // all shown
+
+    const handle = requestAnimationFrame(() => {
+      setDisplayCount((prev) => {
+        const total = filteredLengthRef.current;
+        if (prev >= total) return prev;
+        return Math.min(prev + 20, total);
+      });
+    });
+
+    return () => cancelAnimationFrame(handle);
+  }, [displayCount, filtered.length, discoveryLoading, statsLoading]);
+
+  // Secondary: IntersectionObserver for scroll-triggered loading (backup)
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
           setDisplayCount((prev) => {
             const total = filteredLengthRef.current;
-            if (prev >= total) return prev; // already showing all
+            if (prev >= total) return prev;
             return Math.min(prev + 20, total);
           });
         }
@@ -321,7 +339,7 @@ function MarketsPageInner() {
         observer.unobserve(currentTarget);
       }
     };
-  }, [filtered.length]); // only re-create when total changes
+  }, [filtered.length]);
 
   // Reset display count when filters change
   useEffect(() => {
