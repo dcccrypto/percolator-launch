@@ -51,7 +51,15 @@ export const MarketStatsCard: FC = () => {
     : formatTokenAmount(vault, decimals);
 
   const stats = [
-    { label: `${symbol} Price`, value: formatUsd(livePriceE6 ?? config.lastEffectivePriceE6) },
+    { label: `${symbol} Price`, value: (() => {
+      const raw = livePriceE6 ?? config.lastEffectivePriceE6;
+      if (raw == null || raw === 0n) return "—";
+      // Guard against uninitialized on-chain values (e.g. hyperp markets with no trades)
+      // A price > $1M per token is almost certainly a raw integer / scaling bug
+      const usd = Number(raw) / 1_000_000;
+      if (usd > 1_000_000 || usd < 0) return "—";
+      return formatUsd(raw);
+    })() },
     { label: "Open Interest", value: oiDisplay },
     { label: "Vault", value: vaultDisplay },
     { label: "Trading Fee", value: formatBps(params.tradingFeeBps) },

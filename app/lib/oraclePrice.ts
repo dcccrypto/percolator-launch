@@ -55,11 +55,16 @@ export function resolveMarketPriceE6(cfg: {
       // authorityPriceE6 may be stale/garbage — never use it
       return cfg.lastEffectivePriceE6;
 
-    case "hyperp":
+    case "hyperp": {
       // Hyperp (DEX oracle): lastEffectivePriceE6 is the index price from on-chain crank
       // authorityPriceE6 is the mark price — use index price for display
       // Note: authorityTimestamp stores funding rate, NOT a real timestamp
+      // Guard: uninitialized hyperp markets may have garbage values in price fields
+      // A valid e6 price should be < 1e15 (~$1B); anything above is bogus data
+      const MAX_SANE_E6 = 1_000_000_000_000_000n; // $1B in e6
+      if (cfg.lastEffectivePriceE6 > MAX_SANE_E6) return 0n;
       return cfg.lastEffectivePriceE6;
+    }
 
     case "admin":
       // Admin oracle: authorityPriceE6 is the latest pushed price

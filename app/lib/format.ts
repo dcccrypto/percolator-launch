@@ -39,6 +39,8 @@ export const LIQ_PRICE_UNLIQUIDATABLE = 18446744073709551615n; // max u64
 export function formatUsd(priceE6: bigint | null | undefined): string {
   if (priceE6 == null) return "$0.00";
   const val = Number(priceE6) / 1_000_000;
+  // Guard against uninitialized on-chain values that produce absurd USD prices
+  if (val > 1_000_000_000 || val < -1_000_000_000) return "—";
   return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
 }
 
