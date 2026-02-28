@@ -86,6 +86,89 @@ export function computeTradingFee(
 }
 
 /**
+ * Dynamic fee tier configuration.
+ */
+export interface FeeTierConfig {
+  /** Base trading fee (Tier 1) in bps */
+  baseBps: bigint;
+  /** Tier 2 fee in bps (0 = disabled) */
+  tier2Bps: bigint;
+  /** Tier 3 fee in bps (0 = disabled) */
+  tier3Bps: bigint;
+  /** Notional threshold to enter Tier 2 (0 = tiered fees disabled) */
+  tier2Threshold: bigint;
+  /** Notional threshold to enter Tier 3 */
+  tier3Threshold: bigint;
+}
+
+/**
+ * Compute the effective fee rate in bps using the tiered fee schedule.
+ *
+ * Mirrors on-chain `compute_dynamic_fee_bps` logic:
+ * - notional < tier2Threshold → baseBps (Tier 1)
+ * - notional < tier3Threshold → tier2Bps (Tier 2)
+ * - notional >= tier3Threshold → tier3Bps (Tier 3)
+ *
+ * If tier2Threshold == 0, tiered fees are disabled (flat baseBps).
+ */
+export function computeDynamicFeeBps(
+  notional: bigint,
+  config: FeeTierConfig,
+): bigint {
+  if (config.tier2Threshold === 0n) return config.baseBps;
+  if (config.tier3Threshold > 0n && notional >= config.tier3Threshold) return config.tier3Bps;
+  if (notional >= config.tier2Threshold) return config.tier2Bps;
+  return config.baseBps;
+}
+
+/**
+ * Compute the dynamic trading fee for a given notional and tier config.
+ *
+ * Uses ceiling division to match on-chain behavior (prevents fee evasion
+ * via micro-trades).
+ */
+export function computeDynamicTradingFee(
+  notional: bigint,
+  config: FeeTierConfig,
+): bigint {
+  const feeBps = computeDynamicFeeBps(notional, config);
+  if (notional <= 0n || feeBps <= 0n) return 0n;
+  return (notional * feeBps + 9999n) / 10000n;
+}
+
+/**
+ * Fee split configuration.
+ */
+export interface FeeSplitConfig {
+  /** LP vault share in bps (0–10_000) */
+  lpBps: bigint;
+  /** Protocol treasury share in bps */
+  protocolBps: bigint;
+  /** Market creator share in bps */
+  creatorBps: bigint;
+}
+
+/**
+ * Compute fee split for a total fee amount.
+ *
+ * Returns [lpShare, protocolShare, creatorShare].
+ * If all split params are 0, 100% goes to LP (legacy behavior).
+ * Creator gets the rounding remainder to ensure total is preserved.
+ */
+export function computeFeeSplit(
+  totalFee: bigint,
+  config: FeeSplitConfig,
+): [bigint, bigint, bigint] {
+  if (config.lpBps === 0n && config.protocolBps === 0n && config.creatorBps === 0n) {
+    return [totalFee, 0n, 0n];
+  }
+  const lp = (totalFee * config.lpBps) / 10000n;
+  const protocol = (totalFee * config.protocolBps) / 10000n;
+  const creator = totalFee - lp - protocol;
+  return [lp, protocol, creator];
+}
+
+/**
  * Compute PnL as a percentage of capital.
  *
  * Uses BigInt scaling to avoid precision loss from Number(bigint) conversion.
@@ -143,118 +226,4 @@ export function computeRequiredMargin(
 export function computeMaxLeverage(initialMarginBps: bigint): number {
   if (initialMarginBps === 0n) return 1;
   return Number(10000n / initialMarginBps);
-}
-
-// =============================================================================
-// Warmup leverage cap utilities
-// =============================================================================
-
-/**
- * Compute unlocked capital during the warmup period.
- *
- * Capital is released linearly over `warmupPeriodSlots` slots starting from
- * `warmupStartedAtSlot`. Before warmup starts (startSlot === 0) or if the
- * warmup period is 0, all capital is considered unlocked.
- *
- * @param totalCapital    - Total deposited capital (native units).
- * @param currentSlot     - The current on-chain slot.
- * @param warmupStartSlot - Slot at which warmup started (0 = not started).
- * @param warmupPeriodSlots - Total slots in the warmup period.
- * @returns The amount of capital currently unlocked.
- */
-export function computeWarmupUnlockedCapital(
-  totalCapital: bigint,
-  currentSlot: bigint,
-  warmupStartSlot: bigint,
-  warmupPeriodSlots: bigint,
-): bigint {
-  // No warmup configured or not started → all capital available
-  if (warmupPeriodSlots === 0n || warmupStartSlot === 0n) return totalCapital;
-  if (totalCapital <= 0n) return 0n;
-
-  const elapsed = currentSlot > warmupStartSlot
-    ? currentSlot - warmupStartSlot
-    : 0n;
-
-  // Warmup complete
-  if (elapsed >= warmupPeriodSlots) return totalCapital;
-
-  // Linear unlock: totalCapital * elapsed / warmupPeriodSlots
-  return (totalCapital * elapsed) / warmupPeriodSlots;
-}
-
-/**
- * Compute the effective maximum leverage during the warmup period.
- *
- * During warmup, only unlocked capital can be used as margin. The effective
- * leverage relative to *total* capital is therefore capped at:
- *
- *   effectiveMaxLeverage = maxLeverage × (unlockedCapital / totalCapital)
- *
- * This returns a floored integer value (leverage is always a whole number
- * in the UI), with a minimum of 1x if any capital is unlocked.
- *
- * @param initialMarginBps   - Initial margin requirement in basis points.
- * @param totalCapital       - Total deposited capital (native units).
- * @param currentSlot        - The current on-chain slot.
- * @param warmupStartSlot    - Slot at which warmup started (0 = not started).
- * @param warmupPeriodSlots  - Total slots in the warmup period.
- * @returns The effective maximum leverage (integer, ≥ 1).
- */
-export function computeWarmupLeverageCap(
-  initialMarginBps: bigint,
-  totalCapital: bigint,
-  currentSlot: bigint,
-  warmupStartSlot: bigint,
-  warmupPeriodSlots: bigint,
-): number {
-  const maxLev = computeMaxLeverage(initialMarginBps);
-
-  // No warmup or warmup not started → full leverage
-  if (warmupPeriodSlots === 0n || warmupStartSlot === 0n) return maxLev;
-  if (totalCapital <= 0n) return 1;
-
-  const unlocked = computeWarmupUnlockedCapital(
-    totalCapital,
-    currentSlot,
-    warmupStartSlot,
-    warmupPeriodSlots,
-  );
-
-  if (unlocked <= 0n) return 1; // At least 1x if nothing unlocked yet (slot 0 edge)
-
-  // Effective leverage = maxLev * (unlocked / total), floored, min 1
-  const effectiveLev = Number((BigInt(maxLev) * unlocked) / totalCapital);
-  return Math.max(1, effectiveLev);
-}
-
-/**
- * Compute the maximum position size allowed during warmup.
- *
- * This is the unlocked capital multiplied by the base max leverage.
- * Unlike `computeWarmupLeverageCap` (which gives effective leverage
- * relative to total capital), this gives the absolute notional cap.
- *
- * @param initialMarginBps   - Initial margin requirement in basis points.
- * @param totalCapital       - Total deposited capital (native units).
- * @param currentSlot        - The current on-chain slot.
- * @param warmupStartSlot    - Slot at which warmup started (0 = not started).
- * @param warmupPeriodSlots  - Total slots in the warmup period.
- * @returns Maximum position size in native units.
- */
-export function computeWarmupMaxPositionSize(
-  initialMarginBps: bigint,
-  totalCapital: bigint,
-  currentSlot: bigint,
-  warmupStartSlot: bigint,
-  warmupPeriodSlots: bigint,
-): bigint {
-  const maxLev = computeMaxLeverage(initialMarginBps);
-  const unlocked = computeWarmupUnlockedCapital(
-    totalCapital,
-    currentSlot,
-    warmupStartSlot,
-    warmupPeriodSlots,
-  );
-  return unlocked * BigInt(maxLev);
 }
