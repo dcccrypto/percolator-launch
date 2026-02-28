@@ -37,9 +37,10 @@ const CONFIG_OFFSET = HEADER_LEN;  // MarketConfig starts right after header
 //               thresh_floor(16) + thresh_risk_bps(8) + thresh_update_interval_slots(8) +
 //               thresh_step_bps(8) + thresh_alpha_bps(8) + thresh_min(16) + thresh_max(16) + thresh_min_step(16) +
 //               oracle_authority(32) + authority_price_e6(8) + authority_timestamp(8) +
-//               oracle_price_cap_e2bps(8) + last_effective_price_e6(8)
-//             = 352 bytes
-const CONFIG_LEN = 352;
+//               oracle_price_cap_e2bps(8) + last_effective_price_e6(8) +
+//               oi_cap_multiplier_bps(8) + max_pnl_cap(8)
+//             = 368 bytes
+const CONFIG_LEN = 368;
 // Offset of _reserved field within SlabHeader (magic+version+bump+_padding+admin+pending_admin = 80)
 const RESERVED_OFF = 80;
 
@@ -294,15 +295,16 @@ export function readLastThrUpdateSlot(data: Uint8Array): bigint {
 }
 
 // =============================================================================
-// RiskEngine Layout Constants (updated for PERC-120/121/122 struct changes 2026-02)
-// ENGINE_OFF = align_up(HEADER_LEN + CONFIG_LEN, 8) = align_up(104 + 352, 8) = 456
+// RiskEngine Layout Constants (updated for PERC-289: CONFIG_LEN 352→368)
+// ENGINE_OFF = align_up(HEADER_LEN + CONFIG_LEN, 8) = align_up(104 + 368, 8) = 472
 //
 // RiskParams grew from 144 → 288 bytes (added: premium funding, partial liq, dynamic fees).
 // Account grew from 240 → 248 bytes (added: last_partial_liquidation_slot).
 // SlabHeader grew from 72 → 104 bytes (added: pending_admin).
-// MarketConfig grew from 320 → 352 bytes (added: premium funding config fields).
+// MarketConfig grew from 320 → 368 bytes (added: premium funding, oracle authority,
+//   circuit breaker, OI cap fields).
 // =============================================================================
-const ENGINE_OFF = 456;
+const ENGINE_OFF = 472;
 // RiskEngine struct layout (repr(C), SBF uses 8-byte alignment for u128):
 // - vault: U128 (16 bytes) at offset 0
 // - insurance_fund: InsuranceFund { balance: U128, fee_revenue: U128 } (32 bytes) at offset 16
