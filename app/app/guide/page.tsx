@@ -107,7 +107,7 @@ export default function GuidePage() {
                 ["Tokens", "Test tokens from faucet", "Real SPL tokens with DEX pools"],
                 ["SOL", "Free from faucet", "Real SOL"],
                 ["Risk", "Play money — test freely", "Real money at risk"],
-                ["Markets", "Anyone can create (free)", "Anyone can create (~$65+ rent cost)"],
+                ["Markets", "Anyone can create (free)", "Anyone can create (~7 SOL rent deposit)"],
               ].map(([aspect, devnet, mainnet]) => (
                 <tr key={aspect} className="transition-colors hover:bg-[var(--bg-elevated)]">
                   <td className={`${cellClass} font-medium text-white`}>{aspect}</td>
@@ -196,6 +196,12 @@ export default function GuidePage() {
 
       {/* Market Tiers */}
       <Section id="capacity" tag="capacity" title="Market Tiers">
+        <div className="border border-[var(--warning)]/30 bg-[var(--warning)]/[0.06] px-4 py-3 text-[12px] text-[var(--warning)] leading-relaxed flex items-start gap-2">
+          <span className="mt-0.5 flex-shrink-0">⚠</span>
+          <span>
+            <strong>Currently only the Large tier is available</strong> for market creation on both devnet and mainnet. Small and Medium tiers are planned for a future release.
+          </span>
+        </div>
         <div className={`${cardClass} overflow-x-auto`}>
           <table className="w-full text-left">
             <thead>
@@ -203,18 +209,30 @@ export default function GuidePage() {
                 <th className={thClass}>Tier</th>
                 <th className={thClass}>Trader Slots</th>
                 <th className={thClass}>Approx. Cost</th>
+                <th className={thClass}>Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {[
-                ["Small", "256", "~$65 (~0.44 SOL)"],
-                ["Medium", "1,024", "~$260 (~1.8 SOL)"],
-                ["Large", "4,096", "~$1,000 (~7 SOL)"],
-              ].map(([tier, slots, cost]) => (
-                <tr key={tier} className="transition-colors hover:bg-[var(--bg-elevated)]">
+                ["Small", "256", "~$65 (~0.44 SOL)", "coming-soon"],
+                ["Medium", "1,024", "~$260 (~1.8 SOL)", "coming-soon"],
+                ["Large", "4,096", "~$1,000 (~7 SOL)", "available"],
+              ].map(([tier, slots, cost, status]) => (
+                <tr key={tier} className={`transition-colors hover:bg-[var(--bg-elevated)] ${status === "coming-soon" ? "opacity-50" : ""}`}>
                   <td className={`${cellClass} font-medium text-white`}>{tier}</td>
                   <td className={`${cellClass} text-[var(--text-secondary)]`}>{slots}</td>
                   <td className={`${cellClass} text-[var(--text-secondary)]`}>{cost}</td>
+                  <td className={cellClass}>
+                    {status === "available" ? (
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--accent)] border border-[var(--accent)]/30 bg-[var(--accent)]/[0.08]">
+                        Available
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)] border border-[var(--border)]">
+                        Coming Soon
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -230,7 +248,7 @@ export default function GuidePage() {
         <div className="border border-[var(--border)] divide-y divide-[var(--border)]">
           {[
             { step: "01", title: "Connect Phantom", desc: "Open Phantom wallet settings and switch network to Devnet." },
-            { step: "02", title: "Get Test SOL", desc: "Use the Solana faucet or run 'solana airdrop 2' in your terminal to get free devnet SOL." },
+            { step: "02", title: "Get Test SOL", desc: "Go to /devnet-mint and use the built-in faucet to get free devnet SOL. The public Solana faucet is heavily rate-limited and may not work." },
             { step: "03", title: "Create a Test Token", desc: "Go to /devnet-mint to create a test SPL token with configurable supply and decimals." },
             { step: "04", title: "Launch a Market", desc: "Go to /create, paste your token mint, and use Quick Launch. With no DEX pool, it defaults to admin oracle mode." },
             { step: "05", title: "Push Oracle Prices", desc: "Go to /my-markets. Click 'push price' on your market to set the oracle price manually." },
