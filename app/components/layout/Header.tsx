@@ -18,6 +18,7 @@ const ConnectButton = dynamic(
 const tradeLinks: NavItem[] = [
   { href: "/markets", label: "Markets" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/earn", label: "Earn" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/wallet", label: "Wallet" },
 ];
