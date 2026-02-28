@@ -7,6 +7,7 @@ import { usePrivy, type LinkedAccountWithMetadata } from "@privy-io/react-auth";
 import { useFundWallet, useWallets } from "@privy-io/react-auth/solana";
 import { getConfig } from "@/lib/config";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
+import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { buildSolflareBrowseUrl } from "@/lib/solflare";
 
 /**
@@ -39,15 +40,14 @@ const ConnectButtonInner: FC = () => {
   const { ready, authenticated, login, logout, exportWallet, user } = usePrivy();
   const { wallets } = useWallets();
   const { fundWallet } = useFundWallet();
+  const { preferredAddress } = usePreferredWallet();
   const searchParams = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const activeWallet = useMemo(() => {
-    if (!wallets.length) return null;
-    // Prefer external wallets over Privy embedded
-    return wallets.find((w) => !w.standardWallet?.name?.toLowerCase().includes("privy")) || wallets[0];
-  }, [wallets]);
+    return resolveActiveWallet(wallets, preferredAddress);
+  }, [wallets, preferredAddress]);
 
   const displayAddress = useMemo(() => {
     if (!activeWallet) return "";

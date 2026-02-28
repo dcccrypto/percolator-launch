@@ -3,6 +3,10 @@
 import { Component, FC, ReactNode, useMemo, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { PrivyAvailableContext, PrivyLoginContext } from "@/hooks/usePrivySafe";
+import {
+  PreferredWalletContext,
+  usePreferredWalletState,
+} from "@/hooks/usePreferredWallet";
 
 /**
  * Error boundary that catches PrivyProvider crashes and renders children
@@ -49,10 +53,13 @@ const PrivyProviderClient = dynamic(
 
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  const preferredWallet = usePreferredWalletState();
 
   const readOnlyFallback = (
     <PrivyAvailableContext.Provider value={false}>
-      {children}
+      <PreferredWalletContext.Provider value={preferredWallet}>
+        {children}
+      </PreferredWalletContext.Provider>
     </PrivyAvailableContext.Provider>
   );
 
@@ -65,9 +72,11 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   return (
     <PrivyErrorBoundary fallback={readOnlyFallback}>
       <PrivyAvailableContext.Provider value={true}>
-        <PrivyProviderClient appId={appId}>
-          {children}
-        </PrivyProviderClient>
+        <PreferredWalletContext.Provider value={preferredWallet}>
+          <PrivyProviderClient appId={appId}>
+            {children}
+          </PrivyProviderClient>
+        </PreferredWalletContext.Provider>
       </PrivyAvailableContext.Provider>
     </PrivyErrorBoundary>
   );

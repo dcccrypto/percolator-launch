@@ -10,6 +10,10 @@ import { GlowButton } from "@/components/ui/GlowButton";
 import { CopyableAddress } from "@/components/ui/CopyableAddress";
 import { InfoBanner } from "@/components/ui/InfoBanner";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
+import {
+  usePreferredWallet,
+  resolveActiveWallet,
+} from "@/hooks/usePreferredWallet";
 import { getConfig } from "@/lib/config";
 import { ConnectButton } from "@/components/wallet/ConnectButton";
 import { WalletDebugPanel } from "@/components/wallet/WalletDebugPanel";
@@ -51,13 +55,13 @@ function WalletPageInner() {
   const { ready, authenticated, login, logout, connectWallet, exportWallet, user } = usePrivy();
   const { wallets } = useWallets();
   const { fundWallet } = useFundWallet();
+  const { preferredAddress, setPreferredAddress } = usePreferredWallet();
 
   const network = useMemo(() => getConfig().network, []);
 
   const activeWallet = useMemo(() => {
-    if (!wallets.length) return null;
-    return wallets.find((w) => !w.standardWallet?.name?.toLowerCase().includes("privy")) || wallets[0];
-  }, [wallets]);
+    return resolveActiveWallet(wallets, preferredAddress);
+  }, [wallets, preferredAddress]);
 
   const embeddedWallet = useMemo(() => {
     return user?.linkedAccounts?.find(isEmbeddedSolanaWallet);
@@ -172,19 +176,35 @@ function WalletPageInner() {
           </GlassCard>
 
           <GlassCard className="lg:col-span-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
-              Linked Wallets
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                Linked Wallets
+              </p>
+              {wallets.length > 1 && (
+                <p className="text-[10px] text-[var(--text-muted)]">
+                  Click a wallet to set it as active
+                </p>
+              )}
+            </div>
             {wallets.length === 0 ? (
               <p className="mt-4 text-[13px] text-[var(--text-secondary)]">No linked wallets yet.</p>
             ) : (
               <div className="mt-4 grid gap-2 md:grid-cols-2">
                 {wallets.map((wallet) => {
                   const isEmbedded = embeddedWallet?.address === wallet.address;
+                  const isActive = activeWallet?.address === wallet.address;
                   return (
-                    <div
+                    <button
                       key={wallet.address}
-                      className="flex items-center justify-between rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-3"
+                      type="button"
+                      onClick={() => setPreferredAddress(wallet.address)}
+                      className={[
+                        "flex items-center justify-between rounded-sm border px-4 py-3 text-left transition-all duration-200",
+                        isActive
+                          ? "border-[var(--accent)] bg-[var(--accent)]/[0.08] ring-1 ring-[var(--accent)]/30"
+                          : "border-[var(--border)] bg-[var(--bg-elevated)] hover:border-[var(--accent)]/40 hover:bg-[var(--accent)]/[0.03]",
+                        wallets.length > 1 ? "cursor-pointer" : "",
+                      ].join(" ")}
                     >
                       <div>
                         <p className="text-[12px] font-medium text-white">
@@ -192,12 +212,19 @@ function WalletPageInner() {
                         </p>
                         <CopyableAddress address={wallet.address} className="text-[11px] text-[var(--text-secondary)]" />
                       </div>
-                      {isEmbedded && (
-                        <span className="rounded-sm border border-[var(--accent)]/30 px-2 py-1 text-[9px] uppercase tracking-[0.2em] text-[var(--accent)]">
-                          embedded
-                        </span>
-                      )}
-                    </div>
+                      <div className="flex flex-col items-end gap-1">
+                        {isActive && (
+                          <span className="rounded-sm border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">
+                            active
+                          </span>
+                        )}
+                        {isEmbedded && (
+                          <span className="rounded-sm border border-[var(--accent)]/30 px-2 py-0.5 text-[9px] uppercase tracking-[0.2em] text-[var(--accent)]">
+                            embedded
+                          </span>
+                        )}
+                      </div>
+                    </button>
                   );
                 })}
               </div>

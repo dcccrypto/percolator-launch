@@ -6,6 +6,7 @@ import { useWallets, useSignTransaction } from "@privy-io/react-auth/solana";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import { getConfig, getNetwork, getWsEndpoint } from "@/lib/config";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
+import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { getBatchRpc } from "@/lib/batchRpc";
 
 /**
@@ -39,15 +40,11 @@ function useWalletCompatInner() {
   const { ready, authenticated, user, logout } = usePrivy();
   const { wallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();
+  const { preferredAddress } = usePreferredWallet();
 
   const activeWallet = useMemo(() => {
-    if (!wallets.length) return null;
-    // Prefer external wallet, fall back to embedded
-    return (
-      wallets.find((w) => !w.standardWallet?.name?.toLowerCase().includes("privy")) ||
-      wallets[0]
-    );
-  }, [wallets]);
+    return resolveActiveWallet(wallets, preferredAddress);
+  }, [wallets, preferredAddress]);
 
   const publicKey = useMemo(() => {
     if (!activeWallet) return null;
