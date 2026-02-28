@@ -38,14 +38,14 @@ const MAGIC_BYTES = new Uint8Array([0x54, 0x41, 0x4c, 0x4f, 0x43, 0x52, 0x45, 0x
  *   RiskEngine = fixed(576) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
  *
  * Verified against deployed devnet programs (PERC-131 e2e testing):
- *   Small  (256 slots):  program logs expected = 0xfe40 = 65088
+ *   Small  (256 slots):  deployed binary expects 65104 (PERC-289)
  *   Medium (1024 slots): computed from identical struct layout
  *   Large  (4096 slots): computed from identical struct layout
  */
 export const SLAB_TIERS = {
-  small:  { maxAccounts: 256,  dataSize: 65_088,    label: "Small",  description: "256 slots · ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257_184,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
-  large:  { maxAccounts: 4096, dataSize: 1_025_568, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
+  small:  { maxAccounts: 256,  dataSize: 65_104,    label: "Small",  description: "256 slots · ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257_200,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 1_025_584, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
 } as const;
 
 export type SlabTierKey = keyof typeof SLAB_TIERS;
@@ -68,8 +68,9 @@ export function slabDataSize(maxAccounts: number): number {
   const ENGINE_FIXED = 576;     // scalars before bitmap
   const ACCOUNT_SIZE = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
-  // After bitmap: num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) = 18
-  const postBitmap = 18;
+  // After bitmap: num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2)
+  //   + epoch_counter(u64,8) + reserved(u64,8) = 34  (PERC-289: deployed binary includes 2 extra u64 fields)
+  const postBitmap = 34;
   const nextFreeBytes = maxAccounts * 2;
   const preAccountsLen = ENGINE_FIXED + bitmapBytes + postBitmap + nextFreeBytes;
   // Align to 8 bytes for Account (max field align = 8 on SBF)

@@ -1275,16 +1275,16 @@ async function fetchTokenAccount(connection, address, tokenProgramId = TOKEN_PRO
 var ENGINE_BITMAP_OFF2 = 576;
 var MAGIC_BYTES = new Uint8Array([84, 65, 76, 79, 67, 82, 69, 80]);
 var SLAB_TIERS = {
-  small: { maxAccounts: 256, dataSize: 65088, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257184, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
-  large: { maxAccounts: 4096, dataSize: 1025568, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
+  small: { maxAccounts: 256, dataSize: 65104, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257200, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
+  large: { maxAccounts: 4096, dataSize: 1025584, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
 };
 function slabDataSize(maxAccounts) {
   const ENGINE_OFF_LOCAL = 456;
   const ENGINE_FIXED = 576;
   const ACCOUNT_SIZE2 = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
-  const postBitmap = 18;
+  const postBitmap = 34;
   const nextFreeBytes = maxAccounts * 2;
   const preAccountsLen = ENGINE_FIXED + bitmapBytes + postBitmap + nextFreeBytes;
   const accountsOff = Math.ceil(preAccountsLen / 8) * 8;

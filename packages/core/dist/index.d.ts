@@ -870,26 +870,26 @@ interface DiscoveredMarket {
  *   RiskEngine = fixed(576) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
  *
  * Verified against deployed devnet programs (PERC-131 e2e testing):
- *   Small  (256 slots):  program logs expected = 0xfe40 = 65088
+ *   Small  (256 slots):  deployed binary expects 65104 (PERC-289)
  *   Medium (1024 slots): computed from identical struct layout
  *   Large  (4096 slots): computed from identical struct layout
  */
 declare const SLAB_TIERS: {
     readonly small: {
         readonly maxAccounts: 256;
-        readonly dataSize: 65088;
+        readonly dataSize: 65104;
         readonly label: "Small";
         readonly description: "256 slots · ~0.45 SOL";
     };
     readonly medium: {
         readonly maxAccounts: 1024;
-        readonly dataSize: 257184;
+        readonly dataSize: 257200;
         readonly label: "Medium";
         readonly description: "1,024 slots · ~1.79 SOL";
     };
     readonly large: {
         readonly maxAccounts: 4096;
-        readonly dataSize: 1025568;
+        readonly dataSize: 1025584;
         readonly label: "Large";
         readonly description: "4,096 slots · ~7.14 SOL";
     };
