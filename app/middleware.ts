@@ -119,6 +119,9 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
   ].join("; ");
 
   response.headers.set("Content-Security-Policy", csp);
+  // HSTS: enforce HTTPS for 2 years, include subdomains, allow preload list submission.
+  // Vercel may add this at the edge, but explicit is defense-in-depth.
+  response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
   response.headers.set("X-Content-Type-Options", "nosniff");
   // SAMEORIGIN allows Privy's embedded wallet iframes to work.
   // frame-ancestors CSP directive provides more granular control.

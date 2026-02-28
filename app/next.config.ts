@@ -8,41 +8,26 @@ const nextConfig: NextConfig = {
   // that webpack includes verbatim, causing "Unexpected token 'export'" in production bundles.
   transpilePackages: ["@percolator/sdk", "@solana/kit"],
   async headers() {
+    // Security headers are set here as a baseline. CSP is NOT set here because
+    // middleware.ts handles it with per-request nonce generation. When both
+    // next.config and middleware set CSP, browsers intersect them (most
+    // restrictive wins), which can cause unexpected blocking.
     return [
       {
         source: "/(.*)",
         headers: [
           // Clickjacking protection — SAMEORIGIN allows Privy embedded wallet iframes
-          // (middleware also sets this; must agree to avoid double-header conflicts)
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
           // MIME sniffing protection
           { key: "X-Content-Type-Options", value: "nosniff" },
           // Referrer control
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // HSTS: enforce HTTPS for 2 years (defense-in-depth alongside middleware)
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
           // Disable browser features not used by a DApp
           {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=(), usb=(), bluetooth=()",
-          },
-          // Content Security Policy — permissive enough for wallet adapters + Solana
-          // frame-ancestors 'none' is the CSP equivalent of X-Frame-Options: DENY
-          {
-            key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              // Next.js requires unsafe-inline and unsafe-eval; wallet adapters add more
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com",
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "font-src 'self' data: https://fonts.gstatic.com",
-              // Images from various sources (explorer, token logos, CDNs)
-              "img-src 'self' data: blob: https:",
-              // RPC calls, Supabase, Helius, Railway API, Pyth, Sentry, Phantom/Solflare
-              "connect-src 'self' https: wss: ws://localhost:* ws://127.0.0.1:*",
-              // Privy auth + embedded wallet iframe + wallet adapter popups/iframes
-              "frame-src 'self' https://auth.privy.io https://embedded-wallets.privy.io https://phantom.app https://solflare.com",
-              "worker-src 'self' blob:",
-              "frame-ancestors 'self' https://percolatorlaunch.com https://*.percolatorlaunch.com https://percolator-launch.vercel.app https://*.vercel.app",
-            ].join("; "),
           },
         ],
       },
