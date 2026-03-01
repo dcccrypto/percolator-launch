@@ -87,14 +87,14 @@ describe("slabDataSize", () => {
   });
 
   it("accounts for bitmap, next_free array, and padding overhead", () => {
-    // For 256 accounts (updated for PERC-299: ENGINE_FIXED 608→632):
-    // ENGINE_OFF = 472, ENGINE_FIXED = 632
+    // For 256 accounts (updated for PERC-300: ENGINE_OFF 472→488):
+    // ENGINE_OFF = 488, ENGINE_FIXED = 632
     // bitmap = ceil(256/64) * 8 = 32 bytes
     // postBitmap = 18 bytes
     // nextFree = 256 * 2 = 512 bytes
     // preAccountsLen = 632 + 32 + 18 + 512 = 1194
     // accountsOff = ceil(1194/8)*8 = 1200
-    // total = 472 + 1200 + 256*248 = 472 + 1200 + 63488 = 65160
-    expect(slabDataSize(256)).toBe(65160);
+    // total = 488 + 1200 + 256*248 = 488 + 1200 + 63488 = 65176
+    expect(slabDataSize(256)).toBe(65176);
   });
 });

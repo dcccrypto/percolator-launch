@@ -24,7 +24,7 @@ console.log("Testing slab parsing...\n");
 //   RESERVED_OFF = 80 (nonce at 80, lastThrUpdateSlot at 88)
 //   pending_admin field at offset 48 (32 bytes)
 function createMockSlab(): Buffer {
-  const buf = Buffer.alloc(500);  // HEADER_LEN(104) + CONFIG_LEN(368) = 472 minimum
+  const buf = Buffer.alloc(500);  // HEADER_LEN(104) + CONFIG_LEN(384) = 488 minimum
 
   // Header (104 bytes)
   // magic: "PERCOLAT" = 0x504552434f4c4154
@@ -166,8 +166,8 @@ console.log("\nTesting account parsing...\n");
 
 // Constants from slab.ts for testing (keep in sync with slab.ts)
 // Updated for PERC-289: CONFIG_LEN 352→368
-const ENGINE_OFF = 472;
-const ENGINE_ACCOUNTS_OFF = 9360;  // Updated for PERC-299
+const ENGINE_OFF = 488; // PERC-300
+const ENGINE_ACCOUNTS_OFF = 9360;  // Updated for PERC-299/300
 const ACCOUNT_SIZE = 248;
 const ENGINE_BITMAP_OFF = 632;  // Updated for PERC-299
 

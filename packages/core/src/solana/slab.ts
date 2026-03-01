@@ -38,11 +38,12 @@ const CONFIG_OFFSET = HEADER_LEN;  // MarketConfig starts right after header
 //               thresh_step_bps(8) + thresh_alpha_bps(8) + thresh_min(16) + thresh_max(16) + thresh_min_step(16) +
 //               oracle_authority(32) + authority_price_e6(8) + authority_timestamp(8) +
 //               oracle_price_cap_e2bps(8) + last_effective_price_e6(8) +
-//               oi_cap_multiplier_bps(8) + max_pnl_cap(8)
-//             = 368 bytes
-// NOTE: PERC-298 skew_factor_bps is packed into upper bits of oi_cap_multiplier_bps,
-// so MarketConfig size is unchanged.
-const CONFIG_LEN = 368;
+//               oi_cap_multiplier_bps(8) + max_pnl_cap(8) +
+//               adaptive_funding_enabled(1) + _pad(1) + adaptive_scale_bps(2) + _pad2(4) +
+//               adaptive_max_funding_bps(8)
+//             = 384 bytes (PERC-300)
+// NOTE: PERC-298 skew_factor_bps is packed into upper bits of oi_cap_multiplier_bps.
+const CONFIG_LEN = 384;
 // Offset of _reserved field within SlabHeader (magic+version+bump+_padding+admin+pending_admin = 80)
 const RESERVED_OFF = 80;
 
@@ -100,6 +101,13 @@ export interface MarketConfig {
   // Oracle price circuit breaker
   oraclePriceCapE2bps: bigint;
   lastEffectivePriceE6: bigint;
+  // OI cap (PERC-273/298)
+  oiCapMultiplierBps: bigint;
+  maxPnlCap: bigint;
+  // Adaptive funding (PERC-300)
+  adaptiveFundingEnabled: boolean;
+  adaptiveScaleBps: number;
+  adaptiveMaxFundingBps: bigint;
 }
 
 /**
@@ -245,6 +253,23 @@ export function parseConfig(data: Uint8Array): MarketConfig {
   off += 8;
 
   const lastEffectivePriceE6 = readU64LE(data, off);
+  off += 8;
+
+  // OI cap (PERC-273/298)
+  const oiCapMultiplierBps = readU64LE(data, off);
+  off += 8;
+
+  const maxPnlCap = readU64LE(data, off);
+  off += 8;
+
+  // Adaptive funding (PERC-300)
+  const adaptiveFundingEnabled = readU8(data, off) !== 0;
+  off += 1;
+  off += 1; // _adaptive_pad
+  const adaptiveScaleBps = readU16LE(data, off);
+  off += 2;
+  off += 4; // _adaptive_pad2
+  const adaptiveMaxFundingBps = readU64LE(data, off);
 
   return {
     collateralMint,
@@ -273,6 +298,11 @@ export function parseConfig(data: Uint8Array): MarketConfig {
     authorityTimestamp,
     oraclePriceCapE2bps,
     lastEffectivePriceE6,
+    oiCapMultiplierBps,
+    maxPnlCap,
+    adaptiveFundingEnabled,
+    adaptiveScaleBps,
+    adaptiveMaxFundingBps,
   };
 }
 
@@ -297,8 +327,8 @@ export function readLastThrUpdateSlot(data: Uint8Array): bigint {
 }
 
 // =============================================================================
-// RiskEngine Layout Constants (CONFIG_LEN = 368, unchanged by PERC-298)
-// ENGINE_OFF = align_up(HEADER_LEN + CONFIG_LEN, 8) = align_up(104 + 368, 8) = 472 (BPF alignment)
+// RiskEngine Layout Constants (CONFIG_LEN = 384, updated for PERC-300)
+// ENGINE_OFF = align_up(HEADER_LEN + CONFIG_LEN, 8) = align_up(104 + 384, 8) = 488 (BPF alignment)
 //
 // RiskParams grew from 144 → 288 bytes (added: premium funding, partial liq, dynamic fees).
 // Account grew from 240 → 248 bytes (added: last_partial_liquidation_slot).
@@ -307,7 +337,7 @@ export function readLastThrUpdateSlot(data: Uint8Array): bigint {
 //   circuit breaker, OI cap fields). PERC-298 skew_factor packed in oi_cap_multiplier_bps.
 // RiskEngine grew by 32 bytes in PERC-298 (added: long_oi, short_oi U128 fields).
 // =============================================================================
-const ENGINE_OFF = 472;
+const ENGINE_OFF = 488;
 // RiskEngine struct layout (repr(C), SBF uses 8-byte alignment for u128):
 // - vault: U128 (16 bytes) at offset 0
 // - insurance_fund: InsuranceFund { balance: U128, fee_revenue: U128 } (32 bytes) at offset 16
@@ -361,7 +391,7 @@ const ACCOUNT_SIZE = 248;  // Account now includes last_partial_liquidation_slot
 // For backward compat, keep large default
 // Large: bitmap(64*8=512) + num_used(2) + pad(6) + next_account_id(8) + free_head(2) + next_free(4096*2=8192) + pad(6) + accounts = 9304 - 576 = ...
 // Actually: engine fixed(576) + bitmap(512) + 18 + 8192 = 9298, align to 8 = 9304
-const ENGINE_ACCOUNTS_OFF = 9360;       // accounts offset for 4096 variant (within engine, PERC-299)
+const ENGINE_ACCOUNTS_OFF = 9360;       // accounts offset for 4096 variant (within engine)
 
 /**
  * Compute bitmap words and accounts offset for a given maxAccounts.
