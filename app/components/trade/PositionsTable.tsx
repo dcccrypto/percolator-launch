@@ -93,14 +93,19 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   const entryPriceE6 = account.entryPrice;
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
 
-  const pnlTokens = currentPriceE6 > 0n
+  // PERC-297: Mark price is considered "available" when it's a positive value.
+  // When mark is unavailable (oracle not initialized, price feed stale, or tx
+  // just processed before price arrives), PnL/ROE cannot be computed reliably.
+  const hasValidMark = currentPriceE6 > 0n;
+
+  const pnlTokens = hasValidMark
     ? computeMarkPnl(account.positionSize, entryPriceE6, currentPriceE6)
     : 0n;
-  const pnlUsdRaw = priceUsd !== null && currentPriceE6 > 0n
+  const pnlUsdRaw = priceUsd !== null && hasValidMark
     ? (Number(pnlTokens) / (10 ** decimals)) * priceUsd
     : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
-  const roe = currentPriceE6 > 0n ? computePnlPercent(pnlTokens, account.capital) : 0;
+  const roe = hasValidMark ? computePnlPercent(pnlTokens, account.capital) : 0;
 
   const liqPriceE6 = computeLiqPrice(
     entryPriceE6,
@@ -190,7 +195,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
 
               {/* Mark */}
               <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-                {formatUsd(currentPriceE6)}
+                {hasValidMark ? formatUsd(currentPriceE6) : <span className="text-[var(--text-dim)]">--</span>}
               </td>
 
               {/* Liq. Price */}
@@ -199,25 +204,32 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
               </td>
 
               {/* PnL */}
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${pnlColor}`} style={{ fontFamily: "var(--font-mono)" }}>
-                <div>{formatPnl(pnlTokens, decimals)} {symbol}</div>
-                {pnlUsd !== null && (
-                  <div className="text-[9px]">
-                    {pnlUsd >= 0 ? "+" : ""}${Math.abs(pnlUsd).toFixed(2)}
-                  </div>
+              <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+                {hasValidMark ? (
+                  <>
+                    <div>{formatPnl(pnlTokens, decimals)} {symbol}</div>
+                    {pnlUsd !== null && (
+                      <div className="text-[9px]">
+                        {pnlUsd >= 0 ? "+" : ""}${Math.abs(pnlUsd).toFixed(2)}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <span>--</span>
                 )}
               </td>
 
               {/* ROE% */}
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${roeColor}`} style={{ fontFamily: "var(--font-mono)" }}>
-                {formatPercent(roe)}
+              <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${hasValidMark ? roeColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+                {hasValidMark ? formatPercent(roe) : "--"}
               </td>
 
               {/* Close */}
               <td className="whitespace-nowrap px-3 py-2.5 text-right">
                 <button
                   onClick={() => setShowCloseModal(true)}
-                  disabled={closeLoading || lpUnderfunded}
+                  disabled={closeLoading || lpUnderfunded || !hasValidMark}
+                  title={!hasValidMark ? "Waiting for price data…" : undefined}
                   className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Close

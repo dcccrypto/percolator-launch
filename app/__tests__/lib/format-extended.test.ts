@@ -39,7 +39,7 @@ describe("formatPriceE6", () => {
 describe("formatUsd (extended)", () => {
   it("returns $0.00 for null", () => expect(formatUsd(null)).toBe("$0.00"));
   it("returns $0.00 for undefined", () => expect(formatUsd(undefined)).toBe("$0.00"));
-  it("formats zero", () => expect(formatUsd(0n)).toBe("$0.00"));
+  it("formats zero as dash (PERC-297: 0 = oracle unavailable)", () => expect(formatUsd(0n)).toBe("$—"));
   it("formats large amounts", () => {
     const result = formatUsd(1_000_000_000_000n); // $1,000,000
     expect(result).toContain("$");

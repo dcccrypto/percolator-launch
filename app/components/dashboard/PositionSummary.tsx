@@ -27,6 +27,8 @@ function PositionCard({ pos, symbol }: { pos: PortfolioPosition; symbol: string 
   const sizeAbs = posSize < 0n ? -posSize : posSize;
   const severity = getLiquidationSeverity(pos.liquidationDistancePct);
   const hasPosition = posSize !== 0n;
+  // PERC-297: Guard PnL display when oracle price is unavailable
+  const hasValidOracle = pos.oraclePriceE6 > 0n;
 
   return (
     <Link
@@ -77,17 +79,25 @@ function PositionCard({ pos, symbol }: { pos: PortfolioPosition; symbol: string 
             )}
           </div>
           <div className="text-right">
-            <span
-              className={`text-[11px] font-bold ${pos.unrealizedPnl >= 0n ? "text-[var(--long)]" : "text-[var(--short)]"}`}
-              style={{ fontFamily: "var(--font-jetbrains-mono)" }}
-            >
-              {formatPnl(pos.unrealizedPnl)}
-            </span>
-            <span
-              className={`ml-1 text-[9px] ${pos.pnlPercent >= 0 ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
-            >
-              {formatPnlPct(pos.pnlPercent)}
-            </span>
+            {hasValidOracle ? (
+              <>
+                <span
+                  className={`text-[11px] font-bold ${pos.unrealizedPnl >= 0n ? "text-[var(--long)]" : "text-[var(--short)]"}`}
+                  style={{ fontFamily: "var(--font-jetbrains-mono)" }}
+                >
+                  {formatPnl(pos.unrealizedPnl)}
+                </span>
+                <span
+                  className={`ml-1 text-[9px] ${pos.pnlPercent >= 0 ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
+                >
+                  {formatPnlPct(pos.pnlPercent)}
+                </span>
+              </>
+            ) : (
+              <span className="text-[11px] font-bold text-[var(--text-dim)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                --
+              </span>
+            )}
           </div>
         </div>
 

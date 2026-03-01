@@ -41,6 +41,8 @@ export function formatUsd(priceE6: bigint | null | undefined): string {
   // Defense-in-depth: reject absurd values (matches Rust MAX_ORACLE_PRICE = 1e15)
   if (priceE6 > 1_000_000_000_000_000n) return "$—";
   if (priceE6 < 0n) return "$—";
+  // PERC-297: 0 price means oracle data unavailable — show dash instead of "$0.00"
+  if (priceE6 === 0n) return "$—";
   const val = Number(priceE6) / 1_000_000;
   return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
 }

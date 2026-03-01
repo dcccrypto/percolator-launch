@@ -123,9 +123,9 @@ describe("formatUsd", () => {
     expect(result).toContain("0.000001");
   });
 
-  it("formats zero", () => {
+  it("formats zero as dash (PERC-297: 0 = oracle unavailable)", () => {
     const result = formatUsd(0n);
-    expect(result).toBe("$0.00");
+    expect(result).toBe("$—");
   });
 
   it("returns '$—' for absurdly large prices (defense-in-depth)", () => {
