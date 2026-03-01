@@ -10,7 +10,7 @@ import {
 } from "./slab.js";
 
 /** Bitmap offset within engine struct (updated for PERC-120/121/122 struct changes) */
-const ENGINE_BITMAP_OFF = 632; // Updated for PERC-299 (608 + 24 emergency OI fields)
+const ENGINE_BITMAP_OFF = 656; // Updated for PERC-299 (608 + 24 emergency OI fields)
 
 /**
  * A discovered Percolator market from on-chain program accounts.
@@ -44,9 +44,9 @@ const MAGIC_BYTES = new Uint8Array([0x54, 0x41, 0x4c, 0x4f, 0x43, 0x52, 0x45, 0x
  *       Values below must be verified against BPF build before deployment.
  */
 export const SLAB_TIERS = {
-  small:  { maxAccounts: 256,  dataSize: 65_208,    label: "Small",  description: "256 slots · ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257_304,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
-  large:  { maxAccounts: 4096, dataSize: 1_025_688, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
+  small:  { maxAccounts: 256,  dataSize: 65_248,    label: "Small",  description: "256 slots · ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257_344,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 1_025_728, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
 } as const;
 
 export type SlabTierKey = keyof typeof SLAB_TIERS;
@@ -65,8 +65,8 @@ export type SlabTierKey = keyof typeof SLAB_TIERS;
  * Must match the on-chain program's SLAB_LEN exactly.
  */
 export function slabDataSize(maxAccounts: number): number {
-  const ENGINE_OFF_LOCAL = 520; // align_up(104 + 416, 8) — PERC-300 + PERC-302 + PERC-301
-  const ENGINE_FIXED = 632;     // scalars before bitmap (608 + 24 for PERC-299 emergency OI fields)
+  const ENGINE_OFF_LOCAL = 536; // align_up(104 + 416, 8) — PERC-300 + PERC-302 + PERC-301
+  const ENGINE_FIXED = 656;     // scalars before bitmap (608 + 24 for PERC-299 emergency OI fields)
   const ACCOUNT_SIZE = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
   // After bitmap: num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) = 18
@@ -99,7 +99,7 @@ const SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 /** We need header(104) + config(416) + engine up to nextAccountId (~1100). Total ~1620. Use 1720 for margin. */
 const HEADER_SLICE_LENGTH = 1720;
 
-const ENGINE_OFF = 520; // PERC-300 + PERC-302 + PERC-301: CONFIG_LEN grew 368→416
+const ENGINE_OFF = 536; // PERC-300 + PERC-302 + PERC-301: CONFIG_LEN grew 368→416
 
 function dv(data: Uint8Array): DataView {
   return new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -163,33 +163,35 @@ function parseEngineLight(data: Uint8Array, maxAccounts: number = 4096): EngineS
     insuranceFund: {
       balance: readU128LE(data, base + 16),
       feeRevenue: readU128LE(data, base + 32),
+      isolatedBalance: readU128LE(data, base + 48),
+      isolationBps: readU16LE(data, base + 64),
     },
-    currentSlot: readU64LE(data, base + 336),
-    fundingIndexQpbE6: readI128LE(data, base + 344),
-    lastFundingSlot: readU64LE(data, base + 360),
-    fundingRateBpsPerSlotLast: readI64LE(data, base + 368),
-    lastCrankSlot: readU64LE(data, base + 400),
-    maxCrankStalenessSlots: readU64LE(data, base + 408),
-    totalOpenInterest: readU128LE(data, base + 416),
-    longOi: readU128LE(data, base + 432),
-    shortOi: readU128LE(data, base + 448),
-    cTot: readU128LE(data, base + 464),
-    pnlPosTot: readU128LE(data, base + 480),
-    liqCursor: readU16LE(data, base + 496),
-    gcCursor: readU16LE(data, base + 498),
-    lastSweepStartSlot: readU64LE(data, base + 504),
-    lastSweepCompleteSlot: readU64LE(data, base + 512),
-    crankCursor: readU16LE(data, base + 520),
-    sweepStartIdx: readU16LE(data, base + 522),
-    lifetimeLiquidations: readU64LE(data, base + 528),
-    lifetimeForceCloses: readU64LE(data, base + 536),
-    netLpPos: readI128LE(data, base + 544),
-    lpSumAbs: readU128LE(data, base + 560),
-    lpMaxAbs: readU128LE(data, base + 576),
-    lpMaxAbsSweep: readU128LE(data, base + 592),
-    emergencyOiMode: data[base + 608] !== 0,
-    emergencyStartSlot: readU64LE(data, base + 616),
-    lastBreakerSlot: readU64LE(data, base + 624),
+    currentSlot: readU64LE(data, base + 384),
+    fundingIndexQpbE6: readI128LE(data, base + 392),
+    lastFundingSlot: readU64LE(data, base + 384),
+    fundingRateBpsPerSlotLast: readI64LE(data, base + 392),
+    lastCrankSlot: readU64LE(data, base + 424),
+    maxCrankStalenessSlots: readU64LE(data, base + 456),
+    totalOpenInterest: readU128LE(data, base + 440),
+    longOi: readU128LE(data, base + 456),
+    shortOi: readU128LE(data, base + 472),
+    cTot: readU128LE(data, base + 488),
+    pnlPosTot: readU128LE(data, base + 552),
+    liqCursor: readU16LE(data, base + 568),
+    gcCursor: readU16LE(data, base + 546),
+    lastSweepStartSlot: readU64LE(data, base + 552),
+    lastSweepCompleteSlot: readU64LE(data, base + 584),
+    crankCursor: readU16LE(data, base + 568),
+    sweepStartIdx: readU16LE(data, base + 546),
+    lifetimeLiquidations: readU64LE(data, base + 552),
+    lifetimeForceCloses: readU64LE(data, base + 584),
+    netLpPos: readI128LE(data, base + 568),
+    lpSumAbs: readU128LE(data, base + 584),
+    lpMaxAbs: readU128LE(data, base + 600),
+    lpMaxAbsSweep: readU128LE(data, base + 640),
+    emergencyOiMode: data[base + 632] !== 0,
+    emergencyStartSlot: readU64LE(data, base + 640),
+    lastBreakerSlot: readU64LE(data, base + 648),
     numUsedAccounts: canReadNumUsed ? readU16LE(data, base + numUsedOff) : 0,
     nextAccountId: canReadNextId ? readU64LE(data, base + nextAccountIdOff) : 0n,
   };

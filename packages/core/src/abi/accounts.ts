@@ -328,6 +328,27 @@ export const ACCOUNTS_WITHDRAW_INSURANCE_LP: readonly AccountSpec[] = [
   { name: "vaultAuthority", signer: false, writable: false },
 ] as const;
 
+/**
+ * FundMarketInsurance: 5 accounts (PERC-306)
+ * Fund per-market isolated insurance balance.
+ */
+export const ACCOUNTS_FUND_MARKET_INSURANCE: readonly AccountSpec[] = [
+  { name: "admin", signer: true, writable: true },
+  { name: "slab", signer: false, writable: true },
+  { name: "adminAta", signer: false, writable: true },
+  { name: "vault", signer: false, writable: true },
+  { name: "tokenProgram", signer: false, writable: false },
+] as const;
+
+/**
+ * SetInsuranceIsolation: 2 accounts (PERC-306)
+ * Set max % of global fund this market can access.
+ */
+export const ACCOUNTS_SET_INSURANCE_ISOLATION: readonly AccountSpec[] = [
+  { name: "admin", signer: true, writable: false },
+  { name: "slab", signer: false, writable: true },
+] as const;
+
 // ============================================================================
 // WELL-KNOWN PROGRAM/SYSVAR KEYS
 // ============================================================================

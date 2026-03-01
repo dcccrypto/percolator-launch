@@ -45,7 +45,7 @@ const CONFIG_OFFSET = HEADER_LEN;  // MarketConfig starts right after header
 //               resolved_slot(8) + _perc301_reserved(8)
 //             = 416 bytes (PERC-300 + PERC-302 + PERC-301)
 // NOTE: PERC-298 skew_factor_bps is packed into upper bits of oi_cap_multiplier_bps.
-const CONFIG_LEN = 416;
+const CONFIG_LEN = 432;
 // Offset of _reserved field within SlabHeader (magic+version+bump+_padding+admin+pending_admin = 80)
 const RESERVED_OFF = 80;
 
@@ -115,6 +115,7 @@ export interface MarketConfig {
   oiRampSlots: bigint;
   // Auto-recovery unresolve (PERC-301)
   resolvedSlot: bigint;
+  insuranceIsolationBps: number;
 }
 
 /**
@@ -288,7 +289,9 @@ export function parseConfig(data: Uint8Array): MarketConfig {
 
   // Auto-recovery unresolve (PERC-301)
   const resolvedSlot = readU64LE(data, off);
-  // off += 8; // + 8 for _perc301_reserved (skipped)
+  off += 8;
+  off += 8; // _perc301_reserved
+  const insuranceIsolationBps = readU16LE(data, off);
 
   return {
     collateralMint,
@@ -325,6 +328,7 @@ export function parseConfig(data: Uint8Array): MarketConfig {
     marketCreatedSlot,
     oiRampSlots,
     resolvedSlot,
+    insuranceIsolationBps,
   };
 }
 
@@ -406,52 +410,54 @@ export function readLastThrUpdateSlot(data: Uint8Array): bigint {
 //   PERC-298 skew_factor packed in oi_cap_multiplier_bps.
 // RiskEngine grew by 32 bytes in PERC-298 (added: long_oi, short_oi U128 fields).
 // =============================================================================
-const ENGINE_OFF = 520;
+const ENGINE_OFF = 536;
 // RiskEngine struct layout (repr(C), SBF uses 8-byte alignment for u128):
 // - vault: U128 (16 bytes) at offset 0
 // - insurance_fund: InsuranceFund { balance: U128, fee_revenue: U128 } (32 bytes) at offset 16
 // - params: RiskParams (288 bytes) at offset 48
 const ENGINE_VAULT_OFF = 0;
 const ENGINE_INSURANCE_OFF = 16;
-const ENGINE_PARAMS_OFF = 48;         // RiskParams starts here (after vault+insurance_fund)
+const ENGINE_INSURANCE_ISOLATED_OFF = 48;
+const ENGINE_INSURANCE_ISOLATION_BPS_OFF = 64;
+const ENGINE_PARAMS_OFF = 72;         // RiskParams starts here (after vault+insurance_fund)
 // After RiskParams (at engine offset 48 + 288 = 336):
-const ENGINE_CURRENT_SLOT_OFF = 336;
-const ENGINE_FUNDING_INDEX_OFF = 344;   // I128 (16 bytes)
-const ENGINE_LAST_FUNDING_SLOT_OFF = 360;
-const ENGINE_FUNDING_RATE_BPS_OFF = 368;// i64: funding_rate_bps_per_slot_last (8 bytes)
+const ENGINE_CURRENT_SLOT_OFF = 360;
+const ENGINE_FUNDING_INDEX_OFF = 368;   // I128 (16 bytes)
+const ENGINE_LAST_FUNDING_SLOT_OFF = 384;
+const ENGINE_FUNDING_RATE_BPS_OFF = 392;// i64: funding_rate_bps_per_slot_last (8 bytes)
 // Premium funding state (PERC-121):
-const ENGINE_MARK_PRICE_OFF = 376;      // u64: mark_price_e6
-const ENGINE_FUNDING_FROZEN_OFF = 384;  // bool (1 byte + 7 padding)
-const ENGINE_FROZEN_RATE_OFF = 392;     // i64: funding_frozen_rate_snapshot
+const ENGINE_MARK_PRICE_OFF = 400;      // u64: mark_price_e6
+const ENGINE_FUNDING_FROZEN_OFF = 408;  // bool (1 byte + 7 padding)
+const ENGINE_FROZEN_RATE_OFF = 416;     // i64: funding_frozen_rate_snapshot
 // Keeper crank:
-const ENGINE_LAST_CRANK_SLOT_OFF = 400;
-const ENGINE_MAX_CRANK_STALENESS_OFF = 408;
-const ENGINE_TOTAL_OI_OFF = 416;        // U128 (16 bytes)
-const ENGINE_LONG_OI_OFF = 432;         // U128: long OI (PERC-298)
-const ENGINE_SHORT_OI_OFF = 448;        // U128: short OI (PERC-298)
-const ENGINE_C_TOT_OFF = 464;           // U128: sum of all account capital
-const ENGINE_PNL_POS_TOT_OFF = 480;     // U128: sum of all positive PnL
-const ENGINE_LIQ_CURSOR_OFF = 496;      // u16
-const ENGINE_GC_CURSOR_OFF = 498;       // u16
+const ENGINE_LAST_CRANK_SLOT_OFF = 424;
+const ENGINE_MAX_CRANK_STALENESS_OFF = 432;
+const ENGINE_TOTAL_OI_OFF = 440;        // U128 (16 bytes)
+const ENGINE_LONG_OI_OFF = 456;         // U128: long OI (PERC-298)
+const ENGINE_SHORT_OI_OFF = 472;        // U128: short OI (PERC-298)
+const ENGINE_C_TOT_OFF = 488;           // U128: sum of all account capital
+const ENGINE_PNL_POS_TOT_OFF = 504;     // U128: sum of all positive PnL
+const ENGINE_LIQ_CURSOR_OFF = 520;      // u16
+const ENGINE_GC_CURSOR_OFF = 522;       // u16
 // 4 bytes padding for u64 alignment
-const ENGINE_LAST_SWEEP_START_OFF = 504;
-const ENGINE_LAST_SWEEP_COMPLETE_OFF = 512;
-const ENGINE_CRANK_CURSOR_OFF = 520;    // u16
-const ENGINE_SWEEP_START_IDX_OFF = 522; // u16
+const ENGINE_LAST_SWEEP_START_OFF = 528;
+const ENGINE_LAST_SWEEP_COMPLETE_OFF = 536;
+const ENGINE_CRANK_CURSOR_OFF = 544;    // u16
+const ENGINE_SWEEP_START_IDX_OFF = 546; // u16
 // 4 bytes padding for u64 alignment
-const ENGINE_LIFETIME_LIQUIDATIONS_OFF = 528;
-const ENGINE_LIFETIME_FORCE_CLOSES_OFF = 536;
+const ENGINE_LIFETIME_LIQUIDATIONS_OFF = 552;
+const ENGINE_LIFETIME_FORCE_CLOSES_OFF = 560;
 // LP Aggregates for funding rate calculation (PERC-121)
-const ENGINE_NET_LP_POS_OFF = 544;      // I128
-const ENGINE_LP_SUM_ABS_OFF = 560;      // U128
-const ENGINE_LP_MAX_ABS_OFF = 576;      // U128
-const ENGINE_LP_MAX_ABS_SWEEP_OFF = 592;// U128
+const ENGINE_NET_LP_POS_OFF = 568;      // I128
+const ENGINE_LP_SUM_ABS_OFF = 584;      // U128
+const ENGINE_LP_MAX_ABS_OFF = 600;      // U128
+const ENGINE_LP_MAX_ABS_SWEEP_OFF = 616;// U128
 // PERC-299: Volatility-adjusted OI cap fields
-const ENGINE_EMERGENCY_OI_MODE_OFF = 608; // u8 (+ 7 padding)
-const ENGINE_EMERGENCY_START_SLOT_OFF = 616; // u64
-const ENGINE_LAST_BREAKER_SLOT_OFF = 624; // u64
+const ENGINE_EMERGENCY_OI_MODE_OFF = 632; // u8 (+ 7 padding)
+const ENGINE_EMERGENCY_START_SLOT_OFF = 640; // u64
+const ENGINE_LAST_BREAKER_SLOT_OFF = 648; // u64
 // Bitmap starts at 632
-const ENGINE_BITMAP_OFF = 632;
+const ENGINE_BITMAP_OFF = 656;
 // Dynamic layout helpers — bitmap/accounts offsets depend on maxAccounts
 const DEFAULT_MAX_ACCOUNTS = 4096;
 const DEFAULT_BITMAP_WORDS = 64;  // ceil(4096/64)
@@ -460,7 +466,7 @@ const ACCOUNT_SIZE = 248;  // Account now includes last_partial_liquidation_slot
 // For backward compat, keep large default
 // Large: bitmap(64*8=512) + num_used(2) + pad(6) + next_account_id(8) + free_head(2) + next_free(4096*2=8192) + pad(6) + accounts = 9304 - 576 = ...
 // Actually: engine fixed(576) + bitmap(512) + 18 + 8192 = 9298, align to 8 = 9304
-const ENGINE_ACCOUNTS_OFF = 9360;       // accounts offset for 4096 variant (within engine)
+const ENGINE_ACCOUNTS_OFF = 9384;       // accounts offset for 4096 variant (within engine)
 
 /**
  * Compute bitmap words and accounts offset for a given maxAccounts.
@@ -558,6 +564,8 @@ const ACCT_LAST_FEE_SLOT_OFF = 232;   // last_fee_slot (u64, 8 bytes), ends at 2
 export interface InsuranceFund {
   balance: bigint;
   feeRevenue: bigint;
+  isolatedBalance: bigint;
+  isolationBps: number;
 }
 
 export interface RiskParams {
@@ -703,6 +711,8 @@ export function parseEngine(data: Uint8Array): EngineState {
     insuranceFund: {
       balance: readU128LE(data, base + ENGINE_INSURANCE_OFF),
       feeRevenue: readU128LE(data, base + ENGINE_INSURANCE_OFF + 16),
+      isolatedBalance: readU128LE(data, base + ENGINE_INSURANCE_ISOLATED_OFF),
+      isolationBps: readU16LE(data, base + ENGINE_INSURANCE_ISOLATION_BPS_OFF),
     },
     currentSlot: readU64LE(data, base + ENGINE_CURRENT_SLOT_OFF),
     fundingIndexQpbE6: readI128LE(data, base + ENGINE_FUNDING_INDEX_OFF),

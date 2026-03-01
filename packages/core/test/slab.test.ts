@@ -166,10 +166,10 @@ console.log("\nTesting account parsing...\n");
 
 // Constants from slab.ts for testing (keep in sync with slab.ts)
 // Updated for PERC-301: CONFIG_LEN 400→416, ENGINE_OFF 504→520
-const ENGINE_OFF = 520;
-const ENGINE_ACCOUNTS_OFF = 9360;  // ENGINE_FIXED(632) + bitmap(512) + postBitmap(18) + nextFree(8192) = 9354 → 9360
+const ENGINE_OFF = 536;
+const ENGINE_ACCOUNTS_OFF = 9384;  // ENGINE_FIXED(632) + bitmap(512) + postBitmap(18) + nextFree(8192) = 9354 → 9360
 const ACCOUNT_SIZE = 248;
-const ENGINE_BITMAP_OFF = 632;  // Updated for PERC-299
+const ENGINE_BITMAP_OFF = 656;  // Updated for PERC-299
 
 // Account field offsets
 const ACCT_ACCOUNT_ID_OFF = 0;
@@ -201,7 +201,7 @@ function writeI128LE(buf: Buffer, offset: number, value: bigint): void {
 // Create a full mock slab with accounts
 // Updated for PERC-301: CONFIG_LEN 416, ENGINE_OFF = 520
 //   HEADER_LEN = 104, RESERVED_OFF = 80, ENGINE_OFF = 520
-//   ENGINE_BITMAP_OFF = 632, ENGINE_ACCOUNTS_OFF = 9360, ACCOUNT_SIZE = 248
+//   ENGINE_BITMAP_OFF = 656, ENGINE_ACCOUNTS_OFF = 9384, ACCOUNT_SIZE = 248
 function createFullMockSlab(): Buffer {
   // Need enough space for header + config + engine + bitmap + accounts
   const minSize = ENGINE_OFF + ENGINE_ACCOUNTS_OFF + ACCOUNT_SIZE * 4;

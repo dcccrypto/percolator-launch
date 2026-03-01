@@ -120,7 +120,11 @@ var IX_TAG = {
   CreateLpVault: 37,
   LpVaultDeposit: 38,
   LpVaultWithdraw: 39,
-  LpVaultCrankFees: 40
+  LpVaultCrankFees: 40,
+  /** PERC-306: Fund per-market isolated insurance balance */
+  FundMarketInsurance: 41,
+  /** PERC-306: Set insurance isolation BPS for a market */
+  SetInsuranceIsolation: 42
 };
 function encodeFeedId(feedId) {
   const hex = feedId.startsWith("0x") ? feedId.slice(2) : feedId;
@@ -308,15 +312,6 @@ function encodeUpdateRiskParams(args) {
   ];
   if (args.tradingFeeBps !== void 0) {
     parts.push(encU64(args.tradingFeeBps));
-    if (args.oiCapMultiplierBps !== void 0) {
-      parts.push(encU64(args.oiCapMultiplierBps));
-      if (args.maxPnlCap !== void 0) {
-        parts.push(encU64(args.maxPnlCap));
-        if (args.oiRampSlots !== void 0) {
-          parts.push(encU64(args.oiRampSlots));
-        }
-      }
-    }
   }
   return concatBytes(...parts);
 }
@@ -390,6 +385,12 @@ function computeEmaMarkPrice(markPrevE6, oracleE6, dtSlots, alphaE6 = MARK_PRICE
 IX_TAG["UpdateHyperpMark"] = 34;
 function encodeUpdateHyperpMark() {
   return new Uint8Array([34]);
+}
+function encodeFundMarketInsurance(args) {
+  return concatBytes(encU8(IX_TAG.FundMarketInsurance), encU64(args.amount));
+}
+function encodeSetInsuranceIsolation(args) {
+  return concatBytes(encU8(IX_TAG.SetInsuranceIsolation), encU16(args.bps));
 }
 var VAMM_MAGIC = 0x504552434d415443n;
 var CTX_VAMM_OFFSET = 64;
@@ -604,6 +605,17 @@ var ACCOUNTS_WITHDRAW_INSURANCE_LP = [
   { name: "insLpMint", signer: false, writable: true },
   { name: "withdrawerLpAta", signer: false, writable: true },
   { name: "vaultAuthority", signer: false, writable: false }
+];
+var ACCOUNTS_FUND_MARKET_INSURANCE = [
+  { name: "admin", signer: true, writable: true },
+  { name: "slab", signer: false, writable: true },
+  { name: "adminAta", signer: false, writable: true },
+  { name: "vault", signer: false, writable: true },
+  { name: "tokenProgram", signer: false, writable: false }
+];
+var ACCOUNTS_SET_INSURANCE_ISOLATION = [
+  { name: "admin", signer: true, writable: false },
+  { name: "slab", signer: false, writable: true }
 ];
 var WELL_KNOWN = {
   tokenProgram: TOKEN_PROGRAM_ID,
@@ -843,7 +855,7 @@ function readI64LE(data, off) {
 var MAGIC = 0x504552434f4c4154n;
 var HEADER_LEN = 104;
 var CONFIG_OFFSET = HEADER_LEN;
-var CONFIG_LEN = 416;
+var CONFIG_LEN = 432;
 var RESERVED_OFF = 80;
 var FLAG_RESOLVED = 1 << 0;
 async function fetchSlab(connection, slabPubkey) {
@@ -954,6 +966,9 @@ function parseConfig(data) {
   const oiRampSlots = readU64LE(data, off);
   off += 8;
   const resolvedSlot = readU64LE(data, off);
+  off += 8;
+  off += 8;
+  const insuranceIsolationBps = readU16LE(data, off);
   return {
     collateralMint,
     vaultPubkey,
@@ -988,7 +1003,8 @@ function parseConfig(data) {
     adaptiveMaxFundingBps,
     marketCreatedSlot,
     oiRampSlots,
-    resolvedSlot
+    resolvedSlot,
+    insuranceIsolationBps
   };
 }
 var RAMP_START_BPS = 1000n;
@@ -1017,41 +1033,43 @@ function readLastThrUpdateSlot(data) {
   }
   return readU64LE(data, RESERVED_OFF + 8);
 }
-var ENGINE_OFF = 520;
+var ENGINE_OFF = 536;
 var ENGINE_VAULT_OFF = 0;
 var ENGINE_INSURANCE_OFF = 16;
-var ENGINE_PARAMS_OFF = 48;
-var ENGINE_CURRENT_SLOT_OFF = 336;
-var ENGINE_FUNDING_INDEX_OFF = 344;
-var ENGINE_LAST_FUNDING_SLOT_OFF = 360;
-var ENGINE_FUNDING_RATE_BPS_OFF = 368;
-var ENGINE_LAST_CRANK_SLOT_OFF = 400;
-var ENGINE_MAX_CRANK_STALENESS_OFF = 408;
-var ENGINE_TOTAL_OI_OFF = 416;
-var ENGINE_LONG_OI_OFF = 432;
-var ENGINE_SHORT_OI_OFF = 448;
-var ENGINE_C_TOT_OFF = 464;
-var ENGINE_PNL_POS_TOT_OFF = 480;
-var ENGINE_LIQ_CURSOR_OFF = 496;
-var ENGINE_GC_CURSOR_OFF = 498;
-var ENGINE_LAST_SWEEP_START_OFF = 504;
-var ENGINE_LAST_SWEEP_COMPLETE_OFF = 512;
-var ENGINE_CRANK_CURSOR_OFF = 520;
-var ENGINE_SWEEP_START_IDX_OFF = 522;
-var ENGINE_LIFETIME_LIQUIDATIONS_OFF = 528;
-var ENGINE_LIFETIME_FORCE_CLOSES_OFF = 536;
-var ENGINE_NET_LP_POS_OFF = 544;
-var ENGINE_LP_SUM_ABS_OFF = 560;
-var ENGINE_LP_MAX_ABS_OFF = 576;
-var ENGINE_LP_MAX_ABS_SWEEP_OFF = 592;
-var ENGINE_EMERGENCY_OI_MODE_OFF = 608;
-var ENGINE_EMERGENCY_START_SLOT_OFF = 616;
-var ENGINE_LAST_BREAKER_SLOT_OFF = 624;
-var ENGINE_BITMAP_OFF = 632;
+var ENGINE_INSURANCE_ISOLATED_OFF = 48;
+var ENGINE_INSURANCE_ISOLATION_BPS_OFF = 64;
+var ENGINE_PARAMS_OFF = 72;
+var ENGINE_CURRENT_SLOT_OFF = 360;
+var ENGINE_FUNDING_INDEX_OFF = 368;
+var ENGINE_LAST_FUNDING_SLOT_OFF = 384;
+var ENGINE_FUNDING_RATE_BPS_OFF = 392;
+var ENGINE_LAST_CRANK_SLOT_OFF = 424;
+var ENGINE_MAX_CRANK_STALENESS_OFF = 432;
+var ENGINE_TOTAL_OI_OFF = 440;
+var ENGINE_LONG_OI_OFF = 456;
+var ENGINE_SHORT_OI_OFF = 472;
+var ENGINE_C_TOT_OFF = 488;
+var ENGINE_PNL_POS_TOT_OFF = 504;
+var ENGINE_LIQ_CURSOR_OFF = 520;
+var ENGINE_GC_CURSOR_OFF = 522;
+var ENGINE_LAST_SWEEP_START_OFF = 528;
+var ENGINE_LAST_SWEEP_COMPLETE_OFF = 536;
+var ENGINE_CRANK_CURSOR_OFF = 544;
+var ENGINE_SWEEP_START_IDX_OFF = 546;
+var ENGINE_LIFETIME_LIQUIDATIONS_OFF = 552;
+var ENGINE_LIFETIME_FORCE_CLOSES_OFF = 560;
+var ENGINE_NET_LP_POS_OFF = 568;
+var ENGINE_LP_SUM_ABS_OFF = 584;
+var ENGINE_LP_MAX_ABS_OFF = 600;
+var ENGINE_LP_MAX_ABS_SWEEP_OFF = 616;
+var ENGINE_EMERGENCY_OI_MODE_OFF = 632;
+var ENGINE_EMERGENCY_START_SLOT_OFF = 640;
+var ENGINE_LAST_BREAKER_SLOT_OFF = 648;
+var ENGINE_BITMAP_OFF = 656;
 var DEFAULT_MAX_ACCOUNTS = 4096;
 var DEFAULT_BITMAP_WORDS = 64;
 var ACCOUNT_SIZE = 248;
-var ENGINE_ACCOUNTS_OFF = 9360;
+var ENGINE_ACCOUNTS_OFF = 9384;
 function slabLayout(maxAccounts) {
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
@@ -1149,7 +1167,9 @@ function parseEngine(data) {
     vault: readU128LE(data, base + ENGINE_VAULT_OFF),
     insuranceFund: {
       balance: readU128LE(data, base + ENGINE_INSURANCE_OFF),
-      feeRevenue: readU128LE(data, base + ENGINE_INSURANCE_OFF + 16)
+      feeRevenue: readU128LE(data, base + ENGINE_INSURANCE_OFF + 16),
+      isolatedBalance: readU128LE(data, base + ENGINE_INSURANCE_ISOLATED_OFF),
+      isolationBps: readU16LE(data, base + ENGINE_INSURANCE_ISOLATION_BPS_OFF)
     },
     currentSlot: readU64LE(data, base + ENGINE_CURRENT_SLOT_OFF),
     fundingIndexQpbE6: readI128LE(data, base + ENGINE_FUNDING_INDEX_OFF),
@@ -1331,16 +1351,16 @@ async function fetchTokenAccount(connection, address, tokenProgramId = TOKEN_PRO
 }
 
 // src/solana/discovery.ts
-var ENGINE_BITMAP_OFF2 = 632;
+var ENGINE_BITMAP_OFF2 = 656;
 var MAGIC_BYTES = new Uint8Array([84, 65, 76, 79, 67, 82, 69, 80]);
 var SLAB_TIERS = {
-  small: { maxAccounts: 256, dataSize: 65208, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257304, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
-  large: { maxAccounts: 4096, dataSize: 1025688, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
+  small: { maxAccounts: 256, dataSize: 65248, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257344, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
+  large: { maxAccounts: 4096, dataSize: 1025728, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
 };
 function slabDataSize(maxAccounts) {
-  const ENGINE_OFF_LOCAL = 520;
-  const ENGINE_FIXED = 632;
+  const ENGINE_OFF_LOCAL = 536;
+  const ENGINE_FIXED = 656;
   const ACCOUNT_SIZE2 = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
   const postBitmap = 18;
@@ -1355,7 +1375,7 @@ function validateSlabTierMatch(dataSize, programSlabLen) {
 var ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map((t) => t.dataSize);
 var SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 var HEADER_SLICE_LENGTH = 1720;
-var ENGINE_OFF2 = 520;
+var ENGINE_OFF2 = 536;
 function dv2(data) {
   return new DataView(data.buffer, data.byteOffset, data.byteLength);
 }
@@ -1396,34 +1416,36 @@ function parseEngineLight(data, maxAccounts = 4096) {
     vault: readU128LE2(data, base + 0),
     insuranceFund: {
       balance: readU128LE2(data, base + 16),
-      feeRevenue: readU128LE2(data, base + 32)
+      feeRevenue: readU128LE2(data, base + 32),
+      isolatedBalance: readU128LE2(data, base + 48),
+      isolationBps: readU16LE2(data, base + 64)
     },
-    currentSlot: readU64LE2(data, base + 336),
-    fundingIndexQpbE6: readI128LE2(data, base + 344),
-    lastFundingSlot: readU64LE2(data, base + 360),
-    fundingRateBpsPerSlotLast: readI64LE2(data, base + 368),
-    lastCrankSlot: readU64LE2(data, base + 400),
-    maxCrankStalenessSlots: readU64LE2(data, base + 408),
-    totalOpenInterest: readU128LE2(data, base + 416),
-    longOi: readU128LE2(data, base + 432),
-    shortOi: readU128LE2(data, base + 448),
-    cTot: readU128LE2(data, base + 464),
-    pnlPosTot: readU128LE2(data, base + 480),
-    liqCursor: readU16LE2(data, base + 496),
-    gcCursor: readU16LE2(data, base + 498),
-    lastSweepStartSlot: readU64LE2(data, base + 504),
-    lastSweepCompleteSlot: readU64LE2(data, base + 512),
-    crankCursor: readU16LE2(data, base + 520),
-    sweepStartIdx: readU16LE2(data, base + 522),
-    lifetimeLiquidations: readU64LE2(data, base + 528),
-    lifetimeForceCloses: readU64LE2(data, base + 536),
-    netLpPos: readI128LE2(data, base + 544),
-    lpSumAbs: readU128LE2(data, base + 560),
-    lpMaxAbs: readU128LE2(data, base + 576),
-    lpMaxAbsSweep: readU128LE2(data, base + 592),
-    emergencyOiMode: data[base + 608] !== 0,
-    emergencyStartSlot: readU64LE2(data, base + 616),
-    lastBreakerSlot: readU64LE2(data, base + 624),
+    currentSlot: readU64LE2(data, base + 384),
+    fundingIndexQpbE6: readI128LE2(data, base + 392),
+    lastFundingSlot: readU64LE2(data, base + 384),
+    fundingRateBpsPerSlotLast: readI64LE2(data, base + 392),
+    lastCrankSlot: readU64LE2(data, base + 424),
+    maxCrankStalenessSlots: readU64LE2(data, base + 456),
+    totalOpenInterest: readU128LE2(data, base + 440),
+    longOi: readU128LE2(data, base + 456),
+    shortOi: readU128LE2(data, base + 472),
+    cTot: readU128LE2(data, base + 488),
+    pnlPosTot: readU128LE2(data, base + 552),
+    liqCursor: readU16LE2(data, base + 568),
+    gcCursor: readU16LE2(data, base + 546),
+    lastSweepStartSlot: readU64LE2(data, base + 552),
+    lastSweepCompleteSlot: readU64LE2(data, base + 584),
+    crankCursor: readU16LE2(data, base + 568),
+    sweepStartIdx: readU16LE2(data, base + 546),
+    lifetimeLiquidations: readU64LE2(data, base + 552),
+    lifetimeForceCloses: readU64LE2(data, base + 584),
+    netLpPos: readI128LE2(data, base + 568),
+    lpSumAbs: readU128LE2(data, base + 584),
+    lpMaxAbs: readU128LE2(data, base + 600),
+    lpMaxAbsSweep: readU128LE2(data, base + 640),
+    emergencyOiMode: data[base + 632] !== 0,
+    emergencyStartSlot: readU64LE2(data, base + 640),
+    lastBreakerSlot: readU64LE2(data, base + 648),
     numUsedAccounts: canReadNumUsed ? readU16LE2(data, base + numUsedOff) : 0,
     nextAccountId: canReadNextId ? readU64LE2(data, base + nextAccountIdOff) : 0n
   };
@@ -2455,6 +2477,7 @@ export {
   ACCOUNTS_CREATE_INSURANCE_MINT,
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_DEPOSIT_INSURANCE_LP,
+  ACCOUNTS_FUND_MARKET_INSURANCE,
   ACCOUNTS_INIT_LP,
   ACCOUNTS_INIT_MARKET,
   ACCOUNTS_INIT_USER,
@@ -2463,6 +2486,7 @@ export {
   ACCOUNTS_PAUSE_MARKET,
   ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_RESOLVE_MARKET,
+  ACCOUNTS_SET_INSURANCE_ISOLATION,
   ACCOUNTS_SET_MAINTENANCE_FEE,
   ACCOUNTS_SET_ORACLE_AUTHORITY,
   ACCOUNTS_SET_ORACLE_PRICE_CAP,
@@ -2549,6 +2573,7 @@ export {
   encodeCreateInsuranceMint,
   encodeDepositCollateral,
   encodeDepositInsuranceLP,
+  encodeFundMarketInsurance,
   encodeInitLP,
   encodeInitMarket,
   encodeInitUser,
@@ -2558,6 +2583,7 @@ export {
   encodePushOraclePrice,
   encodeRenounceAdmin,
   encodeResolveMarket,
+  encodeSetInsuranceIsolation,
   encodeSetMaintenanceFee,
   encodeSetOracleAuthority,
   encodeSetOraclePriceCap,

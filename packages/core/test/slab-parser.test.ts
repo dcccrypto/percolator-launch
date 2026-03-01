@@ -11,7 +11,7 @@ import {
  *    RESERVED_OFF = 80 (nonce at 80, lastThrUpdateSlot at 88)
  */
 function buildMockSlab(): Uint8Array {
-  const size = 1_025_688; // large tier (4096 accounts) with ACCOUNT_SIZE=248, CONFIG_LEN=416
+  const size = 1_025_728; // large tier (4096 accounts) with ACCOUNT_SIZE=248, CONFIG_LEN=416
   const buf = new Uint8Array(size);
   const dv = new DataView(buf.buffer);
 
@@ -34,13 +34,13 @@ function buildMockSlab(): Uint8Array {
   for (let i = 136; i < 168; i++) buf[i] = 3;
 
   // Engine at offset 488 (HEADER=104 + CONFIG=384, aligned to 8)
-  const engineBase = 520;
+  const engineBase = 536;
   // vault = 1000000 (U128)
   dv.setBigUint64(engineBase + 0, 1000000n, true);
   // insurance balance = 500000
   dv.setBigUint64(engineBase + 16, 500000n, true);
   // totalOpenInterest = 100000 (at engine offset 416)
-  dv.setBigUint64(engineBase + 416, 100000n, true);
+  dv.setBigUint64(engineBase + 440, 100000n, true);
   // cTot = 800000 (at engine offset 432)
   dv.setBigUint64(engineBase + 432, 800000n, true);
   // numUsedAccounts at bitmap(576) + bitmap_words(64*8=512) = offset 1088
