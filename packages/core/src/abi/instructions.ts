@@ -60,6 +60,8 @@ export const IX_TAG = {
   FundMarketInsurance: 41,
   /** PERC-306: Set insurance isolation BPS for a market */
   SetInsuranceIsolation: 42,
+  /** PERC-305: Keeper-triggered partial ADL */
+  ExecuteAdl: 43,
 } as const;
 
 /**
@@ -741,6 +743,27 @@ export function encodeFundMarketInsurance(args: { amount: bigint }): Uint8Array 
  */
 export function encodeSetInsuranceIsolation(args: { bps: number }): Uint8Array {
   return concatBytes(encU8(IX_TAG.SetInsuranceIsolation), encU16(args.bps));
+}
+
+// ============================================================================
+// PERC-305: Partial Auto-Deleveraging
+// ============================================================================
+
+/**
+ * Keeper-triggered partial ADL: close profitable positions to reduce pnl_pos_tot.
+ * Accounts: [keeper(signer), slab(writable)]
+ * Data: tag(1) + num_targets(u16) + target_indices(u16[]) + oracle_price_e6(u64)
+ */
+export function encodeExecuteAdl(args: {
+  targetIndices: number[];
+  oraclePriceE6: bigint;
+}): Uint8Array {
+  return concatBytes(
+    encU8(IX_TAG.ExecuteAdl),
+    encU16(args.targetIndices.length),
+    ...args.targetIndices.map((idx) => encU16(idx)),
+    encU64(args.oraclePriceE6),
+  );
 }
 
 // ============================================================================

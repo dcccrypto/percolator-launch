@@ -349,6 +349,15 @@ export const ACCOUNTS_SET_INSURANCE_ISOLATION: readonly AccountSpec[] = [
   { name: "slab", signer: false, writable: true },
 ] as const;
 
+/**
+ * ExecuteAdl: 2 accounts (PERC-305)
+ * Keeper-triggered partial auto-deleveraging.
+ */
+export const ACCOUNTS_EXECUTE_ADL: readonly AccountSpec[] = [
+  { name: "keeper", signer: true, writable: false },
+  { name: "slab", signer: false, writable: true },
+] as const;
+
 // ============================================================================
 // WELL-KNOWN PROGRAM/SYSVAR KEYS
 // ============================================================================
