@@ -78,23 +78,23 @@ describe("slabDataSize", () => {
   it("data size is always 8-byte aligned (due to account alignment)", () => {
     for (const n of [64, 128, 256, 512, 1024, 2048, 4096]) {
       const size = slabDataSize(n);
-      // Total size = ENGINE_OFF(456) + accountsOff + maxAccounts * ACCOUNT_SIZE(248)
+      // Total size = ENGINE_OFF(472) + accountsOff + maxAccounts * ACCOUNT_SIZE(248)
       // Verify it's a reasonable positive integer exceeding raw account data
-      expect(size).toBeGreaterThan(456 + n * 248); // must exceed raw account data
+      expect(size).toBeGreaterThan(472 + n * 248); // must exceed raw account data
       // Verify 8-byte alignment invariant
       expect(size % 8).toBe(0);
     }
   });
 
   it("accounts for bitmap, next_free array, and padding overhead", () => {
-    // For 256 accounts (updated for PERC-289: CONFIG_LEN 352→368):
-    // ENGINE_OFF = 472, ENGINE_FIXED = 576
+    // For 256 accounts (PERC-298: ENGINE_FIXED grew 576→608):
+    // ENGINE_OFF = 472, ENGINE_FIXED = 608
     // bitmap = ceil(256/64) * 8 = 32 bytes
     // postBitmap = 18 bytes
     // nextFree = 256 * 2 = 512 bytes
-    // preAccountsLen = 576 + 32 + 18 + 512 = 1138
-    // accountsOff = ceil(1138/8)*8 = 1144
-    // total = 472 + 1144 + 256*248 = 472 + 1144 + 63488 = 65104
-    expect(slabDataSize(256)).toBe(65104);
+    // preAccountsLen = 608 + 32 + 18 + 512 = 1170
+    // accountsOff = ceil(1170/8)*8 = 1176
+    // total = 472 + 1176 + 256*248 = 472 + 1176 + 63488 = 65136
+    expect(slabDataSize(256)).toBe(65136);
   });
 });

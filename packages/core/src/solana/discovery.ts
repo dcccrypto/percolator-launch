@@ -9,8 +9,8 @@ import {
   type RiskParams,
 } from "./slab.js";
 
-/** Bitmap offset within engine struct (updated for PERC-120/121/122 struct changes) */
-const ENGINE_BITMAP_OFF = 576;
+/** Bitmap offset within engine struct (PERC-298: +32 from long_oi/short_oi) */
+const ENGINE_BITMAP_OFF = 608;
 
 /**
  * A discovered Percolator market from on-chain program accounts.
@@ -33,20 +33,19 @@ const MAGIC_BYTES = new Uint8Array([0x54, 0x41, 0x4c, 0x4f, 0x43, 0x52, 0x45, 0x
  * IMPORTANT: dataSize must match the compiled program's SLAB_LEN for that MAX_ACCOUNTS.
  * The on-chain program has a hardcoded SLAB_LEN — slab account data.len() must equal it exactly.
  *
- * Layout: HEADER(104) + CONFIG(384) + RiskEngine(variable by tier)
- *   ENGINE_OFF = align_up(104 + 384, 8) = 488  (SBF: u128 align = 8)
+ * Layout: HEADER(104) + CONFIG(368) + RiskEngine(variable by tier)
+ *   ENGINE_OFF = align_up(104 + 368, 8) = 472  (SBF: U128=[u64;2], align=8)
  *   RiskEngine = fixed(608) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
  *
- * NOTE: CONFIG_LEN grew from 368→384 (PERC-298: skew_factor_bps + reserved).
- *       RiskEngine grew by 32 bytes (PERC-298: long_oi + short_oi U128 fields).
- *       ENGINE_OFF shifted from 472→488 (+16 bytes), ENGINE_LEN grew +32 bytes.
- *       Total growth: +48 bytes per tier.
- *       Values below must be verified against BPF build before deployment.
+ * NOTE: PERC-298 added long_oi + short_oi (32 bytes) to RiskEngine.
+ *       CONFIG_LEN unchanged at 368 (skew factor packed into oi_cap_multiplier_bps).
+ *       ENGINE_OFF unchanged at 472. ENGINE_LEN grew +32 bytes.
+ *       Values computed via slabDataSize() and verified against BPF build.
  */
 export const SLAB_TIERS = {
-  small:  { maxAccounts: 256,  dataSize: 65_152,    label: "Small",  description: "256 slots · ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257_248,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
-  large:  { maxAccounts: 4096, dataSize: 1_025_632, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
+  small:  { maxAccounts: 256,  dataSize: 65_136,    label: "Small",  description: "256 slots · ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257_232,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 1_025_616, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
 } as const;
 
 export type SlabTierKey = keyof typeof SLAB_TIERS;
@@ -55,7 +54,7 @@ export type SlabTierKey = keyof typeof SLAB_TIERS;
  *
  * Layout (SBF, u128 align = 8):
  *   HEADER(104) + CONFIG(368) → ENGINE_OFF = 472
- *   RiskEngine fixed scalars: 576 bytes (vault through lp_max_abs_sweep)
+ *   RiskEngine fixed scalars: 608 bytes (vault through lp_max_abs_sweep, PERC-298: +32)
  *   + bitmap: ceil(N/64)*8
  *   + num_used_accounts(u16) + pad(6) + next_account_id(u64) + free_head(u16) = 18
  *   + next_free: N*2
@@ -66,7 +65,7 @@ export type SlabTierKey = keyof typeof SLAB_TIERS;
  */
 export function slabDataSize(maxAccounts: number): number {
   const ENGINE_OFF_LOCAL = 472; // align_up(104 + 368, 8)
-  const ENGINE_FIXED = 576;     // scalars before bitmap
+  const ENGINE_FIXED = 608;     // scalars before bitmap (PERC-298: +32 from long_oi/short_oi)
   const ACCOUNT_SIZE = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
   // After bitmap: num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) = 18
@@ -96,8 +95,8 @@ const ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map(t => t.dataSize);
 /** Legacy constant for backward compat */
 const SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 
-/** We need header(104) + config(368) + engine up to nextAccountId (~1100). Total ~1572. Use 1600 for margin. */
-const HEADER_SLICE_LENGTH = 1600;
+/** We need header(104) + config(368) + engine up to nextAccountId (~1132). Total ~1604. Use 1700 for margin. */
+const HEADER_SLICE_LENGTH = 1700;
 
 const ENGINE_OFF = 472;
 
@@ -147,15 +146,16 @@ function parseEngineLight(data: Uint8Array, maxAccounts: number = 4096): EngineS
   const canReadNumUsed = data.length >= base + numUsedOff + 2;
   const canReadNextId = data.length >= base + nextAccountIdOff + 8;
 
-  // Engine field offsets within engine struct (updated for PERC-120/121/122):
+  // Engine field offsets within engine struct (PERC-298: +32 shift after totalOI):
   // vault(0) + insurance(16,32) + params(48,288) + currentSlot(336) + fundingIndex(344,16)
   // + lastFundingSlot(360) + fundingRateBps(368) + markPrice(376) + fundingFrozen(384,8)
   // + frozenRate(392) + lastCrankSlot(400) + maxCrankStaleness(408) + totalOI(416,16)
-  // + cTot(432,16) + pnlPosTot(448,16) + liqCursor(464,2) + gcCursor(466,2)
-  // + lastSweepStart(472) + lastSweepComplete(480) + crankCursor(488,2) + sweepStartIdx(490,2)
-  // + lifetimeLiquidations(496) + lifetimeForceCloses(504)
-  // + netLpPos(512,16) + lpSumAbs(528,16) + lpMaxAbs(544,16) + lpMaxAbsSweep(560,16)
-  // + bitmap(576)
+  // + longOi(432,16) + shortOi(448,16)    ← PERC-298 new fields
+  // + cTot(464,16) + pnlPosTot(480,16) + liqCursor(496,2) + gcCursor(498,2)
+  // + lastSweepStart(504) + lastSweepComplete(512) + crankCursor(520,2) + sweepStartIdx(522,2)
+  // + lifetimeLiquidations(528) + lifetimeForceCloses(536)
+  // + netLpPos(544,16) + lpSumAbs(560,16) + lpMaxAbs(576,16) + lpMaxAbsSweep(592,16)
+  // + bitmap(608)
   return {
     vault: readU128LE(data, base + 0),
     insuranceFund: {
@@ -169,20 +169,22 @@ function parseEngineLight(data: Uint8Array, maxAccounts: number = 4096): EngineS
     lastCrankSlot: readU64LE(data, base + 400),
     maxCrankStalenessSlots: readU64LE(data, base + 408),
     totalOpenInterest: readU128LE(data, base + 416),
-    cTot: readU128LE(data, base + 432),
-    pnlPosTot: readU128LE(data, base + 448),
-    liqCursor: readU16LE(data, base + 464),
-    gcCursor: readU16LE(data, base + 466),
-    lastSweepStartSlot: readU64LE(data, base + 472),
-    lastSweepCompleteSlot: readU64LE(data, base + 480),
-    crankCursor: readU16LE(data, base + 488),
-    sweepStartIdx: readU16LE(data, base + 490),
-    lifetimeLiquidations: readU64LE(data, base + 496),
-    lifetimeForceCloses: readU64LE(data, base + 504),
-    netLpPos: readI128LE(data, base + 512),
-    lpSumAbs: readU128LE(data, base + 528),
-    lpMaxAbs: readU128LE(data, base + 544),
-    lpMaxAbsSweep: readU128LE(data, base + 560),
+    longOi: readU128LE(data, base + 432),
+    shortOi: readU128LE(data, base + 448),
+    cTot: readU128LE(data, base + 464),
+    pnlPosTot: readU128LE(data, base + 480),
+    liqCursor: readU16LE(data, base + 496),
+    gcCursor: readU16LE(data, base + 498),
+    lastSweepStartSlot: readU64LE(data, base + 504),
+    lastSweepCompleteSlot: readU64LE(data, base + 512),
+    crankCursor: readU16LE(data, base + 520),
+    sweepStartIdx: readU16LE(data, base + 522),
+    lifetimeLiquidations: readU64LE(data, base + 528),
+    lifetimeForceCloses: readU64LE(data, base + 536),
+    netLpPos: readI128LE(data, base + 544),
+    lpSumAbs: readU128LE(data, base + 560),
+    lpMaxAbs: readU128LE(data, base + 576),
+    lpMaxAbsSweep: readU128LE(data, base + 592),
     numUsedAccounts: canReadNumUsed ? readU16LE(data, base + numUsedOff) : 0,
     nextAccountId: canReadNextId ? readU64LE(data, base + nextAccountIdOff) : 0n,
   };

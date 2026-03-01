@@ -5,13 +5,13 @@ import {
 } from "../src/solana/slab.js";
 
 /** Build a minimal valid slab buffer for header + config + engine (no accounts).
- *  Updated for PERC-120/121/122 struct changes:
+ *  Updated for PERC-298 struct changes:
  *    HEADER_LEN = 104, CONFIG_OFFSET = 104, ENGINE_OFF = 472
- *    ENGINE_BITMAP_OFF = 576, ACCOUNT_SIZE = 248
+ *    ENGINE_BITMAP_OFF = 608, ACCOUNT_SIZE = 248
  *    RESERVED_OFF = 80 (nonce at 80, lastThrUpdateSlot at 88)
  */
 function buildMockSlab(): Uint8Array {
-  const size = 1_025_584; // large tier (4096 accounts) with ACCOUNT_SIZE=248, CONFIG_LEN=368
+  const size = 1_025_616; // large tier (4096 accounts) PERC-298 BPF size
   const buf = new Uint8Array(size);
   const dv = new DataView(buf.buffer);
 
@@ -41,12 +41,16 @@ function buildMockSlab(): Uint8Array {
   dv.setBigUint64(engineBase + 16, 500000n, true);
   // totalOpenInterest = 100000 (at engine offset 416)
   dv.setBigUint64(engineBase + 416, 100000n, true);
-  // cTot = 800000 (at engine offset 432)
-  dv.setBigUint64(engineBase + 432, 800000n, true);
-  // numUsedAccounts at bitmap(576) + bitmap_words(64*8=512) = offset 1088
-  dv.setUint16(engineBase + 1088, 0, true);
-  // nextAccountId at aligned offset after numUsedAccounts: ceil((1088+2)/8)*8 = 1096
-  dv.setBigUint64(engineBase + 1096, 1n, true);
+  // PERC-298: longOi = 60000 (at engine offset 432)
+  dv.setBigUint64(engineBase + 432, 60000n, true);
+  // PERC-298: shortOi = 40000 (at engine offset 448)
+  dv.setBigUint64(engineBase + 448, 40000n, true);
+  // cTot = 800000 (at engine offset 464, shifted +32 by PERC-298)
+  dv.setBigUint64(engineBase + 464, 800000n, true);
+  // numUsedAccounts at bitmap(608) + bitmap_words(64*8=512) = offset 1120
+  dv.setUint16(engineBase + 1120, 0, true);
+  // nextAccountId at aligned offset after numUsedAccounts: ceil((1120+2)/8)*8 = 1128
+  dv.setBigUint64(engineBase + 1128, 1n, true);
 
   // RiskParams at engine offset 48
   const paramsBase = engineBase + 48;
@@ -94,6 +98,8 @@ describe("parseEngine", () => {
     expect(e.vault).toBe(1000000n);
     expect(e.insuranceFund.balance).toBe(500000n);
     expect(e.totalOpenInterest).toBe(100000n);
+    expect(e.longOi).toBe(60000n);
+    expect(e.shortOi).toBe(40000n);
     expect(e.cTot).toBe(800000n);
     expect(e.numUsedAccounts).toBe(0);
     expect(e.nextAccountId).toBe(1n);
