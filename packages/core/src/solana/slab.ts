@@ -347,8 +347,12 @@ const ENGINE_NET_LP_POS_OFF = 544;      // I128
 const ENGINE_LP_SUM_ABS_OFF = 560;      // U128
 const ENGINE_LP_MAX_ABS_OFF = 576;      // U128
 const ENGINE_LP_MAX_ABS_SWEEP_OFF = 592;// U128
-// Bitmap starts at 608
-const ENGINE_BITMAP_OFF = 608;
+// PERC-299: Volatility-adjusted OI cap fields
+const ENGINE_EMERGENCY_OI_MODE_OFF = 608; // u8 (+ 7 padding)
+const ENGINE_EMERGENCY_START_SLOT_OFF = 616; // u64
+const ENGINE_LAST_BREAKER_SLOT_OFF = 624; // u64
+// Bitmap starts at 632
+const ENGINE_BITMAP_OFF = 632;
 // Dynamic layout helpers — bitmap/accounts offsets depend on maxAccounts
 const DEFAULT_MAX_ACCOUNTS = 4096;
 const DEFAULT_BITMAP_WORDS = 64;  // ceil(4096/64)
@@ -357,7 +361,7 @@ const ACCOUNT_SIZE = 248;  // Account now includes last_partial_liquidation_slot
 // For backward compat, keep large default
 // Large: bitmap(64*8=512) + num_used(2) + pad(6) + next_account_id(8) + free_head(2) + next_free(4096*2=8192) + pad(6) + accounts = 9304 - 576 = ...
 // Actually: engine fixed(576) + bitmap(512) + 18 + 8192 = 9298, align to 8 = 9304
-const ENGINE_ACCOUNTS_OFF = 9336;       // accounts offset for 4096 variant (within engine)
+const ENGINE_ACCOUNTS_OFF = 9360;       // accounts offset for 4096 variant (within engine, PERC-299)
 
 /**
  * Compute bitmap words and accounts offset for a given maxAccounts.
@@ -500,6 +504,10 @@ export interface EngineState {
   lpSumAbs: bigint;          // Sum of abs(LP positions)
   lpMaxAbs: bigint;          // Max abs(LP position) monotone upper bound
   lpMaxAbsSweep: bigint;     // In-progress max abs for current sweep
+  // PERC-299: Volatility-adjusted OI cap
+  emergencyOiMode: boolean;  // true = OI cap halved (circuit breaker active)
+  emergencyStartSlot: bigint;
+  lastBreakerSlot: bigint;
   numUsedAccounts: number;
   nextAccountId: bigint;
 }
@@ -621,6 +629,9 @@ export function parseEngine(data: Uint8Array): EngineState {
     lpSumAbs: readU128LE(data, base + ENGINE_LP_SUM_ABS_OFF),
     lpMaxAbs: readU128LE(data, base + ENGINE_LP_MAX_ABS_OFF),
     lpMaxAbsSweep: readU128LE(data, base + ENGINE_LP_MAX_ABS_SWEEP_OFF),
+    emergencyOiMode: data[base + ENGINE_EMERGENCY_OI_MODE_OFF] !== 0,
+    emergencyStartSlot: readU64LE(data, base + ENGINE_EMERGENCY_START_SLOT_OFF),
+    lastBreakerSlot: readU64LE(data, base + ENGINE_LAST_BREAKER_SLOT_OFF),
     numUsedAccounts: (() => {
       const bw = layout ? layout.bitmapWords : DEFAULT_BITMAP_WORDS;
       return readU16LE(data, base + ENGINE_BITMAP_OFF + bw * 8);

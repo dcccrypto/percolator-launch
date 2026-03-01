@@ -995,11 +995,14 @@ var ENGINE_NET_LP_POS_OFF = 544;
 var ENGINE_LP_SUM_ABS_OFF = 560;
 var ENGINE_LP_MAX_ABS_OFF = 576;
 var ENGINE_LP_MAX_ABS_SWEEP_OFF = 592;
-var ENGINE_BITMAP_OFF = 608;
+var ENGINE_EMERGENCY_OI_MODE_OFF = 608;
+var ENGINE_EMERGENCY_START_SLOT_OFF = 616;
+var ENGINE_LAST_BREAKER_SLOT_OFF = 624;
+var ENGINE_BITMAP_OFF = 632;
 var DEFAULT_MAX_ACCOUNTS = 4096;
 var DEFAULT_BITMAP_WORDS = 64;
 var ACCOUNT_SIZE = 248;
-var ENGINE_ACCOUNTS_OFF = 9336;
+var ENGINE_ACCOUNTS_OFF = 9360;
 function slabLayout(maxAccounts) {
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
@@ -1123,6 +1126,9 @@ function parseEngine(data) {
     lpSumAbs: readU128LE(data, base + ENGINE_LP_SUM_ABS_OFF),
     lpMaxAbs: readU128LE(data, base + ENGINE_LP_MAX_ABS_OFF),
     lpMaxAbsSweep: readU128LE(data, base + ENGINE_LP_MAX_ABS_SWEEP_OFF),
+    emergencyOiMode: data[base + ENGINE_EMERGENCY_OI_MODE_OFF] !== 0,
+    emergencyStartSlot: readU64LE(data, base + ENGINE_EMERGENCY_START_SLOT_OFF),
+    lastBreakerSlot: readU64LE(data, base + ENGINE_LAST_BREAKER_SLOT_OFF),
     numUsedAccounts: (() => {
       const bw = layout ? layout.bitmapWords : DEFAULT_BITMAP_WORDS;
       return readU16LE(data, base + ENGINE_BITMAP_OFF + bw * 8);
@@ -1276,16 +1282,16 @@ async function fetchTokenAccount(connection, address, tokenProgramId = TOKEN_PRO
 }
 
 // src/solana/discovery.ts
-var ENGINE_BITMAP_OFF2 = 576;
+var ENGINE_BITMAP_OFF2 = 632;
 var MAGIC_BYTES = new Uint8Array([84, 65, 76, 79, 67, 82, 69, 80]);
 var SLAB_TIERS = {
-  small: { maxAccounts: 256, dataSize: 65136, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257232, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
-  large: { maxAccounts: 4096, dataSize: 1025616, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
+  small: { maxAccounts: 256, dataSize: 65160, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257256, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
+  large: { maxAccounts: 4096, dataSize: 1025640, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
 };
 function slabDataSize(maxAccounts) {
   const ENGINE_OFF_LOCAL = 472;
-  const ENGINE_FIXED = 608;
+  const ENGINE_FIXED = 632;
   const ACCOUNT_SIZE2 = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
   const postBitmap = 18;
@@ -1366,6 +1372,9 @@ function parseEngineLight(data, maxAccounts = 4096) {
     lpSumAbs: readU128LE2(data, base + 560),
     lpMaxAbs: readU128LE2(data, base + 576),
     lpMaxAbsSweep: readU128LE2(data, base + 592),
+    emergencyOiMode: data[base + 608] !== 0,
+    emergencyStartSlot: readU64LE2(data, base + 616),
+    lastBreakerSlot: readU64LE2(data, base + 624),
     numUsedAccounts: canReadNumUsed ? readU16LE2(data, base + numUsedOff) : 0,
     nextAccountId: canReadNextId ? readU64LE2(data, base + nextAccountIdOff) : 0n
   };

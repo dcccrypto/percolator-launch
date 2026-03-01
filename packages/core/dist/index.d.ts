@@ -745,6 +745,9 @@ interface EngineState {
     lpSumAbs: bigint;
     lpMaxAbs: bigint;
     lpMaxAbsSweep: bigint;
+    emergencyOiMode: boolean;
+    emergencyStartSlot: bigint;
+    lastBreakerSlot: bigint;
     numUsedAccounts: number;
     nextAccountId: bigint;
 }
@@ -879,19 +882,19 @@ interface DiscoveredMarket {
 declare const SLAB_TIERS: {
     readonly small: {
         readonly maxAccounts: 256;
-        readonly dataSize: 65136;
+        readonly dataSize: 65160;
         readonly label: "Small";
         readonly description: "256 slots · ~0.45 SOL";
     };
     readonly medium: {
         readonly maxAccounts: 1024;
-        readonly dataSize: 257232;
+        readonly dataSize: 257256;
         readonly label: "Medium";
         readonly description: "1,024 slots · ~1.79 SOL";
     };
     readonly large: {
         readonly maxAccounts: 4096;
-        readonly dataSize: 1025616;
+        readonly dataSize: 1025640;
         readonly label: "Large";
         readonly description: "4,096 slots · ~7.14 SOL";
     };

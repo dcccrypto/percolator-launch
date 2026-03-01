@@ -10,7 +10,7 @@ import {
 } from "./slab.js";
 
 /** Bitmap offset within engine struct (updated for PERC-120/121/122 struct changes) */
-const ENGINE_BITMAP_OFF = 576;
+const ENGINE_BITMAP_OFF = 632; // Updated for PERC-299 (608 + 24 emergency OI fields)
 
 /**
  * A discovered Percolator market from on-chain program accounts.
@@ -43,9 +43,9 @@ const MAGIC_BYTES = new Uint8Array([0x54, 0x41, 0x4c, 0x4f, 0x43, 0x52, 0x45, 0x
  *       Values below must be verified against BPF build before deployment.
  */
 export const SLAB_TIERS = {
-  small:  { maxAccounts: 256,  dataSize: 65_136,    label: "Small",  description: "256 slots · ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257_232,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
-  large:  { maxAccounts: 4096, dataSize: 1_025_616, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
+  small:  { maxAccounts: 256,  dataSize: 65_160,    label: "Small",  description: "256 slots · ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257_256,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 1_025_640, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
 } as const;
 
 export type SlabTierKey = keyof typeof SLAB_TIERS;
@@ -65,7 +65,7 @@ export type SlabTierKey = keyof typeof SLAB_TIERS;
  */
 export function slabDataSize(maxAccounts: number): number {
   const ENGINE_OFF_LOCAL = 472; // align_up(104 + 368, 8)
-  const ENGINE_FIXED = 608;     // scalars before bitmap (576 + 32 for PERC-298 long_oi/short_oi)
+  const ENGINE_FIXED = 632;     // scalars before bitmap (608 + 24 for PERC-299 emergency OI fields)
   const ACCOUNT_SIZE = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
   // After bitmap: num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) = 18
@@ -155,7 +155,8 @@ function parseEngineLight(data: Uint8Array, maxAccounts: number = 4096): EngineS
   // + lastSweepStart(504) + lastSweepComplete(512) + crankCursor(520,2) + sweepStartIdx(522,2)
   // + lifetimeLiquidations(528) + lifetimeForceCloses(536)
   // + netLpPos(544,16) + lpSumAbs(560,16) + lpMaxAbs(576,16) + lpMaxAbsSweep(592,16)
-  // + bitmap(608)
+  // + emergencyOiMode(608,1+7pad) + emergencyStartSlot(616,8) + lastBreakerSlot(624,8)
+  // + bitmap(632)
   return {
     vault: readU128LE(data, base + 0),
     insuranceFund: {
@@ -185,6 +186,9 @@ function parseEngineLight(data: Uint8Array, maxAccounts: number = 4096): EngineS
     lpSumAbs: readU128LE(data, base + 560),
     lpMaxAbs: readU128LE(data, base + 576),
     lpMaxAbsSweep: readU128LE(data, base + 592),
+    emergencyOiMode: data[base + 608] !== 0,
+    emergencyStartSlot: readU64LE(data, base + 616),
+    lastBreakerSlot: readU64LE(data, base + 624),
     numUsedAccounts: canReadNumUsed ? readU16LE(data, base + numUsedOff) : 0,
     nextAccountId: canReadNextId ? readU64LE(data, base + nextAccountIdOff) : 0n,
   };
