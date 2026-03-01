@@ -349,6 +349,11 @@ export const ACCOUNTS_SET_INSURANCE_ISOLATION: readonly AccountSpec[] = [
   { name: "slab", signer: false, writable: true },
 ] as const;
 
+export const ACCOUNTS_EXECUTE_ADL: readonly AccountSpec[] = [
+  { name: "keeper", signer: true, writable: false },
+  { name: "slab", signer: false, writable: true },
+] as const;
+
 // ============================================================================
 // WELL-KNOWN PROGRAM/SYSVAR KEYS
 // ============================================================================
