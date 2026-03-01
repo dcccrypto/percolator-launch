@@ -350,8 +350,10 @@ export const ACCOUNTS_SET_INSURANCE_ISOLATION: readonly AccountSpec[] = [
 ] as const;
 
 /**
- * ExecuteAdl: 2 accounts (PERC-305)
- * Keeper-triggered partial auto-deleveraging.
+ * ExecuteAdl: NOT IMPLEMENTED ON-CHAIN (PERC-305 pending).
+ * Tag 43 is ChallengeSettlement (PERC-314). This constant is retained
+ * for reference only — do NOT use it to build instructions.
+ * @deprecated PERC-305 is not deployed. Using this would invoke ChallengeSettlement.
  */
 export const ACCOUNTS_EXECUTE_ADL: readonly AccountSpec[] = [
   { name: "keeper", signer: true, writable: false },

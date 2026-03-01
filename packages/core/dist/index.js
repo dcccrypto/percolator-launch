@@ -125,8 +125,17 @@ var IX_TAG = {
   FundMarketInsurance: 41,
   /** PERC-306: Set insurance isolation BPS for a market */
   SetInsuranceIsolation: 42,
-  /** PERC-305: Keeper-triggered partial ADL */
-  ExecuteAdl: 43
+  // Tag 43 is ChallengeSettlement on-chain (PERC-314).
+  // PERC-305 (ExecuteAdl) is NOT implemented on-chain — do NOT assign tag 43 here.
+  // When PERC-305 is implemented, assign a new unused tag (≥47).
+  /** PERC-314: Challenge settlement price during dispute window */
+  ChallengeSettlement: 43,
+  /** PERC-314: Resolve dispute (admin adjudication) */
+  ResolveDispute: 44,
+  /** PERC-315: Deposit LP vault tokens as perp collateral */
+  DepositLpCollateral: 45,
+  /** PERC-315: Withdraw LP collateral (position must be closed) */
+  WithdrawLpCollateral: 46
 };
 function encodeFeedId(feedId) {
   const hex = feedId.startsWith("0x") ? feedId.slice(2) : feedId;
@@ -393,14 +402,6 @@ function encodeFundMarketInsurance(args) {
 }
 function encodeSetInsuranceIsolation(args) {
   return concatBytes(encU8(IX_TAG.SetInsuranceIsolation), encU16(args.bps));
-}
-function encodeExecuteAdl(args) {
-  return concatBytes(
-    encU8(IX_TAG.ExecuteAdl),
-    encU16(args.targetIndices.length),
-    ...args.targetIndices.map((idx) => encU16(idx)),
-    encU64(args.oraclePriceE6)
-  );
 }
 var VAMM_MAGIC = 0x504552434d415443n;
 var CTX_VAMM_OFFSET = 64;
@@ -869,7 +870,7 @@ function readI64LE(data, off) {
 var MAGIC = 0x504552434f4c4154n;
 var HEADER_LEN = 104;
 var CONFIG_OFFSET = HEADER_LEN;
-var CONFIG_LEN = 432;
+var CONFIG_LEN = 496;
 var RESERVED_OFF = 80;
 var FLAG_RESOLVED = 1 << 0;
 async function fetchSlab(connection, slabPubkey) {
@@ -1047,7 +1048,7 @@ function readLastThrUpdateSlot(data) {
   }
   return readU64LE(data, RESERVED_OFF + 8);
 }
-var ENGINE_OFF = 536;
+var ENGINE_OFF = 600;
 var ENGINE_VAULT_OFF = 0;
 var ENGINE_INSURANCE_OFF = 16;
 var ENGINE_INSURANCE_ISOLATED_OFF = 48;
@@ -1368,12 +1369,12 @@ async function fetchTokenAccount(connection, address, tokenProgramId = TOKEN_PRO
 var ENGINE_BITMAP_OFF2 = 656;
 var MAGIC_BYTES = new Uint8Array([84, 65, 76, 79, 67, 82, 69, 80]);
 var SLAB_TIERS = {
-  small: { maxAccounts: 256, dataSize: 65248, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257344, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
-  large: { maxAccounts: 4096, dataSize: 1025728, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
+  small: { maxAccounts: 256, dataSize: 65312, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257408, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
+  large: { maxAccounts: 4096, dataSize: 1025792, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
 };
 function slabDataSize(maxAccounts) {
-  const ENGINE_OFF_LOCAL = 536;
+  const ENGINE_OFF_LOCAL = 600;
   const ENGINE_FIXED = 656;
   const ACCOUNT_SIZE2 = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
@@ -1388,8 +1389,8 @@ function validateSlabTierMatch(dataSize, programSlabLen) {
 }
 var ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map((t) => t.dataSize);
 var SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
-var HEADER_SLICE_LENGTH = 1720;
-var ENGINE_OFF2 = 536;
+var HEADER_SLICE_LENGTH = 1900;
+var ENGINE_OFF2 = 600;
 function dv2(data) {
   return new DataView(data.buffer, data.byteOffset, data.byteLength);
 }
@@ -2762,7 +2763,6 @@ export {
   encodeCreateInsuranceMint,
   encodeDepositCollateral,
   encodeDepositInsuranceLP,
-  encodeExecuteAdl,
   encodeFundMarketInsurance,
   encodeInitLP,
   encodeInitMarket,

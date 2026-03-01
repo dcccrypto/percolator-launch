@@ -60,8 +60,17 @@ export const IX_TAG = {
   FundMarketInsurance: 41,
   /** PERC-306: Set insurance isolation BPS for a market */
   SetInsuranceIsolation: 42,
-  /** PERC-305: Keeper-triggered partial ADL */
-  ExecuteAdl: 43,
+  // Tag 43 is ChallengeSettlement on-chain (PERC-314).
+  // PERC-305 (ExecuteAdl) is NOT implemented on-chain — do NOT assign tag 43 here.
+  // When PERC-305 is implemented, assign a new unused tag (≥47).
+  /** PERC-314: Challenge settlement price during dispute window */
+  ChallengeSettlement: 43,
+  /** PERC-314: Resolve dispute (admin adjudication) */
+  ResolveDispute: 44,
+  /** PERC-315: Deposit LP vault tokens as perp collateral */
+  DepositLpCollateral: 45,
+  /** PERC-315: Withdraw LP collateral (position must be closed) */
+  WithdrawLpCollateral: 46,
 } as const;
 
 /**
@@ -746,25 +755,16 @@ export function encodeSetInsuranceIsolation(args: { bps: number }): Uint8Array {
 }
 
 // ============================================================================
-// PERC-305: Partial Auto-Deleveraging
+// PERC-305: Partial Auto-Deleveraging — NOT YET IMPLEMENTED ON-CHAIN
 // ============================================================================
-
-/**
- * Keeper-triggered partial ADL: close profitable positions to reduce pnl_pos_tot.
- * Accounts: [keeper(signer), slab(writable)]
- * Data: tag(1) + num_targets(u16) + target_indices(u16[]) + oracle_price_e6(u64)
- */
-export function encodeExecuteAdl(args: {
-  targetIndices: number[];
-  oraclePriceE6: bigint;
-}): Uint8Array {
-  return concatBytes(
-    encU8(IX_TAG.ExecuteAdl),
-    encU16(args.targetIndices.length),
-    ...args.targetIndices.map((idx) => encU16(idx)),
-    encU64(args.oraclePriceE6),
-  );
-}
+// encodeExecuteAdl() has been REMOVED. The on-chain program does NOT have an
+// ExecuteAdl instruction. Tag 43 is ChallengeSettlement (PERC-314).
+// Calling the old encodeExecuteAdl() would have invoked ChallengeSettlement
+// with a garbled data layout — a critical security vulnerability (PERC-319).
+//
+// When PERC-305 is implemented on-chain, add the encoder here with a new
+// unused tag (≥47). See tags.rs for the single source of truth.
+// ============================================================================
 
 // ============================================================================
 // SMART PRICE ROUTER — quote computation for LP selection
