@@ -124,7 +124,9 @@ var IX_TAG = {
   /** PERC-306: Fund per-market isolated insurance balance */
   FundMarketInsurance: 41,
   /** PERC-306: Set insurance isolation BPS for a market */
-  SetInsuranceIsolation: 42
+  SetInsuranceIsolation: 42,
+  /** PERC-305: Keeper-triggered partial ADL */
+  ExecuteAdl: 43
 };
 function encodeFeedId(feedId) {
   const hex = feedId.startsWith("0x") ? feedId.slice(2) : feedId;
@@ -392,6 +394,14 @@ function encodeFundMarketInsurance(args) {
 function encodeSetInsuranceIsolation(args) {
   return concatBytes(encU8(IX_TAG.SetInsuranceIsolation), encU16(args.bps));
 }
+function encodeExecuteAdl(args) {
+  return concatBytes(
+    encU8(IX_TAG.ExecuteAdl),
+    encU16(args.targetIndices.length),
+    ...args.targetIndices.map((idx) => encU16(idx)),
+    encU64(args.oraclePriceE6)
+  );
+}
 var VAMM_MAGIC = 0x504552434d415443n;
 var CTX_VAMM_OFFSET = 64;
 var BPS_DENOM = 10000n;
@@ -615,6 +625,10 @@ var ACCOUNTS_FUND_MARKET_INSURANCE = [
 ];
 var ACCOUNTS_SET_INSURANCE_ISOLATION = [
   { name: "admin", signer: true, writable: false },
+  { name: "slab", signer: false, writable: true }
+];
+var ACCOUNTS_EXECUTE_ADL = [
+  { name: "keeper", signer: true, writable: false },
   { name: "slab", signer: false, writable: true }
 ];
 var WELL_KNOWN = {
@@ -2477,6 +2491,7 @@ export {
   ACCOUNTS_CREATE_INSURANCE_MINT,
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_DEPOSIT_INSURANCE_LP,
+  ACCOUNTS_EXECUTE_ADL,
   ACCOUNTS_FUND_MARKET_INSURANCE,
   ACCOUNTS_INIT_LP,
   ACCOUNTS_INIT_MARKET,
@@ -2573,6 +2588,7 @@ export {
   encodeCreateInsuranceMint,
   encodeDepositCollateral,
   encodeDepositInsuranceLP,
+  encodeExecuteAdl,
   encodeFundMarketInsurance,
   encodeInitLP,
   encodeInitMarket,
