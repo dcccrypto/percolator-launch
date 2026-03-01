@@ -1697,6 +1697,46 @@ function readU128LE3(dv3, offset) {
   return lo | hi << 64n;
 }
 
+// src/solana/oracle.ts
+var CHAINLINK_MIN_SIZE = 224;
+var MAX_DECIMALS = 18;
+var CHAINLINK_DECIMALS_OFFSET = 138;
+var CHAINLINK_ANSWER_OFFSET = 216;
+function readU82(data, off) {
+  return data[off];
+}
+function readBigInt64LE(data, off) {
+  return new DataView(data.buffer, data.byteOffset, data.byteLength).getBigInt64(off, true);
+}
+function parseChainlinkPrice(data) {
+  if (data.length < CHAINLINK_MIN_SIZE) {
+    throw new Error(
+      `Oracle account data too small: ${data.length} bytes (need at least ${CHAINLINK_MIN_SIZE})`
+    );
+  }
+  const decimals = readU82(data, CHAINLINK_DECIMALS_OFFSET);
+  if (decimals > MAX_DECIMALS) {
+    throw new Error(
+      `Oracle decimals out of range: ${decimals} (max ${MAX_DECIMALS})`
+    );
+  }
+  const price = readBigInt64LE(data, CHAINLINK_ANSWER_OFFSET);
+  if (price <= 0n) {
+    throw new Error(
+      `Oracle price is non-positive: ${price}`
+    );
+  }
+  return { price, decimals };
+}
+function isValidChainlinkOracle(data) {
+  try {
+    parseChainlinkPrice(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // src/solana/token-program.ts
 import { PublicKey as PublicKey6 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID as TOKEN_PROGRAM_ID3 } from "@solana/spl-token";
@@ -2516,11 +2556,15 @@ export {
   ACCOUNTS_WITHDRAW_INSURANCE,
   ACCOUNTS_WITHDRAW_INSURANCE_LP,
   AccountKind,
+  CHAINLINK_ANSWER_OFFSET,
+  CHAINLINK_DECIMALS_OFFSET,
+  CHAINLINK_MIN_SIZE,
   CTX_VAMM_OFFSET,
   DEFAULT_OI_RAMP_SLOTS,
   IX_TAG,
   MARK_PRICE_EMA_ALPHA_E6,
   MARK_PRICE_EMA_WINDOW_SLOTS,
+  MAX_DECIMALS,
   METEORA_DLMM_PROGRAM_ID,
   PERCOLATOR_ERRORS,
   PROGRAM_IDS,
@@ -2645,9 +2689,11 @@ export {
   isAccountUsed,
   isStandardToken,
   isToken2022,
+  isValidChainlinkOracle,
   maxAccountIndex,
   parseAccount,
   parseAllAccounts,
+  parseChainlinkPrice,
   parseConfig,
   parseDexPool,
   parseEngine,
