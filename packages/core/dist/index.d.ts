@@ -729,6 +729,8 @@ interface EngineState {
     lastCrankSlot: bigint;
     maxCrankStalenessSlots: bigint;
     totalOpenInterest: bigint;
+    longOi: bigint;
+    shortOi: bigint;
     cTot: bigint;
     pnlPosTot: bigint;
     liqCursor: number;
@@ -867,32 +869,29 @@ interface DiscoveredMarket {
  *
  * Layout: HEADER(104) + CONFIG(368) + RiskEngine(variable by tier)
  *   ENGINE_OFF = align_up(104 + 368, 8) = 472  (SBF: u128 align = 8)
- *   RiskEngine = fixed(576) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
+ *   RiskEngine = fixed(608) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
  *
- * Verified against deployed devnet programs (PERC-289 re-verification):
- *   Small  (256 slots):  program logs SLAB_LEN = 0xfe50 = 65104
- *   Medium (1024 slots): computed from identical struct layout
- *   Large  (4096 slots): computed from identical struct layout
- *
- * NOTE: CONFIG_LEN grew from 352→368 (PERC-273 OI cap + oracle authority fields),
- *       shifting ENGINE_OFF from 456→472 (+16 bytes across all tiers).
+ * NOTE: PERC-298 packed skew_factor_bps into oi_cap_multiplier_bps upper bits (CONFIG_LEN unchanged).
+ *       RiskEngine grew by 32 bytes (PERC-298: long_oi + short_oi U128 fields).
+ *       ENGINE_OFF unchanged at 472. ENGINE_LEN grew +32 bytes. Total growth: +32 bytes per tier.
+ *       Values below must be verified against BPF build before deployment.
  */
 declare const SLAB_TIERS: {
     readonly small: {
         readonly maxAccounts: 256;
-        readonly dataSize: 65104;
+        readonly dataSize: 65136;
         readonly label: "Small";
         readonly description: "256 slots · ~0.45 SOL";
     };
     readonly medium: {
         readonly maxAccounts: 1024;
-        readonly dataSize: 257200;
+        readonly dataSize: 257232;
         readonly label: "Medium";
         readonly description: "1,024 slots · ~1.79 SOL";
     };
     readonly large: {
         readonly maxAccounts: 4096;
-        readonly dataSize: 1025584;
+        readonly dataSize: 1025616;
         readonly label: "Large";
         readonly description: "4,096 slots · ~7.14 SOL";
     };

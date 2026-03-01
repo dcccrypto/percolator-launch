@@ -979,25 +979,27 @@ var ENGINE_FUNDING_RATE_BPS_OFF = 368;
 var ENGINE_LAST_CRANK_SLOT_OFF = 400;
 var ENGINE_MAX_CRANK_STALENESS_OFF = 408;
 var ENGINE_TOTAL_OI_OFF = 416;
-var ENGINE_C_TOT_OFF = 432;
-var ENGINE_PNL_POS_TOT_OFF = 448;
-var ENGINE_LIQ_CURSOR_OFF = 464;
-var ENGINE_GC_CURSOR_OFF = 466;
-var ENGINE_LAST_SWEEP_START_OFF = 472;
-var ENGINE_LAST_SWEEP_COMPLETE_OFF = 480;
-var ENGINE_CRANK_CURSOR_OFF = 488;
-var ENGINE_SWEEP_START_IDX_OFF = 490;
-var ENGINE_LIFETIME_LIQUIDATIONS_OFF = 496;
-var ENGINE_LIFETIME_FORCE_CLOSES_OFF = 504;
-var ENGINE_NET_LP_POS_OFF = 512;
-var ENGINE_LP_SUM_ABS_OFF = 528;
-var ENGINE_LP_MAX_ABS_OFF = 544;
-var ENGINE_LP_MAX_ABS_SWEEP_OFF = 560;
-var ENGINE_BITMAP_OFF = 576;
+var ENGINE_LONG_OI_OFF = 432;
+var ENGINE_SHORT_OI_OFF = 448;
+var ENGINE_C_TOT_OFF = 464;
+var ENGINE_PNL_POS_TOT_OFF = 480;
+var ENGINE_LIQ_CURSOR_OFF = 496;
+var ENGINE_GC_CURSOR_OFF = 498;
+var ENGINE_LAST_SWEEP_START_OFF = 504;
+var ENGINE_LAST_SWEEP_COMPLETE_OFF = 512;
+var ENGINE_CRANK_CURSOR_OFF = 520;
+var ENGINE_SWEEP_START_IDX_OFF = 522;
+var ENGINE_LIFETIME_LIQUIDATIONS_OFF = 528;
+var ENGINE_LIFETIME_FORCE_CLOSES_OFF = 536;
+var ENGINE_NET_LP_POS_OFF = 544;
+var ENGINE_LP_SUM_ABS_OFF = 560;
+var ENGINE_LP_MAX_ABS_OFF = 576;
+var ENGINE_LP_MAX_ABS_SWEEP_OFF = 592;
+var ENGINE_BITMAP_OFF = 608;
 var DEFAULT_MAX_ACCOUNTS = 4096;
 var DEFAULT_BITMAP_WORDS = 64;
 var ACCOUNT_SIZE = 248;
-var ENGINE_ACCOUNTS_OFF = 9304;
+var ENGINE_ACCOUNTS_OFF = 9336;
 function slabLayout(maxAccounts) {
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
@@ -1104,6 +1106,8 @@ function parseEngine(data) {
     lastCrankSlot: readU64LE(data, base + ENGINE_LAST_CRANK_SLOT_OFF),
     maxCrankStalenessSlots: readU64LE(data, base + ENGINE_MAX_CRANK_STALENESS_OFF),
     totalOpenInterest: readU128LE(data, base + ENGINE_TOTAL_OI_OFF),
+    longOi: readU128LE(data, base + ENGINE_LONG_OI_OFF),
+    shortOi: readU128LE(data, base + ENGINE_SHORT_OI_OFF),
     cTot: readU128LE(data, base + ENGINE_C_TOT_OFF),
     pnlPosTot: readU128LE(data, base + ENGINE_PNL_POS_TOT_OFF),
     liqCursor: readU16LE(data, base + ENGINE_LIQ_CURSOR_OFF),
@@ -1275,13 +1279,13 @@ async function fetchTokenAccount(connection, address, tokenProgramId = TOKEN_PRO
 var ENGINE_BITMAP_OFF2 = 576;
 var MAGIC_BYTES = new Uint8Array([84, 65, 76, 79, 67, 82, 69, 80]);
 var SLAB_TIERS = {
-  small: { maxAccounts: 256, dataSize: 65104, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257200, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
-  large: { maxAccounts: 4096, dataSize: 1025584, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
+  small: { maxAccounts: 256, dataSize: 65136, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257232, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
+  large: { maxAccounts: 4096, dataSize: 1025616, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
 };
 function slabDataSize(maxAccounts) {
   const ENGINE_OFF_LOCAL = 472;
-  const ENGINE_FIXED = 576;
+  const ENGINE_FIXED = 608;
   const ACCOUNT_SIZE2 = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
   const postBitmap = 18;
@@ -1346,20 +1350,22 @@ function parseEngineLight(data, maxAccounts = 4096) {
     lastCrankSlot: readU64LE2(data, base + 400),
     maxCrankStalenessSlots: readU64LE2(data, base + 408),
     totalOpenInterest: readU128LE2(data, base + 416),
-    cTot: readU128LE2(data, base + 432),
-    pnlPosTot: readU128LE2(data, base + 448),
-    liqCursor: readU16LE2(data, base + 464),
-    gcCursor: readU16LE2(data, base + 466),
-    lastSweepStartSlot: readU64LE2(data, base + 472),
-    lastSweepCompleteSlot: readU64LE2(data, base + 480),
-    crankCursor: readU16LE2(data, base + 488),
-    sweepStartIdx: readU16LE2(data, base + 490),
-    lifetimeLiquidations: readU64LE2(data, base + 496),
-    lifetimeForceCloses: readU64LE2(data, base + 504),
-    netLpPos: readI128LE2(data, base + 512),
-    lpSumAbs: readU128LE2(data, base + 528),
-    lpMaxAbs: readU128LE2(data, base + 544),
-    lpMaxAbsSweep: readU128LE2(data, base + 560),
+    longOi: readU128LE2(data, base + 432),
+    shortOi: readU128LE2(data, base + 448),
+    cTot: readU128LE2(data, base + 464),
+    pnlPosTot: readU128LE2(data, base + 480),
+    liqCursor: readU16LE2(data, base + 496),
+    gcCursor: readU16LE2(data, base + 498),
+    lastSweepStartSlot: readU64LE2(data, base + 504),
+    lastSweepCompleteSlot: readU64LE2(data, base + 512),
+    crankCursor: readU16LE2(data, base + 520),
+    sweepStartIdx: readU16LE2(data, base + 522),
+    lifetimeLiquidations: readU64LE2(data, base + 528),
+    lifetimeForceCloses: readU64LE2(data, base + 536),
+    netLpPos: readI128LE2(data, base + 544),
+    lpSumAbs: readU128LE2(data, base + 560),
+    lpMaxAbs: readU128LE2(data, base + 576),
+    lpMaxAbsSweep: readU128LE2(data, base + 592),
     numUsedAccounts: canReadNumUsed ? readU16LE2(data, base + numUsedOff) : 0,
     nextAccountId: canReadNextId ? readU64LE2(data, base + nextAccountIdOff) : 0n
   };

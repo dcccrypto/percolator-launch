@@ -167,9 +167,9 @@ console.log("\nTesting account parsing...\n");
 // Constants from slab.ts for testing (keep in sync with slab.ts)
 // Updated for PERC-289: CONFIG_LEN 352→368
 const ENGINE_OFF = 472;
-const ENGINE_ACCOUNTS_OFF = 9304;
+const ENGINE_ACCOUNTS_OFF = 9336;  // Updated for PERC-298
 const ACCOUNT_SIZE = 248;
-const ENGINE_BITMAP_OFF = 576;
+const ENGINE_BITMAP_OFF = 608;  // Updated for PERC-298
 
 // Account field offsets
 const ACCT_ACCOUNT_ID_OFF = 0;
