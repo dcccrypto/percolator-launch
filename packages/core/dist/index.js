@@ -1773,7 +1773,17 @@ var STAKE_IX = {
   AdminSetMaintenanceFee: 8,
   AdminResolveMarket: 9,
   AdminWithdrawInsurance: 10,
-  AdminSetInsurancePolicy: 11
+  AdminSetInsurancePolicy: 11,
+  /** PERC-272: Accrue trading fees to LP vault */
+  AccrueFees: 12,
+  /** PERC-272: Init pool in trading LP mode */
+  InitTradingPool: 13,
+  /** PERC-313: Set HWM config (enable + floor bps) */
+  AdminSetHwmConfig: 14,
+  /** PERC-303: Enable/configure senior-junior LP tranches */
+  AdminSetTrancheConfig: 15,
+  /** PERC-303: Deposit into junior (first-loss) tranche */
+  DepositJunior: 16
 };
 function deriveStakePool(slab, programId = STAKE_PROGRAM_ID) {
   return PublicKey7.findProgramAddressSync(
@@ -1865,6 +1875,32 @@ function encodeStakeAdminWithdrawInsurance(amount) {
     u64Le(amount)
   ]);
 }
+function encodeStakeAccrueFees() {
+  return Buffer.from([STAKE_IX.AccrueFees]);
+}
+function encodeStakeInitTradingPool(cooldownSlots, depositCap) {
+  return Buffer.concat([
+    Buffer.from([STAKE_IX.InitTradingPool]),
+    u64Le(cooldownSlots),
+    u64Le(depositCap)
+  ]);
+}
+function encodeStakeAdminSetHwmConfig(enabled, hwmFloorBps) {
+  return Buffer.concat([
+    Buffer.from([STAKE_IX.AdminSetHwmConfig]),
+    Buffer.from([enabled ? 1 : 0]),
+    u16Le(hwmFloorBps)
+  ]);
+}
+function encodeStakeAdminSetTrancheConfig(juniorFeeMultBps) {
+  return Buffer.concat([
+    Buffer.from([STAKE_IX.AdminSetTrancheConfig]),
+    u16Le(juniorFeeMultBps)
+  ]);
+}
+function encodeStakeDepositJunior(amount) {
+  return Buffer.concat([Buffer.from([STAKE_IX.DepositJunior]), u64Le(amount)]);
+}
 function encodeStakeAdminSetInsurancePolicy(authority, minWithdrawBase, maxWithdrawBps, cooldownSlots) {
   return Buffer.concat([
     Buffer.from([STAKE_IX.AdminSetInsurancePolicy]),
@@ -1873,6 +1909,98 @@ function encodeStakeAdminSetInsurancePolicy(authority, minWithdrawBase, maxWithd
     u16Le(maxWithdrawBps),
     u64Le(cooldownSlots)
   ]);
+}
+var STAKE_POOL_SIZE = 352;
+function decodeStakePool(data) {
+  if (data.length < STAKE_POOL_SIZE) {
+    throw new Error(`StakePool data too short: ${data.length} < ${STAKE_POOL_SIZE}`);
+  }
+  const buf = Buffer.from(data);
+  let off = 0;
+  const isInitialized = buf[off] === 1;
+  off += 1;
+  const bump = buf[off];
+  off += 1;
+  const vaultAuthorityBump = buf[off];
+  off += 1;
+  const adminTransferred = buf[off] === 1;
+  off += 1;
+  off += 4;
+  const slab = new PublicKey7(buf.subarray(off, off + 32));
+  off += 32;
+  const admin = new PublicKey7(buf.subarray(off, off + 32));
+  off += 32;
+  const collateralMint = new PublicKey7(buf.subarray(off, off + 32));
+  off += 32;
+  const lpMint = new PublicKey7(buf.subarray(off, off + 32));
+  off += 32;
+  const vault = new PublicKey7(buf.subarray(off, off + 32));
+  off += 32;
+  const totalDeposited = buf.readBigUInt64LE(off);
+  off += 8;
+  const totalLpSupply = buf.readBigUInt64LE(off);
+  off += 8;
+  const cooldownSlots = buf.readBigUInt64LE(off);
+  off += 8;
+  const depositCap = buf.readBigUInt64LE(off);
+  off += 8;
+  const totalFlushed = buf.readBigUInt64LE(off);
+  off += 8;
+  const totalReturned = buf.readBigUInt64LE(off);
+  off += 8;
+  const totalWithdrawn = buf.readBigUInt64LE(off);
+  off += 8;
+  const percolatorProgram = new PublicKey7(buf.subarray(off, off + 32));
+  off += 32;
+  const totalFeesEarned = buf.readBigUInt64LE(off);
+  off += 8;
+  const lastFeeAccrualSlot = buf.readBigUInt64LE(off);
+  off += 8;
+  const lastVaultSnapshot = buf.readBigUInt64LE(off);
+  off += 8;
+  const poolMode = buf[off];
+  off += 1;
+  off += 7;
+  const reservedStart = off;
+  const hwmEnabled = buf[reservedStart + 9] === 1;
+  const hwmTvlLow = buf.readBigUInt64LE(reservedStart + 10);
+  const hwmTvlHigh = buf.readBigUInt64LE(reservedStart + 18);
+  const epochHighWaterTvl = hwmTvlLow + (hwmTvlHigh << 64n);
+  const hwmFloorBps = buf.readUInt16LE(reservedStart + 26);
+  const trancheEnabled = buf[reservedStart + 32] === 1;
+  const juniorBalance = buf.readBigUInt64LE(reservedStart + 33);
+  const juniorTotalLp = buf.readBigUInt64LE(reservedStart + 41);
+  const juniorFeeMultBps = buf.readUInt16LE(reservedStart + 49);
+  return {
+    isInitialized,
+    bump,
+    vaultAuthorityBump,
+    adminTransferred,
+    slab,
+    admin,
+    collateralMint,
+    lpMint,
+    vault,
+    totalDeposited,
+    totalLpSupply,
+    cooldownSlots,
+    depositCap,
+    totalFlushed,
+    totalReturned,
+    totalWithdrawn,
+    percolatorProgram,
+    totalFeesEarned,
+    lastFeeAccrualSlot,
+    lastVaultSnapshot,
+    poolMode,
+    hwmEnabled,
+    epochHighWaterTvl,
+    hwmFloorBps,
+    trancheEnabled,
+    juniorBalance,
+    juniorTotalLp,
+    juniorFeeMultBps
+  };
 }
 function initPoolAccounts(a) {
   return [
@@ -2576,6 +2704,7 @@ export {
   RAYDIUM_CLMM_PROGRAM_ID,
   SLAB_TIERS,
   STAKE_IX,
+  STAKE_POOL_SIZE,
   STAKE_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   VAMM_MAGIC,
@@ -2604,6 +2733,7 @@ export {
   computeWarmupUnlockedCapital,
   concatBytes,
   decodeError,
+  decodeStakePool,
   depositAccounts,
   deriveDepositPda,
   deriveInsuranceLpMint,
@@ -2649,15 +2779,20 @@ export {
   encodeSetOraclePriceCap,
   encodeSetPythOracle,
   encodeSetRiskThreshold,
+  encodeStakeAccrueFees,
   encodeStakeAdminResolveMarket,
+  encodeStakeAdminSetHwmConfig,
   encodeStakeAdminSetInsurancePolicy,
   encodeStakeAdminSetMaintenanceFee,
   encodeStakeAdminSetOracleAuthority,
   encodeStakeAdminSetRiskThreshold,
+  encodeStakeAdminSetTrancheConfig,
   encodeStakeAdminWithdrawInsurance,
   encodeStakeDeposit,
+  encodeStakeDepositJunior,
   encodeStakeFlushToInsurance,
   encodeStakeInitPool,
+  encodeStakeInitTradingPool,
   encodeStakeTransferAdmin,
   encodeStakeUpdateConfig,
   encodeStakeWithdraw,
