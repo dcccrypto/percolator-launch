@@ -10,6 +10,7 @@ import { useStakeDeposit } from '@/hooks/useStakeDeposit';
 import { useStakeWithdraw } from '@/hooks/useStakeWithdraw';
 import { useEngineState } from '@/hooks/useEngineState';
 import { useEarnStats, type MarketVaultInfo } from '@/hooks/useEarnStats';
+import { getSupabase } from '@/lib/supabase';
 import { OiCapMeter } from '@/components/earn/OiCapMeter';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
@@ -70,6 +71,25 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     return earnStats.markets.find((m) => m.slabAddress === slabAddress) ?? null;
   }, [earnStats.markets, slabAddress]);
 
+  // Fallback: fetch symbol directly from Supabase if market not in earn stats
+  // (e.g., market status is not 'active' so it's filtered out of useEarnStats)
+  const [fallbackSymbol, setFallbackSymbol] = useState<string | null>(null);
+  useEffect(() => {
+    if (marketInfo || earnLoading) return;
+    let cancelled = false;
+    getSupabase()
+      .from('markets_with_stats')
+      .select('symbol, name')
+      .eq('slab_address', slabAddress)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled && data?.symbol) {
+          setFallbackSymbol(data.symbol);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [marketInfo, earnLoading, slabAddress]);
+
   const loading = poolLoading || earnLoading;
 
   // Callbacks
@@ -89,7 +109,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     [stakeWithdraw, refreshState],
   );
 
-  const symbol = marketInfo?.symbol ?? 'UNKNOWN';
+  const symbol = marketInfo?.symbol ?? fallbackSymbol ?? 'UNKNOWN';
   const maxOI = marketInfo?.maxOI ?? 0;
   const currentOI = marketInfo?.totalOI ?? (totalOI ? Number(totalOI) / 1e6 : 0);
   const estimatedApy = marketInfo?.estimatedApyPct ?? 0;
