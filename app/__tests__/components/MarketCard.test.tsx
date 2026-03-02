@@ -435,10 +435,10 @@ describe("MarketBrowser Component Tests", () => {
   });
 
   describe("Oracle Type Badge", () => {
-    it("should show Admin badge for zero oracle feed ID", () => {
+    it("should show HYPERP badge for zero oracle feed ID (DEX oracle)", () => {
       const zeroKey = new PublicKey("11111111111111111111111111111111");
       const market = createMockMarket({});
-      market.config.indexFeedId = zeroKey; // Admin oracle
+      market.config.indexFeedId = zeroKey; // Hyperp DEX oracle
       const mockMarkets = [market];
 
       (useMarketDiscovery as any).mockReturnValue({
@@ -453,13 +453,15 @@ describe("MarketBrowser Component Tests", () => {
 
       render(<MarketBrowser />);
 
-      expect(screen.getAllByText("Admin").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("HYPERP").length).toBeGreaterThanOrEqual(1);
     });
 
-    it("should show Pyth badge for non-zero oracle feed ID", () => {
+    it("should show PYTH badge for non-zero feed ID with zero oracle authority", () => {
       const pythKey = new PublicKey("2kVU3naG2r4kezerqcuDB6nadtd7vmyeRTsqcbWBTscb");
+      const zeroKey = new PublicKey("11111111111111111111111111111111");
       const market = createMockMarket({});
       market.config.indexFeedId = pythKey; // Pyth oracle
+      market.config.oracleAuthority = zeroKey; // zero authority → pyth-pinned
       const mockMarkets = [market];
 
       (useMarketDiscovery as any).mockReturnValue({
@@ -474,7 +476,30 @@ describe("MarketBrowser Component Tests", () => {
 
       render(<MarketBrowser />);
 
-      expect(screen.getAllByText("Pyth").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("PYTH").length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should show ADMIN badge for non-zero feed ID with non-zero oracle authority", () => {
+      const pythKey = new PublicKey("2kVU3naG2r4kezerqcuDB6nadtd7vmyeRTsqcbWBTscb");
+      const adminKey = new PublicKey("8rxVYS7HdWpmqGgNPTCZXTqGATZLde9Lv5e9kaUrZGCQ");
+      const market = createMockMarket({});
+      market.config.indexFeedId = pythKey;
+      market.config.oracleAuthority = adminKey; // non-zero authority → admin
+      const mockMarkets = [market];
+
+      (useMarketDiscovery as any).mockReturnValue({
+        markets: mockMarkets,
+        loading: false,
+        error: null,
+      });
+
+      (useMultiTokenMeta as any).mockReturnValue(
+        new Map([[mockPublicKey.toBase58(), { symbol: "SOL", decimals: 6 }]])
+      );
+
+      render(<MarketBrowser />);
+
+      expect(screen.getAllByText("ADMIN").length).toBeGreaterThanOrEqual(1);
     });
   });
 });

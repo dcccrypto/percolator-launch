@@ -7,7 +7,9 @@ import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { formatTokenAmount, shortenAddress } from "@/lib/format";
 import { computeMarketHealth, sanitizeAccountCount } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
+import { OracleBadge } from "@/components/oracle/OracleBadge";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
+import { detectOracleMode } from "@/lib/oraclePrice";
 import type { DiscoveredMarket } from "@percolator/sdk";
 
 const ALL_ZEROS = new PublicKey("11111111111111111111111111111111");
@@ -107,15 +109,7 @@ export const MarketBrowser: FC = () => {
                     </a>
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                        isAdminOracle(m)
-                          ? "bg-[var(--warning)]/20 text-[var(--warning)]"
-                          : "bg-[var(--long)]/[0.08] text-[var(--long)]"
-                      }`}
-                    >
-                      {isAdminOracle(m) ? "Admin" : "Pyth"}
-                    </span>
+                    <OracleBadge mode={detectOracleMode(m.config)} pulse={false} />
                   </td>
                   <td className="px-4 py-3 text-right text-[var(--text)]">
                     {formatTokenAmount(m.engine.totalOpenInterest, decimals)} {symbol}
@@ -163,15 +157,7 @@ export const MarketBrowser: FC = () => {
                     <div className="font-medium text-sm text-[var(--text)]">{symbol}/USD PERP</div>
                     <div className="font-mono text-[10px] text-[var(--text-muted)]">{shortenAddress(slab, 4)}</div>
                   </div>
-                  <span
-                    className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                      isAdminOracle(m)
-                        ? "bg-[var(--warning)]/20 text-[var(--warning)]"
-                        : "bg-[var(--long)]/[0.08] text-[var(--long)]"
-                    }`}
-                  >
-                    {isAdminOracle(m) ? "Admin" : "Pyth"}
-                  </span>
+                  <OracleBadge mode={detectOracleMode(m.config)} pulse={false} />
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <HealthBadge level={health.level} />

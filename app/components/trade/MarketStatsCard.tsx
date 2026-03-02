@@ -13,6 +13,7 @@ import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { FundingRateCard } from "./FundingRateCard";
 import { FundingRateChart } from "./FundingRateChart";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
+import { OracleFreshnessIndicator } from "@/components/oracle/OracleFreshnessIndicator";
 
 function formatNum(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -80,6 +81,9 @@ export const MarketStatsCard: FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Oracle Freshness Indicator — P0 */}
+      <OracleFreshnessIndicator />
 
       {/* Funding Rate Section */}
       {slabAddress && (
