@@ -584,3 +584,36 @@ describe("MM Fleet — Combined Orderbook Depth", () => {
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// PERC-368: Keeper Wallet Tests
+// ═══════════════════════════════════════════════════════════════
+
+describe("PERC-368 — Keeper Wallet Configuration", () => {
+  it("profile names map to valid env var keys", () => {
+    for (const profile of DEFAULT_PROFILES) {
+      const envKey = `KEEPER_WALLET_${profile.name}`;
+      // Must be uppercase alphanumeric + underscore only
+      expect(envKey).toMatch(/^KEEPER_WALLET_[A-Z0-9_]+$/);
+    }
+  });
+
+  it("profile names map to valid file names", () => {
+    for (const profile of DEFAULT_PROFILES) {
+      const fileName = `keeper-${profile.name.toLowerCase()}.json`;
+      expect(fileName).toMatch(/^keeper-[a-z0-9_]+\.json$/);
+    }
+  });
+
+  it("3 profiles produce 3 distinct env var keys", () => {
+    const keys = DEFAULT_PROFILES.map((p) => `KEEPER_WALLET_${p.name}`);
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  it("3 profiles produce 3 distinct file names", () => {
+    const names = DEFAULT_PROFILES.map(
+      (p) => `keeper-${p.name.toLowerCase()}.json`,
+    );
+    expect(new Set(names).size).toBe(3);
+  });
+});

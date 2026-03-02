@@ -23,7 +23,9 @@
     "maker": "tsx scripts/floating-maker.ts",
     "maker:dry": "DRY_RUN=true tsx scripts/floating-maker.ts",
     "fleet": "tsx scripts/mm-fleet.ts",
-    "fleet:dry": "DRY_RUN=true tsx scripts/mm-fleet.ts"
+    "fleet:dry": "DRY_RUN=true tsx scripts/mm-fleet.ts",
+    "fleet:keygen": "tsx scripts/generate-keeper-wallets.ts --airdrop",
+    "fleet:keygen:dry": "tsx scripts/generate-keeper-wallets.ts"
   },
   "engines": {
     "node": ">=20"

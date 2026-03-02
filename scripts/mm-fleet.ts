@@ -8,7 +8,7 @@
  *   BOOTSTRAP_KEYPAIR=/path/to/keypair.json npx tsx scripts/mm-fleet.ts
  *
  * Environment variables (all optional, sane defaults):
- *   BOOTSTRAP_KEYPAIR     — Path to fleet controller keypair JSON (required)
+ *   BOOTSTRAP_KEYPAIR     — Path to fleet controller keypair JSON (fallback for all profiles)
  *   RPC_URL               — Solana RPC URL (default: devnet via Helius)
  *   HELIUS_API_KEY        — Helius API key for devnet RPC
  *   DRY_RUN               — "true" for simulation only
@@ -17,6 +17,16 @@
  *   MM_WIDE_SPREAD_BPS    — Override WIDE spread (see mm-profiles.ts)
  *   MM_TIGHT_A_SPREAD_BPS — Override TIGHT_A spread
  *   PROMETHEUS_PORT        — Expose /metrics on this port (default: off)
+ *
+ * PERC-368 — Per-profile keeper wallets:
+ *   KEEPER_WALLET_WIDE    — Keypair JSON for WIDE profile
+ *   KEEPER_WALLET_TIGHT_A — Keypair JSON for TIGHT_A profile
+ *   KEEPER_WALLET_TIGHT_B — Keypair JSON for TIGHT_B profile
+ *   KEEPER_WALLETS_DIR    — Directory containing keeper-wide.json, keeper-tight_a.json, etc.
+ *
+ *   When per-profile wallets are configured, each profile signs with its own
+ *   keypair. This creates 3 independent on-chain identities for more realistic
+ *   orderbook activity and avoids single-wallet rate limiting.
  */
 
 import {
@@ -97,6 +107,8 @@ const activeProfiles = PROFILE_FILTER
 interface FleetInstance {
   /** Profile configuration */
   profile: MakerProfile;
+  /** Signing wallet for this instance (PERC-368: may differ per profile) */
+  wallet: Keypair;
   /** On-chain market slab address */
   slabAddress: PublicKey;
   /** Collateral mint */
@@ -161,7 +173,55 @@ function loadKeypair(path: string): Keypair {
 }
 
 const connection = new Connection(RPC_URL, "confirmed");
-let fleetWallet: Keypair;
+let fleetWallet: Keypair; // fallback wallet
+
+/**
+ * PERC-368: Per-profile keeper wallets.
+ * Maps profile name → Keypair. Falls back to fleetWallet if not configured.
+ */
+const profileWallets = new Map<string, Keypair>();
+
+function loadProfileWallets(): void {
+  const walletsDir = process.env.KEEPER_WALLETS_DIR;
+
+  for (const profile of activeProfiles) {
+    // Check per-profile env var first: KEEPER_WALLET_WIDE, KEEPER_WALLET_TIGHT_A, etc.
+    const envKey = `KEEPER_WALLET_${profile.name}`;
+    const envPath = process.env[envKey];
+
+    if (envPath && fs.existsSync(envPath)) {
+      profileWallets.set(profile.name, loadKeypair(envPath));
+      log("wallets", `${profile.name}: loaded from ${envKey}`);
+      continue;
+    }
+
+    // Check directory mode: keeper-wide.json, keeper-tight_a.json
+    if (walletsDir) {
+      const fileName = `keeper-${profile.name.toLowerCase()}.json`;
+      const dirPath = `${walletsDir}/${fileName}`;
+      if (fs.existsSync(dirPath)) {
+        profileWallets.set(profile.name, loadKeypair(dirPath));
+        log("wallets", `${profile.name}: loaded from ${dirPath}`);
+        continue;
+      }
+    }
+
+    // Falls through → will use fleetWallet
+  }
+
+  const usingIndependent = profileWallets.size;
+  if (usingIndependent > 0) {
+    log(
+      "wallets",
+      `🔑 ${usingIndependent}/${activeProfiles.length} profiles using independent keeper wallets`,
+    );
+  }
+}
+
+/** Get the wallet for a given profile (falls back to fleetWallet) */
+function getWallet(profileName: string): Keypair {
+  return profileWallets.get(profileName) ?? fleetWallet;
+}
 
 /**
  * Send a transaction with retry logic.
@@ -374,6 +434,7 @@ async function setupInstance(
   profile: MakerProfile,
   isHyperp: boolean,
 ): Promise<FleetInstance | null> {
+  const wallet = getWallet(profile.name);
   const slabAddress = market.slabAddress;
   const mint = market.config.collateralMint;
 
@@ -383,22 +444,23 @@ async function setupInstance(
   const data = new Uint8Array(slabInfo.data);
   const accounts = parseAllAccounts(data);
 
-  // Each profile needs its own accounts. We tag them by looking for
-  // accounts owned by our wallet. Since we may create multiple,
-  // we track them by index.
+  // Each profile needs its own accounts. With per-profile wallets (PERC-368),
+  // each wallet owns its own accounts. With shared wallet, we use subaccount index.
   const myAccounts = accounts.filter((a) =>
-    a.account.owner.equals(fleetWallet.publicKey),
+    a.account.owner.equals(wallet.publicKey),
   );
   const myLPs = myAccounts.filter((a) => a.account.kind === 1);
   const myUsers = myAccounts.filter((a) => a.account.kind === 0);
 
-  // Profile index determines which subaccount to use
-  const profileIdx = activeProfiles.indexOf(profile);
+  // When using independent wallets, each wallet has index 0.
+  // When sharing a wallet, use profile index for subaccount isolation.
+  const hasOwnWallet = profileWallets.has(profile.name);
+  const profileIdx = hasOwnWallet ? 0 : activeProfiles.indexOf(profile);
 
   let lpAccount = myLPs[profileIdx] ?? null;
   let userAccount = myUsers[profileIdx] ?? null;
 
-  const walletAta = await getAta(fleetWallet.publicKey, mint);
+  const walletAta = await getAta(wallet.publicKey, mint);
   const [vaultPda] = deriveVaultAuthority(PROGRAM_ID, slabAddress);
   const vaultAta = await getAta(vaultPda, mint, true);
 
@@ -414,7 +476,7 @@ async function setupInstance(
         feePayment: "1000000",
       });
       const initKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
-        fleetWallet.publicKey,
+        wallet.publicKey,
         slabAddress,
         walletAta,
         vaultAta,
@@ -427,7 +489,7 @@ async function setupInstance(
         amount: profile.initialCollateralUsdc.toString(),
       });
       const depositKeys = buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
-        fleetWallet.publicKey,
+        wallet.publicKey,
         slabAddress,
         walletAta,
         vaultAta,
@@ -436,7 +498,7 @@ async function setupInstance(
       ]);
       const depositIx = buildIx({ programId: PROGRAM_ID, keys: depositKeys, data: depositData });
 
-      await sendTx([initIx, depositIx], [fleetWallet]);
+      await sendTx([initIx, depositIx], [wallet]);
     }
 
     // Refetch
@@ -444,7 +506,7 @@ async function setupInstance(
     if (newInfo) {
       const newAccs = parseAllAccounts(newInfo.data);
       const newLPs = newAccs
-        .filter((a) => a.account.kind === 1 && a.account.owner.equals(fleetWallet.publicKey));
+        .filter((a) => a.account.kind === 1 && a.account.owner.equals(wallet.publicKey));
       lpAccount = newLPs[profileIdx] ?? newLPs[newLPs.length - 1] ?? null;
     }
   }
@@ -457,7 +519,7 @@ async function setupInstance(
       log("setup", `${symbol}/${profile.name}: creating User account...`);
       const initData = encodeInitUser({ feePayment: "1000000" });
       const initKeys = buildAccountMetas(ACCOUNTS_INIT_USER, [
-        fleetWallet.publicKey,
+        wallet.publicKey,
         slabAddress,
         walletAta,
         vaultAta,
@@ -470,7 +532,7 @@ async function setupInstance(
         amount: profile.initialCollateralUsdc.toString(),
       });
       const depositKeys = buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
-        fleetWallet.publicKey,
+        wallet.publicKey,
         slabAddress,
         walletAta,
         vaultAta,
@@ -479,7 +541,7 @@ async function setupInstance(
       ]);
       const depositIx = buildIx({ programId: PROGRAM_ID, keys: depositKeys, data: depositData });
 
-      await sendTx([initIx, depositIx], [fleetWallet]);
+      await sendTx([initIx, depositIx], [wallet]);
     }
 
     // Refetch
@@ -487,7 +549,7 @@ async function setupInstance(
     if (newInfo) {
       const newAccs = parseAllAccounts(newInfo.data);
       const newUsers = newAccs
-        .filter((a) => a.account.kind === 0 && a.account.owner.equals(fleetWallet.publicKey));
+        .filter((a) => a.account.kind === 0 && a.account.owner.equals(wallet.publicKey));
       userAccount = newUsers[profileIdx] ?? newUsers[newUsers.length - 1] ?? null;
     }
   }
@@ -504,6 +566,7 @@ async function setupInstance(
 
   return {
     profile,
+    wallet,
     slabAddress,
     mint,
     symbol,
@@ -565,12 +628,12 @@ async function pushOracleIfNeeded(
     const timestamp = BigInt(Math.floor(Date.now() / 1000));
     const pushData = encodePushOraclePrice({ priceE6, timestamp });
     const pushKeys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
-      fleetWallet.publicKey,
+      inst.wallet.publicKey,
       inst.slabAddress,
     ]);
     const pushIx = buildIx({ programId: PROGRAM_ID, keys: pushKeys, data: pushData });
 
-    await sendTx([pushIx], [fleetWallet], 200_000);
+    await sendTx([pushIx], [inst.wallet], 200_000);
     lastPushed.set(slabKey, priceE6);
     inst.lastOraclePrice = priceE6;
     return true;
@@ -603,7 +666,7 @@ async function executeTrade(
 
     const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
     const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
-      fleetWallet.publicKey,
+      inst.wallet.publicKey,
       inst.slabAddress,
       SYSVAR_CLOCK_PUBKEY,
       inst.slabAddress,
@@ -616,7 +679,7 @@ async function executeTrade(
       size: size.toString(),
     });
     const tradeKeys = buildAccountMetas(ACCOUNTS_TRADE_CPI, [
-      fleetWallet.publicKey,
+      inst.wallet.publicKey,
       inst.lpOwner,
       inst.slabAddress,
       inst.slabAddress,
@@ -626,7 +689,7 @@ async function executeTrade(
     ]);
     const tradeIx = buildIx({ programId: PROGRAM_ID, keys: tradeKeys, data: tradeData });
 
-    const sig = await sendTx([crankIx, tradeIx], [fleetWallet], 600_000);
+    const sig = await sendTx([crankIx, tradeIx], [inst.wallet], 600_000);
     inst.positionSize += size;
     inst.stats.tradesSucceeded++;
 
@@ -678,7 +741,7 @@ async function runQuoteCycle(inst: FleetInstance): Promise<void> {
             (a) =>
               a.idx === inst.userIdx &&
               a.account.kind === 0 &&
-              a.account.owner.equals(fleetWallet.publicKey),
+              a.account.owner.equals(inst.wallet.publicKey),
           );
           if (userAcc) {
             inst.positionSize = userAcc.account.position ?? inst.positionSize;
@@ -887,31 +950,54 @@ process.on("SIGTERM", () => {
 async function main() {
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║  PERC-366: Market Maker Fleet                                ║
-║  Multi-profile oracle-anchored market making                 ║
+║  PERC-366/368: Market Maker Fleet                            ║
+║  Multi-profile oracle-anchored MM with keeper wallets        ║
 ║  Profiles: ${activeProfiles.map((p) => p.name).join(", ").padEnd(48)}║
 ╚══════════════════════════════════════════════════════════════╝
 `);
 
   globalStartedAt = Date.now();
 
-  // Load wallet
+  // Load fallback wallet
   const KP_PATH =
     process.env.BOOTSTRAP_KEYPAIR ?? "/tmp/bootstrap-wallet.json";
   try {
     fleetWallet = loadKeypair(KP_PATH);
-    log("main", `Wallet: ${fleetWallet.publicKey.toBase58()}`);
+    log("main", `Fallback wallet: ${fleetWallet.publicKey.toBase58()}`);
   } catch (e: any) {
-    console.error(`❌ Failed to load keypair from ${KP_PATH}: ${e.message}`);
-    process.exit(1);
+    // If no fallback wallet and no per-profile wallets configured, fail
+    if (!process.env.KEEPER_WALLETS_DIR && !activeProfiles.some(p => process.env[`KEEPER_WALLET_${p.name}`])) {
+      console.error(`❌ Failed to load keypair from ${KP_PATH}: ${e.message}`);
+      console.error("Set BOOTSTRAP_KEYPAIR, KEEPER_WALLETS_DIR, or KEEPER_WALLET_<PROFILE> env vars");
+      process.exit(1);
+    }
+    log("main", "No fallback wallet — using per-profile wallets only");
+    fleetWallet = Keypair.generate(); // dummy, won't be used
   }
 
-  // Check balance
-  const balance = await connection.getBalance(fleetWallet.publicKey);
-  const balSol = balance / 1e9;
-  log("main", `SOL: ${balSol.toFixed(4)}`);
-  if (balSol < 0.05) {
-    log("main", "⚠ Low SOL — fleet needs more for multi-instance txs");
+  // PERC-368: Load per-profile keeper wallets
+  loadProfileWallets();
+
+  // Check balances for all unique wallets
+  const uniqueWallets = new Map<string, { name: string; kp: Keypair }>();
+  for (const profile of activeProfiles) {
+    const w = getWallet(profile.name);
+    const key = w.publicKey.toBase58();
+    if (!uniqueWallets.has(key)) {
+      uniqueWallets.set(key, { name: profile.name, kp: w });
+    } else {
+      const existing = uniqueWallets.get(key)!;
+      existing.name += `+${profile.name}`;
+    }
+  }
+
+  for (const [pubkey, { name, kp }] of uniqueWallets) {
+    const balance = await connection.getBalance(kp.publicKey);
+    const balSol = balance / 1e9;
+    log("main", `${name} wallet ${pubkey.slice(0, 8)}...: ${balSol.toFixed(4)} SOL`);
+    if (balSol < 0.05) {
+      log("main", `⚠ ${name}: Low SOL — needs more for txs`);
+    }
   }
 
   log("main", `Profiles: ${activeProfiles.map((p) => `${p.name}(${p.spreadBps}bps)`).join(", ")}`);

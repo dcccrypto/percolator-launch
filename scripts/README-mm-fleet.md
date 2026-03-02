@@ -16,23 +16,42 @@ This creates 6 distinct price levels per market (3 bids + 3 asks) with $2,550 de
 
 ## Quick Start
 
+### Option A: Single wallet (subaccount isolation)
+
 ```bash
 # Generate a fleet wallet
 solana-keygen new -o /tmp/fleet-wallet.json --no-bip39-passphrase
 
-# Fund it (needs more SOL than single-instance — 3x the tx volume)
+# Fund it
 solana airdrop 5 $(solana-keygen pubkey /tmp/fleet-wallet.json) --url devnet
 
 # Run the fleet
 BOOTSTRAP_KEYPAIR=/tmp/fleet-wallet.json \
 HELIUS_API_KEY=your-key \
 npx tsx scripts/mm-fleet.ts
+```
 
-# Or use the npm script
+### Option B: 3 independent keeper wallets (PERC-368, recommended)
+
+```bash
+# Generate 3 keeper wallets + airdrop devnet SOL
+pnpm fleet:keygen
+
+# Run with independent wallets
+KEEPER_WALLETS_DIR=/tmp/percolator-keepers \
+HELIUS_API_KEY=your-key \
 pnpm fleet
+```
 
-# Dry run (no transactions)
-pnpm fleet:dry
+Each profile signs with its own keypair, creating 3 independent on-chain identities.
+This looks more realistic on-chain (3 different authorities in the orderbook) and
+avoids single-wallet rate limiting.
+
+```bash
+# Or use the npm scripts
+pnpm fleet           # run fleet
+pnpm fleet:dry       # dry run (no transactions)
+pnpm fleet:keygen    # generate wallets + airdrop
 ```
 
 ## Architecture
@@ -80,13 +99,21 @@ pnpm fleet:dry
 ### Core
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BOOTSTRAP_KEYPAIR` | `/tmp/bootstrap-wallet.json` | Path to fleet wallet keypair |
+| `BOOTSTRAP_KEYPAIR` | `/tmp/bootstrap-wallet.json` | Fallback wallet keypair (used when no per-profile wallet set) |
 | `RPC_URL` | Helius devnet | Solana RPC endpoint |
 | `HELIUS_API_KEY` | — | Helius API key |
 | `DRY_RUN` | `false` | Simulate without transactions |
 | `MARKETS_FILTER` | all | Comma-separated market symbols |
 | `FLEET_PROFILES` | all 3 | Comma-separated profiles to run |
 | `PROMETHEUS_PORT` | off | Enable Prometheus `/metrics` endpoint |
+
+### Per-Profile Keeper Wallets (PERC-368)
+| Variable | Description |
+|----------|-------------|
+| `KEEPER_WALLETS_DIR` | Directory containing `keeper-wide.json`, `keeper-tight_a.json`, `keeper-tight_b.json` |
+| `KEEPER_WALLET_WIDE` | Path to WIDE profile keypair JSON |
+| `KEEPER_WALLET_TIGHT_A` | Path to TIGHT_A profile keypair JSON |
+| `KEEPER_WALLET_TIGHT_B` | Path to TIGHT_B profile keypair JSON |
 
 ### Profile Overrides
 Override any profile parameter via environment variables with the pattern `MM_<PROFILE>_<PARAM>`:
