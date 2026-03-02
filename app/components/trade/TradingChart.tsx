@@ -3,6 +3,7 @@
 import { FC, useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
+import { ChartEmptyState } from "./ChartEmptyState";
 
 type ChartType = "line" | "candle";
 type Timeframe = "1h" | "4h" | "1d" | "7d" | "30d";
@@ -212,12 +213,10 @@ export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (filteredPrices.length === 0) {
     return (
-      <div className="flex h-[200px] sm:h-[400px] items-center justify-center rounded-none border border-[var(--border)] bg-[var(--bg)]">
-        <div className="text-center">
-          <div className="text-sm text-[var(--text-secondary)]">No price data yet</div>
-          <div className="mt-1 text-xs text-[var(--text-dim)]">Prices will appear after trades</div>
-        </div>
-      </div>
+      <ChartEmptyState
+        currentPrice={priceUsd ?? undefined}
+        heightClass="h-[200px] sm:h-[400px]"
+      />
     );
   }
 

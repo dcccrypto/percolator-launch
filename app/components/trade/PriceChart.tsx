@@ -6,6 +6,7 @@ import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockPriceHistory } from "@/lib/mock-trade-data";
+import { ChartEmptyState } from "./ChartEmptyState";
 
 interface PricePoint {
   price_e6: number;
@@ -282,19 +283,10 @@ export const PriceChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   if (prices.length < 2) {
     return (
-      <div className="flex h-[200px] flex-col items-center justify-center rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 relative">
-        {currentPrice > 0 ? (
-          <>
-            <div className="text-2xl font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>${currentPrice < 0.01 ? currentPrice.toFixed(6) : currentPrice.toFixed(2)}</div>
-            <div className="mt-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Price chart building...</div>
-          </>
-        ) : (
-          <>
-            <div className="text-[11px] text-[var(--text-muted)]">No price data yet</div>
-            <div className="mt-1 text-[10px] text-[var(--text-dim)]">Prices will appear after the first trade.</div>
-          </>
-        )}
-      </div>
+      <ChartEmptyState
+        currentPrice={currentPrice > 0 ? currentPrice : undefined}
+        heightClass="h-[300px]"
+      />
     );
   }
 
