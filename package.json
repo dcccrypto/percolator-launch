@@ -19,7 +19,9 @@
     "lint": "eslint packages/*/src/**/*.ts",
     "format": "prettier --write packages/*/src/**/*.ts",
     "format:check": "prettier --check packages/*/src/**/*.ts",
-    "start": "pnpm --filter @percolator/app start"
+    "start": "pnpm --filter @percolator/app start",
+    "maker": "tsx scripts/floating-maker.ts",
+    "maker:dry": "DRY_RUN=true tsx scripts/floating-maker.ts"
   },
   "engines": {
     "node": ">=20"
