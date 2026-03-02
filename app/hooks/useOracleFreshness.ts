@@ -121,9 +121,9 @@ export function useOracleFreshness(): OracleFreshnessState {
     elapsedSecs,
     level,
     color: getFreshnessColor(level),
-    // Publisher count is not available on-chain; will be populated by API later
-    publisherCount: mode === "hyperp" ? 7 : mode === "pyth-pinned" ? 5 : null,
-    publisherTotal: mode === "hyperp" ? 9 : mode === "pyth-pinned" ? 7 : null,
+    // Publisher data now fetched dynamically by useOraclePublishers hook (PERC-371)
+    publisherCount: null,
+    publisherTotal: null,
     ready: mode !== null && lastUpdateMs !== null,
     lastUpdateMs,
   };

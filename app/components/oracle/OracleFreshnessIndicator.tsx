@@ -2,6 +2,7 @@
 
 import { FC, useState, useCallback } from "react";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { useOraclePublishers } from "@/hooks/useOraclePublishers";
 import { OracleDetailsPanel } from "./OracleDetailsPanel";
 
 /**
@@ -22,10 +23,13 @@ export const OracleFreshnessIndicator: FC = () => {
     elapsedSecs,
     level,
     color,
-    publisherCount,
-    publisherTotal,
     ready,
   } = useOracleFreshness();
+
+  const {
+    publisherCount,
+    publisherTotal,
+  } = useOraclePublishers();
 
   const [panelOpen, setPanelOpen] = useState(false);
 

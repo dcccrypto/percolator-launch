@@ -6,6 +6,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { OracleBadge } from "./OracleBadge";
+import { useOraclePublishers, type PublisherInfo } from "@/hooks/useOraclePublishers";
 
 interface OracleDetailsPanelProps {
   onClose: () => void;
@@ -29,9 +30,13 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
     elapsedSecs,
     level,
     color,
+  } = useOracleFreshness();
+
+  const {
     publisherCount,
     publisherTotal,
-  } = useOracleFreshness();
+    publishers: dynamicPublishers,
+  } = useOraclePublishers();
 
   const panelRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -73,8 +78,8 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
 
   const fallbackChain = getFallbackChain(mode);
 
-  // Mock publisher data — will be replaced by API data later
-  const publishers = getMockPublishers(mode);
+  // Dynamic publisher data from Pythnet/oracle bridge (PERC-371)
+  const publishers = dynamicPublishers;
 
   return (
     <div
@@ -297,7 +302,7 @@ function PanelContent({
           <div className="space-y-1">
             {publishers.map((pub) => (
               <div
-                key={pub.name}
+                key={pub.key ?? pub.name}
                 className="flex items-center justify-between py-0.5"
               >
                 <div className="flex items-center gap-1.5">
@@ -421,11 +426,6 @@ function HexIconLarge() {
   );
 }
 
-interface PublisherInfo {
-  name: string;
-  status: "active" | "degraded" | "offline";
-}
-
 /** Get fallback chain for a given mode */
 function getFallbackChain(mode: string | null): string[] {
   switch (mode) {
@@ -440,27 +440,4 @@ function getFallbackChain(mode: string | null): string[] {
   }
 }
 
-/** Mock publisher data — will be replaced by real API data */
-function getMockPublishers(mode: string | null): PublisherInfo[] {
-  if (mode === "hyperp") {
-    return [
-      { name: "Jump Trading", status: "active" },
-      { name: "Wintermute", status: "active" },
-      { name: "Two Sigma", status: "active" },
-      { name: "DRW Cumberland", status: "active" },
-      { name: "Citadel", status: "degraded" },
-      { name: "GS DeFi", status: "active" },
-      { name: "Alameda Remnant", status: "active" },
-    ];
-  }
-  if (mode === "pyth-pinned") {
-    return [
-      { name: "Pyth Network", status: "active" },
-      { name: "Jump Trading", status: "active" },
-      { name: "Wintermute", status: "active" },
-      { name: "GBV Capital", status: "active" },
-      { name: "CMS Holdings", status: "active" },
-    ];
-  }
-  return [];
-}
+/* getMockPublishers removed in PERC-371 — publisher data now fetched dynamically */
