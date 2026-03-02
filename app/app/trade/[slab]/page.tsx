@@ -272,7 +272,7 @@ function TradePageInner({ slab }: { slab: string }) {
           <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
             <UsdToggleButton />
             {health && <HealthBadge level={health.level} />}
-            {oracleMode && <OracleBadge mode={oracleMode} status={oracleLevel === "stale" ? "stale" : "healthy"} pulse={false} />}
+            {oracleMode && <OracleBadge mode={oracleMode} status={oracleLevel === "stale" ? "stale" : "healthy"} />}
             {priceDisplay && (
               <span className="shrink-0 text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
             )}
@@ -339,7 +339,7 @@ function TradePageInner({ slab }: { slab: string }) {
             <span className="h-3.5 w-px bg-[var(--border)]/40" />
             <OracleBadge
               mode={oracleMode}
-              status={oracleLevel === "stale" ? "stale" : oracleLevel === "aging" ? "stale" : "healthy"}
+              status={oracleLevel === "stale" ? "stale" : "healthy"}
             />
           </>
         )}

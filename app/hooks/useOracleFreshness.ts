@@ -86,6 +86,10 @@ export function useOracleFreshness(): OracleFreshnessState {
       const ts = config.authorityTimestamp;
       if (ts > 0n) {
         setLastUpdateMs(Number(ts) * 1000);
+      } else if (config.lastEffectivePriceE6 > 0n) {
+        // Fallback: admin price is set but timestamp is zero (legacy/static markets).
+        // Show a degraded freshness state rather than hiding entirely.
+        setLastUpdateMs((prev) => prev ?? Date.now());
       }
     } else {
       // Hyperp / Pyth: track when the price value changes
