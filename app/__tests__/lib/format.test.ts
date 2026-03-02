@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   formatTokenAmount,
+  formatCompactTokenAmount,
   formatPriceE6,
   formatBps,
   LIQ_PRICE_UNLIQUIDATABLE,
@@ -347,5 +348,38 @@ describe("formatFundingRate", () => {
     const expected = slotsPerYear / 100; // 788400
     const result = formatFundingRate(1n);
     expect(result).toBe(`+${expected.toFixed(2)}%`);
+  });
+});
+
+describe("formatCompactTokenAmount", () => {
+  it("returns '0' for null/undefined/zero", () => {
+    expect(formatCompactTokenAmount(null)).toBe("0");
+    expect(formatCompactTokenAmount(undefined)).toBe("0");
+    expect(formatCompactTokenAmount(0n)).toBe("0");
+  });
+
+  it("abbreviates millions (D2 fix: vault 2M)", () => {
+    // 2,000,000 tokens with 6 decimals = 2_000_000_000_000n raw
+    const raw = 2_000_000_000_000n;
+    expect(formatCompactTokenAmount(raw, 6)).toBe("2.0M");
+  });
+
+  it("abbreviates thousands", () => {
+    // 1,500 tokens with 6 decimals = 1_500_000_000n raw
+    const raw = 1_500_000_000n;
+    expect(formatCompactTokenAmount(raw, 6)).toBe("1.5K");
+  });
+
+  it("formats mid-range numbers with commas", () => {
+    // 500 tokens with 6 decimals = 500_000_000n raw
+    const raw = 500_000_000n;
+    const result = formatCompactTokenAmount(raw, 6);
+    expect(result).toBe("500");
+  });
+
+  it("falls back to full precision for sub-1 amounts", () => {
+    // 0.5 tokens with 6 decimals = 500_000n raw
+    const raw = 500_000n;
+    expect(formatCompactTokenAmount(raw, 6)).toBe("0.5");
   });
 });

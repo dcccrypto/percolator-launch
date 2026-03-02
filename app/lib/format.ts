@@ -62,6 +62,25 @@ export function shortenAddress(address: string, chars: number = 4): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
 }
 
+/**
+ * Format a token amount compactly for dashboard/stats display.
+ * ≥ 1 000 000 → "2.0M", ≥ 1 000 → "1.5K", otherwise comma-separated.
+ * Falls back to formatTokenAmount for sub-1 values.
+ */
+export function formatCompactTokenAmount(
+  raw: bigint | null | undefined,
+  decimals: number = 6,
+): string {
+  if (raw == null || raw <= 0n) return "0";
+  const divisor = 10n ** BigInt(decimals);
+  const num = Number(raw) / Number(divisor);
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  if (num >= 1) return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  // Sub-1 amounts: use full precision
+  return formatTokenAmount(raw, decimals);
+}
+
 export function formatSlotAge(currentSlot: bigint | null | undefined, targetSlot: bigint | null | undefined): string {
   if (currentSlot == null || targetSlot == null) return "—";
   const diff = currentSlot - targetSlot;

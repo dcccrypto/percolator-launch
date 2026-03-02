@@ -293,7 +293,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           className={`flex-1 rounded-none py-2 text-[11px] font-medium uppercase tracking-[0.1em] transition-all duration-150 ${
             direction === "short"
               ? "border border-[var(--short)]/60 text-[var(--short)] bg-[var(--short)]/8 shadow-[0_0_12px_rgba(255,59,92,0.1)]"
-              : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border)]"
+              : "border border-[var(--short)]/30 text-[var(--short)]/60 hover:text-[var(--short)] hover:border-[var(--short)]/50 hover:bg-[var(--short)]/5"
           }`}
         >
           Short

@@ -6,7 +6,7 @@ import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
-import { formatTokenAmount, formatUsd, formatBps } from "@/lib/format";
+import { formatTokenAmount, formatCompactTokenAmount, formatUsd, formatBps } from "@/lib/format";
 import { sanitizeOnChainValue, sanitizeAccountCount } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
@@ -46,18 +46,25 @@ export const MarketStatsCard: FC = () => {
   const vault = sanitizeOnChainValue(engine.vault ?? 0n);
   const oiDisplay = showUsd && priceUsd != null
     ? formatNum((Number(totalOI) / tokenDivisor) * priceUsd)
-    : formatTokenAmount(totalOI, decimals);
+    : formatCompactTokenAmount(totalOI, decimals);
   const vaultDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(vault) / tokenDivisor) * priceUsd)
+    : formatCompactTokenAmount(vault, decimals);
+  // Full-precision tooltips for truncated stat cells (D1/D2)
+  const oiFullDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(totalOI) / tokenDivisor) * priceUsd)
+    : formatTokenAmount(totalOI, decimals);
+  const vaultFullDisplay = showUsd && priceUsd != null
     ? formatNum((Number(vault) / tokenDivisor) * priceUsd)
     : formatTokenAmount(vault, decimals);
 
   const stats = [
-    { label: `${symbol} Price`, value: formatUsd(livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n)) },
-    { label: "Open Interest", value: oiDisplay },
-    { label: "Vault", value: vaultDisplay },
-    { label: "Trading Fee", value: formatBps(params.tradingFeeBps) },
-    { label: "Init. Margin", value: formatBps(params.initialMarginBps) },
-    { label: "Accounts", value: sanitizeAccountCount(engine.numUsedAccounts ?? 0, params ? Number(params.maxAccounts) : undefined).toString() },
+    { label: `${symbol} Price`, value: formatUsd(livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n)), tooltip: "" },
+    { label: "Open Interest", value: oiDisplay, tooltip: oiFullDisplay },
+    { label: "Vault", value: vaultDisplay, tooltip: vaultFullDisplay },
+    { label: "Trading Fee", value: formatBps(params.tradingFeeBps), tooltip: "" },
+    { label: "Init. Margin", value: formatBps(params.initialMarginBps), tooltip: "" },
+    { label: "Accounts", value: sanitizeAccountCount(engine.numUsedAccounts ?? 0, params ? Number(params.maxAccounts) : undefined).toString(), tooltip: "" },
   ];
 
   return (
@@ -66,9 +73,9 @@ export const MarketStatsCard: FC = () => {
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">
         <div className="grid grid-cols-3 gap-px">
           {stats.map((s) => (
-            <div key={s.label} className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(3n)]:border-r-0 [&:nth-last-child(-n+3)]:border-b-0">
+            <div key={s.label} className="px-1.5 py-1 overflow-hidden border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(3n)]:border-r-0 [&:nth-last-child(-n+3)]:border-b-0">
               <p className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)] truncate">{s.label}</p>
-              <p className="text-[11px] font-medium text-[var(--text)] truncate" style={{ fontFamily: "var(--font-mono)" }}>{s.value}</p>
+              <p className="text-[11px] font-medium text-[var(--text)] truncate" title={s.tooltip || s.value} style={{ fontFamily: "var(--font-mono)" }}>{s.value}</p>
             </div>
           ))}
         </div>
