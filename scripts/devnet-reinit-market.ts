@@ -147,11 +147,20 @@ async function main() {
   // Validate devnet
   const rpcUrl = process.env.RPC_URL;
   if (!rpcUrl) throw new Error("RPC_URL not set in .env");
-  if (!rpcUrl.includes("devnet")) {
+  // Detect network from RPC URL
+  const detectedNetwork = rpcUrl.includes("devnet")
+    ? "devnet"
+    : rpcUrl.includes("mainnet")
+      ? "mainnet-beta"
+      : rpcUrl.includes("testnet")
+        ? "testnet"
+        : "unknown";
+
+  if (detectedNetwork !== "devnet") {
     console.error("\n⛔ SAFETY: RPC_URL does not contain 'devnet'.");
     console.error("   This script is designed for devnet only.");
     console.error("   If you REALLY want to run on a non-devnet cluster, set FORCE_NON_DEVNET=1");
-    if (!process.env.FORCE_NON_DEVNET) process.exit(1);
+    if (process.env.FORCE_NON_DEVNET !== "1") process.exit(1);
     console.warn("\n⚠️  FORCE_NON_DEVNET=1 — proceeding on non-devnet cluster\n");
   }
 
@@ -165,7 +174,15 @@ async function main() {
   const oldSlabPubkey = new PublicKey(args.slab!);
   const tierInfo = SLAB_TIERS[TIER];
 
-  console.log(`\nRPC: ${rpcUrl.replace(/api-key=.*/, "api-key=***")}`);
+  // Log only the RPC host, never full URL (may contain API keys/tokens)
+  let rpcHost: string;
+  try {
+    const u = new URL(rpcUrl);
+    rpcHost = u.origin;
+  } catch {
+    rpcHost = rpcUrl.split("/").slice(0, 3).join("/").replace(/[?#].*/, "");
+  }
+  console.log(`\nRPC: ${rpcHost}`);
   console.log(`Admin: ${payer.publicKey.toBase58()}`);
   console.log(`Program: ${PROGRAM_ID.toBase58()}`);
   console.log(`Old Slab: ${oldSlabPubkey.toBase58()}`);
@@ -224,6 +241,29 @@ async function main() {
   const TRADING_FEE_BPS = BigInt(args["trading-fee-bps"]!);
   const INITIAL_MARGIN_BPS = BigInt(args["initial-margin-bps"]!);
   const IS_ADMIN_ORACLE = ORACLE_FEED === "0".repeat(64);
+
+  // --- Input validation ---
+  if (!IS_ADMIN_ORACLE && !/^[0-9a-fA-F]{64}$/.test(ORACLE_FEED)) {
+    throw new Error(`Invalid oracle feed ID: expected 64 hex chars, got "${ORACLE_FEED}"`);
+  }
+  if (INVERT !== 0 && INVERT !== 1) {
+    throw new Error(`Invalid --invert value: expected 0 or 1, got ${INVERT}`);
+  }
+  if (INITIAL_PRICE_E6 <= 0n) {
+    throw new Error(`Invalid --initial-price: must be positive, got ${INITIAL_PRICE_E6}`);
+  }
+  if (LP_COLLATERAL <= 0n) {
+    throw new Error(`Invalid --lp-collateral: must be positive, got ${LP_COLLATERAL}`);
+  }
+  if (INSURANCE_AMOUNT < 0n) {
+    throw new Error(`Invalid --insurance: must be non-negative, got ${INSURANCE_AMOUNT}`);
+  }
+  if (TRADING_FEE_BPS < 0n || TRADING_FEE_BPS > 10000n) {
+    throw new Error(`Invalid --trading-fee-bps: must be 0-10000, got ${TRADING_FEE_BPS}`);
+  }
+  if (INITIAL_MARGIN_BPS < 0n || INITIAL_MARGIN_BPS > 10000n) {
+    throw new Error(`Invalid --initial-margin-bps: must be 0-10000, got ${INITIAL_MARGIN_BPS}`);
+  }
 
   console.log("\n--- Final Parameters ---");
   console.log(`  Mint: ${MINT.toBase58()}`);
@@ -515,7 +555,7 @@ async function main() {
   const pythPDA = IS_ADMIN_ORACLE ? null : derivePythPushOraclePDA(ORACLE_FEED)[0].toBase58();
 
   const marketInfo = {
-    network: "devnet",
+    network: detectedNetwork,
     reinitializedAt: new Date().toISOString(),
     programId: PROGRAM_ID.toBase58(),
     oldSlab: oldSlabPubkey.toBase58(),
