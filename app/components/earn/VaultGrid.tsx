@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { VaultCard } from './VaultCard';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
 
 type SortKey = 'apy' | 'tvl' | 'volume' | 'utilization';
+
+const PAGE_SIZE = 24;
 
 interface VaultGridProps {
   markets: MarketVaultInfo[];
@@ -14,6 +16,8 @@ interface VaultGridProps {
 export function VaultGrid({ markets, loading }: VaultGridProps) {
   const [sortBy, setSortBy] = useState<SortKey>('apy');
   const [searchQuery, setSearchQuery] = useState('');
+  const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
+  const observerTarget = useRef<HTMLDivElement>(null);
 
   const sorted = useMemo(() => {
     let filtered = markets;
@@ -44,6 +48,36 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
       }
     });
   }, [markets, sortBy, searchQuery]);
+
+  // Reset display count when filters change
+  useEffect(() => {
+    setDisplayCount(PAGE_SIZE);
+  }, [searchQuery, sortBy]);
+
+  // Progressive auto-reveal (loads batches via rAF)
+  useEffect(() => {
+    if (loading || displayCount >= sorted.length) return;
+    const handle = requestAnimationFrame(() => {
+      setDisplayCount((prev) => Math.min(prev + PAGE_SIZE, sorted.length));
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [displayCount, sorted.length, loading]);
+
+  // IntersectionObserver backup for scroll-triggered loading
+  useEffect(() => {
+    const target = observerTarget.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayCount((prev) => Math.min(prev + PAGE_SIZE, sorted.length));
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(target);
+    return () => observer.unobserve(target);
+  }, [sorted.length]);
 
   return (
     <div>
@@ -121,11 +155,31 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sorted.map((vault) => (
-            <VaultCard key={vault.slabAddress} vault={vault} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sorted.slice(0, displayCount).map((vault) => (
+              <VaultCard key={vault.slabAddress} vault={vault} />
+            ))}
+          </div>
+          {displayCount < sorted.length ? (
+            <div ref={observerTarget} className="flex items-center justify-center gap-2 py-6">
+              <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+              <span className="text-xs text-[var(--text-muted)]">Loading more…</span>
+            </div>
+          ) : sorted.length > PAGE_SIZE ? (
+            <div className="flex items-center justify-center gap-3 py-4">
+              <span className="text-[11px] text-[var(--text-dim)]" style={{ fontFamily: 'var(--font-mono)' }}>
+                all {sorted.length} vault{sorted.length !== 1 ? 's' : ''} loaded
+              </span>
+              <button
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                className="text-[11px] text-[var(--accent)]/60 hover:text-[var(--accent)] transition-colors"
+              >
+                ↑ top
+              </button>
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   );
