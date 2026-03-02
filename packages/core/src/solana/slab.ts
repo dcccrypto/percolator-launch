@@ -46,9 +46,11 @@ const CONFIG_OFFSET = HEADER_LEN;  // MarketConfig starts right after header
 //             + PERC-306 isolation(16) + PERC-307 orphan(16)
 //             + PERC-312 safety_valve(16) + PERC-314 dispute(16)
 //             + PERC-315 lp_collateral(16)
-//             = 496 bytes (verified by on-chain compile-time assertion)
+//             = 496 bytes
+//             + PERC-328 _reserved: [u8; 40] (SlabHeader isolation)
+//             = 536 bytes (verified by on-chain compile-time assertion)
 // NOTE: PERC-298 skew_factor_bps is packed into upper bits of oi_cap_multiplier_bps.
-const CONFIG_LEN = 496;
+const CONFIG_LEN = 536;
 // Offset of _reserved field within SlabHeader (magic+version+bump+_padding+admin+pending_admin = 80)
 const RESERVED_OFF = 80;
 
@@ -402,20 +404,20 @@ export function readLastThrUpdateSlot(data: Uint8Array): bigint {
 }
 
 // =============================================================================
-// RiskEngine Layout Constants (CONFIG_LEN = 496, verified against on-chain assertion)
-// ENGINE_OFF = align_up(HEADER_LEN + CONFIG_LEN, 8) = align_up(104 + 496, 8) = 600 (BPF alignment)
+// RiskEngine Layout Constants (CONFIG_LEN = 536, verified against on-chain assertion)
+// ENGINE_OFF = align_up(HEADER_LEN + CONFIG_LEN, 8) = align_up(104 + 536, 8) = 640 (BPF alignment)
 //
 // RiskParams grew from 144 → 288 bytes (added: premium funding, partial liq, dynamic fees).
 // Account grew from 240 → 248 bytes (added: last_partial_liquidation_slot).
 // SlabHeader grew from 72 → 104 bytes (added: pending_admin).
-// MarketConfig grew from 320 → 496 bytes (added: premium funding, oracle authority,
+// MarketConfig grew from 320 → 536 bytes (added: premium funding, oracle authority,
 //   circuit breaker, OI cap fields, adaptive funding, market maturity ramp, auto-unresolve,
 //   PERC-306 insurance isolation, PERC-307 orphan penalty, PERC-312 safety valve,
-//   PERC-314 dispute settlement, PERC-315 LP collateral).
+//   PERC-314 dispute settlement, PERC-315 LP collateral, PERC-328 _reserved[40]).
 //   PERC-298 skew_factor packed in oi_cap_multiplier_bps.
 // RiskEngine grew by 32 bytes in PERC-298 (added: long_oi, short_oi U128 fields).
 // =============================================================================
-const ENGINE_OFF = 600;
+const ENGINE_OFF = 640;
 // RiskEngine struct layout (repr(C), SBF uses 8-byte alignment for u128):
 // - vault: U128 (16 bytes) at offset 0
 // - insurance_fund: InsuranceFund { balance: U128, fee_revenue: U128 } (32 bytes) at offset 16

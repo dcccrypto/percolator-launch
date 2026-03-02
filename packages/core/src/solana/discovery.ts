@@ -33,20 +33,21 @@ const MAGIC_BYTES = new Uint8Array([0x54, 0x41, 0x4c, 0x4f, 0x43, 0x52, 0x45, 0x
  * IMPORTANT: dataSize must match the compiled program's SLAB_LEN for that MAX_ACCOUNTS.
  * The on-chain program has a hardcoded SLAB_LEN — slab account data.len() must equal it exactly.
  *
- * Layout: HEADER(104) + CONFIG(496) + RiskEngine(variable by tier)
- *   ENGINE_OFF = align_up(104 + 496, 8) = 600  (SBF: u128 align = 8)
- *   RiskEngine = fixed(632) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
+ * Layout: HEADER(104) + CONFIG(536) + RiskEngine(variable by tier)
+ *   ENGINE_OFF = align_up(104 + 536, 8) = 640  (SBF: u128 align = 8)
+ *   RiskEngine = fixed(656) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
  *
- * NOTE: CONFIG_LEN grew 368→384→400→416→432→496 across PERC-298 through PERC-315.
+ * NOTE: CONFIG_LEN grew 368→384→400→416→432→496→536 across PERC-298 through PERC-328.
  *       PERC-306/307/312/314/315 added 64 bytes (isolation, orphan, safety valve, dispute, LP collateral).
- *       ENGINE_OFF = 600 (verified against on-chain compile-time assertion: const _: [(); 496] = [(); CONFIG_LEN]).
+ *       PERC-328 added 40 bytes (_reserved: [u8; 40] for SlabHeader isolation).
+ *       ENGINE_OFF = 640 (verified against on-chain compile-time assertion: const _: [(); 536] = [(); CONFIG_LEN]).
  *       RiskEngine grew by 32 bytes (PERC-298: long_oi + short_oi) + 24 (PERC-299: emergency OI).
  *       Values below must be verified against BPF build before deployment.
  */
 export const SLAB_TIERS = {
-  small:  { maxAccounts: 256,  dataSize: 65_312,    label: "Small",  description: "256 slots · ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257_408,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
-  large:  { maxAccounts: 4096, dataSize: 1_025_792, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
+  small:  { maxAccounts: 256,  dataSize: 65_352,    label: "Small",  description: "256 slots · ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257_448,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 1_025_832, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
 } as const;
 
 export type SlabTierKey = keyof typeof SLAB_TIERS;
@@ -54,7 +55,7 @@ export type SlabTierKey = keyof typeof SLAB_TIERS;
 /** Calculate slab data size for arbitrary account count.
  *
  * Layout (SBF, u128 align = 8):
- *   HEADER(104) + CONFIG(496) → ENGINE_OFF = 600
+ *   HEADER(104) + CONFIG(536) → ENGINE_OFF = 640
  *   RiskEngine fixed scalars: 656 bytes (PERC-299: +24 emergency OI, +32 long/short OI)
  *   + bitmap: ceil(N/64)*8
  *   + num_used_accounts(u16) + pad(6) + next_account_id(u64) + free_head(u16) = 18
@@ -65,7 +66,7 @@ export type SlabTierKey = keyof typeof SLAB_TIERS;
  * Must match the on-chain program's SLAB_LEN exactly.
  */
 export function slabDataSize(maxAccounts: number): number {
-  const ENGINE_OFF_LOCAL = 600; // align_up(104 + 496, 8) — CONFIG_LEN=496 (PERC-306/307/312/314/315)
+  const ENGINE_OFF_LOCAL = 640; // align_up(104 + 536, 8) — CONFIG_LEN=536 (PERC-328: +40 _reserved)
   const ENGINE_FIXED = 656;     // scalars before bitmap (608 + 24 for PERC-299 emergency OI fields)
   const ACCOUNT_SIZE = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
@@ -96,10 +97,10 @@ const ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map(t => t.dataSize);
 /** Legacy constant for backward compat */
 const SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 
-/** We need header(104) + config(496) + engine up to nextAccountId (~1200). Total ~1800. Use 1900 for margin. */
-const HEADER_SLICE_LENGTH = 1900;
+/** We need header(104) + config(536) + engine up to nextAccountId (~1200). Total ~1840. Use 1940 for margin. */
+const HEADER_SLICE_LENGTH = 1940;
 
-const ENGINE_OFF = 600; // CONFIG_LEN=496 (PERC-306/307/312/314/315): align_up(104+496, 8) = 600
+const ENGINE_OFF = 640; // CONFIG_LEN=536 (PERC-328: +40 _reserved): align_up(104+536, 8) = 640
 
 function dv(data: Uint8Array): DataView {
   return new DataView(data.buffer, data.byteOffset, data.byteLength);
