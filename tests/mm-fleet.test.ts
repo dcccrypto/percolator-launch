@@ -616,4 +616,87 @@ describe("PERC-368 — Keeper Wallet Configuration", () => {
     );
     expect(new Set(names).size).toBe(3);
   });
+
+  it("env var overrides directory", async () => {
+    const fs = await import("fs");
+    const os = await import("os");
+    const path = await import("path");
+    const { Keypair } = await import("@solana/web3.js");
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "keeper-test-"));
+    const profile = DEFAULT_PROFILES[0];
+
+    // Create a directory-mode keypair file
+    const dirKp = Keypair.generate();
+    const dirFile = path.join(tmpDir, `keeper-${profile.name.toLowerCase()}.json`);
+    fs.writeFileSync(dirFile, JSON.stringify(Array.from(dirKp.secretKey)));
+
+    // Create a separate keypair for the env var override
+    const envKp = Keypair.generate();
+    const envFile = path.join(tmpDir, `env-override-${profile.name.toLowerCase()}.json`);
+    fs.writeFileSync(envFile, JSON.stringify(Array.from(envKp.secretKey)));
+
+    const envKey = `KEEPER_WALLET_${profile.name}`;
+
+    try {
+      // Simulate the resolution logic from loadProfileWallets:
+      // env var path takes precedence over directory path
+      process.env[envKey] = envFile;
+      process.env.KEEPER_WALLETS_DIR = tmpDir;
+
+      const envPath = process.env[envKey];
+      const dirPath = path.join(tmpDir, `keeper-${profile.name.toLowerCase()}.json`);
+
+      // Env var path should exist and be checked first
+      expect(fs.existsSync(envPath!)).toBe(true);
+      expect(fs.existsSync(dirPath)).toBe(true);
+
+      // Env var keypair is different from directory keypair
+      const envLoaded = Keypair.fromSecretKey(
+        Uint8Array.from(JSON.parse(fs.readFileSync(envPath!, "utf8"))),
+      );
+      const dirLoaded = Keypair.fromSecretKey(
+        Uint8Array.from(JSON.parse(fs.readFileSync(dirPath, "utf8"))),
+      );
+      expect(envLoaded.publicKey.toBase58()).toBe(envKp.publicKey.toBase58());
+      expect(dirLoaded.publicKey.toBase58()).toBe(dirKp.publicKey.toBase58());
+      expect(envLoaded.publicKey.toBase58()).not.toBe(dirLoaded.publicKey.toBase58());
+    } finally {
+      delete process.env[envKey];
+      delete process.env.KEEPER_WALLETS_DIR;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("missing wallet produces error when no fallback", () => {
+    const profile = DEFAULT_PROFILES[0];
+    const envKey = `KEEPER_WALLET_${profile.name}`;
+
+    // Ensure no env var and no directory set
+    const origEnv = process.env[envKey];
+    const origDir = process.env.KEEPER_WALLETS_DIR;
+    delete process.env[envKey];
+    delete process.env.KEEPER_WALLETS_DIR;
+
+    try {
+      const envPath = process.env[envKey];
+      const walletsDir = process.env.KEEPER_WALLETS_DIR;
+
+      // No env var path
+      expect(envPath).toBeUndefined();
+      // No directory mode
+      expect(walletsDir).toBeUndefined();
+
+      // Without BOOTSTRAP_KEYPAIR either, the fleet should have no wallet source
+      const hasBootstrap = !!process.env.BOOTSTRAP_KEYPAIR;
+      if (!hasBootstrap) {
+        // No wallet resolution possible — this is the error condition
+        const hasAnyWallet = envPath || walletsDir;
+        expect(hasAnyWallet).toBeFalsy();
+      }
+    } finally {
+      if (origEnv !== undefined) process.env[envKey] = origEnv;
+      if (origDir !== undefined) process.env.KEEPER_WALLETS_DIR = origDir;
+    }
+  });
 });

@@ -13,7 +13,6 @@ import { Keypair, Connection } from "@solana/web3.js";
 import * as fs from "fs";
 import * as path from "path";
 
-const WALLET_COUNT = 3;
 const PROFILE_NAMES = ["WIDE", "TIGHT_A", "TIGHT_B"];
 const AIRDROP_SOL = 2; // SOL per wallet
 
@@ -32,14 +31,13 @@ async function main() {
     `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
   const connection = new Connection(rpcUrl, "confirmed");
 
-  console.log(`\n🔑 PERC-368: Generating ${WALLET_COUNT} keeper wallets\n`);
+  console.log(`\n🔑 PERC-368: Generating ${PROFILE_NAMES.length} keeper wallets\n`);
   console.log(`Directory: ${keyDir}`);
   console.log(`Airdrop: ${doAirdrop ? "yes" : "no (use --airdrop)"}\n`);
 
   const wallets: { name: string; path: string; pubkey: string }[] = [];
 
-  for (let i = 0; i < WALLET_COUNT; i++) {
-    const name = PROFILE_NAMES[i];
+  for (const name of PROFILE_NAMES) {
     const filePath = path.join(keyDir, `keeper-${name.toLowerCase()}.json`);
 
     let kp: Keypair;
