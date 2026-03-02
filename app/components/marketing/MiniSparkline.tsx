@@ -64,7 +64,6 @@ export function MiniSparkline({
 
   const areaPoints = `0,${height} ${points} ${width},${height}`;
   const currentPrice = prices[prices.length - 1];
-
   const gradientId = useId();
   const fillId = `sparkFill-${gradientId}`;
 

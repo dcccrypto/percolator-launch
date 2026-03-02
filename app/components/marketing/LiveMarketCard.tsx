@@ -29,7 +29,7 @@ export function LiveMarketCard({ className = "", animate = true }: { className?:
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3.5">
           <div className="flex items-center gap-3">
             <div
-              className="flex h-8 w-8 items-center justify-center bg-[var(--accent)]/[0.10] border border-[var(--accent)]/20 text-xs font-bold text-[var(--accent)]"
+              className="flex h-8 w-8 items-center justify-center border border-[var(--accent)]/20 bg-[var(--accent)]/[0.10] text-xs font-bold text-[var(--accent)]"
               style={{ fontFamily: "var(--font-heading)" }}
             >
               S
