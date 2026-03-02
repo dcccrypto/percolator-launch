@@ -114,6 +114,18 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           <span className="text-white">{symbol}-PERP Vault</span>
         </div>
 
+        {/* Not Initialized Warning */}
+        {!loading && !poolState.poolExists && (
+          <div className="mb-6 border border-[var(--warning)]/30 bg-[var(--warning)]/5 rounded-sm px-4 py-3">
+            <p className="text-[12px] font-medium text-[var(--warning)]">
+              ⚠ Vault Not Initialized
+            </p>
+            <p className="text-[11px] text-[var(--text-secondary)] mt-1">
+              This market&apos;s LP vault pool has not been created on-chain yet. Deposits and withdrawals are unavailable until the pool is initialized by the market deployer.
+            </p>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div className="flex items-center gap-4">
