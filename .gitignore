@@ -63,3 +63,4 @@ render-pdf.mjs
 .worktrees/
 program/target/
 percolator/target/
+tests/devnet-e2e-large*.ts

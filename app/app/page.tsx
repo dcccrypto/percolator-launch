@@ -145,6 +145,15 @@ export default function Home() {
             const usd = (raw / 10 ** d) * p;
             return usd > MAX_PER_MARKET_USD ? 0 : usd; // discard absurd values
           };
+          // For insurance/TVL: when price is missing, fall back to raw token amount
+          // (correct for stablecoins like USDC where 1 token ≈ $1)
+          const toUsdWithFallback = (raw: number, decimals: number | null, price: number | null): number => {
+            if (!isSaneMarketValue(raw)) return 0;
+            const d = Math.min(Math.max(decimals ?? 6, 0), 18);
+            const p = price ?? 0;
+            const usd = p > 0 ? (raw / 10 ** d) * p : raw / 10 ** d;
+            return usd > MAX_PER_MARKET_USD ? 0 : usd;
+          };
 
           // Filter out empty/abandoned markets using shared active-market filter
           // (consistent with /api/stats and markets page)
@@ -157,7 +166,8 @@ export default function Home() {
               // Fall back to insurance_balance if insurance_fund is missing.
               const raw = Number(m.insurance_fund ?? m.insurance_balance ?? 0);
               if (!isSaneMarketValue(raw)) return s;
-              return s + toUsd(raw, m.decimals, m.last_price);
+              // Use fallback converter — insurance should show even when price oracle is unavailable
+              return s + toUsdWithFallback(raw, m.decimals, m.last_price);
             }, 0),
           });
           setStatsLoaded(true);
