@@ -126,7 +126,7 @@ export default function Home() {
       }
 
       try {
-        const { data, error: dbError } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, last_price, total_open_interest, open_interest_long, open_interest_short, decimals") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; last_price: number | null; total_open_interest: number | null; open_interest_long: number | null; open_interest_short: number | null; decimals: number | null }[] | null; error: { message: string } | null };
+        const { data, error: dbError } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, insurance_fund, last_price, total_open_interest, open_interest_long, open_interest_short, decimals") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; insurance_fund: number | null; last_price: number | null; total_open_interest: number | null; open_interest_long: number | null; open_interest_short: number | null; decimals: number | null }[] | null; error: { message: string } | null };
         if (dbError) {
           console.error("Failed to query markets_with_stats:", dbError.message);
           throw new Error(dbError.message);
@@ -152,7 +152,13 @@ export default function Home() {
           setStats({
             markets: activeData.length,
             volume: activeData.reduce((s, m) => s + toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price), 0),
-            insurance: activeData.reduce((s, m) => s + toUsd(Number(m.insurance_balance || 0), m.decimals, m.last_price), 0),
+            insurance: activeData.reduce((s, m) => {
+              // Use insurance_fund (raw on-chain value in token micro-units) consistent with earn page.
+              // Fall back to insurance_balance if insurance_fund is missing.
+              const raw = Number(m.insurance_fund ?? m.insurance_balance ?? 0);
+              if (!isSaneMarketValue(raw)) return s;
+              return s + toUsd(raw, m.decimals, m.last_price);
+            }, 0),
           });
           setStatsLoaded(true);
           // Convert to USD first, then sort by converted volume

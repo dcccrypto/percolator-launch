@@ -404,9 +404,13 @@ function TradePageInner({ slab }: { slab: string }) {
         </ErrorBoundary>
 
         {/* Bottom tabs: Stats | Trades | Book */}
-        <Tabs tabs={["Stats", "Trades", "Risk", "Book"]}>
+        <Tabs tabs={["Stats", "Trades", "Health", "Risk", "Book"]}>
           <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
           <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
+          <ErrorBoundary label="EngineHealthCard">
+            <EngineHealthCard />
+            <div className="mt-2"><CrankHealthCard /></div>
+          </ErrorBoundary>
           <ErrorBoundary label="RiskAnalytics">
             <OpenInterestCard slabAddress={slab} />
             <div className="mt-2"><InsuranceDashboard slabAddress={slab} /></div>
