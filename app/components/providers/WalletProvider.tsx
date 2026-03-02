@@ -2,6 +2,7 @@
 
 import { Component, FC, ReactNode, useMemo, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import { AutoFundProvider } from "./AutoFundProvider";
 import { PrivyAvailableContext, PrivyLoginContext } from "@/hooks/usePrivySafe";
 import {
   PreferredWalletContext,
@@ -74,6 +75,7 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
       <PrivyAvailableContext.Provider value={true}>
         <PreferredWalletContext.Provider value={preferredWallet}>
           <PrivyProviderClient appId={appId}>
+            <AutoFundProvider />
             {children}
           </PrivyProviderClient>
         </PreferredWalletContext.Provider>
