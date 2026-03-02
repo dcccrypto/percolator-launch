@@ -19,7 +19,10 @@
     "lint": "eslint packages/*/src/**/*.ts",
     "format": "prettier --write packages/*/src/**/*.ts",
     "format:check": "prettier --check packages/*/src/**/*.ts",
-    "start": "pnpm --filter @percolator/app start"
+    "start": "pnpm --filter @percolator/app start",
+    "bootstrap": "tsx scripts/market-bootstrap.ts",
+    "bootstrap:once": "tsx scripts/market-bootstrap.ts --once",
+    "bootstrap:dry": "tsx scripts/market-bootstrap.ts --dry-run"
   },
   "engines": {
     "node": ">=20"
