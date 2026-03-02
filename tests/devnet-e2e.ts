@@ -85,7 +85,7 @@ async function main() {
   // Step 1: Init market + vault
   console.log("--- Step 1: Init Market ---");
   const [vaultPda] = deriveVaultAuthority(PROGRAM_ID, slabKeypair.publicKey);
-  const vaultAta = await getAta(vaultPda, MINT);
+  const vaultAta = await getAta(vaultPda, MINT, true); // allowOwnerOffCurve=true for PDA owner
 
   // Create vault ATA
   const { createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
@@ -106,9 +106,15 @@ async function main() {
     maintenanceMarginBps: "100",               // 1% maintenance margin
     initialMarginBps: "500",                   // 5% initial margin
     tradingFeeBps: "30",                       // 0.3% trading fee
-    maxAccounts: tier.maxAccounts,
+    maxAccounts: String(tier.maxAccounts),       // Must be string|bigint for encU64
     newAccountFee: "1000000",                  // 1 token account creation fee
     riskReductionThreshold: "800",             // 8% risk reduction threshold
+    maintenanceFeePerSlot: "0",                // No maintenance fee
+    maxCrankStalenessSlots: "200",             // 200 slots max crank staleness
+    liquidationFeeBps: "50",                   // 0.5% liquidation fee
+    liquidationFeeCap: "10000000",             // 10 token cap
+    liquidationBufferBps: "50",                // 0.5% buffer
+    minLiquidationAbs: "100000",               // 0.1 token minimum
   });
   const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
     DEPLOYER_KP.publicKey, slabKeypair.publicKey,
@@ -152,7 +158,7 @@ async function main() {
   // It reads LP config from context bytes 64..68, using defaults when zeroed.
 
   const userAta = await getAta(DEPLOYER_KP.publicKey, MINT);
-  const initLpData = encodeInitLP({ feePayment: "1000000" });
+  const initLpData = encodeInitLP({ matcherProgram: MATCHER_ID, matcherContext: matcherCtxKeypair.publicKey, feePayment: "1000000" });
   const [lpPda] = deriveLpPda(PROGRAM_ID, slabKeypair.publicKey, 0);
   const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
     DEPLOYER_KP.publicKey, slabKeypair.publicKey, userAta, vaultAta,

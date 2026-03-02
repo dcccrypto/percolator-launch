@@ -1355,11 +1355,11 @@ import {
   getAccount,
   TOKEN_PROGRAM_ID as TOKEN_PROGRAM_ID2
 } from "@solana/spl-token";
-async function getAta(owner, mint, tokenProgramId = TOKEN_PROGRAM_ID2) {
-  return getAssociatedTokenAddress(mint, owner, false, tokenProgramId);
+async function getAta(owner, mint, allowOwnerOffCurve = false, tokenProgramId = TOKEN_PROGRAM_ID2) {
+  return getAssociatedTokenAddress(mint, owner, allowOwnerOffCurve, tokenProgramId);
 }
-function getAtaSync(owner, mint, tokenProgramId = TOKEN_PROGRAM_ID2) {
-  return getAssociatedTokenAddressSync(mint, owner, false, tokenProgramId);
+function getAtaSync(owner, mint, allowOwnerOffCurve = false, tokenProgramId = TOKEN_PROGRAM_ID2) {
+  return getAssociatedTokenAddressSync(mint, owner, allowOwnerOffCurve, tokenProgramId);
 }
 async function fetchTokenAccount(connection, address, tokenProgramId = TOKEN_PROGRAM_ID2) {
   return getAccount(connection, address, void 0, tokenProgramId);

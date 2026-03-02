@@ -15,9 +15,10 @@ import { TOKEN_2022_PROGRAM_ID } from "./token-program.js";
 export async function getAta(
   owner: PublicKey,
   mint: PublicKey,
+  allowOwnerOffCurve = false,
   tokenProgramId: PublicKey = TOKEN_PROGRAM_ID,
 ): Promise<PublicKey> {
-  return getAssociatedTokenAddress(mint, owner, false, tokenProgramId);
+  return getAssociatedTokenAddress(mint, owner, allowOwnerOffCurve, tokenProgramId);
 }
 
 /**
@@ -27,9 +28,10 @@ export async function getAta(
 export function getAtaSync(
   owner: PublicKey,
   mint: PublicKey,
+  allowOwnerOffCurve = false,
   tokenProgramId: PublicKey = TOKEN_PROGRAM_ID,
 ): PublicKey {
-  return getAssociatedTokenAddressSync(mint, owner, false, tokenProgramId);
+  return getAssociatedTokenAddressSync(mint, owner, allowOwnerOffCurve, tokenProgramId);
 }
 
 /**

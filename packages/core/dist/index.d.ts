@@ -907,12 +907,12 @@ declare function derivePythPushOraclePDA(feedIdHex: string): [PublicKey, number]
  * Get the associated token address for an owner and mint.
  * Supports both standard SPL Token and Token2022 via optional tokenProgramId.
  */
-declare function getAta(owner: PublicKey, mint: PublicKey, tokenProgramId?: PublicKey): Promise<PublicKey>;
+declare function getAta(owner: PublicKey, mint: PublicKey, allowOwnerOffCurve?: boolean, tokenProgramId?: PublicKey): Promise<PublicKey>;
 /**
  * Synchronous version of getAta.
  * Supports both standard SPL Token and Token2022 via optional tokenProgramId.
  */
-declare function getAtaSync(owner: PublicKey, mint: PublicKey, tokenProgramId?: PublicKey): PublicKey;
+declare function getAtaSync(owner: PublicKey, mint: PublicKey, allowOwnerOffCurve?: boolean, tokenProgramId?: PublicKey): PublicKey;
 /**
  * Fetch token account info.
  * Supports both standard SPL Token and Token2022 via optional tokenProgramId.
