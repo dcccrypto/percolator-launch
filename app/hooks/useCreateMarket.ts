@@ -600,6 +600,40 @@ export function useCreateMarket() {
           console.warn("Failed to register market in dashboard DB");
         }
 
+        // PERC-361: Post-creation hooks — register oracle bridge + mint devnet token
+        const slabAddr = state.slabAddress;
+        const mintAddr = params.mint.toBase58();
+        const isDevnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet";
+
+        if (isDevnet && slabAddr) {
+          // Register with oracle bridge (fire-and-forget)
+          try {
+            const oracleUrl = process.env.NEXT_PUBLIC_ORACLE_BRIDGE_URL ?? "http://127.0.0.1:18802";
+            await fetch(`${oracleUrl}/oracle/register`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ca: mintAddr,
+                marketAddress: slabAddr,
+                symbol: params.symbol,
+              }),
+            }).catch(() => {});
+          } catch {}
+
+          // Mint devnet token + airdrop $500 to creator
+          try {
+            await fetch("/api/devnet-mint-token", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                mainnetCA: mintAddr,
+                marketAddress: slabAddr,
+                creatorWallet: wallet.publicKey.toBase58(),
+              }),
+            }).catch(() => {});
+          } catch {}
+        }
+
         // Done! Clear persisted keypair from localStorage
         localStorage.removeItem("percolator-pending-slab-keypair");
         setState((s) => ({
