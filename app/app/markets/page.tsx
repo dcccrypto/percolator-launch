@@ -218,8 +218,9 @@ function MarketsPageInner() {
         : (isSaneNum(m.supabase?.total_open_interest ?? 0) ||
            isSaneNum((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0)));
 
-      // Keep market if it has at least a price (on-chain or Supabase)
-      return hasOnChainPrice || hasSupabasePrice || hasVolume || hasOI;
+      // Keep market if it has data OR if it's marked active in Supabase
+      const isActive = m.supabase ? isActiveMarket(m.supabase) : false;
+      return isActive || hasOnChainPrice || hasSupabasePrice || hasVolume || hasOI;
     });
   }, [effectiveMarkets]);
 
