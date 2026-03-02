@@ -143,6 +143,7 @@ function TradePageInner({ slab }: { slab: string }) {
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;
   const { mode: oracleMode, level: oracleLevel } = useOracleFreshness();
+  const oracleBadgeStatus = oracleLevel === "stale" ? "stale" : "healthy";
   const pageRef = useRef<HTMLDivElement>(null);
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
@@ -272,7 +273,7 @@ function TradePageInner({ slab }: { slab: string }) {
           <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
             <UsdToggleButton />
             {health && <HealthBadge level={health.level} />}
-            {oracleMode && <OracleBadge mode={oracleMode} status={oracleLevel === "stale" ? "stale" : "healthy"} />}
+            {oracleMode && <OracleBadge mode={oracleMode} status={oracleBadgeStatus} />}
             {priceDisplay && (
               <span className="shrink-0 text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
             )}
@@ -339,7 +340,7 @@ function TradePageInner({ slab }: { slab: string }) {
             <span className="h-3.5 w-px bg-[var(--border)]/40" />
             <OracleBadge
               mode={oracleMode}
-              status={oracleLevel === "stale" ? "stale" : "healthy"}
+              status={oracleBadgeStatus}
             />
           </>
         )}
