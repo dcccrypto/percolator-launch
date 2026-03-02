@@ -937,32 +937,33 @@ interface DiscoveredMarket {
  * IMPORTANT: dataSize must match the compiled program's SLAB_LEN for that MAX_ACCOUNTS.
  * The on-chain program has a hardcoded SLAB_LEN — slab account data.len() must equal it exactly.
  *
- * Layout: HEADER(104) + CONFIG(496) + RiskEngine(variable by tier)
- *   ENGINE_OFF = align_up(104 + 496, 8) = 600  (SBF: u128 align = 8)
- *   RiskEngine = fixed(632) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
+ * Layout: HEADER(104) + CONFIG(536) + RiskEngine(variable by tier)
+ *   ENGINE_OFF = align_up(104 + 536, 8) = 640  (SBF: u128 align = 8)
+ *   RiskEngine = fixed(656) + bitmap(BW*8) + post_bitmap(18) + next_free(N*2) + pad + accounts(N*248)
  *
- * NOTE: CONFIG_LEN grew 368→384→400→416→432→496 across PERC-298 through PERC-315.
+ * NOTE: CONFIG_LEN grew 368→384→400→416→432→496→536 across PERC-298 through PERC-328.
  *       PERC-306/307/312/314/315 added 64 bytes (isolation, orphan, safety valve, dispute, LP collateral).
- *       ENGINE_OFF = 600 (verified against on-chain compile-time assertion: const _: [(); 496] = [(); CONFIG_LEN]).
+ *       PERC-328 added 40 bytes (_reserved: [u8; 40] for SlabHeader isolation).
+ *       ENGINE_OFF = 640 (verified against on-chain compile-time assertion: const _: [(); 536] = [(); CONFIG_LEN]).
  *       RiskEngine grew by 32 bytes (PERC-298: long_oi + short_oi) + 24 (PERC-299: emergency OI).
  *       Values below must be verified against BPF build before deployment.
  */
 declare const SLAB_TIERS: {
     readonly small: {
         readonly maxAccounts: 256;
-        readonly dataSize: 65312;
+        readonly dataSize: 65352;
         readonly label: "Small";
         readonly description: "256 slots · ~0.45 SOL";
     };
     readonly medium: {
         readonly maxAccounts: 1024;
-        readonly dataSize: 257408;
+        readonly dataSize: 257448;
         readonly label: "Medium";
         readonly description: "1,024 slots · ~1.79 SOL";
     };
     readonly large: {
         readonly maxAccounts: 4096;
-        readonly dataSize: 1025792;
+        readonly dataSize: 1025832;
         readonly label: "Large";
         readonly description: "4,096 slots · ~7.14 SOL";
     };
@@ -971,7 +972,7 @@ type SlabTierKey = keyof typeof SLAB_TIERS;
 /** Calculate slab data size for arbitrary account count.
  *
  * Layout (SBF, u128 align = 8):
- *   HEADER(104) + CONFIG(496) → ENGINE_OFF = 600
+ *   HEADER(104) + CONFIG(536) → ENGINE_OFF = 640
  *   RiskEngine fixed scalars: 656 bytes (PERC-299: +24 emergency OI, +32 long/short OI)
  *   + bitmap: ceil(N/64)*8
  *   + num_used_accounts(u16) + pad(6) + next_account_id(u64) + free_head(u16) = 18
