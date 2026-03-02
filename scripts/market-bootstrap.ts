@@ -297,7 +297,7 @@ async function placeSeedTrades(
     const accounts = parseAllAccounts(slabData.data);
     const lpAccount = accounts.find((a) => a.account.kind === 1);
     if (!lpAccount) throw new Error("No LP account found");
-    const userAccount = accounts.find((a) => !a.account.kind === 1 && a.account.owner.equals(wallet.publicKey));
+    const userAccount = accounts.find((a) => a.account.kind !== 1 && a.account.owner.equals(wallet.publicKey));
     if (!userAccount) throw new Error("User account not found");
 
     const [lpPda] = deriveLpPda(PROGRAM_ID, slabAddress, lpAccount.idx);
@@ -469,7 +469,7 @@ async function bootstrapMarket(market: MarketRecord): Promise<void> {
       if (slabData) {
         const accounts = parseAllAccounts(slabData.data);
         const lp = accounts.find((a) => a.account.kind === 1);
-        const user = accounts.find((a) => !a.account.kind === 1 && a.account.owner.equals(bootstrapWallet.publicKey));
+        const user = accounts.find((a) => a.account.kind !== 1 && a.account.owner.equals(bootstrapWallet.publicKey));
         if (lp && user) {
           activeMarkets.set(market.slab_address, {
             slabAddress: slabPk,
