@@ -87,10 +87,15 @@ async function main() {
   const [vaultPda] = deriveVaultAuthority(PROGRAM_ID, slabKeypair.publicKey);
   const vaultAta = await getAta(vaultPda, MINT, true); // allowOwnerOffCurve=true for PDA owner
 
-  // Create vault ATA
-  const { createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
+  // Create vault ATA and seed it with MIN_INIT_MARKET_SEED (500 USDC = 500_000_000 micro-units)
+  const { createAssociatedTokenAccountInstruction, createTransferInstruction } = await import("@solana/spl-token");
   const createVaultAtaIx = createAssociatedTokenAccountInstruction(
     DEPLOYER_KP.publicKey, vaultAta, vaultPda, MINT
+  );
+  const deployerAta_seed = await getAta(DEPLOYER_KP.publicKey, MINT);
+  const VAULT_SEED_AMOUNT = 500_000_000; // 500 USDC at 6 decimals — required by on-chain MIN_INIT_MARKET_SEED
+  const seedVaultIx = createTransferInstruction(
+    deployerAta_seed, vaultAta, DEPLOYER_KP.publicKey, VAULT_SEED_AMOUNT,
   );
 
   const initMarketData = encodeInitMarket({
@@ -116,12 +121,25 @@ async function main() {
     liquidationBufferBps: "50",                // 0.5% buffer
     minLiquidationAbs: "100000",               // 0.1 token minimum
   });
+  // ACCOUNTS_INIT_MARKET requires 9 accounts:
+  // admin, slab, mint, vault, tokenProgram, clock, rent, dummyAta, systemProgram
+  const { TOKEN_PROGRAM_ID } = await import("@solana/spl-token");
+  const { SYSVAR_RENT_PUBKEY } = await import("@solana/web3.js");
+  const deployerAta = await getAta(DEPLOYER_KP.publicKey, MINT);
   const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
-    DEPLOYER_KP.publicKey, slabKeypair.publicKey,
+    DEPLOYER_KP.publicKey,     // admin (signer, writable)
+    slabKeypair.publicKey,     // slab (writable)
+    MINT,                      // mint
+    vaultAta,                  // vault
+    TOKEN_PROGRAM_ID,          // tokenProgram
+    SYSVAR_CLOCK_PUBKEY,       // clock
+    SYSVAR_RENT_PUBKEY,        // rent
+    deployerAta,               // dummyAta (deployer's ATA as placeholder)
+    SystemProgram.programId,   // systemProgram
   ]);
   const initMarketIx = buildIx({ programId: PROGRAM_ID, keys: initMarketKeys, data: initMarketData });
 
-  let sig = await sendTx([createSlabIx, createVaultAtaIx, initMarketIx], [DEPLOYER_KP, slabKeypair]);
+  let sig = await sendTx([createSlabIx, createVaultAtaIx, seedVaultIx, initMarketIx], [DEPLOYER_KP, slabKeypair]);
   console.log(`✅ Step 0+1 OK: ${sig}`);
   console.log(`Slab: ${slabKeypair.publicKey.toBase58()}`);
 
@@ -160,9 +178,10 @@ async function main() {
   const userAta = await getAta(DEPLOYER_KP.publicKey, MINT);
   const initLpData = encodeInitLP({ matcherProgram: MATCHER_ID, matcherContext: matcherCtxKeypair.publicKey, feePayment: "1000000" });
   const [lpPda] = deriveLpPda(PROGRAM_ID, slabKeypair.publicKey, 0);
+  // ACCOUNTS_INIT_LP: user, slab, userAta, vault, tokenProgram
   const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
     DEPLOYER_KP.publicKey, slabKeypair.publicKey, userAta, vaultAta,
-    WELL_KNOWN.tokenProgram, MATCHER_ID, matcherCtxKeypair.publicKey, lpPda,
+    WELL_KNOWN.tokenProgram,
   ]);
   const initLpIx = buildIx({ programId: PROGRAM_ID, keys: initLpKeys, data: initLpData });
 
