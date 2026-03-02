@@ -37,7 +37,7 @@ export function MiniOrderBook({ className = "" }: { className?: string }) {
   return (
     <div
       className={`font-mono text-[11px] leading-relaxed ${className}`}
-      style={{ fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)" }}
+      style={{ fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)", fontVariantNumeric: "tabular-nums" }}
     >
       {[...sells].reverse().map((l, i) => (
         <div key={`s-${i}`} className="relative flex items-center justify-between py-0.5">

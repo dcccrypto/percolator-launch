@@ -87,7 +87,7 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
       >
         <div className="flex items-center gap-2">
           <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Account</span>
-          <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
+          <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
             {formatTokenAmount(capital)} {symbol}
           </span>
         </div>

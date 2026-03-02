@@ -8,6 +8,7 @@ import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
@@ -150,7 +151,7 @@ export default function PortfolioPage() {
             ].map((stat) => (
               <div key={stat.label} className="bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
                 <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">{stat.label}</p>
-                <p className={`text-xl font-bold ${stat.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                <p className={`text-xl font-bold tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                   {stat.value}
                 </p>
                 {stat.sub && (
@@ -166,9 +167,29 @@ export default function PortfolioPage() {
         {/* Positions */}
         <ScrollReveal delay={0.2}>
           {loading || tokenMetasLoading ? (
-            <div className="space-y-px">
+            <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-14 animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" />
+                <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <ShimmerSkeleton className="h-5 w-28" />
+                      <ShimmerSkeleton className="h-5 w-14 rounded" />
+                      <ShimmerSkeleton className="h-5 w-10 rounded" />
+                    </div>
+                    <div className="text-right flex items-center gap-2">
+                      <ShimmerSkeleton className="h-5 w-20" />
+                      <ShimmerSkeleton className="h-4 w-14" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-5">
+                    {[1, 2, 3, 4, 5].map((j) => (
+                      <div key={j}>
+                        <ShimmerSkeleton className="h-3 w-12 mb-1.5" />
+                        <ShimmerSkeleton className="h-4 w-16" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           ) : positions.length === 0 ? (
@@ -231,7 +252,7 @@ export default function PortfolioPage() {
                       {/* Row 1: Market name, side, PnL */}
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                          <span className="text-sm font-semibold text-white" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.symbol ?? pos.slabAddress.slice(0, 8) + "\u2026"}/USD
                           </span>
                           <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${
@@ -252,7 +273,7 @@ export default function PortfolioPage() {
                         <div className="text-right">
                           <span
                             className={`text-sm font-bold ${pnlPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
-                            style={{ fontFamily: "var(--font-jetbrains-mono)" }}
+                            style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                           >
                             {formatPnl(unrealizedPnl)}
                           </span>
@@ -268,25 +289,25 @@ export default function PortfolioPage() {
                       <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-5">
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Size</p>
-                          <p className="text-[12px] text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                          <p className="text-[12px] text-white" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {formatTokenAmount(sizeAbs)}
                           </p>
                         </div>
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Entry</p>
-                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {formatPriceE6(posEntry)}
                           </p>
                         </div>
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Mark Price</p>
-                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {oraclePriceE6 > 0n ? formatPriceE6(oraclePriceE6) : "—"}
                           </p>
                         </div>
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Capital</p>
-                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {formatTokenAmount(posCapital)}
                           </p>
                         </div>
@@ -313,7 +334,7 @@ export default function PortfolioPage() {
                                   ? "text-[var(--warning)]"
                                   : "text-[var(--text-secondary)]"
                               }`}
-                              style={{ fontFamily: "var(--font-jetbrains-mono)" }}
+                              style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                             >
                               {hasPosition && liquidationPriceE6 > 0n
                                 ? formatPriceE6(liquidationPriceE6)

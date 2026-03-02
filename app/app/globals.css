@@ -59,6 +59,21 @@ body {
   color: var(--text);
   font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ─── Tabular Numbers — enforce on all numeric displays ─── */
+[style*="font-family: var(--font-jetbrains-mono)"],
+[style*="font-family:var(--font-jetbrains-mono)"],
+[data-numeric],
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ─── Safe Area — mobile bottom nav ─── */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* ─── Noise Texture Overlay ─── */

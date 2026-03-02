@@ -130,7 +130,7 @@ export const AccountsCard: FC = () => {
             {t.label} ({t.count})
           </button>
         ))}
-        <span className="ml-auto text-[9px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{accounts.length} total</span>
+        <span className="ml-auto text-[9px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{accounts.length} total</span>
       </div>
 
       {sortedRows.length === 0 ? (
@@ -158,8 +158,8 @@ export const AccountsCard: FC = () => {
                 const absPos = row.positionSize < 0n ? -row.positionSize : row.positionSize;
                 return (
                   <tr key={row.idx} className="border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03]">
-                    <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{i + 1}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>{shortenAddress(row.owner)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{i + 1}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{shortenAddress(row.owner)}</td>
                     {isOpenLike && (
                       <td className="whitespace-nowrap px-2 py-1.5 text-left">
                         {row.direction === "IDLE" ? <span className="text-[var(--text-dim)]">-</span> : (
@@ -170,16 +170,16 @@ export const AccountsCard: FC = () => {
                       </td>
                     )}
                     {isOpenLike && (
-                      <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+                      <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                         {row.positionSize !== 0n ? formatTokenAmount(absPos) : "-"}
                       </td>
                     )}
-                    {isOpenLike && <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
+                    {isOpenLike && <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
                     {isOpenLike && (
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">
                         {row.positionSize !== 0n ? (
                           <div className="flex items-center justify-end gap-1">
-                            <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatLiqPrice(row.liqPrice)}</span>
+                            <span className="text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{formatLiqPrice(row.liqPrice)}</span>
                             <div className="h-1 w-8 shrink-0 bg-[var(--border)]/50">
                               <div className={`h-1 ${liqBarColor(row.liqHealthPct)}`} style={{ width: `${Math.max(8, row.liqHealthPct)}%` }} />
                             </div>
@@ -187,12 +187,12 @@ export const AccountsCard: FC = () => {
                         ) : "-"}
                       </td>
                     )}
-                    <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+                    <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                       {formatPnl(row.pnl)}
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(row.capital)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{formatTokenAmount(row.capital)}</td>
                     {isOpenLike && (
-                      <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.marginPct > 50 ? "text-[var(--long)]" : row.marginPct > 20 ? "text-[var(--warning)]" : "text-[var(--short)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+                      <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.marginPct > 50 ? "text-[var(--long)]" : row.marginPct > 20 ? "text-[var(--warning)]" : "text-[var(--short)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                         {row.positionSize !== 0n ? `${row.marginPct.toFixed(1)}%` : "-"}
                       </td>
                     )}

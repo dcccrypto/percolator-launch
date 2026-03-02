@@ -692,18 +692,18 @@ function MarketsPageInner() {
                         </div>
                       </div>
                       <div className="text-right truncate">
-                        <span className="text-sm text-white" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                        <span className="text-sm text-white tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                           {lastPrice != null
                             ? `$${lastPrice < 0.01 ? lastPrice.toFixed(6) : lastPrice < 1 ? lastPrice.toFixed(4) : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                             : "\u2014"}
                         </span>
                       </div>
-                      <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{oiDisplay}</div>
-                      <div className="text-right text-sm text-[var(--text-secondary)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                      <div className="text-right text-sm text-[var(--text-secondary)] truncate tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>{oiDisplay}</div>
+                      <div className="text-right text-sm text-[var(--text-secondary)] truncate tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                         {volumeDisplay ?? "\u2014"}
                       </div>
-                      <div className="text-right text-sm text-[var(--text)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>{insuranceDisplay}</div>
-                      <div className="text-right text-sm text-[var(--text-secondary)]">{m.maxLeverage}x</div>
+                      <div className="text-right text-sm text-[var(--text)] truncate tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>{insuranceDisplay}</div>
+                      <div className="text-right text-sm text-[var(--text-secondary)] tabular-nums" style={{ fontVariantNumeric: "tabular-nums" }}>{m.maxLeverage}x</div>
                       <div className="text-right"><HealthBadge level={health.level} /></div>
                     </Link>
                   );
@@ -742,9 +742,24 @@ function MarketsPageInner() {
 export default function MarketsPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-        <span className="text-xs text-[var(--text-muted)]">Loading markets…</span>
+      <div className="min-h-[calc(100vh-48px)] relative">
+        <div className="absolute inset-x-0 top-0 h-32 bg-grid pointer-events-none" />
+        <div className="relative mx-auto max-w-4xl px-4 pt-4 pb-10">
+          <div className="mb-8">
+            <ShimmerSkeleton className="h-3 w-20 mb-2" />
+            <ShimmerSkeleton className="h-8 w-48 mb-2" />
+            <ShimmerSkeleton className="h-4 w-72" />
+          </div>
+          <div className="mb-6 flex gap-3">
+            <ShimmerSkeleton className="flex-1 h-11" />
+            <ShimmerSkeleton className="h-11 w-48" />
+          </div>
+          <div className="space-y-2">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <ShimmerSkeleton key={i} className="h-[52px]" />
+            ))}
+          </div>
+        </div>
       </div>
     }>
       <MarketsPageInner />

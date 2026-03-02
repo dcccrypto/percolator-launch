@@ -304,7 +304,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="mb-2">
         <div className="mb-1 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Margin ({symbol})<InfoIcon tooltip="The amount of collateral you're putting up for this trade. If your position loses more than your margin, you get liquidated." /></label>
-          <span className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+          <span className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
             Bal: {formatPerc(capital, decimals)}
           </span>
         </div>
@@ -314,7 +314,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             value={marginInput}
             onChange={(e) => setMarginInput(e.target.value.replace(/[^0-9.]/g, ""))}
             placeholder="0.00"
-            style={{ fontFamily: "var(--font-mono)" }}
+            style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
             className={`w-full rounded-none border px-3 py-2 pr-14 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 ${
               exceedsMargin
                 ? "border-[var(--short)]/50 bg-[var(--short)]/5 focus:border-[var(--short)] focus:ring-[var(--short)]/30"
@@ -331,7 +331,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </button>
         </div>
         {exceedsMargin && (
-          <p className="mt-1 text-[10px] text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
+          <p className="mt-1 text-[10px] text-[var(--short)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
             Exceeds balance ({formatPerc(capital, decimals)} {symbol})
           </p>
         )}
@@ -354,7 +354,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="mb-5">
         <div className="mb-1 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Leverage<InfoIcon tooltip="Multiplies your position size. 5x leverage means 5x the profit but also 5x the loss. Higher leverage = higher risk of liquidation." /></label>
-          <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{leverage}x</span>
+          <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{leverage}x</span>
         </div>
         <input
           type="range"
@@ -459,7 +459,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       )}
 
       {lastSig && (
-        <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+        <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           Tx:{" "}
           <a
             href={`${explorerTxUrl(lastSig)}`}

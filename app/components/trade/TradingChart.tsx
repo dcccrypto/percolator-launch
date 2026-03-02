@@ -225,7 +225,7 @@ export const TradingChart: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <div className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: isUp ? "var(--long)" : "var(--short)" }}>
+          <div className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", color: isUp ? "var(--long)" : "var(--short)" }}>
             ${currentPrice.toFixed(currentPrice < 1 ? 4 : 2)}
           </div>
           <div className="text-xs" style={{ color: isUp ? "var(--long)" : "var(--short)" }}>

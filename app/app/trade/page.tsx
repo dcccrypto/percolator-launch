@@ -3,15 +3,17 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 /**
  * /trade (no slab parameter)
  *
- * Redirects to the highest-volume active market.
- * Falls back to the markets browser if no markets are available.
+ * Redirects to SOL-PERP (by symbol match) or the highest-volume
+ * active market. Falls back to the markets browser if no markets
+ * are available.
  *
- * Fixes: GitHub issue #480 — /trade was returning 404 because
- * the only trade route was /trade/[slab] (dynamic segment required).
+ * PERC-352: Default to SOL-PERP instead of a blank state.
+ * Shows skeleton UI during redirect for perceived performance.
  */
 
 interface MarketRow {
@@ -55,8 +57,27 @@ export default function TradeRedirectPage() {
           (m) => m.last_price != null && m.last_price > 0 && m.last_price < 1e18
         );
 
-        // Pick by highest 24h volume, falling back to first active, then first overall
-        const sorted = [...(active.length > 0 ? active : markets)].sort(
+        const pool = active.length > 0 ? active : markets;
+
+        // PERC-352: Prefer SOL-PERP or SOL/USD by symbol match
+        const solPerp = pool.find((m) => {
+          const sym = (m.symbol ?? "").toUpperCase();
+          return (
+            sym === "SOL-PERP" ||
+            sym === "SOL/USD" ||
+            sym === "SOL" ||
+            sym.startsWith("SOL-") ||
+            sym.startsWith("SOL/")
+          );
+        });
+
+        if (solPerp?.slab_address) {
+          router.replace(`/trade/${solPerp.slab_address}`);
+          return;
+        }
+
+        // Fallback: highest 24h volume
+        const sorted = [...pool].sort(
           (a, b) => (b.volume_24h ?? 0) - (a.volume_24h ?? 0)
         );
 
@@ -121,6 +142,12 @@ export default function TradeRedirectPage() {
           </p>
           <div className="mt-4 flex items-center justify-center gap-3">
             <Link
+              href="/create"
+              className="border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-4 py-1.5 text-[11px] text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors"
+            >
+              Create Market
+            </Link>
+            <Link
               href="/markets"
               className="border border-[var(--border)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors"
             >
@@ -132,13 +159,60 @@ export default function TradeRedirectPage() {
     );
   }
 
-  // Loading / redirecting
+  // PERC-352: Skeleton loading state (replaces spinner)
+  // Matches the trade page layout to reduce perceived loading time
   return (
-    <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-      <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.15em]">
-        Finding best market…
-      </p>
+    <div className="min-h-[calc(100vh-48px)]">
+      {/* Mobile header skeleton */}
+      <div className="sticky top-0 z-30 border-b border-[var(--border)]/50 bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShimmerSkeleton className="h-8 w-8 rounded-full" />
+            <ShimmerSkeleton className="h-5 w-32" />
+          </div>
+          <ShimmerSkeleton className="h-6 w-20" />
+        </div>
+      </div>
+
+      {/* Desktop header skeleton */}
+      <div className="hidden lg:flex items-start justify-between px-4 py-2 gap-3 border-b border-[var(--border)]/30">
+        <div className="min-w-0">
+          <ShimmerSkeleton className="h-3 w-16 mb-2" />
+          <div className="flex items-center gap-2.5">
+            <ShimmerSkeleton className="h-12 w-12 rounded-full" />
+            <ShimmerSkeleton className="h-7 w-40" />
+          </div>
+        </div>
+        <ShimmerSkeleton className="h-8 w-24" />
+      </div>
+
+      {/* Mobile layout skeleton */}
+      <div className="flex flex-col gap-1.5 px-2 pt-2 pb-4 lg:hidden">
+        <ShimmerSkeleton className="h-[300px] w-full" />
+        <ShimmerSkeleton className="h-[240px] w-full" />
+      </div>
+
+      {/* Desktop layout skeleton */}
+      <div className="hidden lg:grid grid-cols-[1fr_340px] gap-1.5 px-3 pb-3 pt-1.5">
+        <div className="min-w-0 space-y-1.5">
+          <ShimmerSkeleton className="h-[500px] w-full" />
+          <ShimmerSkeleton className="h-[200px] w-full" />
+        </div>
+        <div className="min-w-0 space-y-1.5">
+          <ShimmerSkeleton className="h-[350px] w-full" />
+          <ShimmerSkeleton className="h-[300px] w-full" />
+        </div>
+      </div>
+
+      {/* Subtle loading indicator */}
+      <div className="fixed bottom-20 md:bottom-4 left-1/2 -translate-x-1/2 z-50">
+        <div className="flex items-center gap-2 rounded-sm border border-[var(--border)] bg-[var(--bg)]/95 px-3 py-1.5 backdrop-blur-sm">
+          <div className="h-3 w-3 animate-spin rounded-full border border-[var(--accent)] border-t-transparent" />
+          <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.15em]">
+            Loading SOL-PERP…
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

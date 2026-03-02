@@ -7,6 +7,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
 import { TickerBanner } from "@/components/layout/TickerBanner";
 import { CursorGlow } from "@/components/ui/CursorGlow";
 import { MusicPlayer } from "@/components/ui/MusicPlayer";
@@ -53,8 +54,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <div className="relative z-[1] flex min-h-screen flex-col">
             <TickerBanner />
             <Header />
-            <main className="flex-1">{children}</main>
+            <main className="flex-1 pb-[60px] md:pb-0">{children}</main>
             <Footer />
+            <MobileBottomNav />
           </div>
           <MusicPlayer />
         </Providers>
