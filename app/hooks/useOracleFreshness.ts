@@ -33,7 +33,7 @@ const AGING_THRESHOLD = 30;
 
 function getFreshnessLevel(elapsedSecs: number): FreshnessLevel {
   if (elapsedSecs < FRESH_THRESHOLD) return "fresh";
-  if (elapsedSecs < AGING_THRESHOLD) return "aging";
+  if (elapsedSecs <= AGING_THRESHOLD) return "aging";
   return "stale";
 }
 

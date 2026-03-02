@@ -127,7 +127,7 @@ export function useLivePrice(): PriceState {
             timestamp?: number;
           };
 
-          if (msg.type === "price.updated" && msg.slabAddress === slabAddr && msg.data?.priceE6) {
+          if ((msg.type === "price" || msg.type === "price.updated") && msg.slabAddress === slabAddr && msg.data?.priceE6) {
             // C4: Validate string format before BigInt conversion
             const priceStr = msg.data.priceE6;
             if (typeof priceStr !== "string" || !/^-?\d+$/.test(priceStr)) {
