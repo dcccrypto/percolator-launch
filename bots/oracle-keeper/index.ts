@@ -169,7 +169,7 @@ async function fetchPythPrices(symbols: string[]): Promise<void> {
       // Reject prices Pyth hasn't updated in 60s — they are stale at the source.
       const publishMs = entry.price.publish_time * 1000;
       const ageMs = Date.now() - publishMs;
-      if (price > 0 && ageMs < 60_000) {
+      if (price > 0 && ageMs >= 0 && ageMs < 60_000) {
         pythCache.set(sym, { price, ts: publishMs });
       } else if (price > 0) {
         log(`⚠️ ${sym}: Pyth publish_time is ${Math.floor(ageMs / 1000)}s old — rejecting stale price`);
