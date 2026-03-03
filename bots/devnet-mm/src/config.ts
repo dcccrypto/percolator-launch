@@ -97,11 +97,11 @@ export function loadConfig(): BotConfig {
     fillerKeypairPath:
       process.env.FILLER_KEYPAIR ??
       process.env.BOOTSTRAP_KEYPAIR ??
-      "/tmp/percolator-keepers/filler.json",
+      "/tmp/percolator-bots/filler.json",
     makerKeypairPath:
       process.env.MAKER_KEYPAIR ??
       process.env.BOOTSTRAP_KEYPAIR ??
-      "/tmp/percolator-keepers/maker.json",
+      "/tmp/percolator-bots/maker.json",
 
     crankIntervalMs: parseNum(process.env.CRANK_INTERVAL_MS, 5000),
     maxCrankStalenessSlots: parseNum(process.env.MAX_CRANK_STALENESS, 200),
