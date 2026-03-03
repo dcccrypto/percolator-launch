@@ -22,8 +22,8 @@
  *   ADMIN_KEYPAIR_PATH — Oracle authority keypair
  *   PUSH_INTERVAL_MS  — Push interval (default: 3000)
  *   HEALTH_PORT       — HTTP health check port (default: 18810)
- *   HEALTH_HOST       — Bind address for health server (default: 127.0.0.1)
- *   HEALTH_SECRET     — Bearer token for health endpoint auth (optional but recommended)
+ *   HEALTH_BIND       — Bind address for health server (default: 127.0.0.1)
+ *   HEALTH_AUTH_TOKEN — Bearer token for health endpoint auth (optional but recommended)
  *   MAX_PRICE_MOVE_PCT — Circuit breaker % (default: 10)
  *   STALE_THRESHOLD_S  — Staleness alert threshold (default: 30)
  */
@@ -49,10 +49,6 @@ const STALE_THRESHOLD_S = Number(process.env.STALE_THRESHOLD_S ?? "30");
 const ADMIN_KP_PATH = process.env.ADMIN_KEYPAIR_PATH ??
   `${process.env.HOME}/.config/solana/percolator-upgrade-authority.json`;
 const RPC_URL = process.env.RPC_URL ?? "https://api.devnet.solana.com";
-// #613: bind health server to localhost by default; set HEALTH_HOST=0.0.0.0 for external access
-const HEALTH_HOST = process.env.HEALTH_HOST ?? "127.0.0.1";
-// #613: optional bearer token for health endpoint auth
-const HEALTH_SECRET = process.env.HEALTH_SECRET ?? "";
 
 const conn = new Connection(RPC_URL, "confirmed");
 // Support inline keypair via ADMIN_KEYPAIR env var (JSON array) for Railway/Docker deployments
