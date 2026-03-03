@@ -161,15 +161,22 @@ async function fetchPythPrices(symbols: string[]): Promise<void> {
       idToSymbol.set(id, sym);
     }
 
-    const now = Date.now();
     for (const entry of json.parsed) {
       const sym = idToSymbol.get(entry.id);
       if (!sym) continue;
       const rawPrice = parseInt(entry.price.price, 10);
       const expo = entry.price.expo;
       const price = rawPrice * Math.pow(10, expo);
-      if (price > 0) {
-        pythCache.set(sym, { price, ts: now });
+      // Use Pyth's publish_time as the cache timestamp (not fetch time).
+      // This ensures getPythPrice's 30s staleness check operates against the
+      // actual Pyth oracle clock, not the moment we fetched the HTTP response.
+      // Reject prices Pyth hasn't updated in 60s — they are stale at the source.
+      const publishMs = entry.price.publish_time * 1000;
+      const ageMs = Date.now() - publishMs;
+      if (price > 0 && ageMs < 60_000) {
+        pythCache.set(sym, { price, ts: publishMs });
+      } else if (price > 0) {
+        log(`⚠️ ${sym}: Pyth publish_time is ${Math.floor(ageMs / 1000)}s old — rejecting stale price`);
       }
     }
   } catch (e) {
