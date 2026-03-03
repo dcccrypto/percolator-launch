@@ -324,6 +324,126 @@ describe('CrankService', () => {
     });
   });
 
+  describe('PERC-381: permanent skip cooldown', () => {
+    it('should NOT re-enable 0x4-skipped markets on immediate rediscovery', async () => {
+      const slabAddress = 'MarketSkip111111111111111111111111111111';
+      const mockMarket = {
+        slabAddress: { toBase58: () => slabAddress },
+        programId: { toBase58: () => '11111111111111111111111111111111' },
+        config: {
+          collateralMint: { toBase58: () => 'MintSkip1111111111111111111111111111111' },
+          oracleAuthority: { toBase58: () => '11111111111111111111111111111111', equals: () => true },
+          indexFeedId: { toBytes: () => new Uint8Array(32) },
+        },
+        params: { maintenanceMarginBps: 500n },
+        header: { admin: { toBase58: () => 'AdminSkip111111111111111111111111111111' } },
+      };
+
+      vi.mocked(core.discoverMarkets).mockResolvedValue([mockMarket] as any);
+      await crankService.discover();
+
+      // Simulate 0x4 error → permanently skipped
+      vi.mocked(shared.sendWithRetryKeeper).mockRejectedValue(
+        new Error('failed to send transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x4')
+      );
+      await crankService.crankMarket(slabAddress);
+
+      const stateAfterSkip = crankService.getMarkets().get(slabAddress)!;
+      expect(stateAfterSkip.permanentlySkipped).toBe(true);
+      expect(stateAfterSkip.permanentlySkippedAt).toBeDefined();
+      expect(stateAfterSkip.skipCount).toBe(1);
+
+      // Immediately rediscover — should NOT re-enable (cooldown not elapsed)
+      await crankService.discover();
+
+      const stateAfterRediscovery = crankService.getMarkets().get(slabAddress)!;
+      expect(stateAfterRediscovery.permanentlySkipped).toBe(true);
+    });
+
+    it('should re-enable 0x4-skipped markets after cooldown expires', async () => {
+      const slabAddress = 'MarketCool111111111111111111111111111111';
+      const mockMarket = {
+        slabAddress: { toBase58: () => slabAddress },
+        programId: { toBase58: () => '11111111111111111111111111111111' },
+        config: {
+          collateralMint: { toBase58: () => 'MintCool1111111111111111111111111111111' },
+          oracleAuthority: { toBase58: () => '11111111111111111111111111111111', equals: () => true },
+          indexFeedId: { toBytes: () => new Uint8Array(32) },
+        },
+        params: { maintenanceMarginBps: 500n },
+        header: { admin: { toBase58: () => 'AdminCool111111111111111111111111111111' } },
+      };
+
+      vi.mocked(core.discoverMarkets).mockResolvedValue([mockMarket] as any);
+      await crankService.discover();
+
+      // Simulate 0x4 error
+      vi.mocked(shared.sendWithRetryKeeper).mockRejectedValue(
+        new Error('custom program error: 0x4')
+      );
+      await crankService.crankMarket(slabAddress);
+
+      const state = crankService.getMarkets().get(slabAddress)!;
+      expect(state.permanentlySkipped).toBe(true);
+
+      // Fast-forward past the 1-hour cooldown (skipCount=1 → 1h)
+      state.permanentlySkippedAt = Date.now() - 3_700_000; // 1h + 100s ago
+
+      // Rediscover — should now re-enable
+      await crankService.discover();
+
+      const stateAfterCooldown = crankService.getMarkets().get(slabAddress)!;
+      expect(stateAfterCooldown.permanentlySkipped).toBe(false);
+      expect(stateAfterCooldown.consecutiveFailures).toBe(0);
+    });
+
+    it('should increase cooldown with each skip (exponential backoff)', { timeout: 30000 }, async () => {
+      const slabAddress = 'MarketExp1111111111111111111111111111111';
+      const mockMarket = {
+        slabAddress: { toBase58: () => slabAddress },
+        programId: { toBase58: () => '11111111111111111111111111111111' },
+        config: {
+          collateralMint: { toBase58: () => 'MintExp11111111111111111111111111111111' },
+          oracleAuthority: { toBase58: () => '11111111111111111111111111111111', equals: () => true },
+          indexFeedId: { toBytes: () => new Uint8Array(32) },
+        },
+        params: { maintenanceMarginBps: 500n },
+        header: { admin: { toBase58: () => 'AdminExp1111111111111111111111111111111' } },
+      };
+
+      vi.mocked(core.discoverMarkets).mockResolvedValue([mockMarket] as any);
+      await crankService.discover();
+
+      // Simulate multiple 0x4 errors
+      vi.mocked(shared.sendWithRetryKeeper).mockRejectedValue(
+        new Error('custom program error: 0x4')
+      );
+      await crankService.crankMarket(slabAddress);
+
+      const state = crankService.getMarkets().get(slabAddress)!;
+      expect(state.skipCount).toBe(1);
+
+      // Re-enable after cooldown, then fail again → skipCount=2
+      state.permanentlySkippedAt = Date.now() - 3_700_000; // past 1h cooldown
+      await crankService.discover();
+      expect(state.permanentlySkipped).toBe(false);
+
+      await crankService.crankMarket(slabAddress);
+      expect(state.permanentlySkipped).toBe(true);
+      expect(state.skipCount).toBe(2);
+
+      // After 1h (skipCount=2 → 2h cooldown) → should NOT re-enable yet
+      state.permanentlySkippedAt = Date.now() - 3_700_000; // 1h ago, but need 2h
+      await crankService.discover();
+      expect(state.permanentlySkipped).toBe(true); // Still in cooldown
+
+      // After 2h → should re-enable
+      state.permanentlySkippedAt = Date.now() - 7_300_000; // 2h+ ago
+      await crankService.discover();
+      expect(state.permanentlySkipped).toBe(false);
+    });
+  });
+
   describe('start and stop', () => {
     it('should start timer and perform initial discovery', async () => {
       vi.mocked(core.discoverMarkets).mockResolvedValue([]);

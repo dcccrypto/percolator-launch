@@ -27,6 +27,10 @@ interface MarketCrankState {
   missingDiscoveryCount: number;
   /** Permanently skip — market is not initialized on-chain (error 0x4) */
   permanentlySkipped?: boolean;
+  /** Timestamp when the market was first permanently skipped (for cooldown) */
+  permanentlySkippedAt?: number;
+  /** How many times this market has been skipped for 0x4 across rediscoveries */
+  skipCount?: number;
 }
 
 /** Process items in batches with delay between batches.
@@ -132,11 +136,29 @@ export class CrankService {
         const state = this.markets.get(key)!;
         state.market = market;
         state.missingDiscoveryCount = 0;
-        // Re-enable permanently skipped markets on rediscovery (may have been initialized since)
-        if (state.permanentlySkipped) {
-          state.permanentlySkipped = false;
-          state.consecutiveFailures = 0;
-          logger.info("Re-enabling previously skipped market", { slabAddress: key });
+        // PERC-381: Only re-enable permanently skipped (0x4) markets after a long cooldown
+        // to avoid crank→skip→rediscover→re-enable→crank thrash loop on stale slabs.
+        // Cooldown increases exponentially with skip count (1h, 2h, 4h, ... capped at 24h).
+        if (state.permanentlySkipped && state.permanentlySkippedAt) {
+          const skipCount = state.skipCount ?? 1;
+          const cooldownMs = Math.min(skipCount * 3_600_000, 24 * 3_600_000); // 1h per skip, max 24h
+          const elapsed = Date.now() - state.permanentlySkippedAt;
+          if (elapsed >= cooldownMs) {
+            state.permanentlySkipped = false;
+            state.consecutiveFailures = 0;
+            logger.info("Re-enabling permanently skipped market after cooldown", {
+              slabAddress: key,
+              cooldownMs,
+              skipCount,
+              elapsedMs: elapsed,
+            });
+          } else {
+            logger.debug("Permanently skipped market still in cooldown", {
+              slabAddress: key,
+              remainingMs: cooldownMs - elapsed,
+              skipCount,
+            });
+          }
         }
       }
     }
@@ -250,13 +272,17 @@ export class CrankService {
       state.consecutiveFailures++;
 
       // Detect NotInitialized (error 0x4) — permanently skip these markets
+      // PERC-381: Track skip count and timestamp for exponential cooldown on rediscovery
       const errMsg = err instanceof Error ? err.message : String(err);
       if (errMsg.includes("custom program error: 0x4")) {
         state.permanentlySkipped = true;
+        state.permanentlySkippedAt = Date.now();
+        state.skipCount = (state.skipCount ?? 0) + 1;
         state.isActive = false;
         logger.warn("Market not initialized on-chain, permanently skipping", {
           slabAddress,
           programId: market.programId.toBase58(),
+          skipCount: state.skipCount,
         });
         return false;
       }
