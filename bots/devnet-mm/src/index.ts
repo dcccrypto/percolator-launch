@@ -31,6 +31,52 @@ import { MakerBot } from "./maker.js";
 import { startHealthServer } from "./health.js";
 import { log, logError } from "./logger.js";
 import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+
+// ═══════════════════════════════════════════════════════════════
+// Railway / Docker: materialize keypairs from env vars
+// ═══════════════════════════════════════════════════════════════
+// When running in containers, keypair files don't exist on disk.
+// Support FILLER_KEYPAIR_JSON / MAKER_KEYPAIR_JSON env vars that
+// contain the raw JSON array, and write them to temp files.
+
+function materializeKeypairFromEnv(
+  envVar: string,
+  pathEnvVar: string,
+  filename: string,
+): void {
+  const jsonStr = process.env[envVar];
+  if (!jsonStr) return;
+
+  // Validate it parses as a JSON array of numbers
+  try {
+    const arr = JSON.parse(jsonStr);
+    if (!Array.isArray(arr) || arr.length < 32) {
+      console.error(`⚠️ ${envVar} is not a valid keypair array`);
+      return;
+    }
+  } catch {
+    console.error(`⚠️ ${envVar} is not valid JSON`);
+    return;
+  }
+
+  const dir = path.join(os.tmpdir(), "percolator-bots");
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, filename);
+  fs.writeFileSync(filePath, jsonStr, { mode: 0o600 });
+
+  // Set the path env var so config.ts picks it up
+  if (!process.env[pathEnvVar]) {
+    process.env[pathEnvVar] = filePath;
+  }
+  console.log(`✅ Materialized ${envVar} → ${filePath}`);
+}
+
+materializeKeypairFromEnv("FILLER_KEYPAIR_JSON", "FILLER_KEYPAIR", "filler.json");
+materializeKeypairFromEnv("MAKER_KEYPAIR_JSON", "MAKER_KEYPAIR", "maker.json");
+// Also support BOOTSTRAP_KEYPAIR_JSON for single-wallet mode
+materializeKeypairFromEnv("BOOTSTRAP_KEYPAIR_JSON", "BOOTSTRAP_KEYPAIR", "bootstrap.json");
 
 // ═══════════════════════════════════════════════════════════════
 // Banner
