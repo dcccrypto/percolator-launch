@@ -64,6 +64,8 @@ if (process.env.ADMIN_KEYPAIR) {
 // Optional API keys for rate-limited sources
 const COINGECKO_API_KEY = process.env.COINGECKO_API_KEY ?? "";
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY ?? "";
+const HEALTH_BIND = process.env.HEALTH_BIND ?? "127.0.0.1";
+const HEALTH_AUTH_TOKEN = process.env.HEALTH_AUTH_TOKEN ?? "";
 
 // Track markets where we're not the oracle authority (skip future attempts)
 const skippedMarkets = new Set<string>();
@@ -145,16 +147,30 @@ async function fetchCoinGeckoPrice(symbol: string): Promise<number | null> {
   } catch { return null; }
 }
 
+// Jupiter Price API requires mint addresses, not symbols
+const JUPITER_MINTS: Record<string, string> = {
+  SOL: "So11111111111111111111111111111111111111112",
+  BTC: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh", // wBTC (Portal)
+  ETH: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", // wETH (Portal)
+  BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+  WIF: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+  JTO: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+  JUP: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+  PYTH: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",
+  RAY: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+  RNDR: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof",
+};
+
 async function fetchJupiterPrice(symbol: string): Promise<number | null> {
-  // Jupiter uses mint addresses, but for common tokens we can use symbol
-  // This is a lightweight fallback
+  const mint = JUPITER_MINTS[symbol];
+  if (!mint) return null;
   try {
     const resp = await fetch(
-      `https://api.jup.ag/price/v2?ids=${symbol}`,
+      `https://api.jup.ag/price/v2?ids=${mint}`,
       { signal: AbortSignal.timeout(4000) },
     );
     const json = (await resp.json()) as any;
-    const data = json.data?.[symbol];
+    const data = json.data?.[mint];
     return data?.price ? parseFloat(data.price) : null;
   } catch { return null; }
 }
@@ -296,6 +312,16 @@ async function pushAndCrank(market: MarketInfo, programId: PublicKey): Promise<v
 // ── Health Check Server ─────────────────────────────────────
 function startHealthServer() {
   const server = http.createServer((req, res) => {
+    // Auth guard: if HEALTH_AUTH_TOKEN is set, require Bearer token
+    if (HEALTH_AUTH_TOKEN) {
+      const auth = req.headers.authorization;
+      if (auth !== `Bearer ${HEALTH_AUTH_TOKEN}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+    }
+
     if (req.url === "/health" || req.url === "/") {
       const now = Date.now();
       const uptimeS = Math.floor((now - startTime) / 1000);
@@ -333,8 +359,8 @@ function startHealthServer() {
     }
   });
 
-  server.listen(HEALTH_PORT, () => {
-    log(`Health endpoint: http://localhost:${HEALTH_PORT}/health`);
+  server.listen(HEALTH_PORT, HEALTH_BIND, () => {
+    log(`Health endpoint: http://${HEALTH_BIND}:${HEALTH_PORT}/health${HEALTH_AUTH_TOKEN ? " (auth required)" : ""}`);
   });
   return server;
 }
@@ -342,7 +368,12 @@ function startHealthServer() {
 // ── Main Loop ───────────────────────────────────────────────
 async function main() {
   log(`Oracle Keeper starting — admin: ${admin.publicKey.toBase58().slice(0, 12)}...`);
-  log(`RPC: ${RPC_URL.slice(0, 40)}...`);
+  // Redact RPC URL to prevent API key exposure in logs
+  const rpcRedacted = (() => {
+    try { const u = new URL(RPC_URL); return `${u.protocol}//${u.hostname}`; }
+    catch { return "<invalid-url>"; }
+  })();
+  log(`RPC: ${rpcRedacted}`);
   log(`Push interval: ${PUSH_INTERVAL_MS}ms | Circuit breaker: ${MAX_PRICE_MOVE_PCT}% | Stale threshold: ${STALE_THRESHOLD_S}s`);
 
   const deployPath = "/tmp/percolator-devnet-deployment.json";
