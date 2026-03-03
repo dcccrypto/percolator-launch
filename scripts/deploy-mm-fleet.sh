@@ -42,7 +42,7 @@ export MM_WIDE_SPREAD_BPS="${MM_WIDE_SPREAD_BPS:-40}"
 export MM_TIGHT_A_SPREAD_BPS="${MM_TIGHT_A_SPREAD_BPS:-12}"
 export MM_TIGHT_B_SPREAD_BPS="${MM_TIGHT_B_SPREAD_BPS:-18}"
 
-# Parse args
+# Parse args — fail on unknown flags to prevent accidental real deploys
 for arg in "$@"; do
   case "$arg" in
     --dry-run)  DRY_RUN=true ;;
@@ -59,8 +59,20 @@ for arg in "$@"; do
       echo "  KEEPER_DIR      Wallet directory (default: /tmp/percolator-keepers)"
       exit 0
       ;;
+    *)
+      echo "❌ Unknown argument: $arg"
+      echo "Run '$0 --help' for usage."
+      exit 1
+      ;;
   esac
 done
+
+# Validate required environment variables
+if [ -z "${HELIUS_API_KEY:-}" ]; then
+  echo "❌ HELIUS_API_KEY is not set. Required for devnet RPC."
+  echo "   export HELIUS_API_KEY=your-key-here"
+  exit 1
+fi
 
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║     PERC-372: Devnet MM Fleet Deployment                ║"
@@ -90,8 +102,11 @@ fi
 # ── Step 2: Verify wallets exist ──
 echo ""
 echo "🔍 Step 2: Verifying wallets..."
-for profile in wide tight_a tight_b; do
-  wallet_file="$KEEPER_DIR/keeper-${profile}.json"
+# Respect FLEET_PROFILES override; default to all three
+IFS=',' read -ra _PROFILES <<< "${FLEET_PROFILES:-WIDE,TIGHT_A,TIGHT_B}"
+for profile_upper in "${_PROFILES[@]}"; do
+  profile_lower="$(echo "$profile_upper" | tr '[:upper:]' '[:lower:]')"
+  wallet_file="$KEEPER_DIR/keeper-${profile_lower}.json"
   if [ ! -f "$wallet_file" ]; then
     echo "❌ Missing wallet: $wallet_file"
     exit 1

@@ -68,22 +68,24 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
 
     const key = `${publicKey.toBase58()}:${slabAddress}`;
     if (attemptedRef.current.has(key)) return;
-    attemptedRef.current.add(key);
 
-    // Check wallet USDC balance
+    // Check wallet USDC balance before marking as attempted
     try {
       const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
       const tokenInfo = await connection.getTokenAccountBalance(ata);
       const walletBalance = BigInt(tokenInfo.value.amount);
 
-      if (walletBalance < MIN_WALLET_BALANCE) return; // Not enough to deposit
+      if (walletBalance < MIN_WALLET_BALANCE) return; // Not enough to deposit — don't mark attempted yet
 
       // Calculate deposit amount: min(AUTO_DEPOSIT_AMOUNT, walletBalance - small buffer for fees)
       const buffer = 1_000_000n; // Keep 1 USDC buffer
       const maxDeposit = walletBalance > buffer ? walletBalance - buffer : 0n;
       const depositAmount = maxDeposit < AUTO_DEPOSIT_AMOUNT ? maxDeposit : AUTO_DEPOSIT_AMOUNT;
 
-      if (depositAmount < MIN_WALLET_BALANCE) return;
+      if (depositAmount < MIN_WALLET_BALANCE) return; // Don't mark attempted yet
+
+      // Eligibility confirmed — mark as attempted to prevent reruns
+      attemptedRef.current.add(key);
 
       inflightRef.current = true;
       setDepositing(true);

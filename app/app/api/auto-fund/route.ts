@@ -5,7 +5,7 @@
  * Body: { wallet: string }
  *
  * When a devnet wallet has < 0.1 SOL, airdrops 2 SOL.
- * When the wallet has no test USDC, mints 100 USDC.
+ * When the wallet has no test USDC, mints 1,000 USDC.
  *
  * Rate-limited: one fund per wallet per 24h (tracked in Supabase).
  */

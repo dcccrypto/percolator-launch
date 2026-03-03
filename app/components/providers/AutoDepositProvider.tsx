@@ -92,6 +92,8 @@ const AutoDepositToast: FC<{ state: AutoDepositState }> = ({ state }) => {
               </p>
             </div>
             <button
+              type="button"
+              aria-label="Dismiss deposit notification"
               onClick={() => { setVisible(false); setDismissed(true); }}
               className="ml-auto text-[var(--text-dim)] hover:text-[var(--text)] text-[12px]"
             >
@@ -119,6 +121,8 @@ const AutoDepositToast: FC<{ state: AutoDepositState }> = ({ state }) => {
               </p>
             </div>
             <button
+              type="button"
+              aria-label="Dismiss error notification"
               onClick={() => { setVisible(false); setDismissed(true); }}
               className="ml-auto text-[var(--text-dim)] hover:text-[var(--text)] text-[12px]"
             >
