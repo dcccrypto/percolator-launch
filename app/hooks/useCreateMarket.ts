@@ -615,7 +615,7 @@ export function useCreateMarket() {
         // PERC-361: Post-creation hooks — register oracle bridge + mint devnet token
         const slabAddr = slabPk.toBase58();
         const mintAddr = params.mint.toBase58();
-        const isDevnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet";
+        const isDevnet = (process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() || "devnet") === "devnet";
 
         if (isDevnet && slabAddr) {
           // Register with oracle bridge (fire-and-forget)

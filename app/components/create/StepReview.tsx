@@ -4,6 +4,7 @@ import { FC, useMemo } from "react";
 import { type SlabTierKey, SLAB_TIERS } from "@percolator/sdk";
 import { CostEstimate } from "./CostEstimate";
 import Link from "next/link";
+import { getNetwork } from "@/lib/config";
 
 interface StepReviewProps {
   // Token
@@ -167,7 +168,7 @@ export const StepReview: FC<StepReviewProps> = ({
       )}
 
       {/* Devnet: no tokens — guide to mint first */}
-      {walletConnected && !hasTokens && process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet" && (
+      {walletConnected && !hasTokens && getNetwork() === "devnet" && (
         <div className="border border-[var(--short)]/20 bg-[var(--short)]/[0.04] px-4 py-3 space-y-2">
           <p className="text-[11px] text-[var(--text)]">
             <span className="text-[var(--short)] font-medium">No tokens found.</span>{" "}

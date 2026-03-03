@@ -3,6 +3,7 @@
 import { FC, useState } from "react";
 import Link from "next/link";
 import { LogoUpload } from "./LogoUpload";
+import { getNetwork } from "@/lib/config";
 
 interface LaunchSuccessProps {
   tokenSymbol: string;
@@ -44,7 +45,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [copiedDevnet, setCopiedDevnet] = useState(false);
-  const isDevnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet";
+  const isDevnet = getNetwork() === "devnet";
 
   const handleCopy = async () => {
     try {

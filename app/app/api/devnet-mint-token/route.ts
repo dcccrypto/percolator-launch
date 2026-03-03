@@ -37,7 +37,8 @@ export const dynamic = "force-dynamic";
 
 const NETWORK = process.env.NEXT_PUBLIC_SOLANA_NETWORK ?? "devnet";
 const AIRDROP_USD_VALUE = 500; // $500 worth of tokens
-const ORACLE_BRIDGE_URL = process.env.ORACLE_BRIDGE_URL ?? "http://127.0.0.1:18802";
+// ORACLE_BRIDGE_URL removed — unreachable from Vercel serverless.
+// Price fetching uses DexScreener API directly via fetchTokenInfo().
 
 interface DexScreenerToken {
   name: string;
