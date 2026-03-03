@@ -6,6 +6,14 @@ import { PublicKey } from "@solana/web3.js";
 import { useDexPoolSearch, type DexPoolResult } from "./useDexPoolSearch";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
 
+export interface OracleResolution {
+  found: boolean;
+  feedId?: string;
+  symbol?: string;
+  priceUsd?: number;
+  source?: "pyth" | null;
+}
+
 export interface QuickLaunchConfig {
   mint: string;
   name: string;
@@ -18,6 +26,12 @@ export interface QuickLaunchConfig {
   tradingFeeBps: number;
   lpCollateral: string;
   liquidityTier: "low" | "medium" | "high";
+  /** Whether the token has a mainnet Pyth feed */
+  isMainnet: boolean;
+  /** Resolved oracle type */
+  oracleType: "pyth" | "admin";
+  /** Pyth feed ID if found */
+  pythFeedId?: string;
 }
 
 export interface QuickLaunchResult {
@@ -25,6 +39,7 @@ export interface QuickLaunchResult {
   loading: boolean;
   error: string | null;
   poolInfo: DexPoolResult | null;
+  oracle: OracleResolution | null;
 }
 
 /**
@@ -38,6 +53,8 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tokenMeta, setTokenMeta] = useState<{ name: string; symbol: string; decimals: number } | null>(null);
+  const [oracle, setOracle] = useState<OracleResolution | null>(null);
+  const [oracleLoading, setOracleLoading] = useState(false);
 
   // Fetch on-chain token metadata using shared fetchTokenMeta
   // (checks cache → well-known → Metaplex on-chain → Jupiter, in that order)
@@ -65,6 +82,33 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
 
     return () => { cancelled = true; };
   }, [mint, connection]);
+
+  // Resolve oracle (Pyth feed lookup) after token meta is fetched
+  useEffect(() => {
+    setOracle(null);
+    if (!mint || mint.length < 32) return;
+
+    let cancelled = false;
+    setOracleLoading(true);
+
+    (async () => {
+      try {
+        const resp = await fetch(`/api/oracle/resolve/${mint}`);
+        if (!resp.ok) {
+          if (!cancelled) setOracle({ found: false, source: null });
+          return;
+        }
+        const data = await resp.json();
+        if (!cancelled) setOracle(data);
+      } catch {
+        if (!cancelled) setOracle({ found: false, source: null });
+      } finally {
+        if (!cancelled) setOracleLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [mint]);
 
   // Build config when we have both token meta and pools
   useEffect(() => {
@@ -110,27 +154,36 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
       tradingFeeBps = 5;
     }
 
+    const isMainnet = oracle?.found === true && oracle?.source === "pyth";
+    const resolvedOracleType = isMainnet ? "pyth" as const : "admin" as const;
+    const oraclePrice = oracle?.priceUsd;
+    const effectivePrice = oraclePrice && oraclePrice > 0 ? oraclePrice : (price > 0 ? price : 1);
+
     setConfig({
       mint,
       name: tokenMeta.name,
       symbol: tokenMeta.symbol,
       decimals: tokenMeta.decimals,
-      initialPrice: price > 0 ? price.toFixed(6) : "1.000000",
+      initialPrice: effectivePrice.toFixed(6),
       maxLeverage,
       initialMarginBps,
       maintenanceMarginBps,
       tradingFeeBps,
       lpCollateral: "1000",
       liquidityTier: tier,
+      isMainnet,
+      oracleType: resolvedOracleType,
+      pythFeedId: oracle?.feedId,
     });
-  }, [tokenMeta, pools, mint]);
+  }, [tokenMeta, pools, mint, oracle]);
 
   const bestPool = pools.length > 0 ? pools[0] : null;
 
   return {
     config,
-    loading: loading || poolsLoading,
+    loading: loading || poolsLoading || oracleLoading,
     error,
     poolInfo: bestPool,
+    oracle,
   };
 }

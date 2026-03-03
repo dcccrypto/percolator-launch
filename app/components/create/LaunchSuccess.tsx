@@ -168,11 +168,14 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           )}
 
           {devnetMintError && (
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className="text-[var(--short)]">✗</span>
-              <span className="text-[var(--short)]">
-                Token mint failed: {devnetMintError}
-              </span>
+            <div className="border border-[var(--short)]/30 bg-[var(--short)]/[0.06] px-3 py-2.5 rounded">
+              <div className="flex items-start gap-2 text-[12px]">
+                <span className="text-[var(--short)] text-[14px] mt-0.5">⚠</span>
+                <div>
+                  <p className="text-[var(--short)] font-semibold">Token mint failed</p>
+                  <p className="text-[var(--short)]/80 text-[11px] mt-0.5 break-all">{devnetMintError}</p>
+                </div>
+              </div>
             </div>
           )}
 

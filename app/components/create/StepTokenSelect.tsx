@@ -91,7 +91,14 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
     };
   }, [connection, publicKey, debounced, mintValid, onBalanceChange]);
 
+  // Detect URLs and other clearly-wrong input
+  const isUrl = /^https?:\/\//i.test(debounced);
   const showInvalid = debounced.length > 0 && !mintValid;
+  const invalidReason = isUrl
+    ? "That looks like a URL. Paste a valid Solana token address (e.g. 7xKXt...)"
+    : debounced.length > 0 && !mintValid
+      ? "Paste a valid Solana token address (base58, 32-44 characters)"
+      : null;
   const showResolved = mintValid && tokenMeta;
 
   return (
@@ -116,8 +123,8 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
               : "border-[var(--border)] bg-[var(--bg)] text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)]/40"
           }`}
         />
-        {showInvalid && (
-          <p className="mt-1.5 text-[10px] text-[var(--short)]">Invalid mint address</p>
+        {showInvalid && invalidReason && (
+          <p className="mt-1.5 text-[10px] text-[var(--short)] font-medium">{invalidReason}</p>
         )}
       </div>
 

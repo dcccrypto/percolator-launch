@@ -53,7 +53,7 @@ const DEFAULT_STATE: WizardState = {
   oracleFeed: "",
   dexPool: null,
   pythFeed: null,
-  slabTier: "large",  // PERC-277: default to large (4096) — matches deployed devnet program
+  slabTier: "small",  // Default to small for Quick Launch (cheapest); Manual mode can change
   tradingFeeBps: 30,
   initialMarginBps: 1000,
   lpCollateral: "",
@@ -141,7 +141,23 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
   const allValid = step1Valid && step2Valid && step3Valid && hasTokens && hasSufficientTokensForSeed && hasSufficientSol;
 
-  // Quick Launch auto-advance: step 1 → step 2 when token is resolved and params ready
+  // Quick Launch: auto-resolve oracle from useQuickLaunch results
+  // Sets oracleType and oracleFeed automatically so user never sees the oracle step
+  useEffect(() => {
+    if (wizard.mode !== "quick") return;
+    if (!quickLaunch.config) return;
+    const cfg = quickLaunch.config;
+
+    setWizard((prev) => {
+      if (cfg.oracleType === "pyth" && cfg.pythFeedId) {
+        return { ...prev, oracleType: "pyth" as const, oracleFeed: cfg.pythFeedId };
+      }
+      return { ...prev, oracleType: "admin" as const, oracleFeed: "", adminPrice: cfg.initialPrice };
+    });
+  }, [wizard.mode, quickLaunch.config]);
+
+  // Quick Launch auto-advance: step 1 → step 3 (slab/parameters) — SKIP oracle step
+  // In quick mode: Token (1) → Parameters/Slab (3) → Review (4). Oracle (2) is auto-resolved.
   const quickAutoAdvancedRef = useRef(false);
   useEffect(() => {
     if (wizard.mode !== "quick") { quickAutoAdvancedRef.current = false; return; }
@@ -152,26 +168,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (!quickLaunch.config) return;
 
     quickAutoAdvancedRef.current = true;
-    setCompletedSteps((prev) => new Set(prev).add(1));
-    setWizard((prev) => ({ ...prev, step: 2 as WizardStep }));
-  }, [wizard.mode, wizard.step, step1Valid, quickLaunch.loading, quickLaunch.config]);
-
-  // Quick Launch auto-advance: step 2 → step 3 (Pool Size) when oracle is resolved
-  // Pool size selection is NOT skipped — user must choose Small/Medium/Large
-  const quickOracleAutoAdvancedRef = useRef(false);
-  useEffect(() => {
-    if (wizard.mode !== "quick") { quickOracleAutoAdvancedRef.current = false; return; }
-    if (quickOracleAutoAdvancedRef.current) return;
-    if (wizard.step !== 2) return;
-    const oracleReady = wizard.oracleType === "admin" ||
-      (wizard.oracleType === "pyth" && isValidHex64(wizard.oracleFeed)) ||
-      (wizard.oracleType === "hyperp_ema" && isValidBase58Pubkey(wizard.oracleFeed));
-    if (!oracleReady) return;
-
-    quickOracleAutoAdvancedRef.current = true;
-    setCompletedSteps((prev) => new Set(prev).add(2));
+    setCompletedSteps((prev) => { const s = new Set(prev); s.add(1); s.add(2); return s; });
     setWizard((prev) => ({ ...prev, step: 3 as WizardStep }));
-  }, [wizard.mode, wizard.step, wizard.oracleType, wizard.oracleFeed]);
+  }, [wizard.mode, wizard.step, step1Valid, quickLaunch.loading, quickLaunch.config]);
 
   // Navigation
   const goToStep = useCallback((step: WizardStep) => {
@@ -387,13 +386,15 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const oracleLabel =
     wizard.oracleType === "pyth" && wizard.pythFeed
       ? wizard.pythFeed.name
-      : wizard.oracleType === "hyperp_ema" && wizard.dexPool
-        ? `${wizard.dexPool.pairLabel} (${wizard.dexPool.dexId})`
-        : wizard.oracleType === "admin"
-          ? "Admin Oracle"
-          : wizard.oracleFeed
-            ? `${wizard.oracleFeed.slice(0, 12)}...`
-            : "Not configured";
+      : wizard.oracleType === "pyth" && wizard.oracleFeed
+        ? `Pyth (${wizard.oracleFeed.slice(0, 12)}...)`
+        : wizard.oracleType === "hyperp_ema" && wizard.dexPool
+          ? `${wizard.dexPool.pairLabel} (${wizard.dexPool.dexId})`
+          : wizard.oracleType === "admin"
+            ? "Admin Oracle"
+            : wizard.oracleFeed
+              ? `${wizard.oracleFeed.slice(0, 12)}...`
+              : "Not configured";
 
   const detectedPrice = wizard.dexPool?.priceUsd ?? undefined;
 
