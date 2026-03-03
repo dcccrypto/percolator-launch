@@ -244,9 +244,10 @@ export async function POST(req: NextRequest) {
 
     // FIX: Also upsert markets table so /api/airdrop can find the mint.
     // The airdrop route looks up mint_address in the markets table, not devnet_mints.
+    // Best-effort: if this fails, airdrop can still fall back to devnet_mints.
     if (marketAddress) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (supabase as any).from("markets").upsert(
+      const { error: upsertErr } = await (supabase as any).from("markets").upsert(
         {
           slab_address: marketAddress,
           mint_address: devnetMint,
@@ -254,6 +255,9 @@ export async function POST(req: NextRequest) {
         },
         { onConflict: "slab_address" },
       );
+      if (upsertErr) {
+        console.warn("devnet-mint-token: markets upsert failed (non-fatal):", upsertErr.message);
+      }
     }
 
     return NextResponse.json({

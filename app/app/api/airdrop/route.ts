@@ -100,13 +100,17 @@ export async function POST(req: NextRequest) {
     // may have been missed (race condition or older markets created before the fix).
     if (!mintAddress) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: devnetMintData } = await (supabase as any)
+      const { data: devnetMintData, error: fallbackErr } = await (supabase as any)
         .from("devnet_mints")
         .select("devnet_mint, symbol")
         .eq("market_address", marketAddress)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      if (fallbackErr) {
+        console.warn("airdrop: devnet_mints fallback query failed:", fallbackErr.message);
+      }
 
       if (devnetMintData?.devnet_mint) {
         mintAddress = devnetMintData.devnet_mint;
