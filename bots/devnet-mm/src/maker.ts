@@ -243,7 +243,8 @@ export class MakerBot {
     // Brief delay between bid and ask
     await new Promise((r) => setTimeout(r, 500));
 
-    // Execute ask (sell/short)
+    // Execute ask (sell/short) — guard against stop() during delay
+    if (!this.running) return;
     if (quotes.askSize > 0n) {
       const sizeUsd = Number(quotes.askSize) / 1e6;
       log("maker", `  ASK @ $${quotes.askPrice.toFixed(4)} | $${sizeUsd.toFixed(0)}`);
@@ -310,6 +311,7 @@ export class MakerBot {
 
     if (this.markets.length === 0) {
       logError("maker", "No markets available after retry");
+      this.running = false;
       return;
     }
 

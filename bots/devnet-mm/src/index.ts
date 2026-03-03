@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S npx tsx
 /**
  * PERC-377: Devnet Market-Making Bots — Main Entrypoint
  *
@@ -145,7 +145,7 @@ async function main() {
   }
 
   // Start health server
-  const healthServer = startHealthServer(config.healthPort, filler, maker);
+  const healthServer = startHealthServer(config.healthPort, filler, maker, config.healthHost);
 
   // Start bots
   try {

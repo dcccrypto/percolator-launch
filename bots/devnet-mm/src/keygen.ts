@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S npx tsx
 /**
  * PERC-377: Generate bot wallet keypairs + airdrop devnet SOL.
  *
@@ -11,9 +11,11 @@ import { Keypair, Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import * as fs from "fs";
 import * as path from "path";
 
-const OUT_DIR = process.argv.includes("--dir")
-  ? process.argv[process.argv.indexOf("--dir") + 1]
-  : "/tmp/percolator-bots";
+const dirIdx = process.argv.indexOf("--dir");
+const OUT_DIR =
+  dirIdx >= 0 && dirIdx + 1 < process.argv.length && !process.argv[dirIdx + 1].startsWith("-")
+    ? process.argv[dirIdx + 1]
+    : "/tmp/percolator-bots";
 
 const RPC_URL = process.env.RPC_URL ?? "https://api.devnet.solana.com";
 const AIRDROP_SOL = 2;
@@ -63,7 +65,7 @@ async function main() {
 
     // Generate new keypair
     const kp = Keypair.generate();
-    fs.writeFileSync(filePath, JSON.stringify(Array.from(kp.secretKey)));
+    fs.writeFileSync(filePath, JSON.stringify(Array.from(kp.secretKey)), { mode: 0o600 });
     console.log(`🔑 ${wallet.name}: ${kp.publicKey.toBase58()}`);
     console.log(`   ${wallet.description}`);
     console.log(`   Saved to: ${filePath}`);

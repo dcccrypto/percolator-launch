@@ -12,19 +12,22 @@ export function startHealthServer(
   port: number,
   filler: FillerBot | null,
   maker: MakerBot | null,
+  host: string = "127.0.0.1",
 ): http.Server {
   const server = http.createServer((req, res) => {
     if (req.url === "/health" || req.url === "/") {
+      const fillerStatus = filler?.getStatus() ?? null;
+      const makerStatus = maker?.getStatus() ?? null;
       const status = {
         status: "ok",
         timestamp: new Date().toISOString(),
-        filler: filler?.getStatus() ?? null,
-        maker: maker?.getStatus() ?? null,
+        filler: fillerStatus,
+        maker: makerStatus,
       };
 
       // Check if any bot is degraded
-      if (filler && !filler.getStatus().running) status.status = "degraded";
-      if (maker && !maker.getStatus().running) status.status = "degraded";
+      if (fillerStatus && !fillerStatus.running) status.status = "degraded";
+      if (makerStatus && !makerStatus.running) status.status = "degraded";
 
       const statusCode = status.status === "ok" ? 200 : 503;
       res.writeHead(statusCode, { "Content-Type": "application/json" });
@@ -64,9 +67,9 @@ export function startHealthServer(
     }
   });
 
-  server.listen(port, () => {
-    log("health", `Health endpoint: http://localhost:${port}/health`);
-    log("health", `Metrics endpoint: http://localhost:${port}/metrics`);
+  server.listen(port, host, () => {
+    log("health", `Health endpoint: http://${host}:${port}/health`);
+    log("health", `Metrics endpoint: http://${host}:${port}/metrics`);
   });
 
   return server;

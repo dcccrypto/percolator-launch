@@ -44,8 +44,12 @@ const COINGECKO_MAP: Record<string, string> = {
 const cache = new Map<string, PriceData>();
 const CACHE_TTL_MS = 2_000;
 
+function normalizeSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase();
+}
+
 function getCached(symbol: string): PriceData | null {
-  const entry = cache.get(symbol);
+  const entry = cache.get(normalizeSymbol(symbol));
   if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
     return entry;
   }
@@ -53,7 +57,7 @@ function getCached(symbol: string): PriceData | null {
 }
 
 function setCache(symbol: string, data: PriceData): void {
-  cache.set(symbol, data);
+  cache.set(normalizeSymbol(symbol), data);
 }
 
 // ── Fetchers ────────────────────────────────────────────
@@ -68,7 +72,9 @@ async function fetchBinance(symbol: string): Promise<number | null> {
     );
     if (!resp.ok) return null;
     const json = (await resp.json()) as { price?: string };
-    return json.price ? parseFloat(json.price) : null;
+    if (!json.price) return null;
+    const parsed = parseFloat(json.price);
+    return Number.isFinite(parsed) ? parsed : null;
   } catch {
     return null;
   }

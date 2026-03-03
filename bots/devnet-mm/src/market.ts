@@ -279,7 +279,10 @@ export async function setupMarketAccounts(
   }
 
   // Determine oracle mode
-  const feedHex = Buffer.from(market.config.indexFeedId.toBytes()).toString("hex");
+  const feedId = market.config.indexFeedId;
+  const feedHex = Buffer.from(
+    feedId instanceof PublicKey ? feedId.toBytes() : (feedId as Uint8Array),
+  ).toString("hex");
   const isHyperp = feedHex === "0".repeat(64);
 
   log("setup", `✅ ${symbol}: LP idx=${lpAccount.idx}, User idx=${userAccount.idx}`);
