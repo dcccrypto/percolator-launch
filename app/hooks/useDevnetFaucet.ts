@@ -75,6 +75,9 @@ export function useDevnetFaucet(): DevnetFaucetState {
   const [usdcBalance, setUsdcBalance] = useState<number | null>(null);
   const [solDone, setSolDone] = useState(false);
   const [usdcDone, setUsdcDone] = useState(false);
+  // depositDone is intentionally never set to true here — the actual deposit
+  // completion is tracked by AutoDepositProvider. This flag exists in the
+  // return type for UI consumers that need a unified status interface.
   const [depositDone, setDepositDone] = useState(false);
   const [rateLimited, setRateLimited] = useState(false);
   const [nextClaimAt, setNextClaimAt] = useState<string | null>(null);
