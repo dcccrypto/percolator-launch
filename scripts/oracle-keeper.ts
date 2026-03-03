@@ -6,7 +6,7 @@
  * Percolator devnet markets via PushOraclePrice + KeeperCrank.
  *
  * Improvements over oracle-pusher.ts:
- *   - Multi-source failover: Binance → CoinGecko → Jupiter → cached
+ *   - Multi-source failover: Pyth Hermes → Jupiter → DexScreener
  *   - Staleness detection: alerts if price hasn't updated in 30s
  *   - Circuit breaker: rejects price moves > 10% per update
  *   - Health endpoint: /health for monitoring
@@ -61,9 +61,9 @@ if (process.env.ADMIN_KEYPAIR) {
   delete process.env.ADMIN_KEYPAIR;
 }
 
-// Optional API keys for rate-limited sources
-const COINGECKO_API_KEY = process.env.COINGECKO_API_KEY ?? "";
-const BINANCE_API_KEY = process.env.BINANCE_API_KEY ?? "";
+// Pyth Hermes endpoint (free, no API key required)
+const HERMES_URL = process.env.HERMES_URL ?? "https://hermes.pyth.network";
+// Health endpoint security (from security hardening #616)
 const HEALTH_BIND = process.env.HEALTH_BIND ?? "127.0.0.1";
 const HEALTH_AUTH_TOKEN = process.env.HEALTH_AUTH_TOKEN ?? "";
 
@@ -91,67 +91,27 @@ interface MarketStats {
 }
 
 // ── Price Sources ───────────────────────────────────────────
-const BINANCE_MAP: Record<string, string> = {
-  SOL: "SOLUSDT", BTC: "BTCUSDT", ETH: "ETHUSDT",
-  BONK: "BONKUSDT", WIF: "WIFUSDT", JTO: "JTOUSDT",
-  JUP: "JUPUSDT", PYTH: "PYTHUSDT", RAY: "RAYUSDT",
-  RNDR: "RNDRUSDT", W: "WUSDT", TNSR: "TNSRUSDT",
+
+// Pyth Network feed IDs (hex, without 0x prefix) — universal across all chains
+const PYTH_FEED_IDS: Record<string, string> = {
+  SOL: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+  BTC: "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+  ETH: "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+  BONK: "72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419",
+  WIF: "4ca4beeca86f0d164160323817a4e42b10010a724c2217c6ee41b54cd4cc61fc",
+  JTO: "b43660a5f790c69354b0729a5ef9d50d68f1df92107540210b9cccba1f947cc2",
+  JUP: "0a0408d619e9380abad35060f9192039ed5042fa6f82301d0e48bb52be830996",
+  PYTH: "0bbf28e9a841a1cc788f6a361b17ca072d0ea3098a1e5df1c3922d06719579ff",
+  RAY: "91568baa8beb53db23eb3fb7f22c6e8bd303d103919e19733f2bb642d3e7987a",
+  W: "eff7446475e218517566ea99e72a4abec2e1bd8498b43b7d8331e29dcb059389",
+  TNSR: "05ecd4597cd48fe13d6cc3596c62af4f9675aee06e2e0b94c06d8bee2b659e05",
 };
 
-const COINGECKO_IDS: Record<string, string> = {
-  SOL: "solana", BTC: "bitcoin", ETH: "ethereum",
-  BONK: "bonk", WIF: "dogwifcoin", JTO: "jito-governance-token",
-  JUP: "jupiter-exchange-solana", PYTH: "pyth-network",
-  RAY: "raydium", RNDR: "render-token",
-};
-
-async function fetchBinancePrice(symbol: string): Promise<number | null> {
-  const pair = BINANCE_MAP[symbol];
-  if (!pair) return null;
-  try {
-    const headers: Record<string, string> = {};
-    if (BINANCE_API_KEY) headers["X-MBX-APIKEY"] = BINANCE_API_KEY;
-    const resp = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`, {
-      signal: AbortSignal.timeout(3000),
-      headers,
-    });
-    if (resp.status === 429) {
-      log(`⚠️ Binance rate-limited (429). Set BINANCE_API_KEY env var for higher limits.`);
-      return null;
-    }
-    const json = (await resp.json()) as { price?: string };
-    return json.price ? parseFloat(json.price) : null;
-  } catch { return null; }
-}
-
-async function fetchCoinGeckoPrice(symbol: string): Promise<number | null> {
-  const id = COINGECKO_IDS[symbol];
-  if (!id) return null;
-  try {
-    // Use pro API endpoint if API key is set, otherwise free tier
-    const baseUrl = COINGECKO_API_KEY
-      ? "https://pro-api.coingecko.com/api/v3"
-      : "https://api.coingecko.com/api/v3";
-    const headers: Record<string, string> = {};
-    if (COINGECKO_API_KEY) headers["x-cg-pro-api-key"] = COINGECKO_API_KEY;
-    const resp = await fetch(
-      `${baseUrl}/simple/price?ids=${id}&vs_currencies=usd`,
-      { signal: AbortSignal.timeout(4000), headers },
-    );
-    if (resp.status === 429) {
-      log(`⚠️ CoinGecko rate-limited (429). Set COINGECKO_API_KEY env var for higher limits.`);
-      return null;
-    }
-    const json = (await resp.json()) as Record<string, { usd?: number }>;
-    return json[id]?.usd ?? null;
-  } catch { return null; }
-}
-
-// Jupiter Price API requires mint addresses, not symbols
+// Jupiter mint addresses — fallback for tokens not on Pyth
 const JUPITER_MINTS: Record<string, string> = {
   SOL: "So11111111111111111111111111111111111111112",
-  BTC: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh", // wBTC (Portal)
-  ETH: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", // wETH (Portal)
+  BTC: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+  ETH: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
   BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
   WIF: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
   JTO: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
@@ -161,6 +121,63 @@ const JUPITER_MINTS: Record<string, string> = {
   RNDR: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof",
 };
 
+/** Batch-fetch prices from Pyth Hermes REST API */
+const pythCache = new Map<string, { price: number; ts: number }>();
+
+async function fetchPythPrices(symbols: string[]): Promise<void> {
+  const ids = symbols
+    .map(s => PYTH_FEED_IDS[s])
+    .filter(Boolean);
+  if (ids.length === 0) return;
+
+  try {
+    const params = ids.map(id => `ids[]=${id}`).join("&");
+    const resp = await fetch(
+      `${HERMES_URL}/v2/updates/price/latest?${params}&parsed=true`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (!resp.ok) {
+      log(`⚠️ Pyth Hermes returned ${resp.status}`);
+      return;
+    }
+    const json = (await resp.json()) as {
+      parsed: Array<{
+        id: string;
+        price: { price: string; expo: number; publish_time: number };
+      }>;
+    };
+
+    // Build reverse map: feedId → symbol
+    const idToSymbol = new Map<string, string>();
+    for (const [sym, id] of Object.entries(PYTH_FEED_IDS)) {
+      idToSymbol.set(id, sym);
+    }
+
+    const now = Date.now();
+    for (const entry of json.parsed) {
+      const sym = idToSymbol.get(entry.id);
+      if (!sym) continue;
+      const rawPrice = parseInt(entry.price.price, 10);
+      const expo = entry.price.expo;
+      const price = rawPrice * Math.pow(10, expo);
+      if (price > 0) {
+        pythCache.set(sym, { price, ts: now });
+      }
+    }
+  } catch (e) {
+    log(`⚠️ Pyth Hermes fetch failed: ${(e as Error).message?.slice(0, 60)}`);
+  }
+}
+
+function getPythPrice(symbol: string): number | null {
+  const cached = pythCache.get(symbol);
+  if (!cached) return null;
+  // Reject if older than 30s
+  if (Date.now() - cached.ts > 30_000) return null;
+  return cached.price;
+}
+
+/** Jupiter price fallback (uses mint addresses) */
 async function fetchJupiterPrice(symbol: string): Promise<number | null> {
   const mint = JUPITER_MINTS[symbol];
   if (!mint) return null;
@@ -175,19 +192,34 @@ async function fetchJupiterPrice(symbol: string): Promise<number | null> {
   } catch { return null; }
 }
 
-/** Fetch price with multi-source failover */
+/** DexScreener fallback for custom/exotic tokens */
+async function fetchDexScreenerPrice(symbol: string): Promise<number | null> {
+  const mint = JUPITER_MINTS[symbol];
+  if (!mint) return null;
+  try {
+    const resp = await fetch(
+      `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
+      { signal: AbortSignal.timeout(4000) },
+    );
+    const json = (await resp.json()) as any;
+    const pair = json.pairs?.[0];
+    return pair?.priceUsd ? parseFloat(pair.priceUsd) : null;
+  } catch { return null; }
+}
+
+/** Fetch price with multi-source failover: Pyth → Jupiter → DexScreener */
 async function getPrice(symbol: string): Promise<{ price: number; source: string } | null> {
-  // Primary: Binance (fastest, most liquid)
-  const binance = await fetchBinancePrice(symbol);
-  if (binance) return { price: binance, source: "binance" };
+  // Primary: Pyth (decentralized oracle, fastest for supported tokens)
+  const pyth = getPythPrice(symbol);
+  if (pyth) return { price: pyth, source: "pyth" };
 
-  // Secondary: CoinGecko
-  const cg = await fetchCoinGeckoPrice(symbol);
-  if (cg) return { price: cg, source: "coingecko" };
-
-  // Tertiary: Jupiter
+  // Secondary: Jupiter (Solana DEX aggregator, uses mint addresses)
   const jup = await fetchJupiterPrice(symbol);
   if (jup) return { price: jup, source: "jupiter" };
+
+  // Tertiary: DexScreener (broad coverage for exotic tokens)
+  const dex = await fetchDexScreenerPrice(symbol);
+  if (dex) return { price: dex, source: "dexscreener" };
 
   return null;
 }
@@ -408,6 +440,10 @@ async function main() {
 
   // Main push loop
   while (running) {
+    // Batch-fetch all Pyth prices in a single request
+    const marketSymbols = [...new Set(markets.map(m => m.symbol))];
+    await fetchPythPrices(marketSymbols);
+
     const promises = markets.map(market =>
       pushAndCrank(market, programId).catch(e => {
         const s = getOrCreateStats(market);
