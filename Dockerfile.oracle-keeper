@@ -22,6 +22,9 @@ RUN pnpm install --frozen-lockfile --filter @percolator/oracle-keeper...
 COPY packages/core/ packages/core/
 COPY bots/oracle-keeper/ bots/oracle-keeper/
 
+# Build SDK so dist/index.js exists (exports field points there)
+RUN pnpm --filter @percolator/sdk run build
+
 # Set ownership and switch to non-root
 RUN chown -R keeper:keeper /app
 USER keeper
