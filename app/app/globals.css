@@ -894,6 +894,12 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   to { transform: translateX(100%); }
 }
 
+@keyframes slide-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-slide-up { animation: slide-up 0.3s ease-out both; }
+
 @keyframes slide-in-bottom {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }

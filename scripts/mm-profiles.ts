@@ -43,7 +43,7 @@ export interface MakerProfile {
  */
 export const PROFILE_WIDE: MakerProfile = {
   name: "WIDE",
-  spreadBps: 60, // 0.60% half-spread
+  spreadBps: 40, // 0.40% half-spread — PERC-372: tightened from 60 to stay within 1%
   maxQuoteSizeUsdc: 2_000_000_000n, // $2,000 per side
   maxPositionPct: 15,
   quoteIntervalMs: 8_000,
@@ -62,7 +62,7 @@ export const PROFILE_WIDE: MakerProfile = {
  */
 export const PROFILE_TIGHT_A: MakerProfile = {
   name: "TIGHT_A",
-  spreadBps: 15, // 0.15% half-spread
+  spreadBps: 12, // 0.12% half-spread — PERC-372: tightened from 15 for tighter top-of-book
   maxQuoteSizeUsdc: 300_000_000n, // $300 per side
   maxPositionPct: 8,
   quoteIntervalMs: 3_000,
@@ -82,7 +82,7 @@ export const PROFILE_TIGHT_A: MakerProfile = {
  */
 export const PROFILE_TIGHT_B: MakerProfile = {
   name: "TIGHT_B",
-  spreadBps: 20, // 0.20% half-spread
+  spreadBps: 18, // 0.18% half-spread — PERC-372: tightened from 20 for tighter quotes
   maxQuoteSizeUsdc: 250_000_000n, // $250 per side
   maxPositionPct: 8,
   quoteIntervalMs: 4_000,

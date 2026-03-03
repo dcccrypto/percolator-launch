@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
 const NETWORK = process.env.NEXT_PUBLIC_SOLANA_NETWORK ?? "devnet";
 const MIN_SOL_BALANCE = 0.1 * LAMPORTS_PER_SOL; // 0.1 SOL threshold
 const AIRDROP_AMOUNT = 2 * LAMPORTS_PER_SOL; // 2 SOL
-const USDC_MINT_AMOUNT = 100_000_000; // 100 USDC (6 decimals)
+const USDC_MINT_AMOUNT = 1_000_000_000; // 1,000 USDC (6 decimals) — PERC-372
 const RATE_LIMIT_HOURS = 24;
 
 // Public devnet RPC for airdrop (Helius may not forward airdrop requests)

@@ -32,6 +32,7 @@ import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol } from "@/lib/symbol-utils";
 import { OracleBadge } from "@/components/oracle/OracleBadge";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
 
 /* ── Reusable tiny components ─────────────────────────────── */
 
@@ -529,7 +530,9 @@ export default function TradePage({ params }: { params: Promise<{ slab: string }
   return (
     <SlabProvider slabAddress={slab}>
       <UsdToggleProvider>
-        <TradePageInner slab={slab} />
+        <AutoDepositProvider slabAddress={slab}>
+          <TradePageInner slab={slab} />
+        </AutoDepositProvider>
       </UsdToggleProvider>
     </SlabProvider>
   );
