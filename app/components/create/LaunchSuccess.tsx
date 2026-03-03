@@ -187,15 +187,10 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         </div>
       )}
 
-      {/* Devnet airdrop failed or not available — show manual mint link */}
-      {isDevnet && !devnetMint && (devnetMintError || !devnetAirdropAmount) && (
-        <div className="mb-6">
-          <Link
-            href={`/devnet-mint?ca=${mainnetCA ?? ""}&market=${marketAddress}`}
-            className="text-[11px] text-[var(--accent)] hover:underline"
-          >
-            Mint devnet tokens manually →
-          </Link>
+      {/* Devnet mint error — show inline error (minting is automatic, no manual faucet link) */}
+      {isDevnet && devnetMintError && !devnetMint && !devnetAirdropAmount && (
+        <div className="mb-6 text-[11px] text-[var(--text-dim)]">
+          Token minting failed — you can get devnet tokens from the market page.
         </div>
       )}
 

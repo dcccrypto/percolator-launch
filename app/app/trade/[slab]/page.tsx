@@ -34,6 +34,7 @@ import { OracleBadge } from "@/components/oracle/OracleBadge";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
 import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModal";
+import { AirdropButton } from "@/components/trade/AirdropButton";
 
 /* ── Reusable tiny components ─────────────────────────────── */
 
@@ -295,6 +296,7 @@ function TradePageInner({ slab }: { slab: string }) {
               {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
             </span>
           )}
+          <AirdropButton marketAddress={slab} symbol={symbol} />
           <ShareButton
             slabAddress={slab}
             marketName={symbol}
@@ -362,6 +364,7 @@ function TradePageInner({ slab }: { slab: string }) {
 
         {/* Right-aligned controls */}
         <div className="ml-auto flex items-center gap-3">
+          <AirdropButton marketAddress={slab} symbol={symbol} />
           <UsdToggleButton />
           <ShareButton
             slabAddress={slab}

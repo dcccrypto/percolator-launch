@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Look up the devnet mint for this market
+    // Look up the devnet mint for this market (try markets table first, then devnet_mints)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: marketData } = await (supabase as any)
       .from("markets")
@@ -92,12 +92,33 @@ export async function POST(req: NextRequest) {
       .eq("slab_address", marketAddress)
       .maybeSingle();
 
-    if (!marketData?.mint_address) {
-      return NextResponse.json({ error: "Market not found" }, { status: 404 });
+    let mintAddress: string | null = marketData?.mint_address ?? null;
+    let symbol: string = marketData?.symbol ?? "TOKEN";
+
+    // FIX: Fallback to devnet_mints table if markets table doesn't have the mint.
+    // devnet-mint-token stores the mint in devnet_mints; the markets table upsert
+    // may have been missed (race condition or older markets created before the fix).
+    if (!mintAddress) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: devnetMintData } = await (supabase as any)
+        .from("devnet_mints")
+        .select("devnet_mint, symbol")
+        .eq("market_address", marketAddress)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (devnetMintData?.devnet_mint) {
+        mintAddress = devnetMintData.devnet_mint;
+        symbol = devnetMintData.symbol ?? symbol;
+      }
     }
 
-    const mintPk = new PublicKey(marketData.mint_address);
-    const symbol = marketData.symbol ?? "TOKEN";
+    if (!mintAddress) {
+      return NextResponse.json({ error: "Market not found — no devnet mint exists for this market" }, { status: 404 });
+    }
+
+    const mintPk = new PublicKey(mintAddress);
 
     // Get current price from oracle bridge
     let priceUsd = 1.0; // fallback

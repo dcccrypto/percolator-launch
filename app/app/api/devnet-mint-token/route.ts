@@ -242,6 +242,20 @@ export async function POST(req: NextRequest) {
       creator_wallet: creatorWallet,
     });
 
+    // FIX: Also upsert markets table so /api/airdrop can find the mint.
+    // The airdrop route looks up mint_address in the markets table, not devnet_mints.
+    if (marketAddress) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any).from("markets").upsert(
+        {
+          slab_address: marketAddress,
+          mint_address: devnetMint,
+          symbol: tokenInfo.symbol,
+        },
+        { onConflict: "slab_address" },
+      );
+    }
+
     return NextResponse.json({
       status: "created",
       devnetMint,
