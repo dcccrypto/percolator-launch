@@ -34,6 +34,7 @@ import {
   encodePushOraclePrice, encodeKeeperCrank,
   ACCOUNTS_PUSH_ORACLE_PRICE, ACCOUNTS_KEEPER_CRANK,
   buildAccountMetas, buildIx, WELL_KNOWN,
+  fetchSlab, parseConfig,
 } from "@percolator/sdk";
 import * as fs from "fs";
 import * as http from "http";
@@ -53,6 +54,19 @@ const adminSecretKey = process.env.ADMIN_KEYPAIR
   ? Uint8Array.from(JSON.parse(process.env.ADMIN_KEYPAIR))
   : Uint8Array.from(JSON.parse(fs.readFileSync(ADMIN_KP_PATH, "utf8")));
 const admin = Keypair.fromSecretKey(adminSecretKey);
+
+// Security: scrub keypair material from environment to prevent leaks via
+// process inspection, child processes, or crash dumps
+if (process.env.ADMIN_KEYPAIR) {
+  delete process.env.ADMIN_KEYPAIR;
+}
+
+// Optional API keys for rate-limited sources
+const COINGECKO_API_KEY = process.env.COINGECKO_API_KEY ?? "";
+const BINANCE_API_KEY = process.env.BINANCE_API_KEY ?? "";
+
+// Track markets where we're not the oracle authority (skip future attempts)
+const skippedMarkets = new Set<string>();
 
 // ── Types ───────────────────────────────────────────────────
 interface MarketInfo {
@@ -93,9 +107,16 @@ async function fetchBinancePrice(symbol: string): Promise<number | null> {
   const pair = BINANCE_MAP[symbol];
   if (!pair) return null;
   try {
+    const headers: Record<string, string> = {};
+    if (BINANCE_API_KEY) headers["X-MBX-APIKEY"] = BINANCE_API_KEY;
     const resp = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`, {
       signal: AbortSignal.timeout(3000),
+      headers,
     });
+    if (resp.status === 429) {
+      log(`⚠️ Binance rate-limited (429). Set BINANCE_API_KEY env var for higher limits.`);
+      return null;
+    }
     const json = (await resp.json()) as { price?: string };
     return json.price ? parseFloat(json.price) : null;
   } catch { return null; }
@@ -105,10 +126,20 @@ async function fetchCoinGeckoPrice(symbol: string): Promise<number | null> {
   const id = COINGECKO_IDS[symbol];
   if (!id) return null;
   try {
+    // Use pro API endpoint if API key is set, otherwise free tier
+    const baseUrl = COINGECKO_API_KEY
+      ? "https://pro-api.coingecko.com/api/v3"
+      : "https://api.coingecko.com/api/v3";
+    const headers: Record<string, string> = {};
+    if (COINGECKO_API_KEY) headers["x-cg-pro-api-key"] = COINGECKO_API_KEY;
     const resp = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`,
-      { signal: AbortSignal.timeout(4000) },
+      `${baseUrl}/simple/price?ids=${id}&vs_currencies=usd`,
+      { signal: AbortSignal.timeout(4000), headers },
     );
+    if (resp.status === 429) {
+      log(`⚠️ CoinGecko rate-limited (429). Set COINGECKO_API_KEY env var for higher limits.`);
+      return null;
+    }
     const json = (await resp.json()) as Record<string, { usd?: number }>;
     return json[id]?.usd ?? null;
   } catch { return null; }
@@ -189,6 +220,26 @@ function log(msg: string) {
 // ── Push + Crank ────────────────────────────────────────────
 async function pushAndCrank(market: MarketInfo, programId: PublicKey): Promise<void> {
   const s = getOrCreateStats(market);
+
+  // Skip markets where we've already confirmed we're not the oracle authority
+  if (skippedMarkets.has(market.slab)) return;
+
+  // On first push attempt, validate on-chain oracle authority matches our admin key
+  if (s.totalPushes === 0 && s.totalErrors === 0) {
+    try {
+      const slabData = await fetchSlab(conn, new PublicKey(market.slab));
+      const cfg = parseConfig(slabData);
+      if (!cfg.oracleAuthority.equals(admin.publicKey)) {
+        log(`⚠️ ${market.label}: oracle authority mismatch — expected ${admin.publicKey.toBase58().slice(0, 12)}..., got ${cfg.oracleAuthority.toBase58().slice(0, 12)}... Skipping.`);
+        skippedMarkets.add(market.slab);
+        return;
+      }
+      log(`✓ ${market.label}: oracle authority verified`);
+    } catch (e) {
+      log(`⚠️ ${market.label}: failed to verify oracle authority: ${(e as Error).message?.slice(0, 60)}`);
+      // Continue anyway — the tx will fail with a clear error if authority is wrong
+    }
+  }
 
   const result = await getPrice(market.symbol);
   if (!result) {
