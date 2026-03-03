@@ -21,8 +21,8 @@ export interface PriceRouterState {
   error: string | null;
 }
 
-// Use Next.js proxy to avoid CORS — /api/oracle/* is rewritten to the backend
-const API_BASE = "";
+// Use Next.js API route: /api/oracle/resolve/[ca] (Next.js handles proxy/cache)
+const API_BASE = "/api";
 
 /** Maximum number of retry attempts for transient errors */
 const MAX_RETRIES = 2;
@@ -48,7 +48,17 @@ export function usePriceRouter(mintAddress: string | null): PriceRouterState {
   useEffect(() => {
     setState({ bestSource: null, allSources: [], loading: false, error: null });
 
+    // Reject URLs and non-base58 inputs immediately — don't hit the API
     if (!mintAddress || mintAddress.length < 32) return;
+    if (mintAddress.startsWith("http://") || mintAddress.startsWith("https://") || mintAddress.includes("://")) {
+      setState({
+        bestSource: null,
+        allSources: [],
+        loading: false,
+        error: "Paste a valid Solana token address, not a URL",
+      });
+      return;
+    }
 
     abortRef.current?.abort();
     const controller = new AbortController();

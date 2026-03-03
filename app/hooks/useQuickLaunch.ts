@@ -25,11 +25,18 @@ export interface QuickLaunchResult {
   loading: boolean;
   error: string | null;
   poolInfo: DexPoolResult | null;
+  /** Detected oracle type for this token */
+  oracleType: "pyth" | "admin";
+  /** Pyth feed ID (hex64) if oracleType === "pyth", else null */
+  pythFeedId: string | null;
+  /** Best price string for adminPrice field */
+  adminPrice: string;
 }
 
 /**
  * Auto-detects token metadata and best DEX pool, then suggests
  * sensible market parameters based on liquidity.
+ * Also resolves oracle type: Pyth (mainnet) vs admin (devnet-only tokens).
  */
 export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   const { connection } = useConnectionCompat();
@@ -38,6 +45,53 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tokenMeta, setTokenMeta] = useState<{ name: string; symbol: string; decimals: number } | null>(null);
+
+  // Oracle detection state
+  const [oracleType, setOracleType] = useState<"pyth" | "admin">("admin");
+  const [pythFeedId, setPythFeedId] = useState<string | null>(null);
+  const [adminPrice, setAdminPrice] = useState<string>("1.000000");
+
+  // Oracle resolution: call /api/oracle/resolve/[mint] after token meta loads.
+  // If Pyth feed found → pyth oracle; else → admin oracle with best available price.
+  useEffect(() => {
+    setOracleType("admin");
+    setPythFeedId(null);
+    setAdminPrice("1.000000");
+    if (!mint || mint.length < 32 || !tokenMeta) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch(`/api/oracle/resolve/${mint}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (cancelled) return;
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.feedId) {
+            setOracleType("pyth");
+            setPythFeedId(data.feedId);
+            if (data.price > 0) setAdminPrice(data.price.toFixed(6));
+          } else {
+            setOracleType("admin");
+            setPythFeedId(null);
+            if (data.price > 0) setAdminPrice(data.price.toFixed(6));
+          }
+        } else {
+          // 404 or error — fall back to admin oracle
+          setOracleType("admin");
+          setPythFeedId(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setOracleType("admin");
+          setPythFeedId(null);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [mint, tokenMeta]);
 
   // Fetch on-chain token metadata using shared fetchTokenMeta
   // (checks cache → well-known → Metaplex on-chain → Jupiter, in that order)
@@ -132,5 +186,8 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
     loading: loading || poolsLoading,
     error,
     poolInfo: bestPool,
+    oracleType,
+    pythFeedId,
+    adminPrice,
   };
 }

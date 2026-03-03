@@ -102,6 +102,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Reject URLs and non-base58 inputs — prevents DexScreener being called with a URL
+    const isUrl = typeof mainnetCA === "string" &&
+      (mainnetCA.startsWith("http://") || mainnetCA.startsWith("https://") || mainnetCA.includes("://"));
+    if (isUrl) {
+      return NextResponse.json(
+        { error: "Paste a valid Solana token address, not a URL" },
+        { status: 400 },
+      );
+    }
+    try {
+      new PublicKey(mainnetCA);
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid token address: must be a valid Solana base58 public key" },
+        { status: 400 },
+      );
+    }
+
     let creatorPk: PublicKey;
     try {
       creatorPk = new PublicKey(creatorWallet);

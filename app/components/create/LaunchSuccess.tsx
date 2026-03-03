@@ -116,8 +116,8 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         </div>
       </div>
 
-      {/* Devnet Token Info — CA mismatch notice + airdrop confirmation */}
-      {isDevnet && (devnetMint || devnetAirdropAmount) && (
+      {/* Devnet Token Info — CA mismatch notice + airdrop confirmation + mint errors */}
+      {isDevnet && (devnetMint || devnetAirdropAmount || devnetMintError) && (
         <div className="border border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] p-4 mb-6 text-left w-full max-w-sm mx-auto space-y-3">
           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--accent)]">
             DEVNET TOKEN INFO

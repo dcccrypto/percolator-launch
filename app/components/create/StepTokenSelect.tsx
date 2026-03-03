@@ -47,7 +47,11 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
     return () => clearTimeout(timer);
   }, [inputValue, onMintChange]);
 
-  const mintValid = isValidBase58Pubkey(debounced) && debounced.length >= 32;
+  const mintIsUrl =
+    debounced.startsWith("http://") ||
+    debounced.startsWith("https://") ||
+    debounced.includes("://");
+  const mintValid = !mintIsUrl && isValidBase58Pubkey(debounced) && debounced.length >= 32;
   const mintPk = useMemo(
     () => (mintValid ? new PublicKey(debounced) : null),
     [debounced, mintValid]
@@ -117,7 +121,11 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
           }`}
         />
         {showInvalid && (
-          <p className="mt-1.5 text-[10px] text-[var(--short)]">Invalid mint address</p>
+          <p className="mt-1.5 text-[10px] text-[var(--short)]">
+            {mintIsUrl
+              ? "Paste a valid Solana token address, not a URL"
+              : "Invalid mint address — must be a base58 Solana token address"}
+          </p>
         )}
       </div>
 

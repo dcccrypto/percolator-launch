@@ -18,7 +18,9 @@ import { StepReview } from "./StepReview";
 import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { RecoverSolBanner } from "./RecoverSolBanner";
+import { SlabTierPicker } from "./SlabTierPicker";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
+import { useToast } from "@/hooks/useToast";
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -49,11 +51,13 @@ const DEFAULT_STATE: WizardState = {
   mintAddress: "",
   tokenMeta: null,
   walletBalance: null,
-  oracleType: "pyth",
+  oracleType: "admin",
   oracleFeed: "",
   dexPool: null,
   pythFeed: null,
-  slabTier: "large",  // PERC-277: default to large (4096) — matches deployed devnet program
+  // Quick mode defaults to small — cheapest tier for quick testing.
+  // Manual mode users can choose their own tier (defaults to large in the picker).
+  slabTier: "small",
   tradingFeeBps: 30,
   initialMarginBps: 1000,
   lpCollateral: "",
@@ -92,7 +96,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     return () => { cancelled = true; };
   }, [publicKey, connection]);
 
-  // Apply quick launch defaults to parameters
+  // Apply quick launch defaults to parameters (fee, margin, collateral, price)
   useEffect(() => {
     if (wizard.mode !== "quick" || !quickLaunch.config) return;
     setWizard((prev) => ({
@@ -100,6 +104,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       tradingFeeBps: quickLaunch.config!.tradingFeeBps,
       initialMarginBps: quickLaunch.config!.initialMarginBps,
       lpCollateral: quickLaunch.config!.lpCollateral,
+      // Apply detected oracle price as adminPrice (used if oracle ends up admin)
+      adminPrice: quickLaunch.config!.initialPrice || prev.adminPrice,
     }));
   }, [quickLaunch.config, wizard.mode]);
 
@@ -156,22 +162,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     setWizard((prev) => ({ ...prev, step: 2 as WizardStep }));
   }, [wizard.mode, wizard.step, step1Valid, quickLaunch.loading, quickLaunch.config]);
 
-  // Quick Launch auto-advance: step 2 → step 3 (Pool Size) when oracle is resolved
-  // Pool size selection is NOT skipped — user must choose Small/Medium/Large
-  const quickOracleAutoAdvancedRef = useRef(false);
-  useEffect(() => {
-    if (wizard.mode !== "quick") { quickOracleAutoAdvancedRef.current = false; return; }
-    if (quickOracleAutoAdvancedRef.current) return;
-    if (wizard.step !== 2) return;
-    const oracleReady = wizard.oracleType === "admin" ||
-      (wizard.oracleType === "pyth" && isValidHex64(wizard.oracleFeed)) ||
-      (wizard.oracleType === "hyperp_ema" && isValidBase58Pubkey(wizard.oracleFeed));
-    if (!oracleReady) return;
-
-    quickOracleAutoAdvancedRef.current = true;
-    setCompletedSteps((prev) => new Set(prev).add(2));
-    setWizard((prev) => ({ ...prev, step: 3 as WizardStep }));
-  }, [wizard.mode, wizard.step, wizard.oracleType, wizard.oracleFeed]);
+  // Quick Launch: step 2 is slab selection (NOT oracle).
+  // Oracle is resolved from useQuickLaunch and applied when user clicks Continue.
+  // No auto-advance from step 2 — user must explicitly choose a slab tier.
 
   // Navigation
   const goToStep = useCallback((step: WizardStep) => {
@@ -189,11 +182,42 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   );
 
   const goBack = useCallback(() => {
-    setWizard((prev) => ({
-      ...prev,
-      step: Math.max(1, prev.step - 1) as WizardStep,
-    }));
+    setWizard((prev) => {
+      // In quick mode, step 4 (review) goes back to step 2 (slab) — skip oracle step
+      if (prev.mode === "quick" && prev.step === 4) {
+        return { ...prev, step: 2 as WizardStep };
+      }
+      return { ...prev, step: Math.max(1, prev.step - 1) as WizardStep };
+    });
   }, []);
+
+  // Quick Launch: user confirms slab tier → apply oracle from hook → jump to review (step 4)
+  const handleQuickSlabContinue = useCallback(() => {
+    setCompletedSteps((prev) => {
+      const next = new Set(prev);
+      next.add(2);
+      next.add(3); // oracle step auto-completed in quick mode
+      return next;
+    });
+    setWizard((prev) => {
+      const base = { ...prev, step: 4 as WizardStep };
+      if (quickLaunch.oracleType === "pyth" && quickLaunch.pythFeedId) {
+        return {
+          ...base,
+          oracleType: "pyth" as const,
+          oracleFeed: quickLaunch.pythFeedId,
+          adminPrice: quickLaunch.adminPrice,
+        };
+      }
+      // Admin oracle — devnet-only or unknown token
+      return {
+        ...base,
+        oracleType: "admin" as const,
+        oracleFeed: "",
+        adminPrice: quickLaunch.adminPrice,
+      };
+    });
+  }, [quickLaunch]);
 
   // Mode change
   const handleModeChange = useCallback(
@@ -202,10 +226,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         ...prev,
         mode,
         // Reset oracle fields when switching
-        oracleType: "pyth",
+        oracleType: mode === "quick" ? "admin" : "pyth",
         oracleFeed: "",
         dexPool: null,
         pythFeed: null,
+        // Reset slab tier to mode-appropriate default
+        slabTier: mode === "quick" ? "small" : "large",
       }));
     },
     []
@@ -436,7 +462,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             {wizard.step === 1
               ? "Token"
               : wizard.step === 2
-                ? "Oracle"
+                ? wizard.mode === "quick" ? "Slab Tier" : "Oracle"
                 : wizard.step === 3
                   ? "Parameters"
                   : "Review"}
@@ -455,8 +481,49 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           />
         )}
 
-        {/* Step 2: Oracle */}
-        {wizard.step === 2 && (
+        {/* Step 2: Quick mode = Slab Tier selection; Manual mode = Oracle */}
+        {wizard.step === 2 && wizard.mode === "quick" && (
+          <div className="space-y-6">
+            <div>
+              <p className="text-[11px] text-[var(--text-secondary)] mb-4">
+                Choose your market size. Larger slabs support more concurrent traders but cost more SOL to deploy.
+              </p>
+              <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] mb-3">
+                Slab Tier
+              </label>
+              <SlabTierPicker value={wizard.slabTier} onChange={setSlabTier} />
+            </div>
+            {/* Oracle detection status */}
+            {quickLaunch.loading ? (
+              <p className="text-[10px] text-[var(--text-dim)]">⏳ Detecting oracle...</p>
+            ) : quickLaunch.oracleType === "pyth" && quickLaunch.pythFeedId ? (
+              <p className="text-[10px] text-[var(--long)]">
+                ✓ Pyth oracle detected — price feed will be used automatically
+              </p>
+            ) : (
+              <p className="text-[10px] text-[var(--text-dim)]">
+                ℹ Admin oracle — you&apos;ll control pricing (devnet token)
+              </p>
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={goBack}
+                className="border border-[var(--border)] bg-transparent px-5 py-3 text-[12px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all hud-btn-corners hover:border-[var(--accent)]/30 hover:text-[var(--text)]"
+              >
+                ← BACK
+              </button>
+              <button
+                type="button"
+                onClick={handleQuickSlabContinue}
+                className="flex-1 border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] py-3 text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hud-btn-corners hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.15]"
+              >
+                CONTINUE →
+              </button>
+            </div>
+          </div>
+        )}
+        {wizard.step === 2 && wizard.mode === "manual" && (
           <StepOracleSelect
             mintAddress={wizard.mintAddress}
             mintValid={mintValid}
