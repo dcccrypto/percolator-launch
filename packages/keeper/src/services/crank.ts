@@ -254,7 +254,8 @@ export class CrankService {
       if (errMsg.includes("custom program error: 0x4")) {
         state.permanentlySkipped = true;
         state.isActive = false;
-        logger.warn("Market not initialized on-chain, permanently skipping", {
+        logger.warn("Market slab size mismatch (0x4 InvalidSlabLen) — permanently skipping. " +
+          "Fix: run `npx tsx scripts/reinit-slab.ts --slab <ADDRESS>` to recreate with correct size.", {
           slabAddress,
           programId: market.programId.toBase58(),
         });

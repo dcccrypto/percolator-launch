@@ -53,6 +53,7 @@ import {
 } from "../packages/core/src/abi/accounts.js";
 import { deriveVaultAuthority, derivePythPushOraclePDA } from "../packages/core/src/solana/pda.js";
 import { buildIx } from "../packages/core/src/runtime/tx.js";
+import { SLAB_TIERS } from "../packages/core/src/solana/discovery.js";
 
 dotenv.config();
 
@@ -94,8 +95,15 @@ const IS_ADMIN_ORACLE = ORACLE_FEED === "0".repeat(64);
 // ============================================================================
 
 const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || "GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24");
-const SLAB_SIZE = 992_560;
+// PERC-381: Use canonical slab size from SLAB_TIERS (large = 4096 accounts).
+// Previous value 992_560 was stale and caused 0x4 InvalidSlabLen errors.
+const SLAB_SIZE = SLAB_TIERS.large.dataSize;
 const PRIORITY_FEE = 50_000;
+
+// Safety: assert slab size hasn't drifted from expected value
+if (SLAB_SIZE !== 1_025_832) {
+  throw new Error(`SLAB_TIERS.large.dataSize changed to ${SLAB_SIZE} — update create-market.ts and verify on-chain program compatibility`);
+}
 
 // ============================================================================
 // HELPERS
