@@ -38,7 +38,7 @@ import {
   discoverMarkets,
   parseAllAccounts,
   type DiscoveredMarket,
-} from "../../../packages/core/src/index.js";
+} from "@percolator/sdk";
 import type { BotConfig } from "./config.js";
 import { log, logError } from "./logger.js";
 
@@ -279,7 +279,7 @@ export async function setupMarketAccounts(
   }
 
   // Determine oracle mode
-  const feedHex = Buffer.from(market.config.indexFeedId).toString("hex");
+  const feedHex = Buffer.from(market.config.indexFeedId.toBytes()).toString("hex");
   const isHyperp = feedHex === "0".repeat(64);
 
   log("setup", `✅ ${symbol}: LP idx=${lpAccount.idx}, User idx=${userAccount.idx}`);
@@ -295,8 +295,8 @@ export async function setupMarketAccounts(
     matcherProgram: lpAccount.account.matcherProgram ?? config.matcherProgramId,
     matcherContext: lpAccount.account.matcherContext ?? PublicKey.default,
     oracleMode: isHyperp ? "authority" : "pyth",
-    positionSize: userAccount.account.position ?? 0n,
-    collateral: userAccount.account.collateral ?? depositCollateral,
+    positionSize: userAccount.account.positionSize ?? 0n,
+    collateral: userAccount.account.capital ?? depositCollateral,
     lastOraclePriceE6: 0n,
     lastCrankSlot: market.engine.lastCrankSlot,
     lastQuoteTime: 0,
@@ -425,8 +425,8 @@ export async function refreshPosition(
       (a) => a.account.kind === 0 && a.account.owner.equals(wallet.publicKey),
     );
     if (userAcc) {
-      market.positionSize = userAcc.account.position ?? market.positionSize;
-      market.collateral = userAcc.account.collateral ?? market.collateral;
+      market.positionSize = userAcc.account.positionSize ?? market.positionSize;
+      market.collateral = userAcc.account.capital ?? market.collateral;
     }
   } catch {
     // Non-fatal — use cached position
