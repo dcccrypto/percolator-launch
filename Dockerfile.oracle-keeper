@@ -33,14 +33,16 @@ WORKDIR /app/bots/oracle-keeper
 
 EXPOSE 18810
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:${HEALTH_PORT:-18810}/health || exit 1
+# Health check: any HTTP response = process alive (don't use -f which fails on 503).
+# --start-period gives 60s grace for first price push cycle.
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=60s \
+  CMD curl -so /dev/null http://localhost:${HEALTH_PORT:-18810}/health || exit 1
 
 # Environment defaults (override via Railway vars)
 ENV RPC_URL=https://api.devnet.solana.com
 ENV PUSH_INTERVAL_MS=3000
 ENV HEALTH_PORT=18810
-ENV HEALTH_HOST=0.0.0.0
+ENV HEALTH_BIND=0.0.0.0
 ENV MAX_PRICE_MOVE_PCT=10
 ENV STALE_THRESHOLD_S=30
 

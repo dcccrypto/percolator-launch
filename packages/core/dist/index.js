@@ -938,6 +938,14 @@ function parseConfig(data) {
   off += 8;
   const fundingMaxBpsPerSlot = readI64LE(data, off);
   off += 8;
+  const fundingPremiumWeightBps = readU64LE(data, off);
+  off += 8;
+  const fundingSettlementIntervalSlots = readU64LE(data, off);
+  off += 8;
+  const fundingPremiumDampeningE6 = readU64LE(data, off);
+  off += 8;
+  const fundingPremiumMaxBpsPerSlot = readU64LE(data, off);
+  off += 8;
   const threshFloor = readU128LE(data, off);
   off += 16;
   const threshRiskBps = readU64LE(data, off);
@@ -998,6 +1006,10 @@ function parseConfig(data) {
     fundingInvScaleNotionalE6,
     fundingMaxPremiumBps,
     fundingMaxBpsPerSlot,
+    fundingPremiumWeightBps,
+    fundingSettlementIntervalSlots,
+    fundingPremiumDampeningE6,
+    fundingPremiumMaxBpsPerSlot,
     threshFloor,
     threshRiskBps,
     threshUpdateIntervalSlots,

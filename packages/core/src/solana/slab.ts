@@ -92,6 +92,10 @@ export interface MarketConfig {
   fundingInvScaleNotionalE6: bigint;
   fundingMaxPremiumBps: bigint;
   fundingMaxBpsPerSlot: bigint;
+  fundingPremiumWeightBps: bigint;
+  fundingSettlementIntervalSlots: bigint;
+  fundingPremiumDampeningE6: bigint;
+  fundingPremiumMaxBpsPerSlot: bigint;
   // Threshold parameters
   threshFloor: bigint;
   threshRiskBps: bigint;
@@ -226,6 +230,19 @@ export function parseConfig(data: Uint8Array): MarketConfig {
   const fundingMaxBpsPerSlot = readI64LE(data, off); // Rust: i64
   off += 8;
 
+  // Additional funding fields (added in later Rust struct revisions)
+  const fundingPremiumWeightBps = readU64LE(data, off);
+  off += 8;
+
+  const fundingSettlementIntervalSlots = readU64LE(data, off);
+  off += 8;
+
+  const fundingPremiumDampeningE6 = readU64LE(data, off);
+  off += 8;
+
+  const fundingPremiumMaxBpsPerSlot = readU64LE(data, off);
+  off += 8;
+
   // Threshold parameters
   const threshFloor = readU128LE(data, off);
   off += 16;
@@ -312,6 +329,10 @@ export function parseConfig(data: Uint8Array): MarketConfig {
     fundingInvScaleNotionalE6,
     fundingMaxPremiumBps,
     fundingMaxBpsPerSlot,
+    fundingPremiumWeightBps,
+    fundingSettlementIntervalSlots,
+    fundingPremiumDampeningE6,
+    fundingPremiumMaxBpsPerSlot,
     threshFloor,
     threshRiskBps,
     threshUpdateIntervalSlots,
