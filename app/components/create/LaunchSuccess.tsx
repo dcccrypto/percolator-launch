@@ -20,6 +20,8 @@ interface LaunchSuccessProps {
   devnetAirdropAmount?: number | null;
   /** Token symbol for airdrop */
   devnetAirdropSymbol?: string | null;
+  /** Error from devnet mint attempt */
+  devnetMintError?: string | null;
 }
 
 /**
@@ -38,6 +40,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   devnetMint,
   devnetAirdropAmount,
   devnetAirdropSymbol,
+  devnetMintError,
 }) => {
   const [copied, setCopied] = useState(false);
   const [copiedDevnet, setCopiedDevnet] = useState(false);
@@ -163,7 +166,16 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
             </div>
           )}
 
-          {!devnetMint && !devnetAirdropAmount && (
+          {devnetMintError && (
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-[var(--short)]">✗</span>
+              <span className="text-[var(--short)]">
+                Token mint failed: {devnetMintError}
+              </span>
+            </div>
+          )}
+
+          {!devnetMint && !devnetAirdropAmount && !devnetMintError && (
             <div className="flex items-center gap-2 text-[11px]">
               <span className="text-[var(--text-dim)]">⏳</span>
               <span className="text-[var(--text-dim)]">
@@ -174,8 +186,8 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         </div>
       )}
 
-      {/* Devnet airdrop not available — show manual mint link */}
-      {isDevnet && !devnetMint && !devnetAirdropAmount && (
+      {/* Devnet airdrop failed or not available — show manual mint link */}
+      {isDevnet && !devnetMint && (devnetMintError || !devnetAirdropAmount) && (
         <div className="mb-6">
           <Link
             href={`/devnet-mint?ca=${mainnetCA ?? ""}&market=${marketAddress}`}

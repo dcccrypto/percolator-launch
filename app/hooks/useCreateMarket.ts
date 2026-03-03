@@ -99,6 +99,8 @@ export interface CreateMarketState {
   devnetAirdropAmount: number | null;
   /** Token symbol for devnet airdrop */
   devnetAirdropSymbol: string | null;
+  /** Error from devnet mint attempt */
+  devnetMintError: string | null;
 }
 
 const STEP_LABELS = [
@@ -122,6 +124,7 @@ export function useCreateMarket() {
     devnetMint: null,
     devnetAirdropAmount: null,
     devnetAirdropSymbol: null,
+    devnetMintError: null,
   });
 
   // Persist slab keypair across retries so we can resume from any step
@@ -630,6 +633,7 @@ export function useCreateMarket() {
           } catch {}
 
           // Mint devnet token + airdrop $500 to creator
+          setState((s) => ({ ...s, stepLabel: "Minting devnet tokens..." }));
           try {
             const mintResp = await fetch("/api/devnet-mint-token", {
               method: "POST",
@@ -640,16 +644,29 @@ export function useCreateMarket() {
                 creatorWallet: wallet.publicKey.toBase58(),
               }),
             });
+            const mintData = await mintResp.json();
             if (mintResp.ok) {
-              const mintData = await mintResp.json();
               setState((s) => ({
                 ...s,
                 devnetMint: mintData.devnetMint ?? null,
                 devnetAirdropAmount: mintData.airdropTokens ?? null,
                 devnetAirdropSymbol: mintData.symbol ?? null,
               }));
+            } else {
+              console.warn("Devnet mint failed:", mintData.error ?? mintResp.status);
+              // Non-fatal — market is live, just no tokens minted
+              setState((s) => ({
+                ...s,
+                devnetMintError: mintData.error ?? `HTTP ${mintResp.status}`,
+              }));
             }
-          } catch {}
+          } catch (mintErr) {
+            console.warn("Devnet mint error:", mintErr);
+            setState((s) => ({
+              ...s,
+              devnetMintError: mintErr instanceof Error ? mintErr.message : "Mint request failed",
+            }));
+          }
         }
 
         // Done! Clear persisted keypair from localStorage
@@ -681,6 +698,7 @@ export function useCreateMarket() {
       devnetMint: null,
       devnetAirdropAmount: null,
       devnetAirdropSymbol: null,
+    devnetMintError: null,
     });
   }, []);
 

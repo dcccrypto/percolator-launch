@@ -156,7 +156,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     setWizard((prev) => ({ ...prev, step: 2 as WizardStep }));
   }, [wizard.mode, wizard.step, step1Valid, quickLaunch.loading, quickLaunch.config]);
 
-  // Quick Launch auto-advance: step 2 → step 4 when oracle is resolved
+  // Quick Launch auto-advance: step 2 → step 3 (Pool Size) when oracle is resolved
+  // Pool size selection is NOT skipped — user must choose Small/Medium/Large
   const quickOracleAutoAdvancedRef = useRef(false);
   useEffect(() => {
     if (wizard.mode !== "quick") { quickOracleAutoAdvancedRef.current = false; return; }
@@ -168,8 +169,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (!oracleReady) return;
 
     quickOracleAutoAdvancedRef.current = true;
-    setCompletedSteps((prev) => { const s = new Set(prev); s.add(2); s.add(3); return s; });
-    setWizard((prev) => ({ ...prev, step: 4 as WizardStep }));
+    setCompletedSteps((prev) => new Set(prev).add(2));
+    setWizard((prev) => ({ ...prev, step: 3 as WizardStep }));
   }, [wizard.mode, wizard.step, wizard.oracleType, wizard.oracleFeed]);
 
   // Navigation
@@ -366,6 +367,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         devnetMint={createState.devnetMint}
         devnetAirdropAmount={createState.devnetAirdropAmount}
         devnetAirdropSymbol={createState.devnetAirdropSymbol}
+        devnetMintError={createState.devnetMintError}
       />
     );
   }
