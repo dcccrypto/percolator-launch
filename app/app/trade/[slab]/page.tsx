@@ -32,6 +32,7 @@ import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol } from "@/lib/symbol-utils";
 import { OracleBadge } from "@/components/oracle/OracleBadge";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { useAutoDeposit } from "@/hooks/useAutoDeposit";
 
 /* ── Reusable tiny components ─────────────────────────────── */
 
@@ -144,6 +145,7 @@ function TradePageInner({ slab }: { slab: string }) {
   const health = engine ? computeMarketHealth(engine) : null;
   const { mode: oracleMode, level: oracleLevel } = useOracleFreshness();
   const oracleBadgeStatus = oracleLevel === "stale" ? "stale" : "healthy";
+  const { status: autoDepositStatus } = useAutoDeposit(slab);
   const pageRef = useRef<HTMLDivElement>(null);
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
@@ -258,6 +260,16 @@ function TradePageInner({ slab }: { slab: string }) {
 
   return (
     <div ref={pageRef} className="mx-auto max-w-[1920px] overflow-x-hidden gsap-fade">
+
+      {/* ── Auto-deposit banner (devnet only) ── */}
+      {autoDepositStatus !== "idle" && autoDepositStatus !== "done" && (
+        <div className="border-b border-[var(--accent)]/20 bg-[var(--accent)]/5 px-4 py-2 text-center text-[11px] text-[var(--accent)]">
+          {autoDepositStatus === "funding" && "⏳ Setting up your devnet wallet…"}
+          {autoDepositStatus === "creating" && "⏳ Creating your trading account…"}
+          {autoDepositStatus === "depositing" && "⏳ Depositing test collateral…"}
+          {autoDepositStatus === "error" && "⚠️ Auto-setup failed — you can deposit manually below"}
+        </div>
+      )}
 
       {/* ── MOBILE: Sticky header ── */}
       <div className="sticky top-0 z-30 border-b border-[var(--border)]/50 bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">

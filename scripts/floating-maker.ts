@@ -73,7 +73,7 @@ const MATCHER_ID = new PublicKey(
 );
 
 // Market maker config
-const SPREAD_BPS = Number(process.env.SPREAD_BPS ?? "30"); // 0.30% half-spread
+const SPREAD_BPS = Number(process.env.SPREAD_BPS ?? "25"); // 0.25% half-spread (bid+ask < 1% total, per PERC-372)
 const MAX_QUOTE_SIZE = BigInt(
   process.env.MAX_QUOTE_SIZE_USDC ?? "500",
 ) * 1_000_000n; // Convert to 6-decimal USDC
