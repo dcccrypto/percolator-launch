@@ -75,6 +75,8 @@ const HEALTH_AUTH_TOKEN = process.env.HEALTH_AUTH_TOKEN ?? "";
 
 // Track markets where we're not the oracle authority (skip future attempts)
 const skippedMarkets = new Set<string>();
+// Track markets where oracle authority has been successfully verified
+const authorityVerified = new Set<string>();
 
 // ── Types ───────────────────────────────────────────────────
 interface MarketInfo {
@@ -278,20 +280,24 @@ async function pushAndCrank(market: MarketInfo, programId: PublicKey): Promise<v
   // Skip markets where we've already confirmed we're not the oracle authority
   if (skippedMarkets.has(market.slab)) return;
 
-  // On first push attempt, validate on-chain oracle authority matches our admin key
-  if (s.totalPushes === 0 && s.totalErrors === 0) {
+  // Validate oracle authority on-chain: run on first attempt, or every 50 errors
+  // (catches cases where fetchSlab failed transiently on the first check)
+  const needsAuthorityCheck = !authorityVerified.has(market.slab) &&
+    (s.totalErrors === 0 || s.totalErrors % 50 === 0);
+  if (needsAuthorityCheck) {
     try {
       const slabData = await fetchSlab(conn, new PublicKey(market.slab));
       const cfg = parseConfig(slabData);
       if (!cfg.oracleAuthority.equals(admin.publicKey)) {
-        log(`⚠️ ${market.label}: oracle authority mismatch — expected ${admin.publicKey.toBase58().slice(0, 12)}..., got ${cfg.oracleAuthority.toBase58().slice(0, 12)}... Skipping.`);
+        log(`🚨 ${market.label}: ORACLE AUTHORITY MISMATCH — slab has ${cfg.oracleAuthority.toBase58()}, keeper is signing as ${admin.publicKey.toBase58()}. Needs reinit. Skipping.`);
         skippedMarkets.add(market.slab);
         return;
       }
-      log(`✓ ${market.label}: oracle authority verified`);
+      authorityVerified.add(market.slab);
+      log(`✓ ${market.label}: oracle authority verified (${admin.publicKey.toBase58().slice(0, 12)}...)`);
     } catch (e) {
-      log(`⚠️ ${market.label}: failed to verify oracle authority: ${(e as Error).message?.slice(0, 60)}`);
-      // Continue anyway — the tx will fail with a clear error if authority is wrong
+      log(`⚠️ ${market.label}: failed to verify oracle authority (attempt ${s.totalErrors + 1}): ${(e as Error).message?.slice(0, 80)}`);
+      // Continue anyway — the tx will fail with a clear program error if authority is wrong
     }
   }
 
@@ -434,6 +440,29 @@ async function main() {
   log(`Program: ${programId.toBase58().slice(0, 12)}...`);
   log(`Markets: ${markets.map(m => m.label).join(", ")}`);
 
+  // ── Startup oracle authority check ──────────────────────────
+  // Verify all slabs before entering the main loop so mismatches are obvious in boot logs.
+  log(`Verifying oracle authority for ${markets.length} market(s)...`);
+  for (const m of markets) {
+    try {
+      const slabData = await fetchSlab(conn, new PublicKey(m.slab));
+      const cfg = parseConfig(slabData);
+      if (!cfg.oracleAuthority.equals(admin.publicKey)) {
+        log(`🚨 STARTUP: ${m.label} (${m.slab.slice(0, 12)}...) — authority MISMATCH. Slab: ${cfg.oracleAuthority.toBase58()} | Keeper: ${admin.publicKey.toBase58()} → SLAB NEEDS REINIT`);
+        skippedMarkets.add(m.slab);
+      } else {
+        authorityVerified.add(m.slab);
+        log(`✅ STARTUP: ${m.label} — authority OK (${admin.publicKey.toBase58().slice(0, 12)}...)`);
+      }
+    } catch (e) {
+      log(`⚠️ STARTUP: ${m.label} — authority check failed: ${(e as Error).message?.slice(0, 80)}. Will retry during push loop.`);
+    }
+  }
+  if (skippedMarkets.size > 0) {
+    log(`⛔ ${skippedMarkets.size} market(s) skipped due to authority mismatch: ${markets.filter(m => skippedMarkets.has(m.slab)).map(m => m.label).join(", ")}`);
+    log(`   Action required: reinitialise slab(s) with current keeper authority, or update ADMIN_KEYPAIR to match.`);
+  }
+
   // Initialize stats
   for (const m of markets) getOrCreateStats(m);
 
@@ -461,7 +490,18 @@ async function main() {
         const s = getOrCreateStats(market);
         s.totalErrors++;
         s.consecutiveErrors++;
-        log(`❌ ${market.label}: ${(e as Error).message?.slice(0, 80)}`);
+        // Safely extract error info — SendTransactionError.message may be undefined
+        // on some @solana/web3.js versions; .logs contains the on-chain program output
+        const err = e as any;
+        const msg: string = (typeof err?.message === "string" && err.message.length > 0)
+          ? err.message.slice(0, 120)
+          : (typeof err === "string" ? err.slice(0, 120) : `[${Object.prototype.toString.call(err)}]`);
+        const txLogs = Array.isArray(err?.logs) ? (err.logs as string[]) : [];
+        log(`❌ ${market.label}: ${msg}`);
+        if (txLogs.length > 0) {
+          // Print last 5 program log lines — this reveals the actual on-chain error
+          log(`   TX logs: ${txLogs.slice(-5).join(" | ").slice(0, 400)}`);
+        }
       })
     );
     await Promise.allSettled(promises);
