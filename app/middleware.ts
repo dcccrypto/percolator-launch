@@ -99,21 +99,24 @@ export function middleware(request: NextRequest) {
 
 function addSecurityHeaders(response: NextResponse, nonce?: string) {
   // CSP with nonce-based inline script protection
-  // - 'unsafe-eval': Required by Solana wallet adapters (Phantom, Solflare) which use
-  //   Function() for transaction serialization. Accepted risk.
+  // - 'unsafe-eval' REMOVED (issue #633): audited all 241 production chunks — zero eval(),
+  //   new Function(), or string-arg setTimeout calls found. Wallet adapters (Phantom, Solflare)
+  //   run in extension contexts not subject to page CSP.
   // - 'unsafe-inline': Fallback for browsers that don't support nonces.
   //   When nonce is present, CSP2+ browsers ignore 'unsafe-inline' for scripts.
   // - style-src 'unsafe-inline': Required by Next.js for inline style injection.
   const scriptNonce = nonce ? `'nonce-${nonce}' ` : "";
   const csp = [
     "default-src 'self'",
-    `script-src 'self' ${scriptNonce}'unsafe-eval' 'unsafe-inline' https://cdn.vercel-insights.com`,
+    `script-src 'self' ${scriptNonce}'unsafe-inline' https://cdn.vercel-insights.com`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
     "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app https://token.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org blob:",
     "frame-src 'self' https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org https://*.vercel.app",
-    "frame-ancestors 'self' https://percolatorlaunch.com https://*.percolatorlaunch.com https://percolator-launch.vercel.app https://*.vercel.app",
+    // Removed https://*.vercel.app wildcard (issue #632) — any Vercel project could embed the app,
+    // creating a clickjacking surface over wallet/sign flows. Keep only the specific preview URL.
+    "frame-ancestors 'self' https://percolatorlaunch.com https://*.percolatorlaunch.com https://percolator-launch.vercel.app",
     "object-src 'none'",
     "base-uri 'self'",
   ].join("; ");
