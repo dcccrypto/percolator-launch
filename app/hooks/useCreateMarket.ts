@@ -93,6 +93,12 @@ export interface CreateMarketState {
   slabAddress: string | null;
   error: string | null;
   loading: boolean;
+  /** Devnet mint address (different from mainnet CA) */
+  devnetMint: string | null;
+  /** Number of tokens airdropped to creator */
+  devnetAirdropAmount: number | null;
+  /** Token symbol for devnet airdrop */
+  devnetAirdropSymbol: string | null;
 }
 
 const STEP_LABELS = [
@@ -113,6 +119,9 @@ export function useCreateMarket() {
     slabAddress: null,
     error: null,
     loading: false,
+    devnetMint: null,
+    devnetAirdropAmount: null,
+    devnetAirdropSymbol: null,
   });
 
   // Persist slab keypair across retries so we can resume from any step
@@ -601,7 +610,7 @@ export function useCreateMarket() {
         }
 
         // PERC-361: Post-creation hooks — register oracle bridge + mint devnet token
-        const slabAddr = state.slabAddress;
+        const slabAddr = slabPk.toBase58();
         const mintAddr = params.mint.toBase58();
         const isDevnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet";
 
@@ -622,7 +631,7 @@ export function useCreateMarket() {
 
           // Mint devnet token + airdrop $500 to creator
           try {
-            await fetch("/api/devnet-mint-token", {
+            const mintResp = await fetch("/api/devnet-mint-token", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -630,7 +639,16 @@ export function useCreateMarket() {
                 marketAddress: slabAddr,
                 creatorWallet: wallet.publicKey.toBase58(),
               }),
-            }).catch(() => {});
+            });
+            if (mintResp.ok) {
+              const mintData = await mintResp.json();
+              setState((s) => ({
+                ...s,
+                devnetMint: mintData.devnetMint ?? null,
+                devnetAirdropAmount: mintData.airdropTokens ?? null,
+                devnetAirdropSymbol: mintData.symbol ?? null,
+              }));
+            }
           } catch {}
         }
 
@@ -660,6 +678,9 @@ export function useCreateMarket() {
       slabAddress: null,
       error: null,
       loading: false,
+      devnetMint: null,
+      devnetAirdropAmount: null,
+      devnetAirdropSymbol: null,
     });
   }, []);
 

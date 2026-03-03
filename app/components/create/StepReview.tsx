@@ -3,6 +3,7 @@
 import { FC, useMemo } from "react";
 import { type SlabTierKey, SLAB_TIERS } from "@percolator/sdk";
 import { CostEstimate } from "./CostEstimate";
+import Link from "next/link";
 
 interface StepReviewProps {
   // Token
@@ -112,6 +113,9 @@ export const StepReview: FC<StepReviewProps> = ({
                 <p className="text-[10px] text-[var(--text-dim)]">
                   Oracle: {oracleTypeLabel} · {oracleLabel}
                 </p>
+                <p className="text-[9px] text-[var(--text-dim)] font-mono mt-0.5">
+                  Mint: {mintAddress.slice(0, 8)}...{mintAddress.slice(-6)}
+                </p>
               </div>
             </div>
             <div className="text-right">
@@ -159,6 +163,25 @@ export const StepReview: FC<StepReviewProps> = ({
               </span>
             </>
           )}
+        </div>
+      )}
+
+      {/* Devnet: no tokens — guide to mint first */}
+      {walletConnected && !hasTokens && process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet" && (
+        <div className="border border-[var(--short)]/20 bg-[var(--short)]/[0.04] px-4 py-3 space-y-2">
+          <p className="text-[11px] text-[var(--text)]">
+            <span className="text-[var(--short)] font-medium">No tokens found.</span>{" "}
+            On devnet, you need to mint tokens first before creating a market.
+          </p>
+          <Link
+            href="/devnet-mint"
+            className="inline-block border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hover:bg-[var(--accent)]/[0.15]"
+          >
+            MINT DEVNET TOKENS →
+          </Link>
+          <p className="text-[9px] text-[var(--text-dim)]">
+            After minting, come back here to launch your market. Your settings will be preserved.
+          </p>
         </div>
       )}
 

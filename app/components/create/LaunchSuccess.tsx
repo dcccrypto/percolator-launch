@@ -12,6 +12,14 @@ interface LaunchSuccessProps {
   marketAddress: string;
   txSigs: string[];
   onDeployAnother: () => void;
+  /** Original mainnet CA the user pasted */
+  mainnetCA?: string;
+  /** Devnet mint address (different from mainnet CA) */
+  devnetMint?: string | null;
+  /** Number of tokens airdropped */
+  devnetAirdropAmount?: number | null;
+  /** Token symbol for airdrop */
+  devnetAirdropSymbol?: string | null;
 }
 
 /**
@@ -26,8 +34,14 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   marketAddress,
   txSigs,
   onDeployAnother,
+  mainnetCA,
+  devnetMint,
+  devnetAirdropAmount,
+  devnetAirdropSymbol,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [copiedDevnet, setCopiedDevnet] = useState(false);
+  const isDevnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet";
 
   const handleCopy = async () => {
     try {
@@ -97,6 +111,80 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Devnet Token Info — CA mismatch notice + airdrop confirmation */}
+      {isDevnet && (devnetMint || devnetAirdropAmount) && (
+        <div className="border border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] p-4 mb-6 text-left w-full max-w-sm mx-auto space-y-3">
+          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--accent)]">
+            DEVNET TOKEN INFO
+          </p>
+
+          {devnetAirdropAmount && devnetAirdropSymbol && (
+            <div className="flex items-center gap-2 text-[12px]">
+              <span className="text-[var(--long)]">✓</span>
+              <span className="text-[var(--text)]">
+                Airdropped <strong>{devnetAirdropAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {devnetAirdropSymbol}</strong>{" "}
+                <span className="text-[var(--text-dim)]">(~$500 worth)</span>
+              </span>
+            </div>
+          )}
+
+          {devnetMint && (
+            <div className="space-y-1">
+              <p className="text-[10px] text-[var(--text-muted)]">
+                ⚠️ Devnet uses a <strong>different mint address</strong> than mainnet:
+              </p>
+              {mainnetCA && (
+                <div className="flex items-center gap-2 text-[10px]">
+                  <span className="text-[var(--text-dim)] w-16 flex-shrink-0">Mainnet:</span>
+                  <code className="font-mono text-[9px] text-[var(--text-dim)] truncate">{mainnetCA}</code>
+                </div>
+              )}
+              <div className="flex items-center gap-2 text-[10px]">
+                <span className="text-[var(--accent)] w-16 flex-shrink-0 font-medium">Devnet:</span>
+                <code className="font-mono text-[9px] text-[var(--accent)] truncate flex-1">{devnetMint}</code>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(devnetMint);
+                      setCopiedDevnet(true);
+                      setTimeout(() => setCopiedDevnet(false), 2000);
+                    } catch {}
+                  }}
+                  className="border border-[var(--border)] px-1.5 py-0.5 text-[8px] font-medium text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors flex-shrink-0"
+                >
+                  {copiedDevnet ? "✓" : "copy"}
+                </button>
+              </div>
+              <p className="text-[9px] text-[var(--text-dim)] mt-1">
+                Use the devnet mint address when adding tokens to your wallet or trading.
+              </p>
+            </div>
+          )}
+
+          {!devnetMint && !devnetAirdropAmount && (
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-[var(--text-dim)]">⏳</span>
+              <span className="text-[var(--text-dim)]">
+                Devnet token minting in progress...
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Devnet airdrop not available — show manual mint link */}
+      {isDevnet && !devnetMint && !devnetAirdropAmount && (
+        <div className="mb-6">
+          <Link
+            href={`/devnet-mint?ca=${mainnetCA ?? ""}&market=${marketAddress}`}
+            className="text-[11px] text-[var(--accent)] hover:underline"
+          >
+            Mint devnet tokens manually →
+          </Link>
+        </div>
+      )}
 
       {/* CTAs */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

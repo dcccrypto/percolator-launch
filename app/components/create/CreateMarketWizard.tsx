@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useState, useMemo, useCallback, useEffect } from "react";
+import { FC, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useCreateMarket, MIN_INIT_MARKET_SEED, type CreateMarketParams } from "@/hooks/useCreateMarket";
@@ -140,6 +140,37 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   }, [wizard.slabTier]);
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
   const allValid = step1Valid && step2Valid && step3Valid && hasTokens && hasSufficientTokensForSeed && hasSufficientSol;
+
+  // Quick Launch auto-advance: step 1 → step 2 when token is resolved and params ready
+  const quickAutoAdvancedRef = useRef(false);
+  useEffect(() => {
+    if (wizard.mode !== "quick") { quickAutoAdvancedRef.current = false; return; }
+    if (quickAutoAdvancedRef.current) return;
+    if (wizard.step !== 1) return;
+    if (!step1Valid) return;
+    if (quickLaunch.loading) return;
+    if (!quickLaunch.config) return;
+
+    quickAutoAdvancedRef.current = true;
+    setCompletedSteps((prev) => new Set(prev).add(1));
+    setWizard((prev) => ({ ...prev, step: 2 as WizardStep }));
+  }, [wizard.mode, wizard.step, step1Valid, quickLaunch.loading, quickLaunch.config]);
+
+  // Quick Launch auto-advance: step 2 → step 4 when oracle is resolved
+  const quickOracleAutoAdvancedRef = useRef(false);
+  useEffect(() => {
+    if (wizard.mode !== "quick") { quickOracleAutoAdvancedRef.current = false; return; }
+    if (quickOracleAutoAdvancedRef.current) return;
+    if (wizard.step !== 2) return;
+    const oracleReady = wizard.oracleType === "admin" ||
+      (wizard.oracleType === "pyth" && isValidHex64(wizard.oracleFeed)) ||
+      (wizard.oracleType === "hyperp_ema" && isValidBase58Pubkey(wizard.oracleFeed));
+    if (!oracleReady) return;
+
+    quickOracleAutoAdvancedRef.current = true;
+    setCompletedSteps((prev) => { const s = new Set(prev); s.add(2); s.add(3); return s; });
+    setWizard((prev) => ({ ...prev, step: 4 as WizardStep }));
+  }, [wizard.mode, wizard.step, wizard.oracleType, wizard.oracleFeed]);
 
   // Navigation
   const goToStep = useCallback((step: WizardStep) => {
@@ -331,6 +362,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         marketAddress={createState.slabAddress}
         txSigs={createState.txSigs}
         onDeployAnother={handleReset}
+        mainnetCA={wizard.mintAddress}
+        devnetMint={createState.devnetMint}
+        devnetAirdropAmount={createState.devnetAirdropAmount}
+        devnetAirdropSymbol={createState.devnetAirdropSymbol}
       />
     );
   }
