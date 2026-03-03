@@ -46,6 +46,7 @@ Migrations are automatically applied when pushed to the linked Supabase project 
 | 021 | `fix_rls_policies.sql` | Fix write policies to require service_role (was open to anon) |
 | 022 | `insurance_tables.sql` | Insurance snapshots and LP events tables |
 | 023 | `drop_simulation_tables.sql` | Drop simulation tables (feature removed in PRs #225-#227) |
+| 029 | `auto_fund_log.sql` | Auto-fund faucet rate-limit log for devnet wallet funding |
 
 ## Database Schema Overview
 
@@ -81,6 +82,12 @@ Funding rate history over time
 - **PK:** `id` (BIGSERIAL)
 - **FK:** `market_slab` → market_stats
 - **Key fields:** rate_bps_per_slot, timestamp, slot
+
+#### `auto_fund_log`
+Devnet auto-fund faucet rate-limit log
+- **PK:** `id` (BIGSERIAL)
+- **Key fields:** wallet, sol_airdropped, usdc_minted, created_at
+- **Index:** (wallet, created_at DESC) for rate-limit lookups
 
 ### Transparency & Analytics Tables
 
