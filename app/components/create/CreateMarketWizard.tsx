@@ -429,6 +429,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       ? formatHumanAmount(wizard.walletBalance, wizard.tokenMeta.decimals)
       : null;
 
+  // Step labels — Quick Launch skips Oracle (step 2 auto-resolved), so relabel it
+  const stepLabels: readonly [string, string, string, string] =
+    wizard.mode === "quick"
+      ? ["Token", "Oracle ✓", "Slab Tier", "Review"]
+      : ["Token", "Oracle", "Parameters", "Review"];
+
   return (
     <div className="space-y-6 p-4 sm:p-6">
       {/* Stuck slab recovery banner */}
@@ -448,6 +454,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       <WizardProgress
         currentStep={wizard.step}
         completedSteps={completedSteps}
+        stepLabels={stepLabels}
         onStepClick={(step) => {
           if (completedSteps.has(step)) goToStep(step);
         }}
@@ -458,14 +465,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         {/* Step header */}
         <div className="mb-5 pb-4 border-b border-[var(--border)]">
           <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
-            STEP {wizard.step} / 4 —{" "}
-            {wizard.step === 1
-              ? "Token"
-              : wizard.step === 2
-                ? wizard.mode === "quick" ? "Slab Tier" : "Oracle"
-                : wizard.step === 3
-                  ? "Parameters"
-                  : "Review"}
+            STEP {wizard.step} / 4 — {stepLabels[wizard.step - 1]}
           </p>
         </div>
 

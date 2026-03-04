@@ -2,13 +2,15 @@
 
 import { FC } from "react";
 
+const DEFAULT_LABELS = ["Token", "Oracle", "Parameters", "Review"] as const;
+
 interface WizardProgressProps {
   currentStep: 1 | 2 | 3 | 4;
   completedSteps: Set<number>;
   onStepClick?: (step: 1 | 2 | 3 | 4) => void;
+  /** Override step labels (e.g. Quick Launch swaps "Oracle" → "Slab Tier") */
+  stepLabels?: readonly [string, string, string, string];
 }
-
-const STEP_LABELS = ["Token", "Oracle", "Parameters", "Review"] as const;
 
 /**
  * Horizontal step progress indicator with connectors.
@@ -19,12 +21,13 @@ export const WizardProgress: FC<WizardProgressProps> = ({
   currentStep,
   completedSteps,
   onStepClick,
+  stepLabels = DEFAULT_LABELS,
 }) => {
   return (
     <>
       {/* Desktop progress */}
       <div className="hidden sm:flex items-center justify-between">
-        {STEP_LABELS.map((label, idx) => {
+        {stepLabels.map((label, idx) => {
           const stepNum = (idx + 1) as 1 | 2 | 3 | 4;
           const isCompleted = completedSteps.has(stepNum);
           const isActive = currentStep === stepNum;
@@ -74,7 +77,7 @@ export const WizardProgress: FC<WizardProgressProps> = ({
               </button>
 
               {/* Connector line (not after last step) */}
-              {idx < STEP_LABELS.length - 1 && (
+              {idx < stepLabels.length - 1 && (
                 <div className="flex-1 mx-3 h-px">
                   <div
                     className={`h-full transition-colors ${
@@ -93,7 +96,7 @@ export const WizardProgress: FC<WizardProgressProps> = ({
       {/* Mobile progress */}
       <div className="flex sm:hidden items-center justify-between">
         <span className="text-[12px] font-medium text-white">
-          Step {currentStep} of 4 — {STEP_LABELS[currentStep - 1]}
+          Step {currentStep} of 4 — {stepLabels[currentStep - 1]}
         </span>
         <div className="flex items-center gap-1">
           {[1, 2, 3, 4].map((s) => (

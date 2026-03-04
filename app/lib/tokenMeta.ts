@@ -106,6 +106,33 @@ async function fetchViaHeliusDAS(
 }
 
 /**
+ * Fetch token metadata via Jupiter Token API.
+ * Covers pump.fun tokens and other community/verified tokens.
+ */
+async function fetchViaJupiterToken(
+  mintAddress: string,
+): Promise<{ symbol: string; name: string; decimals?: number } | null> {
+  try {
+    const res = await fetch(
+      `https://tokens.jup.ag/token/${mintAddress}`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const symbol = data?.symbol;
+    const name = data?.name;
+    if (!symbol && !name) return null;
+    return {
+      symbol: symbol || shortenMint(mintAddress),
+      name: name || shortenMint(mintAddress),
+      decimals: typeof data?.decimals === "number" ? data.decimals : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Batch-fetch token metadata via Helius DAS getAssetBatch.
  * Resolves up to DAS_BATCH_SIZE assets per call.
  * Returns a Map of mintAddress → { symbol, name, decimals }.
@@ -418,6 +445,17 @@ export async function fetchTokenMeta(
     }
   }
 
+  // 2b. Try Jupiter Token API (covers pump.fun and other community tokens)
+  if (!resolved) {
+    const jupMeta = await fetchViaJupiterToken(key);
+    if (jupMeta) {
+      symbol = jupMeta.symbol;
+      name = jupMeta.name;
+      if (jupMeta.decimals !== undefined) decimals = jupMeta.decimals;
+      resolved = true;
+    }
+  }
+
   // 3. Fallback: on-chain Metaplex metadata (manual buffer parsing)
   if (!resolved) {
     try {
@@ -465,9 +503,9 @@ export async function fetchTokenMeta(
     }
   }
 
-  // 4. Fallback — show truncated mint address instead of "Unknown Token"
+  // 4. Fallback — use "Unknown" symbol with truncated mint as name
   if (!resolved) {
-    symbol = shortenMint(key);
+    symbol = "UNKNOWN";
     name = shortenMint(key);
   }
 
