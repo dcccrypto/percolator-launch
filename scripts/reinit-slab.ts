@@ -312,6 +312,7 @@ async function main() {
 
   if (DRY_RUN) {
     console.log("\n🔍 DRY RUN — would execute the following:");
+    console.log("  0. Generate new slab keypair and save to ./new-slab-keypair-<timestamp>.json");
     console.log("  1. CloseSlab on", slabPubkey.toBase58());
     console.log("  2. SystemProgram.createAccount (new keypair, size =", tier.dataSize, "bytes)");
     console.log("  3. InitMarket with extracted config");
@@ -351,9 +352,22 @@ async function main() {
   console.log("\n--- Step 4: Create new slab account ---");
 
   const newSlabKp = Keypair.generate();
+
+  // CRITICAL: Persist new slab keypair to disk BEFORE any transactions.
+  // If the process dies after CloseSlab but before InitMarket completes,
+  // this file lets you recover the pubkey and retry InitMarket manually.
+  const newSlabKpPath = `./new-slab-keypair-${Date.now()}.json`;
+  fs.writeFileSync(
+    newSlabKpPath,
+    JSON.stringify(Array.from(newSlabKp.secretKey)),
+    "utf-8",
+  );
+  console.log(`  ✅ New slab keypair saved: ${newSlabKpPath}`);
+  console.log(`     Pubkey: ${newSlabKp.publicKey.toBase58()}`);
+  console.log(`     ⚠️  Keep this file safe — needed to recover if the script fails mid-flight.`);
+
   const slabRent = await connection.getMinimumBalanceForRentExemption(tier.dataSize);
 
-  console.log(`  New slab:  ${newSlabKp.publicKey.toBase58()}`);
   console.log(`  Tier:      ${tier.label} (${tier.dataSize} bytes, ${tier.maxAccounts} accounts)`);
   console.log(`  Rent:      ${(slabRent / 1e9).toFixed(4)} SOL`);
 
@@ -466,7 +480,7 @@ async function main() {
   console.log(`Program:            ${PROGRAM_ID.toBase58()}`);
   console.log(`Tier:               ${tier.label} (${tier.dataSize} bytes)`);
   console.log(`\n⚠️  NEXT STEPS:`);
-  console.log(`  1. Save new slab keypair — printed to stdout above (NOT saved to file)`);
+  console.log(`  1. Secure new slab keypair file: ${newSlabKpPath}`);
   console.log(`     → New slab pubkey: ${newSlabKp.publicKey.toBase58()}`);
   console.log(`  2. Run InitLP on the new slab to enable LP deposits:`);
   console.log(`     npx tsx scripts/create-market.ts --existing-slab ${newSlabKp.publicKey.toBase58()} --step init-lp ...`);
