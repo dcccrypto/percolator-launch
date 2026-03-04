@@ -106,26 +106,28 @@ async function fetchViaHeliusDAS(
 }
 
 /**
- * Fetch token metadata via Jupiter Token API.
- * Covers pump.fun tokens and other community/verified tokens.
+ * Fetch token metadata via DexScreener API.
+ * Covers pump.fun tokens and other community tokens not in Helius DAS.
+ * Free, no API key required. Replaces dead tokens.jup.ag domain (PERC-396).
  */
-async function fetchViaJupiterToken(
+async function fetchViaDexScreener(
   mintAddress: string,
-): Promise<{ symbol: string; name: string; decimals?: number } | null> {
+): Promise<{ symbol: string; name: string } | null> {
   try {
     const res = await fetch(
-      `https://tokens.jup.ag/token/${mintAddress}`,
+      `https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`,
       { signal: AbortSignal.timeout(5000) },
     );
     if (!res.ok) return null;
     const data = await res.json();
-    const symbol = data?.symbol;
-    const name = data?.name;
+    // DexScreener returns an array of pairs; the searched mint is always baseToken
+    const baseToken = data?.pairs?.[0]?.baseToken;
+    const symbol = baseToken?.symbol;
+    const name = baseToken?.name;
     if (!symbol && !name) return null;
     return {
       symbol: symbol || shortenMint(mintAddress),
       name: name || shortenMint(mintAddress),
-      decimals: typeof data?.decimals === "number" ? data.decimals : undefined,
     };
   } catch {
     return null;
@@ -445,13 +447,12 @@ export async function fetchTokenMeta(
     }
   }
 
-  // 2b. Try Jupiter Token API (covers pump.fun and other community tokens)
+  // 2b. Try DexScreener (covers pump.fun and other community tokens — key-free, PERC-396)
   if (!resolved) {
-    const jupMeta = await fetchViaJupiterToken(key);
-    if (jupMeta) {
-      symbol = jupMeta.symbol;
-      name = jupMeta.name;
-      if (jupMeta.decimals !== undefined) decimals = jupMeta.decimals;
+    const dexMeta = await fetchViaDexScreener(key);
+    if (dexMeta) {
+      symbol = dexMeta.symbol;
+      name = dexMeta.name;
       resolved = true;
     }
   }
@@ -503,9 +504,9 @@ export async function fetchTokenMeta(
     }
   }
 
-  // 4. Fallback — use "Unknown" symbol with truncated mint as name
+  // 4. Fallback — truncated mint address (never blank, never "UNKNOWN-PERP")
   if (!resolved) {
-    symbol = "UNKNOWN";
+    symbol = shortenMint(key);
     name = shortenMint(key);
   }
 

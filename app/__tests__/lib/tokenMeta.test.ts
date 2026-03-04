@@ -65,16 +65,78 @@ describe("fetchTokenMeta", () => {
   });
 
   it("falls back to truncated mint when all lookups fail (non-Helius, no Metaplex)", async () => {
+    // Mock fetch so DexScreener (and any other API) fails — pure fallback path
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ERR_NAME_NOT_RESOLVED")));
+
     const conn = mockConnection({ accountInfo: null });
     const result = await fetchTokenMeta(conn, new PublicKey(RANDOM_MINT));
 
-    // Should be truncated mint address, not "Unknown Token"
+    // Should be truncated mint address, not "Unknown Token" and not "UNKNOWN-PERP"
     expect(result.symbol).toBeTruthy();
     expect(result.name).toBeTruthy();
     expect(result.symbol).not.toBe("Unknown Token");
     expect(result.name).not.toBe("Unknown Token");
+    expect(result.symbol).not.toBe("UNKNOWN");
     // Truncated form: first 4 + ... + last 4
     expect(result.symbol).toContain("...");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("uses DexScreener fallback for pump.fun tokens when Helius DAS fails (PERC-396)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          pairs: [
+            {
+              baseToken: {
+                address: RANDOM_MINT,
+                symbol: "PUMP",
+                name: "Pump Token",
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    // Non-Helius connection so DAS is skipped, DexScreener becomes the resolver
+    const conn = mockConnection({
+      rpcEndpoint: "https://api.devnet.solana.com",
+      accountInfo: null,
+    });
+    const result = await fetchTokenMeta(conn, new PublicKey(RANDOM_MINT));
+
+    expect(result.symbol).toBe("PUMP");
+    expect(result.name).toBe("Pump Token");
+    expect(mockFetch).toHaveBeenCalledWith(
+      `https://api.dexscreener.com/latest/dex/tokens/${RANDOM_MINT}`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    vi.unstubAllGlobals();
+  });
+
+  it("DexScreener returning empty pairs falls through to truncated mint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ pairs: [] }),
+      }),
+    );
+
+    const conn = mockConnection({
+      rpcEndpoint: "https://api.devnet.solana.com",
+      accountInfo: null,
+    });
+    const result = await fetchTokenMeta(conn, new PublicKey(RANDOM_MINT));
+
+    // Empty pairs → no baseToken → falls through to truncated mint
+    expect(result.symbol).toContain("...");
+
+    vi.unstubAllGlobals();
   });
 
   it("uses Helius DAS when rpcEndpoint contains helius-rpc.com", async () => {
