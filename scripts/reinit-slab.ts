@@ -148,6 +148,21 @@ async function main() {
   const rpcUrl = process.env.RPC_URL;
   if (!rpcUrl) throw new Error("RPC_URL not set in .env");
 
+  // Guard: DEVNET ONLY — abort before any destructive action if not devnet/localhost
+  const rpcLower = rpcUrl.toLowerCase();
+  if (
+    !rpcLower.includes("devnet") &&
+    !rpcLower.includes("localhost") &&
+    !rpcLower.includes("127.0.0.1")
+  ) {
+    throw new Error(
+      `reinit-slab: refusing to run on non-devnet cluster.\n` +
+      `  RPC_URL = ${rpcUrl}\n` +
+      `  This script closes and recreates slab accounts — DEVNET ONLY.\n` +
+      `  Use RPC_URL pointing at devnet (e.g. https://api.devnet.solana.com).`,
+    );
+  }
+
   const keypairPath = process.env.ADMIN_KEYPAIR_PATH || "./admin-keypair.json";
   const payer = loadKeypair(keypairPath);
   const connection = new Connection(rpcUrl, "confirmed");
@@ -182,7 +197,12 @@ async function main() {
   const programTier = PROGRAM_TO_TIER[PROGRAM_ID.toBase58()];
 
   let targetTier: keyof typeof SLAB_TIERS;
-  if (argTier && SLAB_TIERS[argTier]) {
+  if (argTier && !SLAB_TIERS[argTier]) {
+    // Unknown --tier value: fail fast rather than silently auto-detecting
+    console.error(`\n❌ Unknown --tier value: "${argTier}"`);
+    console.error(`   Allowed values: ${Object.keys(SLAB_TIERS).join(", ")}`);
+    process.exit(1);
+  } else if (argTier && SLAB_TIERS[argTier]) {
     targetTier = argTier;
     console.log(`  Tier:          ${targetTier} (from --tier flag)`);
   } else if (detectedTier) {
@@ -309,14 +329,14 @@ async function main() {
   closeTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
   closeTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }));
   closeTx.add(
-    buildIx(
-      PROGRAM_ID,
-      encodeCloseSlab(),
-      buildAccountMetas(ACCOUNTS_CLOSE_SLAB, {
+    buildIx({
+      programId: PROGRAM_ID,
+      data: encodeCloseSlab(),
+      keys: buildAccountMetas(ACCOUNTS_CLOSE_SLAB, {
         admin: payer.publicKey,
         slab: slabPubkey,
       }),
-    ),
+    }),
   );
 
   const closeSig = await sendAndConfirmTransaction(connection, closeTx, [payer], {
@@ -392,7 +412,7 @@ async function main() {
     admin:                  payer.publicKey,
     collateralMint:         mint,
     indexFeedId:            feedIdHex,
-    maxStalenessSecs:       params.maxCrankStalenessSlots,  // same staleness
+    maxStalenessSecs:       config.maxStalenessSlots,  // oracle staleness from parsed config
     confFilterBps:          config.confFilterBps,
     invert:                 config.invert,
     unitScale:              config.unitScale,
