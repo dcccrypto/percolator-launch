@@ -42,6 +42,7 @@ import {
   parseHeader,
   parseConfig,
   parseParams,
+  parseEngine,
   parseAllAccounts,
 } from "../packages/core/src/solana/slab.js";
 import {
@@ -77,17 +78,8 @@ if (!args.slab) throw new Error("--slab <PUBKEY> is required");
 const DRY_RUN = args["dry-run"] ?? false;
 const FORCE = args["force"] ?? false;
 
-// ============================================================================
-// ENGINE LAYOUT CONSTANTS (from packages/core/src/solana/slab.ts)
-// Must stay in sync with those constants.
-// ============================================================================
-const ENGINE_OFF = 640;              // align_up(HEADER_LEN=104 + CONFIG_LEN=536, 8) — see slab.ts:441
-const ENGINE_MARK_PRICE_OFF = 400;   // u64 mark_price_e6 within engine section — see slab.ts:457
-
-function readU64LE(data: Uint8Array, off: number): bigint {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  return view.getBigUint64(off, true);
-}
+// ENGINE_OFF is imported from packages/core/src/solana/slab.ts — single source of truth.
+// Do NOT hardcode ENGINE_OFF or ENGINE_MARK_PRICE_OFF here; use parseEngine() instead.
 
 // ============================================================================
 // HELPERS
@@ -266,8 +258,10 @@ async function main() {
     throw new Error(`Failed to parse slab params: ${e}. Cannot safely reinit.`);
   }
 
-  // Read mark price directly (not exported by parseEngine return value)
-  const markPriceE6 = readU64LE(data, ENGINE_OFF + ENGINE_MARK_PRICE_OFF);
+  // Read mark price via parseEngine — uses the canonical offset from slab.ts.
+  // This prevents silent drift if ENGINE_OFF or ENGINE_MARK_PRICE_OFF changes.
+  const engine = parseEngine(data);
+  const markPriceE6 = engine.markPriceE6;
   // If the slab was never cranked, mark price may be 0; use a safe fallback
   const initialMarkPrice = markPriceE6 > 0n ? markPriceE6 : 1_000_000n;
   console.log(`  Mark price:    ${markPriceE6} (using: ${initialMarkPrice})`);

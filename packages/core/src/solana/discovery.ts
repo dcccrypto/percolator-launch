@@ -3,6 +3,8 @@ import {
   parseHeader,
   parseConfig,
   parseParams,
+  ENGINE_OFF as SLAB_ENGINE_OFF,
+  ENGINE_MARK_PRICE_OFF,
   type SlabHeader,
   type MarketConfig,
   type EngineState,
@@ -66,7 +68,7 @@ export type SlabTierKey = keyof typeof SLAB_TIERS;
  * Must match the on-chain program's SLAB_LEN exactly.
  */
 export function slabDataSize(maxAccounts: number): number {
-  const ENGINE_OFF_LOCAL = 640; // align_up(104 + 536, 8) — CONFIG_LEN=536 (PERC-328: +40 _reserved)
+  const ENGINE_OFF_LOCAL = SLAB_ENGINE_OFF; // single source of truth from slab.ts
   const ENGINE_FIXED = 656;     // scalars before bitmap (608 + 24 for PERC-299 emergency OI fields)
   const ACCOUNT_SIZE = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
@@ -100,7 +102,7 @@ const SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 /** We need header(104) + config(536) + engine up to nextAccountId (~1200). Total ~1840. Use 1940 for margin. */
 const HEADER_SLICE_LENGTH = 1940;
 
-const ENGINE_OFF = 640; // CONFIG_LEN=536 (PERC-328: +40 _reserved): align_up(104+536, 8) = 640
+const ENGINE_OFF = SLAB_ENGINE_OFF; // single source of truth from slab.ts
 
 function dv(data: Uint8Array): DataView {
   return new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -195,6 +197,9 @@ function parseEngineLight(data: Uint8Array, maxAccounts: number = 4096): EngineS
     lastBreakerSlot: readU64LE(data, base + 648),
     numUsedAccounts: canReadNumUsed ? readU16LE(data, base + numUsedOff) : 0,
     nextAccountId: canReadNextId ? readU64LE(data, base + nextAccountIdOff) : 0n,
+    markPriceE6: data.length >= base + ENGINE_MARK_PRICE_OFF + 8
+      ? readU64LE(data, base + ENGINE_MARK_PRICE_OFF)
+      : 0n,
   };
 }
 

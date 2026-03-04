@@ -438,7 +438,7 @@ export function readLastThrUpdateSlot(data: Uint8Array): bigint {
 //   PERC-298 skew_factor packed in oi_cap_multiplier_bps.
 // RiskEngine grew by 32 bytes in PERC-298 (added: long_oi, short_oi U128 fields).
 // =============================================================================
-const ENGINE_OFF = 640;
+export const ENGINE_OFF = 640;
 // RiskEngine struct layout (repr(C), SBF uses 8-byte alignment for u128):
 // - vault: U128 (16 bytes) at offset 0
 // - insurance_fund: InsuranceFund { balance: U128, fee_revenue: U128 } (32 bytes) at offset 16
@@ -454,7 +454,7 @@ const ENGINE_FUNDING_INDEX_OFF = 368;   // I128 (16 bytes)
 const ENGINE_LAST_FUNDING_SLOT_OFF = 384;
 const ENGINE_FUNDING_RATE_BPS_OFF = 392;// i64: funding_rate_bps_per_slot_last (8 bytes)
 // Premium funding state (PERC-121):
-const ENGINE_MARK_PRICE_OFF = 400;      // u64: mark_price_e6
+export const ENGINE_MARK_PRICE_OFF = 400;      // u64: mark_price_e6
 const ENGINE_FUNDING_FROZEN_OFF = 408;  // bool (1 byte + 7 padding)
 const ENGINE_FROZEN_RATE_OFF = 416;     // i64: funding_frozen_rate_snapshot
 // Keeper crank:
@@ -645,6 +645,8 @@ export interface EngineState {
   lastBreakerSlot: bigint;
   numUsedAccounts: number;
   nextAccountId: bigint;
+  /** mark_price_e6: current mark price (u64, scaled by 1e6). Use this instead of raw offset reads. */
+  markPriceE6: bigint;
 }
 
 export enum AccountKind {
@@ -769,6 +771,7 @@ export function parseEngine(data: Uint8Array): EngineState {
     emergencyOiMode: data[base + ENGINE_EMERGENCY_OI_MODE_OFF] !== 0,
     emergencyStartSlot: readU64LE(data, base + ENGINE_EMERGENCY_START_SLOT_OFF),
     lastBreakerSlot: readU64LE(data, base + ENGINE_LAST_BREAKER_SLOT_OFF),
+    markPriceE6: readU64LE(data, base + ENGINE_MARK_PRICE_OFF),
     numUsedAccounts: (() => {
       const bw = layout ? layout.bitmapWords : DEFAULT_BITMAP_WORDS;
       return readU16LE(data, base + ENGINE_BITMAP_OFF + bw * 8);
