@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getBackendUrl } from "@/lib/config";
+import { getBackendUrl, getNetwork } from "@/lib/config";
 import { getServiceClient } from "@/lib/supabase";
 import * as Sentry from "@sentry/nextjs";
 
@@ -25,10 +25,15 @@ export const dynamic = "force-dynamic";
  *     }
  *   }
  *
- * Security note: this route is BLOCKED from serving on mainnet.
- * The cluster guard sits in TraderFleetBot.start() upstream.
+ * Security note: this route is only available on devnet.
+ * An explicit runtime guard below enforces this; do not rely solely on upstream callers.
  */
 export async function GET() {
+  // Explicit mainnet guard — do not serve price data on mainnet (#658)
+  if (getNetwork() === "mainnet") {
+    return NextResponse.json({ error: "Not available on mainnet" }, { status: 403 });
+  }
+
   try {
     // ── Primary: Supabase market_stats ─────────────────────────
     const db = getServiceClient();
@@ -68,6 +73,16 @@ export async function GET() {
 
     // ── Fallback: proxy to backend /prices ─────────────────────
     const backendUrl = getBackendUrl();
+    // Guard: refuse to proxy to the production fallback when BACKEND_URL env is not explicitly
+    // set — prevents silent devnet→production data leakage (#659)
+    const hasExplicitBackendUrl =
+      !!process.env.NEXT_PUBLIC_API_URL || !!process.env.NEXT_PUBLIC_BACKEND_URL;
+    if (!hasExplicitBackendUrl) {
+      console.error(
+        "[/api/prices] BACKEND_URL not configured; refusing to proxy to production default from devnet",
+      );
+      return NextResponse.json({ prices: {} }, { status: 502 });
+    }
     const res = await fetch(`${backendUrl}/prices`, {
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(5000),
