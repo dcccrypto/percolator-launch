@@ -105,18 +105,38 @@ interface TraderFleetConfig {
 }
 
 function loadFleetConfig(): TraderFleetConfig {
+  const fleetSize      = Number(process.env.TRADER_FLEET_SIZE        ?? 5);
+  const minIntervalMs  = Number(process.env.TRADER_MIN_INTERVAL_MS   ?? 30_000);
+  const maxIntervalMs  = Number(process.env.TRADER_MAX_INTERVAL_MS   ?? 180_000);
+  const marketsPerTrader = Number(process.env.TRADER_MARKETS         ?? 3);
+  const minHoldMs      = Number(process.env.TRADER_MIN_HOLD_MS       ?? 20 * 60_000);
+  const maxHoldMs      = Number(process.env.TRADER_MAX_HOLD_MS       ?? 120 * 60_000);
+
+  // Validate numeric fields — reject NaN / Infinity from bad env vars
+  if (!Number.isFinite(fleetSize)      || fleetSize < 1)      throw new Error(`TRADER_FLEET_SIZE must be a positive integer, got "${process.env.TRADER_FLEET_SIZE}"`);
+  if (!Number.isFinite(minIntervalMs)  || minIntervalMs < 0)  throw new Error(`TRADER_MIN_INTERVAL_MS must be ≥ 0, got "${process.env.TRADER_MIN_INTERVAL_MS}"`);
+  if (!Number.isFinite(maxIntervalMs)  || maxIntervalMs < 0)  throw new Error(`TRADER_MAX_INTERVAL_MS must be ≥ 0, got "${process.env.TRADER_MAX_INTERVAL_MS}"`);
+  if (!Number.isFinite(marketsPerTrader) || marketsPerTrader < 1) throw new Error(`TRADER_MARKETS must be a positive integer, got "${process.env.TRADER_MARKETS}"`);
+  if (!Number.isFinite(minHoldMs)      || minHoldMs < 0)      throw new Error(`TRADER_MIN_HOLD_MS must be ≥ 0, got "${process.env.TRADER_MIN_HOLD_MS}"`);
+  if (!Number.isFinite(maxHoldMs)      || maxHoldMs < 0)      throw new Error(`TRADER_MAX_HOLD_MS must be ≥ 0, got "${process.env.TRADER_MAX_HOLD_MS}"`);
+
+  const minTradeSizeE6     = BigInt(process.env.TRADER_MIN_SIZE_USDC    ?? "50000000");    // $50
+  const maxTradeSizeE6     = BigInt(process.env.TRADER_MAX_SIZE_USDC    ?? "1000000000");  // $1 000
+  const initialCollateralE6 = BigInt(process.env.TRADER_COLLATERAL_USDC ?? "5000000000"); // $5 000
+
   return {
-    fleetSize: Number(process.env.TRADER_FLEET_SIZE ?? 5),
-    minTradeSizeE6: BigInt(process.env.TRADER_MIN_SIZE_USDC ?? "50000000"),    // $50
-    maxTradeSizeE6: BigInt(process.env.TRADER_MAX_SIZE_USDC ?? "1000000000"),  // $1 000
-    initialCollateralE6: BigInt(process.env.TRADER_COLLATERAL_USDC ?? "5000000000"), // $5 000
-    minIntervalMs: Number(process.env.TRADER_MIN_INTERVAL_MS ?? 30_000),
-    maxIntervalMs: Number(process.env.TRADER_MAX_INTERVAL_MS ?? 180_000),
-    marketsPerTrader: Number(process.env.TRADER_MARKETS ?? 3),
-    minHoldMs: Number(process.env.TRADER_MIN_HOLD_MS ?? 20 * 60_000),    // 20 min
-    maxHoldMs: Number(process.env.TRADER_MAX_HOLD_MS ?? 120 * 60_000),   // 2 h
-    mintAuthorityJson: process.env.MINT_AUTHORITY_KEYPAIR_JSON ?? null,
-    usdcMint: process.env.TEST_USDC_MINT ?? null,
+    fleetSize:          Math.floor(fleetSize),
+    minTradeSizeE6,
+    // Clamp: if max < min, promote max to min so callers always get a valid range
+    maxTradeSizeE6:     maxTradeSizeE6 < minTradeSizeE6 ? minTradeSizeE6 : maxTradeSizeE6,
+    initialCollateralE6,
+    minIntervalMs,
+    maxIntervalMs:      maxIntervalMs < minIntervalMs ? minIntervalMs : maxIntervalMs,
+    marketsPerTrader:   Math.floor(marketsPerTrader),
+    minHoldMs,
+    maxHoldMs:          maxHoldMs < minHoldMs ? minHoldMs : maxHoldMs,
+    mintAuthorityJson:  process.env.MINT_AUTHORITY_KEYPAIR_JSON ?? null,
+    usdcMint:           process.env.TEST_USDC_MINT ?? null,
   };
 }
 
@@ -136,8 +156,9 @@ function randInt(min: number, max: number): number {
  * Uniformly sample a random BigInt in [min, max) using CSPRNG bytes.
  * Avoids converting range to Number, which loses precision for ranges > 2^53.
  * Uses rejection sampling to eliminate modulo bias.
+ * @internal exported for testing
  */
-function randBigInt(min: bigint, max: bigint): bigint {
+export function randBigInt(min: bigint, max: bigint): bigint {
   if (max <= min) return min;
   const range = max - min;
   // Calculate how many bytes we need to cover the range
@@ -153,7 +174,8 @@ function randBigInt(min: bigint, max: bigint): bigint {
   return min + sample;
 }
 
-function pickPersonality(idx: number): Personality {
+/** @internal exported for testing */
+export function pickPersonality(idx: number): Personality {
   const personalities: Personality[] = ["aggressive", "passive", "trend"];
   return personalities[idx % personalities.length];
 }
@@ -161,8 +183,9 @@ function pickPersonality(idx: number): Personality {
 /**
  * Randomly select `n` items from array without replacement.
  * Captures the target count upfront so shrinking copy.length doesn't truncate.
+ * @internal exported for testing
  */
-function sampleN<T>(arr: T[], n: number): T[] {
+export function sampleN<T>(arr: T[], n: number): T[] {
   const copy = [...arr];
   const count = Math.min(n, copy.length);
   const result: T[] = [];
@@ -298,6 +321,25 @@ async function fundTokens(
 // ═══════════════════════════════════════════════════════════════
 
 /**
+ * Compute the probability of going long given a personality and directional bias.
+ * bias is in [-1, +1]: +1 = fully bullish, -1 = fully bearish.
+ * @internal exported for testing
+ */
+export function computeLongProbability(personality: Personality, bias: number): number {
+  switch (personality) {
+    case "aggressive":
+      // Follows bias strongly
+      return 0.5 + bias * 0.45;
+    case "passive":
+      // Contrarian — fades the bias
+      return 0.5 - bias * 0.2;
+    case "trend":
+      // Follows bias, moderate
+      return 0.5 + bias * 0.35;
+  }
+}
+
+/**
  * Decide whether to open, hold, or close a position on a market.
  * Returns: positive bigint = open long, negative = open short, null = hold/skip
  */
@@ -329,22 +371,7 @@ function decideAction(
   trader.bias = Math.max(-1, Math.min(1, trader.bias + (Math.random() - 0.5) * 0.1));
 
   // Personality-adjusted direction probability
-  let longProb = 0.5 + trader.bias * 0.3;
-  switch (trader.personality) {
-    case "aggressive":
-      // Follows bias strongly
-      longProb = 0.5 + trader.bias * 0.45;
-      break;
-    case "passive":
-      // Contrarian — fades the bias
-      longProb = 0.5 - trader.bias * 0.2;
-      break;
-    case "trend":
-      // Follows bias, moderate
-      longProb = 0.5 + trader.bias * 0.35;
-      break;
-  }
-
+  const longProb = computeLongProbability(trader.personality, trader.bias);
   const goLong = Math.random() < longProb;
 
   // Size: randomize between min and max based on personality
@@ -413,8 +440,8 @@ export class TraderFleetBot {
   private traders: SimTrader[] = [];
   private discoveredMarkets: DiscoveredMarket[] = [];
   private running = false;
-  private loopTimer: ReturnType<typeof setInterval> | null = null;
-  private discoveryTimer: ReturnType<typeof setInterval> | null = null;
+  private loopTimer: ReturnType<typeof setTimeout> | null = null;
+  private discoveryTimer: ReturnType<typeof setTimeout> | null = null;
   readonly stats: FleetStats;
 
   constructor(connection: Connection, botConfig: BotConfig) {
@@ -572,22 +599,43 @@ export class TraderFleetBot {
 
     this.running = true;
 
-    // Main trade loop — check every 5 seconds which traders are ready
-    this.loopTimer = setInterval(() => this._tradeCycle().catch(() => {}), 5_000);
+    // Self-scheduling trade loop — each iteration waits for the previous to
+    // finish before scheduling the next, preventing concurrent cycle runs.
+    const tradeLoop = async (): Promise<void> => {
+      if (!this.running) return;
+      try {
+        await this._tradeCycle();
+      } catch (e: unknown) {
+        logError("fleet", "Unexpected error in trade cycle", e);
+      }
+      if (this.running) {
+        this.loopTimer = setTimeout(tradeLoop, 5_000);
+      }
+    };
 
-    // Refresh positions + re-discover markets every 30 minutes
-    this.discoveryTimer = setInterval(
-      () => this._refreshAll().catch(() => {}),
-      30 * 60_000,
-    );
+    // Self-scheduling discovery loop — same non-overlapping guarantee.
+    const discoveryLoop = async (): Promise<void> => {
+      if (!this.running) return;
+      try {
+        await this._refreshAll();
+      } catch (e: unknown) {
+        logError("fleet", "Unexpected error in discovery cycle", e);
+      }
+      if (this.running) {
+        this.discoveryTimer = setTimeout(discoveryLoop, 30 * 60_000);
+      }
+    };
+
+    this.loopTimer      = setTimeout(tradeLoop,      5_000);
+    this.discoveryTimer = setTimeout(discoveryLoop,  30 * 60_000);
 
     log("fleet", `🚀 Trader fleet started — ${this.traders.length} wallets active`);
   }
 
   stop(): void {
     this.running = false;
-    if (this.loopTimer) clearInterval(this.loopTimer);
-    if (this.discoveryTimer) clearInterval(this.discoveryTimer);
+    if (this.loopTimer) clearTimeout(this.loopTimer);
+    if (this.discoveryTimer) clearTimeout(this.discoveryTimer);
     log("fleet", "Fleet stopped");
   }
 
@@ -649,26 +697,32 @@ export class TraderFleetBot {
         trader.tradesExecuted++;
         this.stats.totalTrades++;
       } else {
-        const result = await executeTrade(
-          this.connection,
-          this.botConfig,
-          market,
-          trader.wallet,
-          tradeSize,
-          `${trader.id} ${label}`,
-        );
-
-        if (result.success) {
-          trader.tradesExecuted++;
-          this.stats.totalTrades++;
-          log(
-            "fleet",
-            `✅ ${trader.id} ${market.symbol}: ${label} | personality=${trader.personality} | bias=${trader.bias.toFixed(2)}`,
+        try {
+          const result = await executeTrade(
+            this.connection,
+            this.botConfig,
+            market,
+            trader.wallet,
+            tradeSize,
+            `${trader.id} ${label}`,
           );
-        } else {
+
+          if (result.success) {
+            trader.tradesExecuted++;
+            this.stats.totalTrades++;
+            log(
+              "fleet",
+              `✅ ${trader.id} ${market.symbol}: ${label} | personality=${trader.personality} | bias=${trader.bias.toFixed(2)}`,
+            );
+          } else {
+            trader.tradesFailed++;
+            this.stats.totalFailed++;
+            logError("fleet", `${trader.id} ${market.symbol}: trade failed — ${result.error}`);
+          }
+        } catch (e: unknown) {
           trader.tradesFailed++;
           this.stats.totalFailed++;
-          logError("fleet", `${trader.id} ${market.symbol}: trade failed — ${result.error}`);
+          logError("fleet", `${trader.id} ${market.symbol}: executeTrade threw unexpectedly`, e);
         }
       }
 

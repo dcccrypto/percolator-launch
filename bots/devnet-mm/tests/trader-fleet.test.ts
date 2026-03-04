@@ -6,45 +6,15 @@
  */
 
 import { describe, it, expect } from "vitest";
-
-// ═══════════════════════════════════════════════════════════════
-// Inline helpers (mirrored from trader-fleet.ts for unit testing)
-// ═══════════════════════════════════════════════════════════════
+import {
+  pickPersonality,
+  randBigInt,
+  sampleN,
+  computeLongProbability,
+  assertDevnetOnly,
+} from "../src/trader-fleet.js";
 
 type Personality = "aggressive" | "passive" | "trend";
-
-function pickPersonality(idx: number): Personality {
-  const personalities: Personality[] = ["aggressive", "passive", "trend"];
-  return personalities[idx % personalities.length];
-}
-
-function randBigInt(min: bigint, max: bigint): bigint {
-  const range = Number(max - min);
-  return min + BigInt(Math.floor(Math.random() * range));
-}
-
-function sampleN<T>(arr: T[], n: number): T[] {
-  const copy = [...arr];
-  const count = Math.min(n, copy.length);
-  const result: T[] = [];
-  for (let i = 0; i < count; i++) {
-    const idx = Math.floor(Math.random() * copy.length);
-    result.push(copy.splice(idx, 1)[0]);
-  }
-  return result;
-}
-
-/** Simplified direction probability from personality + bias */
-function longProbability(personality: Personality, bias: number): number {
-  switch (personality) {
-    case "aggressive":
-      return 0.5 + bias * 0.45;
-    case "passive":
-      return 0.5 - bias * 0.2;
-    case "trend":
-      return 0.5 + bias * 0.35;
-  }
-}
 
 /** Simulate N trades and return fraction that are long */
 function simulateLongFraction(
@@ -54,7 +24,7 @@ function simulateLongFraction(
 ): number {
   let longs = 0;
   for (let i = 0; i < trials; i++) {
-    const prob = longProbability(personality, bias);
+    const prob = computeLongProbability(personality, bias);
     if (Math.random() < prob) longs++;
   }
   return longs / trials;
@@ -67,16 +37,6 @@ function simulateLongFraction(
 // ═══════════════════════════════════════════════════════════════
 // Cluster Guard (PERC-404)
 // ═══════════════════════════════════════════════════════════════
-
-// Mirror the allowlist logic for unit tests (avoids importing the full module
-// which pulls in @solana/web3.js Connection etc.)
-const DEVNET_PATTERNS = ["devnet", "localhost", "127.0.0.1", "0.0.0.0", "[::1]"];
-function assertDevnetOnly(rpcUrl: string): void {
-  const lower = rpcUrl.toLowerCase();
-  if (!DEVNET_PATTERNS.some((p) => lower.includes(p))) {
-    throw new Error(`TraderFleetBot: refusing to start on non-devnet cluster.`);
-  }
-}
 
 describe("assertDevnetOnly (PERC-404 cluster guard)", () => {
   it("allows standard devnet RPC", () => {
@@ -240,13 +200,13 @@ describe("bias clamping", () => {
   });
 });
 
-describe("longProbability bounds", () => {
+describe("computeLongProbability bounds", () => {
   it("never returns probability outside [0, 1]", () => {
     const biases = [-1, -0.5, 0, 0.5, 1];
     const personalities: Personality[] = ["aggressive", "passive", "trend"];
     for (const p of personalities) {
       for (const b of biases) {
-        const prob = longProbability(p, b);
+        const prob = computeLongProbability(p, b);
         expect(prob).toBeGreaterThanOrEqual(0);
         expect(prob).toBeLessThanOrEqual(1);
       }
