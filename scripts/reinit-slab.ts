@@ -248,7 +248,7 @@ async function main() {
     console.log(`  Collateral:    ${config.collateralMint.toBase58()}`);
     console.log(`  Vault:         ${config.vaultPubkey.toBase58()}`);
     console.log(`  Oracle feed:   ${config.indexFeedId.toBase58()}`);
-    console.log(`  Staleness:     ${config.maxStalenessSlots} secs`);
+    console.log(`  Staleness:     ${config.maxStalenessSlots} slots`);
     console.log(`  Invert:        ${config.invert}`);
     console.log(`  Unit scale:    ${config.unitScale}`);
   } catch (e) {

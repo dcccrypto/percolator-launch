@@ -54,6 +54,9 @@ supabase/.temp/
 # Simulator — sensitive bot keypairs
 config/sim-bot-wallets.json
 
+# Slab reinit — ephemeral new keypairs (devnet only, never commit)
+new-slab-keypair-*.json
+
 Percolator-Deck-Final.pdf
 Percolator-Deck-v2.pdf
 Percolator-Pitch-Deck.pdf
