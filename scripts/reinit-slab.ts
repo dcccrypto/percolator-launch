@@ -1,16 +1,21 @@
 /**
- * PERC-381: Reinit a broken slab (close + recreate with correct size).
+ * PERC-408: Full slab reinit — close broken slab + recreate + InitMarket.
  *
  * This script:
- * 1. Reads the existing slab to check its size and active accounts
- * 2. If no active accounts, closes the slab via CloseSlab instruction
- * 3. Creates a new slab account with the correct SLAB_TIERS size
- * 4. Re-runs InitMarket to initialize the new slab
+ * 1. Reads all market config from the broken slab (header, config, params, mark price)
+ * 2. If no active accounts (or --force), closes the slab via CloseSlab instruction
+ * 3. Creates a new slab account with the correct SLAB_TIERS size (new keypair)
+ * 4. Calls InitMarket to fully re-initialize the market on the new slab
  *
  * ⚠️ DEVNET ONLY — closing a slab with active positions loses user funds.
  *
  * Usage:
- *   npx tsx scripts/reinit-slab.ts --slab <SLAB_PUBKEY> [--force] [--dry-run]
+ *   npx tsx scripts/reinit-slab.ts --slab <SLAB_PUBKEY> [--force] [--dry-run] [--tier small|medium|large]
+ *
+ * Requirements:
+ *   - .env with RPC_URL and ADMIN_KEYPAIR_PATH
+ *   - Sufficient SOL in admin wallet (small ~0.45, medium ~1.8, large ~7.14)
+ *   - Admin must be the slab's admin (as stored in slab header)
  */
 
 import {
@@ -21,6 +26,8 @@ import {
   sendAndConfirmTransaction,
   ComputeBudgetProgram,
   SystemProgram,
+  SYSVAR_CLOCK_PUBKEY,
+  SYSVAR_RENT_PUBKEY,
 } from "@solana/web3.js";
 import {
   getOrCreateAssociatedTokenAccount,
@@ -29,18 +36,21 @@ import {
 import * as fs from "fs";
 import * as dotenv from "dotenv";
 import { parseArgs } from "node:util";
+
 import { SLAB_TIERS } from "../packages/core/src/solana/discovery.js";
-import { detectLayout } from "../packages/core/src/solana/slab.js";
-import { parseHeader, parseAllAccounts } from "../packages/core/src/solana/slab.js";
+import {
+  parseHeader,
+  parseConfig,
+  parseParams,
+  parseAllAccounts,
+} from "../packages/core/src/solana/slab.js";
 import {
   encodeCloseSlab,
   encodeInitMarket,
-  encodeInitLP,
 } from "../packages/core/src/abi/instructions.js";
 import {
   ACCOUNTS_CLOSE_SLAB,
   ACCOUNTS_INIT_MARKET,
-  ACCOUNTS_INIT_LP,
   buildAccountMetas,
 } from "../packages/core/src/abi/accounts.js";
 import { deriveVaultAuthority } from "../packages/core/src/solana/pda.js";
@@ -48,20 +58,40 @@ import { buildIx } from "../packages/core/src/runtime/tx.js";
 
 dotenv.config();
 
+// ============================================================================
+// CLI ARGS
+// ============================================================================
+
 const { values: args } = parseArgs({
   options: {
     slab: { type: "string" },
     force: { type: "boolean", default: false },
     "dry-run": { type: "boolean", default: false },
-    tier: { type: "string", default: "large" },
+    tier: { type: "string" },  // optional override; auto-detected from size if omitted
   },
   strict: true,
 });
 
 if (!args.slab) throw new Error("--slab <PUBKEY> is required");
 
-const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || "GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24");
-const PRIORITY_FEE = 50_000;
+const DRY_RUN = args["dry-run"] ?? false;
+const FORCE = args["force"] ?? false;
+
+// ============================================================================
+// ENGINE LAYOUT CONSTANTS (from packages/core/src/solana/slab.ts)
+// Must stay in sync with those constants.
+// ============================================================================
+const ENGINE_OFF = 640;
+const ENGINE_MARK_PRICE_OFF = 400; // u64 offset within engine section
+
+function readU64LE(data: Uint8Array, off: number): bigint {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getBigUint64(off, true);
+}
+
+// ============================================================================
+// HELPERS
+// ============================================================================
 
 function loadKeypair(path: string): Keypair {
   const resolved = path.startsWith("~/")
@@ -70,9 +100,49 @@ function loadKeypair(path: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(resolved, "utf-8"))));
 }
 
+/**
+ * Determine which SLAB_TIERS key best matches a given data size.
+ * Prefers exact match; falls back to closest (for legacy undersized slabs).
+ */
+function detectTierFromSize(dataSize: number): keyof typeof SLAB_TIERS | null {
+  // Exact match first
+  for (const [key, tier] of Object.entries(SLAB_TIERS)) {
+    if (tier.dataSize === dataSize) return key as keyof typeof SLAB_TIERS;
+  }
+  // Return null — caller will fall back to --tier flag or heuristic
+  return null;
+}
+
+/**
+ * For undersized slabs: infer intended tier from how close the size is.
+ * small tier range: < 100KB, medium: 100KB–500KB, large: 500KB+
+ */
+function heuristicTier(dataSize: number): keyof typeof SLAB_TIERS {
+  if (dataSize < 100_000) return "small";
+  if (dataSize < 500_000) return "medium";
+  return "large";
+}
+
+const PRIORITY_FEE = 50_000;
+
+/**
+ * Devnet program IDs → slab tier.
+ * Allows auto-detecting the intended tier from the program owner even when
+ * the slab has a wrong/legacy size (which breaks size-based detection).
+ */
+const PROGRAM_TO_TIER: Record<string, keyof typeof SLAB_TIERS> = {
+  "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn": "small",   // 256 slots
+  "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in":  "medium",  // 1024 slots
+  "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD": "large",   // 4096 slots
+};
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
 async function main() {
   console.log("\n" + "=".repeat(70));
-  console.log("PERC-381: REINIT BROKEN SLAB");
+  console.log("PERC-408: FULL SLAB REINIT (close + create + InitMarket)");
   console.log("=".repeat(70));
 
   const rpcUrl = process.env.RPC_URL;
@@ -83,67 +153,161 @@ async function main() {
   const connection = new Connection(rpcUrl, "confirmed");
 
   const slabPubkey = new PublicKey(args.slab!);
-  const tierKey = args.tier as keyof typeof SLAB_TIERS;
-  const tier = SLAB_TIERS[tierKey];
-  if (!tier) throw new Error(`Unknown tier: ${tierKey}. Use small/medium/large`);
 
-  console.log(`\nSlab:     ${slabPubkey.toBase58()}`);
-  console.log(`Tier:     ${tier.label} (${tier.maxAccounts} accounts, ${tier.dataSize} bytes)`);
-  console.log(`Admin:    ${payer.publicKey.toBase58()}`);
-  console.log(`Program:  ${PROGRAM_ID.toBase58()}`);
-  console.log(`Dry run:  ${args["dry-run"] ? "YES" : "no"}`);
+  console.log(`\nAdmin:    ${payer.publicKey.toBase58()}`);
+  console.log(`Slab:     ${slabPubkey.toBase58()}`);
+  console.log(`Dry run:  ${DRY_RUN ? "YES" : "no"}`);
+  console.log(`Force:    ${FORCE ? "YES (will close even with active accounts)" : "no"}`);
 
-  // Step 1: Fetch and diagnose
-  console.log("\n--- Step 1: Diagnose existing slab ---");
+  // ========================================================================
+  // Step 1: Fetch and diagnose the broken slab
+  // ========================================================================
+  console.log("\n--- Step 1: Diagnose broken slab ---");
+
   const accountInfo = await connection.getAccountInfo(slabPubkey);
   if (!accountInfo) {
-    console.log("❌ Slab account not found on-chain. Nothing to reinit.");
-    console.log("   Use create-market.ts to create a new market instead.");
+    throw new Error(`Slab account not found on-chain: ${slabPubkey.toBase58()}`);
+  }
+
+  const PROGRAM_ID = accountInfo.owner;
+  const dataSize = accountInfo.data.length;
+  const data = new Uint8Array(accountInfo.data);
+
+  console.log(`  Owner program: ${PROGRAM_ID.toBase58()}`);
+  console.log(`  On-chain size: ${dataSize} bytes`);
+
+  // Detect tier: --tier flag > exact size match > owner program ID > heuristic
+  const detectedTier = detectTierFromSize(dataSize);
+  const argTier = args.tier as keyof typeof SLAB_TIERS | undefined;
+  const programTier = PROGRAM_TO_TIER[PROGRAM_ID.toBase58()];
+
+  let targetTier: keyof typeof SLAB_TIERS;
+  if (argTier && SLAB_TIERS[argTier]) {
+    targetTier = argTier;
+    console.log(`  Tier:          ${targetTier} (from --tier flag)`);
+  } else if (detectedTier) {
+    targetTier = detectedTier;
+    console.log(`  Tier:          ${targetTier} (exact size match)`);
+  } else if (programTier) {
+    targetTier = programTier;
+    console.log(`  Tier:          ${targetTier} (inferred from owner program — broken size)`);
+  } else {
+    targetTier = heuristicTier(dataSize);
+    console.log(`  Tier:          ${targetTier} (heuristic fallback — unknown program owner)`);
+  }
+
+  const tier = SLAB_TIERS[targetTier];
+  const isCorrectSize = dataSize === tier.dataSize;
+
+  if (isCorrectSize) {
+    console.log(`\n✅ Slab already has correct size for ${targetTier} tier (${tier.dataSize} bytes). No reinit needed.`);
     return;
   }
 
-  console.log(`  Owner:     ${accountInfo.owner.toBase58()}`);
-  console.log(`  Data size: ${accountInfo.data.length} bytes`);
-  console.log(`  Expected:  ${tier.dataSize} bytes`);
+  console.log(`  Expected size: ${tier.dataSize} bytes (${tier.label} tier, ${tier.maxAccounts} accounts)`);
+  console.log(`  Size delta:    ${tier.dataSize - dataSize > 0 ? "+" : ""}${tier.dataSize - dataSize} bytes`);
 
-  const layout = detectLayout(accountInfo.data.length);
-  if (layout) {
-    console.log(`  Layout:    detected (maxAccounts=${layout.maxAccounts})`);
-  } else {
-    console.log(`  Layout:    ❌ UNKNOWN — size doesn't match any known tier`);
-    console.log(`  This is the bug. Slab was created with wrong size.`);
+  // ========================================================================
+  // Step 2: Read ALL market config from the broken slab BEFORE closing
+  // ========================================================================
+  console.log("\n--- Step 2: Extract market config from broken slab ---");
+
+  let header;
+  try {
+    header = parseHeader(data);
+    console.log(`  Admin (slab):  ${header.admin.toBase58()}`);
+    console.log(`  Version:       ${header.version}`);
+    console.log(`  Flags:         ${header.flags} (resolved=${header.resolved}, paused=${header.paused})`);
+  } catch (e) {
+    throw new Error(`Failed to parse slab header: ${e}. Cannot safely reinit.`);
   }
 
-  // Check for active accounts
+  let config;
+  try {
+    config = parseConfig(data);
+    console.log(`  Collateral:    ${config.collateralMint.toBase58()}`);
+    console.log(`  Vault:         ${config.vaultPubkey.toBase58()}`);
+    console.log(`  Oracle feed:   ${config.indexFeedId.toBase58()}`);
+    console.log(`  Staleness:     ${config.maxStalenessSlots} secs`);
+    console.log(`  Invert:        ${config.invert}`);
+    console.log(`  Unit scale:    ${config.unitScale}`);
+  } catch (e) {
+    throw new Error(`Failed to parse slab config: ${e}. Cannot safely reinit.`);
+  }
+
+  let params;
+  try {
+    params = parseParams(data);
+    console.log(`  Maint margin:  ${params.maintenanceMarginBps} bps`);
+    console.log(`  Init margin:   ${params.initialMarginBps} bps`);
+    console.log(`  Trading fee:   ${params.tradingFeeBps} bps`);
+    console.log(`  Max accounts:  ${params.maxAccounts}`);
+  } catch (e) {
+    throw new Error(`Failed to parse slab params: ${e}. Cannot safely reinit.`);
+  }
+
+  // Read mark price directly (not exported by parseEngine return value)
+  const markPriceE6 = readU64LE(data, ENGINE_OFF + ENGINE_MARK_PRICE_OFF);
+  // If the slab was never cranked, mark price may be 0; use a safe fallback
+  const initialMarkPrice = markPriceE6 > 0n ? markPriceE6 : 1_000_000n;
+  console.log(`  Mark price:    ${markPriceE6} (using: ${initialMarkPrice})`);
+
+  // Check active accounts
   let activeAccounts = 0;
   try {
-    const accounts = parseAllAccounts(new Uint8Array(accountInfo.data));
+    const accounts = parseAllAccounts(data);
     activeAccounts = accounts.length;
-    console.log(`  Active accounts: ${activeAccounts}`);
-  } catch (e) {
-    console.log(`  ⚠️ Could not parse accounts (layout broken): ${e}`);
+  } catch {
+    console.log(`  ⚠️  Could not parse accounts array (expected for broken size)`);
+  }
+  // ⚠️ On undersized slabs the accounts array offset is wrong, so the count
+  // is unreliable (may be garbage). Treat non-zero counts as advisory only.
+  if (dataSize !== tier.dataSize && activeAccounts > 0) {
+    console.log(`  Active accts:  ${activeAccounts} (⚠️  MAY BE UNRELIABLE — slab has wrong size, layout offsets are off)`);
+  } else {
+    console.log(`  Active accts:  ${activeAccounts}`);
   }
 
-  if (activeAccounts > 0 && !args.force) {
-    console.log(`\n❌ Slab has ${activeAccounts} active accounts. Use --force to proceed (WILL LOSE USER FUNDS).`);
-    console.log("   On devnet this is acceptable. On mainnet, NEVER do this.");
+  if (activeAccounts > 0 && !FORCE) {
+    const unreliable = dataSize !== tier.dataSize;
+    console.error(`\n❌ Slab reports ${activeAccounts} active accounts.`);
+    if (unreliable) {
+      console.error("   NOTE: This count is likely unreliable due to the broken slab size.");
+      console.error("   On a properly-sized slab with 0x4 errors this is usually 0.");
+    }
+    console.error("   Pass --force to proceed (DEVNET ONLY — will lose user positions).");
+    if (!DRY_RUN) process.exit(1);
+  }
+
+  // Confirm the admin keypair matches the slab admin
+  const adminMismatch = header.admin.toBase58() !== payer.publicKey.toBase58();
+  if (adminMismatch) {
+    console.error(`\n❌ Admin keypair mismatch.`);
+    console.error(`   Slab admin: ${header.admin.toBase58()}`);
+    console.error(`   Your key:   ${payer.publicKey.toBase58()}`);
+    console.error("   Use ADMIN_KEYPAIR_PATH env var to point to the correct keypair.");
+    if (!DRY_RUN) process.exit(1);
+    console.error("   (dry-run: showing plan anyway)");
+  }
+
+  if (DRY_RUN) {
+    console.log("\n🔍 DRY RUN — would execute the following:");
+    console.log("  1. CloseSlab on", slabPubkey.toBase58());
+    console.log("  2. SystemProgram.createAccount (new keypair, size =", tier.dataSize, "bytes)");
+    console.log("  3. InitMarket with extracted config");
+    console.log("\n  ⚠️  New slab will have a DIFFERENT address from the old one.");
+    console.log("     Update keeper/trader-fleet config with the new slab address after reinit.");
     return;
   }
 
-  if (accountInfo.data.length === tier.dataSize) {
-    console.log("\n✅ Slab already has correct size. No reinit needed.");
-    return;
-  }
+  // ========================================================================
+  // Step 3: Close the broken slab
+  // ========================================================================
+  console.log("\n--- Step 3: Close broken slab ---");
 
-  if (args["dry-run"]) {
-    console.log("\n🔍 DRY RUN — would close and recreate slab. Exiting.");
-    return;
-  }
-
-  // Step 2: Close the broken slab
-  console.log("\n--- Step 2: Close broken slab ---");
   const closeTx = new Transaction();
   closeTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
+  closeTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }));
   closeTx.add(
     buildIx(
       PROGRAM_ID,
@@ -158,15 +322,29 @@ async function main() {
   const closeSig = await sendAndConfirmTransaction(connection, closeTx, [payer], {
     commitment: "confirmed",
   });
-  console.log(`  ✅ Closed: ${closeSig}`);
+  console.log(`  ✅ CloseSlab confirmed: ${closeSig}`);
+  console.log(`     Explorer: https://explorer.solana.com/tx/${closeSig}?cluster=devnet`);
 
-  // Step 3: Create new slab with correct size
-  console.log("\n--- Step 3: Create new slab account ---");
+  // ========================================================================
+  // Step 4: Create new slab account with correct size
+  // ========================================================================
+  console.log("\n--- Step 4: Create new slab account ---");
+
   const newSlabKp = Keypair.generate();
   const slabRent = await connection.getMinimumBalanceForRentExemption(tier.dataSize);
+
   console.log(`  New slab:  ${newSlabKp.publicKey.toBase58()}`);
-  console.log(`  Size:      ${tier.dataSize} bytes`);
+  console.log(`  Tier:      ${tier.label} (${tier.dataSize} bytes, ${tier.maxAccounts} accounts)`);
   console.log(`  Rent:      ${(slabRent / 1e9).toFixed(4)} SOL`);
+
+  const adminBalance = await connection.getBalance(payer.publicKey);
+  const needed = slabRent + 50_000_000; // + ~0.05 SOL buffer for txs
+  if (adminBalance < needed) {
+    throw new Error(
+      `Insufficient SOL: have ${(adminBalance / 1e9).toFixed(4)}, need ${(needed / 1e9).toFixed(4)} ` +
+      `(${(slabRent / 1e9).toFixed(4)} rent + 0.05 tx buffer)`
+    );
+  }
 
   const createTx = new Transaction();
   createTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
@@ -184,16 +362,100 @@ async function main() {
   const createSig = await sendAndConfirmTransaction(connection, createTx, [payer, newSlabKp], {
     commitment: "confirmed",
   });
-  console.log(`  ✅ Created: ${createSig}`);
+  console.log(`  ✅ New slab created: ${createSig}`);
 
+  // ========================================================================
+  // Step 5: Create vault ATA for new slab, then call InitMarket
+  // ========================================================================
+  console.log("\n--- Step 5: Create vault ATA + InitMarket ---");
+
+  const mint = config.collateralMint;
+
+  const [vaultPda] = deriveVaultAuthority(PROGRAM_ID, newSlabKp.publicKey);
+  const vaultAccount = await getOrCreateAssociatedTokenAccount(
+    connection, payer, mint, vaultPda, true,
+  );
+  const vault = vaultAccount.address;
+  console.log(`  Vault PDA:     ${vaultPda.toBase58()}`);
+  console.log(`  Vault ATA:     ${vault.toBase58()}`);
+
+  // Build the oracle feed ID hex string from the stored PublicKey bytes
+  // indexFeedId is stored as 32 raw bytes; convert to 64-char hex for encodeInitMarket
+  const feedIdHex = Buffer.from(config.indexFeedId.toBytes()).toString("hex");
+  const isAdminOracle = feedIdHex === "0".repeat(64);
+  console.log(`  Oracle mode:   ${isAdminOracle ? "Admin oracle (permissioned push)" : "Pyth Pull"}`);
+  if (!isAdminOracle) {
+    console.log(`  Feed ID:       ${feedIdHex}`);
+  }
+
+  const initMarketData = encodeInitMarket({
+    admin:                  payer.publicKey,
+    collateralMint:         mint,
+    indexFeedId:            feedIdHex,
+    maxStalenessSecs:       params.maxCrankStalenessSlots,  // same staleness
+    confFilterBps:          config.confFilterBps,
+    invert:                 config.invert,
+    unitScale:              config.unitScale,
+    initialMarkPriceE6:     initialMarkPrice.toString(),
+    warmupPeriodSlots:      params.warmupPeriodSlots.toString(),
+    maintenanceMarginBps:   params.maintenanceMarginBps.toString(),
+    initialMarginBps:       params.initialMarginBps.toString(),
+    tradingFeeBps:          params.tradingFeeBps.toString(),
+    maxAccounts:            BigInt(tier.maxAccounts).toString(),
+    newAccountFee:          params.newAccountFee.toString(),
+    riskReductionThreshold: params.riskReductionThreshold.toString(),
+    maintenanceFeePerSlot:  params.maintenanceFeePerSlot.toString(),
+    maxCrankStalenessSlots: params.maxCrankStalenessSlots.toString(),
+    liquidationFeeBps:      params.liquidationFeeBps.toString(),
+    liquidationFeeCap:      params.liquidationFeeCap.toString(),
+    liquidationBufferBps:   params.liquidationBufferBps.toString(),
+    minLiquidationAbs:      params.minLiquidationAbs.toString(),
+  });
+
+  const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, {
+    admin:          payer.publicKey,
+    slab:           newSlabKp.publicKey,
+    mint:           mint,
+    vault:          vault,
+    tokenProgram:   TOKEN_PROGRAM_ID,
+    clock:          SYSVAR_CLOCK_PUBKEY,
+    rent:           SYSVAR_RENT_PUBKEY,
+    dummyAta:       vault,  // same vault ATA used as dummyAta
+    systemProgram:  SystemProgram.programId,
+  });
+
+  const initTx = new Transaction();
+  initTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
+  initTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
+  initTx.add(buildIx({ programId: PROGRAM_ID, keys: initMarketKeys, data: initMarketData }));
+
+  const initSig = await sendAndConfirmTransaction(connection, initTx, [payer], {
+    commitment: "confirmed",
+  });
+  console.log(`  ✅ InitMarket confirmed: ${initSig}`);
+  console.log(`     Explorer: https://explorer.solana.com/tx/${initSig}?cluster=devnet`);
+
+  // ========================================================================
+  // DONE — print summary
+  // ========================================================================
   console.log("\n" + "=".repeat(70));
-  console.log("NEW SLAB CREATED — NEEDS InitMarket TO COMPLETE SETUP");
-  console.log(`  New slab address: ${newSlabKp.publicKey.toBase58()}`);
-  console.log("  Run create-market.ts with this slab, or manually call InitMarket.");
+  console.log("✅ REINIT COMPLETE");
+  console.log("=".repeat(70));
+  console.log(`\nOLD slab (closed):  ${slabPubkey.toBase58()}`);
+  console.log(`NEW slab (active):  ${newSlabKp.publicKey.toBase58()}`);
+  console.log(`Program:            ${PROGRAM_ID.toBase58()}`);
+  console.log(`Tier:               ${tier.label} (${tier.dataSize} bytes)`);
+  console.log(`\n⚠️  NEXT STEPS:`);
+  console.log(`  1. Save new slab keypair — printed to stdout above (NOT saved to file)`);
+  console.log(`     → New slab pubkey: ${newSlabKp.publicKey.toBase58()}`);
+  console.log(`  2. Run InitLP on the new slab to enable LP deposits:`);
+  console.log(`     npx tsx scripts/create-market.ts --existing-slab ${newSlabKp.publicKey.toBase58()} --step init-lp ...`);
+  console.log(`  3. Update keeper/trader-fleet config with new slab address`);
+  console.log(`  4. Message devops to update Railway env vars`);
   console.log("=".repeat(70));
 }
 
 main().catch((err) => {
-  console.error("Fatal:", err);
+  console.error("\nFatal:", err.message ?? err);
   process.exit(1);
 });
