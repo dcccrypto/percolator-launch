@@ -52,6 +52,7 @@ import { log, logError } from "./logger.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { randomBytes } from "crypto";
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -131,9 +132,25 @@ function randInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
 }
 
+/**
+ * Uniformly sample a random BigInt in [min, max) using CSPRNG bytes.
+ * Avoids converting range to Number, which loses precision for ranges > 2^53.
+ * Uses rejection sampling to eliminate modulo bias.
+ */
 function randBigInt(min: bigint, max: bigint): bigint {
-  const range = Number(max - min);
-  return min + BigInt(Math.floor(Math.random() * range));
+  if (max <= min) return min;
+  const range = max - min;
+  // Calculate how many bytes we need to cover the range
+  const rangeBits = range.toString(2).length;
+  const byteCount = Math.ceil(rangeBits / 8);
+  const mask = (1n << BigInt(rangeBits)) - 1n;
+  // Rejection sampling: retry until the sample falls within [0, range)
+  let sample: bigint;
+  do {
+    const buf = randomBytes(byteCount);
+    sample = BigInt("0x" + buf.toString("hex")) & mask;
+  } while (sample >= range);
+  return min + sample;
 }
 
 function pickPersonality(idx: number): Personality {
