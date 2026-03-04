@@ -18,7 +18,7 @@ function sanitizeTokenString(input: string, maxLen: number): string {
   return input.replace(/[^a-zA-Z0-9 \-._()$#&\p{Emoji}]/gu, "").trim().slice(0, maxLen);
 }
 
-/** Well-known tokens that don't need a Jupiter lookup. */
+/** Well-known tokens that don't need an external lookup. */
 const KNOWN_TOKENS: Record<string, { symbol: string; name: string }> = {
   A16Gd8AfaPnG6rohE6iPFDf6mr9gk519d6aMUJAperc: { symbol: "PERC", name: "Percolator" },
 };
@@ -106,26 +106,30 @@ async function fetchViaHeliusDAS(
 }
 
 /**
- * Fetch token metadata via Jupiter Token API.
- * Covers pump.fun tokens and other community/verified tokens.
+ * Fetch token metadata via DexScreener API (free, no auth required).
+ * Covers pump.fun tokens and other DEX-listed tokens.
  */
-async function fetchViaJupiterToken(
+async function fetchViaDexScreener(
   mintAddress: string,
-): Promise<{ symbol: string; name: string; decimals?: number } | null> {
+): Promise<{ symbol: string; name: string } | null> {
   try {
     const res = await fetch(
-      `https://tokens.jup.ag/token/${mintAddress}`,
+      `https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`,
       { signal: AbortSignal.timeout(5000) },
     );
     if (!res.ok) return null;
     const data = await res.json();
-    const symbol = data?.symbol;
-    const name = data?.name;
+    const pair = data?.pairs?.[0];
+    if (!pair) return null;
+    // Token could be base or quote — match by address
+    const token =
+      pair.baseToken?.address === mintAddress ? pair.baseToken : pair.quoteToken;
+    const symbol = token?.symbol;
+    const name = token?.name;
     if (!symbol && !name) return null;
     return {
       symbol: symbol || shortenMint(mintAddress),
       name: name || shortenMint(mintAddress),
-      decimals: typeof data?.decimals === "number" ? data.decimals : undefined,
     };
   } catch {
     return null;
@@ -332,6 +336,25 @@ export async function fetchTokenMetaBatch(
       }
     }
 
+    // Try DexScreener for any mints still not in resultMap
+    const stillMissing = unresolved.filter((k) => !resultMap.has(k));
+    if (stillMissing.length > 0) {
+      await Promise.all(
+        stillMissing.map(async (mintKey) => {
+          const dex = await fetchViaDexScreener(mintKey);
+          if (dex) {
+            const meta: TokenMeta = {
+              decimals: 6, // will be refined by decimals fetch below
+              symbol: sanitizeTokenString(dex.symbol, 16),
+              name: sanitizeTokenString(dex.name, 32),
+            };
+            cache.set(mintKey, meta);
+            resultMap.set(mintKey, meta);
+          }
+        }),
+      );
+    }
+
     // Batch-fetch decimals for all unresolved mints via getParsedMultipleAccountsInfo
     // (covers both Metaplex-resolved and completely unresolved)
     try {
@@ -445,13 +468,12 @@ export async function fetchTokenMeta(
     }
   }
 
-  // 2b. Try Jupiter Token API (covers pump.fun and other community tokens)
+  // 2b. Try DexScreener API (covers pump.fun and other DEX-listed tokens)
   if (!resolved) {
-    const jupMeta = await fetchViaJupiterToken(key);
-    if (jupMeta) {
-      symbol = jupMeta.symbol;
-      name = jupMeta.name;
-      if (jupMeta.decimals !== undefined) decimals = jupMeta.decimals;
+    const dexMeta = await fetchViaDexScreener(key);
+    if (dexMeta) {
+      symbol = dexMeta.symbol;
+      name = dexMeta.name;
       resolved = true;
     }
   }
