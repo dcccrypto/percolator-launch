@@ -7,9 +7,9 @@
 
 import { PublicKey } from "@solana/web3.js";
 
-export type BotMode = "filler" | "maker" | "both";
+export type BotMode = "filler" | "maker" | "both" | "trader" | "all";
 
-const VALID_BOT_MODES: BotMode[] = ["filler", "maker", "both"];
+const VALID_BOT_MODES: BotMode[] = ["filler", "maker", "both", "trader", "all"];
 
 function parseNum(val: string | undefined, fallback: number): number {
   if (val === undefined) return fallback;

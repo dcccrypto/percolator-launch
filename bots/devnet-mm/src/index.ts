@@ -10,9 +10,11 @@
  * LP-based matching model.
  *
  * Usage:
- *   BOT_MODE=both npx tsx src/index.ts            # run both bots
+ *   BOT_MODE=both npx tsx src/index.ts            # run filler + maker
  *   BOT_MODE=filler npx tsx src/index.ts           # run filler only
  *   BOT_MODE=maker npx tsx src/index.ts            # run maker only
+ *   BOT_MODE=trader npx tsx src/index.ts           # run trader fleet only
+ *   BOT_MODE=all npx tsx src/index.ts              # run all three
  *
  * Environment:
  *   See config.ts for full list. Key variables:
@@ -28,6 +30,7 @@ import { Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { loadConfig, type BotConfig } from "./config.js";
 import { FillerBot } from "./filler.js";
 import { MakerBot } from "./maker.js";
+import { TraderFleetBot } from "./trader-fleet.js";
 import { startHealthServer } from "./health.js";
 import { log, logError } from "./logger.js";
 import * as fs from "fs";
@@ -89,6 +92,7 @@ function printBanner(config: BotConfig) {
 ║                                                           ║
 ║  Filler: cranks, oracle pushes, system health             ║
 ║  Maker:  two-sided quotes, position-aware skewing         ║
+║  Trader: simulated trader fleet (PERC-404)                ║
 ╚═══════════════════════════════════════════════════════════╝
 `);
   log("main", `Mode: ${config.mode.toUpperCase()}`);
@@ -166,8 +170,9 @@ async function main() {
   // Initialize bots based on mode
   let filler: FillerBot | null = null;
   let maker: MakerBot | null = null;
+  let traderFleet: TraderFleetBot | null = null;
 
-  if (config.mode === "filler" || config.mode === "both") {
+  if (config.mode === "filler" || config.mode === "both" || config.mode === "all") {
     const walletOk = await checkWallet(connection, config.fillerKeypairPath, "Filler");
     if (!walletOk) {
       log("main", "Filler wallet not available — skipping filler");
@@ -176,7 +181,7 @@ async function main() {
     }
   }
 
-  if (config.mode === "maker" || config.mode === "both") {
+  if (config.mode === "maker" || config.mode === "both" || config.mode === "all") {
     const walletOk = await checkWallet(connection, config.makerKeypairPath, "Maker");
     if (!walletOk) {
       log("main", "Maker wallet not available — skipping maker");
@@ -185,18 +190,24 @@ async function main() {
     }
   }
 
-  if (!filler && !maker) {
+  if (config.mode === "trader" || config.mode === "all") {
+    traderFleet = new TraderFleetBot(connection, config);
+    log("main", `Trader fleet: ${process.env.TRADER_FLEET_SIZE ?? 5} simulated wallets`);
+  }
+
+  if (!filler && !maker && !traderFleet) {
     logError("main", "No bots could be initialized. Check keypair paths and wallets.");
     process.exit(1);
   }
 
   // Start health server
-  const healthServer = startHealthServer(config.healthPort, filler, maker, config.healthHost);
+  const healthServer = startHealthServer(config.healthPort, filler, maker, config.healthHost, traderFleet);
 
   // Start bots
   try {
     if (filler) await filler.start();
     if (maker) await maker.start();
+    if (traderFleet) await traderFleet.start();
   } catch (e) {
     logError("main", "Failed to start bots", e);
     process.exit(1);
@@ -213,6 +224,10 @@ async function main() {
       const s = maker.getStatus().stats;
       log("main", `  Maker: quotes=${s.quoteCycles} | trades=${s.tradesExecuted}/${s.tradesExecuted + s.tradesFailed} ok | markets=${s.marketsActive}`);
     }
+    if (traderFleet) {
+      const s = traderFleet.getStatus().stats;
+      log("main", `  Fleet: cycles=${s.cycleCount} | trades=${s.totalTrades} ok / ${s.totalFailed} fail | traders=${s.activeTraders}`);
+    }
     log("main", "═══════════════");
   }, 60_000);
 
@@ -221,6 +236,7 @@ async function main() {
     log("main", "Shutting down...");
     if (filler) filler.stop();
     if (maker) maker.stop();
+    if (traderFleet) traderFleet.stop();
     clearInterval(statsInterval);
     healthServer.close();
     setTimeout(() => process.exit(0), 3000);
