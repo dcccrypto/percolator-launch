@@ -534,13 +534,16 @@ export class TraderFleetBot {
   async start(): Promise<void> {
     if (this.running) return;
 
-    // Guard: TraderFleetBot is DEVNET ONLY — refuse to start on mainnet.
+    // Guard: TraderFleetBot is DEVNET ONLY.
+    // Use a positive-allowlist check (not a blocklist) so custom RPC URLs
+    // (Helius, Triton, QuickNode) that don't contain "mainnet" are also blocked.
     const rpcUrl = this.botConfig.rpcUrl.toLowerCase();
-    const MAINNET_PATTERNS = ["mainnet-beta", "mainnet"];
-    if (MAINNET_PATTERNS.some((p) => rpcUrl.includes(p))) {
+    const DEVNET_ALLOWLIST = ["devnet", "localhost", "127.0.0.1"];
+    if (!DEVNET_ALLOWLIST.some((p) => rpcUrl.includes(p))) {
       throw new Error(
-        `TraderFleetBot refuses to start on a mainnet RPC endpoint: ${this.botConfig.rpcUrl}\n` +
-        `This bot generates simulated volume on DEVNET ONLY.\n` +
+        `TraderFleetBot refuses to start: RPC endpoint does not appear to be devnet/localhost.\n` +
+        `  RPC_URL = ${this.botConfig.rpcUrl}\n` +
+        `This bot generates simulated volume on DEVNET ONLY — real trades on mainnet are forbidden.\n` +
         `Set RPC_URL to a devnet endpoint (e.g. https://api.devnet.solana.com).`,
       );
     }
