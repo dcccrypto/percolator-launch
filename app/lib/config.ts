@@ -187,7 +187,17 @@ export function setNetwork(network: Network) {
  * Previously: NEXT_PUBLIC_BACKEND_URL, NEXT_PUBLIC_API_URL were used inconsistently.
  */
 export function getBackendUrl(): string {
-  return process.env.NEXT_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://percolator-api-production.up.railway.app";
+  const url = process.env.NEXT_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!url) {
+    // On non-production, require explicit backend URL to prevent silent proxy to production
+    if (process.env.NODE_ENV !== "production") {
+      throw new Error(
+        "NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL must be set in non-production environments"
+      );
+    }
+    return "https://percolator-api-production.up.railway.app";
+  }
+  return url;
 }
 
 /** Build an explorer URL for a transaction */
