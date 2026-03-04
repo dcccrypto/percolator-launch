@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/supabase";
-export const dynamic = "force-dynamic";
+import { getSupabase } from "@/lib/supabase";
+
+// Cache responses for 30 s per unique URL at the Next.js server layer.
+// Computation (100k-row JS aggregation) runs at most once per 30 s per
+// query-param combination — fixes the "unbounded origin hammering" risk
+// raised in GitHub issues #676 and #677.
+// Note: ISR revalidation and the Cache-Control header below together
+// protect both server-side CPU and the CDN layer.
+export const revalidate = 30;
 
 export interface LeaderboardEntry {
   rank: number;
@@ -23,7 +30,10 @@ export async function GET(request: Request) {
   const limit = Math.min(Math.max(1, Number.isNaN(rawLimit) ? 50 : rawLimit), 200);
 
   try {
-    const supabase = getServiceClient();
+    // Use the anon/public client so RLS policies apply.
+    // The trades table must have an RLS policy granting SELECT on
+    // (trader, size, created_at) to the anon role.
+    const supabase = getSupabase();
 
     let query = supabase
       .from("trades")
