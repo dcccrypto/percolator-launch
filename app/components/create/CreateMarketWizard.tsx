@@ -8,6 +8,7 @@ import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { SLAB_TIERS, type SlabTierKey } from "@percolator/sdk";
+import { getNetwork } from "@/lib/config";
 
 import { ModeSelector } from "./ModeSelector";
 import { WizardProgress } from "./WizardProgress";
@@ -145,7 +146,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     return slabRentSol + tokenAccountRentSol + TX_FEE_ESTIMATE_SOL;
   }, [wizard.slabTier]);
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
-  const allValid = step1Valid && step2Valid && step3Valid && hasTokens && hasSufficientTokensForSeed && hasSufficientSol;
+  // On devnet, tokens are auto-airdropped after market creation — skip token balance checks
+  const isDevnet = getNetwork() === "devnet";
+  const allValid = step1Valid && step2Valid && step3Valid && (isDevnet || (hasTokens && hasSufficientTokensForSeed)) && hasSufficientSol;
 
   // Quick Launch auto-advance: step 1 → step 2 when token is resolved and params ready
   const quickAutoAdvancedRef = useRef(false);

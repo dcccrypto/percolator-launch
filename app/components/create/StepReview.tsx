@@ -82,14 +82,17 @@ export const StepReview: FC<StepReviewProps> = ({
         ? "HyperpEMA"
         : "Admin";
 
+  const isDevnet = getNetwork() === "devnet";
+
   const launchButtonLabel = useMemo(() => {
     if (!walletConnected) return "Connect Wallet to Launch";
-    if (!hasTokens) return "No Tokens — Mint First";
-    if (!hasSufficientTokensForSeed) return "Insufficient Tokens for Vault Seed (500)";
+    if (!isDevnet && !hasTokens) return "No Tokens — Mint First";
+    if (!isDevnet && !hasSufficientTokensForSeed) return "Insufficient Tokens for Vault Seed (500)";
     if (feeConflict) return "Fix Parameters to Continue";
     if (!hasSufficientBalance) return "Insufficient SOL";
-    return "LAUNCH MARKET";
-  }, [walletConnected, hasTokens, hasSufficientTokensForSeed, feeConflict, hasSufficientBalance]);
+    if (isDevnet) return "LAUNCH & MINT TOKENS →";
+    return "LAUNCH MARKET →";
+  }, [walletConnected, hasTokens, hasSufficientTokensForSeed, feeConflict, hasSufficientBalance, isDevnet]);
 
   return (
     <div className="space-y-5">
@@ -167,21 +170,15 @@ export const StepReview: FC<StepReviewProps> = ({
         </div>
       )}
 
-      {/* Devnet: no tokens — guide to mint first */}
-      {walletConnected && !hasTokens && getNetwork() === "devnet" && (
-        <div className="border border-[var(--short)]/20 bg-[var(--short)]/[0.04] px-4 py-3 space-y-2">
+      {/* Devnet: tokens are auto-minted after market creation */}
+      {walletConnected && isDevnet && (
+        <div className="border border-[var(--long)]/20 bg-[var(--long)]/[0.04] px-4 py-3 space-y-1">
           <p className="text-[11px] text-[var(--text)]">
-            <span className="text-[var(--short)] font-medium">No tokens found.</span>{" "}
-            On devnet, you need to mint tokens first before creating a market.
+            <span className="text-[var(--long)] font-medium">✓ Devnet mode.</span>{" "}
+            Your wallet will receive devnet {tokenSymbol} tokens automatically after the market is created.
           </p>
-          <Link
-            href="/devnet-mint"
-            className="inline-block border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hover:bg-[var(--accent)]/[0.15]"
-          >
-            MINT DEVNET TOKENS →
-          </Link>
           <p className="text-[9px] text-[var(--text-dim)]">
-            After minting, come back here to launch your market. Your settings will be preserved.
+            No tokens needed upfront — tokens are airdropped post-launch for testing.
           </p>
         </div>
       )}
