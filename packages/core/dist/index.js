@@ -1070,6 +1070,7 @@ var ENGINE_CURRENT_SLOT_OFF = 360;
 var ENGINE_FUNDING_INDEX_OFF = 368;
 var ENGINE_LAST_FUNDING_SLOT_OFF = 384;
 var ENGINE_FUNDING_RATE_BPS_OFF = 392;
+var ENGINE_MARK_PRICE_OFF = 400;
 var ENGINE_LAST_CRANK_SLOT_OFF = 424;
 var ENGINE_MAX_CRANK_STALENESS_OFF = 432;
 var ENGINE_TOTAL_OI_OFF = 440;
@@ -1225,6 +1226,7 @@ function parseEngine(data) {
     emergencyOiMode: data[base + ENGINE_EMERGENCY_OI_MODE_OFF] !== 0,
     emergencyStartSlot: readU64LE(data, base + ENGINE_EMERGENCY_START_SLOT_OFF),
     lastBreakerSlot: readU64LE(data, base + ENGINE_LAST_BREAKER_SLOT_OFF),
+    markPriceE6: readU64LE(data, base + ENGINE_MARK_PRICE_OFF),
     numUsedAccounts: (() => {
       const bw = layout ? layout.bitmapWords : DEFAULT_BITMAP_WORDS;
       return readU16LE(data, base + ENGINE_BITMAP_OFF + bw * 8);
@@ -1386,7 +1388,7 @@ var SLAB_TIERS = {
   large: { maxAccounts: 4096, dataSize: 1025832, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
 };
 function slabDataSize(maxAccounts) {
-  const ENGINE_OFF_LOCAL = 640;
+  const ENGINE_OFF_LOCAL = ENGINE_OFF;
   const ENGINE_FIXED = 656;
   const ACCOUNT_SIZE2 = 248;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
@@ -1402,7 +1404,7 @@ function validateSlabTierMatch(dataSize, programSlabLen) {
 var ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map((t) => t.dataSize);
 var SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 var HEADER_SLICE_LENGTH = 1940;
-var ENGINE_OFF2 = 640;
+var ENGINE_OFF2 = ENGINE_OFF;
 function dv2(data) {
   return new DataView(data.buffer, data.byteOffset, data.byteLength);
 }
@@ -1474,7 +1476,8 @@ function parseEngineLight(data, maxAccounts = 4096) {
     emergencyStartSlot: readU64LE2(data, base + 640),
     lastBreakerSlot: readU64LE2(data, base + 648),
     numUsedAccounts: canReadNumUsed ? readU16LE2(data, base + numUsedOff) : 0,
-    nextAccountId: canReadNextId ? readU64LE2(data, base + nextAccountIdOff) : 0n
+    nextAccountId: canReadNextId ? readU64LE2(data, base + nextAccountIdOff) : 0n,
+    markPriceE6: data.length >= base + ENGINE_MARK_PRICE_OFF + 8 ? readU64LE2(data, base + ENGINE_MARK_PRICE_OFF) : 0n
   };
 }
 async function discoverMarkets(connection, programId) {
@@ -2702,6 +2705,8 @@ export {
   CHAINLINK_MIN_SIZE,
   CTX_VAMM_OFFSET,
   DEFAULT_OI_RAMP_SLOTS,
+  ENGINE_MARK_PRICE_OFF,
+  ENGINE_OFF,
   IX_TAG,
   MARK_PRICE_EMA_ALPHA_E6,
   MARK_PRICE_EMA_WINDOW_SLOTS,
