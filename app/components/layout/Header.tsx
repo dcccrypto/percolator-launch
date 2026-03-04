@@ -31,6 +31,7 @@ const buildLinks: NavItem[] = [
 ];
 
 const communityLinks: NavItem[] = [
+  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/join", label: "Join Us" },
   { href: "/agents", label: "Agents" },
   { href: "/report-bug", label: "Report Bug" },
