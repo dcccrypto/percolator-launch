@@ -517,6 +517,17 @@ export class TraderFleetBot {
   async start(): Promise<void> {
     if (this.running) return;
 
+    // Guard: TraderFleetBot is DEVNET ONLY — refuse to start on mainnet.
+    const rpcUrl = this.botConfig.rpcUrl.toLowerCase();
+    const MAINNET_PATTERNS = ["mainnet-beta", "mainnet"];
+    if (MAINNET_PATTERNS.some((p) => rpcUrl.includes(p))) {
+      throw new Error(
+        `TraderFleetBot refuses to start on a mainnet RPC endpoint: ${this.botConfig.rpcUrl}\n` +
+        `This bot generates simulated volume on DEVNET ONLY.\n` +
+        `Set RPC_URL to a devnet endpoint (e.g. https://api.devnet.solana.com).`,
+      );
+    }
+
     await this.initialize();
 
     if (this.traders.length === 0) {
