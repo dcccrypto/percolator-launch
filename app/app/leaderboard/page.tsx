@@ -32,11 +32,14 @@ function timeSince(iso: string): string {
 }
 
 /** Format raw bigint volume as a compact human-readable string */
+/** Micro-unit divisor: 6 decimal places used for all devnet collateral tokens */
+const MICRO_UNIT_DIVISOR = 1_000_000;
+
 function fmtVolume(raw: string): string {
   try {
     const n = BigInt(raw);
-    // Display in "units" (divide by 1e6 for micro-units typically used on devnet)
-    const units = Number(n) / 1_000_000;
+    // Display in "units" (divide by MICRO_UNIT_DIVISOR for micro-units used on devnet)
+    const units = Number(n) / MICRO_UNIT_DIVISOR;
     if (units >= 1_000_000_000) return `${(units / 1_000_000_000).toFixed(2)}B`;
     if (units >= 1_000_000) return `${(units / 1_000_000).toFixed(2)}M`;
     if (units >= 1_000) return `${(units / 1_000).toFixed(1)}K`;
@@ -119,7 +122,7 @@ export default function LeaderboardPage() {
             </span>
           </div>
           <p style={{ color: "var(--text-secondary)" }} className="text-sm font-mono">
-            Top traders by trade count on the Percolator devnet
+            Top traders by trade volume on the Percolator devnet (trade count as tiebreaker)
           </p>
         </div>
 
@@ -241,23 +244,17 @@ export default function LeaderboardPage() {
               return (
                 <div
                   key={entry.trader}
-                  className="grid items-center px-4 py-3 font-mono text-sm transition-colors"
+                  className={`grid items-center px-4 py-3 font-mono text-sm transition-colors border ${
+                    isTop3
+                      ? "border-[rgba(153,69,255,0.2)] hover:border-[rgba(153,69,255,0.35)]"
+                      : "border-[var(--border)] hover:border-[var(--border-hover)]"
+                  }`}
                   style={{
                     gridTemplateColumns: "3rem 1fr 6rem 6rem 6rem",
                     background: isTop3
                       ? "rgba(153,69,255,0.04)"
                       : "var(--panel-bg)",
-                    border: `1px solid ${isTop3 ? "rgba(153,69,255,0.2)" : "var(--border)"}`,
                     color: "var(--text)",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor =
-                      "var(--border-hover)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = isTop3
-                      ? "rgba(153,69,255,0.2)"
-                      : "var(--border)";
                   }}
                 >
                   {/* Rank */}

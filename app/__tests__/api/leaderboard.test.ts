@@ -3,7 +3,7 @@
  * Covers: trade aggregation, volume sorting, period filtering, rank assignment.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 
 /* ── Inline helpers (mirrors the route logic) ─────────────── */
 
@@ -101,7 +101,9 @@ describe("leaderboard aggregation", () => {
   it("assigns correct ranks starting from 1", () => {
     const map = aggregateTrades(sampleTrades);
     const ranked = sortAndRank(map, 10);
-    ranked.forEach((e, i) => expect(e.rank).toBe(i + 1));
+    for (const [i, e] of ranked.entries()) {
+      expect(e.rank).toBe(i + 1);
+    }
   });
 
   it("respects the limit parameter", () => {
