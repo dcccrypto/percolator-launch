@@ -51,11 +51,21 @@ export async function GET(
       .limit(1);
 
     if (stats && stats.length > 0) {
+      const markPriceE6 = stats[0].mark_price_e6 as number | null | undefined;
+      if (
+        typeof markPriceE6 !== "number" ||
+        !Number.isFinite(markPriceE6) ||
+        markPriceE6 <= 0
+      ) {
+        return NextResponse.json({ prices: [] }); // no valid mark price
+      }
       return NextResponse.json({
         prices: [
           {
-            price_e6: String(stats[0].mark_price_e6),
-            timestamp: new Date(stats[0].last_updated).getTime(),
+            price_e6: String(markPriceE6),
+            timestamp: stats[0].last_updated
+              ? new Date(stats[0].last_updated).getTime()
+              : Date.now(),
           },
         ],
       });
