@@ -85,6 +85,7 @@ export function fundingRoutes(): Hono {
    */
   app.get("/funding/:slab", cacheMiddleware(30), validateSlab, async (c) => {
     const slab = c.req.param("slab");
+    if (!slab) return c.json({ error: "slab required" }, 400);
 
     try {
       // Fetch current funding rate from market_stats
@@ -176,6 +177,7 @@ export function fundingRoutes(): Hono {
    */
   app.get("/funding/:slab/history", validateSlab, async (c) => {
     const slab = c.req.param("slab");
+    if (!slab) return c.json({ error: "slab required" }, 400);
     const limitParam = c.req.query("limit");
     const sinceParam = c.req.query("since");
 

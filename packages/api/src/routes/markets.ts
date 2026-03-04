@@ -92,6 +92,7 @@ export function marketRoutes(): Hono {
   // GET /markets/:slab — single market details (on-chain read) — 10s cache
   app.get("/markets/:slab", cacheMiddleware(10), validateSlab, async (c) => {
     const slab = c.req.param("slab");
+    if (!slab) return c.json({ error: "slab required" }, 400);
     try {
       const connection = getConnection();
       const slabPubkey = new PublicKey(slab);
