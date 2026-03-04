@@ -81,8 +81,8 @@ const FORCE = args["force"] ?? false;
 // ENGINE LAYOUT CONSTANTS (from packages/core/src/solana/slab.ts)
 // Must stay in sync with those constants.
 // ============================================================================
-const ENGINE_OFF = 640;
-const ENGINE_MARK_PRICE_OFF = 400; // u64 offset within engine section
+const ENGINE_OFF = 640;              // align_up(HEADER_LEN=104 + CONFIG_LEN=536, 8) — see slab.ts:441
+const ENGINE_MARK_PRICE_OFF = 400;   // u64 mark_price_e6 within engine section — see slab.ts:457
 
 function readU64LE(data: Uint8Array, off: number): bigint {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
