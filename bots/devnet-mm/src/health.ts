@@ -32,6 +32,7 @@ export function startHealthServer(
       // Check if any bot is degraded
       if (fillerStatus && !fillerStatus.running) status.status = "degraded";
       if (makerStatus && !makerStatus.running) status.status = "degraded";
+      if (fleetStatus && !fleetStatus.running) status.status = "degraded";
       if (traderFleet && fleetStatus && !fleetStatus.running) status.status = "degraded";
 
       const statusCode = status.status === "ok" ? 200 : 503;
