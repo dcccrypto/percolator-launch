@@ -311,7 +311,7 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
     ? (amountNum / pool.vaultBalance) * pool.totalLpSupply
     : 0;
 
-  const capRatio = pool ? pool.capUsed / pool.capTotal : 0;
+  const capRatio = pool && pool.capTotal > 0 ? pool.capUsed / pool.capTotal : 0;
 
   return (
     <div id="deposit" className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
@@ -426,7 +426,7 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
 /* ── Pool Card ── */
 
 function PoolCard({ pool }: { pool: StakePool }) {
-  const capRatio = pool.capUsed / pool.capTotal;
+  const capRatio = pool.capTotal > 0 ? pool.capUsed / pool.capTotal : 0;
 
   return (
     <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)]">
