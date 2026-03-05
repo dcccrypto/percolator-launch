@@ -55,7 +55,7 @@
       "bn.js": ">=5.2.3",
       "lodash": ">=4.17.21",
       "minimatch": ">=10.2.3",
-    "rollup": ">=4.59.0",
+    "rollup": "4.59.0",
     "serialize-javascript": "7.0.4"
     }
   }
