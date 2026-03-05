@@ -188,9 +188,13 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
  * The on-chain program emits: "Program log: {v1}, {v2}, {v3}, {v4}, {v5}"
  * where one value is price_e6 (range $0.001 to $1M → 1,000 to 1,000,000,000,000).
  * Values can be in hex (0x...) or decimal format.
+ *
+ * NOTE: Helius Enhanced Transactions expose log messages as `tx.logs` (top-level),
+ * NOT `tx.logMessages` (which is the web3.js RPC field nested under `tx.meta`).
+ * We accept both for safety.
  */
 function extractPriceFromLogs(tx: any): number {
-  const logs: string[] = tx.logMessages ?? [];
+  const logs: string[] = tx.logs ?? tx.logMessages ?? [];
   for (const log of logs) {
     // Match both hex (0x...) and decimal formats
     const match = log.match(/^Program log: (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+)$/);
