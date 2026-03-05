@@ -571,7 +571,7 @@ export default function StakePage() {
       </ErrorBoundary>
 
       {/* Main content */}
-      <div className="mx-auto max-w-[1100px] px-6 pb-16">
+      <div className="mx-auto max-w-[1100px] px-6 pb-24 lg:pb-16">
         <ScrollReveal>
           {/* Mobile: single-column stack (position → deposit → pools) */}
           {/* Desktop lg+: 2-column — sidebar [380px] on left, pools on right */}
