@@ -539,13 +539,23 @@ function SlugResolvePage({ slug }: { slug: string }) {
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
-        const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number }> = data.markets ?? [];
+        const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number | null; total_open_interest?: number | null; created_at?: string }> = data.markets ?? [];
         // Normalize: "SOL-PERP" → "SOL", then match against symbol
         const slugNorm = slug.toUpperCase().replace(/-PERP$/, "");
 
-        // Sort by volume_24h DESC so the most active slab wins when multiple
-        // markets share the same symbol / mint (e.g. 25 SOL devnet markets).
-        const sorted = [...markets].sort((a, b) => (b.volume_24h ?? 0) - (a.volume_24h ?? 0));
+        // Sort to prefer the most active slab when multiple markets share the same symbol / mint.
+        // Treat volume_24h=0 and null identically as "no volume" (-1) so a stale slab with
+        // explicit vol=0 never beats a fresh slab with vol=null (fixes issue #721).
+        // Tiebreakers: total_open_interest DESC, then created_at DESC (newest wins).
+        const sorted = [...markets].sort((a, b) => {
+          const va = typeof a.volume_24h === "number" && a.volume_24h > 0 ? a.volume_24h : -1;
+          const vb = typeof b.volume_24h === "number" && b.volume_24h > 0 ? b.volume_24h : -1;
+          if (vb !== va) return vb - va;
+          const oa = typeof a.total_open_interest === "number" && a.total_open_interest > 0 ? a.total_open_interest : -1;
+          const ob = typeof b.total_open_interest === "number" && b.total_open_interest > 0 ? b.total_open_interest : -1;
+          if (ob !== oa) return ob - oa;
+          return new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime();
+        });
 
         // 1. Try matching by symbol name
         let match = sorted.find((m) => {

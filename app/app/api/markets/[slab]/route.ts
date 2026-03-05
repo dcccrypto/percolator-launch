@@ -60,12 +60,19 @@ export async function GET(
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
 
-      // Sort by volume_24h DESC so the most active slab wins when multiple
-      // markets share the same symbol / mint (e.g. 25 SOL devnet markets).
+      // Sort to prefer the most active slab when multiple markets share the same
+      // symbol / mint (e.g. 25 SOL devnet markets).
+      // Rule: treat volume_24h=0 and volume_24h=null identically as "no volume" (-1)
+      // so a dead slab with explicit vol=0 never beats a fresh slab with vol=null.
+      // Tiebreakers: total_open_interest DESC, then created_at DESC (newest wins).
       const sorted = (rows ?? []).slice().sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
-        const va = typeof a.volume_24h === "number" ? a.volume_24h : 0;
-        const vb = typeof b.volume_24h === "number" ? b.volume_24h : 0;
-        return vb - va;
+        const va = typeof a.volume_24h === "number" && (a.volume_24h as number) > 0 ? (a.volume_24h as number) : -1;
+        const vb = typeof b.volume_24h === "number" && (b.volume_24h as number) > 0 ? (b.volume_24h as number) : -1;
+        if (vb !== va) return vb - va;
+        const oa = typeof a.total_open_interest === "number" && (a.total_open_interest as number) > 0 ? (a.total_open_interest as number) : -1;
+        const ob = typeof b.total_open_interest === "number" && (b.total_open_interest as number) > 0 ? (b.total_open_interest as number) : -1;
+        if (ob !== oa) return ob - oa;
+        return new Date(String(b.created_at ?? 0)).getTime() - new Date(String(a.created_at ?? 0)).getTime();
       });
 
       // 1. Try symbol match (e.g. DB symbol = "SOL-PERP")

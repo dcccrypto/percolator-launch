@@ -76,10 +76,16 @@ export default function TradeRedirectPage() {
           return;
         }
 
-        // Fallback: highest 24h volume
-        const sorted = [...pool].sort(
-          (a, b) => (b.volume_24h ?? 0) - (a.volume_24h ?? 0)
-        );
+        // Fallback: sort by activity — treat vol=0 and null as dead (-1) so stale
+        // slabs don't win over fresh ones. Tiebreaker: OI DESC.
+        const sorted = [...pool].sort((a, b) => {
+          const va = typeof a.volume_24h === "number" && a.volume_24h > 0 ? a.volume_24h : -1;
+          const vb = typeof b.volume_24h === "number" && b.volume_24h > 0 ? b.volume_24h : -1;
+          if (vb !== va) return vb - va;
+          const oa = typeof a.total_open_interest === "number" && a.total_open_interest > 0 ? a.total_open_interest : -1;
+          const ob = typeof b.total_open_interest === "number" && b.total_open_interest > 0 ? b.total_open_interest : -1;
+          return ob - oa;
+        });
 
         const target = sorted[0];
         if (target?.slab_address) {
