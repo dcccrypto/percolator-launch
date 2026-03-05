@@ -36,7 +36,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@percolator/sdk', () => {
   const { PublicKey: PK } = require('@solana/web3.js');
   return {
-    STAKE_PROGRAM_ID: new PK('4mJ8CasWfJCGEjGNaJThNfFfUWJTfZLBwz6qmUGqxVMc'),
+    STAKE_PROGRAM_ID: new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k'),
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
     deriveDepositPda: vi.fn().mockReturnValue([mockDepositPda, 253]),
@@ -98,10 +98,10 @@ describe('useStakePool', () => {
     mockConnection = {
       getAccountInfo: vi.fn().mockImplementation(async (pubkey: PublicKey) => {
         if (pubkey.equals(mockPool)) {
-          return { data: buildPoolAccountData({ cooldownSlots: 100n }), owner: new PublicKey('4mJ8CasWfJCGEjGNaJThNfFfUWJTfZLBwz6qmUGqxVMc') };
+          return { data: buildPoolAccountData({ cooldownSlots: 100n }), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
         }
         if (pubkey.equals(mockDepositPda)) {
-          return { data: buildDepositPdaData({ depositSlot: 50n }), owner: new PublicKey('4mJ8CasWfJCGEjGNaJThNfFfUWJTfZLBwz6qmUGqxVMc') };
+          return { data: buildDepositPdaData({ depositSlot: 50n }), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
         }
         return { data: Buffer.alloc(165), owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
       }),

@@ -15,7 +15,7 @@ import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
 /** Percolator Stake program ID (devnet). Update for mainnet. */
 export const STAKE_PROGRAM_ID = new PublicKey(
-  '4mJ8CasWfJCGEjGNaJThNfFfUWJTfZLBwz6qmUGqxVMc'
+  '6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k'
 );
 
 // ═══════════════════════════════════════════════════════════════

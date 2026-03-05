@@ -40,7 +40,7 @@ vi.mock('@/lib/tx', () => ({
 vi.mock('@percolator/sdk', () => {
   const { PublicKey: PK } = require('@solana/web3.js');
   return {
-    STAKE_PROGRAM_ID: new PK('4mJ8CasWfJCGEjGNaJThNfFfUWJTfZLBwz6qmUGqxVMc'),
+    STAKE_PROGRAM_ID: new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k'),
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
     deriveDepositPda: vi.fn().mockReturnValue([mockDepositPda, 253]),
@@ -91,7 +91,7 @@ describe('useStakeWithdraw', () => {
     mockConnection = {
       getAccountInfo: vi.fn().mockImplementation(async (pubkey: PublicKey) => {
         if (pubkey.equals(mockPool)) {
-          return { data: buildPoolAccountData(), owner: new PublicKey('4mJ8CasWfJCGEjGNaJThNfFfUWJTfZLBwz6qmUGqxVMc') };
+          return { data: buildPoolAccountData(), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
         }
         return { data: Buffer.alloc(165), owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
       }),
@@ -186,7 +186,7 @@ describe('useStakeWithdraw', () => {
     mockConnection.getAccountInfo.mockImplementation(async (pubkey: PublicKey) => {
       calls.push(pubkey);
       if (pubkey.equals(mockPool)) {
-        return { data: buildPoolAccountData(), owner: new PublicKey('4mJ8CasWfJCGEjGNaJThNfFfUWJTfZLBwz6qmUGqxVMc') };
+        return { data: buildPoolAccountData(), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
       }
       // First non-pool call is slab validation → return data
       // Second non-pool call is collateral ATA → return null

@@ -8,7 +8,6 @@ import { PublicKey } from "@solana/web3.js";
 const DEVNET_USDC_MINT =
   process.env.NEXT_PUBLIC_TEST_USDC_MINT ?? "DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
-import { GradientText } from "@/components/ui/GradientText";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
@@ -43,52 +42,48 @@ interface UserPosition {
   cooldownTotal: number;
 }
 
-/* ── Mock data (replace with API when ready) ── */
+/** Shape returned by /api/stake/pools */
+interface ApiPool {
+  poolAddress: string;
+  slabAddress: string;
+  collateralMint: string;
+  lpMint: string;
+  vault: string;
+  name: string;
+  symbol: string;
+  logoUrl: string | null;
+  tvl: number;
+  tvlRaw: string;
+  poolValue: number;
+  apr: number;
+  capTotal: number;
+  capTotalRaw: string;
+  capUsed: number;
+  capUsedRaw: string;
+  cooldownSlots: number;
+  totalLpSupply: number;
+  vaultBalance: number;
+  poolMode: number;
+  adminTransferred: boolean;
+}
 
-const MOCK_POOLS: StakePool[] = [
-  {
-    id: "sol-perp-pool",
-    name: "SOL-PERP Pool",
-    symbol: "SOL-PERP",
-    slabAddress: "So11111111111111111111111111111111111111112",
-    collateralMint: DEVNET_USDC_MINT,
-    tvl: 50_000_000,
-    apr: 12.4,
-    capUsed: 4_250_000,
-    capTotal: 5_000_000,
-    cooldownSlots: 3200,
-    totalLpSupply: 49_500_000,
-    vaultBalance: 50_000_000,
-  },
-  {
-    id: "btc-perp-pool",
-    name: "BTC-PERP Pool",
-    symbol: "BTC-PERP",
-    slabAddress: "BTC1111111111111111111111111111111111111112",
-    collateralMint: DEVNET_USDC_MINT,
-    tvl: 12_300_000,
-    apr: 9.2,
-    capUsed: 2_300_000,
-    capTotal: 10_000_000,
-    cooldownSlots: 3200,
-    totalLpSupply: 12_000_000,
-    vaultBalance: 12_300_000,
-  },
-  {
-    id: "eth-perp-pool",
-    name: "ETH-PERP Pool",
-    symbol: "ETH-PERP",
-    slabAddress: "ETH1111111111111111111111111111111111111112",
-    collateralMint: DEVNET_USDC_MINT,
-    tvl: 8_100_000,
-    apr: 7.8,
-    capUsed: 6_100_000,
-    capTotal: 10_000_000,
-    cooldownSlots: 3200,
-    totalLpSupply: 8_000_000,
-    vaultBalance: 8_100_000,
-  },
-];
+/** Convert API pool shape to the page-local StakePool type. */
+function apiPoolToStakePool(p: ApiPool): StakePool {
+  return {
+    id: p.poolAddress,
+    name: p.name,
+    symbol: p.symbol,
+    slabAddress: p.slabAddress,
+    collateralMint: p.collateralMint,
+    tvl: p.tvl,
+    apr: p.apr,
+    capUsed: p.capUsed,
+    capTotal: p.capTotal,
+    cooldownSlots: p.cooldownSlots,
+    totalLpSupply: p.totalLpSupply,
+    vaultBalance: p.vaultBalance,
+  };
+}
 
 const MOCK_POSITION: UserPosition | null = null; // No position by default
 
@@ -486,7 +481,38 @@ function PoolCard({ pool }: { pool: StakePool }) {
 
 /* ── Pool List Section ── */
 
-function PoolList({ pools }: { pools: StakePool[] }) {
+function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <section id="pools">
+        <div className="mb-4 flex items-center justify-between">
+          <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
+        </div>
+        <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="bg-[var(--panel-bg)] p-4 sm:p-5 space-y-3">
+              <div className="flex items-center gap-2.5 mb-4">
+                <ShimmerSkeleton className="h-8 w-8 rounded-full" />
+                <div className="space-y-1.5">
+                  <ShimmerSkeleton className="h-3 w-20" />
+                  <ShimmerSkeleton className="h-2.5 w-10" />
+                </div>
+              </div>
+              {[0, 1, 2, 3].map((j) => (
+                <div key={j} className="flex justify-between">
+                  <ShimmerSkeleton className="h-3 w-16" />
+                  <ShimmerSkeleton className="h-3 w-20" />
+                </div>
+              ))}
+              <ShimmerSkeleton className="h-1 w-full mt-3" />
+              <ShimmerSkeleton className="h-8 w-full mt-2" />
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   if (pools.length === 0) {
     return (
       <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-10 text-center">
@@ -514,9 +540,28 @@ function PoolList({ pools }: { pools: StakePool[] }) {
 /* ── Main Page ── */
 
 export default function StakePage() {
-  // TODO: Replace with real API call to /api/stake/pools
-  const [pools] = useState<StakePool[]>(MOCK_POOLS);
+  const [pools, setPools] = useState<StakePool[]>([]);
+  const [poolsLoading, setPoolsLoading] = useState(true);
   const [position] = useState<UserPosition | null>(MOCK_POSITION);
+
+  // Fetch live pool data from API
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/stake/pools");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json() as { pools: ApiPool[] };
+        if (!cancelled) setPools((json.pools ?? []).map(apiPoolToStakePool));
+      } catch (err) {
+        console.error("[StakePage] Failed to fetch pools:", err);
+        // Leave pools empty — PoolList shows empty state
+      } finally {
+        if (!cancelled) setPoolsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div className="relative min-h-screen overflow-x-hidden">
@@ -545,7 +590,7 @@ export default function StakePage() {
             {/* Right column: Pool list — stacks below on mobile, sidebar on lg+ */}
             <div className="min-w-0">
               <ErrorBoundary label="Pool List">
-                <PoolList pools={pools} />
+                <PoolList pools={pools} loading={poolsLoading} />
               </ErrorBoundary>
             </div>
           </div>
