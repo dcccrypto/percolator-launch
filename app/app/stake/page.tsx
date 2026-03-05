@@ -398,7 +398,7 @@ function PoolCard({ pool }: { pool: StakePool }) {
         </div>
         <div className="flex justify-between">
           <span className="text-[var(--text-secondary)]">Cooldown</span>
-          <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.cooldownSlots.toLocaleString()} slots</span>
+          <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.cooldownSlots.toLocaleString()} slots ({slotsToTime(pool.cooldownSlots)})</span>
         </div>
       </div>
 
