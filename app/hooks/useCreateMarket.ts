@@ -155,10 +155,10 @@ export function useCreateMarket() {
       // PERC-277: Default to 4096 (large) — the main devnet program binary is compiled for
       // MAX_ACCOUNTS=4096. Using a smaller tier against a 4096-account program causes
       // InvalidSlabLen (error 0x4) because the program's hardcoded SLAB_LEN won't match.
-      const tierMap: Record<number, string> = { 256: "small", 1024: "medium", 4096: "large" };
-      const tierKey = tierMap[params.maxAccounts ?? 4096] ?? "large";
-      const programsByTier = (cfg as Record<string, unknown>).programsBySlabTier as Record<string, string> | undefined;
-      const selectedProgramId = programsByTier?.[tierKey] ?? cfg.programId;
+      type SlabTier = "small" | "medium" | "large";
+      const tierMap: Record<number, SlabTier> = { 256: "small", 1024: "medium", 4096: "large" };
+      const tierKey: SlabTier = tierMap[params.maxAccounts ?? 4096] ?? "large";
+      const selectedProgramId = cfg.programsBySlabTier?.[tierKey] ?? cfg.programId;
       const programId = new PublicKey(selectedProgramId);
       const isAdminOracle = params.oracleFeed === ALL_ZEROS_FEED;
       const startStep = retryFromStep ?? 0;

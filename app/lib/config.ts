@@ -107,7 +107,7 @@ const CONFIGS = {
       small: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",   // 256 slots
       medium: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",   // 1024 slots
       large: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",    // 4096 slots (confirmed working)
-    } as Record<string, string>,
+    } satisfies Record<string, string>,
     // PERC-356: Test USDC mint for auto-fund on wallet connect
     testUsdcMint: process.env.NEXT_PUBLIC_TEST_USDC_MINT ?? "DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs",
   },
@@ -164,6 +164,10 @@ export function getConfig() {
     slabSize: 992_560,
     matcherCtxSize: 320,
     priorityFee: 50_000,
+    // Expose programsBySlabTier with proper typing (devnet has it, mainnet doesn't yet)
+    programsBySlabTier: "programsBySlabTier" in baseConfig
+      ? (baseConfig as typeof CONFIGS.devnet).programsBySlabTier
+      : undefined,
   };
 }
 
