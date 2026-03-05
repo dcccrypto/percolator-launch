@@ -13,6 +13,7 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
+import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
 
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
@@ -33,7 +34,7 @@ function formatPnlPct(pct: number): string {
 
 export default function PortfolioPage() {
   useEffect(() => { document.title = "Portfolio — Percolator"; }, []);
-  const { connected: walletConnected } = useWalletCompat();
+  const { connected: walletConnected, publicKey: walletPublicKey } = useWalletCompat();
   const mockMode = isMockMode();
   const connected = walletConnected || mockMode;
   const portfolio = usePortfolio();
@@ -383,24 +384,18 @@ export default function PortfolioPage() {
           )}
         </ScrollReveal>
 
-        {/* Position history placeholder */}
-        {positions.length > 0 && (
-          <ScrollReveal delay={0.3}>
-            <div className="mt-8">
-              <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
-                // trade history
-              </h2>
-              <div className="border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/50 p-8 text-center">
-                <p className="text-[13px] text-[var(--text-dim)]">
-                  Position history and closed trades coming soon
-                </p>
-                <p className="mt-1 text-[10px] text-[var(--text-dim)]/60">
-                  Requires indexer integration for historical trade data
-                </p>
-              </div>
-            </div>
-          </ScrollReveal>
-        )}
+        {/* Trade history */}
+        <ScrollReveal delay={0.3}>
+          <div className="mt-8">
+            <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+              // trade history
+            </h2>
+            <TradeHistoryTable
+              wallet={walletPublicKey?.toBase58() ?? null}
+              pageSize={20}
+            />
+          </div>
+        </ScrollReveal>
       </div>
     </div>
   );
