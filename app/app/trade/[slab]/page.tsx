@@ -539,12 +539,16 @@ function SlugResolvePage({ slug }: { slug: string }) {
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
-        const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string }> = data.markets ?? [];
+        const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number }> = data.markets ?? [];
         // Normalize: "SOL-PERP" → "SOL", then match against symbol
         const slugNorm = slug.toUpperCase().replace(/-PERP$/, "");
 
+        // Sort by volume_24h DESC so the most active slab wins when multiple
+        // markets share the same symbol / mint (e.g. 25 SOL devnet markets).
+        const sorted = [...markets].sort((a, b) => (b.volume_24h ?? 0) - (a.volume_24h ?? 0));
+
         // 1. Try matching by symbol name
-        let match = markets.find((m) => {
+        let match = sorted.find((m) => {
           const sym = (m.symbol ?? "").toUpperCase().replace(/-PERP$/, "");
           return sym === slugNorm || (m.symbol ?? "").toUpperCase() === slug.toUpperCase();
         });
@@ -553,7 +557,7 @@ function SlugResolvePage({ slug }: { slug: string }) {
         if (!match) {
           const aliasMint = SLUG_ALIASES[slugNorm];
           if (aliasMint) {
-            match = markets.find((m) => m.mint_address === aliasMint);
+            match = sorted.find((m) => m.mint_address === aliasMint);
           }
         }
         if (match) {

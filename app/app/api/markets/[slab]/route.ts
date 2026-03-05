@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { getServiceClient } from "@/lib/supabase";
+import { SLUG_ALIASES } from "@/lib/symbol-utils";
 import * as Sentry from "@sentry/nextjs";
 export const dynamic = "force-dynamic";
 
@@ -59,10 +60,28 @@ export async function GET(
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
 
-      const match = (rows ?? []).find((m: Record<string, unknown>) => {
+      // Sort by volume_24h DESC so the most active slab wins when multiple
+      // markets share the same symbol / mint (e.g. 25 SOL devnet markets).
+      const sorted = (rows ?? []).slice().sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
+        const va = typeof a.volume_24h === "number" ? a.volume_24h : 0;
+        const vb = typeof b.volume_24h === "number" ? b.volume_24h : 0;
+        return vb - va;
+      });
+
+      // 1. Try symbol match (e.g. DB symbol = "SOL-PERP")
+      let match = sorted.find((m: Record<string, unknown>) => {
         const sym = String(m.symbol ?? "").toUpperCase().replace(/-PERP$/, "");
         return sym === slugNorm || String(m.symbol ?? "").toUpperCase() === slab.toUpperCase();
       });
+
+      // 2. Fallback: well-known mint alias (e.g. SOL → So111...)
+      if (!match) {
+        const aliasMint = SLUG_ALIASES[slugNorm];
+        if (aliasMint) {
+          match = sorted.find((m: Record<string, unknown>) => m.mint_address === aliasMint);
+        }
+      }
+
       data = match ?? null;
     }
 
