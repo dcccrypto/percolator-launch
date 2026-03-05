@@ -238,7 +238,7 @@ function extractPriceFromAccountData(tx: any, slabAddress: string): number {
  * Matches 2–8 comma-separated values on a single "Program log:" line.
  */
 function extractPriceFromLogs(tx: any): number {
-  const logs: string[] = tx.logMessages ?? [];
+  const logs: string[] = tx.logs ?? tx.logMessages ?? [];
   const valuePattern = /0x[0-9a-fA-F]+|\d+/g;
 
   for (const log of logs) {
