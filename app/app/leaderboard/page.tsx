@@ -3,6 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 
+/* ── Constants ────────────────────────────────────────────── */
+/** S2 devnet trading competition end: March 21, 2026 00:00 UTC */
+const COMPETITION_END = new Date("2026-03-21T00:00:00Z");
+
 /* ── Types ────────────────────────────────────────────────── */
 interface LeaderboardEntry {
   rank: number;
@@ -13,6 +17,14 @@ interface LeaderboardEntry {
 }
 
 type Period = "24h" | "7d" | "alltime";
+
+interface TimeLeft {
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  ended: boolean;
+}
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function shortenAddr(addr: string): string {
@@ -29,6 +41,22 @@ function timeSince(iso: string): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+function getTimeLeft(): TimeLeft {
+  const now = Date.now();
+  const diff = COMPETITION_END.getTime() - now;
+  if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0, ended: true };
+  const totalSec = Math.floor(diff / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  return { days, hours, minutes, seconds, ended: false };
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
 /** Format raw bigint volume as a compact human-readable string */
@@ -64,6 +92,157 @@ const PERIOD_LABELS: Record<Period, string> = {
   "7d": "7 Days",
   alltime: "All-Time",
 };
+
+/* ── CompetitionBanner ────────────────────────────────────── */
+function CompetitionBanner() {
+  const [timeLeft, setTimeLeft] = useState<TimeLeft>(() => getTimeLeft());
+
+  useEffect(() => {
+    const id = setInterval(() => setTimeLeft(getTimeLeft()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (timeLeft.ended) {
+    return (
+      <div
+        className="mb-6 px-5 py-4 border font-mono text-center text-sm"
+        style={{
+          background: "rgba(153,69,255,0.06)",
+          borderColor: "rgba(153,69,255,0.25)",
+          color: "var(--text-secondary)",
+        }}
+      >
+        <span className="text-xs uppercase tracking-widest" style={{ color: "var(--accent)" }}>
+          S2 Devnet Competition
+        </span>
+        <span className="ml-3" style={{ color: "var(--text-muted)" }}>
+          Competition ended — results are final.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mb-6 border"
+      style={{
+        background: "rgba(153,69,255,0.06)",
+        borderColor: "rgba(153,69,255,0.2)",
+      }}
+    >
+      {/* Top strip */}
+      <div
+        className="flex items-center justify-between px-5 py-2 border-b"
+        style={{ borderColor: "rgba(153,69,255,0.15)" }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[10px] font-bold uppercase tracking-[0.2em] px-1.5 py-0.5 rounded-sm"
+            style={{ background: "var(--accent)", color: "#fff" }}
+          >
+            LIVE
+          </span>
+          <span
+            className="text-xs font-mono font-semibold uppercase tracking-widest"
+            style={{ color: "var(--text)" }}
+          >
+            S2 Devnet Trading Competition
+          </span>
+        </div>
+        <span className="text-[11px] font-mono" style={{ color: "var(--text-muted)" }}>
+          Ends Mar 21, 2026
+        </span>
+      </div>
+
+      {/* Body */}
+      <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        {/* Prizes */}
+        <div className="flex items-start gap-6">
+          <div>
+            <p
+              className="text-[10px] font-mono uppercase tracking-[0.18em] mb-1"
+              style={{ color: "var(--text-muted)" }}
+            >
+              #1 Prize
+            </p>
+            <p className="text-sm font-bold tabular-nums" style={{ color: "var(--text)" }}>
+              🥇 Early Access
+            </p>
+            <p className="text-[11px] font-mono mt-0.5" style={{ color: "var(--text-secondary)" }}>
+              Beta whitelist spot
+            </p>
+          </div>
+          <div>
+            <p
+              className="text-[10px] font-mono uppercase tracking-[0.18em] mb-1"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Top 10
+            </p>
+            <p className="text-sm font-bold tabular-nums" style={{ color: "var(--text)" }}>
+              🎖️ Beta Badge
+            </p>
+            <p className="text-[11px] font-mono mt-0.5" style={{ color: "var(--text-secondary)" }}>
+              Pioneer role on Discord
+            </p>
+          </div>
+          <div>
+            <p
+              className="text-[10px] font-mono uppercase tracking-[0.18em] mb-1"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Ranked
+            </p>
+            <p className="text-sm font-bold tabular-nums" style={{ color: "var(--text)" }}>
+              📊 On-Chain Record
+            </p>
+            <p className="text-[11px] font-mono mt-0.5" style={{ color: "var(--text-secondary)" }}>
+              Volume logged forever
+            </p>
+          </div>
+        </div>
+
+        {/* Countdown */}
+        <div
+          className="shrink-0 flex gap-3 items-end"
+          aria-label="Time remaining in competition"
+        >
+          {[
+            { value: timeLeft.days, label: "DAYS" },
+            { value: timeLeft.hours, label: "HRS" },
+            { value: timeLeft.minutes, label: "MIN" },
+            { value: timeLeft.seconds, label: "SEC" },
+          ].map(({ value, label }, i) => (
+            <div key={label} className="flex items-center gap-3">
+              {i > 0 && (
+                <span
+                  className="text-lg font-mono font-bold mb-3"
+                  style={{ color: "rgba(153,69,255,0.5)" }}
+                >
+                  :
+                </span>
+              )}
+              <div className="flex flex-col items-center">
+                <span
+                  className="text-2xl font-bold font-mono tabular-nums"
+                  style={{ color: "var(--accent)", lineHeight: 1.1 }}
+                >
+                  {pad(value)}
+                </span>
+                <span
+                  className="text-[8px] font-mono uppercase tracking-[0.15em] mt-0.5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {label}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ── Main Component ───────────────────────────────────────── */
 export default function LeaderboardPage() {
@@ -101,7 +280,7 @@ export default function LeaderboardPage() {
       <div className="max-w-3xl mx-auto px-4 sm:px-6">
 
         {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="mb-8">
+        <div className="mb-6">
           <div className="flex items-center gap-3 mb-1">
             <span className="text-2xl">🏆</span>
             <h1
@@ -125,6 +304,9 @@ export default function LeaderboardPage() {
             Top traders by trade volume on the Percolator devnet (trade count as tiebreaker)
           </p>
         </div>
+
+        {/* ── Competition Banner ──────────────────────────────────── */}
+        <CompetitionBanner />
 
         {/* ── Period Switcher ─────────────────────────────────────── */}
         <div className="flex gap-1 mb-6">
