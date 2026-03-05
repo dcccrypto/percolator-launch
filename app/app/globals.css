@@ -40,6 +40,7 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden; /* prevent horizontal scroll at viewport level */
 }
 
 /* Account for fixed bottom nav on mobile so anchor-scroll doesn't hide content */

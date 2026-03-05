@@ -169,9 +169,9 @@ function StakeHero({ pools }: { pools: StakePool[] }) {
           {/* Metrics row */}
           <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-4">
             {metrics.map((m) => (
-              <div key={m.label} className="bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
-                <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.2em] text-[#9ca3af]">{m.label}</p>
-                <p className={`text-lg sm:text-xl font-semibold tracking-tight tabular-nums ${m.color}`} style={{ fontFamily: "var(--font-heading)" }}>
+              <div key={m.label} className="min-w-0 overflow-hidden bg-[var(--panel-bg)] p-3 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
+                <p className="mb-1.5 truncate text-[9px] font-medium uppercase tracking-[0.15em] text-[#9ca3af] sm:text-[10px] sm:tracking-[0.2em]">{m.label}</p>
+                <p className={`truncate text-base font-semibold tracking-tight tabular-nums sm:text-xl ${m.color}`} style={{ fontFamily: "var(--font-heading)" }}>
                   {m.value}
                 </p>
               </div>
@@ -502,7 +502,7 @@ function PoolList({ pools }: { pools: StakePool[] }) {
       <div className="mb-4 flex items-center justify-between">
         <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
       </div>
-      <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-3">
         {pools.map((pool) => (
           <PoolCard key={pool.id} pool={pool} />
         ))}
@@ -533,7 +533,7 @@ export default function StakePage() {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
             {/* Left column: Position + Deposit — full-width on mobile, sidebar on lg+ */}
             {/* pb-24 on mobile ensures deposit widget clears the fixed bottom nav (56px) */}
-            <div className="order-first space-y-4 pb-24 lg:order-none lg:pb-0 w-full">
+            <div className="space-y-4 pb-24 lg:pb-0">
               <ErrorBoundary label="Your Position">
                 <YourPositionPanel position={position} />
               </ErrorBoundary>
@@ -542,8 +542,8 @@ export default function StakePage() {
               </ErrorBoundary>
             </div>
 
-            {/* Right column: Pool list — order-last on mobile */}
-            <div className="order-last min-w-0 lg:order-none">
+            {/* Right column: Pool list — stacks below on mobile, sidebar on lg+ */}
+            <div className="min-w-0">
               <ErrorBoundary label="Pool List">
                 <PoolList pools={pools} />
               </ErrorBoundary>
