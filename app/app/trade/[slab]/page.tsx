@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import gsap from "gsap";
 import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
@@ -508,9 +509,9 @@ function InvalidAddressPage({ address }: { address: string }) {
   return (
     <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3">
       <div className="border border-[var(--short)]/30 bg-[var(--short)]/5 p-6 text-center max-w-md">
-        <p className="text-sm font-medium text-[var(--short)]">Invalid market address</p>
+        <p className="text-sm font-medium text-[var(--short)]">Market not found</p>
         <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
-          The address in the URL is not a valid Solana public key.
+          No market exists for this address or symbol.
         </p>
         <p className="mt-2 text-[10px] text-[var(--text-dim)] break-all" style={{ fontFamily: "var(--font-mono)" }}>{address}</p>
         <a
@@ -525,56 +526,46 @@ function InvalidAddressPage({ address }: { address: string }) {
 }
 
 /**
- * Slug resolver: when the URL param isn't a valid Solana pubkey (e.g. "SOL-PERP"),
- * fetch the markets API and try to match by symbol/slug, then redirect.
+ * Handles slugs like "SOL-PERP" or "SOL" that are not valid Solana public keys.
+ * Fetches the markets index and redirects to the resolved slab address.
  */
-function SlugResolver({ slug }: { slug: string }) {
-  const [error, setError] = useState(false);
+function SlugResolvePage({ slug }: { slug: string }) {
+  const router = useRouter();
+  const [resolveError, setResolveError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-
-    async function resolve() {
-      try {
-        const res = await fetch("/api/markets", { signal: AbortSignal.timeout(8000) });
-        if (!res.ok) throw new Error("Markets API error");
-        const data = (await res.json()) as { markets?: Array<{ slab_address: string; symbol: string | null; name: string | null }> };
+    fetch("/api/markets")
+      .then((r) => r.json())
+      .then((data) => {
         if (cancelled) return;
-
-        const markets = data.markets ?? [];
-        const normalizedSlug = slug.toUpperCase().replace(/[_\s]/g, "-");
-
-        // Match by symbol (exact), then by name (case-insensitive), then by prefix
-        const match =
-          markets.find((m) => (m.symbol ?? "").toUpperCase() === normalizedSlug) ??
-          markets.find((m) => (m.symbol ?? "").toUpperCase().replace(/[/_\s]/g, "-") === normalizedSlug) ??
-          markets.find((m) => (m.name ?? "").toUpperCase().replace(/[/_\s]/g, "-") === normalizedSlug) ??
-          markets.find((m) => (m.symbol ?? "").toUpperCase().startsWith(normalizedSlug.split("-")[0]));
-
-        if (match?.slab_address) {
-          // Use replace so the slug URL doesn't stay in browser history
-          window.location.replace(`/trade/${match.slab_address}`);
+        const markets: Array<{ slab_address: string; symbol?: string }> = data.markets ?? [];
+        // Normalize: "SOL-PERP" → "SOL", then match against symbol
+        const slugNorm = slug.toUpperCase().replace(/-PERP$/, "");
+        const match = markets.find((m) => {
+          const sym = (m.symbol ?? "").toUpperCase().replace(/-PERP$/, "");
+          return sym === slugNorm || (m.symbol ?? "").toUpperCase() === slug.toUpperCase();
+        });
+        if (match) {
+          router.replace(`/trade/${match.slab_address}`);
         } else {
-          if (!cancelled) setError(true);
+          setResolveError(true);
         }
-      } catch {
-        if (!cancelled) setError(true);
-      }
-    }
-
-    resolve();
+      })
+      .catch(() => {
+        if (!cancelled) setResolveError(true);
+      });
     return () => { cancelled = true; };
-  }, [slug]);
+  }, [slug, router]);
 
-  if (error) return <InvalidAddressPage address={slug} />;
+  if (resolveError) {
+    return <InvalidAddressPage address={slug} />;
+  }
 
-  // Loading state while resolving slug
   return (
     <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-      <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.15em]">
-        Resolving market…
-      </p>
+      <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.15em]">Resolving market…</p>
       <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slug}</p>
     </div>
   );
@@ -585,7 +576,8 @@ export default function TradePage({ params }: { params: Promise<{ slab: string }
 
   // If not a valid pubkey, try resolving as a market slug (e.g. SOL-PERP)
   if (!isValidPublicKey(slab)) {
-    return <SlugResolver slug={slab} />;
+    // Not a valid base58 pubkey — try slug resolution (e.g. "SOL-PERP" → actual slab address)
+    return <SlugResolvePage slug={slab} />;
   }
 
   return (
