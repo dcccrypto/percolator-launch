@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 
 /* ── Constants ────────────────────────────────────────────── */
 /** S2 devnet trading competition end: March 21, 2026 00:00 UTC */
@@ -244,6 +245,181 @@ function CompetitionBanner() {
   );
 }
 
+/* ── Share helpers ────────────────────────────────────────── */
+const LEADERBOARD_URL = "https://percolatorlaunch.com/leaderboard";
+
+function buildShareText(entry: LeaderboardEntry): string {
+  const medal = RANK_MEDALS[entry.rank];
+  const rankStr = medal ? `${medal} #${entry.rank}` : `#${entry.rank}`;
+  const vol = fmtVolume(entry.totalVolume);
+  return (
+    `I'm ${rankStr} on the @percolatorlaunch devnet leaderboard with ${vol} volume!\n\n` +
+    `S2 devnet competition ends Mar 21 — top traders get beta access 🚀\n\n` +
+    LEADERBOARD_URL
+  );
+}
+
+function buildGenericShareText(): string {
+  return (
+    `Check out the @percolatorlaunch devnet trading competition!\n\n` +
+    `Permissionless perps on Solana — top traders get beta access 🚀\n\n` +
+    LEADERBOARD_URL
+  );
+}
+
+function twitterUrl(text: string): string {
+  return `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+}
+
+/* ── MyRankCard ───────────────────────────────────────────── */
+interface MyRankCardProps {
+  entry: LeaderboardEntry | null;
+  walletConnected: boolean;
+}
+
+function MyRankCard({ entry, walletConnected }: MyRankCardProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = useCallback(() => {
+    const text = entry ? buildShareText(entry) : buildGenericShareText();
+    window.open(twitterUrl(text), "_blank", "noopener,noreferrer");
+  }, [entry]);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(LEADERBOARD_URL);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* silently fail */
+    }
+  }, []);
+
+  // Show nothing if wallet not connected and no entry
+  if (!walletConnected && !entry) return null;
+
+  if (!entry) {
+    // Connected but not ranked — show generic share
+    return (
+      <div
+        className="mb-6 px-4 py-3 border flex items-center justify-between gap-4"
+        style={{
+          background: "var(--panel-bg)",
+          borderColor: "var(--border)",
+        }}
+      >
+        <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+          Not ranked yet — start trading to appear on the board
+        </p>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={handleShare}
+            className="px-3 py-1.5 text-xs font-mono tracking-wide transition-all"
+            style={{
+              background: "transparent",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            SHARE 𝕏
+          </button>
+          <button
+            onClick={handleCopy}
+            className="px-3 py-1.5 text-xs font-mono transition-all"
+            style={{
+              background: "transparent",
+              color: copied ? "var(--accent)" : "var(--text-muted)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            {copied ? "COPIED!" : "COPY LINK"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const medal = RANK_MEDALS[entry.rank];
+
+  return (
+    <div
+      className="mb-6 px-4 py-4 border"
+      style={{
+        background: "rgba(153,69,255,0.06)",
+        borderColor: "rgba(153,69,255,0.3)",
+      }}
+    >
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        {/* Rank info */}
+        <div>
+          <p
+            className="text-[10px] font-mono uppercase tracking-[0.18em] mb-1.5"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Your Rank
+          </p>
+          <div className="flex items-center gap-3">
+            <span
+              className="text-2xl leading-none"
+              aria-label={medal ? `Rank ${entry.rank}` : undefined}
+            >
+              {medal ?? (
+                <span
+                  className="text-xl font-bold tabular-nums"
+                  style={{ color: "var(--accent)" }}
+                >
+                  #{entry.rank}
+                </span>
+              )}
+            </span>
+            {medal && (
+              <span
+                className="text-lg font-bold tabular-nums"
+                style={{ color: "var(--accent)" }}
+              >
+                #{entry.rank}
+              </span>
+            )}
+            <div className="text-xs font-mono" style={{ color: "var(--text-secondary)" }}>
+              <span className="tabular-nums">{entry.tradeCount.toLocaleString()} trades</span>
+              <span className="mx-2" style={{ color: "var(--text-muted)" }}>·</span>
+              <span className="tabular-nums">{fmtVolume(entry.totalVolume)} vol</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Share buttons */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={handleShare}
+            className="px-4 py-1.5 text-xs font-mono font-semibold tracking-wide transition-all hover:opacity-90"
+            style={{
+              background: "var(--accent)",
+              color: "#fff",
+              border: "1px solid var(--accent)",
+            }}
+            title="Share your rank on X / Twitter"
+          >
+            SHARE 𝕏
+          </button>
+          <button
+            onClick={handleCopy}
+            className="px-3 py-1.5 text-xs font-mono transition-all"
+            style={{
+              background: "var(--panel-bg)",
+              color: copied ? "var(--accent)" : "var(--text-secondary)",
+              border: "1px solid var(--border)",
+            }}
+            title="Copy leaderboard link"
+          >
+            {copied ? "✓ COPIED" : "COPY LINK"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Component ───────────────────────────────────────── */
 export default function LeaderboardPage() {
   const [period, setPeriod] = useState<Period>("24h");
@@ -251,6 +427,8 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+
+  const { publicKey, connected } = useWalletCompat();
 
   const fetchLeaderboard = useCallback(async (p: Period) => {
     setLoading(true);
@@ -274,6 +452,13 @@ export default function LeaderboardPage() {
   }, [period, fetchLeaderboard]);
 
   const noData = !loading && !error && entries.length === 0;
+
+  /** Find connected wallet in the current leaderboard entries */
+  const myEntry = publicKey
+    ? entries.find(
+        (e) => e.trader.toLowerCase() === publicKey.toBase58().toLowerCase()
+      ) ?? null
+    : null;
 
   return (
     <main className="min-h-screen pt-20 pb-24">
@@ -345,6 +530,11 @@ export default function LeaderboardPage() {
             ↻
           </button>
         </div>
+
+        {/* ── My Rank / Share ─────────────────────────────────────── */}
+        {!loading && (
+          <MyRankCard entry={myEntry} walletConnected={connected} />
+        )}
 
         {/* ── Loading skeleton ────────────────────────────────────── */}
         {loading && (
@@ -501,7 +691,7 @@ export default function LeaderboardPage() {
         {/* ── CTA ─────────────────────────────────────────────────── */}
         {entries.length > 0 && (
           <div
-            className="mt-8 px-6 py-5 border flex items-center justify-between gap-4"
+            className="mt-8 px-6 py-5 border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
             style={{
               background: "rgba(153,69,255,0.04)",
               borderColor: "rgba(153,69,255,0.2)",
@@ -515,17 +705,39 @@ export default function LeaderboardPage() {
                 Get free devnet tokens and start trading across 126+ markets.
               </p>
             </div>
-            <Link
-              href="/devnet-mint"
-              className="shrink-0 px-4 py-2 text-xs font-mono font-semibold tracking-wide transition-all"
-              style={{
-                background: "var(--accent)",
-                color: "#fff",
-                border: "1px solid var(--accent)",
-              }}
-            >
-              GET TOKENS →
-            </Link>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Generic share for unranked / not-connected visitors */}
+              {!myEntry && (
+                <button
+                  onClick={() =>
+                    window.open(
+                      twitterUrl(buildGenericShareText()),
+                      "_blank",
+                      "noopener,noreferrer"
+                    )
+                  }
+                  className="px-4 py-2 text-xs font-mono tracking-wide transition-all hover:opacity-80"
+                  style={{
+                    background: "transparent",
+                    color: "var(--text-secondary)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  SHARE 𝕏
+                </button>
+              )}
+              <Link
+                href="/devnet-mint"
+                className="shrink-0 px-4 py-2 text-xs font-mono font-semibold tracking-wide transition-all"
+                style={{
+                  background: "var(--accent)",
+                  color: "#fff",
+                  border: "1px solid var(--accent)",
+                }}
+              >
+                GET TOKENS →
+              </Link>
+            </div>
           </div>
         )}
       </div>
