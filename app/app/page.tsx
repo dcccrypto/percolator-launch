@@ -73,7 +73,7 @@ function HowItWorks() {
                   <div className="flex h-12 w-12 items-center justify-center border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] transition-colors duration-200 group-hover:border-[var(--accent)]/30 group-hover:bg-[var(--accent)]/[0.08]">
                     <OnboardingIcon type={step.brandIcon} size={32} />
                   </div>
-                  <span className="text-[20px] font-normal tracking-tight text-[var(--text-muted)] transition-colors duration-200 group-hover:text-[var(--accent)]/20" style={{ fontFamily: "var(--font-heading)" }}>
+                  <span className="text-[11px] font-medium tracking-tight text-white/25 transition-colors duration-200 group-hover:text-[var(--accent)]/30" style={{ fontFamily: "var(--font-heading)" }}>
                     {step.number}
                   </span>
                 </div>
@@ -239,7 +239,7 @@ export default function Home() {
                   { label: "Access", value: "Open", color: "text-[var(--long)]" },
                 ].map((stat) => (
                   <div key={stat.label} className="bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
-                    <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">{stat.label}</p>
+                    <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.2em] text-[#9ca3af]">{stat.label}</p>
                     {stat.value === null ? (
                       <ShimmerSkeleton className="h-6 w-14 mt-1" />
                     ) : (
@@ -286,7 +286,7 @@ export default function Home() {
                         <path d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5a17.92 17.92 0 0 1-8.716-2.247m0 0A9 9 0 0 1 3 12c0-1.47.353-2.856.978-4.082" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </div>
-                    <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+                    <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[#9ca3af]">
                       PERMISSIONLESS
                     </span>
                   </div>
@@ -353,7 +353,7 @@ export default function Home() {
                         <path d={f.icon} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </div>
-                    <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)] transition-colors duration-200 group-hover:text-[var(--accent)]/40">
+                    <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[#9ca3af] transition-colors duration-200 group-hover:text-[var(--accent)]/40">
                       {f.tag}
                     </span>
                   </div>

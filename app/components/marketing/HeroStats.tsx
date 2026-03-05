@@ -66,7 +66,7 @@ export function HeroStats({
           {i > 0 && (
             <span className="mr-2 hidden text-white/10 md:inline">|</span>
           )}
-          <span className="text-[var(--text-secondary)]">{s.label}</span>
+          <span className="font-medium text-[#9ca3af]">{s.label}</span>
           {s.value}
         </div>
       ))}
