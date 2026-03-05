@@ -176,9 +176,14 @@ function YourPositionPanel({ position }: { position: UserPosition | null }) {
   if (!connected) return null;
   if (!position) {
     return (
-      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-6 text-center">
-        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">No open positions</p>
-        <p className="mt-1 text-[10px] text-[var(--text-dim)]">Deposit into a pool to get started</p>
+      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
+        <div className="px-4 py-2 border-b border-[var(--border)]/30">
+          <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// your positions</span>
+        </div>
+        <div className="p-6 text-center">
+          <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">No open positions</p>
+          <p className="mt-1 text-[10px] text-[var(--text-dim)]">Deposit into a pool to get started</p>
+        </div>
       </div>
     );
   }
@@ -256,6 +261,11 @@ function YourPositionPanel({ position }: { position: UserPosition | null }) {
 
 /* ── Deposit Widget ── */
 
+/** Derive the deposit denomination token from the pool symbol (e.g. "SOL-PERP Pool" → "SOL") */
+function poolDenom(symbol: string): string {
+  return symbol.split("-")[0] ?? "USDC";
+}
+
 function DepositWidget({ pools }: { pools: StakePool[] }) {
   const { connected } = useWalletCompat();
   const [selectedPool, setSelectedPool] = useState(pools[0]?.id ?? "");
@@ -263,6 +273,7 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
 
   const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
   const amountNum = parseFloat(amount) || 0;
+  const denom = pool ? poolDenom(pool.symbol) : "USDC";
 
   // LP token estimate: lp_out = (amount / pool_value) * total_lp_supply
   const lpEstimate = pool && pool.vaultBalance > 0
@@ -296,16 +307,21 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
         <div>
           <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
           <div className="flex gap-2">
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              min="0"
-              step="any"
-              className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-white placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums"
-              style={{ fontFamily: "var(--font-mono)" }}
-            />
+            <div className="relative flex-1">
+              <input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                min="0"
+                step="any"
+                className="w-full border border-[var(--border)] bg-[var(--bg-surface)] pl-3 pr-14 py-2.5 text-[13px] text-white placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums"
+                style={{ fontFamily: "var(--font-mono)" }}
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]">
+                {denom}
+              </span>
+            </div>
             <button className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)]">
               MAX
             </button>
@@ -344,8 +360,11 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
 
         {/* CTA */}
         {!connected ? (
-          <button className="w-full py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] cursor-not-allowed">
-            Connect Wallet to Deposit
+          <button
+            disabled
+            className="w-full py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] cursor-not-allowed opacity-40"
+          >
+            Connect Wallet
           </button>
         ) : (
           <button
@@ -364,6 +383,27 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
   );
 }
 
+/* ── Token icon colours ── */
+
+const TOKEN_META: Record<string, { bg: string; color: string; label: string }> = {
+  SOL: { bg: "rgba(153,69,255,0.12)", color: "#9945ff", label: "◎" },
+  BTC: { bg: "rgba(247,147,26,0.12)", color: "#f7931a", label: "₿" },
+  ETH: { bg: "rgba(98,126,234,0.12)", color: "#627eea", label: "Ξ" },
+};
+
+function TokenIcon({ symbol }: { symbol: string }) {
+  const base = symbol.split("-")[0] ?? "";
+  const meta = TOKEN_META[base] ?? { bg: "rgba(99,102,241,0.1)", color: "var(--accent)", label: base.slice(0, 1) };
+  return (
+    <div
+      className="flex h-8 w-8 items-center justify-center rounded-full text-[14px] font-bold shrink-0"
+      style={{ background: meta.bg, color: meta.color, border: `1px solid ${meta.color}30` }}
+    >
+      {meta.label}
+    </div>
+  );
+}
+
 /* ── Pool Card ── */
 
 function PoolCard({ pool }: { pool: StakePool }) {
@@ -373,9 +413,7 @@ function PoolCard({ pool }: { pool: StakePool }) {
     <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)]">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] text-[12px]">
-            💧
-          </div>
+          <TokenIcon symbol={pool.symbol} />
           <div>
             <h3 className="text-[13px] font-semibold text-white">{pool.symbol}</h3>
             <p className="text-[10px] text-[var(--text-muted)]">POOL</p>
