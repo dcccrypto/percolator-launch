@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { IX_TAG } from "@percolator/sdk";
+import { IX_TAG, ENGINE_OFF, ENGINE_MARK_PRICE_OFF } from "@percolator/sdk";
 import { config, insertTrade, eventBus, decodeBase58, readU128LE, parseTradeSize, createLogger } from "@percolator/shared";
 
 const logger = createLogger("indexer:webhook");
@@ -123,8 +123,8 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
     // Validate pubkey formats
     if (!BASE58_PUBKEY.test(trader) || !BASE58_PUBKEY.test(slabAddress)) continue;
 
-    // Extract price from program logs, fee from balance changes
-    const price = extractPriceFromLogs(tx);
+    // Extract price from slab account data or program logs
+    const price = extractPrice(tx, slabAddress);
     const fee = extractFeeFromTransfers(tx, trader);
 
     trades.push({
@@ -162,7 +162,7 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
 
       if (!BASE58_PUBKEY.test(trader) || !BASE58_PUBKEY.test(slabAddress)) continue;
 
-      const price = extractPriceFromLogs(tx);
+      const price = extractPrice(tx, slabAddress);
       const fee = extractFeeFromTransfers(tx, trader);
 
       // Avoid duplicates within same tx (match on trader + side + size + slab)
@@ -184,24 +184,78 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
 }
 
 /**
- * Extract execution price from program logs in the enhanced tx.
- * The on-chain program emits: "Program log: {v1}, {v2}, {v3}, {v4}, {v5}"
- * where one value is price_e6 (range $0.001 to $1M → 1,000 to 1,000,000,000,000).
- * Values can be in hex (0x...) or decimal format.
+ * Extract execution price from an enhanced transaction.
+ *
+ * Strategy (in order):
+ * 1. Read mark_price_e6 from the slab account's post-state data (Helius
+ *    enhanced txs include `accountData` with base64-encoded post-state).
+ * 2. Parse program logs for comma-separated numeric values and pick the
+ *    first value in a plausible price_e6 range ($0.001–$1M).
+ * 3. Return 0 if neither strategy yields a result.
+ */
+function extractPrice(tx: any, slabAddress: string): number {
+  // Strategy 1: read mark_price_e6 from slab post-state account data
+  const priceFromAccount = extractPriceFromAccountData(tx, slabAddress);
+  if (priceFromAccount > 0) return priceFromAccount;
+
+  // Strategy 2: parse program logs
+  return extractPriceFromLogs(tx);
+}
+
+/**
+ * Read mark_price_e6 from the slab account's post-state data.
+ * Helius enhanced transactions include `accountData[]` with each account's
+ * post-state as a base64-encoded `data` field.
+ */
+function extractPriceFromAccountData(tx: any, slabAddress: string): number {
+  const accountData: any[] = tx.accountData ?? [];
+  for (const acc of accountData) {
+    if (acc.account !== slabAddress) continue;
+    // Helius provides data as base64 string or { data: [base64, "base64"] }
+    let raw: Uint8Array | null = null;
+    if (typeof acc.data === "string") {
+      try { raw = Uint8Array.from(Buffer.from(acc.data, "base64")); } catch { /* skip */ }
+    } else if (Array.isArray(acc.data) && typeof acc.data[0] === "string") {
+      try { raw = Uint8Array.from(Buffer.from(acc.data[0], "base64")); } catch { /* skip */ }
+    }
+    if (!raw) continue;
+
+    // mark_price_e6 is a u64 at ENGINE_OFF + ENGINE_MARK_PRICE_OFF
+    const off = ENGINE_OFF + ENGINE_MARK_PRICE_OFF;
+    if (raw.length < off + 8) continue;
+
+    const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+    const markPriceE6 = dv.getBigUint64(off, true);
+    if (markPriceE6 > 0n && markPriceE6 < 1_000_000_000_000n) {
+      return Number(markPriceE6) / 1_000_000;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Parse program logs for comma-separated numeric values (hex or decimal).
+ * Matches 2–8 comma-separated values on a single "Program log:" line.
  */
 function extractPriceFromLogs(tx: any): number {
   const logs: string[] = tx.logMessages ?? [];
+  const valuePattern = /0x[0-9a-fA-F]+|\d+/g;
+
   for (const log of logs) {
-    // Match both hex (0x...) and decimal formats
-    const match = log.match(/^Program log: (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+)$/);
-    if (!match) continue;
-    
-    // Parse hex or decimal to number
-    const values = [match[1], match[2], match[3], match[4], match[5]].map((v) => {
-      return v.startsWith('0x') ? parseInt(v, 16) : Number(v);
-    });
-    
+    if (!log.startsWith("Program log: ")) continue;
+    const payload = log.slice("Program log: ".length).trim();
+    // Only consider lines that look like comma-separated numbers
+    if (!/^[\d, a-fA-Fx]+$/.test(payload)) continue;
+
+    const matches = payload.match(valuePattern);
+    if (!matches || matches.length < 2) continue;
+
+    const values = matches.map((v) =>
+      v.startsWith("0x") ? parseInt(v, 16) : Number(v),
+    );
+
     for (const v of values) {
+      // Reasonable price_e6 range: $0.001 to $1,000,000
       if (v >= 1_000 && v <= 1_000_000_000_000) {
         return v / 1_000_000;
       }

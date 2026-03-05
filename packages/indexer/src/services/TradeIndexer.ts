@@ -1,5 +1,5 @@
 import { Connection, PublicKey, type ParsedTransactionWithMeta } from "@solana/web3.js";
-import { IX_TAG } from "@percolator/sdk";
+import { IX_TAG, ENGINE_OFF, ENGINE_MARK_PRICE_OFF } from "@percolator/sdk";
 import { config, getConnection, insertTrade, tradeExistsBySignature, getMarkets, eventBus, decodeBase58, readU128LE, parseTradeSize, withRetry, createLogger, captureException, addBreadcrumb } from "@percolator/shared";
 
 const logger = createLogger("indexer:trade-indexer");
@@ -269,8 +269,11 @@ export class TradeIndexerPolling {
       if (!traderKey) continue;
       const trader = traderKey.toBase58();
 
-      // Get price from program logs
-      const price = this.extractPriceFromLogs(tx) ?? 0;
+      // Get price: try logs first, then read slab account mark_price
+      let price = this.extractPriceFromLogs(tx);
+      if (price === 0) {
+        price = await this.readMarkPriceFromSlab(getConnection(), slabAddress);
+      }
       const fee = 0;
 
       // Check for duplicate
@@ -317,20 +320,24 @@ export class TradeIndexerPolling {
 
   /**
    * Try to extract execution price from transaction logs.
-   * The on-chain program emits values in hex (0x...) or decimal format.
+   * Matches comma-separated numeric values (2–8 values, hex or decimal).
    */
-  private extractPriceFromLogs(tx: ParsedTransactionWithMeta): number | null {
-    if (!tx.meta?.logMessages) return null;
+  private extractPriceFromLogs(tx: ParsedTransactionWithMeta): number {
+    if (!tx.meta?.logMessages) return 0;
+
+    const valuePattern = /0x[0-9a-fA-F]+|\d+/g;
 
     for (const log of tx.meta.logMessages) {
-      // Match both hex (0x...) and decimal formats
-      const match = log.match(/^Program log: (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+), (0x[0-9a-fA-F]+|\d+)$/);
-      if (!match) continue;
+      if (!log.startsWith("Program log: ")) continue;
+      const payload = log.slice("Program log: ".length).trim();
+      if (!/^[\d, a-fA-Fx]+$/.test(payload)) continue;
 
-      // Parse hex or decimal to number
-      const values = [match[1], match[2], match[3], match[4], match[5]].map((v) => {
-        return v.startsWith('0x') ? parseInt(v, 16) : Number(v);
-      });
+      const matches = payload.match(valuePattern);
+      if (!matches || matches.length < 2) continue;
+
+      const values = matches.map((v) =>
+        v.startsWith("0x") ? parseInt(v, 16) : Number(v),
+      );
 
       for (const v of values) {
         // Reasonable price_e6 range: $0.001 to $1,000,000
@@ -340,7 +347,32 @@ export class TradeIndexerPolling {
       }
     }
 
-    return null;
+    return 0;
+  }
+
+  /**
+   * Fallback: read mark_price_e6 from the slab account's on-chain state.
+   * This gives the current mark price (close to execution price for recent trades).
+   */
+  private async readMarkPriceFromSlab(connection: Connection, slabAddress: string): Promise<number> {
+    try {
+      const info = await connection.getAccountInfo(new PublicKey(slabAddress));
+      if (!info?.data || info.data.length < ENGINE_OFF + ENGINE_MARK_PRICE_OFF + 8) return 0;
+
+      const off = ENGINE_OFF + ENGINE_MARK_PRICE_OFF;
+      const dv = new DataView(info.data.buffer, info.data.byteOffset, info.data.byteLength);
+      const markPriceE6 = dv.getBigUint64(off, true);
+
+      if (markPriceE6 > 0n && markPriceE6 < 1_000_000_000_000n) {
+        return Number(markPriceE6) / 1_000_000;
+      }
+    } catch (err) {
+      logger.warn("Failed to read mark price from slab", {
+        slabAddress: slabAddress.slice(0, 8),
+        error: err instanceof Error ? err.message : err,
+      });
+    }
+    return 0;
   }
 }
 
