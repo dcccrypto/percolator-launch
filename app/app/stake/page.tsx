@@ -497,7 +497,7 @@ function PoolList({ pools }: { pools: StakePool[] }) {
       <div className="mb-4 flex items-center justify-between">
         <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
       </div>
-      <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3">
         {pools.map((pool) => (
           <PoolCard key={pool.id} pool={pool} />
         ))}
@@ -514,7 +514,7 @@ export default function StakePage() {
   const [position] = useState<UserPosition | null>(MOCK_POSITION);
 
   return (
-    <div className="relative min-h-screen">
+    <div className="relative min-h-screen overflow-x-hidden">
       {/* Hero */}
       <ErrorBoundary label="Stake Hero">
         <StakeHero pools={pools} />
@@ -526,8 +526,8 @@ export default function StakePage() {
           {/* Mobile: single-column stack (position → deposit → pools) */}
           {/* Desktop lg+: 2-column — sidebar [380px] on left, pools on right */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
-            {/* Left column: Position + Deposit — order-first on mobile */}
-            <div className="order-first space-y-4 lg:order-none">
+            {/* Left column: Position + Deposit — full-width on mobile, sidebar on lg+ */}
+            <div className="order-first space-y-4 lg:order-none w-full">
               <ErrorBoundary label="Your Position">
                 <YourPositionPanel position={position} />
               </ErrorBoundary>
@@ -537,7 +537,7 @@ export default function StakePage() {
             </div>
 
             {/* Right column: Pool list — order-last on mobile */}
-            <div className="order-last lg:order-none">
+            <div className="order-last min-w-0 lg:order-none">
               <ErrorBoundary label="Pool List">
                 <PoolList pools={pools} />
               </ErrorBoundary>
