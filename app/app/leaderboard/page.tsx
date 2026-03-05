@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import CompetitionBanner from "@/components/CompetitionBanner";
 
 /* ── Types ────────────────────────────────────────────────── */
 interface LeaderboardEntry {
@@ -99,6 +100,9 @@ export default function LeaderboardPage() {
   return (
     <main className="min-h-screen pt-20 pb-24">
       <div className="max-w-3xl mx-auto px-4 sm:px-6">
+
+        {/* ── Competition Banner ─────────────────────────────────── */}
+        <CompetitionBanner />
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="mb-8">
