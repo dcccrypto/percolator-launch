@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 import { PublicKey } from "@solana/web3.js";
 
@@ -9,8 +9,32 @@ import { PublicKey } from "@solana/web3.js";
  * Uses service_role client (bypasses RLS) — all on-chain trades are public.
  *
  * PERC-420: Trade history for portfolio page
+ *
+ * Security: IP-based in-memory rate limiter (60 req/min) guards against
+ * unauthenticated enumeration / DB-scraping (see GitHub issue #700).
  */
 export const dynamic = "force-dynamic";
+
+// ---------------------------------------------------------------------------
+// Simple in-memory rate limiter — resets on cold start (fine for serverless).
+// 60 requests per minute per IP.
+// ---------------------------------------------------------------------------
+const RATE_LIMIT = 60;
+const RATE_WINDOW_MS = 60_000; // 1 minute
+
+const rateMap = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  if (entry.count >= RATE_LIMIT) return true;
+  entry.count++;
+  return false;
+}
 
 export interface TraderTradeEntry {
   id: string;
@@ -25,9 +49,28 @@ export interface TraderTradeEntry {
 }
 
 export async function GET(
-  _request: Request,
+  _request: NextRequest,
   { params }: { params: Promise<{ wallet: string }> },
 ) {
+  // Rate limiting — 60 req/min per IP (fixes #700)
+  const ip =
+    _request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    _request.headers.get("x-real-ip") ??
+    "unknown";
+  if (isRateLimited(ip)) {
+    return NextResponse.json(
+      { error: "Too many requests — max 60 per minute" },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": "60",
+          "X-RateLimit-Limit": String(RATE_LIMIT),
+          "X-RateLimit-Window": "60s",
+        },
+      },
+    );
+  }
+
   const { wallet } = await params;
   const url = new URL(_request.url);
 
@@ -79,12 +122,21 @@ export async function GET(
       created_at: String(row.created_at),
     }));
 
-    return NextResponse.json({
-      trades,
-      total: count ?? 0,
-      limit,
-      offset,
-    });
+    return NextResponse.json(
+      {
+        trades,
+        total: count ?? 0,
+        limit,
+        offset,
+      },
+      {
+        headers: {
+          // Allow CDN/edge to cache per-wallet responses for 10s,
+          // reducing repeat DB hits from the same request (fixes #700).
+          "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+        },
+      },
+    );
   } catch (err) {
     console.error("[trader-trades] error:", err);
     return NextResponse.json(
