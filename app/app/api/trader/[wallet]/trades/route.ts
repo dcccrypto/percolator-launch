@@ -26,9 +26,9 @@ export interface TraderTradeEntry {
 
 export async function GET(
   _request: Request,
-  { params }: { params: { wallet: string } },
+  { params }: { params: Promise<{ wallet: string }> },
 ) {
-  const { wallet } = params;
+  const { wallet } = await params;
   const url = new URL(_request.url);
 
   // Validate wallet address
