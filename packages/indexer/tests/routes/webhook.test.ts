@@ -67,6 +67,68 @@ describe('POST /webhook/trades — price extraction', () => {
     app = webhookRoutes();
   });
 
+  it('extracts price from slab accountData (primary strategy)', async () => {
+    // Build a mock slab account buffer with mark_price_e6 at offset ENGINE_OFF + ENGINE_MARK_PRICE_OFF
+    // Mock values: ENGINE_OFF=8, ENGINE_MARK_PRICE_OFF=1032, total offset=1040
+    const slabData = new Uint8Array(1048); // offset 1040 + 8 bytes for u64
+    const dv = new DataView(slabData.buffer);
+    // Write 42_500_000 (= $42.50) as u64 little-endian at offset 1040
+    dv.setBigUint64(1040, 42_500_000n, true);
+
+    const tx = {
+      signature: SIG,
+      instructions: makeBaseInstructions(),
+      innerInstructions: [],
+      accountData: [{
+        account: SLAB,
+        data: Buffer.from(slabData).toString('base64'),
+      }],
+      logs: [], // no logs — forces accountData path
+    };
+    await app.fetch(makeRequest([tx]));
+
+    expect(shared.insertTrade).toHaveBeenCalledWith(
+      expect.objectContaining({ price: 42.5 }) // 42_500_000 / 1_000_000
+    );
+  });
+
+  it('extracts price from slab accountData with array [base64, "base64"] format', async () => {
+    const slabData = new Uint8Array(1048);
+    const dv = new DataView(slabData.buffer);
+    dv.setBigUint64(1040, 10_000_000n, true); // $10.00
+
+    const tx = {
+      signature: SIG,
+      instructions: makeBaseInstructions(),
+      innerInstructions: [],
+      accountData: [{
+        account: SLAB,
+        data: [Buffer.from(slabData).toString('base64'), 'base64'],
+      }],
+      logs: [],
+    };
+    await app.fetch(makeRequest([tx]));
+
+    expect(shared.insertTrade).toHaveBeenCalledWith(
+      expect.objectContaining({ price: 10.0 })
+    );
+  });
+
+  it('falls back to logs when accountData has no slab entry', async () => {
+    const tx = {
+      signature: SIG,
+      instructions: makeBaseInstructions(),
+      innerInstructions: [],
+      accountData: [{ account: 'SomeOtherAccount', data: '' }],
+      logs: ['Program log: 1500000, 2000000, 3000000, 4000000, 5000000'],
+    };
+    await app.fetch(makeRequest([tx]));
+
+    expect(shared.insertTrade).toHaveBeenCalledWith(
+      expect.objectContaining({ price: 1.5 }) // fell back to log extraction
+    );
+  });
+
   it('extracts price from tx.logs (Helius Enhanced Transaction format)', async () => {
     // Helius Enhanced Transactions expose logs as tx.logs, NOT tx.logMessages
     const tx = {
