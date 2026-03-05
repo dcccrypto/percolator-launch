@@ -1775,7 +1775,7 @@ function isStandardToken(tokenProgramId) {
 import { PublicKey as PublicKey7, SystemProgram as SystemProgram2, SYSVAR_RENT_PUBKEY as SYSVAR_RENT_PUBKEY2, SYSVAR_CLOCK_PUBKEY as SYSVAR_CLOCK_PUBKEY2 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID as TOKEN_PROGRAM_ID4 } from "@solana/spl-token";
 var STAKE_PROGRAM_ID = new PublicKey7(
-  "4mJ8CasWfJCGEjGNaJThNfFfUWJTfZLBwz6qmUGqxVMc"
+  "6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k"
 );
 var STAKE_IX = {
   InitPool: 0,
