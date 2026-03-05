@@ -1,0 +1,489 @@
+"use client";
+
+import { useEffect, useState, useMemo } from "react";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { ScrollReveal } from "@/components/ui/ScrollReveal";
+import { GradientText } from "@/components/ui/GradientText";
+import { ProgressBar } from "@/components/ui/ProgressBar";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
+/* ── Types ── */
+
+interface StakePool {
+  id: string;
+  name: string;
+  symbol: string;
+  slabAddress: string;
+  tvl: number;
+  apr: number;
+  capUsed: number;
+  capTotal: number;
+  cooldownSlots: number;
+  totalLpSupply: number;
+  vaultBalance: number;
+}
+
+interface UserPosition {
+  poolId: string;
+  poolName: string;
+  lpBalance: number;
+  estimatedValue: number;
+  deposited: number;
+  pnl: number;
+  pnlPct: number;
+  cooldownRemaining: number;
+  cooldownTotal: number;
+}
+
+/* ── Mock data (replace with API when ready) ── */
+
+const MOCK_POOLS: StakePool[] = [
+  {
+    id: "sol-perp-pool",
+    name: "SOL-PERP Pool",
+    symbol: "SOL-PERP",
+    slabAddress: "So11111111111111111111111111111111111111112",
+    tvl: 50_000_000,
+    apr: 12.4,
+    capUsed: 4_250_000,
+    capTotal: 5_000_000,
+    cooldownSlots: 3200,
+    totalLpSupply: 49_500_000,
+    vaultBalance: 50_000_000,
+  },
+  {
+    id: "btc-perp-pool",
+    name: "BTC-PERP Pool",
+    symbol: "BTC-PERP",
+    slabAddress: "BTC1111111111111111111111111111111111111112",
+    tvl: 12_300_000,
+    apr: 9.2,
+    capUsed: 2_300_000,
+    capTotal: 10_000_000,
+    cooldownSlots: 3200,
+    totalLpSupply: 12_000_000,
+    vaultBalance: 12_300_000,
+  },
+  {
+    id: "eth-perp-pool",
+    name: "ETH-PERP Pool",
+    symbol: "ETH-PERP",
+    slabAddress: "ETH1111111111111111111111111111111111111112",
+    tvl: 8_100_000,
+    apr: 7.8,
+    capUsed: 6_100_000,
+    capTotal: 10_000_000,
+    cooldownSlots: 3200,
+    totalLpSupply: 8_000_000,
+    vaultBalance: 8_100_000,
+  },
+];
+
+const MOCK_POSITION: UserPosition | null = null; // No position by default
+
+/* ── Helpers ── */
+
+function formatUsd(n: number): string {
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function slotsToTime(slots: number): string {
+  const seconds = Math.round(slots * 0.4);
+  if (seconds < 60) return `~${seconds}s`;
+  return `~${Math.round(seconds / 60)} min`;
+}
+
+/* ── Hero Section ── */
+
+function StakeHero({ pools }: { pools: StakePool[] }) {
+  const totalStaked = pools.reduce((s, p) => s + p.tvl, 0);
+  const activePools = pools.length;
+  const avgApr = pools.length > 0
+    ? pools.reduce((s, p) => s + p.apr, 0) / pools.length
+    : 0;
+
+  const metrics = [
+    { label: "Total Staked", value: formatUsd(totalStaked), color: "text-[var(--accent)]" },
+    { label: "Your Deposits", value: "$—", color: "text-[var(--text-secondary)]" },
+    { label: "Active Pools", value: String(activePools), color: "text-[var(--accent)]" },
+    { label: "Avg APR", value: avgApr > 0 ? `${avgApr.toFixed(1)}%` : "—%", color: "text-[var(--cyan)]" },
+  ];
+
+  return (
+    <section className="relative overflow-hidden py-12 lg:py-16">
+      <div className="mx-auto max-w-[1100px] px-6">
+        <ScrollReveal>
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+            // insurance lp
+          </div>
+          <h1
+            className="mb-4 text-3xl font-medium tracking-[-0.02em] sm:text-4xl lg:text-[56px]"
+            style={{ fontFamily: "var(--font-heading)" }}
+          >
+            <span className="text-white">Stake. Earn.</span>
+            <br />
+            <span className="text-[var(--cyan)]">Back the Fund.</span>
+          </h1>
+          <p className="mb-8 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
+            Deposit collateral into insurance pools to earn LP rewards and back the Percolator insurance fund.
+          </p>
+
+          {/* CTA buttons */}
+          <div className="mb-10 flex flex-wrap items-center gap-3">
+            <a
+              href="#deposit"
+              className="group inline-flex items-center gap-2 border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] px-6 py-3 text-sm font-semibold text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
+            >
+              Deposit Now
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
+                <path d="M12 5v14M5 12l7 7 7-7" />
+              </svg>
+            </a>
+            <a
+              href="#pools"
+              className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--cyan)] border-b border-[var(--cyan)]/40 pb-px transition-colors hover:border-[var(--cyan)]/70"
+            >
+              Learn More <span aria-hidden="true">→</span>
+            </a>
+          </div>
+
+          {/* Metrics row */}
+          <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-4">
+            {metrics.map((m) => (
+              <div key={m.label} className="bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
+                <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.2em] text-[#9ca3af]">{m.label}</p>
+                <p className={`text-lg sm:text-xl font-semibold tracking-tight tabular-nums ${m.color}`} style={{ fontFamily: "var(--font-heading)" }}>
+                  {m.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </ScrollReveal>
+      </div>
+    </section>
+  );
+}
+
+/* ── Your Position Panel ── */
+
+function YourPositionPanel({ position }: { position: UserPosition | null }) {
+  const { connected } = useWalletCompat();
+
+  if (!connected) return null;
+  if (!position) {
+    return (
+      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-6 text-center">
+        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">No open positions</p>
+        <p className="mt-1 text-[10px] text-[var(--text-dim)]">Deposit into a pool to get started</p>
+      </div>
+    );
+  }
+
+  const cooldownComplete = position.cooldownRemaining <= 0;
+  const cooldownPct = position.cooldownTotal > 0
+    ? 1 - position.cooldownRemaining / position.cooldownTotal
+    : 1;
+
+  return (
+    <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
+      <div className="px-4 py-2 border-b border-[var(--border)]/30">
+        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// your position</span>
+      </div>
+      <div className="p-4 space-y-3">
+        <div className="grid grid-cols-2 gap-3 text-[12px]">
+          <div>
+            <span className="text-[var(--text-secondary)]">Pool</span>
+            <p className="font-medium text-white">{position.poolName}</p>
+          </div>
+          <div>
+            <span className="text-[var(--text-secondary)]">LP Balance</span>
+            <p className="font-medium text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+              {position.lpBalance.toLocaleString()} LP
+            </p>
+          </div>
+          <div>
+            <span className="text-[var(--text-secondary)]">Est. Value</span>
+            <p className="font-medium text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+              {formatUsd(position.estimatedValue)}
+            </p>
+          </div>
+          <div>
+            <span className="text-[var(--text-secondary)]">Deposited</span>
+            <p className="font-medium text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+              {formatUsd(position.deposited)}
+            </p>
+          </div>
+        </div>
+
+        {/* PnL */}
+        <div className="text-[12px]">
+          <span className="text-[var(--text-secondary)]">PnL</span>
+          <p className={`font-semibold tabular-nums ${position.pnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+            {position.pnl >= 0 ? "+" : ""}{formatUsd(position.pnl)} ({position.pnl >= 0 ? "+" : ""}{position.pnlPct.toFixed(2)}%)
+          </p>
+        </div>
+
+        {/* Cooldown */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] text-[var(--text-secondary)]">Cooldown</span>
+            <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+              {cooldownComplete ? "Complete" : `~${position.cooldownRemaining.toLocaleString()} slots (${slotsToTime(position.cooldownRemaining)})`}
+            </span>
+          </div>
+          <ProgressBar value={cooldownPct} height={8} />
+        </div>
+
+        {/* Withdraw button */}
+        <button
+          disabled={!cooldownComplete}
+          className={`w-full py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+            cooldownComplete
+              ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
+              : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] cursor-not-allowed"
+          }`}
+        >
+          {cooldownComplete ? "Withdraw LP →" : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Deposit Widget ── */
+
+function DepositWidget({ pools }: { pools: StakePool[] }) {
+  const { connected } = useWalletCompat();
+  const [selectedPool, setSelectedPool] = useState(pools[0]?.id ?? "");
+  const [amount, setAmount] = useState("");
+
+  const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
+  const amountNum = parseFloat(amount) || 0;
+
+  // LP token estimate: lp_out = (amount / pool_value) * total_lp_supply
+  const lpEstimate = pool && pool.vaultBalance > 0
+    ? (amountNum / pool.vaultBalance) * pool.totalLpSupply
+    : 0;
+
+  const capRatio = pool ? pool.capUsed / pool.capTotal : 0;
+
+  return (
+    <div id="deposit" className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
+      <div className="px-4 py-2 border-b border-[var(--border)]/30">
+        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// deposit</span>
+      </div>
+      <div className="p-4 space-y-4">
+        {/* Pool selector */}
+        <div>
+          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
+          <select
+            value={selectedPool}
+            onChange={(e) => setSelectedPool(e.target.value)}
+            className="w-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-white outline-none transition-colors focus:border-[var(--accent)]/50"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            {pools.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Amount input */}
+        <div>
+          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              min="0"
+              step="any"
+              className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-white placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums"
+              style={{ fontFamily: "var(--font-mono)" }}
+            />
+            <button className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)]">
+              MAX
+            </button>
+          </div>
+        </div>
+
+        {/* LP estimate */}
+        {amountNum > 0 && (
+          <div className="text-[12px] text-[var(--text-secondary)]">
+            You will receive ≈{" "}
+            <span className="font-medium text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+              {lpEstimate.toLocaleString(undefined, { maximumFractionDigits: 2 })} LP
+            </span>
+          </div>
+        )}
+
+        {/* Pool cap bar */}
+        {pool && (
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-[var(--text-secondary)]">Pool cap</span>
+              <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+                {formatUsd(pool.capUsed)} / {formatUsd(pool.capTotal)} ({Math.round(capRatio * 100)}%)
+              </span>
+            </div>
+            <ProgressBar value={capRatio} height={6} />
+          </div>
+        )}
+
+        {/* Cooldown info */}
+        {pool && (
+          <p className="text-[10px] text-[var(--text-muted)]">
+            Cooldown period: ~{pool.cooldownSlots.toLocaleString()} slots ({slotsToTime(pool.cooldownSlots)} before withdrawal)
+          </p>
+        )}
+
+        {/* CTA */}
+        {!connected ? (
+          <button className="w-full py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] cursor-not-allowed">
+            Connect Wallet to Deposit
+          </button>
+        ) : (
+          <button
+            disabled={amountNum <= 0}
+            className={`w-full py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+              amountNum > 0
+                ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
+                : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] cursor-not-allowed"
+            }`}
+          >
+            Deposit →
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Pool Card ── */
+
+function PoolCard({ pool }: { pool: StakePool }) {
+  const capRatio = pool.capUsed / pool.capTotal;
+
+  return (
+    <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)]">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] text-[12px]">
+            💧
+          </div>
+          <div>
+            <h3 className="text-[13px] font-semibold text-white">{pool.symbol}</h3>
+            <p className="text-[10px] text-[var(--text-muted)]">POOL</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-2 text-[12px]">
+        <div className="flex justify-between">
+          <span className="text-[var(--text-secondary)]">TVL</span>
+          <span className="font-medium text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{formatUsd(pool.tvl)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[var(--text-secondary)]">APR</span>
+          <span className="font-semibold text-[var(--cyan)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.apr.toFixed(1)}%</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[var(--text-secondary)]">Cap</span>
+          <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{Math.round(capRatio * 100)}% full</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[var(--text-secondary)]">Cooldown</span>
+          <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.cooldownSlots.toLocaleString()} slots</span>
+        </div>
+      </div>
+
+      {/* Cap bar */}
+      <div className="mt-3">
+        <ProgressBar value={capRatio} height={4} />
+      </div>
+
+      {/* Deposit ghost button */}
+      <a
+        href="#deposit"
+        className="mt-4 flex w-full items-center justify-center gap-1.5 border border-[var(--accent)]/30 bg-transparent py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/[0.06]"
+      >
+        Deposit
+      </a>
+
+      <div className="absolute bottom-0 left-0 right-0 h-px bg-[var(--accent)]/0 transition-all duration-300 group-hover:bg-[var(--accent)]/30" />
+    </article>
+  );
+}
+
+/* ── Pool List Section ── */
+
+function PoolList({ pools }: { pools: StakePool[] }) {
+  if (pools.length === 0) {
+    return (
+      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-10 text-center">
+        <div className="mb-3 text-2xl text-[var(--text-muted)]">💧</div>
+        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">No pools available yet</p>
+        <p className="mt-1 text-[10px] text-[var(--text-dim)]">Check back soon.</p>
+      </div>
+    );
+  }
+
+  return (
+    <section id="pools">
+      <div className="mb-4 flex items-center justify-between">
+        <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
+      </div>
+      <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-3">
+        {pools.map((pool) => (
+          <PoolCard key={pool.id} pool={pool} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ── Main Page ── */
+
+export default function StakePage() {
+  // TODO: Replace with real API call to /api/stake/pools
+  const [pools] = useState<StakePool[]>(MOCK_POOLS);
+  const [position] = useState<UserPosition | null>(MOCK_POSITION);
+
+  return (
+    <div className="relative min-h-screen">
+      {/* Hero */}
+      <ErrorBoundary label="Stake Hero">
+        <StakeHero pools={pools} />
+      </ErrorBoundary>
+
+      {/* Main content */}
+      <div className="mx-auto max-w-[1100px] px-6 pb-16">
+        <ScrollReveal>
+          {/* Desktop: 2-column — deposit+position on left, pools on right */}
+          {/* Mobile: stacked */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
+            {/* Left column: Position + Deposit */}
+            <div className="space-y-4">
+              <ErrorBoundary label="Your Position">
+                <YourPositionPanel position={position} />
+              </ErrorBoundary>
+              <ErrorBoundary label="Deposit Widget">
+                <DepositWidget pools={pools} />
+              </ErrorBoundary>
+            </div>
+
+            {/* Right column: Pool list */}
+            <ErrorBoundary label="Pool List">
+              <PoolList pools={pools} />
+            </ErrorBoundary>
+          </div>
+        </ScrollReveal>
+      </div>
+    </div>
+  );
+}

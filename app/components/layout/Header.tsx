@@ -28,6 +28,7 @@ const buildLinks: NavItem[] = [
   { href: "/developers", label: "Developers" },
   { href: "/guide", label: "Guide" },
   { href: "/devnet-mint", label: "Faucet" },
+  { href: "/stake", label: "Stake" },
 ];
 
 const communityLinks: NavItem[] = [
