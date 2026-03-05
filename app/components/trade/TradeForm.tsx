@@ -373,7 +373,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <button
               key={l}
               onClick={() => setLeverage(l)}
-              className={`flex-1 rounded-none py-1 text-[10px] font-medium transition-all duration-150 focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 ${
+              className={`flex-1 rounded-none py-1.5 min-h-[44px] text-[10px] font-medium transition-all duration-150 focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 touch-manipulation ${
                 leverage === l
                   ? "bg-[var(--accent)] text-white"
                   : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)]"

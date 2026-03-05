@@ -114,6 +114,17 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
     maintenanceBps,
   );
 
+  // Liq price danger color: amber when mark is within 10% of liq, red within 5%
+  const liqPriceColor = (() => {
+    if (liqPriceE6 <= 0n || !hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
+    const markNum = Number(currentPriceE6);
+    const liqNum = Number(liqPriceE6);
+    const distPct = Math.abs(markNum - liqNum) / markNum;
+    if (distPct < 0.05) return "text-[var(--short)]";
+    if (distPct < 0.10) return "text-[var(--warning)]";
+    return "text-[var(--text-secondary)]";
+  })();
+
   const pnlColor =
     pnlTokens === 0n
       ? "text-[var(--text-muted)]"
@@ -199,7 +210,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
               </td>
 
               {/* Liq. Price */}
-              <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--warning)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+              <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {formatLiqPrice(liqPriceE6)}
               </td>
 

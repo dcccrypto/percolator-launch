@@ -11,6 +11,7 @@ import { GradientText } from "@/components/ui/GradientText";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { OnboardingIcon } from "@/components/icons/OnboardingIcons";
 import { HeroSection } from "@/components/marketing/HeroSection";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 /** Format large numbers compactly: 1.2T / 3.4B / 5.6M / 7.8K */
 function formatCompact(n: number): string {
@@ -220,16 +221,32 @@ export default function Home() {
             <ScrollReveal stagger={0.08}>
               <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-4">
                 {[
-                  { label: "Markets Live", value: statsLoaded ? String(stats.markets) : "—", color: "text-[var(--accent)]" },
-                  { label: "24h Volume", value: statsLoaded ? (stats.volume > 0 ? formatCompact(stats.volume) : "— (devnet)") : "—", color: stats.volume > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]" },
-                  { label: "Insurance Fund", value: statsLoaded ? formatCompact(stats.insurance) : "—", color: "text-[var(--accent)]" },
+                  {
+                    label: "Markets Live",
+                    value: statsLoaded ? String(stats.markets) : null,
+                    color: "text-[var(--accent)]",
+                  },
+                  {
+                    label: "24h Volume",
+                    value: statsLoaded ? (stats.volume > 0 ? formatCompact(stats.volume) : "— (devnet)") : null,
+                    color: stats.volume > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]",
+                  },
+                  {
+                    label: "Insurance Fund",
+                    value: statsLoaded ? formatCompact(stats.insurance) : null,
+                    color: "text-[var(--accent)]",
+                  },
                   { label: "Access", value: "Open", color: "text-[var(--long)]" },
                 ].map((stat) => (
                   <div key={stat.label} className="bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
                     <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">{stat.label}</p>
-                    <p className={`text-lg sm:text-xl font-semibold tracking-tight tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-heading)" }}>
-                      {stat.value}
-                    </p>
+                    {stat.value === null ? (
+                      <ShimmerSkeleton className="h-6 w-14 mt-1" />
+                    ) : (
+                      <p className={`text-lg sm:text-xl font-semibold tracking-tight tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-heading)" }}>
+                        {stat.value}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
