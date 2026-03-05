@@ -32,6 +32,7 @@ interface WizardState {
   mintAddress: string;
   tokenMeta: { name: string; symbol: string; decimals: number } | null;
   walletBalance: bigint | null;
+  mintExistsOnChain: boolean | null;
   // Step 2
   oracleType: "pyth" | "hyperp_ema" | "admin";
   oracleFeed: string;
@@ -52,6 +53,7 @@ const DEFAULT_STATE: WizardState = {
   mintAddress: "",
   tokenMeta: null,
   walletBalance: null,
+  mintExistsOnChain: null,
   oracleType: "admin",
   oracleFeed: "",
   dexPool: null,
@@ -120,7 +122,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const symbol = wizard.tokenMeta?.symbol ?? "Token";
 
   // Step validation
-  const step1Valid = mintValid && wizard.tokenMeta !== null && (wizard.tokenMeta.decimals <= 12);
+  const step1Valid = mintValid && wizard.tokenMeta !== null && (wizard.tokenMeta.decimals <= 12) && wizard.mintExistsOnChain === true;
   const step2Valid = (() => {
     if (wizard.oracleType === "admin") return true;
     if (wizard.oracleType === "pyth") return isValidHex64(wizard.oracleFeed);
@@ -254,6 +256,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   const setWalletBalance = useCallback((balance: bigint | null) => {
     setWizard((prev) => ({ ...prev, walletBalance: balance }));
+  }, []);
+
+  const setMintExistsOnChain = useCallback((exists: boolean | null) => {
+    setWizard((prev) => ({ ...prev, mintExistsOnChain: exists }));
   }, []);
 
   const setOracleType = useCallback(
@@ -479,6 +485,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             onMintChange={setMintAddress}
             onTokenResolved={setTokenMeta}
             onBalanceChange={setWalletBalance}
+            onMintExistsChange={setMintExistsOnChain}
             onContinue={() => advanceStep(1)}
             canContinue={step1Valid}
           />

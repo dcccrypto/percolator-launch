@@ -14,6 +14,7 @@ interface StepTokenSelectProps {
   onTokenResolved: (meta: { name: string; symbol: string; decimals: number } | null) => void;
   onBalanceChange: (balance: bigint | null) => void;
   onDexPoolDetected?: (pool: { priceUsd: number; pairLabel: string } | null) => void;
+  onMintExistsChange?: (exists: boolean | null) => void;
   onContinue: () => void;
   canContinue: boolean;
 }
@@ -27,6 +28,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
   onMintChange,
   onTokenResolved,
   onBalanceChange,
+  onMintExistsChange,
   onContinue,
   canContinue,
 }) => {
@@ -36,6 +38,8 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
   const [debounced, setDebounced] = useState(mintAddress);
   const [balance, setBalance] = useState<bigint | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [mintExists, setMintExists] = useState<boolean | null>(null);
+  const [mintCheckLoading, setMintCheckLoading] = useState(false);
 
   // Debounce mint input
   useEffect(() => {
@@ -57,6 +61,32 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
     [debounced, mintValid]
   );
   const tokenMeta = useTokenMeta(mintPk);
+
+  // Validate mint account exists on-chain (current network)
+  useEffect(() => {
+    if (!mintPk) {
+      setMintExists(null);
+      return;
+    }
+    let cancelled = false;
+    setMintCheckLoading(true);
+    (async () => {
+      try {
+        const info = await connection.getAccountInfo(mintPk);
+        if (!cancelled) setMintExists(info !== null);
+      } catch {
+        if (!cancelled) setMintExists(false);
+      } finally {
+        if (!cancelled) setMintCheckLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [connection, mintPk]);
+
+  // Propagate mint existence status
+  useEffect(() => {
+    onMintExistsChange?.(mintExists);
+  }, [mintExists, onMintExistsChange]);
 
   // Propagate token meta changes
   useEffect(() => {
@@ -125,6 +155,16 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
             {mintIsUrl
               ? "Paste a valid Solana token address, not a URL"
               : "Invalid mint address — must be a base58 Solana token address"}
+          </p>
+        )}
+        {mintValid && !mintCheckLoading && mintExists === false && (
+          <p className="mt-1.5 text-[10px] text-[var(--short)]">
+            Token mint not found on this network. Make sure you&apos;re using a devnet token address.
+          </p>
+        )}
+        {mintValid && mintCheckLoading && (
+          <p className="mt-1.5 text-[10px] text-[var(--text-dim)]">
+            Verifying mint on-chain…
           </p>
         )}
       </div>
