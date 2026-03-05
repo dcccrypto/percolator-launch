@@ -434,7 +434,7 @@ export default function LeaderboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/leaderboard?period=${p}&limit=50`);
+      const res = await fetch(`/api/leaderboard?period=${p}&limit=100`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setEntries(json.leaderboard ?? []);
