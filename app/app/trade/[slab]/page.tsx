@@ -524,11 +524,68 @@ function InvalidAddressPage({ address }: { address: string }) {
   );
 }
 
+/**
+ * Slug resolver: when the URL param isn't a valid Solana pubkey (e.g. "SOL-PERP"),
+ * fetch the markets API and try to match by symbol/slug, then redirect.
+ */
+function SlugResolver({ slug }: { slug: string }) {
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolve() {
+      try {
+        const res = await fetch("/api/markets", { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) throw new Error("Markets API error");
+        const data = (await res.json()) as { markets?: Array<{ slab_address: string; symbol: string | null; name: string | null }> };
+        if (cancelled) return;
+
+        const markets = data.markets ?? [];
+        const normalizedSlug = slug.toUpperCase().replace(/[_\s]/g, "-");
+
+        // Match by symbol (exact), then by name (case-insensitive), then by prefix
+        const match =
+          markets.find((m) => (m.symbol ?? "").toUpperCase() === normalizedSlug) ??
+          markets.find((m) => (m.symbol ?? "").toUpperCase().replace(/[/_\s]/g, "-") === normalizedSlug) ??
+          markets.find((m) => (m.name ?? "").toUpperCase().replace(/[/_\s]/g, "-") === normalizedSlug) ??
+          markets.find((m) => (m.symbol ?? "").toUpperCase().startsWith(normalizedSlug.split("-")[0]));
+
+        if (match?.slab_address) {
+          // Use replace so the slug URL doesn't stay in browser history
+          window.location.replace(`/trade/${match.slab_address}`);
+        } else {
+          if (!cancelled) setError(true);
+        }
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    }
+
+    resolve();
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  if (error) return <InvalidAddressPage address={slug} />;
+
+  // Loading state while resolving slug
+  return (
+    <div className="min-h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+      <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.15em]">
+        Resolving market…
+      </p>
+      <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slug}</p>
+    </div>
+  );
+}
+
 export default function TradePage({ params }: { params: Promise<{ slab: string }> }) {
   const { slab } = use(params);
 
+  // If not a valid pubkey, try resolving as a market slug (e.g. SOL-PERP)
   if (!isValidPublicKey(slab)) {
-    return <InvalidAddressPage address={slab} />;
+    return <SlugResolver slug={slab} />;
   }
 
   return (
