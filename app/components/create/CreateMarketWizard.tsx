@@ -86,6 +86,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const quickMintForHook = wizard.mode === "quick" && wizard.mintAddress.length >= 32 ? wizard.mintAddress : null;
   const quickLaunch = useQuickLaunch(quickMintForHook);
 
+  // On-chain mint network validation (set by StepTokenSelect)
+  const [mintExistsOnNetwork, setMintExistsOnNetwork] = useState(false);
+
   // SOL balance for cost check in review step
   const [solBalance, setSolBalance] = useState<number | null>(null);
   useEffect(() => {
@@ -120,7 +123,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const symbol = wizard.tokenMeta?.symbol ?? "Token";
 
   // Step validation
-  const step1Valid = mintValid && wizard.tokenMeta !== null && (wizard.tokenMeta.decimals <= 12);
+  const step1Valid = mintValid && wizard.tokenMeta !== null && (wizard.tokenMeta.decimals <= 12) && mintExistsOnNetwork;
   const step2Valid = (() => {
     if (wizard.oracleType === "admin") return true;
     if (wizard.oracleType === "pyth") return isValidHex64(wizard.oracleFeed);
@@ -243,6 +246,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Updaters (memoized to avoid unnecessary re-renders in children)
   const setMintAddress = useCallback((mint: string) => {
     setWizard((prev) => ({ ...prev, mintAddress: mint }));
+    // Reset network validation when mint changes
+    setMintExistsOnNetwork(false);
   }, []);
 
   const setTokenMeta = useCallback(
@@ -479,6 +484,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             onMintChange={setMintAddress}
             onTokenResolved={setTokenMeta}
             onBalanceChange={setWalletBalance}
+            onMintNetworkValidChange={setMintExistsOnNetwork}
             onContinue={() => advanceStep(1)}
             canContinue={step1Valid}
           />
