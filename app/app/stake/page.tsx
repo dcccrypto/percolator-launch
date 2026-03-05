@@ -110,6 +110,7 @@ function slotsToTime(slots: number): string {
 /* ── Hero Section ── */
 
 function StakeHero({ pools }: { pools: StakePool[] }) {
+  const { connected } = useWalletCompat();
   const totalStaked = pools.reduce((s, p) => s + p.tvl, 0);
   const activePools = pools.length;
   const avgApr = pools.length > 0
@@ -118,7 +119,11 @@ function StakeHero({ pools }: { pools: StakePool[] }) {
 
   const metrics = [
     { label: "Total Staked", value: formatUsd(totalStaked), color: "text-[var(--accent)]" },
-    { label: "Your Deposits", value: "$—", color: "text-[var(--text-secondary)]" },
+    {
+      label: "Your Deposits",
+      value: connected ? "$—" : "Connect wallet",
+      color: connected ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] text-[11px]",
+    },
     { label: "Active Pools", value: String(activePools), color: "text-[var(--accent)]" },
     { label: "Avg APR", value: avgApr > 0 ? `${avgApr.toFixed(1)}%` : "—%", color: "text-[var(--cyan)]" },
   ];
@@ -455,9 +460,9 @@ function PoolCard({ pool }: { pool: StakePool }) {
           <span className="text-[var(--text-secondary)]">Cap</span>
           <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{Math.round(capRatio * 100)}% full</span>
         </div>
-        <div className="flex justify-between">
-          <span className="text-[var(--text-secondary)]">Cooldown</span>
-          <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.cooldownSlots.toLocaleString()} slots ({slotsToTime(pool.cooldownSlots)})</span>
+        <div className="flex justify-between gap-x-2">
+          <span className="shrink-0 text-[var(--text-secondary)]">Cooldown</span>
+          <span className="text-right text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.cooldownSlots.toLocaleString()} slots ({slotsToTime(pool.cooldownSlots)})</span>
         </div>
       </div>
 
@@ -527,7 +532,8 @@ export default function StakePage() {
           {/* Desktop lg+: 2-column — sidebar [380px] on left, pools on right */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
             {/* Left column: Position + Deposit — full-width on mobile, sidebar on lg+ */}
-            <div className="order-first space-y-4 lg:order-none w-full">
+            {/* pb-24 on mobile ensures deposit widget clears the fixed bottom nav (56px) */}
+            <div className="order-first space-y-4 pb-24 lg:order-none lg:pb-0 w-full">
               <ErrorBoundary label="Your Position">
                 <YourPositionPanel position={position} />
               </ErrorBoundary>

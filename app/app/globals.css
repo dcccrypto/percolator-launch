@@ -42,6 +42,13 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Account for fixed bottom nav on mobile so anchor-scroll doesn't hide content */
+@media (max-width: 767px) {
+  html {
+    scroll-padding-bottom: 80px;
+  }
+}
+
 @theme {
   --color-background: var(--bg);
   --color-foreground: var(--text);
