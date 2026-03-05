@@ -30,7 +30,7 @@ import { computeMarketHealth } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
-import { isPlaceholderSymbol } from "@/lib/symbol-utils";
+import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 import { OracleBadge } from "@/components/oracle/OracleBadge";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
@@ -539,13 +539,23 @@ function SlugResolvePage({ slug }: { slug: string }) {
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
-        const markets: Array<{ slab_address: string; symbol?: string }> = data.markets ?? [];
+        const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string }> = data.markets ?? [];
         // Normalize: "SOL-PERP" → "SOL", then match against symbol
         const slugNorm = slug.toUpperCase().replace(/-PERP$/, "");
-        const match = markets.find((m) => {
+
+        // 1. Try matching by symbol name
+        let match = markets.find((m) => {
           const sym = (m.symbol ?? "").toUpperCase().replace(/-PERP$/, "");
           return sym === slugNorm || (m.symbol ?? "").toUpperCase() === slug.toUpperCase();
         });
+
+        // 2. If no symbol match, try well-known slug aliases (e.g. SOL → mint address)
+        if (!match) {
+          const aliasMint = SLUG_ALIASES[slugNorm];
+          if (aliasMint) {
+            match = markets.find((m) => m.mint_address === aliasMint);
+          }
+        }
         if (match) {
           router.replace(`/trade/${match.slab_address}`);
         } else {

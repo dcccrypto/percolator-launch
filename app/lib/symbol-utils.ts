@@ -4,6 +4,20 @@
  */
 
 /**
+ * Well-known slug aliases that map human-friendly ticker names to their
+ * canonical mint addresses. Used by slug resolution (e.g. /trade/SOL-PERP)
+ * when the DB `symbol` column contains a truncated address instead of
+ * a recognisable name.
+ */
+export const SLUG_ALIASES: Record<string, string> = {
+  SOL: "So11111111111111111111111111111111111111112",
+  WSOL: "So11111111111111111111111111111111111111112",
+  USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+  BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+};
+
+/**
  * Returns true if the given symbol looks like a placeholder / truncated address
  * rather than a real human-readable token name.
  */
