@@ -392,6 +392,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     const tier = SLAB_TIERS[wizard.slabTier];
     const effectiveMint = devnetMintAddress ?? wizard.mintAddress;
 
+    // PERC-470: Include oracleMode + dexPoolAddress in retry params (fixes #810)
+    const oracleMode = wizard.oracleType === "pyth" ? "pyth" as const
+      : wizard.oracleType === "hyperp_ema" ? "hyperp" as const
+      : "admin" as const;
+
     const params: CreateMarketParams = {
       mint: new PublicKey(effectiveMint),
       initialPriceE6: priceE6,
@@ -407,6 +412,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       name: wizard.tokenMeta?.name ?? "Unknown Token",
       decimals,
       mainnetCA: wizard.mintAddress !== effectiveMint ? wizard.mintAddress : undefined,
+      oracleMode,
+      ...(oracleMode === "hyperp" && wizard.dexPool ? {
+        dexPoolAddress: wizard.dexPool.poolAddress,
+      } : {}),
     };
     create(params, createState.step);
   };

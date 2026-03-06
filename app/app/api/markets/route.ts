@@ -66,6 +66,8 @@ export async function POST(req: NextRequest) {
     matcher_context,
     logo_url,
     mainnet_ca,
+    oracle_mode,
+    dex_pool_address,
   } = body;
 
   if (!slab_address || !mint_address || !deployer) {
@@ -128,6 +130,8 @@ export async function POST(req: NextRequest) {
       matcher_context,
       logo_url: logo_url || null,
       mainnet_ca: mainnet_ca || null,
+      oracle_mode: oracle_mode || "admin",
+      dex_pool_address: dex_pool_address || null,
     })
     .select()
     .single();
