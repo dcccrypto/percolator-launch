@@ -9,6 +9,11 @@ import { formatHumanAmount } from "@/lib/parseAmount";
 import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 import { getNetwork } from "@/lib/config";
 
+/** Derive whether we're on devnet from the live RPC endpoint (not build-time env var). */
+function isDevnetEndpoint(rpcEndpoint: string): boolean {
+  return rpcEndpoint.includes("devnet") || rpcEndpoint.includes("127.0.0.1") || rpcEndpoint.includes("localhost");
+}
+
 type MintNetworkStatus = "idle" | "loading" | "valid" | "invalid" | "mirroring" | "mirror-failed";
 
 interface StepTokenSelectProps {
@@ -47,7 +52,8 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
   const [mintNetworkStatus, setMintNetworkStatus] = useState<MintNetworkStatus>("idle");
   const [mirrorError, setMirrorError] = useState<string | null>(null);
   const [mirrorMeta, setMirrorMeta] = useState<{ name: string; symbol: string; decimals: number } | null>(null);
-  const isDevnet = getNetwork() === "devnet";
+  // Use live RPC endpoint to detect devnet (not build-time env var which may be wrong in prod).
+  const isDevnet = isDevnetEndpoint(connection.rpcEndpoint) || getNetwork() === "devnet";
 
   // Debounce mint input
   useEffect(() => {
@@ -79,16 +85,55 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
       onMintNetworkValidChange?.(false);
       return;
     }
-    // Devnet: accept any valid pubkey — mirror endpoint handles devnet mint creation
-    if (isDevnet) {
-      setMintNetworkStatus("valid");
-      onMintNetworkValidChange?.(true);
-      return;
-    }
     let cancelled = false;
-    setMintNetworkStatus("loading");
     setMirrorError(null);
     setMirrorMeta(null);
+
+    if (isDevnet) {
+      // DEVNET: Always call mirror-mint to get/create the canonical devnet mint address.
+      // Do NOT early-return — devnetMintAddress must be resolved before the wizard can proceed.
+      setMintNetworkStatus("mirroring");
+      (async () => {
+        try {
+          const resp = await fetch("/api/devnet-mirror-mint", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mainnetCA: debounced }),
+          });
+          if (cancelled) return;
+          const data = await resp.json();
+          if (!resp.ok) {
+            setMintNetworkStatus("mirror-failed");
+            setMirrorError(data.error ?? `Mirror failed (HTTP ${resp.status})`);
+            onMintNetworkValidChange?.(false);
+            return;
+          }
+          // Mirror succeeded — notify parent with the devnet mint + metadata
+          const resolvedMirrorMeta = {
+            name: data.name ?? `Token ${debounced.slice(0, 6)}`,
+            symbol: data.symbol ?? debounced.slice(0, 4).toUpperCase(),
+            decimals: data.decimals ?? 6,
+          };
+          setMirrorMeta(resolvedMirrorMeta);
+          // Wire devnet mint CA up to CreateMarketWizard (effectiveMint in handleLaunch)
+          onDevnetMintResolved?.(data.devnetMint, resolvedMirrorMeta);
+          // Also push metadata to parent (useTokenMeta won't find mainnet token on devnet)
+          onTokenResolved(resolvedMirrorMeta);
+          setMintNetworkStatus("valid");
+          onMintNetworkValidChange?.(true);
+        } catch {
+          if (!cancelled) {
+            setMintNetworkStatus("mirror-failed");
+            setMirrorError("Network error — could not reach mirror-mint endpoint");
+            onMintNetworkValidChange?.(false);
+          }
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+
+    // MAINNET: Check on-chain mint existence
+    setMintNetworkStatus("loading");
     (async () => {
       try {
         const accountInfo = await connection.getAccountInfo(mintPk);
@@ -108,43 +153,9 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
           onMintNetworkValidChange?.(true);
           return;
         }
-
-        // Account does not exist on this network
-        if (!isDevnet) {
-          // On mainnet, just block — no mirroring
-          setMintNetworkStatus("invalid");
-          onMintNetworkValidChange?.(false);
-          return;
-        }
-
-        // DEVNET: Auto-mirror the mainnet CA
-        setMintNetworkStatus("mirroring");
-        const resp = await fetch("/api/devnet-mirror-mint", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mainnetCA: debounced }),
-        });
-        if (cancelled) return;
-        const data = await resp.json();
-        if (!resp.ok) {
-          setMintNetworkStatus("mirror-failed");
-          setMirrorError(data.error ?? `Mirror failed (HTTP ${resp.status})`);
-          onMintNetworkValidChange?.(false);
-          return;
-        }
-
-        // Mirror succeeded — notify parent with devnet mint + metadata
-        const resolvedMirrorMeta = {
-          name: data.name ?? `Token ${debounced.slice(0, 6)}`,
-          symbol: data.symbol ?? debounced.slice(0, 4).toUpperCase(),
-          decimals: data.decimals ?? 6,
-        };
-        setMirrorMeta(resolvedMirrorMeta);
-        onDevnetMintResolved?.(data.devnetMint, resolvedMirrorMeta);
-        // Also push metadata to parent (useTokenMeta won't find it on devnet)
-        onTokenResolved(resolvedMirrorMeta);
-        setMintNetworkStatus("valid");
-        onMintNetworkValidChange?.(true);
+        // Account does not exist on mainnet — block
+        setMintNetworkStatus("invalid");
+        onMintNetworkValidChange?.(false);
       } catch {
         if (!cancelled) {
           setMintNetworkStatus("invalid");
