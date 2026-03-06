@@ -292,9 +292,20 @@ export async function POST(req: NextRequest) {
       { onConflict: "mainnet_ca", ignoreDuplicates: true },
     );
 
+    // Re-SELECT the canonical row from DB to handle TOCTOU races (#772):
+    // If two concurrent requests both created mints, only one wins the upsert.
+    // Return the DB-canonical devnetMint so all callers get the same address.
+    const { data: canonical } = await (supabase as any)
+      .from("devnet_mints")
+      .select("devnet_mint")
+      .eq("mainnet_ca", mainnetCA)
+      .single();
+
+    const canonicalMint = canonical?.devnet_mint ?? devnetMint;
+
     return NextResponse.json({
-      status: "created",
-      devnetMint,
+      status: canonicalMint === devnetMint ? "created" : "existing",
+      devnetMint: canonicalMint,
       name: tokenInfo.name,
       symbol: tokenInfo.symbol,
       decimals: tokenInfo.decimals,

@@ -20,3 +20,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS devnet_mints_mainnet_ca_idx ON devnet_mints(ma
 
 -- Fast lookup by devnet mint address (used in pre-fund allowlist check)
 CREATE INDEX IF NOT EXISTS devnet_mints_devnet_mint_idx ON devnet_mints(devnet_mint);
+
+-- Explicit RLS: deny all direct access; all operations use service_role client which bypasses RLS.
+ALTER TABLE devnet_mints ENABLE ROW LEVEL SECURITY;
+-- No policies needed: service_role bypasses RLS, anon/authenticated have no grants.
