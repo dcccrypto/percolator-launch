@@ -55,7 +55,8 @@ function computeAprs(
 
     const growth = (cur.rate - old.rate) / old.rate;
     const annualized = growth * (365 * MS_PER_DAY) / elapsed;
-    result[slab] = isFinite(annualized) ? Math.round(annualized * 10_000) / 100 : 0;
+    // Clamp to 0: negative APR (insurance drawdown) would confuse stakers.
+    result[slab] = isFinite(annualized) ? Math.max(0, Math.round(annualized * 10_000) / 100) : 0;
   }
   return result;
 }
@@ -147,6 +148,17 @@ describe("computeAprs", () => {
     });
     expect(result[SLAB_A]).toBeGreaterThan(0);
     expect(result[SLAB_B]).toBe(0);
+  });
+
+  it("clamps negative APR to 0 (insurance drawdown scenario)", () => {
+    const sevenDaysAgo = ts(7);
+    // Rate decreased: drawdown scenario
+    const result = computeAprs([SLAB_A], {
+      earliest7d: [{ slab: SLAB_A, redemption_rate_e6: 1_010_000, created_at: sevenDaysAgo }],
+      earliest30d: [{ slab: SLAB_A, redemption_rate_e6: 1_010_000, created_at: sevenDaysAgo }],
+      latest: [{ slab: SLAB_A, redemption_rate_e6: 1_000_000, created_at: new Date().toISOString() }],
+    });
+    expect(result[SLAB_A]).toBe(0);
   });
 
   it("returns 0 for current rate of 0 (no LP activity)", () => {

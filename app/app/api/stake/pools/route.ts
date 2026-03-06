@@ -67,12 +67,15 @@ async function computeAprs(
     .gte("created_at", since30d)
     .order("created_at", { ascending: true });
 
-  // Fetch the latest snapshot per slab (current rate)
+  // Fetch the latest snapshot per slab (current rate).
+  // Limit to slabAddresses.length * 10 rows to bound result size
+  // (slab list is on-chain so not user-controlled, but avoids latency spikes).
   const { data: latestRaw } = await db
     .from("insurance_snapshots")
     .select("slab, redemption_rate_e6, created_at")
     .in("slab", slabAddresses)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(slabAddresses.length * 10);
 
   const earliest7d: InsuranceSnapshotRow[] = earliest7dRaw ?? [];
   const earliest30d: InsuranceSnapshotRow[] = earliest30dRaw ?? [];
@@ -134,8 +137,9 @@ async function computeAprs(
     const growth = (cur.rate - old.rate) / old.rate;
     const annualized = growth * (365 * MS_PER_DAY) / elapsed;
 
+    // Clamp to 0: negative APR (insurance drawdown) would confuse stakers.
     result[slab] = isFinite(annualized)
-      ? Math.round(annualized * 10_000) / 100  // → percentage, 2dp
+      ? Math.max(0, Math.round(annualized * 10_000) / 100)  // → percentage, 2dp, floor 0
       : 0;
   }
 
