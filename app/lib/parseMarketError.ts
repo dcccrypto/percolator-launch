@@ -37,7 +37,7 @@ export function parseMarketCreationError(error: unknown): string {
   // token transfers also include "insufficient funds" but are not a SOL problem. Fixes #758.
   if (
     msg.includes("insufficient funds for transfer") ||
-    (msg.includes("insufficient funds") && !msg.includes("lamports")) ||
+    (msg.includes("insufficient funds") && !msg.includes("lamports") && !msg.includes("for rent")) ||
     (msg.includes("custom program error: 0x1") && msg.includes("TokenkegQ"))
   ) {
     return "Insufficient token balance. Your wallet doesn't have enough collateral tokens to complete this step. On devnet, refresh the page and retry — the faucet will top up your balance.";
