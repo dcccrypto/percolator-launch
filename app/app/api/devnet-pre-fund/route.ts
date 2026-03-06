@@ -28,6 +28,7 @@ import {
   createAssociatedTokenAccountInstruction,
   createMintToInstruction,
   getAccount,
+  getMint,
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
@@ -130,6 +131,38 @@ export async function POST(req: NextRequest) {
 
     const cfg = getConfig();
     const connection = new Connection(cfg.rpcUrl, "confirmed");
+
+    // Pre-flight: verify the configured keypair is actually the mint authority
+    // This catches env misconfigurations early with a clear error instead of
+    // a generic "Internal server error" from a failed mintTo instruction.
+    try {
+      const mintInfo = await getMint(connection, mintPk);
+      if (
+        !mintInfo.mintAuthority ||
+        !mintInfo.mintAuthority.equals(mintAuthority.publicKey)
+      ) {
+        const configuredAuth = mintAuthority.publicKey.toBase58().slice(0, 8);
+        const onChainAuth = mintInfo.mintAuthority
+          ? mintInfo.mintAuthority.toBase58().slice(0, 8)
+          : "none";
+        Sentry.captureMessage(
+          `Mint authority mismatch for ${mintAddress}: configured=${configuredAuth}… on-chain=${onChainAuth}…`,
+          { level: "error", tags: { endpoint: "/api/devnet-pre-fund" } },
+        );
+        return NextResponse.json(
+          {
+            error: "Mint authority mismatch — server keypair is not the authority for this mint. Contact team.",
+            detail: `configured=${configuredAuth}… on-chain=${onChainAuth}…`,
+          },
+          { status: 500 },
+        );
+      }
+    } catch (e) {
+      // If we can't fetch mint info, proceed and let the tx fail naturally
+      Sentry.captureException(e, {
+        tags: { endpoint: "/api/devnet-pre-fund", phase: "authority-check" },
+      });
+    }
 
     // Derive user's ATA
     const ata = await getAssociatedTokenAddress(mintPk, walletPk);
