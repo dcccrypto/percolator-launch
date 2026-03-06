@@ -92,20 +92,11 @@ describe("getRpcEndpoint", () => {
     expect(getRpcEndpoint()).toBe("https://devnet.helius-rpc.com/?api-key=server-key");
   });
 
-  it("does not use NEXT_PUBLIC_HELIUS_API_KEY for server RPC fallback", () => {
+  it("falls back to public devnet RPC when no Helius config provided (PERC-469)", () => {
+    // NEXT_PUBLIC_HELIUS_API_KEY removed in PERC-469 — server fallback must never use it
     clearWindow();
     delete process.env.NEXT_PUBLIC_HELIUS_RPC_URL;
     delete process.env.HELIUS_API_KEY;
-    process.env.NEXT_PUBLIC_HELIUS_API_KEY = "public-key";
-    delete process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-    expect(getRpcEndpoint()).toBe("https://api.devnet.solana.com");
-  });
-
-  it("falls back to public devnet RPC when no Helius config provided", () => {
-    clearWindow();
-    delete process.env.NEXT_PUBLIC_HELIUS_RPC_URL;
-    delete process.env.HELIUS_API_KEY;
-    delete process.env.NEXT_PUBLIC_HELIUS_API_KEY;
     delete process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
     delete process.env.SOLANA_RPC_URL;
     expect(getRpcEndpoint()).toBe("https://api.devnet.solana.com");
@@ -167,20 +158,27 @@ describe("getWsEndpoint", () => {
     clearWindow();
   });
 
-  it("prefers NEXT_PUBLIC_HELIUS_WS_API_KEY when present", () => {
+  it("uses NEXT_PUBLIC_HELIUS_WS_API_KEY for devnet", () => {
     clearWindow();
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
     process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY = "ws-key";
-    process.env.NEXT_PUBLIC_HELIUS_API_KEY = "legacy-key";
     expect(getWsEndpoint()).toBe("wss://devnet.helius-rpc.com/?api-key=ws-key");
   });
 
-  it("falls back to HELIUS_API_KEY (server-only) when WS key not set (PERC-469)", () => {
+  it("uses NEXT_PUBLIC_HELIUS_WS_API_KEY for mainnet", () => {
     clearWindow();
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "mainnet";
+    process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY = "ws-key";
+    expect(getWsEndpoint()).toBe("wss://mainnet.helius-rpc.com/?api-key=ws-key");
+  });
+
+  it("returns undefined when NEXT_PUBLIC_HELIUS_WS_API_KEY is not set (PERC-469)", () => {
+    // HELIUS_API_KEY is server-only and cannot be read client-side — getWsEndpoint()
+    // must not fall back to it or any NEXT_PUBLIC_HELIUS_API_KEY (removed in PERC-469).
+    clearWindow();
     delete process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY;
-    process.env.HELIUS_API_KEY = "server-key";
-    expect(getWsEndpoint()).toBe("wss://mainnet.helius-rpc.com/?api-key=server-key");
+    process.env.HELIUS_API_KEY = "server-key"; // should be ignored
+    expect(getWsEndpoint()).toBeUndefined();
   });
 
   it("returns undefined when no keys are configured", () => {

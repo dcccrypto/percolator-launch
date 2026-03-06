@@ -21,15 +21,45 @@ export const dynamic = "force-dynamic";
  */
 
 /**
- * Lazy RPC URL getter — evaluated on first request, not at module load time.
- * Prevents build failures when env vars aren't available during SSG/SSR.
+ * Build the upstream Helius RPC URL for a specific network.
+ * PERC-469: Supports optional ?network=mainnet|devnet query param so Privy can
+ * configure both chains through the same proxy without exposing any API key.
+ *
+ * Priority for API key resolution:
+ *   HELIUS_MAINNET_API_KEY / HELIUS_DEVNET_API_KEY (network-specific) →
+ *   HELIUS_API_KEY (generic fallback) → public Solana RPC (rate-limited, no key)
  */
-let _rpcUrl: string | null = null;
-function getRpcUrl(): string {
-  if (!_rpcUrl) {
-    _rpcUrl = getRpcEndpoint();
+function buildHeliusUrl(network: "mainnet" | "devnet"): string {
+  if (network === "mainnet") {
+    const key = (process.env.HELIUS_MAINNET_API_KEY ?? process.env.HELIUS_API_KEY ?? "").trim();
+    return key
+      ? `https://mainnet.helius-rpc.com/?api-key=${key}`
+      : "https://api.mainnet-beta.solana.com";
   }
-  return _rpcUrl;
+  const key = (process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? "").trim();
+  return key
+    ? `https://devnet.helius-rpc.com/?api-key=${key}`
+    : "https://api.devnet.solana.com";
+}
+
+/**
+ * Lazy per-network RPC URL cache — avoids rebuilding on every request.
+ * One entry per network ("mainnet" | "devnet" | "default").
+ */
+const _rpcUrlCache: Partial<Record<string, string>> = {};
+
+function getRpcUrl(networkOverride?: "mainnet" | "devnet"): string {
+  if (networkOverride) {
+    if (!_rpcUrlCache[networkOverride]) {
+      _rpcUrlCache[networkOverride] = buildHeliusUrl(networkOverride);
+    }
+    return _rpcUrlCache[networkOverride]!;
+  }
+  // No override — fall back to existing env-driven behaviour
+  if (!_rpcUrlCache["default"]) {
+    _rpcUrlCache["default"] = getRpcEndpoint();
+  }
+  return _rpcUrlCache["default"]!;
 }
 
 /**
@@ -158,12 +188,20 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
 
 /**
  * Process a single validated JSON-RPC request with caching and deduplication.
+ * @param networkOverride — optional "mainnet"|"devnet" to route to a specific Helius endpoint
+ *   (used by Privy so both chains can be initialised without exposing any API key)
  */
-async function processSingleRequest(req: JsonRpcRequest): Promise<unknown> {
+async function processSingleRequest(
+  req: JsonRpcRequest,
+  networkOverride?: "mainnet" | "devnet",
+): Promise<unknown> {
   const method = req.method;
   const isMutating = MUTATING_METHODS.has(method);
   const ttl = CACHEABLE_METHODS[method];
-  const cacheKey = !isMutating ? getCacheKey(method, req.params) : "";
+  // Include network in cache key so mainnet/devnet responses don't collide
+  const cacheKey = !isMutating
+    ? getCacheKey(`${networkOverride ?? "default"}:${method}`, req.params)
+    : "";
 
   // Check cache for read-only methods
   if (ttl && !isMutating) {
@@ -181,7 +219,7 @@ async function processSingleRequest(req: JsonRpcRequest): Promise<unknown> {
   }
 
   const fetchPromise = (async () => {
-    const response = await fetch(getRpcUrl(), {
+    const response = await fetch(getRpcUrl(networkOverride), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
@@ -213,6 +251,14 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const isBatch = Array.isArray(body);
 
+    // PERC-469: Optional ?network=mainnet|devnet query param lets Privy configure both
+    // Solana chains through the same proxy without exposing any Helius API key client-side.
+    const networkParam = req.nextUrl.searchParams.get("network");
+    const networkOverride: "mainnet" | "devnet" | undefined =
+      networkParam === "mainnet" ? "mainnet"
+      : networkParam === "devnet" ? "devnet"
+      : undefined;
+
     if (isBatch) {
       // --- Batch request handling ---
       if (body.length === 0) {
@@ -234,7 +280,7 @@ export async function POST(req: NextRequest) {
         body.map(async (item: Record<string, unknown>) => {
           const error = validateRequest(item);
           if (error) return error;
-          return processSingleRequest(item as unknown as JsonRpcRequest);
+          return processSingleRequest(item as unknown as JsonRpcRequest, networkOverride);
         })
       );
 
@@ -248,7 +294,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(error, { status });
     }
 
-    const result = await processSingleRequest(body as JsonRpcRequest);
+    const result = await processSingleRequest(body as JsonRpcRequest, networkOverride);
     // JSON-RPC errors are application-level, not transport-level — always return HTTP 200.
     // Returning 400 for RPC errors breaks @solana/web3.js which treats non-2xx as network failures.
     return NextResponse.json(result, { status: 200 });
