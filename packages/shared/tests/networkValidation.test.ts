@@ -13,7 +13,7 @@ import {
 describe("validateNetworkConfig", () => {
   // The source regex is [1-9A-HJ-NP-Z]{40,45} — uppercase+digits only.
   // Use a test ID that matches this pattern.
-  const validProgramId = "123456789ABCDEFGHJKLMNPQRSTUVWXYZ123456789ABC";
+  const validProgramId = "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD";
   const validDevnetEnv = {
     NETWORK: "devnet",
     PROGRAM_ID: validProgramId,
@@ -176,7 +176,7 @@ describe("ensureNetworkConfigValid", () => {
   it("does not throw for valid devnet config", () => {
     const env = {
       NETWORK: "devnet",
-      PROGRAM_ID: "123456789ABCDEFGHJKLMNPQRSTUVWXYZ123456789ABC",
+      PROGRAM_ID: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
     } as unknown as NodeJS.ProcessEnv;
     expect(() => ensureNetworkConfigValid(env)).not.toThrow();
   });
