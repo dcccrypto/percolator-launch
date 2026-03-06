@@ -69,13 +69,10 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
         const collMintPk = new PublicKey(collateralMint);
 
         // Validate slab exists on-chain (P-CRITICAL-3: network check)
-        try {
-          const slabInfo = await connection.getAccountInfo(slabPk);
-          if (!slabInfo) {
-            throw new Error('Market not found on current network. Please switch networks in your wallet and refresh.');
-          }
-        } catch (e) {
-          if (e instanceof Error && e.message.includes('Market not found')) throw e;
+        // Do NOT wrap in try/catch — RPC errors must propagate to prevent silent bypass of network guard.
+        const slabInfo = await connection.getAccountInfo(slabPk);
+        if (!slabInfo) {
+          throw new Error('Market not found on current network. Please switch networks in your wallet and refresh.');
         }
 
         // Derive all PDAs
