@@ -99,7 +99,7 @@ const CONFIGS = {
     get rpcUrl() { return getRpcEndpoint(); },
     programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
     matcherProgramId: "GTRgyTDfrMvBubALAqtHuQwT8tbGyXid7svXZKtWfC9k",
-    crankWallet: "2JaSzRYrf44fPpQBtRJfnCEgThwCmvpFd3FCXi45VXxm",
+    crankWallet: "FF7KFfU5Bb3Mze2AasDHCCZuyhdaSLjUZy2K3JvjdB7x",
     explorerUrl: "https://explorer.solana.com",
     // Multiple program deployments for different slab sizes (PERC-286).
     // Each tier has its own on-chain program compiled with the appropriate --features flag.

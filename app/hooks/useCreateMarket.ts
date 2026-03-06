@@ -773,7 +773,9 @@ export function useCreateMarket() {
               name: params.name ?? "Unknown Token",
               decimals: params.decimals ?? 6,
               deployer: wallet.publicKey.toBase58(),
-              oracle_authority: isAdminOracle ? wallet.publicKey.toBase58() : null,
+              oracle_authority: isAdminOracle
+                ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : wallet.publicKey.toBase58())
+                : null,
               initial_price_e6: params.initialPriceE6.toString(),
               max_leverage: params.initialMarginBps > 0 ? Math.floor(10000 / Number(params.initialMarginBps)) : 1,
               trading_fee_bps: Number(params.tradingFeeBps),
