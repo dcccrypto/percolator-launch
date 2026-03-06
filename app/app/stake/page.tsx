@@ -8,9 +8,10 @@ import {
   deriveStakePool,
   deriveDepositPda,
 } from "@percolator/sdk";
-import { unpackAccount } from "@solana/spl-token";
+import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
+import { parseHumanAmount } from "@/lib/parseAmount";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -377,7 +378,8 @@ function DepositWidget({
     if (!pool || amountNum <= 0 || depositLoading) return;
     setTxStatus(null);
     try {
-      const rawAmount = BigInt(Math.round(amountNum * Math.pow(10, balanceDecimals)));
+      // Use string-based BigInt parsing to avoid float precision loss at large amounts.
+      const rawAmount = parseHumanAmount(amount, balanceDecimals);
       const sig = await deposit(rawAmount);
       setAmount("");
       setTxStatus({ type: "success", msg: `Deposit confirmed: ${sig.slice(0, 8)}…` });
@@ -683,7 +685,10 @@ export default function StakePage() {
             const lpAccount = unpackAccount(userLpAta, lpAtaInfo);
             if (lpAccount.amount === 0n) continue;
 
-            const lpBalance = Number(lpAccount.amount) / 1e6; // assume 6 decimals
+            // Derive decimals from on-chain LP mint rather than assuming 6.
+            const lpMintInfo = await getMint(connection, lpMint);
+            const lpDecimals = lpMintInfo.decimals;
+            const lpBalance = Number(lpAccount.amount) / Math.pow(10, lpDecimals);
 
             // Calculate estimated value: (user_lp / total_lp_supply) * vault_balance
             const estimatedValue = pool.totalLpSupply > 0
