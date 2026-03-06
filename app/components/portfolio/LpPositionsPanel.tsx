@@ -197,7 +197,7 @@ export function LpPositionsPanel({
       {/* Section heading */}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--cyan)]/70">
-          Insurance LP Positions
+          // Insurance LP Positions
         </h2>
         {positions.length > 0 && !loading && (
           <span
@@ -234,8 +234,20 @@ export function LpPositionsPanel({
           ))}
         </div>
       ) : error ? (
-        <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-6 text-center">
-          <p className="text-[12px] text-[var(--short)]">Failed to load LP positions</p>
+        <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-6 flex flex-col items-center justify-center gap-3 text-center">
+          <div className="flex items-center gap-2">
+            <svg className="h-4 w-4 text-[var(--warning)] flex-shrink-0" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1a7 7 0 110 14A7 7 0 018 1zm0 9.5a.75.75 0 100 1.5.75.75 0 000-1.5zM8 4a.75.75 0 00-.75.75v3.5a.75.75 0 001.5 0v-3.5A.75.75 0 008 4z" />
+            </svg>
+            <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Unable to load LP positions</p>
+          </div>
+          <p className="text-[11px] text-[var(--text-dim)]">Please try refreshing</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="border border-[var(--cyan)]/40 px-4 py-1.5 text-[11px] font-semibold text-[var(--cyan)] transition-colors hover:border-[var(--cyan)]/80 hover:bg-[var(--cyan)]/5"
+          >
+            Retry
+          </button>
         </div>
       ) : positions.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-6 flex items-center justify-between gap-4">

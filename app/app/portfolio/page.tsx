@@ -149,9 +149,8 @@ export default function PortfolioPage() {
               },
               {
                 label: "LP Value",
-                value: lpPositions.loading ? "\u2026" : lpPositions.totalRedeemable > 0
-                  ? `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  : "—",
+                value: lpPositions.loading ? "\u2026"
+                  : `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                 color: lpPositions.totalRedeemable > 0 ? "text-[var(--cyan)]" : "text-[var(--text-dim)]",
                 sub: lpPositions.positions.length > 0
                   ? `${lpPositions.positions.length} pool${lpPositions.positions.length > 1 ? "s" : ""}`
@@ -164,8 +163,8 @@ export default function PortfolioPage() {
                 sub: atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
                 subColor: atRiskCount > 0 ? "text-[var(--short)]" : undefined,
               },
-            ].map((stat) => (
-              <div key={stat.label} className="bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
+            ].map((stat, i, arr) => (
+              <div key={stat.label} className={`bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]${arr.length % 2 !== 0 && i === arr.length - 1 ? " col-span-2 sm:col-span-1" : ""}`}>
                 <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">{stat.label}</p>
                 <p className={`text-xl font-bold tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                   {stat.value}
