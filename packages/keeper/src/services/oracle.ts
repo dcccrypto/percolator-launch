@@ -90,7 +90,8 @@ export class OracleService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
       
-      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
+      // Encode mint to prevent URL injection (#783)
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(mint)}`, {
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -131,7 +132,8 @@ export class OracleService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
       
-      const res = await fetch(`https://api.jup.ag/price/v2?ids=${mint}`, {
+      // Encode mint to prevent query param injection (#783)
+      const res = await fetch(`https://api.jup.ag/price/v2?ids=${encodeURIComponent(mint)}`, {
         signal: controller.signal
       });
       clearTimeout(timeoutId);

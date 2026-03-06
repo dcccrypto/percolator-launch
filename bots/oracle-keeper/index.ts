@@ -496,9 +496,13 @@ async function discoverNewMarkets(): Promise<MarketInfo[]> {
  * This fetches price directly using the mainnet CA via Jupiter Lite API.
  */
 async function fetchPriceByCA(mainnetCA: string): Promise<{ price: number; source: string } | null> {
+  // Validate as base58 Solana address before using in external URLs (#783, #784)
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mainnetCA)) return null;
+  const encoded = encodeURIComponent(mainnetCA);
+
   try {
     const resp = await fetch(
-      `https://api.jup.ag/price/v2?ids=${mainnetCA}`,
+      `https://api.jup.ag/price/v2?ids=${encoded}`,
       { signal: AbortSignal.timeout(4000) },
     );
     const json = (await resp.json()) as any;
@@ -509,7 +513,7 @@ async function fetchPriceByCA(mainnetCA: string): Promise<{ price: number; sourc
   // DexScreener fallback
   try {
     const resp = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${mainnetCA}`,
+      `https://api.dexscreener.com/latest/dex/tokens/${encoded}`,
       { signal: AbortSignal.timeout(4000) },
     );
     const json = (await resp.json()) as any;

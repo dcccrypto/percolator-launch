@@ -56,6 +56,11 @@ export async function POST(req: NextRequest) {
     try { new PublicKey(mainnetCA); } catch {
       return NextResponse.json({ error: "Invalid mainnetCA" }, { status: 400 });
     }
+    if (devnetMint) {
+      try { new PublicKey(devnetMint); } catch {
+        return NextResponse.json({ error: "Invalid devnetMint" }, { status: 400 });
+      }
+    }
 
     // Step 1: Write mainnet_ca to Supabase so oracle service can look up the token price
     let dbResult: { slab_address: string; mainnet_ca: string; symbol?: string } | null = null;
