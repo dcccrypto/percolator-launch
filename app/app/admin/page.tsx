@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient, type User } from "@supabase/supabase-js";
+import { OracleAdminSection } from "@/components/admin/OracleAdminSection";
 
 function getAuthClient() {
   return createClient(
@@ -707,6 +708,11 @@ export default function AdminDashboard() {
           )}
         </div>
       </div>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          ORACLE AUTHORITY ADMIN
+      ══════════════════════════════════════════════════════════════════════ */}
+      <OracleAdminSection />
 
       {/* ══════════════════════════════════════════════════════════════════════
           PLATFORM STATS
