@@ -175,7 +175,10 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
             const [depositPda] = deriveDepositPda(poolPk, walletPk, stakeProgramPk);
             const depositInfo = await connection.getAccountInfo(depositPda);
             if (depositInfo && depositInfo.data.length >= 80) {
-              // depositPda layout: [discriminator: 8 bytes][depositor: 32 bytes][slab: 32 bytes][deposit_slot: u64 8 bytes][...]
+              // StakeDeposit layout (percolator-stake/src/state.rs, #[repr(C)] Pod):
+              //   is_initialized: u8 (1) + bump: u8 (1) + _padding: [u8;6] (6)
+              //   pool: [u8;32] (32) + user: [u8;32] (32) → last_deposit_slot: u64 at offset 72
+              //   lp_amount: u64 at offset 80 → total minimum size = 80 bytes
               const depositSlot = depositInfo.data.readBigUInt64LE(72);
               const cooldownSlots = BigInt(pool.cooldownSlots);
               cooldownElapsed = depositSlot === 0n || cooldownSlots === 0n

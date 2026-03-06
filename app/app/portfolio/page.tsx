@@ -117,11 +117,11 @@ export default function PortfolioPage() {
             </div>
             {refresh && (
               <button
-                onClick={() => refresh()}
-                disabled={loading}
+                onClick={() => { refresh(); lpPositions.refresh(); }}
+                disabled={loading || lpPositions.loading}
                 className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-2 text-xs text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--text)] disabled:opacity-40"
               >
-                {loading ? "Refreshing..." : "Refresh"}
+                {loading || lpPositions.loading ? "Refreshing..." : "Refresh"}
               </button>
             )}
           </div>
