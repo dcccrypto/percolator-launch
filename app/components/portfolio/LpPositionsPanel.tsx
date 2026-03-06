@@ -24,20 +24,31 @@ function formatPct(n: number): string {
 
 /**
  * Detect if a "symbol" is actually a truncated address hash (e.g. "7MkErbg1").
- * Real symbols are short (1-10 chars) and mostly letters.
+ *
+ * Real token symbols are ALL-CAPS letters only (e.g. "BTC", "SOL", "PERP").
+ * Pool address slabs look like "7MkErbg1" — mixed case + digits, not a proper symbol.
+ * Using a positive match (/^[A-Z]{1,10}$/) is more reliable than a digit-ratio
+ * heuristic, which failed for "7MkErbg1" (2/8 = 25%, below the old 30% threshold).
  */
 function isAddressHash(s: string): boolean {
-  if (!s || s.length > 10) return false;
-  // If more than half the chars are digits, it's likely a hash
-  const digitCount = (s.match(/\d/g) || []).length;
-  return digitCount > s.length * 0.3 && s.length >= 6;
+  if (!s) return true;
+  // A valid symbol is 1-10 uppercase letters only.
+  // Anything that doesn't match is treated as an address hash.
+  return !/^[A-Z]{1,10}$/.test(s);
 }
 
 /** Get a clean display symbol from position data. */
 function getDisplaySymbol(pos: { symbol: string; name: string }): string {
   if (!isAddressHash(pos.symbol)) return pos.symbol;
-  // Fallback: try name, then clean up
-  if (pos.name && !isAddressHash(pos.name)) return pos.name;
+  // Fallback: extract clean symbol from name if it ends in "-PERP" / " PERP"
+  // e.g. name="Pool 7MkErbg1" → still a hash, skip; name="BTC-PERP" → strip suffix
+  if (pos.name) {
+    const nameSymbol = pos.name
+      .replace(/[-\s]PERP$/i, "")   // strip -PERP / PERP suffix
+      .replace(/^Pool\s+/i, "")     // strip "Pool " prefix
+      .trim();
+    if (!isAddressHash(nameSymbol)) return nameSymbol;
+  }
   return pos.symbol;
 }
 
