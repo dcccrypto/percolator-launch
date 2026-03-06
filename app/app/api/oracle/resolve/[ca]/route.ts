@@ -171,7 +171,11 @@ async function fetchDexScreenerInfo(
     // PERC-470: Also return pool address and DEX ID for hyperp mode
     const SUPPORTED_DEX_IDS = new Set(["pumpswap", "raydium", "meteora"]);
     const dexId = (best as any).dexId?.toLowerCase() ?? null;
-    const poolAddress = SUPPORTED_DEX_IDS.has(dexId ?? "") ? (best as any).pairAddress ?? null : null;
+    let poolAddress: string | null = SUPPORTED_DEX_IDS.has(dexId ?? "") ? (best as any).pairAddress ?? null : null;
+    // PERC-470 security: validate pool address is a valid Solana pubkey before returning
+    if (poolAddress) {
+      try { new PublicKey(poolAddress); } catch { poolAddress = null; }
+    }
 
     return { price, symbol: best.baseToken?.symbol ?? null, poolAddress, dexId };
   } catch {

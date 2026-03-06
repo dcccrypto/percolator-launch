@@ -329,7 +329,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // PERC-470: Hyperp mode uses index_feed_id = zeros.
       // The DEX pool address is passed separately via dexPoolAddress.
       // Use the detected DEX price as initial mark price.
-      const dexPrice = wizard.dexPool?.priceUsd ?? 1;
+      const dexPrice = wizard.dexPool?.priceUsd;
+      if (!dexPrice || dexPrice <= 0) {
+        // Security: don't default to $1 — require a real price for hyperp mode
+        return { oracleFeed: "0".repeat(64), priceE6: 0n };
+      }
       const priceE6 = BigInt(Math.round(dexPrice * 1_000_000));
       return { oracleFeed: "0".repeat(64), priceE6 };
     }
@@ -343,6 +347,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const handleLaunch = () => {
     if (!allValid || !publicKey) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
+    // PERC-470 security: block hyperp launch without valid DEX price
+    if (wizard.oracleType === "hyperp_ema" && priceE6 === 0n) {
+      alert("Cannot create market: no DEX price available for this token. Try again or switch to Admin oracle.");
+      return;
+    }
     const tier = SLAB_TIERS[wizard.slabTier];
     // On devnet, use the mirror mint for on-chain ops; keep mainnet CA for metadata
     const effectiveMint = devnetMintAddress ?? wizard.mintAddress;
