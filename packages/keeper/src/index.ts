@@ -52,13 +52,16 @@ const healthServer = http.createServer((req, res) => {
   // Auth: requires x-shared-secret header matching KEEPER_REGISTER_SECRET env var (defense-in-depth; #780)
   if (req.url === "/register" && req.method === "POST") {
     const registerSecret = process.env.KEEPER_REGISTER_SECRET ?? "";
-    if (registerSecret) {
-      const provided = req.headers["x-shared-secret"] ?? "";
-      if (provided !== registerSecret) {
-        res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ success: false, message: "Unauthorized" }));
-        return;
-      }
+    if (!registerSecret) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: false, message: "Endpoint not configured" }));
+      return;
+    }
+    const provided = req.headers["x-shared-secret"] ?? "";
+    if (provided !== registerSecret) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: false, message: "Unauthorized" }));
+      return;
     }
     let body = "";
     req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
