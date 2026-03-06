@@ -88,6 +88,13 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
           throw new Error('Stake pool not initialized for this market. Contact admin.');
         }
 
+        // Defense-in-depth: validate pool account owner matches stake program.
+        // The pool is a PDA so an attacker cannot substitute a malicious account,
+        // but this guards against edge cases in test environments or network misconfigs.
+        if (!poolInfo.owner.equals(STAKE_PROGRAM_ID)) {
+          throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
+        }
+
         // Decode pool using canonical StakePool layout from SDK (352 bytes).
         // Avoids manual byte offset arithmetic — offsets are versioned in decodeStakePool.
         const { lpMint, vault } = decodeStakePool(Buffer.from(poolInfo.data));
