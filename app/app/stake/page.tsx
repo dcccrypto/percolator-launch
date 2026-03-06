@@ -7,6 +7,8 @@ import { PublicKey } from "@solana/web3.js";
 import {
   deriveStakePool,
   deriveDepositPda,
+  STAKE_POOL_SIZE,
+  decodeStakePool,
 } from "@percolator/sdk";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
@@ -673,11 +675,10 @@ export default function StakePage() {
             const [poolPda] = deriveStakePool(slabPk);
             const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey);
 
-            // Fetch pool account to get lpMint
+            // Fetch pool account to get lpMint using canonical StakePool layout
             const poolInfo = await connection.getAccountInfo(poolPda);
-            if (!poolInfo || poolInfo.data.length < 186) continue;
-            const poolData = Buffer.from(poolInfo.data);
-            const lpMint = new PublicKey(poolData.subarray(65, 97));
+            if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE) continue;
+            const { lpMint } = decodeStakePool(Buffer.from(poolInfo.data));
 
             // Get user LP ATA balance
             const userLpAta = getAssociatedTokenAddressSync(lpMint, publicKey);
