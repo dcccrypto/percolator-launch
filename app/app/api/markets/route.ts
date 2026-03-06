@@ -77,6 +77,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // #813: Validate oracle_mode enum
+  const VALID_ORACLE_MODES = ["pyth", "hyperp", "admin"] as const;
+  type OracleMode = typeof VALID_ORACLE_MODES[number];
+  const resolvedOracleMode: OracleMode = oracle_mode ?? "admin";
+  if (!VALID_ORACLE_MODES.includes(resolvedOracleMode)) {
+    return NextResponse.json(
+      { error: `Invalid oracle_mode. Must be one of: ${VALID_ORACLE_MODES.join(", ")}` },
+      { status: 400 }
+    );
+  }
+
+  // #813: Validate dex_pool_address is a valid Solana pubkey (when provided)
+  if (dex_pool_address) {
+    try {
+      new PublicKey(dex_pool_address);
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid dex_pool_address: must be a valid Solana public key" },
+        { status: 400 }
+      );
+    }
+  }
+
   // Verify slab account exists on-chain and is owned by our program
   try {
     const cfg = getConfig();
@@ -130,7 +153,7 @@ export async function POST(req: NextRequest) {
       matcher_context,
       logo_url: logo_url || null,
       mainnet_ca: mainnet_ca || null,
-      oracle_mode: oracle_mode || "admin",
+      oracle_mode: resolvedOracleMode,
       dex_pool_address: dex_pool_address || null,
     })
     .select()
