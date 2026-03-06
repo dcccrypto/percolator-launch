@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
-/** Devnet test USDC mint — mirrors NEXT_PUBLIC_TEST_USDC_MINT env var */
-const DEVNET_USDC_MINT =
-  process.env.NEXT_PUBLIC_TEST_USDC_MINT ?? "DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs";
+import {
+  deriveStakePool,
+  deriveDepositPda,
+} from "@percolator/sdk";
+import { unpackAccount } from "@solana/spl-token";
+import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
+import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -33,13 +37,15 @@ interface StakePool {
 interface UserPosition {
   poolId: string;
   poolName: string;
+  slabAddress: string;
+  collateralMint: string;
+  /** User's LP token balance (in tokens, not raw) */
   lpBalance: number;
+  lpBalanceRaw: bigint;
   estimatedValue: number;
-  deposited: number;
-  pnl: number;
-  pnlPct: number;
   cooldownRemaining: number;
   cooldownTotal: number;
+  cooldownElapsed: boolean;
 }
 
 /** Shape returned by /api/stake/pools */
@@ -85,8 +91,6 @@ function apiPoolToStakePool(p: ApiPool): StakePool {
   };
 }
 
-const MOCK_POSITION: UserPosition | null = null; // No position by default
-
 /* ── Helpers ── */
 
 function formatUsd(n: number): string {
@@ -104,7 +108,7 @@ function slotsToTime(slots: number): string {
 
 /* ── Hero Section ── */
 
-function StakeHero({ pools }: { pools: StakePool[] }) {
+function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUserDeposited: number | null }) {
   const { connected } = useWalletCompat();
   const totalStaked = pools.reduce((s, p) => s + p.tvl, 0);
   const activePools = pools.length;
@@ -112,12 +116,20 @@ function StakeHero({ pools }: { pools: StakePool[] }) {
     ? pools.reduce((s, p) => s + p.apr, 0) / pools.length
     : 0;
 
+  const yourDepositsLabel = !connected
+    ? "Connect wallet"
+    : totalUserDeposited === null
+    ? "Loading..."
+    : totalUserDeposited > 0
+    ? formatUsd(totalUserDeposited)
+    : "$—";
+
   const metrics = [
     { label: "Total Staked", value: formatUsd(totalStaked), color: "text-[var(--accent)]" },
     {
       label: "Your Deposits",
-      value: connected ? "$—" : "Connect wallet",
-      color: connected ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] text-[11px]",
+      value: yourDepositsLabel,
+      color: connected && totalUserDeposited !== null ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] text-[11px]",
     },
     { label: "Active Pools", value: String(activePools), color: "text-[var(--accent)]" },
     { label: "Avg APR", value: avgApr > 0 ? `${avgApr.toFixed(1)}%` : "—%", color: "text-[var(--cyan)]" },
@@ -180,8 +192,34 @@ function StakeHero({ pools }: { pools: StakePool[] }) {
 
 /* ── Your Position Panel ── */
 
-function YourPositionPanel({ position }: { position: UserPosition | null }) {
+function YourPositionPanel({
+  position,
+  onWithdrawSuccess,
+}: {
+  position: UserPosition | null;
+  onWithdrawSuccess?: () => void;
+}) {
   const { connected } = useWalletCompat();
+
+  const { withdraw, loading: withdrawLoading, error: withdrawError } = useStakeWithdrawByPool({
+    slabAddress: position?.slabAddress ?? "",
+    collateralMint: position?.collateralMint ?? "",
+  });
+
+  const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+
+  const handleWithdraw = useCallback(async () => {
+    if (!position || !position.cooldownElapsed) return;
+    setTxStatus(null);
+    try {
+      const sig = await withdraw(position.lpBalanceRaw);
+      setTxStatus({ type: "success", msg: `Withdrawal confirmed: ${sig.slice(0, 8)}…` });
+      onWithdrawSuccess?.();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setTxStatus({ type: "error", msg });
+    }
+  }, [withdraw, position, onWithdrawSuccess]);
 
   if (!connected) return null;
   if (!position) {
@@ -199,7 +237,6 @@ function YourPositionPanel({ position }: { position: UserPosition | null }) {
     );
   }
 
-  const cooldownComplete = position.cooldownRemaining <= 0;
   const cooldownPct = position.cooldownTotal > 0
     ? 1 - position.cooldownRemaining / position.cooldownTotal
     : 1;
@@ -218,7 +255,7 @@ function YourPositionPanel({ position }: { position: UserPosition | null }) {
           <div>
             <span className="text-[var(--text-secondary)]">LP Balance</span>
             <p className="font-medium text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-              {position.lpBalance.toLocaleString()} LP
+              {position.lpBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} LP
             </p>
           </div>
           <div>
@@ -227,20 +264,6 @@ function YourPositionPanel({ position }: { position: UserPosition | null }) {
               {formatUsd(position.estimatedValue)}
             </p>
           </div>
-          <div>
-            <span className="text-[var(--text-secondary)]">Deposited</span>
-            <p className="font-medium text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-              {formatUsd(position.deposited)}
-            </p>
-          </div>
-        </div>
-
-        {/* PnL */}
-        <div className="text-[12px]">
-          <span className="text-[var(--text-secondary)]">PnL</span>
-          <p className={`font-semibold tabular-nums ${position.pnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
-            {position.pnl >= 0 ? "+" : ""}{formatUsd(position.pnl)} ({position.pnl >= 0 ? "+" : ""}{position.pnlPct.toFixed(2)}%)
-          </p>
         </div>
 
         {/* Cooldown */}
@@ -248,22 +271,40 @@ function YourPositionPanel({ position }: { position: UserPosition | null }) {
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] text-[var(--text-secondary)]">Cooldown</span>
             <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-              {cooldownComplete ? "Complete" : `~${position.cooldownRemaining.toLocaleString()} slots (${slotsToTime(position.cooldownRemaining)})`}
+              {position.cooldownElapsed
+                ? "Complete ✓"
+                : `~${position.cooldownRemaining.toLocaleString()} slots (${slotsToTime(position.cooldownRemaining)})`
+              }
             </span>
           </div>
           <ProgressBar value={cooldownPct} height={8} />
         </div>
 
+        {/* Tx feedback */}
+        {txStatus && (
+          <p className={`text-[11px] ${txStatus.type === "success" ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
+            {txStatus.msg}
+          </p>
+        )}
+        {withdrawError && !txStatus && (
+          <p className="text-[11px] text-[var(--short)]">{withdrawError}</p>
+        )}
+
         {/* Withdraw button */}
         <button
-          disabled={!cooldownComplete}
+          disabled={!position.cooldownElapsed || withdrawLoading}
+          onClick={handleWithdraw}
           className={`w-full py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
-            cooldownComplete
+            position.cooldownElapsed && !withdrawLoading
               ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
               : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] cursor-not-allowed"
           }`}
         >
-          {cooldownComplete ? "Withdraw LP →" : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
+          {withdrawLoading
+            ? "Withdrawing…"
+            : position.cooldownElapsed
+            ? "Withdraw LP →"
+            : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
         </button>
       </div>
     </div>
@@ -272,16 +313,35 @@ function YourPositionPanel({ position }: { position: UserPosition | null }) {
 
 /* ── Deposit Widget ── */
 
-function DepositWidget({ pools }: { pools: StakePool[] }) {
+function DepositWidget({
+  pools,
+  onDepositSuccess,
+}: {
+  pools: StakePool[];
+  onDepositSuccess?: () => void;
+}) {
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const [selectedPool, setSelectedPool] = useState(pools[0]?.id ?? "");
   const [amount, setAmount] = useState("");
   const [walletBalanceRaw, setWalletBalanceRaw] = useState<bigint | null>(null);
   const [balanceDecimals, setBalanceDecimals] = useState(6);
+  const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
   const amountNum = parseFloat(amount) || 0;
+
+  const { deposit, loading: depositLoading, error: depositError } = useStakeDepositByPool({
+    slabAddress: pool?.slabAddress ?? "",
+    collateralMint: pool?.collateralMint ?? "",
+  });
+
+  // Sync selectedPool when pools list loads
+  useEffect(() => {
+    if (pools.length > 0 && !pools.find((p) => p.id === selectedPool)) {
+      setSelectedPool(pools[0].id);
+    }
+  }, [pools, selectedPool]);
 
   // Fetch real SPL token balance for the selected pool's collateral mint
   useEffect(() => {
@@ -313,6 +373,21 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
 
   const capRatio = pool && pool.capTotal > 0 ? pool.capUsed / pool.capTotal : 0;
 
+  const handleDeposit = useCallback(async () => {
+    if (!pool || amountNum <= 0 || depositLoading) return;
+    setTxStatus(null);
+    try {
+      const rawAmount = BigInt(Math.round(amountNum * Math.pow(10, balanceDecimals)));
+      const sig = await deposit(rawAmount);
+      setAmount("");
+      setTxStatus({ type: "success", msg: `Deposit confirmed: ${sig.slice(0, 8)}…` });
+      onDepositSuccess?.();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setTxStatus({ type: "error", msg });
+    }
+  }, [pool, amountNum, balanceDecimals, deposit, depositLoading, onDepositSuccess]);
+
   return (
     <div id="deposit" className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
       <div className="px-4 py-2 border-b border-[var(--border)]/30">
@@ -324,7 +399,7 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
           <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
           <select
             value={selectedPool}
-            onChange={(e) => setSelectedPool(e.target.value)}
+            onChange={(e) => { setSelectedPool(e.target.value); setTxStatus(null); }}
             className="w-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-white outline-none transition-colors focus:border-[var(--accent)]/50"
             style={{ fontFamily: "var(--font-mono)" }}
           >
@@ -354,7 +429,7 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
             <input
               type="number"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => { setAmount(e.target.value); setTxStatus(null); }}
               placeholder="0.00"
               min="0"
               step="any"
@@ -376,7 +451,7 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
           <div className="text-[12px] text-[var(--text-secondary)]">
             You will receive ≈{" "}
             <span className="font-medium text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-              {lpEstimate.toLocaleString(undefined, { maximumFractionDigits: 2 })} LP
+              {lpEstimate.toLocaleString(undefined, { maximumFractionDigits: 4 })} LP
             </span>
           </div>
         )}
@@ -401,6 +476,16 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
           </p>
         )}
 
+        {/* Tx feedback */}
+        {txStatus && (
+          <p className={`text-[11px] ${txStatus.type === "success" ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
+            {txStatus.msg}
+          </p>
+        )}
+        {depositError && !txStatus && (
+          <p className="text-[11px] text-[var(--short)]">{depositError}</p>
+        )}
+
         {/* CTA */}
         {!connected ? (
           <button className="w-full py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] cursor-not-allowed">
@@ -408,14 +493,15 @@ function DepositWidget({ pools }: { pools: StakePool[] }) {
           </button>
         ) : (
           <button
-            disabled={amountNum <= 0}
+            disabled={amountNum <= 0 || depositLoading}
+            onClick={handleDeposit}
             className={`w-full py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
-              amountNum > 0
+              amountNum > 0 && !depositLoading
                 ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
                 : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] cursor-not-allowed"
             }`}
           >
-            Deposit →
+            {depositLoading ? "Depositing…" : "Deposit →"}
           </button>
         )}
       </div>
@@ -542,7 +628,11 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
 export default function StakePage() {
   const [pools, setPools] = useState<StakePool[]>([]);
   const [poolsLoading, setPoolsLoading] = useState(true);
-  const [position] = useState<UserPosition | null>(MOCK_POSITION);
+  const [position, setPosition] = useState<UserPosition | null>(null);
+  const [positionRefreshKey, setPositionRefreshKey] = useState(0);
+
+  const { connected, publicKey } = useWalletCompat();
+  const { connection } = useConnectionCompat();
 
   // Fetch live pool data from API
   useEffect(() => {
@@ -555,7 +645,6 @@ export default function StakePage() {
         if (!cancelled) setPools((json.pools ?? []).map(apiPoolToStakePool));
       } catch (err) {
         console.error("[StakePage] Failed to fetch pools:", err);
-        // Leave pools empty — PoolList shows empty state
       } finally {
         if (!cancelled) setPoolsLoading(false);
       }
@@ -563,11 +652,113 @@ export default function StakePage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Fetch user position from on-chain data when wallet connected + pools loaded
+  useEffect(() => {
+    if (!connected || !publicKey || pools.length === 0) {
+      setPosition(null);
+      return;
+    }
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Check each pool for user's LP position
+        for (const pool of pools) {
+          if (!pool.slabAddress || !pool.collateralMint) continue;
+          try {
+            const slabPk = new PublicKey(pool.slabAddress);
+            const [poolPda] = deriveStakePool(slabPk);
+            const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey);
+
+            // Fetch pool account to get lpMint
+            const poolInfo = await connection.getAccountInfo(poolPda);
+            if (!poolInfo || poolInfo.data.length < 186) continue;
+            const poolData = Buffer.from(poolInfo.data);
+            const lpMint = new PublicKey(poolData.subarray(65, 97));
+
+            // Get user LP ATA balance
+            const userLpAta = getAssociatedTokenAddressSync(lpMint, publicKey);
+            const lpAtaInfo = await connection.getAccountInfo(userLpAta);
+            if (!lpAtaInfo) continue;
+            const lpAccount = unpackAccount(userLpAta, lpAtaInfo);
+            if (lpAccount.amount === 0n) continue;
+
+            const lpBalance = Number(lpAccount.amount) / 1e6; // assume 6 decimals
+
+            // Calculate estimated value: (user_lp / total_lp_supply) * vault_balance
+            const estimatedValue = pool.totalLpSupply > 0
+              ? (lpBalance / pool.totalLpSupply) * pool.tvl
+              : 0;
+
+            // Fetch deposit PDA for cooldown info
+            let cooldownRemaining = 0;
+            let cooldownElapsed = true;
+            let userDepositSlot = 0n;
+
+            const depInfo = await connection.getAccountInfo(depositPdaAddress);
+            if (depInfo && depInfo.data.length >= 81) {
+              const depData = Buffer.from(depInfo.data);
+              if (depData[0] === 1) {
+                userDepositSlot = depData.readBigUInt64LE(65);
+              }
+            }
+
+            if (userDepositSlot > 0n && pool.cooldownSlots > 0) {
+              try {
+                const currentSlot = BigInt(await connection.getSlot());
+                const slotsElapsed = currentSlot - userDepositSlot;
+                const cooldownTotal = BigInt(pool.cooldownSlots);
+                if (slotsElapsed < cooldownTotal) {
+                  cooldownElapsed = false;
+                  cooldownRemaining = Number(cooldownTotal - slotsElapsed);
+                }
+              } catch {
+                cooldownElapsed = false;
+              }
+            }
+
+            if (!cancelled) {
+              setPosition({
+                poolId: pool.id,
+                poolName: pool.name,
+                slabAddress: pool.slabAddress,
+                collateralMint: pool.collateralMint!,
+                lpBalance,
+                lpBalanceRaw: lpAccount.amount,
+                estimatedValue,
+                cooldownRemaining,
+                cooldownTotal: pool.cooldownSlots,
+                cooldownElapsed,
+              });
+            }
+            return; // found a position, stop scanning
+          } catch {
+            // skip pool on error
+          }
+        }
+        // No position found across all pools
+        if (!cancelled) setPosition(null);
+      } catch (err) {
+        console.error("[StakePage] Failed to fetch user position:", err);
+        if (!cancelled) setPosition(null);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [connected, publicKey, pools, connection, positionRefreshKey]);
+
+  const handleTxSuccess = useCallback(() => {
+    // Re-fetch position after deposit/withdraw
+    setPositionRefreshKey((k) => k + 1);
+  }, []);
+
+  const totalUserDeposited = position ? position.estimatedValue : connected ? 0 : null;
+
   return (
     <div className="relative min-h-screen overflow-x-hidden">
       {/* Hero */}
       <ErrorBoundary label="Stake Hero">
-        <StakeHero pools={pools} />
+        <StakeHero pools={pools} totalUserDeposited={totalUserDeposited} />
       </ErrorBoundary>
 
       {/* Main content */}
@@ -580,10 +771,10 @@ export default function StakePage() {
             {/* pb-24 on mobile ensures deposit widget clears the fixed bottom nav (56px) */}
             <div className="space-y-4 pb-24 lg:pb-0">
               <ErrorBoundary label="Your Position">
-                <YourPositionPanel position={position} />
+                <YourPositionPanel position={position} onWithdrawSuccess={handleTxSuccess} />
               </ErrorBoundary>
               <ErrorBoundary label="Deposit Widget">
-                <DepositWidget pools={pools} />
+                <DepositWidget pools={pools} onDepositSuccess={handleTxSuccess} />
               </ErrorBoundary>
             </div>
 
