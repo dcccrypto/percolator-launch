@@ -5,7 +5,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { discoverMarkets } from "@percolator/sdk";
 
-const HELIUS_KEY = process.env.HELIUS_API_KEY ?? "";
+const HELIUS_KEY = process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? "";
 const RPC_URL = HELIUS_KEY
   ? `https://devnet.helius-rpc.com/?api-key=${HELIUS_KEY}`
   : "https://api.devnet.solana.com";

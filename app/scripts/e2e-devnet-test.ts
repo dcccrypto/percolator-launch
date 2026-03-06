@@ -62,7 +62,7 @@ import {
   SLAB_TIERS,
 } from "../../packages/core/dist/index.js";
 
-const HELIUS_KEY = process.env.HELIUS_API_KEY;
+const HELIUS_KEY = process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY;
 const RPC = HELIUS_KEY
   ? `https://devnet.helius-rpc.com/?api-key=${HELIUS_KEY}`
   : "https://api.devnet.solana.com";

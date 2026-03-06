@@ -51,11 +51,15 @@ export function getRpcEndpoint(): string {
   const explicit = validateRpcUrl(process.env.NEXT_PUBLIC_HELIUS_RPC_URL);
   if (explicit) return explicit;
 
-  // 2. Build from Helius API key
-  const apiKey = (process.env.HELIUS_API_KEY ?? "").trim();
+  // 2. Build from Helius API key (PERC-469: prefer network-specific keys, fall back to generic)
+  const net = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
+  const network = net === "mainnet" ? "mainnet" : "devnet";
+  const apiKey = (
+    network === "mainnet"
+      ? (process.env.HELIUS_MAINNET_API_KEY ?? process.env.HELIUS_API_KEY ?? "")
+      : (process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? "")
+  ).trim();
   if (apiKey) {
-    const net = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
-    const network = net === "mainnet" ? "mainnet" : "devnet";
     return network === "mainnet"
       ? `https://mainnet.helius-rpc.com/?api-key=${apiKey}`
       : `https://devnet.helius-rpc.com/?api-key=${apiKey}`;

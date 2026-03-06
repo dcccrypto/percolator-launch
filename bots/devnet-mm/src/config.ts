@@ -71,7 +71,8 @@ export interface BotConfig {
 }
 
 export function loadConfig(): BotConfig {
-  const heliusKey = process.env.HELIUS_API_KEY ?? "";
+  // PERC-469: prefer network-specific key, fall back to generic HELIUS_API_KEY
+  const heliusKey = process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? "";
   const defaultRpc = heliusKey
     ? `https://devnet.helius-rpc.com/?api-key=${heliusKey}`
     : "https://api.devnet.solana.com";

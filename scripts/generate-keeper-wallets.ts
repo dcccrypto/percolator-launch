@@ -28,7 +28,7 @@ async function main() {
 
   const rpcUrl =
     process.env.RPC_URL ??
-    `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
+    `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? ""}`;
   const connection = new Connection(rpcUrl, "confirmed");
 
   console.log(`\n🔑 PERC-368: Generating ${PROFILE_NAMES.length} keeper wallets\n`);

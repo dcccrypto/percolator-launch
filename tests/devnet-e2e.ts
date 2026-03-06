@@ -34,7 +34,7 @@ import {
 import * as fs from "fs";
 
 // Config
-const RPC_URL = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
+const RPC_URL = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? ""}`;
 // Use centralized config instead of hard-coded ID
 import { getProgramId } from "../packages/core/src/config/program-ids.js";
 const PROGRAM_ID = getProgramId("devnet");

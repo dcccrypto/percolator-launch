@@ -63,7 +63,7 @@ import {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const RPC_URL = process.env.SOLANA_RPC_URL ??
-  `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
+  `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? ""}`;
 const PROGRAM_ID = new PublicKey(
   process.env.PROGRAM_ID ?? "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD"
 );

@@ -32,7 +32,7 @@ import {
 } from "../packages/core/src/index.js";
 import * as fs from "fs";
 
-const HELIUS_KEY = process.env.HELIUS_API_KEY ?? "";
+const HELIUS_KEY = process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? "";
 const RPC_URL = process.env.RPC_URL ??
   (HELIUS_KEY ? `https://devnet.helius-rpc.com/?api-key=${HELIUS_KEY}` : "https://api.devnet.solana.com");
 

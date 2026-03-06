@@ -34,7 +34,9 @@ const envSchemaBase = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   RPC_URL: z.string().url().optional(),
   FALLBACK_RPC_URL: z.string().url().optional(),
-  HELIUS_API_KEY: z.string().optional(),
+  HELIUS_API_KEY: z.string().optional(), // legacy fallback — prefer HELIUS_DEVNET/MAINNET_API_KEY
+  HELIUS_DEVNET_API_KEY: z.string().optional(),
+  HELIUS_MAINNET_API_KEY: z.string().optional(),
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),

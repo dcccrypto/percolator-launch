@@ -37,7 +37,7 @@ import * as fs from "fs";
 // Configuration
 // ═══════════════════════════════════════════════════════════════
 
-const RPC_URL = process.env.RPC_URL ?? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
+const RPC_URL = process.env.RPC_URL ?? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? ""}`;
 const HTTP_PORT = parseInt(process.env.ORACLE_BRIDGE_PORT ?? "18802", 10);
 const PUSH_INTERVAL_MS = parseInt(process.env.PUSH_INTERVAL_MS ?? "10000", 10);
 const MAX_CROSS_SOURCE_DEVIATION_PCT = 10;

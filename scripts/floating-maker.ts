@@ -66,7 +66,7 @@ import * as fs from "fs";
 
 const RPC_URL =
   process.env.RPC_URL ??
-  `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY ?? ""}`;
+  `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? ""}`;
 const PROGRAM_ID = getProgramId("devnet");
 const MATCHER_ID = new PublicKey(
   process.env.MATCHER_ID ?? "GTRgyTDfrMvBubALAqtHuQwT8tbGyXid7svXZKtWfC9k",
