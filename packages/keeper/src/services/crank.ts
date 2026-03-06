@@ -8,6 +8,11 @@ import {
   derivePythPushOraclePDA,
   ACCOUNTS_KEEPER_CRANK,
   ACCOUNTS_PUSH_ORACLE_PRICE,
+  fetchSlab,
+  parseHeader,
+  parseConfig,
+  parseEngine,
+  parseParams,
   type DiscoveredMarket,
 } from "@percolator/sdk";
 import { config, getConnection, getFallbackConnection, loadKeypair, sendWithRetry, sendWithRetryKeeper, rateLimitedCall, eventBus, createLogger, sendCriticalAlert } from "@percolator/shared";
@@ -31,6 +36,12 @@ interface MarketCrankState {
   permanentlySkippedAt?: number;
   /** How many times this market has been skipped for 0x4 across rediscoveries */
   skipCount?: number;
+  /**
+   * PERC-465: Mainnet CA override for price lookups.
+   * On devnet Quick Launch markets, collateralMint is a devnet mirror mint with no DEX data.
+   * This field stores the original mainnet CA so Jupiter/DexScreener lookups use the right address.
+   */
+  mainnetCA?: string;
 }
 
 /** Process items in batches with delay between batches.
@@ -208,7 +219,9 @@ export class CrankService {
       // Only push if we are the oracle authority for this market
       if (this.isAdminOracle(market) && keypair.publicKey.equals(market.config.oracleAuthority)) {
         try {
-          const mint = market.config.collateralMint.toBase58();
+          // PERC-465: Use mainnetCA if available (devnet mirror mint markets), else collateralMint.
+          // Fresh devnet mints have no DEX liquidity so Jupiter/DexScreener lookups fail for them.
+          const mint = state.mainnetCA ?? market.config.collateralMint.toBase58();
           const priceEntry = await this.oracleService.fetchPrice(mint, slabAddress);
           if (priceEntry) {
             const pushData = encodePushOraclePrice({
@@ -377,6 +390,78 @@ export class CrankService {
 
     this.lastCycleResult = { success, failed, skipped };
     return { success, failed, skipped };
+  }
+
+  /**
+   * Hot-register a freshly created market without waiting for the next discovery cycle.
+   * Fetches slab data on-chain, adds to the tracked markets map, and triggers an
+   * immediate crank so the price is pushed to the new market within seconds.
+   *
+   * @param slabAddress - The slab account address on-chain
+   * @param mainnetCA   - Optional mainnet CA for price lookups (for devnet mirror mint markets)
+   *
+   * Called by the /register HTTP endpoint when the frontend creates a new market.
+   */
+  async registerMarket(slabAddress: string, mainnetCA?: string): Promise<{ success: boolean; message: string }> {
+    if (this.markets.has(slabAddress)) {
+      // Update mainnetCA even if already tracked (registration may have been partial)
+      if (mainnetCA) {
+        const existing = this.markets.get(slabAddress)!;
+        existing.mainnetCA = mainnetCA;
+      }
+      logger.info("Market already tracked, skipping hot-register", { slabAddress });
+      return { success: true, message: "Market already tracked" };
+    }
+
+    const connection = getConnection();
+    const slabPubkey = new PublicKey(slabAddress);
+
+    let info: Awaited<ReturnType<typeof connection.getAccountInfo>>;
+    try {
+      info = await connection.getAccountInfo(slabPubkey);
+    } catch (err) {
+      const msg = `RPC error fetching slab: ${err instanceof Error ? err.message : String(err)}`;
+      logger.error(msg, { slabAddress });
+      return { success: false, message: msg };
+    }
+
+    if (!info) {
+      return { success: false, message: `Slab account not found: ${slabAddress}` };
+    }
+
+    const data = new Uint8Array(info.data);
+    const programId = info.owner;
+
+    try {
+      const header = parseHeader(data);
+      const marketConfig = parseConfig(data);
+      const engine = parseEngine(data);
+      const params = parseParams(data);
+
+      const market: DiscoveredMarket = { slabAddress: slabPubkey, programId, header, config: marketConfig, engine, params };
+
+      this.markets.set(slabAddress, {
+        market,
+        lastCrankTime: 0,
+        successCount: 0,
+        failureCount: 0,
+        consecutiveFailures: 0,
+        isActive: true,
+        missingDiscoveryCount: 0,
+        mainnetCA,
+      });
+
+      logger.info("Hot-registered new market", { slabAddress, programId: programId.toBase58() });
+
+      // Trigger immediate oracle push + crank so price is live within seconds
+      await this.crankMarket(slabAddress);
+
+      return { success: true, message: "Market registered and initial crank triggered" };
+    } catch (err) {
+      const msg = `Failed to parse slab: ${err instanceof Error ? err.message : String(err)}`;
+      logger.error(msg, { slabAddress });
+      return { success: false, message: msg };
+    }
   }
 
   start(): void {

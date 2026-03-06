@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
       const keeperResp = await fetch(`${KEEPER_URL}/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slabAddress }),
+        body: JSON.stringify({ slabAddress, mainnetCA }),
         signal: AbortSignal.timeout(8_000),
       });
       const keeperData = (await keeperResp.json()) as { success: boolean; message: string };

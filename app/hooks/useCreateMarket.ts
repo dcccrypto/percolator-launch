@@ -51,6 +51,27 @@ const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
 const ALL_ZEROS_FEED = "0".repeat(64);
 const MATCHER_CTX_SIZE = 320; // Minimum context size for percolator matcher
 
+/**
+ * PERC-465: Fetch the current USD price for a token from Jupiter price API.
+ * Used to push a real initial oracle price immediately after market creation.
+ * Returns null on any failure — caller falls back to params.initialPriceE6.
+ */
+async function fetchJupiterPriceE6(ca: string): Promise<bigint | null> {
+  try {
+    const resp = await fetch(
+      `https://lite.jup.ag/v6/price?ids=${ca}`,
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    if (!resp.ok) return null;
+    const json = await resp.json() as { data?: Record<string, { price?: number }> };
+    const price = json.data?.[ca]?.price;
+    if (!price || !isFinite(price) || price <= 0) return null;
+    return BigInt(Math.round(price * 1_000_000));
+  } catch {
+    return null;
+  }
+}
+
 /** Minimum vault seed required by percolator-prog before InitMarket (500_000_000 raw tokens). */
 export const MIN_INIT_MARKET_SEED = 500_000_000n;
 
@@ -463,9 +484,16 @@ export function useCreateMarket() {
             instructions.push(buildIx({ programId, keys: setAuthToUserKeys, data: setAuthToUserData }));
 
             // 2. PushOraclePrice (user is now authority)
+            // PERC-465: Fetch fresh Jupiter price so we push the real market price,
+            // not the pre-fetched (possibly stale or fallback $1) initialPriceE6.
+            // Use mainnetCA if available (devnet mirror markets), else params.mint.
+            const jupiterCA = params.mainnetCA ?? params.mint.toBase58();
+            const freshPriceE6 = await fetchJupiterPriceE6(jupiterCA);
+            const resolvedPriceE6 = freshPriceE6 ?? params.initialPriceE6;
+
             const now = Math.floor(Date.now() / 1000);
             const pushData = encodePushOraclePrice({
-              priceE6: params.initialPriceE6.toString(),
+              priceE6: resolvedPriceE6.toString(),
               timestamp: now.toString(),
             });
             const pushKeys = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
@@ -651,9 +679,15 @@ export function useCreateMarket() {
           const finalInstructions = [depositIx, topupIx];
 
           if (isAdminOracle) {
+            // PERC-465: Push fresh price again in the final crank bundle.
+            // Fetch from Jupiter first; fall back to the resolvedPriceE6 from step 1.
+            const jupiterCA2 = params.mainnetCA ?? params.mint.toBase58();
+            const freshPrice2 = await fetchJupiterPriceE6(jupiterCA2);
+            const finalPriceE6 = freshPrice2 ?? params.initialPriceE6;
+
             const now2 = Math.floor(Date.now() / 1000);
             const pushData2 = encodePushOraclePrice({
-              priceE6: params.initialPriceE6.toString(),
+              priceE6: finalPriceE6.toString(),
               timestamp: now2.toString(),
             });
             const pushKeys2 = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
@@ -669,15 +703,31 @@ export function useCreateMarket() {
           ]);
           finalInstructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
 
-          // NOTE: For admin oracle markets, user STAYS as oracle authority.
-          // This lets the admin push prices from the My Markets UI.
-          // The crank service handles price push failures gracefully (non-fatal).
-          // Admin can delegate to crank later via "Delegate to Crank" button.
+          // PERC-465: On devnet, delegate oracle authority to the crank keypair so the
+          // oracle keeper can continuously push live prices for this new market.
+          // SetOracleAuthority is added AFTER the final crank — it clears authority_price_e6
+          // but that's fine here since the crank has already processed the current price.
+          if (isDevnetEnv && isAdminOracle) {
+            const crankPubkey = getConfig().crankWallet;
+            if (crankPubkey && crankPubkey.trim() !== "") {
+              try {
+                const crankPk = new PublicKey(crankPubkey);
+                const setAuthToCrankData = encodeSetOracleAuthority({ newAuthority: crankPk });
+                const setAuthToCrankKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_AUTHORITY, [
+                  wallet.publicKey, slabPk,
+                ]);
+                finalInstructions.push(buildIx({ programId, keys: setAuthToCrankKeys, data: setAuthToCrankData }));
+              } catch {
+                // Non-fatal: invalid crankWallet config — market still works, keeper just can't push prices
+                console.warn("PERC-465: Invalid crankWallet config — skipping oracle authority delegation");
+              }
+            }
+          }
 
           const sig = await sendTx({
             connection, wallet,
             instructions: finalInstructions,
-            computeUnits: 400_000,
+            computeUnits: 450_000,
           });
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
