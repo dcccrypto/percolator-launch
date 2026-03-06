@@ -20,7 +20,7 @@ try {
   // Fall back to safe devnet defaults so the config module stays importable.
   networkConfig = {
     // PERC-469: prefer network-specific key, fall back to generic
-    rpcUrl: env.RPC_URL ?? `https://devnet.helius-rpc.com/?api-key=${(env as Record<string, string | undefined>).HELIUS_DEVNET_API_KEY ?? env.HELIUS_API_KEY ?? ""}`,
+    rpcUrl: env.RPC_URL ?? `https://devnet.helius-rpc.com/?api-key=${env.HELIUS_DEVNET_API_KEY ?? env.HELIUS_API_KEY ?? ""}`,
     programIds: [env.PROGRAM_ID ?? "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD"],
   };
 }
