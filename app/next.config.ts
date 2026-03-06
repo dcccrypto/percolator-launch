@@ -54,7 +54,11 @@ const nextConfig: NextConfig = {
       { source: "/api/prices/:path*", destination: `${API_URL}/prices/:path*` },
       { source: "/api/crank/status", destination: `${API_URL}/crank/status` },
       { source: "/api/trades/recent", destination: `${API_URL}/trades/recent` },
-      { source: "/api/oracle/:path*", destination: `${API_URL}/oracle/:path*` },
+      // PERC-470: /api/oracle/resolve is handled by Next.js route.ts (returns oracleMode + dexPoolAddress).
+      // Railway also has /oracle/resolve but returns a different format ({ bestSource }).
+      // We only need the Railway proxy for non-resolve oracle routes now.
+      // Using a negative lookahead isn't possible in Next.js rewrites, so list explicitly:
+      { source: "/api/oracle/publishers", destination: `${API_URL}/oracle/publishers` },
     ];
   },
   webpack: (config, { isServer }) => {
