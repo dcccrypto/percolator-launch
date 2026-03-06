@@ -35,6 +35,7 @@ vi.mock('@percolator/sdk', () => {
   const { PublicKey: PK } = require('@solana/web3.js');
   return {
     STAKE_PROGRAM_ID: new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k'),
+    STAKE_POOL_SIZE: 352,
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
     deriveDepositPda: vi.fn().mockReturnValue([mockDepositPda, 253]),
@@ -42,6 +43,7 @@ vi.mock('@percolator/sdk', () => {
     depositAccounts: vi.fn().mockReturnValue([
       { pubkey: new PK('7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'), isSigner: true, isWritable: false },
     ]),
+    decodeStakePool: vi.fn().mockReturnValue({ lpMint: mockLpMint, vault: mockVault }),
   };
 });
 
@@ -64,12 +66,14 @@ import { useConnectionCompat, useWalletCompat } from '@/hooks/useWalletCompat';
 import { sendTx } from '@/lib/tx';
 import { encodeStakeDeposit, depositAccounts } from '@percolator/sdk';
 
-// Build a fake pool account buffer (186 bytes)
+// Build a fake pool account buffer (352 bytes — canonical StakePool size).
+// lpMint at offset 104, vault at offset 136 per decodeStakePool layout.
+// decodeStakePool is mocked, so exact content doesn't matter; size must be ≥ 352.
 function buildPoolAccountData(): Buffer {
-  const buf = Buffer.alloc(186);
+  const buf = Buffer.alloc(352);
   buf[0] = 1; // is_initialized
-  mockLpMint.toBuffer().copy(buf, 65);
-  mockVault.toBuffer().copy(buf, 97);
+  mockLpMint.toBuffer().copy(buf, 104);
+  mockVault.toBuffer().copy(buf, 136);
   return buf;
 }
 
