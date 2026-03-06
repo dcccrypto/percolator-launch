@@ -31,6 +31,7 @@ import {
   getMint,
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
+import { getServiceClient } from "@/lib/supabase";
 import * as Sentry from "@sentry/nextjs";
 
 export const dynamic = "force-dynamic";
@@ -100,9 +101,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate mintAddress against allowlist before touching any keys/RPC
-    // Fail closed: if no allowlist is configured, reject all mints
-    if (DEVNET_ALLOWED_MINTS.size === 0 || !DEVNET_ALLOWED_MINTS.has(mintAddress)) {
+    // Validate mintAddress: check static allowlist first, then dynamic devnet_mints table.
+    // PERC-456: Support dynamically-created mirror mints in addition to env allowlist.
+    let mintPermitted = DEVNET_ALLOWED_MINTS.has(mintAddress);
+    if (!mintPermitted) {
+      try {
+        const supabase = getServiceClient();
+        const { data: mirrorRow } = await (supabase as any)
+          .from("devnet_mints")
+          .select("devnet_mint")
+          .eq("devnet_mint", mintAddress)
+          .maybeSingle();
+        if (mirrorRow?.devnet_mint) {
+          mintPermitted = true;
+        }
+      } catch (e) {
+        // DB check failed — fall through to rejection (fail closed)
+        Sentry.captureException(e, {
+          tags: { endpoint: "/api/devnet-pre-fund", phase: "dynamic-mint-check" },
+        });
+      }
+    }
+    if (!mintPermitted) {
       return NextResponse.json({ error: "mintAddress not permitted" }, { status: 400 });
     }
 

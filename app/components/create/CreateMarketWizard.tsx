@@ -88,6 +88,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   // On-chain mint network validation (set by StepTokenSelect)
   const [mintExistsOnNetwork, setMintExistsOnNetwork] = useState(false);
+  // Devnet mirror mint address (different from mainnet CA entered by user)
+  const [devnetMintAddress, setDevnetMintAddress] = useState<string | null>(null);
 
   // SOL balance for cost check in review step
   const [solBalance, setSolBalance] = useState<number | null>(null);
@@ -246,8 +248,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Updaters (memoized to avoid unnecessary re-renders in children)
   const setMintAddress = useCallback((mint: string) => {
     setWizard((prev) => ({ ...prev, mintAddress: mint }));
-    // Reset network validation when mint changes
+    // Reset network validation and devnet mirror when mint changes
     setMintExistsOnNetwork(false);
+    setDevnetMintAddress(null);
   }, []);
 
   const setTokenMeta = useCallback(
@@ -334,9 +337,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (!allValid || !publicKey) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
     const tier = SLAB_TIERS[wizard.slabTier];
+    // On devnet, use the mirror mint for on-chain ops; keep mainnet CA for metadata
+    const effectiveMint = devnetMintAddress ?? wizard.mintAddress;
 
     const params: CreateMarketParams = {
-      mint: new PublicKey(wizard.mintAddress),
+      mint: new PublicKey(effectiveMint),
       initialPriceE6: priceE6,
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
       insuranceAmount: parseHumanAmount(wizard.insuranceAmount, decimals),
@@ -358,9 +363,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (!allValid || !publicKey || !createState.slabAddress) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
     const tier = SLAB_TIERS[wizard.slabTier];
+    const effectiveMint = devnetMintAddress ?? wizard.mintAddress;
 
     const params: CreateMarketParams = {
-      mint: new PublicKey(wizard.mintAddress),
+      mint: new PublicKey(effectiveMint),
       initialPriceE6: priceE6,
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
       insuranceAmount: parseHumanAmount(wizard.insuranceAmount, decimals),
@@ -382,6 +388,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     resetCreate();
     setWizard({ ...DEFAULT_STATE });
     setCompletedSteps(new Set());
+    setDevnetMintAddress(null);
   };
 
   // --- Render ---
@@ -485,6 +492,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             onTokenResolved={setTokenMeta}
             onBalanceChange={setWalletBalance}
             onMintNetworkValidChange={setMintExistsOnNetwork}
+            onDevnetMintResolved={setDevnetMintAddress}
             onContinue={() => advanceStep(1)}
             canContinue={step1Valid}
           />
