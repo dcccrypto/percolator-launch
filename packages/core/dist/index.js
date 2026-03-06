@@ -2647,7 +2647,7 @@ function getProgramId(network) {
   if (process.env.PROGRAM_ID) {
     return new PublicKey10(process.env.PROGRAM_ID);
   }
-  const targetNetwork = network ?? process.env.NETWORK ?? "devnet";
+  const targetNetwork = network ?? process.env.NETWORK ?? "mainnet";
   const programId = PROGRAM_IDS[targetNetwork].percolator;
   return new PublicKey10(programId);
 }
@@ -2655,7 +2655,7 @@ function getMatcherProgramId(network) {
   if (process.env.MATCHER_PROGRAM_ID) {
     return new PublicKey10(process.env.MATCHER_PROGRAM_ID);
   }
-  const targetNetwork = network ?? process.env.NETWORK ?? "devnet";
+  const targetNetwork = network ?? process.env.NETWORK ?? "mainnet";
   const programId = PROGRAM_IDS[targetNetwork].matcher;
   if (!programId) {
     throw new Error(`Matcher program not deployed on ${targetNetwork}`);
@@ -2664,10 +2664,10 @@ function getMatcherProgramId(network) {
 }
 function getCurrentNetwork() {
   const network = process.env.NETWORK?.toLowerCase();
-  if (network === "mainnet" || network === "mainnet-beta") {
-    return "mainnet";
+  if (network === "devnet") {
+    return "devnet";
   }
-  return "devnet";
+  return "mainnet";
 }
 export {
   ACCOUNTS_CLOSE_ACCOUNT,

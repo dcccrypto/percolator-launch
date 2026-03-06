@@ -52,11 +52,12 @@ test.describe("Wallet connection (Privy)", () => {
       const ariaLabel = await readyBtn.first().getAttribute("aria-label");
       expect(ariaLabel).toBe("Connect wallet");
     } catch {
-      // Privy did not initialize (no app ID in CI) — verify loading state instead
-      const loadingBtn = page.locator('button:has-text("Loading")').first();
-      await expect(loadingBtn).toBeVisible({ timeout: 5000 });
-      // Loading button should be disabled
-      await expect(loadingBtn).toBeDisabled();
+      // Privy did not initialize (no app ID in CI) — verify degraded state instead.
+      // When Privy is unavailable the button shows "Connect" with aria-label "Wallet unavailable",
+      // or it may still be in the "Loading…" state.
+      const degradedBtn = page.locator('button[aria-label="Wallet unavailable"], button:has-text("Loading")').first();
+      await expect(degradedBtn).toBeVisible({ timeout: 5000 });
+      await expect(degradedBtn).toBeDisabled();
     }
   });
 

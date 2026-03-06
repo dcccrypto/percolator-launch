@@ -139,6 +139,7 @@ jobs:
       # Privy validates appId.length === 25 exactly; use the secret when available,
       # otherwise fall back to a 25-char placeholder so the server starts in CI.
       NEXT_PUBLIC_PRIVY_APP_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_APP_ID || 'cltestappid00000000000000' }}
+      NEXT_PUBLIC_DEFAULT_NETWORK: devnet
     
     steps:
       - name: Checkout code

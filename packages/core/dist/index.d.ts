@@ -1620,8 +1620,8 @@ declare function getProgramId(network?: Network): PublicKey;
  */
 declare function getMatcherProgramId(network?: Network): PublicKey;
 /**
- * Get the current network from environment
- * Defaults to devnet for safety
+ * Get the current network from environment.
+ * Defaults fail-closed to mainnet — set NETWORK=devnet explicitly for devnet environments.
  */
 declare function getCurrentNetwork(): Network;
 
