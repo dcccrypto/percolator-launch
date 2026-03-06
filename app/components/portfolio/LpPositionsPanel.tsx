@@ -199,7 +199,7 @@ export function LpPositionsPanel({
       {/* Section heading */}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--cyan)]/70">
-          Insurance LP Positions
+          // Insurance LP Positions
         </h2>
         {positions.length > 0 && !loading && (
           <span
