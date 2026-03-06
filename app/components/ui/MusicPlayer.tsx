@@ -33,8 +33,9 @@ const VolDownIcon = () => (
 );
 
 /** Routes where the floating player should be hidden on mobile (<640px)
- *  to avoid overlaying critical interactive UI (e.g. trade margin inputs). */
-const HIDE_ON_MOBILE_ROUTES = ["/trade"];
+ *  to avoid overlaying critical interactive UI (e.g. trade margin inputs,
+ *  stake pool cards that scroll under the player at 370-640px widths). */
+const HIDE_ON_MOBILE_ROUTES = ["/trade", "/stake"];
 
 /**
  * Routes where the floating player should move to top-right instead of
