@@ -35,10 +35,14 @@ export function parseMarketCreationError(error: unknown): string {
   // Insufficient SOL for rent/fees
   if (
     msg.includes("Attempt to debit an account but found no record of a prior credit") ||
-    msg.includes("insufficient funds") ||
     msg.includes("insufficient lamports")
   ) {
     return "Insufficient SOL balance. You need enough SOL to cover the slab rent and transaction fees. Check your wallet balance.";
+  }
+
+  // Insufficient token balance (generic "insufficient funds" from token program transfers)
+  if (msg.includes("insufficient funds")) {
+    return "Insufficient token balance. Your wallet may not have enough tokens to complete this step (vault seed, LP collateral, or insurance deposit). On devnet, reload the page to trigger a top-up.";
   }
 
   // Account already exists (slab already created in a previous attempt)

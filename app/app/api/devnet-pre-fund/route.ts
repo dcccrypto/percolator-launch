@@ -58,8 +58,18 @@ const DEVNET_ALLOWED_MINTS: Set<string> = new Set(
  */
 const MIN_INIT_MARKET_SEED = 500_000_000n;
 
-/** Fund 2× the minimum so user can retry without re-requesting */
-const FUND_AMOUNT = MIN_INIT_MARKET_SEED * 2n;
+/**
+ * Total tokens needed for full market creation (Small slab):
+ *   Vault seed:      500 tokens (MIN_INIT_MARKET_SEED)
+ *   LP collateral: 1,000 tokens
+ *   Insurance fund:  100 tokens
+ *   Total:         1,600 tokens
+ *
+ * Fund 2× the total requirement so user has headroom for retries
+ * and Medium/Large slabs which may need more.
+ */
+const FULL_MARKET_TOKEN_REQUIREMENT = 1_600_000_000n;
+const FUND_AMOUNT = FULL_MARKET_TOKEN_REQUIREMENT * 2n;
 
 /** Wrap a promise with a timeout; rejects after `ms` milliseconds. */
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -178,7 +188,7 @@ export async function POST(req: NextRequest) {
       // ATA doesn't exist yet
     }
 
-    if (currentBalance >= MIN_INIT_MARKET_SEED) {
+    if (currentBalance >= FULL_MARKET_TOKEN_REQUIREMENT) {
       return NextResponse.json({
         status: "sufficient",
         balance: currentBalance.toString(),
