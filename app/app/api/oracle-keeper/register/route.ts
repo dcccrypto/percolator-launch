@@ -94,7 +94,11 @@ export async function POST(req: NextRequest) {
     try {
       const keeperResp = await fetch(`${KEEPER_URL}/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // Forward shared secret so keeper's defense-in-depth auth passes (#780)
+          "x-shared-secret": REGISTER_SECRET,
+        },
         body: JSON.stringify({ slabAddress, mainnetCA }),
         signal: AbortSignal.timeout(8_000),
       });

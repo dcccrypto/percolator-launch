@@ -49,7 +49,17 @@ const healthPort = Number(process.env.KEEPER_HEALTH_PORT ?? 8081);
 const healthServer = http.createServer((req, res) => {
   // POST /register — hot-register a new market without waiting for discovery cycle
   // Body: { slabAddress: string, mainnetCA?: string }
+  // Auth: requires x-shared-secret header matching KEEPER_REGISTER_SECRET env var (defense-in-depth; #780)
   if (req.url === "/register" && req.method === "POST") {
+    const registerSecret = process.env.KEEPER_REGISTER_SECRET ?? "";
+    if (registerSecret) {
+      const provided = req.headers["x-shared-secret"] ?? "";
+      if (provided !== registerSecret) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, message: "Unauthorized" }));
+        return;
+      }
+    }
     let body = "";
     req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
     req.on("end", async () => {
