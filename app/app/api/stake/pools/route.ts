@@ -2,8 +2,8 @@
  * GET /api/stake/pools
  *
  * Returns all initialized StakePool accounts from the percolator-stake
- * devnet program, enriched with market name/symbol from Supabase and
- * vault token balance from RPC.
+ * devnet program, enriched with market name/symbol from Supabase,
+ * vault token balance from RPC, and trailing APR from insurance snapshots.
  *
  * Response shape matches the StakePool interface used on the /stake page.
  */
@@ -13,6 +13,134 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { getServiceClient } from "@/lib/supabase";
 import { getRpcEndpoint } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
+
+// ── APR helpers ───────────────────────────────────────────────────────────────
+
+/** Milliseconds per day */
+const MS_PER_DAY = 86_400_000;
+
+/** Row shape returned from `insurance_snapshots` (not yet in generated types). */
+interface InsuranceSnapshotRow {
+  slab: string;
+  redemption_rate_e6: number;
+  created_at: string;
+}
+
+/**
+ * Compute trailing APR (%) for a set of slab addresses using the
+ * `insurance_snapshots` table written by the indexer's InsuranceLPService.
+ *
+ * Strategy: for each slab find the oldest snapshot in the last 7 days and
+ * the most-recent snapshot, then annualise the redemption-rate growth.
+ * Falls back to the 30-day window if there is less than 1 day of 7d data.
+ * Returns 0 when insufficient history exists.
+ *
+ * Note: `insurance_snapshots` is not yet reflected in the generated Supabase
+ * types, so we cast to `any` on the table name and cast the result rows.
+ */
+async function computeAprs(
+  slabAddresses: string[],
+  supabase: ReturnType<typeof getServiceClient>
+): Promise<Record<string, number>> {
+  if (slabAddresses.length === 0) return {};
+
+  const now = Date.now();
+  const since7d = new Date(now - 7 * MS_PER_DAY).toISOString();
+  const since30d = new Date(now - 30 * MS_PER_DAY).toISOString();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any;
+
+  // Fetch the oldest snapshot per slab within the 7-day window
+  const { data: earliest7dRaw } = await db
+    .from("insurance_snapshots")
+    .select("slab, redemption_rate_e6, created_at")
+    .in("slab", slabAddresses)
+    .gte("created_at", since7d)
+    .order("created_at", { ascending: true });
+
+  // Fetch the oldest snapshot per slab within the 30-day window (fallback)
+  const { data: earliest30dRaw } = await db
+    .from("insurance_snapshots")
+    .select("slab, redemption_rate_e6, created_at")
+    .in("slab", slabAddresses)
+    .gte("created_at", since30d)
+    .order("created_at", { ascending: true });
+
+  // Fetch the latest snapshot per slab (current rate)
+  const { data: latestRaw } = await db
+    .from("insurance_snapshots")
+    .select("slab, redemption_rate_e6, created_at")
+    .in("slab", slabAddresses)
+    .order("created_at", { ascending: false });
+
+  const earliest7d: InsuranceSnapshotRow[] = earliest7dRaw ?? [];
+  const earliest30d: InsuranceSnapshotRow[] = earliest30dRaw ?? [];
+  const latest: InsuranceSnapshotRow[] = latestRaw ?? [];
+
+  // Build lookup maps: slab → first record in window
+  const earliest7dBySlab = new Map<string, { rate: number; ts: number }>();
+  const earliest30dBySlab = new Map<string, { rate: number; ts: number }>();
+  const latestBySlab = new Map<string, { rate: number; ts: number }>();
+
+  for (const row of earliest7d) {
+    if (!earliest7dBySlab.has(row.slab)) {
+      earliest7dBySlab.set(row.slab, {
+        rate: Number(row.redemption_rate_e6),
+        ts: new Date(row.created_at).getTime(),
+      });
+    }
+  }
+  for (const row of earliest30d) {
+    if (!earliest30dBySlab.has(row.slab)) {
+      earliest30dBySlab.set(row.slab, {
+        rate: Number(row.redemption_rate_e6),
+        ts: new Date(row.created_at).getTime(),
+      });
+    }
+  }
+  for (const row of latest) {
+    if (!latestBySlab.has(row.slab)) {
+      latestBySlab.set(row.slab, {
+        rate: Number(row.redemption_rate_e6),
+        ts: new Date(row.created_at).getTime(),
+      });
+    }
+  }
+
+  const result: Record<string, number> = {};
+
+  for (const slab of slabAddresses) {
+    const cur = latestBySlab.get(slab);
+    if (!cur || cur.rate === 0) {
+      result[slab] = 0;
+      continue;
+    }
+
+    // Try 7-day window first, fall back to 30-day
+    const old = earliest7dBySlab.get(slab) ?? earliest30dBySlab.get(slab);
+    if (!old || old.rate === 0) {
+      result[slab] = 0;
+      continue;
+    }
+
+    const elapsed = cur.ts - old.ts;
+    if (elapsed < MS_PER_DAY) {
+      // Not enough history yet
+      result[slab] = 0;
+      continue;
+    }
+
+    const growth = (cur.rate - old.rate) / old.rate;
+    const annualized = growth * (365 * MS_PER_DAY) / elapsed;
+
+    result[slab] = isFinite(annualized)
+      ? Math.round(annualized * 10_000) / 100  // → percentage, 2dp
+      : 0;
+  }
+
+  return result;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -166,13 +294,16 @@ export async function GET() {
       }
     }
 
-    // 4. Cross-reference slab addresses with Supabase market data
+    // 4. Cross-reference slab addresses with Supabase market data + APR
     const slabAddresses = parsed.map((p) => p.pool.slab);
     const supabase = getServiceClient();
-    const { data: markets } = await supabase
-      .from("markets_with_stats")
-      .select("slab_address,symbol,name,logo_url,insurance_balance,vault_balance")
-      .in("slab_address", slabAddresses);
+    const [{ data: markets }, aprBySlab] = await Promise.all([
+      supabase
+        .from("markets_with_stats")
+        .select("slab_address,symbol,name,logo_url,insurance_balance,vault_balance")
+        .in("slab_address", slabAddresses),
+      computeAprs(slabAddresses, supabase),
+    ]);
 
     const marketBySlab: Record<string, {
       symbol: string;
@@ -199,9 +330,9 @@ export async function GET() {
       const vaultBalRaw = vaultBalances[pool.vault] ?? 0n;
       const poolValueRaw = calcPoolValue(pool);
 
-      // APR: use insurance_balance growth proxy when available; 0 otherwise.
-      // TODO: compute real APR from fee accrual history.
-      const apr = 0;
+      // APR: trailing annualised rate from insurance_snapshots (7d or 30d window).
+      // Falls back to 0 when fewer than 1 day of snapshots exist.
+      const apr = aprBySlab[pool.slab] ?? 0;
 
       const capUsedRaw = vaultBalRaw; // real deposits in vault
       const capTotalRaw = pool.depositCap > 0n ? pool.depositCap : 0n; // 0 = uncapped
@@ -227,7 +358,7 @@ export async function GET() {
         tvlRaw: vaultBalRaw.toString(),
         /** Pool value (deposited - withdrawn - flushed + returned) */
         poolValue: toUsdcFloat(poolValueRaw),
-        /** APR (0 until fee history is indexed) */
+        /** Trailing APR % from insurance_snapshots redemption-rate growth (7d/30d window) */
         apr,
         /** Deposit cap in USDC (0 = uncapped) */
         capTotal: toUsdcFloat(capTotalRaw),
