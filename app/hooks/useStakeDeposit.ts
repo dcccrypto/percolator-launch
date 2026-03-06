@@ -82,6 +82,9 @@ export function useStakeDeposit() {
         if (!poolInfo || poolInfo.data.length < 186) {
           throw new Error('Stake pool not initialized for this market. Contact admin.');
         }
+        if (!poolInfo.owner.equals(STAKE_PROGRAM_ID)) {
+          throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
+        }
 
         // Parse lpMint and vault from pool account (offsets from struct layout)
         const poolData = Buffer.from(poolInfo.data);

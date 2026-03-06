@@ -82,6 +82,9 @@ export function useStakeWithdraw() {
         if (!poolInfo || poolInfo.data.length < 186) {
           throw new Error('Stake pool not initialized for this market.');
         }
+        if (!poolInfo.owner.equals(STAKE_PROGRAM_ID)) {
+          throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
+        }
 
         const poolData = Buffer.from(poolInfo.data);
         const lpMint = new PublicKey(poolData.subarray(65, 97));
