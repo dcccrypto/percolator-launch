@@ -46,7 +46,7 @@ const mobileGroups = [
 ];
 
 export const Header: FC = () => {
-  const [network, setNet] = useState<Network>("devnet");
+  const [network, setNet] = useState<Network>("mainnet");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);

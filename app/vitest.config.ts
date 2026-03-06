@@ -13,6 +13,9 @@ export default defineConfig({
     setupFiles: ['./__tests__/setup.ts'],
     env: {
       NODE_ENV: 'development',
+      // Test environment is always devnet; prevents getConfig() mainnet validation errors
+      // when NEXT_PUBLIC_DEFAULT_NETWORK is not set in the test process env.
+      NEXT_PUBLIC_DEFAULT_NETWORK: 'devnet',
     },
     coverage: {
       provider: 'v8',

@@ -16,7 +16,10 @@ export function getNetwork(): Network {
   // Trim env var to handle trailing whitespace/newlines (Vercel env var copy-paste issue)
   const envNet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
   if (envNet === "mainnet" || envNet === "devnet") return envNet;
-  return "devnet";
+  // Default fail-closed to mainnet; prevents devnet-only features (pre-fund, faucet)
+  // from activating on misconfigured production deployments.
+  // Set NEXT_PUBLIC_DEFAULT_NETWORK=devnet explicitly for devnet environments.
+  return "mainnet";
 }
 
 /** Solana public fallback RPC (rate-limited, for development/build only) */

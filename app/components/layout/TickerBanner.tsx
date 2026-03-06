@@ -47,7 +47,7 @@ function TickerContent({ items, colorClass, dotClass }: { items: string[]; color
 }
 
 export function TickerBanner() {
-  const [network, setNetwork] = useState<Network>("devnet");
+  const [network, setNetwork] = useState<Network>("mainnet");
   useEffect(() => { setNetwork(getConfig().network); }, []);
 
   const isMainnet = network === "mainnet";

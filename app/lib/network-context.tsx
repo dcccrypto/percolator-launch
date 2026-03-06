@@ -3,7 +3,8 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { Network } from "./config";
 
-const NetworkContext = createContext<Network>("devnet");
+// Default fail-closed to mainnet — consistent with getNetwork() in config.ts.
+const NetworkContext = createContext<Network>("mainnet");
 
 export function NetworkProvider({ value, children }: { value: Network; children: ReactNode }) {
   return <NetworkContext.Provider value={value}>{children}</NetworkContext.Provider>;

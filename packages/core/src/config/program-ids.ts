@@ -34,8 +34,8 @@ export function getProgramId(network?: Network): PublicKey {
     return new PublicKey(process.env.PROGRAM_ID);
   }
 
-  // Use provided network or detect from env
-  const targetNetwork = network ?? (process.env.NETWORK as Network) ?? "devnet";
+  // Use provided network or detect from env — default fail-closed to mainnet
+  const targetNetwork = network ?? (process.env.NETWORK as Network) ?? "mainnet";
   const programId = PROGRAM_IDS[targetNetwork].percolator;
 
   return new PublicKey(programId);
@@ -50,8 +50,8 @@ export function getMatcherProgramId(network?: Network): PublicKey {
     return new PublicKey(process.env.MATCHER_PROGRAM_ID);
   }
 
-  // Use provided network or detect from env
-  const targetNetwork = network ?? (process.env.NETWORK as Network) ?? "devnet";
+  // Use provided network or detect from env — default fail-closed to mainnet
+  const targetNetwork = network ?? (process.env.NETWORK as Network) ?? "mainnet";
   const programId = PROGRAM_IDS[targetNetwork].matcher;
 
   if (!programId) {
@@ -62,13 +62,14 @@ export function getMatcherProgramId(network?: Network): PublicKey {
 }
 
 /**
- * Get the current network from environment
- * Defaults to devnet for safety
+ * Get the current network from environment.
+ * Defaults fail-closed to mainnet — set NETWORK=devnet explicitly for devnet environments.
  */
 export function getCurrentNetwork(): Network {
   const network = process.env.NETWORK?.toLowerCase();
-  if (network === "mainnet" || network === "mainnet-beta") {
-    return "mainnet";
+  if (network === "devnet") {
+    return "devnet";
   }
-  return "devnet";
+  // mainnet, mainnet-beta, or any unset/unknown value → mainnet (fail-closed)
+  return "mainnet";
 }
