@@ -78,7 +78,9 @@ export function getRpcEndpoint(): string {
  * Returns undefined if no Helius key is configured (disables WS subscriptions).
  */
 export function getWsEndpoint(): string | undefined {
-  const apiKey = process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY ?? process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? "";
+  // PERC-469: Prefer server-only HELIUS_API_KEY; fall back to WS-specific key.
+  // NEXT_PUBLIC_HELIUS_API_KEY removed to prevent client-side exposure.
+  const apiKey = process.env.HELIUS_API_KEY ?? process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY ?? "";
   if (!apiKey) return undefined;
 
   const net = getNetwork();

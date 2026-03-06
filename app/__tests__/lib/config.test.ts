@@ -175,18 +175,18 @@ describe("getWsEndpoint", () => {
     expect(getWsEndpoint()).toBe("wss://devnet.helius-rpc.com/?api-key=ws-key");
   });
 
-  it("falls back to NEXT_PUBLIC_HELIUS_API_KEY for backward compatibility", () => {
+  it("falls back to HELIUS_API_KEY (server-only) when WS key not set (PERC-469)", () => {
     clearWindow();
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "mainnet";
     delete process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY;
-    process.env.NEXT_PUBLIC_HELIUS_API_KEY = "legacy-key";
-    expect(getWsEndpoint()).toBe("wss://mainnet.helius-rpc.com/?api-key=legacy-key");
+    process.env.HELIUS_API_KEY = "server-key";
+    expect(getWsEndpoint()).toBe("wss://mainnet.helius-rpc.com/?api-key=server-key");
   });
 
-  it("returns undefined when no public WS key is configured", () => {
+  it("returns undefined when no keys are configured", () => {
     clearWindow();
+    delete process.env.HELIUS_API_KEY;
     delete process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY;
-    delete process.env.NEXT_PUBLIC_HELIUS_API_KEY;
     expect(getWsEndpoint()).toBeUndefined();
   });
 });

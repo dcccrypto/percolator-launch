@@ -30,32 +30,32 @@ const PrivyProviderClient: FC<{ appId: string; children: ReactNode }> = ({
   // transactions is selected via the explicit `chain` parameter on signTransaction /
   // signAndSendTransaction calls (see useWalletCompat.ts), NOT by limiting rpcs.
   const solanaRpcs = useMemo(() => {
-    const heliusKey = process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? "";
+    // PERC-469: Use /api/rpc proxy to avoid exposing Helius API key client-side.
+    // The proxy routes requests to Helius server-side using HELIUS_API_KEY (no NEXT_PUBLIC_ prefix).
+    const proxyRpcUrl = typeof window !== "undefined"
+      ? new URL("/api/rpc", window.location.origin).toString()
+      : "/api/rpc";
 
-    // Derive WSS from HTTPS URL by replacing scheme
-    const toWss = (url: string) => url.replace(/^https:\/\//, "wss://");
-
-    // Mainnet RPC — always provided for Privy initialization
-    const mainnetRpcUrl =
-      process.env.NEXT_PUBLIC_HELIUS_RPC_URL ||
-      (heliusKey
-        ? `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`
-        : "https://api.mainnet-beta.solana.com");
-
-    // Devnet RPC — always provided for Privy initialization
-    const devnetRpcUrl = heliusKey
-      ? `https://devnet.helius-rpc.com/?api-key=${heliusKey}`
-      : "https://api.devnet.solana.com";
+    // WSS endpoint for subscriptions — uses a separate key that's safe for WS connections,
+    // or falls back to public endpoints if not configured.
+    // Note: NEXT_PUBLIC_HELIUS_WS_API_KEY is intentionally public (WS-only, rate-limited key).
+    const wsKey = process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY ?? "";
+    const mainnetWss = wsKey
+      ? `wss://mainnet.helius-rpc.com/?api-key=${wsKey}`
+      : "wss://api.mainnet-beta.solana.com";
+    const devnetWss = wsKey
+      ? `wss://devnet.helius-rpc.com/?api-key=${wsKey}`
+      : "wss://api.devnet.solana.com";
 
     return {
       "solana:mainnet": {
-        rpc: createSolanaRpc(mainnetRpcUrl),
-        rpcSubscriptions: createSolanaRpcSubscriptions(toWss(mainnetRpcUrl)),
+        rpc: createSolanaRpc(proxyRpcUrl),
+        rpcSubscriptions: createSolanaRpcSubscriptions(mainnetWss),
         blockExplorerUrl: "https://solscan.io",
       },
       "solana:devnet": {
-        rpc: createSolanaRpc(devnetRpcUrl),
-        rpcSubscriptions: createSolanaRpcSubscriptions(toWss(devnetRpcUrl)),
+        rpc: createSolanaRpc(proxyRpcUrl),
+        rpcSubscriptions: createSolanaRpcSubscriptions(devnetWss),
         blockExplorerUrl: "https://explorer.solana.com?cluster=devnet",
       },
     };
