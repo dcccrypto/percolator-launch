@@ -174,7 +174,7 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
             const poolPk = new PublicKey(pool.poolAddress);
             const [depositPda] = deriveDepositPda(poolPk, walletPk, stakeProgramPk);
             const depositInfo = await connection.getAccountInfo(depositPda);
-            if (depositInfo && depositInfo.data.length >= 16) {
+            if (depositInfo && depositInfo.data.length >= 80) {
               // depositPda layout: [discriminator: 8 bytes][depositor: 32 bytes][slab: 32 bytes][deposit_slot: u64 8 bytes][...]
               const depositSlot = depositInfo.data.readBigUInt64LE(72);
               const cooldownSlots = BigInt(pool.cooldownSlots);
