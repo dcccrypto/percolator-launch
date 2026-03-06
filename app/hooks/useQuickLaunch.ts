@@ -26,11 +26,13 @@ export interface QuickLaunchResult {
   error: string | null;
   poolInfo: DexPoolResult | null;
   /** Detected oracle type for this token */
-  oracleType: "pyth" | "admin";
+  oracleType: "pyth" | "hyperp_ema" | "admin";
   /** Pyth feed ID (hex64) if oracleType === "pyth", else null */
   pythFeedId: string | null;
   /** Best price string for adminPrice field */
   adminPrice: string;
+  /** PERC-470: DEX pool address for hyperp oracle mode */
+  dexPoolAddress: string | null;
 }
 
 /**
@@ -47,9 +49,10 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
   const [tokenMeta, setTokenMeta] = useState<{ name: string; symbol: string; decimals: number } | null>(null);
 
   // Oracle detection state
-  const [oracleType, setOracleType] = useState<"pyth" | "admin">("admin");
+  const [oracleType, setOracleType] = useState<"pyth" | "hyperp_ema" | "admin">("admin");
   const [pythFeedId, setPythFeedId] = useState<string | null>(null);
   const [adminPrice, setAdminPrice] = useState<string>("1.000000");
+  const [dexPoolAddress, setDexPoolAddress] = useState<string | null>(null);
 
   // Oracle resolution: call /api/oracle/resolve/[mint] after token meta loads.
   // If Pyth feed found → pyth oracle; else → admin oracle with best available price.
@@ -57,6 +60,7 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
     setOracleType("admin");
     setPythFeedId(null);
     setAdminPrice("1.000000");
+    setDexPoolAddress(null);
     if (!mint || mint.length < 32 || !tokenMeta) return;
 
     let cancelled = false;
@@ -71,10 +75,18 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
           if (data.feedId) {
             setOracleType("pyth");
             setPythFeedId(data.feedId);
+            setDexPoolAddress(null);
+            if (data.price > 0) setAdminPrice(data.price.toFixed(6));
+          } else if (data.oracleMode === "hyperp" && data.dexPoolAddress) {
+            // PERC-470: Hyperp mode — DEX pool is the oracle
+            setOracleType("hyperp_ema");
+            setPythFeedId(null);
+            setDexPoolAddress(data.dexPoolAddress);
             if (data.price > 0) setAdminPrice(data.price.toFixed(6));
           } else {
             setOracleType("admin");
             setPythFeedId(null);
+            setDexPoolAddress(null);
             if (data.price > 0) setAdminPrice(data.price.toFixed(6));
           }
         } else {
@@ -189,5 +201,6 @@ export function useQuickLaunch(mint: string | null): QuickLaunchResult {
     oracleType,
     pythFeedId,
     adminPrice,
+    dexPoolAddress,
   };
 }

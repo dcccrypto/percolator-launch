@@ -27,6 +27,9 @@ import {
   encodePushOraclePrice,
   encodeSetOraclePriceCap,
   encodeUpdateConfig,
+  encodeUpdateHyperpMark,
+  detectDexType,
+  parseDexPool,
   ACCOUNTS_INIT_MARKET,
   ACCOUNTS_INIT_LP,
   ACCOUNTS_DEPOSIT_COLLATERAL,
@@ -126,6 +129,14 @@ export interface CreateMarketParams {
   vammParams?: VammParams;
   /** Mainnet token CA — used by oracle keeper to fetch real-time prices (PERC-465) */
   mainnetCA?: string;
+  /** PERC-470: Oracle mode — determines how price is fed to the market */
+  oracleMode?: "pyth" | "hyperp" | "admin";
+  /** PERC-470: DEX pool address for hyperp mode (PumpSwap/Raydium/Meteora) */
+  dexPoolAddress?: string;
+  /** PERC-470: Base vault address for hyperp mode (PumpSwap) */
+  dexBaseVault?: string;
+  /** PERC-470: Quote vault address for hyperp mode (PumpSwap) */
+  dexQuoteVault?: string;
 }
 
 export interface CreateMarketState {
@@ -202,8 +213,34 @@ export function useCreateMarket() {
       const tierKey: SlabTier = tierMap[params.maxAccounts ?? 4096] ?? "large";
       const selectedProgramId = cfg.programsBySlabTier?.[tierKey] ?? cfg.programId;
       const programId = new PublicKey(selectedProgramId);
-      const isAdminOracle = params.oracleFeed === ALL_ZEROS_FEED;
+      // PERC-470: Oracle mode detection
+      // - "pyth": index_feed_id = pyth hex, uses KeeperCrank with Pyth PDA
+      // - "hyperp": index_feed_id = zeros, uses UpdateHyperpMark (reads DEX pool directly)
+      // - "admin": index_feed_id = zeros, uses PushOraclePrice + KeeperCrank
+      const oracleMode = params.oracleMode ?? (params.oracleFeed === ALL_ZEROS_FEED ? "admin" : "pyth");
+      const isAdminOracle = oracleMode === "admin";
+      const isHyperpOracle = oracleMode === "hyperp";
       const isDevnetEnv = (process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() ?? "mainnet") === "devnet";
+
+      // PERC-470: Resolve DEX pool vault addresses for hyperp mode
+      // If vaults weren't provided, fetch the pool account on-chain
+      if (isHyperpOracle && params.dexPoolAddress && !params.dexBaseVault) {
+        try {
+          const poolPk = new PublicKey(params.dexPoolAddress);
+          const poolAccount = await connection.getAccountInfo(poolPk);
+          if (poolAccount?.data) {
+            const dexType = detectDexType(poolAccount.owner);
+            if (dexType) {
+              const poolInfo = parseDexPool(dexType, poolPk, poolAccount.data);
+              if (poolInfo.baseVault) params.dexBaseVault = poolInfo.baseVault.toBase58();
+              if (poolInfo.quoteVault) params.dexQuoteVault = poolInfo.quoteVault.toBase58();
+            }
+          }
+        } catch (e) {
+          console.warn("PERC-470: Failed to resolve DEX pool vaults:", e);
+        }
+      }
+
       const startStep = retryFromStep ?? 0;
 
       setState((s) => ({
@@ -549,13 +586,32 @@ export function useCreateMarket() {
           ]);
           instructions.push(buildIx({ programId, keys: updateConfigKeys, data: updateConfigData }));
 
-          // Pre-LP KeeperCrank (must come BEFORE SetAuth to crank, since SetAuth clears price)
-          const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
-          const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
-          const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
-            wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
-          ]);
-          instructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
+          // Pre-LP crank — UpdateHyperpMark for hyperp mode, KeeperCrank otherwise
+          if (isHyperpOracle && params.dexPoolAddress) {
+            // PERC-470: UpdateHyperpMark reads DEX pool directly — no keeper needed
+            const hyperpData = encodeUpdateHyperpMark();
+            const hyperpKeys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [
+              { pubkey: slabPk, isSigner: false, isWritable: true },
+              { pubkey: new PublicKey(params.dexPoolAddress), isSigner: false, isWritable: false },
+              { pubkey: WELL_KNOWN.clock, isSigner: false, isWritable: false },
+            ];
+            // PumpSwap pools need vault0 + vault1 as remaining accounts
+            if (params.dexBaseVault) {
+              hyperpKeys.push({ pubkey: new PublicKey(params.dexBaseVault), isSigner: false, isWritable: false });
+            }
+            if (params.dexQuoteVault) {
+              hyperpKeys.push({ pubkey: new PublicKey(params.dexQuoteVault), isSigner: false, isWritable: false });
+            }
+            instructions.push(new TransactionInstruction({ programId, keys: hyperpKeys, data: Buffer.from(hyperpData) }));
+          } else {
+            // KeeperCrank for Pyth and admin modes
+            const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
+            const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
+            const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
+              wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
+            ]);
+            instructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
+          }
 
           // NOTE: Do NOT delegate oracle authority here — SetOracleAuthority clears
           // authority_price_e6 to 0, which would break the final crank in Step 4.
@@ -715,17 +771,35 @@ export function useCreateMarket() {
             finalInstructions.push(buildIx({ programId, keys: pushKeys2, data: pushData2 }));
           }
 
-          const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
-          const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
-          const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
-            wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
-          ]);
-          finalInstructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
+          // PERC-470: Final crank — UpdateHyperpMark for hyperp, KeeperCrank otherwise
+          if (isHyperpOracle && params.dexPoolAddress) {
+            const hyperpData = encodeUpdateHyperpMark();
+            const hyperpKeys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [
+              { pubkey: slabPk, isSigner: false, isWritable: true },
+              { pubkey: new PublicKey(params.dexPoolAddress), isSigner: false, isWritable: false },
+              { pubkey: WELL_KNOWN.clock, isSigner: false, isWritable: false },
+            ];
+            if (params.dexBaseVault) {
+              hyperpKeys.push({ pubkey: new PublicKey(params.dexBaseVault), isSigner: false, isWritable: false });
+            }
+            if (params.dexQuoteVault) {
+              hyperpKeys.push({ pubkey: new PublicKey(params.dexQuoteVault), isSigner: false, isWritable: false });
+            }
+            finalInstructions.push(new TransactionInstruction({ programId, keys: hyperpKeys, data: Buffer.from(hyperpData) }));
+          } else {
+            const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
+            const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
+            const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
+              wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
+            ]);
+            finalInstructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
+          }
 
           // PERC-465: On devnet, delegate oracle authority to the crank keypair so the
           // oracle keeper can continuously push live prices for this new market.
           // SetOracleAuthority is added AFTER the final crank — it clears authority_price_e6
           // but that's fine here since the crank has already processed the current price.
+          // PERC-470: Skip for hyperp mode — oracle_authority stays zeros (permissionless).
           if (isDevnetEnv && isAdminOracle) {
             const crankPubkey = getConfig().crankWallet;
             if (crankPubkey && crankPubkey.trim() !== "") {
@@ -792,6 +866,8 @@ export function useCreateMarket() {
               name: params.name ?? "Unknown Token",
               decimals: params.decimals ?? 6,
               deployer: wallet.publicKey.toBase58(),
+              oracle_mode: oracleMode,
+              dex_pool_address: params.dexPoolAddress ?? null,
               oracle_authority: isAdminOracle
                 ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : wallet.publicKey.toBase58())
                 : null,

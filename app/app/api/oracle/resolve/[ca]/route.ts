@@ -91,6 +91,12 @@ interface OracleResolveResult {
   symbol: string;
   price: number;
   source: "pyth" | "jupiter" | "dexscreener" | "unknown";
+  /** PERC-470: DEX pool address for hyperp oracle mode (when no Pyth feed) */
+  dexPoolAddress?: string | null;
+  /** PERC-470: DEX type (pumpswap, raydium, meteora) */
+  dexType?: string | null;
+  /** PERC-470: Recommended oracle mode */
+  oracleMode?: "pyth" | "hyperp" | "admin";
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +142,7 @@ async function fetchJupiterPrice(
 
 async function fetchDexScreenerInfo(
   ca: string,
-): Promise<{ price: number; symbol: string | null } | null> {
+): Promise<{ price: number; symbol: string | null; poolAddress: string | null; dexId: string | null } | null> {
   try {
     const resp = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${ca}`, {
       signal: AbortSignal.timeout(6000),
@@ -162,7 +168,12 @@ async function fetchDexScreenerInfo(
     const price = parseFloat(best.priceUsd ?? "0");
     if (!isFinite(price) || price <= 0) return null;
 
-    return { price, symbol: best.baseToken?.symbol ?? null };
+    // PERC-470: Also return pool address and DEX ID for hyperp mode
+    const SUPPORTED_DEX_IDS = new Set(["pumpswap", "raydium", "meteora"]);
+    const dexId = (best as any).dexId?.toLowerCase() ?? null;
+    const poolAddress = SUPPORTED_DEX_IDS.has(dexId ?? "") ? (best as any).pairAddress ?? null : null;
+
+    return { price, symbol: best.baseToken?.symbol ?? null, poolAddress, dexId };
   } catch {
     return null;
   }
@@ -216,26 +227,29 @@ export async function GET(
 
   let result: OracleResolveResult;
 
+  // PERC-470: Determine best DEX pool for hyperp mode
+  const bestPool = dexResult?.poolAddress ?? null;
+  const bestDexType = dexResult?.dexId ?? null;
+
   if (pythEntry) {
     result = {
       feedId: pythEntry.feedId,
       symbol: pythEntry.symbol,
       price,
       source: "pyth",
+      oracleMode: "pyth",
     };
-  } else if (jupResult) {
+  } else if (jupResult || dexResult) {
+    // PERC-470: No Pyth feed — use hyperp mode if we have a supported DEX pool
+    const hasPool = !!bestPool;
     result = {
       feedId: null,
       symbol: symbolFromPrice ?? ca.slice(0, 6),
-      price: jupResult.price,
-      source: "jupiter",
-    };
-  } else if (dexResult) {
-    result = {
-      feedId: null,
-      symbol: symbolFromPrice ?? ca.slice(0, 6),
-      price: dexResult.price,
-      source: "dexscreener",
+      price: (jupResult?.price ?? dexResult?.price) || 0,
+      source: jupResult ? "jupiter" : "dexscreener",
+      dexPoolAddress: bestPool,
+      dexType: bestDexType,
+      oracleMode: hasPool ? "hyperp" : "admin",
     };
   } else {
     // No price found anywhere

@@ -217,6 +217,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           adminPrice: quickLaunch.adminPrice,
         };
       }
+      // PERC-470: Hyperp EMA — auto-detected DEX pool as oracle
+      if (quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress) {
+        return {
+          ...base,
+          oracleType: "hyperp_ema" as const,
+          oracleFeed: quickLaunch.dexPoolAddress,
+          adminPrice: quickLaunch.adminPrice,
+          dexPool: quickLaunch.poolInfo ?? null,
+        };
+      }
       // Admin oracle — devnet-only or unknown token
       return {
         ...base,
@@ -316,15 +326,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       return { oracleFeed: wizard.oracleFeed, priceE6: 0n };
     }
     if (wizard.oracleType === "hyperp_ema") {
-      try {
-        const pk = new PublicKey(wizard.oracleFeed);
-        const hex = Array.from(pk.toBytes())
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
-        return { oracleFeed: hex, priceE6: 0n };
-      } catch {
-        return { oracleFeed: "0".repeat(64), priceE6: 1_000_000n };
-      }
+      // PERC-470: Hyperp mode uses index_feed_id = zeros.
+      // The DEX pool address is passed separately via dexPoolAddress.
+      // Use the detected DEX price as initial mark price.
+      const dexPrice = wizard.dexPool?.priceUsd ?? 1;
+      const priceE6 = BigInt(Math.round(dexPrice * 1_000_000));
+      return { oracleFeed: "0".repeat(64), priceE6 };
     }
     // Admin oracle
     const price = parseFloat(wizard.adminPrice ?? "1");
@@ -339,6 +346,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     const tier = SLAB_TIERS[wizard.slabTier];
     // On devnet, use the mirror mint for on-chain ops; keep mainnet CA for metadata
     const effectiveMint = devnetMintAddress ?? wizard.mintAddress;
+
+    // PERC-470: Map wizard oracle type to CreateMarketParams oracleMode
+    const oracleMode = wizard.oracleType === "pyth" ? "pyth" as const
+      : wizard.oracleType === "hyperp_ema" ? "hyperp" as const
+      : "admin" as const;
 
     const params: CreateMarketParams = {
       mint: new PublicKey(effectiveMint),
@@ -355,6 +367,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       name: wizard.tokenMeta?.name ?? "Unknown Token",
       decimals,
       mainnetCA: wizard.mintAddress !== effectiveMint ? wizard.mintAddress : undefined,
+      oracleMode,
+      // PERC-470: Pass DEX pool info for hyperp mode
+      ...(oracleMode === "hyperp" && wizard.dexPool ? {
+        dexPoolAddress: wizard.dexPool.poolAddress,
+      } : {}),
     };
     create(params);
   };
@@ -518,6 +535,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             ) : quickLaunch.oracleType === "pyth" && quickLaunch.pythFeedId ? (
               <p className="text-[10px] text-[var(--long)]">
                 ✓ Pyth oracle detected — price feed will be used automatically
+              </p>
+            ) : quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress ? (
+              <p className="text-[10px] text-[var(--long)]">
+                ✓ DEX pool detected — permissionless on-chain pricing (no keeper needed)
               </p>
             ) : (
               <p className="text-[10px] text-[var(--text-dim)]">
