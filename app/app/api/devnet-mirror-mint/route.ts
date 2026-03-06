@@ -41,6 +41,53 @@ import * as Sentry from "@sentry/nextjs";
 
 export const dynamic = "force-dynamic";
 
+// Per-IP rate limiter for this endpoint specifically.
+// Tighter than the global middleware limit (120/min) because each request
+// creates an on-chain devnet SPL mint that costs real SOL from the shared
+// DEVNET_MINT_AUTHORITY_KEYPAIR. 10 req/min/IP is generous for legitimate use
+// while preventing a single attacker from draining the mint authority wallet.
+const MINT_RATE_LIMIT_MAX = 10;
+const MINT_RATE_LIMIT_WINDOW_MS = 60_000;
+const mintRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkMintRateLimit(ip: string): { allowed: boolean; retryAfter: number } {
+  const now = Date.now();
+  let entry = mintRateLimitMap.get(ip);
+
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + MINT_RATE_LIMIT_WINDOW_MS };
+    mintRateLimitMap.set(ip, entry);
+  }
+
+  entry.count++;
+
+  // Occasional GC to prevent unbounded Map growth
+  if (Math.random() < 0.01) {
+    for (const [key, val] of mintRateLimitMap) {
+      if (now > val.resetAt) mintRateLimitMap.delete(key);
+    }
+  }
+
+  if (entry.count > MINT_RATE_LIMIT_MAX) {
+    return { allowed: false, retryAfter: Math.ceil((entry.resetAt - now) / 1000) };
+  }
+  return { allowed: true, retryAfter: 0 };
+}
+
+/** Extract client IP from request headers, respecting proxy depth env var. */
+function getClientIp(req: NextRequest): string {
+  const PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
+  if (PROXY_DEPTH > 0) {
+    const forwarded = req.headers.get("x-forwarded-for");
+    if (forwarded) {
+      const ips = forwarded.split(",").map((s) => s.trim());
+      const idx = Math.max(0, ips.length - PROXY_DEPTH);
+      return ips[idx] ?? "unknown";
+    }
+  }
+  return "unknown";
+}
+
 const NETWORK = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() ?? "mainnet";
 
 interface TokenInfo {
@@ -105,6 +152,24 @@ export async function POST(req: NextRequest) {
   try {
     if (NETWORK !== "devnet") {
       return NextResponse.json({ error: "Only available on devnet" }, { status: 403 });
+    }
+
+    // Per-endpoint rate limit: 10 req/min/IP (tighter than global 120/min).
+    // Prevents SOL drain on the shared DEVNET_MINT_AUTHORITY_KEYPAIR.
+    const clientIp = getClientIp(req);
+    const { allowed, retryAfter } = checkMintRateLimit(clientIp);
+    if (!allowed) {
+      return NextResponse.json(
+        { error: "Too many mint requests. Please wait before retrying." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            "X-RateLimit-Limit": String(MINT_RATE_LIMIT_MAX),
+            "X-RateLimit-Window": "60",
+          },
+        },
+      );
     }
 
     const body = await req.json();
