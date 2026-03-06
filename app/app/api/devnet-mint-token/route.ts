@@ -35,7 +35,8 @@ import * as Sentry from "@sentry/nextjs";
 
 export const dynamic = "force-dynamic";
 
-const NETWORK = process.env.NEXT_PUBLIC_SOLANA_NETWORK ?? "devnet";
+// Default to 'mainnet' so misconfigured deployments fail closed, not open
+const NETWORK = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() ?? "mainnet";
 const AIRDROP_USD_VALUE = 500; // $500 worth of tokens
 // ORACLE_BRIDGE_URL removed — unreachable from Vercel serverless.
 // Price fetching uses DexScreener API directly via fetchTokenInfo().
