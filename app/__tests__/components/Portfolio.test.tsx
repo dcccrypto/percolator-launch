@@ -35,6 +35,18 @@ vi.mock("next/dynamic", () => ({
 vi.mock("@/hooks/useWalletCompat");
 vi.mock("@/hooks/usePortfolio");
 vi.mock("@/hooks/useMultiTokenMeta");
+vi.mock("@/hooks/useLpPositions", () => ({
+  useLpPositions: () => ({
+    positions: [],
+    totalRedeemable: 0,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));
+vi.mock("@/components/portfolio/LpPositionsPanel", () => ({
+  LpPositionsPanel: () => <div data-testid="lp-positions-panel" />,
+}));
 vi.mock("@/components/ui/ScrollReveal", () => ({
   ScrollReveal: ({ children }: any) => <div>{children}</div>,
 }));

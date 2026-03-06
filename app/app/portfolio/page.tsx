@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio, getLiquidationSeverity } from "@/hooks/usePortfolio";
+import { useLpPositions } from "@/hooks/useLpPositions";
+import { LpPositionsPanel } from "@/components/portfolio/LpPositionsPanel";
 import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
@@ -49,6 +51,9 @@ export default function PortfolioPage() {
   const atRiskCount = portfolio.atRiskCount ?? 0;
   const loading = mockPositions ? false : portfolio.loading;
   const refresh = portfolio.refresh;
+
+  // LP positions (insurance fund deposits)
+  const lpPositions = useLpPositions();
 
   // Auto-refresh every 15s
   useEffect(() => {
@@ -124,7 +129,7 @@ export default function PortfolioPage() {
 
         {/* Summary stats */}
         <ScrollReveal stagger={0.08}>
-          <div className="mb-8 grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4">
+          <div className="mb-8 grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] sm:grid-cols-5">
             {[
               {
                 label: "Portfolio Value",
@@ -141,6 +146,16 @@ export default function PortfolioPage() {
                 value: loading ? "\u2026" : formatPnl(totalUnrealizedPnl),
                 color: totalUnrealizedPnl >= 0n ? "text-[var(--long)]" : "text-[var(--short)]",
                 sub: loading ? undefined : `${totalDeposited > 0n ? formatPnlPct(Number((totalUnrealizedPnl * 10000n) / (totalDeposited || 1n)) / 100) : "0.00%"}`,
+              },
+              {
+                label: "LP Value",
+                value: lpPositions.loading ? "\u2026" : lpPositions.totalRedeemable > 0
+                  ? `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "—",
+                color: lpPositions.totalRedeemable > 0 ? "text-[var(--cyan)]" : "text-[var(--text-dim)]",
+                sub: lpPositions.positions.length > 0
+                  ? `${lpPositions.positions.length} pool${lpPositions.positions.length > 1 ? "s" : ""}`
+                  : undefined,
               },
               {
                 label: "Positions",
@@ -382,6 +397,18 @@ export default function PortfolioPage() {
               })}
             </div>
           )}
+        </ScrollReveal>
+
+        {/* LP positions */}
+        <ScrollReveal delay={0.25}>
+          <div className="mt-8">
+            <LpPositionsPanel
+              loading={lpPositions.loading}
+              positions={lpPositions.positions}
+              totalRedeemable={lpPositions.totalRedeemable}
+              error={lpPositions.error}
+            />
+          </div>
         </ScrollReveal>
 
         {/* Trade history */}
