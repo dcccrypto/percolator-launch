@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
+import { explorerTxUrl } from "@/lib/config";
 import { useAdminActions } from "@/hooks/useAdminActions";
 import type { DiscoveredMarket } from "@percolator/sdk";
 
@@ -132,7 +134,7 @@ export function OracleAdminSection() {
   const canSubmit =
     connected &&
     selectedMarket &&
-    newAuthority.trim().length > 30 &&
+    (() => { try { new PublicKey(newAuthority.trim()); return true; } catch { return false; } })() &&
     !submitting &&
     actionLoading !== "setOracleAuthority";
 
@@ -296,7 +298,7 @@ export function OracleAdminSection() {
                         ✓ Oracle authority updated
                       </div>
                       <a
-                        href={`https://explorer.solana.com/tx/${txResult.sig}?cluster=devnet`}
+                        href={explorerTxUrl(txResult.sig!)}
                         target="_blank"
                         rel="noreferrer"
                         className="text-[11px] font-mono text-[var(--accent)] hover:underline break-all"
