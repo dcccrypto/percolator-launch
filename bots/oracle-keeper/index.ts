@@ -74,6 +74,34 @@ const skippedMarkets = new Set<string>();
 // Track markets where oracle authority has been successfully verified
 const authorityVerified = new Set<string>();
 
+// ── Supabase Auto-Discovery ─────────────────────────────────
+const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const DISCOVERY_INTERVAL_MS = Number(process.env.DISCOVERY_INTERVAL_MS ?? "30000"); // 30s
+
+const supabaseEnabled = !!(SUPABASE_URL && SUPABASE_SERVICE_KEY);
+
+/** Lightweight Supabase REST query — no client library needed */
+async function supabaseQuery(table: string, params: string): Promise<any[] | null> {
+  if (!supabaseEnabled) return null;
+  try {
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/${table}?${params}`,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+        },
+        signal: AbortSignal.timeout(5000),
+      },
+    );
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
 // ── Types ───────────────────────────────────────────────────
 interface MarketInfo {
   symbol: string;
@@ -218,8 +246,8 @@ async function fetchDexScreenerPrice(symbol: string): Promise<number | null> {
   } catch { return null; }
 }
 
-/** Fetch price with multi-source failover: Pyth → Jupiter → DexScreener */
-async function getPrice(symbol: string): Promise<{ price: number; source: string } | null> {
+/** Fetch price with multi-source failover: Pyth → Jupiter → DexScreener → CA lookup */
+async function getPrice(symbol: string, slab?: string): Promise<{ price: number; source: string } | null> {
   // Primary: Pyth (decentralized oracle, fastest for supported tokens)
   const pyth = getPythPrice(symbol);
   if (pyth) return { price: pyth, source: "pyth" };
@@ -231,6 +259,15 @@ async function getPrice(symbol: string): Promise<{ price: number; source: string
   // Tertiary: DexScreener (broad coverage for exotic tokens)
   const dex = await fetchDexScreenerPrice(symbol);
   if (dex) return { price: dex, source: "dexscreener" };
+
+  // Quaternary: Direct CA lookup for dynamic markets (PERC-465)
+  if (slab) {
+    const ca = slabToMainnetCA.get(slab);
+    if (ca) {
+      const caPrice = await fetchPriceByCA(ca);
+      if (caPrice) return caPrice;
+    }
+  }
 
   return null;
 }
@@ -304,7 +341,7 @@ async function pushAndCrank(market: MarketInfo, programId: PublicKey): Promise<v
     }
   }
 
-  const result = await getPrice(market.symbol);
+  const result = await getPrice(market.symbol, market.slab);
   if (!result) {
     s.totalErrors++;
     s.consecutiveErrors++;
@@ -412,6 +449,80 @@ function startHealthServer() {
   return server;
 }
 
+// ── Supabase Market Discovery ───────────────────────────────
+const knownSlabs = new Set<string>();
+
+/**
+ * Poll Supabase `markets` table for newly created markets with a mainnet_ca.
+ * Returns new MarketInfo entries that aren't already tracked.
+ */
+async function discoverNewMarkets(): Promise<MarketInfo[]> {
+  if (!supabaseEnabled) return [];
+  try {
+    const data = await supabaseQuery(
+      "markets",
+      "select=slab_address,mint_address,mainnet_ca,symbol,name&mainnet_ca=not.is.null",
+    );
+
+    if (!data) {
+      log(`⚠️ Supabase discovery failed`);
+      return [];
+    }
+
+    const newMarkets: MarketInfo[] = [];
+    for (const row of data) {
+      if (knownSlabs.has(row.slab_address)) continue;
+      knownSlabs.add(row.slab_address);
+
+      // Map mainnet CA to a symbol for price lookup
+      // Use the stored symbol, or fall back to the DB name
+      const symbol = row.symbol?.toUpperCase() ?? "UNKNOWN";
+      newMarkets.push({
+        symbol,
+        label: `${symbol}-PERP (dynamic)`,
+        slab: row.slab_address,
+      });
+    }
+    return newMarkets;
+  } catch (e) {
+    log(`⚠️ Supabase discovery error: ${(e as Error).message?.slice(0, 80)}`);
+    return [];
+  }
+}
+
+/**
+ * For dynamically discovered markets, we need to fetch prices by mainnet CA
+ * since they may not be in PYTH_FEED_IDS or JUPITER_MINTS.
+ * This fetches price directly using the mainnet CA via Jupiter Lite API.
+ */
+async function fetchPriceByCA(mainnetCA: string): Promise<{ price: number; source: string } | null> {
+  try {
+    const resp = await fetch(
+      `https://api.jup.ag/price/v2?ids=${mainnetCA}`,
+      { signal: AbortSignal.timeout(4000) },
+    );
+    const json = (await resp.json()) as any;
+    const data = json.data?.[mainnetCA];
+    if (data?.price) return { price: parseFloat(data.price), source: "jupiter-ca" };
+  } catch {}
+
+  // DexScreener fallback
+  try {
+    const resp = await fetch(
+      `https://api.dexscreener.com/latest/dex/tokens/${mainnetCA}`,
+      { signal: AbortSignal.timeout(4000) },
+    );
+    const json = (await resp.json()) as any;
+    const pair = json.pairs?.[0];
+    if (pair?.priceUsd) return { price: parseFloat(pair.priceUsd), source: "dexscreener-ca" };
+  } catch {}
+
+  return null;
+}
+
+// Map slab address → mainnet CA for dynamic markets
+const slabToMainnetCA = new Map<string, string>();
+
 // ── Main Loop ───────────────────────────────────────────────
 async function main() {
   log(`Oracle Keeper starting — admin: ${admin.publicKey.toBase58().slice(0, 12)}...`);
@@ -430,15 +541,17 @@ async function main() {
   } else if (process.env.DEPLOYMENT_JSON) {
     log("Deployment file not found — falling back to DEPLOYMENT_JSON env var");
     deployRaw = process.env.DEPLOYMENT_JSON;
+  } else if (supabaseEnabled) {
+    log("No deployment file — running in Supabase-only discovery mode");
   } else {
     console.error("❌ Deployment info not found at", deployPath);
-    console.error("   Run deploy-devnet-mm.ts first, or set DEPLOYMENT_JSON env var.");
+    console.error("   Run deploy-devnet-mm.ts first, set DEPLOYMENT_JSON env var, or set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.");
     process.exit(1);
   }
 
-  const deploy = JSON.parse(deployRaw);
+  const deploy = deployRaw ? JSON.parse(deployRaw) : { programId: process.env.PROGRAM_ID, markets: [] };
   const programId = new PublicKey(deploy.programId);
-  const markets = deploy.markets as MarketInfo[];
+  const markets: MarketInfo[] = [...(deploy.markets as MarketInfo[])];
 
   log(`Program: ${programId.toBase58().slice(0, 12)}...`);
   log(`Markets: ${markets.map(m => m.label).join(", ")}`);
@@ -466,8 +579,11 @@ async function main() {
     log(`   Action required: reinitialise slab(s) with current keeper authority, or update ADMIN_KEYPAIR to match.`);
   }
 
-  // Initialize stats
-  for (const m of markets) getOrCreateStats(m);
+  // Initialize stats and mark existing markets as known
+  for (const m of markets) {
+    getOrCreateStats(m);
+    knownSlabs.add(m.slab);
+  }
 
   // Start health server
   const healthServer = startHealthServer();
@@ -482,8 +598,70 @@ async function main() {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
+  // Supabase discovery state
+  let lastDiscoveryAt = 0;
+  if (supabaseEnabled) {
+    log(`Supabase auto-discovery enabled (interval: ${DISCOVERY_INTERVAL_MS}ms)`);
+    // Load mainnet CAs for existing markets from Supabase
+    const caRows = await supabaseQuery(
+      "markets",
+      "select=slab_address,mainnet_ca&mainnet_ca=not.is.null",
+    );
+    if (caRows) {
+      for (const row of caRows) {
+        slabToMainnetCA.set(row.slab_address, row.mainnet_ca);
+      }
+      log(`Loaded ${caRows.length} mainnet CA mapping(s) from Supabase`);
+    }
+  } else {
+    log("⚠️ Supabase not configured — auto-discovery disabled (set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)");
+  }
+
   // Main push loop
   while (running) {
+    // Periodic Supabase discovery — check for newly created markets
+    const now = Date.now();
+    if (supabaseEnabled && now - lastDiscoveryAt > DISCOVERY_INTERVAL_MS) {
+      lastDiscoveryAt = now;
+      try {
+        // Refresh mainnet CA mappings
+        const caData = await supabaseQuery(
+          "markets",
+          "select=slab_address,mainnet_ca&mainnet_ca=not.is.null",
+        );
+        if (caData) {
+          for (const row of caData) {
+            slabToMainnetCA.set(row.slab_address, row.mainnet_ca);
+          }
+        }
+
+        const newMarkets = await discoverNewMarkets();
+        if (newMarkets.length > 0) {
+          log(`🔍 Discovered ${newMarkets.length} new market(s): ${newMarkets.map(m => m.label).join(", ")}`);
+          for (const m of newMarkets) {
+            markets.push(m);
+            getOrCreateStats(m);
+            // Verify oracle authority for new market
+            try {
+              const slabData = await fetchSlab(conn, new PublicKey(m.slab));
+              const cfg = parseConfig(slabData);
+              if (!cfg.oracleAuthority.equals(admin.publicKey)) {
+                log(`🚨 ${m.label}: authority MISMATCH — skipping`);
+                skippedMarkets.add(m.slab);
+              } else {
+                authorityVerified.add(m.slab);
+                log(`✅ ${m.label}: authority OK`);
+              }
+            } catch (e) {
+              log(`⚠️ ${m.label}: authority check failed: ${(e as Error).message?.slice(0, 60)}`);
+            }
+          }
+        }
+      } catch (e) {
+        log(`⚠️ Discovery poll error: ${(e as Error).message?.slice(0, 60)}`);
+      }
+    }
+
     // Batch-fetch all Pyth prices in a single request
     const marketSymbols = [...new Set(markets.map(m => m.symbol))];
     await fetchPythPrices(marketSymbols);

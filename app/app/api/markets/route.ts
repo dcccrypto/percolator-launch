@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
     lp_collateral,
     matcher_context,
     logo_url,
+    mainnet_ca,
   } = body;
 
   if (!slab_address || !mint_address || !deployer) {
@@ -126,6 +127,7 @@ export async function POST(req: NextRequest) {
       lp_collateral,
       matcher_context,
       logo_url: logo_url || null,
+      mainnet_ca: mainnet_ca || null,
     })
     .select()
     .single();

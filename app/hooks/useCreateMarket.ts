@@ -84,6 +84,8 @@ export interface CreateMarketParams {
   decimals?: number;
   /** vAMM configuration — if provided, uses custom params instead of defaults */
   vammParams?: VammParams;
+  /** Mainnet token CA — used by oracle keeper to fetch real-time prices (PERC-465) */
+  mainnetCA?: string;
 }
 
 export interface CreateMarketState {
@@ -726,6 +728,7 @@ export function useCreateMarket() {
               max_leverage: params.initialMarginBps > 0 ? Math.floor(10000 / Number(params.initialMarginBps)) : 1,
               trading_fee_bps: Number(params.tradingFeeBps),
               lp_collateral: params.lpCollateral.toString(),
+              mainnet_ca: params.mainnetCA ?? null,
             }),
           });
         } catch {
@@ -733,21 +736,21 @@ export function useCreateMarket() {
           console.warn("Failed to register market in dashboard DB");
         }
 
-        // PERC-361: Post-creation hooks — register oracle bridge + mint devnet token
+        // PERC-465: Post-creation hooks — register with oracle keeper + mint devnet token
         const slabAddr = slabPk.toBase58();
         const mintAddr = params.mint.toBase58();
         const isDevnet = (process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() ?? "mainnet") === "devnet";
 
         if (isDevnet && slabAddr) {
-          // Register with oracle bridge (fire-and-forget)
+          // Register market with oracle keeper for auto price discovery (PERC-465)
+          // This writes mainnet_ca to the markets table so the keeper picks it up
           try {
-            const oracleUrl = process.env.NEXT_PUBLIC_ORACLE_BRIDGE_URL ?? "http://127.0.0.1:18802";
-            await fetch(`${oracleUrl}/oracle/register`, {
+            await fetch("/api/oracle-keeper/register", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                ca: mintAddr,
-                marketAddress: slabAddr,
+                slabAddress: slabAddr,
+                mainnetCA: params.mainnetCA ?? mintAddr,
                 symbol: params.symbol,
               }),
             }).catch(() => {});

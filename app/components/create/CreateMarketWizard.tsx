@@ -354,6 +354,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       symbol: wizard.tokenMeta?.symbol ?? "UNKNOWN",
       name: wizard.tokenMeta?.name ?? "Unknown Token",
       decimals,
+      mainnetCA: wizard.mintAddress !== effectiveMint ? wizard.mintAddress : undefined,
     };
     create(params);
   };
@@ -379,6 +380,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       symbol: wizard.tokenMeta?.symbol ?? "UNKNOWN",
       name: wizard.tokenMeta?.name ?? "Unknown Token",
       decimals,
+      mainnetCA: wizard.mintAddress !== effectiveMint ? wizard.mintAddress : undefined,
     };
     create(params, createState.step);
   };
