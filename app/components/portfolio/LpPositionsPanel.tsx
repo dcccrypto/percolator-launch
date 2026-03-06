@@ -22,6 +22,25 @@ function formatPct(n: number): string {
   return `${n.toFixed(2)}%`;
 }
 
+/**
+ * Detect if a "symbol" is actually a truncated address hash (e.g. "7MkErbg1").
+ * Real symbols are short (1-10 chars) and mostly letters.
+ */
+function isAddressHash(s: string): boolean {
+  if (!s || s.length > 10) return false;
+  // If more than half the chars are digits, it's likely a hash
+  const digitCount = (s.match(/\d/g) || []).length;
+  return digitCount > s.length * 0.3 && s.length >= 6;
+}
+
+/** Get a clean display symbol from position data. */
+function getDisplaySymbol(pos: { symbol: string; name: string }): string {
+  if (!isAddressHash(pos.symbol)) return pos.symbol;
+  // Fallback: try name, then clean up
+  if (pos.name && !isAddressHash(pos.name)) return pos.name;
+  return pos.symbol;
+}
+
 function slotsToTime(slots: number): string {
   const seconds = Math.round(slots * 0.4);
   if (seconds < 60) return `~${seconds}s`;
@@ -39,6 +58,7 @@ interface LpPositionCardProps {
 }
 
 function LpPositionCard({ position: pos }: LpPositionCardProps) {
+  const displaySymbol = getDisplaySymbol(pos);
   const cooldownLabel = pos.cooldownElapsed
     ? null
     : slotsToTime(pos.cooldownSlots);
@@ -56,7 +76,7 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
             {pos.logoUrl ? (
               <img
                 src={pos.logoUrl}
-                alt={pos.symbol}
+                alt={displaySymbol}
                 className="h-6 w-6 rounded-full flex-shrink-0 object-cover"
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).style.display = "none";
@@ -64,12 +84,12 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
               />
             ) : (
               <div className="h-6 w-6 rounded-full flex-shrink-0 bg-[var(--accent)]/20 flex items-center justify-center text-[9px] font-bold text-[var(--accent)]">
-                {pos.symbol.slice(0, 2)}
+                {displaySymbol.slice(0, 2)}
               </div>
             )}
             <div className="min-w-0">
               <p className="text-sm font-semibold text-white truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                {pos.symbol}-PERP
+                {displaySymbol}-PERP
               </p>
               <p className="text-[10px] text-[var(--text-dim)] truncate">
                 {pos.poolMode === 0 ? "Insurance LP" : "Trading LP"}
