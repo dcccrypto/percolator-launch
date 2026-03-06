@@ -20,8 +20,19 @@ import { PublicKey } from "@solana/web3.js";
 export const dynamic = "force-dynamic";
 
 const KEEPER_URL = process.env.KEEPER_INTERNAL_URL ?? "http://localhost:8081";
+const REGISTER_SECRET = process.env.KEEPER_REGISTER_SECRET ?? "";
 
 export async function POST(req: NextRequest) {
+  // Auth: require shared secret to prevent unauthorized oracle source manipulation (#780)
+  if (!REGISTER_SECRET) {
+    console.error("[oracle-keeper/register] KEEPER_REGISTER_SECRET not configured — endpoint disabled");
+    return NextResponse.json({ error: "Endpoint not configured" }, { status: 503 });
+  }
+  const authHeader = req.headers.get("x-keeper-secret") ?? "";
+  if (authHeader !== REGISTER_SECRET) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await req.json();
     const { slabAddress, mainnetCA, devnetMint, symbol } = body as {

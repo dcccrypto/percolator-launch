@@ -792,19 +792,8 @@ export function useCreateMarket() {
         const isDevnet = (process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() ?? "mainnet") === "devnet";
 
         if (isDevnet && slabAddr) {
-          // Register market with oracle keeper for auto price discovery (PERC-465)
-          // This writes mainnet_ca to the markets table so the keeper picks it up
-          try {
-            await fetch("/api/oracle-keeper/register", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                slabAddress: slabAddr,
-                mainnetCA: params.mainnetCA ?? mintAddr,
-                symbol: params.symbol,
-              }),
-            }).catch(() => {});
-          } catch {}
+          // PERC-465: mainnet_ca is already written to the markets table via /api/markets POST above.
+          // The oracle keeper auto-discovers new markets from Supabase every 30s.
 
           // Mint devnet token + airdrop $500 to creator
           setState((s) => ({ ...s, stepLabel: "Minting devnet tokens..." }));

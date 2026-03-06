@@ -142,6 +142,24 @@ export async function POST(req: NextRequest) {
     last_price: initial_price_e6 ? initial_price_e6 / 1_000_000 : null,
   });
 
+  // PERC-465: Hot-register with oracle keeper service (server-to-server, non-fatal)
+  if (mainnet_ca && process.env.KEEPER_REGISTER_SECRET) {
+    try {
+      const keeperRegisterUrl = `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/oracle-keeper/register`;
+      await fetch(keeperRegisterUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-keeper-secret": process.env.KEEPER_REGISTER_SECRET,
+        },
+        body: JSON.stringify({ slabAddress: slab_address, mainnetCA: mainnet_ca }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {});
+    } catch {
+      // Non-fatal — oracle keeper will discover via Supabase polling
+    }
+  }
+
     return NextResponse.json({ market }, { status: 201 });
   } catch (error) {
     Sentry.captureException(error, {
