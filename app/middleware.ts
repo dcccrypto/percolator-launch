@@ -52,6 +52,21 @@ export function middleware(request: NextRequest) {
       ip = ips[idx] ?? "unknown";
     }
   }
+  // PERC-793: Server-side guard for /admin — redirect unauthenticated users to home.
+  // The client-side admin component also checks admin_users table, but this prevents
+  // the page scaffold from being served to unauthenticated requests at all.
+  const isAdmin = request.nextUrl.pathname.startsWith("/admin");
+  if (isAdmin) {
+    // Check for Supabase auth cookie (sb-*-auth-token or sb-*-auth-token.0 for chunked)
+    const cookies = request.cookies.getAll();
+    const hasAuthCookie = cookies.some(
+      (c) => c.name.includes("-auth-token") && c.value.length > 0,
+    );
+    if (!hasAuthCookie) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+  }
+
   const isApi = request.nextUrl.pathname.startsWith("/api/");
 
   if (isApi) {
