@@ -210,16 +210,22 @@ export async function POST(req: NextRequest) {
 
     const devnetMint = mintKeypair.publicKey.toBase58();
 
-    // 4. Store mapping
-    await (supabase as any).from("devnet_mints").insert({
-      mainnet_ca: mainnetCA,
-      devnet_mint: devnetMint,
-      symbol: tokenInfo.symbol,
-      name: tokenInfo.name,
-      decimals: tokenInfo.decimals,
-      logo_url: tokenInfo.logoUrl ?? null,
-      creator_wallet: null, // Will be set when market is created
-    });
+    // 4. Store mapping — upsert with ignoreDuplicates to handle concurrent requests
+    // (TOCTOU: two simultaneous requests can both pass the SELECT check above;
+    //  upsert ON CONFLICT (mainnet_ca) DO NOTHING prevents duplicate rows and
+    //  avoids a second createMint call winning a race that corrupts the table.)
+    await (supabase as any).from("devnet_mints").upsert(
+      {
+        mainnet_ca: mainnetCA,
+        devnet_mint: devnetMint,
+        symbol: tokenInfo.symbol,
+        name: tokenInfo.name,
+        decimals: tokenInfo.decimals,
+        logo_url: tokenInfo.logoUrl ?? null,
+        creator_wallet: null, // Will be set when market is created
+      },
+      { onConflict: "mainnet_ca", ignoreDuplicates: true },
+    );
 
     return NextResponse.json({
       status: "created",
@@ -234,8 +240,10 @@ export async function POST(req: NextRequest) {
     Sentry.captureException(error, {
       tags: { endpoint: "/api/devnet-mirror-mint", method: "POST" },
     });
+    // Return a generic error to avoid leaking internal details (stack traces,
+    // DB schema, RPC URLs, etc.) to clients. Full error is captured by Sentry.
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Internal server error" },
+      { error: "Failed to create devnet mirror mint. Please try again." },
       { status: 500 },
     );
   }
