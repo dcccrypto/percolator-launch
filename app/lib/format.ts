@@ -71,14 +71,52 @@ export function formatCompactTokenAmount(
   raw: bigint | null | undefined,
   decimals: number = 6,
 ): string {
-  if (raw == null || raw <= 0n) return "0";
+  // null/undefined → unknown; known zero → "0.00" (never bare "0" per design rule #865)
+  if (raw == null) return "—";
+  if (raw <= 0n) return "0.00";
   const divisor = 10n ** BigInt(decimals);
   const num = Number(raw) / Number(divisor);
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
   if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
-  if (num >= 1) return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  if (num >= 1) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Sub-1 amounts: use full precision
   return formatTokenAmount(raw, decimals);
+}
+
+/**
+ * Format a stat panel value with strict zero/null rules (#865):
+ * - null/undefined           → "—"   (unknown/unavailable)
+ * - known zero (currency)    → "$0.00"
+ * - known zero (percent)     → "0.00%"
+ * - known zero (number)      → "0.00"
+ * - positive value           → compact formatted with unit
+ */
+export function formatStatValue(
+  value: bigint | number | null | undefined,
+  type: 'currency' | 'percent' | 'number' = 'number',
+  decimals: number = 6,
+): string {
+  if (value == null) return "—";
+  const n = typeof value === 'bigint'
+    ? Number(value) / Math.pow(10, decimals)
+    : value;
+  if (isNaN(n)) return "—";
+  if (type === 'currency') {
+    if (n <= 0) return "$0.00";
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+    if (n >= 1) return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `$${n.toFixed(4)}`;
+  }
+  if (type === 'percent') {
+    return `${n <= 0 ? "0" : n.toFixed(2)}%`;
+  }
+  // 'number'
+  if (n <= 0) return "0.00";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 1) return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toFixed(4);
 }
 
 export function formatSlotAge(currentSlot: bigint | null | undefined, targetSlot: bigint | null | undefined): string {

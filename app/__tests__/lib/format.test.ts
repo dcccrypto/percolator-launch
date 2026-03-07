@@ -352,10 +352,11 @@ describe("formatFundingRate", () => {
 });
 
 describe("formatCompactTokenAmount", () => {
-  it("returns '0' for null/undefined/zero", () => {
-    expect(formatCompactTokenAmount(null)).toBe("0");
-    expect(formatCompactTokenAmount(undefined)).toBe("0");
-    expect(formatCompactTokenAmount(0n)).toBe("0");
+  // #865: null/undefined → "—" (unknown), zero → "0.00" (never bare "0" without unit)
+  it("returns '—' for null/undefined and '0.00' for known zero", () => {
+    expect(formatCompactTokenAmount(null)).toBe("—");
+    expect(formatCompactTokenAmount(undefined)).toBe("—");
+    expect(formatCompactTokenAmount(0n)).toBe("0.00");
   });
 
   it("abbreviates millions (D2 fix: vault 2M)", () => {
@@ -370,11 +371,11 @@ describe("formatCompactTokenAmount", () => {
     expect(formatCompactTokenAmount(raw, 6)).toBe("1.5K");
   });
 
-  it("formats mid-range numbers with commas", () => {
+  it("formats mid-range numbers with 2dp", () => {
     // 500 tokens with 6 decimals = 500_000_000n raw
     const raw = 500_000_000n;
     const result = formatCompactTokenAmount(raw, 6);
-    expect(result).toBe("500");
+    expect(result).toBe("500.00");
   });
 
   it("falls back to full precision for sub-1 amounts", () => {

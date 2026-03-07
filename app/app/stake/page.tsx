@@ -161,7 +161,7 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
           <div className="mb-10 flex flex-wrap items-center gap-3">
             <a
               href="#deposit"
-              className="group inline-flex items-center gap-2 border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] px-6 py-3 text-sm font-semibold text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
+              className="group inline-flex items-center gap-2 rounded-md border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] px-6 py-3 text-sm font-semibold text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
             >
               Deposit Now
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
@@ -297,7 +297,7 @@ function YourPositionPanel({
         <button
           disabled={!position.cooldownElapsed || withdrawLoading}
           onClick={handleWithdraw}
-          className={`w-full py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+          className={`w-full rounded-md py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
             position.cooldownElapsed && !withdrawLoading
               ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
               : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] cursor-not-allowed"
@@ -493,14 +493,14 @@ function DepositWidget({
 
         {/* CTA */}
         {!connected ? (
-          <button className="w-full py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] cursor-not-allowed">
+          <button className="w-full rounded-md py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] cursor-not-allowed">
             Connect Wallet to Deposit
           </button>
         ) : (
           <button
             disabled={amountNum <= 0 || depositLoading}
             onClick={handleDeposit}
-            className={`w-full py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+            className={`w-full rounded-md py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
               amountNum > 0 && !depositLoading
                 ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
                 : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] cursor-not-allowed"
@@ -520,7 +520,7 @@ function PoolCard({ pool }: { pool: StakePool }) {
   const capRatio = pool.capTotal > 0 ? pool.capUsed / pool.capTotal : 0;
 
   return (
-    <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)]">
+    <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] min-w-[280px]">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] text-[12px]">
@@ -579,7 +579,7 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
         <div className="mb-4 flex items-center justify-between">
           <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
         </div>
-        <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="bg-[var(--panel-bg)] p-4 sm:p-5 space-y-3">
               <div className="flex items-center gap-2.5 mb-4">
@@ -621,7 +621,7 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
       </div>
       {/* Bug #850: only use xl:grid-cols-3 when there are ≥ 3 pools; with fewer, stay at lg:grid-cols-2
            to avoid ghost empty card slots filling the grid background */}
-      <div className={`grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 ${pools.length >= 3 ? "xl:grid-cols-3" : ""}`}>
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 ${pools.length >= 3 ? "xl:grid-cols-3" : ""}`}>
         {pools.map((pool) => (
           <PoolCard key={pool.id} pool={pool} />
         ))}

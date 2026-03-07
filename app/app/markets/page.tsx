@@ -23,6 +23,7 @@ import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { MarketLogo } from "@/components/market/MarketLogo";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { detectOracleMode, resolveMarketPriceE6, priceE6ToUsd } from "@/lib/oraclePrice";
+import { formatStatValue } from "@/lib/format";
 
 function formatNum(n: number | null | undefined): string {
   if (n === null || n === undefined) return "\u2014";
@@ -624,12 +625,13 @@ function MarketsPageInner() {
                     : null;
                   
                   // Display values (USD or tokens) — cap token display at 2dp for table readability
+                  // #865: null → "—", known zero → "$0.00" / "0.00" (never bare "0")
                   const oiDisplay = showUsd && lastPrice != null
                     ? formatNum(Math.round((Number(oiTokensRaw) / tokenDivisor) * lastPrice * 100) / 100)
-                    : formatTokenAmount(oiTokensRaw, mintDecimals, 2);
+                    : formatStatValue(oiTokensRaw, 'number', mintDecimals);
                   const insuranceDisplay = showUsd && lastPrice != null
                     ? formatNum(Math.round((Number(insuranceTokensRaw) / tokenDivisor) * lastPrice * 100) / 100)
-                    : formatTokenAmount(insuranceTokensRaw, mintDecimals, 2);
+                    : formatStatValue(insuranceTokensRaw, 'number', mintDecimals);
                   const volumeDisplay = volume24hRaw != null
                     ? (showUsd && lastPrice != null
                         ? formatNum(Math.round((Number(volume24hRaw) / tokenDivisor) * lastPrice * 100) / 100)

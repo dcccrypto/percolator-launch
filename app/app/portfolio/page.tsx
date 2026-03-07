@@ -135,36 +135,37 @@ export default function PortfolioPage() {
         {/* Summary stats */}
         <ScrollReveal stagger={0.08}>
           <div className="mb-8 grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] sm:grid-cols-5">
+            {/* #863: gate loading shimmer on walletConnected; show "—" (muted) when no wallet */}
             {[
               {
                 label: "Portfolio Value",
-                value: loading ? "\u2026" : formatTokenAmount(totalValue),
-                color: "text-white",
+                value: !walletConnected ? "—" : loading ? "\u2026" : formatTokenAmount(totalValue),
+                color: !walletConnected ? "text-white/40" : "text-white",
               },
               {
                 label: "Total Deposited",
-                value: loading ? "\u2026" : formatTokenAmount(totalDeposited),
-                color: "text-[var(--text-secondary)]",
+                value: !walletConnected ? "—" : loading ? "\u2026" : formatTokenAmount(totalDeposited),
+                color: !walletConnected ? "text-white/40" : "text-[var(--text-secondary)]",
               },
               {
                 label: "Unrealized PnL",
-                value: loading ? "\u2026" : formatPnl(totalUnrealizedPnl),
-                color: totalUnrealizedPnl >= 0n ? "text-[var(--long)]" : "text-[var(--short)]",
-                sub: loading ? undefined : `${totalDeposited > 0n ? formatPnlPct(Number((totalUnrealizedPnl * 10000n) / (totalDeposited || 1n)) / 100) : "0.00%"}`,
+                value: !walletConnected ? "—" : loading ? "\u2026" : formatPnl(totalUnrealizedPnl),
+                color: !walletConnected ? "text-white/40" : totalUnrealizedPnl >= 0n ? "text-[var(--long)]" : "text-[var(--short)]",
+                sub: !walletConnected || loading ? undefined : `${totalDeposited > 0n ? formatPnlPct(Number((totalUnrealizedPnl * 10000n) / (totalDeposited || 1n)) / 100) : "0.00%"}`,
               },
               {
                 label: "LP Value",
-                value: lpPositions.loading ? "\u2026" : `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: lpPositions.totalRedeemable > 0 ? "text-[var(--cyan)]" : "text-[var(--text-dim)]",
-                sub: lpPositions.positions.length > 0
+                value: !walletConnected ? "—" : lpPositions.loading ? "\u2026" : `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                color: !walletConnected ? "text-white/40" : lpPositions.totalRedeemable > 0 ? "text-[var(--cyan)]" : "text-[var(--text-dim)]",
+                sub: walletConnected && lpPositions.positions.length > 0
                   ? `${lpPositions.positions.length} pool${lpPositions.positions.length > 1 ? "s" : ""}`
                   : undefined,
               },
               {
                 label: "Positions",
-                value: loading ? "\u2026" : positions.length.toString(),
-                color: "text-white",
-                sub: atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
+                value: !walletConnected ? "—" : loading ? "\u2026" : positions.length.toString(),
+                color: !walletConnected ? "text-white/40" : "text-white",
+                sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
                 subColor: atRiskCount > 0 ? "text-[var(--short)]" : undefined,
               },
             ].map((stat, idx, arr) => (
@@ -185,7 +186,8 @@ export default function PortfolioPage() {
 
         {/* Positions */}
         <ScrollReveal delay={0.2}>
-          {loading || tokenMetasLoading ? (
+          {/* #863: only show shimmer when wallet is actually connected (prevents infinite skeleton when unauthenticated) */}
+          {(loading || tokenMetasLoading) && walletConnected ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-4">

@@ -23,7 +23,7 @@ export function HeroCtaGroup() {
     <div ref={ref} className="flex flex-wrap items-center gap-3">
       <Link
         href="/create"
-        className={`hero-cta group relative inline-flex items-center gap-2 border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] px-6 py-3 text-sm font-semibold text-[var(--accent)] transition-all duration-200 hud-btn-corners hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18] press ${prefersReduced ? '' : 'gsap-fade'}`}
+        className={`hero-cta group relative inline-flex items-center gap-2 bg-violet-700 hover:bg-violet-600 text-white rounded-md px-5 py-2.5 text-sm font-semibold transition-all duration-200 press min-h-[44px] ${prefersReduced ? '' : 'gsap-fade'}`}
       >
         Launch a Market
         <svg
@@ -43,7 +43,7 @@ export function HeroCtaGroup() {
 
       <Link
         href="/markets"
-        className={`hero-cta group inline-flex items-center gap-2 border-[1.5px] border-white/20 bg-white/[0.06] px-6 py-3 text-[15px] font-semibold text-white rounded-lg transition-all duration-150 hover:border-white/35 hover:bg-white/[0.10] ${prefersReduced ? '' : 'gsap-fade'}`}
+        className={`hero-cta group inline-flex items-center gap-2 bg-violet-700 hover:bg-violet-600 text-white rounded-md px-5 py-2.5 text-sm font-semibold transition-all duration-150 min-h-[44px] ${prefersReduced ? '' : 'gsap-fade'}`}
       >
         Trade Now
         <svg
