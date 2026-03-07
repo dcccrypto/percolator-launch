@@ -599,9 +599,12 @@ export function parseHeader(data: Uint8Array): SlabHeader {
  * Parse market config. Layout-version aware.
  * For V0 slabs, fields beyond the basic config are read if present in the data,
  * otherwise defaults are returned.
+ *
+ * @param data - Slab data (may be a partial slice for discovery; pass layoutHint in that case)
+ * @param layoutHint - Pre-detected layout to use; if omitted, detected from data.length.
  */
-export function parseConfig(data: Uint8Array): MarketConfig {
-  const layout = detectSlabLayout(data.length);
+export function parseConfig(data: Uint8Array, layoutHint?: SlabLayout | null): MarketConfig {
+  const layout = layoutHint !== undefined ? layoutHint : detectSlabLayout(data.length);
   const configOff = layout ? layout.configOffset : V0_HEADER_LEN;
   const configLen = layout ? layout.configLen : V0_CONFIG_LEN;
 
@@ -797,9 +800,12 @@ export function parseConfig(data: Uint8Array): MarketConfig {
  * Parse RiskParams from engine data. Layout-version aware.
  * For V0 slabs, extended params (risk_threshold, maintenance_fee, etc.) are
  * not present on-chain, so defaults (0) are returned.
+ *
+ * @param data - Slab data (may be a partial slice; pass layoutHint in that case)
+ * @param layoutHint - Pre-detected layout to use; if omitted, detected from data.length.
  */
-export function parseParams(data: Uint8Array): RiskParams {
-  const layout = detectSlabLayout(data.length);
+export function parseParams(data: Uint8Array, layoutHint?: SlabLayout | null): RiskParams {
+  const layout = layoutHint !== undefined ? layoutHint : detectSlabLayout(data.length);
   const engineOff = layout ? layout.engineOff : V0_ENGINE_OFF;
   const paramsOff = layout ? layout.engineParamsOff : V0_ENGINE_PARAMS_OFF;
   const paramsSize = layout ? layout.paramsSize : V0_PARAMS_SIZE;
