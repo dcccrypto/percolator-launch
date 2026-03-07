@@ -47,6 +47,12 @@ vi.mock("@/hooks/useLpPositions", () => ({
 vi.mock("@/components/portfolio/LpPositionsPanel", () => ({
   LpPositionsPanel: () => <div data-testid="lp-positions-panel" />,
 }));
+vi.mock("@/hooks/useTraderStats", () => ({
+  useTraderStats: () => ({ stats: null, loading: false, error: null, refresh: vi.fn() }),
+}));
+vi.mock("@/components/trade/TradeStatsPanel", () => ({
+  TradeStatsPanel: () => <div data-testid="trade-stats-panel" />,
+}));
 vi.mock("@/components/ui/ScrollReveal", () => ({
   ScrollReveal: ({ children }: any) => <div>{children}</div>,
 }));

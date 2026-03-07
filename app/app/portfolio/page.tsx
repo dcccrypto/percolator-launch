@@ -16,6 +16,8 @@ import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
+import { TradeStatsPanel } from "@/components/trade/TradeStatsPanel";
+import { useTraderStats } from "@/hooks/useTraderStats";
 
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
@@ -54,6 +56,9 @@ export default function PortfolioPage() {
 
   // LP positions (insurance fund deposits)
   const lpPositions = useLpPositions();
+
+  // PERC-481: Aggregate trade statistics
+  const traderStats = useTraderStats(walletPublicKey?.toBase58() ?? null);
 
   // Auto-refresh every 15s
   useEffect(() => {
@@ -410,12 +415,23 @@ export default function PortfolioPage() {
           </div>
         </ScrollReveal>
 
-        {/* Trade history */}
+        {/* Trade history + stats */}
         <ScrollReveal delay={0.3}>
           <div className="mt-8">
             <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
               // trade history
             </h2>
+            {/* PERC-481: Aggregate stats banner */}
+            {(traderStats.stats || traderStats.loading) && (
+              <div className="mb-2">
+                <TradeStatsPanel
+                  stats={traderStats.stats}
+                  loading={traderStats.loading}
+                  error={traderStats.error}
+                  onRetry={traderStats.refresh}
+                />
+              </div>
+            )}
             <TradeHistoryTable
               wallet={walletPublicKey?.toBase58() ?? null}
               pageSize={20}
