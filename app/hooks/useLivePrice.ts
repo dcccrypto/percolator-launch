@@ -18,6 +18,9 @@ if (!WS_URL && typeof window !== "undefined") {
 }
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
+// Jitter: randomise within ±25% of the computed delay to prevent thundering-herd
+// reconnects when the Railway API recovers and hundreds of clients retry in unison.
+const jitter = (ms: number) => ms * (0.75 + Math.random() * 0.5);
 
 interface PriceState {
   price: number | null;
@@ -167,10 +170,11 @@ export function useLivePrice(): PriceState {
 
     function scheduleReconnect() {
       if (!mountedRef.current) return;
+      const delay = jitter(reconnectDelay.current);
       reconnectTimer.current = setTimeout(() => {
         reconnectDelay.current = Math.min(reconnectDelay.current * 2, RECONNECT_MAX_MS);
         connect();
-      }, reconnectDelay.current);
+      }, delay);
     }
 
     connect();
