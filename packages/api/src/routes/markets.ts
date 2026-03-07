@@ -47,7 +47,7 @@ export function marketRoutes(): Hono {
           lastPrice: m.last_price ?? null,
           markPrice: m.mark_price ?? null,
           indexPrice: m.index_price ?? null,
-          fundingRate: m.funding_rate ?? null,
+          fundingRate: (m.funding_rate != null && Number.isFinite(m.funding_rate) && Math.abs(m.funding_rate) <= 10_000) ? m.funding_rate : null,
           netLpPos: m.net_lp_pos ?? null,
         }));
       },
