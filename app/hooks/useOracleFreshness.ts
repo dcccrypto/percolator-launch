@@ -105,8 +105,13 @@ export function useOracleFreshness(): OracleFreshnessState {
         }
       }
     } else {
-      // Hyperp / Pyth: track when the price value changes
-      const currentPrice = config.lastEffectivePriceE6;
+      // Hyperp: track authorityPriceE6 (updated by UpdateHyperpMark instruction).
+      // Pyth-pinned: track lastEffectivePriceE6 (updated by KeeperCrank).
+      // NOTE: Do NOT use authorityTimestamp here — for Hyperp mode that field
+      // stores the funding rate, not a unix timestamp.
+      const currentPrice = currentMode === "hyperp"
+        ? config.authorityPriceE6
+        : config.lastEffectivePriceE6;
       if (prevPriceRef.current !== null && currentPrice !== prevPriceRef.current) {
         setLastUpdateMs(Date.now());
       } else if (prevPriceRef.current === null && currentPrice > 0n) {

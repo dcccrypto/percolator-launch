@@ -40,8 +40,8 @@ interface PublisherInfo {
 
 interface PublishersResponse {
   mode: string;
-  publisherCount: number;
-  publisherTotal: number;
+  publisherCount: number | null;
+  publisherTotal: number | null;
   publishers: PublisherInfo[];
 }
 
@@ -253,11 +253,12 @@ async function fetchHyperpPublishers(): Promise<PublishersResponse> {
     // Oracle bridge not available
   }
 
-  // HyperP uses on-chain DEX liquidity — no traditional publishers
+  // HyperP uses on-chain DEX liquidity — no traditional publishers.
+  // Return null (not 0) so the UI knows to suppress "0 publishers" text.
   return {
     mode: "hyperp",
-    publisherCount: 0,
-    publisherTotal: 0,
+    publisherCount: null,
+    publisherTotal: null,
     publishers: [],
   };
 }

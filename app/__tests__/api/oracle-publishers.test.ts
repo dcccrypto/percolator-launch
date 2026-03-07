@@ -159,6 +159,7 @@ describe("GET /api/oracle/publishers", () => {
 
     const body = await resp.json();
     expect(body.mode).toBe("hyperp");
-    expect(body.publisherCount).toBe(0);
+    // Hyperp fallback returns null (not 0) so UI suppresses "0 publishers" text
+    expect(body.publisherCount).toBeNull();
   });
 });

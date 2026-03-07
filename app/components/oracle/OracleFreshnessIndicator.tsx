@@ -44,8 +44,9 @@ export const OracleFreshnessIndicator: FC = () => {
       ? `${elapsedSecs}s ago`
       : `${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s ago`;
 
+  // Hyperp uses permissionless DEX liquidity — "publishers" is meaningless
   const publisherText =
-    publisherCount !== null && publisherTotal !== null
+    mode !== "hyperp" && publisherCount !== null && publisherTotal !== null
       ? `${publisherCount} publisher${publisherCount !== 1 ? "s" : ""}`
       : null;
 
