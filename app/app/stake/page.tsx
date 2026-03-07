@@ -161,7 +161,7 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
           <div className="mb-10 flex flex-wrap items-center gap-3">
             <a
               href="#deposit"
-              className="group inline-flex items-center gap-2 rounded-md border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] px-6 py-3 text-sm font-semibold text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
+              className="group inline-flex items-center gap-2 rounded-md bg-violet-700 px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-violet-600"
             >
               Deposit Now
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
