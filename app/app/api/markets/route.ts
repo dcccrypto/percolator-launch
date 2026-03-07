@@ -43,7 +43,7 @@ export async function GET() {
 
     // Sanitize funding_rate: raw DB values from uninitialized slabs can be
     // garbage (e.g. 17733189824741436). Clamp to valid bps range. (#817)
-    const sanitized = (data ?? []).map((m: Record<string, unknown>) => ({
+    const sanitized = ((data ?? []) as unknown as Record<string, unknown>[]).map((m) => ({
       ...m,
       funding_rate: sanitizeFundingRate(m.funding_rate as number | null),
     }));
