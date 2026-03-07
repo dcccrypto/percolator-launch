@@ -57,7 +57,14 @@ export function marketRoutes(): Hono {
           totalAccounts: m.total_accounts ?? null,
           lastCrankSlot: m.last_crank_slot ?? null,
           lastPrice: (m.last_price != null && Number.isFinite(m.last_price) && m.last_price > 0 && m.last_price <= 1_000_000) ? m.last_price : null,
-          markPrice: (m.mark_price != null && Number.isFinite(m.mark_price) && m.mark_price > 0 && m.mark_price <= 1_000_000) ? m.mark_price : null,
+          // Fallback chain: mark_price → initial_price_e6 (converted from E6 to USD).
+          // Markets that haven't been cranked yet have null mark_price in the stats view,
+          // but still have a valid initial_price_e6 from market creation.
+          markPrice: (m.mark_price != null && Number.isFinite(m.mark_price) && m.mark_price > 0 && m.mark_price <= 1_000_000)
+            ? m.mark_price
+            : (m.initial_price_e6 != null && m.initial_price_e6 > 0)
+              ? Number(m.initial_price_e6) / 1_000_000
+              : null,
           indexPrice: (m.index_price != null && Number.isFinite(m.index_price) && m.index_price > 0 && m.index_price <= 1_000_000) ? m.index_price : null,
           fundingRate: (m.funding_rate != null && Number.isFinite(m.funding_rate) && Math.abs(m.funding_rate) <= 10_000) ? m.funding_rate : null,
           netLpPos: m.net_lp_pos ?? null,
