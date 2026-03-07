@@ -19,6 +19,21 @@ function sanitizeFundingRate(v: number | null | undefined): number | null {
   return v;
 }
 
+/**
+ * Maximum plausible market price in USD. Prices above this are almost certainly
+ * unscaled raw u64 values from admin-mode markets or test data. (#856)
+ * Set conservatively high to avoid filtering real high-value assets.
+ * BTC ATH ~$109k (2025), so 1M gives 10× headroom.
+ */
+const MAX_PLAUSIBLE_PRICE = 1_000_000;
+
+/** Sanitize a price field. Returns null for corrupt/unscaled values. */
+function sanitizePrice(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  if (!Number.isFinite(v) || v < 0 || v > MAX_PLAUSIBLE_PRICE) return null;
+  return v;
+}
+
 export const dynamic = "force-dynamic";
 
 // GET /api/markets — list all active markets with stats
@@ -63,6 +78,8 @@ export async function GET() {
         ...m,
         oracle_mode,
         funding_rate: sanitizeFundingRate(m.funding_rate as number | null),
+        last_price: sanitizePrice(m.last_price as number | null),
+        mark_price: sanitizePrice(m.mark_price as number | null),
       };
     });
 
