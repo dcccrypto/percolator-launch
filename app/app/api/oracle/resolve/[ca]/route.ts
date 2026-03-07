@@ -155,10 +155,12 @@ async function fetchDexScreenerInfo(
       baseToken?: { symbol?: string };
       liquidity?: { usd?: number };
       chainId?: string;
+      dexId?: string;
+      pairAddress?: string;
     }>;
     if (!pairs?.length) return null;
 
-    // Sort by liquidity, pick best Solana pair
+    // Sort by liquidity, pick best Solana pair (for price/symbol — most liquid wins)
     const solPairs = pairs
       .filter((p) => p.chainId === "solana" && p.priceUsd)
       .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
@@ -168,11 +170,17 @@ async function fetchDexScreenerInfo(
     const price = parseFloat(best.priceUsd ?? "0");
     if (!isFinite(price) || price <= 0) return null;
 
-    // PERC-470: Also return pool address and DEX ID for hyperp mode
+    // PERC-470/#811: For hyperp pool address, find the highest-liquidity pair on a
+    // *supported* DEX — not just the most liquid pair overall. The best overall pair
+    // may be on Orca/other unsupported venues, causing poolAddress to be incorrectly
+    // null even when a valid PumpSwap/Raydium/Meteora pool exists lower in the list.
     const SUPPORTED_DEX_IDS = new Set(["pumpswap", "raydium", "meteora"]);
-    const dexId = (best as any).dexId?.toLowerCase() ?? null;
-    let poolAddress: string | null = SUPPORTED_DEX_IDS.has(dexId ?? "") ? (best as any).pairAddress ?? null : null;
-    // PERC-470 security: validate pool address is a valid Solana pubkey before returning
+    const bestSupported = solPairs.find(
+      (p) => SUPPORTED_DEX_IDS.has(p.dexId?.toLowerCase() ?? "") && p.pairAddress
+    ) ?? null;
+    const dexId = bestSupported?.dexId?.toLowerCase() ?? null;
+    let poolAddress: string | null = bestSupported?.pairAddress ?? null;
+    // Security: validate pool address is a valid Solana pubkey before returning
     if (poolAddress) {
       try { new PublicKey(poolAddress); } catch { poolAddress = null; }
     }

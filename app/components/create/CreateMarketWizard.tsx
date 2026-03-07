@@ -377,9 +377,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       decimals,
       mainnetCA: wizard.mintAddress !== effectiveMint ? wizard.mintAddress : undefined,
       oracleMode,
-      // PERC-470: Pass DEX pool info for hyperp mode
-      ...(oracleMode === "hyperp" && wizard.dexPool ? {
-        dexPoolAddress: wizard.dexPool.poolAddress,
+      // PERC-470/#811: Pass DEX pool address for hyperp mode.
+      // wizard.dexPool is set when the user selects a pool from the UI.
+      // For Quick Launch, poolInfo may be null while oracleFeed holds the pool address —
+      // use oracleFeed as fallback so the pool address is never silently dropped.
+      ...(oracleMode === "hyperp" ? {
+        dexPoolAddress: wizard.dexPool?.poolAddress ?? wizard.oracleFeed,
       } : {}),
     };
     create(params);
@@ -413,8 +416,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       decimals,
       mainnetCA: wizard.mintAddress !== effectiveMint ? wizard.mintAddress : undefined,
       oracleMode,
-      ...(oracleMode === "hyperp" && wizard.dexPool ? {
-        dexPoolAddress: wizard.dexPool.poolAddress,
+      // PERC-470/#811: Same fallback as handleLaunch — oracleFeed holds pool address
+      // for Quick Launch when wizard.dexPool is null.
+      ...(oracleMode === "hyperp" ? {
+        dexPoolAddress: wizard.dexPool?.poolAddress ?? wizard.oracleFeed,
       } : {}),
     };
     create(params, createState.step);
