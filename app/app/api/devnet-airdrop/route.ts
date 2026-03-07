@@ -263,82 +263,86 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Fetch mainnet price from DexScreener
-    const priceResult = await fetchTokenPriceUsd(mainnetCa);
-    let rawAmount: bigint;
-
-    if (priceResult && priceResult.priceUsd > 0) {
-      // $500 / price = tokens; scale by decimals
-      const tokensFloat = AIRDROP_USD_VALUE / priceResult.priceUsd;
-      rawAmount = BigInt(Math.floor(tokensFloat * 10 ** decimals));
-    } else {
-      // Price unavailable — fall back to a fixed generous amount (1000 tokens)
-      rawAmount = BigInt(1000 * 10 ** decimals);
-    }
-
-    // Clamp to [MIN_RAW, MAX_RAW]
-    if (rawAmount < MIN_RAW) rawAmount = MIN_RAW;
-    if (rawAmount > MAX_RAW) rawAmount = MAX_RAW;
-
-    // 4. Load mint authority
-    const mintAuthKeyJson = process.env.DEVNET_MINT_AUTHORITY_KEYPAIR;
-    if (!mintAuthKeyJson) {
-      if (claimId !== undefined) await releaseClaim(supabase, claimId);
-      return NextResponse.json(
-        { error: "Server not configured for devnet minting (DEVNET_MINT_AUTHORITY_KEYPAIR missing)" },
-        { status: 500 },
-      );
-    }
-    let mintAuthority: Keypair;
-    try {
-      mintAuthority = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(mintAuthKeyJson)));
-    } catch {
-      if (claimId !== undefined) await releaseClaim(supabase, claimId);
-      return NextResponse.json({ error: "Server keypair configuration is invalid" }, { status: 500 });
-    }
-
-    const cfg = getConfig();
-    const connection = new Connection(cfg.rpcUrl, "confirmed");
-
-    // Derive user's ATA
-    const ata = await getAssociatedTokenAddress(mintPk, walletPk);
-    let ataExists = false;
-    try {
-      await getAccount(connection, ata);
-      ataExists = true;
-    } catch {
-      // ATA doesn't exist yet — will be created in tx
-    }
-
-    // 5. Build and send mint transaction.
-    //    On failure: release the reserved claim slot so the user can retry.
-    const tx = new Transaction();
-    if (!ataExists) {
-      tx.add(
-        createAssociatedTokenAccountInstruction(
-          mintAuthority.publicKey, // payer
-          ata,
-          walletPk,
-          mintPk,
-        ),
-      );
-    }
-    tx.add(createMintToInstruction(mintPk, ata, mintAuthority.publicKey, rawAmount));
-
+    // Steps 3–5 are wrapped so that ANY failure after the gate INSERT
+    // releases the claim slot. Previously, exceptions between the gate and
+    // the mint try-catch (e.g. DexScreener fetch, ATA derivation) would
+    // skip releaseClaim, locking the user out for 24h on a transient error.
+    let mintSucceeded = false;
     let sig: string;
+    let rawAmount: bigint;
     try {
+      // 3. Fetch mainnet price from DexScreener
+      const priceResult = await fetchTokenPriceUsd(mainnetCa);
+
+      if (priceResult && priceResult.priceUsd > 0) {
+        // $500 / price = tokens; scale by decimals
+        const tokensFloat = AIRDROP_USD_VALUE / priceResult.priceUsd;
+        rawAmount = BigInt(Math.floor(tokensFloat * 10 ** decimals));
+      } else {
+        // Price unavailable — fall back to a fixed generous amount (1000 tokens)
+        rawAmount = BigInt(1000 * 10 ** decimals);
+      }
+
+      // Clamp to [MIN_RAW, MAX_RAW]
+      if (rawAmount < MIN_RAW) rawAmount = MIN_RAW;
+      if (rawAmount > MAX_RAW) rawAmount = MAX_RAW;
+
+      // 4. Load mint authority
+      const mintAuthKeyJson = process.env.DEVNET_MINT_AUTHORITY_KEYPAIR;
+      if (!mintAuthKeyJson) {
+        return NextResponse.json(
+          { error: "Server not configured for devnet minting (DEVNET_MINT_AUTHORITY_KEYPAIR missing)" },
+          { status: 500 },
+        );
+      }
+      let mintAuthority: Keypair;
+      try {
+        mintAuthority = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(mintAuthKeyJson)));
+      } catch {
+        return NextResponse.json({ error: "Server keypair configuration is invalid" }, { status: 500 });
+      }
+
+      const cfg = getConfig();
+      const connection = new Connection(cfg.rpcUrl, "confirmed");
+
+      // Derive user's ATA
+      const ata = await getAssociatedTokenAddress(mintPk, walletPk);
+      let ataExists = false;
+      try {
+        await getAccount(connection, ata);
+        ataExists = true;
+      } catch {
+        // ATA doesn't exist yet — will be created in tx
+      }
+
+      // 5. Build and send mint transaction.
+      const tx = new Transaction();
+      if (!ataExists) {
+        tx.add(
+          createAssociatedTokenAccountInstruction(
+            mintAuthority.publicKey, // payer
+            ata,
+            walletPk,
+            mintPk,
+          ),
+        );
+      }
+      tx.add(createMintToInstruction(mintPk, ata, mintAuthority.publicKey, rawAmount));
+
       sig = await withTimeout(
         sendAndConfirmTransaction(connection, tx, [mintAuthority], { commitment: "confirmed" }),
         30_000,
       );
-    } catch (mintErr) {
-      // Mint failed — release the gate so the user can retry without waiting 24h.
-      if (claimId !== undefined) await releaseClaim(supabase, claimId);
-      throw mintErr; // re-throw to be caught by the outer catch (Sentry + 500)
+      mintSucceeded = true;
+    } finally {
+      // Release the claim slot on ANY failure so user isn't locked out 24h.
+      if (!mintSucceeded && claimId !== undefined) {
+        await releaseClaim(supabase, claimId);
+      }
     }
 
     // Claim slot is already recorded from step 2 — no separate recordClaim needed.
-    const humanAmount = Number(rawAmount) / 10 ** decimals;
+    const humanAmount = Number(rawAmount!) / 10 ** decimals;
 
     return NextResponse.json({
       signature: sig,
