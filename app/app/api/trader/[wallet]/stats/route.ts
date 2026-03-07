@@ -30,10 +30,24 @@ export const dynamic = "force-dynamic";
 const RATE_LIMIT = 30;
 const RATE_WINDOW_MS = 60_000;
 
-const rateMap = new Map<string, { count: number; resetAt: number }>();
+// Exported for testing only — do not import outside of test files.
+export const rateMap = new Map<string, { count: number; resetAt: number }>();
+
+// Evict expired entries when the map grows large to prevent unbounded memory growth.
+// Threshold of 500 is conservative — a typical Railway instance won't see more than a few
+// hundred unique IPs in a 60s window under normal load.
+const EVICTION_THRESHOLD = 500;
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
+
+  // Sweep expired entries before inserting a new one.
+  if (rateMap.size > EVICTION_THRESHOLD) {
+    for (const [k, v] of rateMap) {
+      if (now > v.resetAt) rateMap.delete(k);
+    }
+  }
+
   const entry = rateMap.get(ip);
   if (!entry || now > entry.resetAt) {
     rateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
