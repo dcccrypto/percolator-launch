@@ -45,12 +45,21 @@ function sanitizePrice(v: number | null | undefined, field?: string, slabAddress
 
 // #868: Blocklist for markets with corrupt state or wrong oracle_authority (e.g. issue #837).
 // Populated from BLOCKED_MARKET_ADDRESSES env var (comma-separated slab addresses).
-const BLOCKED_MARKET_ADDRESSES: ReadonlySet<string> = new Set(
-  (process.env.BLOCKED_MARKET_ADDRESSES ?? "")
+// HARDCODED_BLOCKED_MARKETS provides a code-level safety net for known-bad markets
+// so they are excluded even if the env var is not set in a deployment.
+const HARDCODED_BLOCKED_MARKETS: ReadonlySet<string> = new Set([
+  // issue #837: wrong oracle_authority (5Eb8PY personal wallet), hardcoded $1 price,
+  // never timestamped — price manipulation risk on devnet.
+  "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT",
+]);
+
+const BLOCKED_MARKET_ADDRESSES: ReadonlySet<string> = new Set([
+  ...HARDCODED_BLOCKED_MARKETS,
+  ...(process.env.BLOCKED_MARKET_ADDRESSES ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
-);
+]);
 
 export const dynamic = "force-dynamic";
 

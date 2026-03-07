@@ -172,6 +172,26 @@ describe("GET /api/markets — price sanitization (#856)", () => {
     expect(symbols).toContain("GOOD");
   });
 
+  it("hardcoded blocklist excludes issue #837 corrupt market regardless of env var", async () => {
+    // This market has wrong oracle_authority (5Eb8PY personal wallet) and hardcoded $1 price.
+    // It must be excluded even without BLOCKED_MARKET_ADDRESSES env var set.
+    const CORRUPT_MARKET = "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT";
+    mockMarkets = [
+      mkMarket({ slab_address: CORRUPT_MARKET, symbol: "CORRUPT" }),
+      mkMarket({ slab_address: "GoodSlab111111111111111111111111111111111111", symbol: "GOOD" }),
+    ];
+
+    vi.resetModules();
+    vi.unstubAllEnvs(); // ensure env var is NOT set
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET();
+    const body = (await res.json()) as { markets: { symbol: string }[] };
+
+    const symbols = body.markets.map((m) => m.symbol);
+    expect(symbols).not.toContain("CORRUPT");
+    expect(symbols).toContain("GOOD");
+  });
+
   it("sanitizes index_price with same bounds as last_price/mark_price (#855)", async () => {
     mockMarkets = [
       // Corrupt index_price — should be nulled
