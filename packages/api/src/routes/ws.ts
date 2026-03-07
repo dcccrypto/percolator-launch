@@ -66,6 +66,70 @@ let globalSubscriptionCount = 0;
 // Track connections per IP
 const connectionsPerIp = new Map<string, number>();
 
+// Auth failure rate limiting per IP (issue #839: connection flood from repeat auth failures)
+// Tracks recent auth failures to temporarily ban repeat offenders.
+const AUTH_FAILURE_WINDOW_MS = 60_000;   // 60-second rolling window
+const AUTH_FAILURE_BAN_THRESHOLD = 10;   // ban after 10 failures in the window
+const AUTH_FAILURE_BAN_DURATION_MS = 300_000; // 5-minute ban
+
+interface AuthFailureRecord {
+  count: number;
+  windowStart: number;  // start of current counting window
+  bannedUntil: number;  // timestamp after which ban is lifted (0 = not banned)
+}
+const authFailuresPerIp = new Map<string, AuthFailureRecord>();
+
+/**
+ * Record an auth failure for an IP. Returns true if the IP should now be banned.
+ */
+function recordAuthFailure(ip: string): void {
+  const now = Date.now();
+  let rec = authFailuresPerIp.get(ip);
+  if (!rec) {
+    rec = { count: 0, windowStart: now, bannedUntil: 0 };
+    authFailuresPerIp.set(ip, rec);
+  }
+  // Reset window if expired
+  if (now - rec.windowStart > AUTH_FAILURE_WINDOW_MS) {
+    rec.count = 0;
+    rec.windowStart = now;
+  }
+  rec.count++;
+  if (rec.count >= AUTH_FAILURE_BAN_THRESHOLD) {
+    rec.bannedUntil = now + AUTH_FAILURE_BAN_DURATION_MS;
+    logger.warn("IP temporarily banned for repeated auth failures", {
+      ip,
+      failures: rec.count,
+      banUntil: new Date(rec.bannedUntil).toISOString(),
+    });
+  }
+}
+
+/**
+ * Returns true if the IP is currently banned due to too many auth failures.
+ */
+function isAuthBanned(ip: string): boolean {
+  const rec = authFailuresPerIp.get(ip);
+  if (!rec || rec.bannedUntil === 0) return false;
+  if (Date.now() >= rec.bannedUntil) {
+    // Ban expired — clear it
+    authFailuresPerIp.delete(ip);
+    return false;
+  }
+  return true;
+}
+
+// Periodically sweep stale auth failure records to prevent unbounded growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of authFailuresPerIp.entries()) {
+    const stale = rec.bannedUntil > 0
+      ? now >= rec.bannedUntil + AUTH_FAILURE_BAN_DURATION_MS
+      : now - rec.windowStart > AUTH_FAILURE_WINDOW_MS * 2;
+    if (stale) authFailuresPerIp.delete(ip);
+  }
+}, AUTH_FAILURE_BAN_DURATION_MS);
+
 // Track connections per slab (for per-slab limits)
 const connectionsPerSlab = new Map<string, Set<WsClient>>();
 
@@ -410,6 +474,13 @@ export function setupWebSocket(server: Server): WebSocketServer {
       return;
     }
     
+    // Reject IPs temporarily banned for repeated auth failures (issue #839)
+    if (isAuthBanned(clientIp)) {
+      logger.warn("Rejected connection from auth-banned IP", { ip: clientIp });
+      ws.close(1008, "Too many authentication failures — try again later");
+      return;
+    }
+
     // Check connections per IP
     const ipConnections = connectionsPerIp.get(clientIp) || 0;
     if (ipConnections >= MAX_CONNECTIONS_PER_IP) {
@@ -464,6 +535,8 @@ export function setupWebSocket(server: Server): WebSocketServer {
       client.authTimeout = setTimeout(() => {
         if (!client.authenticated) {
           logger.warn("Client failed to authenticate within timeout", { ip: clientIp });
+          // Record auth failure for rate limiting (issue #839: flood protection)
+          recordAuthFailure(clientIp);
           ws.close(1008, "Authentication timeout");
         }
       }, AUTH_TIMEOUT_MS);
@@ -548,6 +621,8 @@ export function setupWebSocket(server: Server): WebSocketServer {
             }));
           } else {
             logger.warn("Invalid auth token in message", { ip: client.ip });
+            // Record auth failure for rate limiting (issue #839)
+            recordAuthFailure(client.ip);
             ws.send(JSON.stringify({ type: "error", message: "Invalid authentication token" }));
           }
           return;

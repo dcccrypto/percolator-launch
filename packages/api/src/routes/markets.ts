@@ -8,6 +8,16 @@ import { getConnection, getSupabase, createLogger, sanitizeSlabAddress } from "@
 
 const logger = createLogger("api:markets");
 
+// Markets to exclude from public API responses.
+// Populated from BLOCKED_MARKET_ADDRESSES env var (comma-separated slab addresses).
+// Use this to hide markets with wrong oracle_authority or corrupt state (e.g. issue #837).
+const BLOCKED_MARKET_ADDRESSES: ReadonlySet<string> = new Set(
+  (process.env.BLOCKED_MARKET_ADDRESSES ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
 export function marketRoutes(): Hono {
   const app = new Hono();
 
@@ -23,7 +33,9 @@ export function marketRoutes(): Hono {
 
         if (error) throw error;
 
-        return (data ?? []).map((m) => ({
+        return (data ?? [])
+          .filter((m) => !BLOCKED_MARKET_ADDRESSES.has(m.slab_address))
+          .map((m) => ({
           slabAddress: m.slab_address,
           mintAddress: m.mint_address,
           symbol: m.symbol,
