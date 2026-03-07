@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
+import { SUPPORTED_DEX_IDS } from "@/lib/dex-constants";
 
 export const dynamic = "force-dynamic";
 
@@ -174,7 +175,6 @@ async function fetchDexScreenerInfo(
     // *supported* DEX — not just the most liquid pair overall. The best overall pair
     // may be on Orca/other unsupported venues, causing poolAddress to be incorrectly
     // null even when a valid PumpSwap/Raydium/Meteora pool exists lower in the list.
-    const SUPPORTED_DEX_IDS = new Set(["pumpswap", "raydium", "meteora"]);
     const bestSupported = solPairs.find(
       (p) => SUPPORTED_DEX_IDS.has(p.dexId?.toLowerCase() ?? "") && p.pairAddress
     ) ?? null;

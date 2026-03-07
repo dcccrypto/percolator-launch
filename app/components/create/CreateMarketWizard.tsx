@@ -380,9 +380,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       // PERC-470/#811: Pass DEX pool address for hyperp mode.
       // wizard.dexPool is set when the user selects a pool from the UI.
       // For Quick Launch, poolInfo may be null while oracleFeed holds the pool address —
-      // use oracleFeed as fallback so the pool address is never silently dropped.
+      // use oracleFeed as fallback ONLY when it's a valid base58 pubkey (pool address),
+      // not a Pyth feed hex64 — prevents confusing on-chain rejection (security LOW fix).
       ...(oracleMode === "hyperp" ? {
-        dexPoolAddress: wizard.dexPool?.poolAddress ?? wizard.oracleFeed,
+        dexPoolAddress: wizard.dexPool?.poolAddress ??
+          (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
       } : {}),
     };
     create(params);
@@ -418,8 +420,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       oracleMode,
       // PERC-470/#811: Same fallback as handleLaunch — oracleFeed holds pool address
       // for Quick Launch when wizard.dexPool is null.
+      // Guard: only use oracleFeed as fallback if it's a valid base58 pubkey (pool address).
       ...(oracleMode === "hyperp" ? {
-        dexPoolAddress: wizard.dexPool?.poolAddress ?? wizard.oracleFeed,
+        dexPoolAddress: wizard.dexPool?.poolAddress ??
+          (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
       } : {}),
     };
     create(params, createState.step);

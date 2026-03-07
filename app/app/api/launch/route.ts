@@ -5,7 +5,7 @@ import { getRpcEndpoint } from "@/lib/config";
 
 export const dynamic = 'force-dynamic';
 
-const SUPPORTED_DEX_IDS = new Set(["pumpswap", "raydium", "meteora"]);
+import { SUPPORTED_DEX_IDS } from "@/lib/dex-constants";
 
 interface DexPoolDetection {
   poolAddress: string;

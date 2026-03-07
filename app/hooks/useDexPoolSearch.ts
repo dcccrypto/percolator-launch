@@ -10,7 +10,7 @@ export interface DexPoolResult {
   priceUsd: number;
 }
 
-const SUPPORTED_DEX_IDS = new Set(["pumpswap", "raydium", "meteora"]);
+import { SUPPORTED_DEX_IDS } from "@/lib/dex-constants";
 
 /**
  * Search DexScreener for DEX pools containing a given token mint.
