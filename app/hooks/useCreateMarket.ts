@@ -46,7 +46,7 @@ import {
   derivePythPushOraclePDA,
 } from "@percolator/sdk";
 import { sendTx } from "@/lib/tx";
-import { getConfig } from "@/lib/config";
+import { getConfig, getNetwork } from "@/lib/config";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
 
 import { SLAB_TIERS, slabDataSize, deriveLpPda } from "@percolator/sdk";
@@ -226,9 +226,11 @@ export function useCreateMarket() {
       const isAdminOracle = oracleMode === "admin";
       const isHyperpOracle = oracleMode === "hyperp";
       // PERC-devnet: isDevnetEnv must be runtime-detected, not build-time.
-      // Users toggle devnet via localStorage — NEXT_PUBLIC_SOLANA_NETWORK is always "mainnet" on Vercel prod.
-      // params.mainnetCA is only set for devnet mirror markets, making it a reliable runtime signal.
-      const isDevnetEnv = !!params.mainnetCA || connection.rpcEndpoint.includes("devnet");
+      // Users toggle devnet via localStorage — NEXT_PUBLIC_DEFAULT_NETWORK is always "mainnet" on Vercel prod.
+      // Use getNetwork() which reads localStorage("percolator-network") first, then env var, then defaults
+      // to "mainnet" (fail-closed). DO NOT use params.mainnetCA as a devnet proxy — it signals
+      // "this is a devnet mirror market" not "the user is connected to devnet" (issue #835).
+      const isDevnetEnv = getNetwork() === "devnet";
 
       // PERC-470: Resolve DEX pool vault addresses for hyperp mode
       // If vaults weren't provided, fetch the pool account on-chain
@@ -894,7 +896,7 @@ export function useCreateMarket() {
         // PERC-465: Post-creation hooks — register with oracle keeper + mint devnet token
         const slabAddr = slabPk.toBase58();
         const mintAddr = params.mint.toBase58();
-        const isDevnet = (process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() ?? "mainnet") === "devnet";
+        const isDevnet = getNetwork() === "devnet";
 
         if (isDevnet && slabAddr) {
           // PERC-465: mainnet_ca is already written to the markets table via /api/markets POST above.
