@@ -14,6 +14,7 @@ import { FundingRateCard } from "./FundingRateCard";
 import { FundingRateChart } from "./FundingRateChart";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { OracleFreshnessIndicator } from "@/components/oracle/OracleFreshnessIndicator";
+import { useMarketInfo } from "@/hooks/useMarketInfo";
 
 function formatNum(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -42,6 +43,7 @@ export const MarketStatsCard: FC = () => {
   const { engine, params, fundingRate, loading } = useEngineState();
   const { config: mktConfig, slabAddress } = useSlabState();
   const config = useMarketConfig();
+  const { market: marketInfo } = useMarketInfo(slabAddress);
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const { showUsd } = useUsdToggle();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -64,6 +66,13 @@ export const MarketStatsCard: FC = () => {
       index = sanitizePriceE6(mktConfig.lastEffectivePriceE6);
       if (mark === 0n) mark = null;
       if (index === 0n) index = null;
+      // Bug #843: for admin mode, lastEffectivePriceE6 may be uninitialized (e.g. 1000 = $0.001)
+      // when KeeperCrank hasn't run yet. If index is >100x smaller than mark, suppress it
+      // to avoid nonsensical spread display (e.g. +200,000,000%).
+      if (mode === "admin" && mark !== null && index !== null && index > 0n) {
+        const ratio = Number(mark) / Number(index);
+        if (ratio > 100) index = null;
+      }
     } else {
       // pyth-pinned: mark ≈ index (Pyth IS the oracle — no separate mark/index distinction)
       const p = sanitizePriceE6(mktConfig.lastEffectivePriceE6);
@@ -171,8 +180,9 @@ export const MarketStatsCard: FC = () => {
     },
     {
       label: "Spread",
+      // Bug #851: full spread value in tooltip since display cell truncates long values
       value: spreadDisplayValue,
-      tooltip: "Mark – Index spread. Amber if >0.5%.",
+      tooltip: spreadDisplayValue !== "—" ? `${spreadDisplayValue} — Mark–Index spread. Amber if >0.5%.` : "Mark – Index spread. Amber if >0.5%.",
       valueClass: spreadColor,
     },
     // Row 2 — Market health
@@ -185,8 +195,33 @@ export const MarketStatsCard: FC = () => {
       valueClass: fundingColor,
     },
     // Row 3 — Market parameters
-    { label: "Trading Fee", value: sanitizeBps(params.tradingFeeBps, 5_000) != null ? formatBps(sanitizeBps(params.tradingFeeBps, 5_000)!) : "—" },
-    { label: "Init. Margin", value: sanitizeBps(params.initialMarginBps) != null ? formatBps(sanitizeBps(params.initialMarginBps)!) : "—" },
+    // Bug #845: on-chain tradingFeeBps / initialMarginBps are 0 for many devnet slabs (init bug).
+    // Fall back to DB values (via useMarketInfo) when on-chain is 0 or out-of-range.
+    {
+      label: "Trading Fee",
+      value: (() => {
+        const onChain = sanitizeBps(params.tradingFeeBps, 5_000);
+        if (onChain != null && onChain > 0) return formatBps(onChain);
+        // Fallback: use DB trading_fee_bps
+        const dbFee = marketInfo?.trading_fee_bps;
+        if (dbFee != null && dbFee > 0) return formatBps(dbFee);
+        return "—";
+      })(),
+    },
+    {
+      label: "Init. Margin",
+      value: (() => {
+        const onChain = sanitizeBps(params.initialMarginBps);
+        if (onChain != null && onChain > 0) return formatBps(onChain);
+        // Fallback: derive from max_leverage (initialMarginBps = 10000 / max_leverage)
+        const maxLev = marketInfo?.max_leverage;
+        if (maxLev != null && maxLev > 0) {
+          const impliedMarginBps = Math.round(10000 / maxLev);
+          return formatBps(impliedMarginBps);
+        }
+        return "—";
+      })(),
+    },
     { label: "Accounts", value: sanitizeAccountCount(engine.numUsedAccounts ?? 0, params ? Number(params.maxAccounts) : undefined).toString() },
   ];
 

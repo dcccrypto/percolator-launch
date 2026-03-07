@@ -619,7 +619,9 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
       <div className="mb-4 flex items-center justify-between">
         <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
       </div>
-      <div className="grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 xl:grid-cols-3">
+      {/* Bug #850: only use xl:grid-cols-3 when there are ≥ 3 pools; with fewer, stay at lg:grid-cols-2
+           to avoid ghost empty card slots filling the grid background */}
+      <div className={`grid grid-cols-1 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 ${pools.length >= 3 ? "xl:grid-cols-3" : ""}`}>
         {pools.map((pool) => (
           <PoolCard key={pool.id} pool={pool} />
         ))}

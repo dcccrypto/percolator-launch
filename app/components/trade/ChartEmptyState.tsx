@@ -51,6 +51,30 @@ export const ChartEmptyState: FC<ChartEmptyStateProps> = ({
           </>
         ) : (
           <>
+            {/* Bug #852: consistent icon + heading + subtext pattern */}
+            <svg
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="mb-2 text-[#475569]"
+              aria-hidden="true"
+            >
+              {/* Candlestick chart icon */}
+              <line x1="18" y1="3" x2="18" y2="6" />
+              <line x1="18" y1="11" x2="18" y2="21" />
+              <rect x="15" y="6" width="6" height="5" rx="1" />
+              <line x1="12" y1="6" x2="12" y2="8" />
+              <line x1="12" y1="15" x2="12" y2="21" />
+              <rect x="9" y="8" width="6" height="7" rx="1" />
+              <line x1="6" y1="3" x2="6" y2="10" />
+              <line x1="6" y1="17" x2="6" y2="21" />
+              <rect x="3" y="10" width="6" height="7" rx="1" />
+            </svg>
             <div
               className="text-[15px] font-semibold text-[#94a3b8]"
               style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}

@@ -31,7 +31,7 @@ export async function GET() {
         "slab_address,mint_address,symbol,name,decimals,deployer,logo_url,max_leverage,trading_fee_bps," +
         "last_price,mark_price,volume_24h,open_interest_long,open_interest_short,total_open_interest," +
         "insurance_fund,insurance_balance,total_accounts,funding_rate,net_lp_pos,lp_sum_abs,c_tot," +
-        "vault_balance,created_at,stats_updated_at"
+        "vault_balance,created_at,stats_updated_at,oracle_mode,dex_pool_address,mainnet_ca,oracle_authority"
       );
 
     if (error) {
@@ -43,10 +43,28 @@ export async function GET() {
 
     // Sanitize funding_rate: raw DB values from uninitialized slabs can be
     // garbage (e.g. 17733189824741436). Clamp to valid bps range. (#817)
-    const sanitized = ((data ?? []) as unknown as Record<string, unknown>[]).map((m) => ({
-      ...m,
-      funding_rate: sanitizeFundingRate(m.funding_rate as number | null),
-    }));
+    // Also: oracle_mode was not populated for markets created before migration 035.
+    // Derive from oracle_authority: zero pubkey → pyth-pinned, else admin/hyperp.
+    // Default to "admin" when unknown — safest assumption for old devnet markets.
+    const ZERO_PUBKEY = "11111111111111111111111111111111";
+    const sanitized = ((data ?? []) as unknown as Record<string, unknown>[]).map((m) => {
+      let oracle_mode = m.oracle_mode as string | null;
+      if (!oracle_mode) {
+        const auth = m.oracle_authority as string | null;
+        if (auth && auth !== ZERO_PUBKEY) {
+          oracle_mode = "admin";
+        } else if (auth === ZERO_PUBKEY) {
+          oracle_mode = "pyth";
+        } else {
+          oracle_mode = "admin"; // safe default
+        }
+      }
+      return {
+        ...m,
+        oracle_mode,
+        funding_rate: sanitizeFundingRate(m.funding_rate as number | null),
+      };
+    });
 
     return NextResponse.json({ markets: sanitized }, {
       headers: {
