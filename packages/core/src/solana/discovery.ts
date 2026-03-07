@@ -46,7 +46,16 @@ const MAGIC_BYTES = new Uint8Array([0x54, 0x41, 0x4c, 0x4f, 0x43, 0x52, 0x45, 0x
  *       RiskEngine grew by 32 bytes (PERC-298: long_oi + short_oi) + 24 (PERC-299: emergency OI).
  *       Values below must be verified against BPF build before deployment.
  */
+// V0 sizes (deployed devnet program: HEADER=72, CONFIG=408, ENGINE_OFF=480, ACCOUNT_SIZE=240)
+// V1 sizes (future upgrade: HEADER=104, CONFIG=536, ENGINE_OFF=640, ACCOUNT_SIZE=248)
 export const SLAB_TIERS = {
+  small:  { maxAccounts: 256,  dataSize: 62_808,    label: "Small",  description: "256 slots · ~0.44 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 248_760,   label: "Medium", description: "1,024 slots · ~1.73 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 992_568,   label: "Large",  description: "4,096 slots · ~6.90 SOL" },
+} as const;
+
+/** V1 slab tier sizes (for use when program is upgraded to V1 layout) */
+export const SLAB_TIERS_V1 = {
   small:  { maxAccounts: 256,  dataSize: 65_352,    label: "Small",  description: "256 slots · ~0.45 SOL" },
   medium: { maxAccounts: 1024, dataSize: 257_448,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
   large:  { maxAccounts: 4096, dataSize: 1_025_832, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
@@ -68,17 +77,29 @@ export type SlabTierKey = keyof typeof SLAB_TIERS;
  * Must match the on-chain program's SLAB_LEN exactly.
  */
 export function slabDataSize(maxAccounts: number): number {
-  const ENGINE_OFF_LOCAL = SLAB_ENGINE_OFF; // single source of truth from slab.ts
-  const ENGINE_FIXED = 656;     // scalars before bitmap (608 + 24 for PERC-299 emergency OI fields)
-  const ACCOUNT_SIZE = 248;
+  // V0 layout (deployed devnet): ENGINE_OFF=480, ENGINE_BITMAP_OFF=320, ACCOUNT_SIZE=240
+  const ENGINE_OFF_V0 = 480;
+  const ENGINE_BITMAP_OFF_V0 = 320;
+  const ACCOUNT_SIZE_V0 = 240;
   const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
-  // After bitmap: num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) = 18
   const postBitmap = 18;
   const nextFreeBytes = maxAccounts * 2;
-  const preAccountsLen = ENGINE_FIXED + bitmapBytes + postBitmap + nextFreeBytes;
-  // Align to 8 bytes for Account (max field align = 8 on SBF)
+  const preAccountsLen = ENGINE_BITMAP_OFF_V0 + bitmapBytes + postBitmap + nextFreeBytes;
   const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
-  return ENGINE_OFF_LOCAL + accountsOff + maxAccounts * ACCOUNT_SIZE;
+  return ENGINE_OFF_V0 + accountsOff + maxAccounts * ACCOUNT_SIZE_V0;
+}
+
+/** Calculate slab data size for V1 layout (future program upgrade). */
+export function slabDataSizeV1(maxAccounts: number): number {
+  const ENGINE_OFF_V1 = 640;
+  const ENGINE_BITMAP_OFF_V1 = 656;
+  const ACCOUNT_SIZE_V1 = 248;
+  const bitmapBytes = Math.ceil(maxAccounts / 64) * 8;
+  const postBitmap = 18;
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = ENGINE_BITMAP_OFF_V1 + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
+  return ENGINE_OFF_V1 + accountsOff + maxAccounts * ACCOUNT_SIZE_V1;
 }
 
 /**
@@ -93,8 +114,11 @@ export function validateSlabTierMatch(dataSize: number, programSlabLen: number):
   return dataSize === programSlabLen;
 }
 
-/** All known slab data sizes for discovery */
-const ALL_SLAB_SIZES = Object.values(SLAB_TIERS).map(t => t.dataSize);
+/** All known slab data sizes for discovery (V0 + V1 tiers) */
+const ALL_SLAB_SIZES = [
+  ...Object.values(SLAB_TIERS).map(t => t.dataSize),
+  ...Object.values(SLAB_TIERS_V1).map(t => t.dataSize),
+];
 
 /** Legacy constant for backward compat */
 const SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;

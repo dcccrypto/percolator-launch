@@ -23,43 +23,348 @@ function readI64LE(data: Uint8Array, off: number): bigint {
   return dv(data).getBigInt64(off, true);
 }
 
-// Constants from Rust (updated for PERC-120/121/122 struct changes 2026-02)
+// =============================================================================
+// Helper: read signed/unsigned i128 from buffer
+// =============================================================================
+function readI128LE(buf: Uint8Array, offset: number): bigint {
+  const lo = readU64LE(buf, offset);
+  const hi = readU64LE(buf, offset + 8);
+  const unsigned = (hi << 64n) | lo;
+  const SIGN_BIT = 1n << 127n;
+  if (unsigned >= SIGN_BIT) {
+    return unsigned - (1n << 128n);
+  }
+  return unsigned;
+}
+
+function readU128LE(buf: Uint8Array, offset: number): bigint {
+  const lo = readU64LE(buf, offset);
+  const hi = readU64LE(buf, offset + 8);
+  return (hi << 64n) | lo;
+}
+
+// =============================================================================
+// Slab Layout Version Detection
+// =============================================================================
+// The deployed devnet program uses a different struct layout (V0) than the SDK
+// was updated for (V1). V1 includes PERC-120/121/122/298/299/300/301/306/328
+// struct changes that have NOT been deployed to devnet yet.
+//
+// V0 (deployed devnet): HEADER=72, CONFIG=408, ENGINE_OFF=480, ACCOUNT_SIZE=240
+//   - InsuranceFund: {balance: U128, fee_revenue: U128} (32 bytes)
+//   - RiskParams: 56 bytes (basic fields only)
+//   - No mark_price, no long_oi/short_oi, no emergency OI cap fields
+//   - No partial liquidation field in Account (240 bytes)
+//
+// V1 (future upgrade): HEADER=104, CONFIG=536, ENGINE_OFF=640, ACCOUNT_SIZE=248
+//   - InsuranceFund: expanded with isolation fields (72 bytes)
+//   - RiskParams: 288 bytes (premium funding, partial liq, dynamic fees)
+//   - Has mark_price, long_oi/short_oi, emergency fields
+//   - Account has last_partial_liquidation_slot (248 bytes)
+// =============================================================================
+
 const MAGIC: bigint = 0x504552434f4c4154n; // "PERCOLAT"
-// SlabHeader: magic(8) + version(4) + bump(1) + _padding(3) + admin(32) + pending_admin(32) + _reserved(24) = 104
-const HEADER_LEN = 104;
-const CONFIG_OFFSET = HEADER_LEN;  // MarketConfig starts right after header
-// MarketConfig: collateral_mint(32) + vault_pubkey(32) + index_feed_id(32) + max_staleness_secs(8) +
-//               conf_filter_bps(2) + bump(1) + invert(1) + unit_scale(4) +
-//               funding_horizon_slots(8) + funding_k_bps(8) + funding_inv_scale_notional_e6(16) +
-//               funding_max_premium_bps(8) + funding_max_bps_per_slot(8) +
-//               funding_premium_weight_bps(8) + funding_settlement_interval_slots(8) +
-//               funding_premium_dampening_e6(8) + funding_premium_max_bps_per_slot(8) +
-//               thresh_floor(16) + thresh_risk_bps(8) + thresh_update_interval_slots(8) +
-//               thresh_step_bps(8) + thresh_alpha_bps(8) + thresh_min(16) + thresh_max(16) + thresh_min_step(16) +
-//               oracle_authority(32) + authority_price_e6(8) + authority_timestamp(8) +
-//               oracle_price_cap_e2bps(8) + last_effective_price_e6(8) +
-//               oi_cap_multiplier_bps(8) + max_pnl_cap(8) +
-//               adaptive_funding_enabled(1) + _pad(1) + adaptive_scale_bps(2) + _pad2(4) +
-//               adaptive_max_funding_bps(8) +
-//               market_created_slot(8) + oi_ramp_slots(8) +
-//               resolved_slot(8) + _perc301_reserved(8)
-//             + PERC-306 isolation(16) + PERC-307 orphan(16)
-//             + PERC-312 safety_valve(16) + PERC-314 dispute(16)
-//             + PERC-315 lp_collateral(16)
-//             = 496 bytes
-//             + PERC-328 _reserved: [u8; 40] (SlabHeader isolation)
-//             = 536 bytes (verified by on-chain compile-time assertion)
-// NOTE: PERC-298 skew_factor_bps is packed into upper bits of oi_cap_multiplier_bps.
-const CONFIG_LEN = 536;
-// Offset of _reserved field within SlabHeader (magic+version+bump+_padding+admin+pending_admin = 80)
-const RESERVED_OFF = 80;
 
 // Flag bits in header._padding[0] at offset 13
 const FLAG_RESOLVED = 1 << 0;
 
 /**
- * Slab header (72 bytes)
+ * Full slab layout descriptor. Returned by detectSlabLayout().
+ * All engine field offsets are relative to engineOff.
  */
+export interface SlabLayout {
+  version: 0 | 1;
+  headerLen: number;
+  configOffset: number;
+  configLen: number;
+  reservedOff: number;          // offset of _reserved in header
+  engineOff: number;
+  accountSize: number;
+  maxAccounts: number;
+  bitmapWords: number;
+  accountsOff: number;          // absolute offset of accounts array in slab
+
+  // Engine field offsets (relative to engineOff)
+  engineInsuranceOff: number;
+  engineParamsOff: number;
+  paramsSize: number;
+  engineCurrentSlotOff: number;
+  engineFundingIndexOff: number;
+  engineLastFundingSlotOff: number;
+  engineFundingRateBpsOff: number;
+  engineMarkPriceOff: number;           // -1 if not present (V0)
+  engineLastCrankSlotOff: number;
+  engineMaxCrankStalenessOff: number;
+  engineTotalOiOff: number;
+  engineLongOiOff: number;              // -1 if not present (V0)
+  engineShortOiOff: number;             // -1 if not present (V0)
+  engineCTotOff: number;
+  enginePnlPosTotOff: number;
+  engineLiqCursorOff: number;
+  engineGcCursorOff: number;
+  engineLastSweepStartOff: number;
+  engineLastSweepCompleteOff: number;
+  engineCrankCursorOff: number;
+  engineSweepStartIdxOff: number;
+  engineLifetimeLiquidationsOff: number;
+  engineLifetimeForceClosesOff: number;
+  engineNetLpPosOff: number;
+  engineLpSumAbsOff: number;
+  engineLpMaxAbsOff: number;
+  engineLpMaxAbsSweepOff: number;
+  engineEmergencyOiModeOff: number;     // -1 if not present (V0)
+  engineEmergencyStartSlotOff: number;  // -1 if not present (V0)
+  engineLastBreakerSlotOff: number;     // -1 if not present (V0)
+  engineBitmapOff: number;              // relative to engineOff
+
+  // Insurance fund layout
+  hasInsuranceIsolation: boolean;
+  engineInsuranceIsolatedOff: number;   // -1 if not present (V0)
+  engineInsuranceIsolationBpsOff: number; // -1 if not present (V0)
+}
+
+// ---- V0 layout constants (deployed devnet program) ----
+const V0_HEADER_LEN = 72;
+const V0_CONFIG_LEN = 408;
+const V0_ENGINE_OFF = 480;   // align_up(72 + 408, 8) = 480
+const V0_ACCOUNT_SIZE = 240;
+const V0_RESERVED_OFF = 48;  // magic(8)+version(4)+bump(1)+pad(3)+admin(32) = 48
+
+// V0 engine: vault(16) + insurance{balance(16),fee_revenue(16)}=32 → params at 48
+// V0 RiskParams: 56 bytes → runtime state at 104
+const V0_ENGINE_PARAMS_OFF = 48;
+const V0_PARAMS_SIZE = 56;
+const V0_ENGINE_CURRENT_SLOT_OFF = 104;
+const V0_ENGINE_FUNDING_INDEX_OFF = 112;
+const V0_ENGINE_LAST_FUNDING_SLOT_OFF = 128;
+const V0_ENGINE_FUNDING_RATE_BPS_OFF = 136;
+const V0_ENGINE_LAST_CRANK_SLOT_OFF = 144;
+const V0_ENGINE_MAX_CRANK_STALENESS_OFF = 152;
+const V0_ENGINE_TOTAL_OI_OFF = 160;
+const V0_ENGINE_C_TOT_OFF = 176;
+const V0_ENGINE_PNL_POS_TOT_OFF = 192;
+const V0_ENGINE_LIQ_CURSOR_OFF = 208;
+const V0_ENGINE_GC_CURSOR_OFF = 210;
+const V0_ENGINE_LAST_SWEEP_START_OFF = 216;
+const V0_ENGINE_LAST_SWEEP_COMPLETE_OFF = 224;
+const V0_ENGINE_CRANK_CURSOR_OFF = 232;
+const V0_ENGINE_SWEEP_START_IDX_OFF = 234;
+const V0_ENGINE_LIFETIME_LIQUIDATIONS_OFF = 240;
+const V0_ENGINE_LIFETIME_FORCE_CLOSES_OFF = 248;
+const V0_ENGINE_NET_LP_POS_OFF = 256;
+const V0_ENGINE_LP_SUM_ABS_OFF = 272;
+const V0_ENGINE_LP_MAX_ABS_OFF = 288;
+const V0_ENGINE_LP_MAX_ABS_SWEEP_OFF = 304;
+const V0_ENGINE_BITMAP_OFF = 320;
+
+// ---- V1 layout constants (future program upgrade) ----
+const V1_HEADER_LEN = 104;
+const V1_CONFIG_LEN = 536;
+const V1_ENGINE_OFF = 640;   // align_up(104 + 536, 8) = 640
+const V1_ACCOUNT_SIZE = 248;
+const V1_RESERVED_OFF = 80;
+
+// V1 engine: vault(16) + insurance expanded(56) → params at 72
+// V1 RiskParams: 288 bytes → runtime state at 360
+const V1_ENGINE_PARAMS_OFF = 72;
+const V1_PARAMS_SIZE = 288;
+const V1_ENGINE_CURRENT_SLOT_OFF = 360;
+const V1_ENGINE_FUNDING_INDEX_OFF = 368;
+const V1_ENGINE_LAST_FUNDING_SLOT_OFF = 384;
+const V1_ENGINE_FUNDING_RATE_BPS_OFF = 392;
+const V1_ENGINE_MARK_PRICE_OFF = 400;
+const V1_ENGINE_LAST_CRANK_SLOT_OFF = 424;
+const V1_ENGINE_MAX_CRANK_STALENESS_OFF = 432;
+const V1_ENGINE_TOTAL_OI_OFF = 440;
+const V1_ENGINE_LONG_OI_OFF = 456;
+const V1_ENGINE_SHORT_OI_OFF = 472;
+const V1_ENGINE_C_TOT_OFF = 488;
+const V1_ENGINE_PNL_POS_TOT_OFF = 504;
+const V1_ENGINE_LIQ_CURSOR_OFF = 520;
+const V1_ENGINE_GC_CURSOR_OFF = 522;
+const V1_ENGINE_LAST_SWEEP_START_OFF = 528;
+const V1_ENGINE_LAST_SWEEP_COMPLETE_OFF = 536;
+const V1_ENGINE_CRANK_CURSOR_OFF = 544;
+const V1_ENGINE_SWEEP_START_IDX_OFF = 546;
+const V1_ENGINE_LIFETIME_LIQUIDATIONS_OFF = 552;
+const V1_ENGINE_LIFETIME_FORCE_CLOSES_OFF = 560;
+const V1_ENGINE_NET_LP_POS_OFF = 568;
+const V1_ENGINE_LP_SUM_ABS_OFF = 584;
+const V1_ENGINE_LP_MAX_ABS_OFF = 600;
+const V1_ENGINE_LP_MAX_ABS_SWEEP_OFF = 616;
+const V1_ENGINE_EMERGENCY_OI_MODE_OFF = 632;
+const V1_ENGINE_EMERGENCY_START_SLOT_OFF = 640;
+const V1_ENGINE_LAST_BREAKER_SLOT_OFF = 648;
+const V1_ENGINE_BITMAP_OFF = 656;
+
+// For backward compatibility, export ENGINE_OFF and ENGINE_MARK_PRICE_OFF
+// (used by reinit-slab and other scripts). These refer to V1 layout.
+export const ENGINE_OFF = V1_ENGINE_OFF;
+export const ENGINE_MARK_PRICE_OFF = V1_ENGINE_MARK_PRICE_OFF;
+
+// ---- Known slab sizes per version and tier ----
+
+function computeSlabSize(
+  engineOff: number,
+  bitmapOff: number,
+  accountSize: number,
+  maxAccounts: number,
+): number {
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const bitmapBytes = bitmapWords * 8;
+  const postBitmap = 18; // num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2)
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
+  return engineOff + accountsOff + maxAccounts * accountSize;
+}
+
+const TIERS = [64, 256, 1024, 4096] as const;
+
+// Pre-compute known slab sizes for fast lookup
+const V0_SIZES = new Map<number, number>();
+const V1_SIZES = new Map<number, number>();
+for (const n of TIERS) {
+  V0_SIZES.set(computeSlabSize(V0_ENGINE_OFF, V0_ENGINE_BITMAP_OFF, V0_ACCOUNT_SIZE, n), n);
+  V1_SIZES.set(computeSlabSize(V1_ENGINE_OFF, V1_ENGINE_BITMAP_OFF, V1_ACCOUNT_SIZE, n), n);
+}
+
+function buildLayout(version: 0 | 1, maxAccounts: number): SlabLayout {
+  const isV0 = version === 0;
+  const engineOff = isV0 ? V0_ENGINE_OFF : V1_ENGINE_OFF;
+  const bitmapOff = isV0 ? V0_ENGINE_BITMAP_OFF : V1_ENGINE_BITMAP_OFF;
+  const accountSize = isV0 ? V0_ACCOUNT_SIZE : V1_ACCOUNT_SIZE;
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const bitmapBytes = bitmapWords * 8;
+  const postBitmap = 18;
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
+
+  return {
+    version,
+    headerLen: isV0 ? V0_HEADER_LEN : V1_HEADER_LEN,
+    configOffset: isV0 ? V0_HEADER_LEN : V1_HEADER_LEN,
+    configLen: isV0 ? V0_CONFIG_LEN : V1_CONFIG_LEN,
+    reservedOff: isV0 ? V0_RESERVED_OFF : V1_RESERVED_OFF,
+    engineOff,
+    accountSize,
+    maxAccounts,
+    bitmapWords,
+    accountsOff: engineOff + accountsOffRel,
+
+    engineInsuranceOff: 16,
+    engineParamsOff: isV0 ? V0_ENGINE_PARAMS_OFF : V1_ENGINE_PARAMS_OFF,
+    paramsSize: isV0 ? V0_PARAMS_SIZE : V1_PARAMS_SIZE,
+    engineCurrentSlotOff: isV0 ? V0_ENGINE_CURRENT_SLOT_OFF : V1_ENGINE_CURRENT_SLOT_OFF,
+    engineFundingIndexOff: isV0 ? V0_ENGINE_FUNDING_INDEX_OFF : V1_ENGINE_FUNDING_INDEX_OFF,
+    engineLastFundingSlotOff: isV0 ? V0_ENGINE_LAST_FUNDING_SLOT_OFF : V1_ENGINE_LAST_FUNDING_SLOT_OFF,
+    engineFundingRateBpsOff: isV0 ? V0_ENGINE_FUNDING_RATE_BPS_OFF : V1_ENGINE_FUNDING_RATE_BPS_OFF,
+    engineMarkPriceOff: isV0 ? -1 : V1_ENGINE_MARK_PRICE_OFF,
+    engineLastCrankSlotOff: isV0 ? V0_ENGINE_LAST_CRANK_SLOT_OFF : V1_ENGINE_LAST_CRANK_SLOT_OFF,
+    engineMaxCrankStalenessOff: isV0 ? V0_ENGINE_MAX_CRANK_STALENESS_OFF : V1_ENGINE_MAX_CRANK_STALENESS_OFF,
+    engineTotalOiOff: isV0 ? V0_ENGINE_TOTAL_OI_OFF : V1_ENGINE_TOTAL_OI_OFF,
+    engineLongOiOff: isV0 ? -1 : V1_ENGINE_LONG_OI_OFF,
+    engineShortOiOff: isV0 ? -1 : V1_ENGINE_SHORT_OI_OFF,
+    engineCTotOff: isV0 ? V0_ENGINE_C_TOT_OFF : V1_ENGINE_C_TOT_OFF,
+    enginePnlPosTotOff: isV0 ? V0_ENGINE_PNL_POS_TOT_OFF : V1_ENGINE_PNL_POS_TOT_OFF,
+    engineLiqCursorOff: isV0 ? V0_ENGINE_LIQ_CURSOR_OFF : V1_ENGINE_LIQ_CURSOR_OFF,
+    engineGcCursorOff: isV0 ? V0_ENGINE_GC_CURSOR_OFF : V1_ENGINE_GC_CURSOR_OFF,
+    engineLastSweepStartOff: isV0 ? V0_ENGINE_LAST_SWEEP_START_OFF : V1_ENGINE_LAST_SWEEP_START_OFF,
+    engineLastSweepCompleteOff: isV0 ? V0_ENGINE_LAST_SWEEP_COMPLETE_OFF : V1_ENGINE_LAST_SWEEP_COMPLETE_OFF,
+    engineCrankCursorOff: isV0 ? V0_ENGINE_CRANK_CURSOR_OFF : V1_ENGINE_CRANK_CURSOR_OFF,
+    engineSweepStartIdxOff: isV0 ? V0_ENGINE_SWEEP_START_IDX_OFF : V1_ENGINE_SWEEP_START_IDX_OFF,
+    engineLifetimeLiquidationsOff: isV0 ? V0_ENGINE_LIFETIME_LIQUIDATIONS_OFF : V1_ENGINE_LIFETIME_LIQUIDATIONS_OFF,
+    engineLifetimeForceClosesOff: isV0 ? V0_ENGINE_LIFETIME_FORCE_CLOSES_OFF : V1_ENGINE_LIFETIME_FORCE_CLOSES_OFF,
+    engineNetLpPosOff: isV0 ? V0_ENGINE_NET_LP_POS_OFF : V1_ENGINE_NET_LP_POS_OFF,
+    engineLpSumAbsOff: isV0 ? V0_ENGINE_LP_SUM_ABS_OFF : V1_ENGINE_LP_SUM_ABS_OFF,
+    engineLpMaxAbsOff: isV0 ? V0_ENGINE_LP_MAX_ABS_OFF : V1_ENGINE_LP_MAX_ABS_OFF,
+    engineLpMaxAbsSweepOff: isV0 ? V0_ENGINE_LP_MAX_ABS_SWEEP_OFF : V1_ENGINE_LP_MAX_ABS_SWEEP_OFF,
+    engineEmergencyOiModeOff: isV0 ? -1 : V1_ENGINE_EMERGENCY_OI_MODE_OFF,
+    engineEmergencyStartSlotOff: isV0 ? -1 : V1_ENGINE_EMERGENCY_START_SLOT_OFF,
+    engineLastBreakerSlotOff: isV0 ? -1 : V1_ENGINE_LAST_BREAKER_SLOT_OFF,
+    engineBitmapOff: isV0 ? V0_ENGINE_BITMAP_OFF : V1_ENGINE_BITMAP_OFF,
+
+    hasInsuranceIsolation: !isV0,
+    engineInsuranceIsolatedOff: isV0 ? -1 : 48,
+    engineInsuranceIsolationBpsOff: isV0 ? -1 : 64,
+  };
+}
+
+/**
+ * Detect slab layout version from data length.
+ * Returns a full SlabLayout descriptor or null if unrecognized.
+ */
+export function detectSlabLayout(dataLen: number): SlabLayout | null {
+  // Check V0 sizes first (deployed devnet program)
+  const v0n = V0_SIZES.get(dataLen);
+  if (v0n !== undefined) return buildLayout(0, v0n);
+
+  // Check V1 sizes (future upgraded program)
+  const v1n = V1_SIZES.get(dataLen);
+  if (v1n !== undefined) return buildLayout(1, v1n);
+
+  return null;
+}
+
+/**
+ * Legacy detectLayout for backward compat.
+ * Returns { bitmapWords, accountsOff, maxAccounts } or null.
+ */
+export function detectLayout(dataLen: number) {
+  const layout = detectSlabLayout(dataLen);
+  if (!layout) return null;
+  const bitmapBytes = layout.bitmapWords * 8;
+  const postBitmap = 18;
+  const nextFreeBytes = layout.maxAccounts * 2;
+  const preAccountsLen = layout.engineBitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
+  return { bitmapWords: layout.bitmapWords, accountsOff, maxAccounts: layout.maxAccounts };
+}
+
+// =============================================================================
+// RiskParams Layout (field offsets within params, same for V0 and V1 basic fields)
+// =============================================================================
+const PARAMS_WARMUP_PERIOD_OFF = 0;
+const PARAMS_MAINTENANCE_MARGIN_OFF = 8;
+const PARAMS_INITIAL_MARGIN_OFF = 16;
+const PARAMS_TRADING_FEE_OFF = 24;
+const PARAMS_MAX_ACCOUNTS_OFF = 32;
+const PARAMS_NEW_ACCOUNT_FEE_OFF = 40;
+// V1-only extended params (offset 56+)
+const PARAMS_RISK_THRESHOLD_OFF = 56;
+const PARAMS_MAINTENANCE_FEE_OFF = 72;
+const PARAMS_MAX_CRANK_STALENESS_OFF = 88;
+const PARAMS_LIQUIDATION_FEE_BPS_OFF = 96;
+const PARAMS_LIQUIDATION_FEE_CAP_OFF = 104;
+const PARAMS_LIQUIDATION_BUFFER_OFF = 120;
+const PARAMS_MIN_LIQUIDATION_OFF = 128;
+
+// =============================================================================
+// Account Layout (240/248 bytes)
+// The first 240 bytes are identical in V0 and V1.
+// V1 adds last_partial_liquidation_slot (u64, 8 bytes) at offset 240.
+// =============================================================================
+const ACCT_ACCOUNT_ID_OFF = 0;
+const ACCT_CAPITAL_OFF = 8;
+const ACCT_KIND_OFF = 24;
+const ACCT_PNL_OFF = 32;
+const ACCT_RESERVED_PNL_OFF = 48;
+const ACCT_WARMUP_STARTED_OFF = 56;
+const ACCT_WARMUP_SLOPE_OFF = 64;
+const ACCT_POSITION_SIZE_OFF = 80;
+const ACCT_ENTRY_PRICE_OFF = 96;
+const ACCT_FUNDING_INDEX_OFF = 104;
+const ACCT_MATCHER_PROGRAM_OFF = 120;
+const ACCT_MATCHER_CONTEXT_OFF = 152;
+const ACCT_OWNER_OFF = 184;
+const ACCT_FEE_CREDITS_OFF = 216;
+const ACCT_LAST_FEE_SLOT_OFF = 232;
+
+// =============================================================================
+// Interfaces
+// =============================================================================
+
 export interface SlabHeader {
   magic: bigint;
   version: number;
@@ -72,21 +377,15 @@ export interface SlabHeader {
   lastThrUpdateSlot: bigint;
 }
 
-/**
- * Market config (starts at offset 72)
- * Layout: collateral_mint(32) + vault_pubkey(32) + index_feed_id(32)
- *         + max_staleness_secs(8) + conf_filter_bps(2) + vault_authority_bump(1) + invert(1) + unit_scale(4)
- */
 export interface MarketConfig {
   collateralMint: PublicKey;
   vaultPubkey: PublicKey;
-  indexFeedId: PublicKey;       // index_feed_id (Pyth feed ID stored as 32 bytes)
-  maxStalenessSlots: bigint;    // max_staleness_secs
+  indexFeedId: PublicKey;
+  maxStalenessSlots: bigint;
   confFilterBps: number;
   vaultAuthorityBump: number;
-  invert: number;               // 0 = no inversion, 1 = invert oracle price
-  unitScale: number;            // Lamports per unit (0 = no scaling)
-  // Funding rate parameters
+  invert: number;
+  unitScale: number;
   fundingHorizonSlots: bigint;
   fundingKBps: bigint;
   fundingInvScaleNotionalE6: bigint;
@@ -96,7 +395,6 @@ export interface MarketConfig {
   fundingSettlementIntervalSlots: bigint;
   fundingPremiumDampeningE6: bigint;
   fundingPremiumMaxBpsPerSlot: bigint;
-  // Threshold parameters
   threshFloor: bigint;
   threshRiskBps: bigint;
   threshUpdateIntervalSlots: bigint;
@@ -105,31 +403,106 @@ export interface MarketConfig {
   threshMin: bigint;
   threshMax: bigint;
   threshMinStep: bigint;
-  // Oracle authority
   oracleAuthority: PublicKey;
   authorityPriceE6: bigint;
   authorityTimestamp: bigint;
-  // Oracle price circuit breaker
   oraclePriceCapE2bps: bigint;
   lastEffectivePriceE6: bigint;
-  // OI cap (PERC-273/298)
   oiCapMultiplierBps: bigint;
   maxPnlCap: bigint;
-  // Adaptive funding (PERC-300)
   adaptiveFundingEnabled: boolean;
   adaptiveScaleBps: number;
   adaptiveMaxFundingBps: bigint;
-  // Market maturity OI ramp (PERC-302)
   marketCreatedSlot: bigint;
   oiRampSlots: bigint;
-  // Auto-recovery unresolve (PERC-301)
   resolvedSlot: bigint;
   insuranceIsolationBps: number;
 }
 
-/**
- * Fetch raw slab account data.
- */
+export interface InsuranceFund {
+  balance: bigint;
+  feeRevenue: bigint;
+  isolatedBalance: bigint;
+  isolationBps: number;
+}
+
+export interface RiskParams {
+  warmupPeriodSlots: bigint;
+  maintenanceMarginBps: bigint;
+  initialMarginBps: bigint;
+  tradingFeeBps: bigint;
+  maxAccounts: bigint;
+  newAccountFee: bigint;
+  riskReductionThreshold: bigint;
+  maintenanceFeePerSlot: bigint;
+  maxCrankStalenessSlots: bigint;
+  liquidationFeeBps: bigint;
+  liquidationFeeCap: bigint;
+  liquidationBufferBps: bigint;
+  minLiquidationAbs: bigint;
+}
+
+export interface EngineState {
+  vault: bigint;
+  insuranceFund: InsuranceFund;
+  currentSlot: bigint;
+  fundingIndexQpbE6: bigint;
+  lastFundingSlot: bigint;
+  fundingRateBpsPerSlotLast: bigint;
+  lastCrankSlot: bigint;
+  maxCrankStalenessSlots: bigint;
+  totalOpenInterest: bigint;
+  longOi: bigint;
+  shortOi: bigint;
+  cTot: bigint;
+  pnlPosTot: bigint;
+  liqCursor: number;
+  gcCursor: number;
+  lastSweepStartSlot: bigint;
+  lastSweepCompleteSlot: bigint;
+  crankCursor: number;
+  sweepStartIdx: number;
+  lifetimeLiquidations: bigint;
+  lifetimeForceCloses: bigint;
+  netLpPos: bigint;
+  lpSumAbs: bigint;
+  lpMaxAbs: bigint;
+  lpMaxAbsSweep: bigint;
+  emergencyOiMode: boolean;
+  emergencyStartSlot: bigint;
+  lastBreakerSlot: bigint;
+  numUsedAccounts: number;
+  nextAccountId: bigint;
+  markPriceE6: bigint;
+}
+
+export enum AccountKind {
+  User = 0,
+  LP = 1,
+}
+
+export interface Account {
+  kind: AccountKind;
+  accountId: bigint;
+  capital: bigint;
+  pnl: bigint;
+  reservedPnl: bigint;
+  warmupStartedAtSlot: bigint;
+  warmupSlopePerStep: bigint;
+  positionSize: bigint;
+  entryPrice: bigint;
+  fundingIndex: bigint;
+  matcherProgram: PublicKey;
+  matcherContext: PublicKey;
+  owner: PublicKey;
+  feeCredits: bigint;
+  lastFeeSlot: bigint;
+}
+
+// =============================================================================
+// Fetch
+// =============================================================================
+
 export async function fetchSlab(
   connection: Connection,
   slabPubkey: PublicKey
@@ -141,12 +514,56 @@ export async function fetchSlab(
   return new Uint8Array(info.data);
 }
 
+// =============================================================================
+// PERC-302: Market Maturity OI Ramp
+// =============================================================================
+
+export const RAMP_START_BPS = 1000n;
+export const DEFAULT_OI_RAMP_SLOTS = 432_000n;
+
+export function computeEffectiveOiCapBps(config: MarketConfig, currentSlot: bigint): bigint {
+  const target = config.oiCapMultiplierBps;
+  if (target === 0n) return 0n;
+  if (config.oiRampSlots === 0n) return target;
+  if (target <= RAMP_START_BPS) return target;
+  const elapsed = currentSlot > config.marketCreatedSlot
+    ? currentSlot - config.marketCreatedSlot
+    : 0n;
+  if (elapsed >= config.oiRampSlots) return target;
+  const range = target - RAMP_START_BPS;
+  const rampAdd = (range * elapsed) / config.oiRampSlots;
+  const result = RAMP_START_BPS + rampAdd;
+  return result < target ? result : target;
+}
+
+// =============================================================================
+// Header helpers
+// =============================================================================
+
+export function readNonce(data: Uint8Array): bigint {
+  const layout = detectSlabLayout(data.length);
+  const roff = layout ? layout.reservedOff : V0_RESERVED_OFF;
+  if (data.length < roff + 8) throw new Error("Slab data too short for nonce");
+  return readU64LE(data, roff);
+}
+
+export function readLastThrUpdateSlot(data: Uint8Array): bigint {
+  const layout = detectSlabLayout(data.length);
+  const roff = layout ? layout.reservedOff : V0_RESERVED_OFF;
+  if (data.length < roff + 16) throw new Error("Slab data too short for lastThrUpdateSlot");
+  return readU64LE(data, roff + 8);
+}
+
+// =============================================================================
+// Parsing Functions
+// =============================================================================
+
 /**
- * Parse slab header (first 64 bytes).
+ * Parse slab header (first 72 bytes — layout-independent).
  */
 export function parseHeader(data: Uint8Array): SlabHeader {
-  if (data.length < HEADER_LEN) {
-    throw new Error(`Slab data too short for header: ${data.length} < ${HEADER_LEN}`);
+  if (data.length < V0_HEADER_LEN) {
+    throw new Error(`Slab data too short for header: ${data.length} < ${V0_HEADER_LEN}`);
   }
 
   const magic = readU64LE(data, 0);
@@ -156,12 +573,14 @@ export function parseHeader(data: Uint8Array): SlabHeader {
 
   const version = readU32LE(data, 8);
   const bump = readU8(data, 12);
-  const flags = readU8(data, 13);  // _padding[0] contains flags
+  const flags = readU8(data, 13);
   const admin = new PublicKey(data.subarray(16, 48));
 
-  // Reserved field: nonce at [0..8], lastThrUpdateSlot at [8..16]
-  const nonce = readU64LE(data, RESERVED_OFF);
-  const lastThrUpdateSlot = readU64LE(data, RESERVED_OFF + 8);
+  // Reserved field location depends on layout
+  const layout = detectSlabLayout(data.length);
+  const roff = layout ? layout.reservedOff : V0_RESERVED_OFF;
+  const nonce = readU64LE(data, roff);
+  const lastThrUpdateSlot = readU64LE(data, roff + 8);
 
   return {
     magic,
@@ -177,17 +596,21 @@ export function parseHeader(data: Uint8Array): SlabHeader {
 }
 
 /**
- * Parse market config (starts at byte 72).
- * Layout: collateral_mint(32) + vault_pubkey(32) + index_feed_id(32)
- *         + max_staleness_secs(8) + conf_filter_bps(2) + vault_authority_bump(1) + invert(1) + unit_scale(4)
+ * Parse market config. Layout-version aware.
+ * For V0 slabs, fields beyond the basic config are read if present in the data,
+ * otherwise defaults are returned.
  */
 export function parseConfig(data: Uint8Array): MarketConfig {
-  const minLen = CONFIG_OFFSET + CONFIG_LEN;
+  const layout = detectSlabLayout(data.length);
+  const configOff = layout ? layout.configOffset : V0_HEADER_LEN;
+  const configLen = layout ? layout.configLen : V0_CONFIG_LEN;
+
+  const minLen = configOff + Math.min(configLen, 120); // need at least basic fields
   if (data.length < minLen) {
     throw new Error(`Slab data too short for config: ${data.length} < ${minLen}`);
   }
 
-  let off = CONFIG_OFFSET;
+  let off = configOff;
 
   const collateralMint = new PublicKey(data.subarray(off, off + 32));
   off += 32;
@@ -195,7 +618,6 @@ export function parseConfig(data: Uint8Array): MarketConfig {
   const vaultPubkey = new PublicKey(data.subarray(off, off + 32));
   off += 32;
 
-  // index_feed_id (32 bytes) - Pyth feed ID, stored as 32 bytes
   const indexFeedId = new PublicKey(data.subarray(off, off + 32));
   off += 32;
 
@@ -221,16 +643,16 @@ export function parseConfig(data: Uint8Array): MarketConfig {
   const fundingKBps = readU64LE(data, off);
   off += 8;
 
-  const fundingInvScaleNotionalE6 = readU128LE(data, off); // Rust: u128
+  const fundingInvScaleNotionalE6 = readU128LE(data, off);
   off += 16;
 
-  const fundingMaxPremiumBps = readI64LE(data, off); // Rust: i64
+  const fundingMaxPremiumBps = readI64LE(data, off);
   off += 8;
 
-  const fundingMaxBpsPerSlot = readI64LE(data, off); // Rust: i64
+  const fundingMaxBpsPerSlot = readI64LE(data, off);
   off += 8;
 
-  // Additional funding fields (added in later Rust struct revisions)
+  // Extended funding fields
   const fundingPremiumWeightBps = readU64LE(data, off);
   off += 8;
 
@@ -285,35 +707,48 @@ export function parseConfig(data: Uint8Array): MarketConfig {
   const lastEffectivePriceE6 = readU64LE(data, off);
   off += 8;
 
-  // OI cap (PERC-273/298)
+  // OI cap
   const oiCapMultiplierBps = readU64LE(data, off);
   off += 8;
 
   const maxPnlCap = readU64LE(data, off);
   off += 8;
 
-  // Adaptive funding (PERC-300)
-  const adaptiveFundingEnabled = readU8(data, off) !== 0;
-  off += 1;
-  off += 1; // _adaptive_pad
-  const adaptiveScaleBps = readU16LE(data, off);
-  off += 2;
-  off += 4; // _adaptive_pad2
-  const adaptiveMaxFundingBps = readU64LE(data, off);
-  off += 8;
+  // Check if we have enough data for V1-only fields
+  const remaining = configOff + configLen - off;
 
-  // Market maturity OI ramp (PERC-302)
-  const marketCreatedSlot = readU64LE(data, off);
-  off += 8;
+  let adaptiveFundingEnabled = false;
+  let adaptiveScaleBps = 0;
+  let adaptiveMaxFundingBps = 0n;
+  let marketCreatedSlot = 0n;
+  let oiRampSlots = 0n;
+  let resolvedSlot = 0n;
+  let insuranceIsolationBps = 0;
 
-  const oiRampSlots = readU64LE(data, off);
-  off += 8;
+  if (remaining >= 40) {
+    // V1 extended fields (adaptive funding, maturity ramp, auto-unresolve)
+    adaptiveFundingEnabled = readU8(data, off) !== 0;
+    off += 1;
+    off += 1; // _adaptive_pad
+    adaptiveScaleBps = readU16LE(data, off);
+    off += 2;
+    off += 4; // _adaptive_pad2
+    adaptiveMaxFundingBps = readU64LE(data, off);
+    off += 8;
 
-  // Auto-recovery unresolve (PERC-301)
-  const resolvedSlot = readU64LE(data, off);
-  off += 8;
-  off += 8; // _perc301_reserved
-  const insuranceIsolationBps = readU16LE(data, off);
+    marketCreatedSlot = readU64LE(data, off);
+    off += 8;
+
+    oiRampSlots = readU64LE(data, off);
+    off += 8;
+
+    resolvedSlot = readU64LE(data, off);
+    off += 8;
+    off += 8; // _perc301_reserved
+    if (remaining >= 42) {
+      insuranceIsolationBps = readU16LE(data, off);
+    }
+  }
 
   return {
     collateralMint,
@@ -358,428 +793,122 @@ export function parseConfig(data: Uint8Array): MarketConfig {
   };
 }
 
-// ========================================
-// PERC-302: Market Maturity OI Ramp
-// ========================================
-
-/** Starting OI cap multiplier for new markets (0.1x LP vault = 1000 bps). */
-export const RAMP_START_BPS = 1000n;
-
-/** Default ramp duration in slots (~2 days at ~2.5 slots/sec). */
-export const DEFAULT_OI_RAMP_SLOTS = 432_000n;
-
 /**
- * Compute effective OI cap multiplier with market maturity ramp.
- * Mirrors the Rust `verify::compute_ramp_multiplier()` function exactly.
- *
- * @param config - MarketConfig with oiCapMultiplierBps, marketCreatedSlot, oiRampSlots
- * @param currentSlot - Current Solana slot
- * @returns Effective multiplier in bps
- */
-export function computeEffectiveOiCapBps(config: MarketConfig, currentSlot: bigint): bigint {
-  const target = config.oiCapMultiplierBps;
-
-  // OI cap disabled
-  if (target === 0n) return 0n;
-
-  // Ramp disabled: full cap immediately
-  if (config.oiRampSlots === 0n) return target;
-
-  // Target at or below ramp start: no ramp needed
-  if (target <= RAMP_START_BPS) return target;
-
-  // Elapsed slots since market creation
-  const elapsed = currentSlot > config.marketCreatedSlot
-    ? currentSlot - config.marketCreatedSlot
-    : 0n;
-
-  // Ramp complete
-  if (elapsed >= config.oiRampSlots) return target;
-
-  // Linear interpolation
-  const range = target - RAMP_START_BPS;
-  const rampAdd = (range * elapsed) / config.oiRampSlots;
-
-  const result = RAMP_START_BPS + rampAdd;
-  return result < target ? result : target;
-}
-
-/**
- * Read nonce from slab header reserved field.
- */
-export function readNonce(data: Uint8Array): bigint {
-  if (data.length < RESERVED_OFF + 8) {
-    throw new Error("Slab data too short for nonce");
-  }
-  return readU64LE(data, RESERVED_OFF);
-}
-
-/**
- * Read last threshold update slot from slab header reserved field.
- */
-export function readLastThrUpdateSlot(data: Uint8Array): bigint {
-  if (data.length < RESERVED_OFF + 16) {
-    throw new Error("Slab data too short for lastThrUpdateSlot");
-  }
-  return readU64LE(data, RESERVED_OFF + 8);
-}
-
-// =============================================================================
-// RiskEngine Layout Constants (CONFIG_LEN = 536, verified against on-chain assertion)
-// ENGINE_OFF = align_up(HEADER_LEN + CONFIG_LEN, 8) = align_up(104 + 536, 8) = 640 (BPF alignment)
-//
-// RiskParams grew from 144 → 288 bytes (added: premium funding, partial liq, dynamic fees).
-// Account grew from 240 → 248 bytes (added: last_partial_liquidation_slot).
-// SlabHeader grew from 72 → 104 bytes (added: pending_admin).
-// MarketConfig grew from 320 → 536 bytes (added: premium funding, oracle authority,
-//   circuit breaker, OI cap fields, adaptive funding, market maturity ramp, auto-unresolve,
-//   PERC-306 insurance isolation, PERC-307 orphan penalty, PERC-312 safety valve,
-//   PERC-314 dispute settlement, PERC-315 LP collateral, PERC-328 _reserved[40]).
-//   PERC-298 skew_factor packed in oi_cap_multiplier_bps.
-// RiskEngine grew by 32 bytes in PERC-298 (added: long_oi, short_oi U128 fields).
-// =============================================================================
-export const ENGINE_OFF = 640;
-// RiskEngine struct layout (repr(C), SBF uses 8-byte alignment for u128):
-// - vault: U128 (16 bytes) at offset 0
-// - insurance_fund: InsuranceFund { balance: U128, fee_revenue: U128 } (32 bytes) at offset 16
-// - params: RiskParams (288 bytes) at offset 48
-const ENGINE_VAULT_OFF = 0;
-const ENGINE_INSURANCE_OFF = 16;
-const ENGINE_INSURANCE_ISOLATED_OFF = 48;
-const ENGINE_INSURANCE_ISOLATION_BPS_OFF = 64;
-const ENGINE_PARAMS_OFF = 72;         // RiskParams starts here (after vault+insurance_fund)
-// After RiskParams (at engine offset 48 + 288 = 336):
-const ENGINE_CURRENT_SLOT_OFF = 360;
-const ENGINE_FUNDING_INDEX_OFF = 368;   // I128 (16 bytes)
-const ENGINE_LAST_FUNDING_SLOT_OFF = 384;
-const ENGINE_FUNDING_RATE_BPS_OFF = 392;// i64: funding_rate_bps_per_slot_last (8 bytes)
-// Premium funding state (PERC-121):
-export const ENGINE_MARK_PRICE_OFF = 400;      // u64: mark_price_e6
-const ENGINE_FUNDING_FROZEN_OFF = 408;  // bool (1 byte + 7 padding)
-const ENGINE_FROZEN_RATE_OFF = 416;     // i64: funding_frozen_rate_snapshot
-// Keeper crank:
-const ENGINE_LAST_CRANK_SLOT_OFF = 424;
-const ENGINE_MAX_CRANK_STALENESS_OFF = 432;
-const ENGINE_TOTAL_OI_OFF = 440;        // U128 (16 bytes)
-const ENGINE_LONG_OI_OFF = 456;         // U128: long OI (PERC-298)
-const ENGINE_SHORT_OI_OFF = 472;        // U128: short OI (PERC-298)
-const ENGINE_C_TOT_OFF = 488;           // U128: sum of all account capital
-const ENGINE_PNL_POS_TOT_OFF = 504;     // U128: sum of all positive PnL
-const ENGINE_LIQ_CURSOR_OFF = 520;      // u16
-const ENGINE_GC_CURSOR_OFF = 522;       // u16
-// 4 bytes padding for u64 alignment
-const ENGINE_LAST_SWEEP_START_OFF = 528;
-const ENGINE_LAST_SWEEP_COMPLETE_OFF = 536;
-const ENGINE_CRANK_CURSOR_OFF = 544;    // u16
-const ENGINE_SWEEP_START_IDX_OFF = 546; // u16
-// 4 bytes padding for u64 alignment
-const ENGINE_LIFETIME_LIQUIDATIONS_OFF = 552;
-const ENGINE_LIFETIME_FORCE_CLOSES_OFF = 560;
-// LP Aggregates for funding rate calculation (PERC-121)
-const ENGINE_NET_LP_POS_OFF = 568;      // I128
-const ENGINE_LP_SUM_ABS_OFF = 584;      // U128
-const ENGINE_LP_MAX_ABS_OFF = 600;      // U128
-const ENGINE_LP_MAX_ABS_SWEEP_OFF = 616;// U128
-// PERC-299: Volatility-adjusted OI cap fields
-const ENGINE_EMERGENCY_OI_MODE_OFF = 632; // u8 (+ 7 padding)
-const ENGINE_EMERGENCY_START_SLOT_OFF = 640; // u64
-const ENGINE_LAST_BREAKER_SLOT_OFF = 648; // u64
-// Bitmap starts at 632
-const ENGINE_BITMAP_OFF = 656;
-// Dynamic layout helpers — bitmap/accounts offsets depend on maxAccounts
-const DEFAULT_MAX_ACCOUNTS = 4096;
-const DEFAULT_BITMAP_WORDS = 64;  // ceil(4096/64)
-const ACCOUNT_SIZE = 248;  // Account now includes last_partial_liquidation_slot (PERC-122)
-
-// For backward compat, keep large default
-// Large: bitmap(64*8=512) + num_used(2) + pad(6) + next_account_id(8) + free_head(2) + next_free(4096*2=8192) + pad(6) + accounts = 9304 - 576 = ...
-// Actually: engine fixed(576) + bitmap(512) + 18 + 8192 = 9298, align to 8 = 9304
-const ENGINE_ACCOUNTS_OFF = 9384;       // accounts offset for 4096 variant (within engine)
-
-/**
- * Compute bitmap words and accounts offset for a given maxAccounts.
- * Layout within engine: fixed(576) + bitmap(words*8) + post_bitmap(18) + next_free(N*2) + padding + accounts(N*248)
- * post_bitmap = num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2) = 18
- */
-function slabLayout(maxAccounts: number) {
-  const bitmapWords = Math.ceil(maxAccounts / 64);
-  const bitmapBytes = bitmapWords * 8;
-  const postBitmap = 18; // num_used(u16,2) + pad(6) + next_account_id(u64,8) + free_head(u16,2)
-  const nextFreeBytes = maxAccounts * 2;
-  // Align to 8 bytes for Account (SBF: u128 align = 8)
-  const preAccountsLen = ENGINE_BITMAP_OFF + bitmapBytes + postBitmap + nextFreeBytes;
-  const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
-  return { bitmapWords, accountsOff, maxAccounts };
-}
-
-// Detect maxAccounts from slab data length
-export function detectLayout(dataLen: number) {
-  // Try each known tier
-  for (const n of [64, 256, 1024, 4096]) {
-    const layout = slabLayout(n);
-    const expectedLen = ENGINE_OFF + layout.accountsOff + n * ACCOUNT_SIZE;
-    if (dataLen === expectedLen) return layout;
-  }
-  // Fallback: compute from params (will read maxAccounts from data)
-  return null;
-}
-
-// =============================================================================
-// RiskParams Layout (288 bytes, repr(C) with 8-byte alignment on SBF)
-// Updated for PERC-120 (dynamic fees), PERC-121 (premium funding), PERC-122 (partial liq)
-// =============================================================================
-const PARAMS_WARMUP_PERIOD_OFF = 0;        // u64
-const PARAMS_MAINTENANCE_MARGIN_OFF = 8;   // u64
-const PARAMS_INITIAL_MARGIN_OFF = 16;      // u64
-const PARAMS_TRADING_FEE_OFF = 24;         // u64
-const PARAMS_MAX_ACCOUNTS_OFF = 32;        // u64
-const PARAMS_NEW_ACCOUNT_FEE_OFF = 40;     // U128 (no padding, 8-byte aligned)
-const PARAMS_RISK_THRESHOLD_OFF = 56;      // U128
-const PARAMS_MAINTENANCE_FEE_OFF = 72;     // U128
-const PARAMS_MAX_CRANK_STALENESS_OFF = 88; // u64
-const PARAMS_LIQUIDATION_FEE_BPS_OFF = 96; // u64
-const PARAMS_LIQUIDATION_FEE_CAP_OFF = 104;// U128
-const PARAMS_LIQUIDATION_BUFFER_OFF = 120; // u64
-const PARAMS_MIN_LIQUIDATION_OFF = 128;    // U128
-// PERC-121: Premium funding params
-const PARAMS_FUNDING_PREMIUM_WEIGHT_OFF = 144; // u64
-const PARAMS_FUNDING_SETTLEMENT_OFF = 152;     // u64
-const PARAMS_FUNDING_DAMPENING_OFF = 160;      // u64
-const PARAMS_FUNDING_PREMIUM_MAX_OFF = 168;    // i64
-// PERC-122: Partial liquidation params
-const PARAMS_PARTIAL_LIQ_BPS_OFF = 176;       // u64
-const PARAMS_PARTIAL_LIQ_COOLDOWN_OFF = 184;  // u64
-const PARAMS_USE_MARK_PRICE_LIQ_OFF = 192;    // bool (1 + 7 padding)
-const PARAMS_EMERGENCY_LIQ_MARGIN_OFF = 200;  // u64
-// PERC-120: Dynamic fee params
-const PARAMS_FEE_TIER2_BPS_OFF = 208;         // u64
-const PARAMS_FEE_TIER3_BPS_OFF = 216;         // u64
-const PARAMS_FEE_TIER2_THRESHOLD_OFF = 224;   // u128
-const PARAMS_FEE_TIER3_THRESHOLD_OFF = 240;   // u128
-const PARAMS_FEE_SPLIT_LP_OFF = 256;          // u64
-const PARAMS_FEE_SPLIT_PROTOCOL_OFF = 264;    // u64
-const PARAMS_FEE_SPLIT_CREATOR_OFF = 272;     // u64
-const PARAMS_FEE_UTILIZATION_SURGE_OFF = 280; // u64
-// Total RiskParams = 288 bytes
-
-// =============================================================================
-// Account Layout (248 bytes, repr(C))
-// NOTE: Despite U128/I128 wrapper types in Rust, on-chain layout remains unchanged
-// Field order: account_id, capital, kind, pnl, reserved_pnl, warmup_started,
-//              warmup_slope, position_size, entry_price, funding_index,
-//              matcher_program, matcher_context, owner, fee_credits, last_fee_slot
-// =============================================================================
-const ACCT_ACCOUNT_ID_OFF = 0;        // accountId (u64, 8 bytes), ends at 8
-const ACCT_CAPITAL_OFF = 8;           // capital (U128, 16 bytes), ends at 24
-const ACCT_KIND_OFF = 24;             // kind (u8, 1 byte + 7 padding), ends at 32
-const ACCT_PNL_OFF = 32;              // pnl (I128, 16 bytes), ends at 48
-const ACCT_RESERVED_PNL_OFF = 48;     // reserved_pnl (u64, 8 bytes), ends at 56
-const ACCT_WARMUP_STARTED_OFF = 56;   // warmup_started (u64, 8 bytes), ends at 64
-const ACCT_WARMUP_SLOPE_OFF = 64;     // warmup_slope (U128, 16 bytes), ends at 80
-const ACCT_POSITION_SIZE_OFF = 80;    // position_size (I128, 16 bytes), ends at 96
-const ACCT_ENTRY_PRICE_OFF = 96;      // entry_price (u64, 8 bytes), ends at 104
-const ACCT_FUNDING_INDEX_OFF = 104;   // funding_index (I128, 16 bytes), ends at 120
-const ACCT_MATCHER_PROGRAM_OFF = 120; // matcher_program (Pubkey, 32 bytes), ends at 152
-const ACCT_MATCHER_CONTEXT_OFF = 152; // matcher_context (Pubkey, 32 bytes), ends at 184
-const ACCT_OWNER_OFF = 184;           // owner (Pubkey, 32 bytes), ends at 216
-const ACCT_FEE_CREDITS_OFF = 216;     // fee_credits (I128, 16 bytes), ends at 232
-const ACCT_LAST_FEE_SLOT_OFF = 232;   // last_fee_slot (u64, 8 bytes), ends at 240
-
-// =============================================================================
-// Interfaces
-// =============================================================================
-
-export interface InsuranceFund {
-  balance: bigint;
-  feeRevenue: bigint;
-  isolatedBalance: bigint;
-  isolationBps: number;
-}
-
-export interface RiskParams {
-  warmupPeriodSlots: bigint;
-  maintenanceMarginBps: bigint;
-  initialMarginBps: bigint;
-  tradingFeeBps: bigint;
-  maxAccounts: bigint;
-  newAccountFee: bigint;
-  riskReductionThreshold: bigint;
-  maintenanceFeePerSlot: bigint;
-  maxCrankStalenessSlots: bigint;
-  liquidationFeeBps: bigint;
-  liquidationFeeCap: bigint;
-  liquidationBufferBps: bigint;
-  minLiquidationAbs: bigint;
-}
-
-export interface EngineState {
-  vault: bigint;
-  insuranceFund: InsuranceFund;
-  currentSlot: bigint;
-  fundingIndexQpbE6: bigint;
-  lastFundingSlot: bigint;
-  fundingRateBpsPerSlotLast: bigint;  // Added: was missing from layout
-  lastCrankSlot: bigint;
-  maxCrankStalenessSlots: bigint;
-  totalOpenInterest: bigint;
-  longOi: bigint;            // Long open interest (PERC-298)
-  shortOi: bigint;           // Short open interest (PERC-298)
-  cTot: bigint;              // Sum of all account capital (O(1) aggregate)
-  pnlPosTot: bigint;         // Sum of all positive PnL (O(1) aggregate)
-  liqCursor: number;
-  gcCursor: number;
-  lastSweepStartSlot: bigint;
-  lastSweepCompleteSlot: bigint;
-  crankCursor: number;
-  sweepStartIdx: number;
-  lifetimeLiquidations: bigint;
-  lifetimeForceCloses: bigint;
-  // LP Aggregates for funding
-  netLpPos: bigint;          // Net LP position (sum of all LP positions)
-  lpSumAbs: bigint;          // Sum of abs(LP positions)
-  lpMaxAbs: bigint;          // Max abs(LP position) monotone upper bound
-  lpMaxAbsSweep: bigint;     // In-progress max abs for current sweep
-  // PERC-299: Volatility-adjusted OI cap
-  emergencyOiMode: boolean;  // true = OI cap halved (circuit breaker active)
-  emergencyStartSlot: bigint;
-  lastBreakerSlot: bigint;
-  numUsedAccounts: number;
-  nextAccountId: bigint;
-  /** mark_price_e6: current mark price (u64, scaled by 1e6). Use this instead of raw offset reads. */
-  markPriceE6: bigint;
-}
-
-export enum AccountKind {
-  User = 0,
-  LP = 1,
-}
-
-export interface Account {
-  kind: AccountKind;
-  accountId: bigint;
-  capital: bigint;
-  pnl: bigint;
-  reservedPnl: bigint;
-  warmupStartedAtSlot: bigint;
-  warmupSlopePerStep: bigint;
-  positionSize: bigint;
-  entryPrice: bigint;
-  fundingIndex: bigint;
-  matcherProgram: PublicKey;
-  matcherContext: PublicKey;  // Pubkey (32 bytes)
-  owner: PublicKey;
-  feeCredits: bigint;
-  lastFeeSlot: bigint;
-}
-
-// =============================================================================
-// Helper: read signed i128 from buffer
-// Match Rust's I128 wrapper: read both halves as unsigned, then interpret as signed
-// =============================================================================
-function readI128LE(buf: Uint8Array, offset: number): bigint {
-  const lo = readU64LE(buf, offset);
-  const hi = readU64LE(buf, offset + 8);
-  const unsigned = (hi << 64n) | lo;
-  // If high bit is set, convert to negative (two's complement)
-  const SIGN_BIT = 1n << 127n;
-  if (unsigned >= SIGN_BIT) {
-    return unsigned - (1n << 128n);
-  }
-  return unsigned;
-}
-
-function readU128LE(buf: Uint8Array, offset: number): bigint {
-  const lo = readU64LE(buf, offset);
-  const hi = readU64LE(buf, offset + 8);
-  return (hi << 64n) | lo;
-}
-
-// =============================================================================
-// Parsing Functions
-// =============================================================================
-
-/**
- * Parse RiskParams from engine data.
- * Note: invert/unitScale are in MarketConfig, not RiskParams.
+ * Parse RiskParams from engine data. Layout-version aware.
+ * For V0 slabs, extended params (risk_threshold, maintenance_fee, etc.) are
+ * not present on-chain, so defaults (0) are returned.
  */
 export function parseParams(data: Uint8Array): RiskParams {
-  const base = ENGINE_OFF + ENGINE_PARAMS_OFF;
-  if (data.length < base + 144) {  // RiskParams is 144 bytes (5×u64 + 4×u128 + 3×u64 + 1×u128)
+  const layout = detectSlabLayout(data.length);
+  const engineOff = layout ? layout.engineOff : V0_ENGINE_OFF;
+  const paramsOff = layout ? layout.engineParamsOff : V0_ENGINE_PARAMS_OFF;
+  const paramsSize = layout ? layout.paramsSize : V0_PARAMS_SIZE;
+  const base = engineOff + paramsOff;
+
+  if (data.length < base + Math.min(paramsSize, 56)) {
     throw new Error("Slab data too short for RiskParams");
   }
 
-  return {
+  // Basic params present in both V0 and V1
+  const result: RiskParams = {
     warmupPeriodSlots: readU64LE(data, base + PARAMS_WARMUP_PERIOD_OFF),
     maintenanceMarginBps: readU64LE(data, base + PARAMS_MAINTENANCE_MARGIN_OFF),
     initialMarginBps: readU64LE(data, base + PARAMS_INITIAL_MARGIN_OFF),
     tradingFeeBps: readU64LE(data, base + PARAMS_TRADING_FEE_OFF),
     maxAccounts: readU64LE(data, base + PARAMS_MAX_ACCOUNTS_OFF),
     newAccountFee: readU128LE(data, base + PARAMS_NEW_ACCOUNT_FEE_OFF),
-    riskReductionThreshold: readU128LE(data, base + PARAMS_RISK_THRESHOLD_OFF),
-    maintenanceFeePerSlot: readU128LE(data, base + PARAMS_MAINTENANCE_FEE_OFF),
-    maxCrankStalenessSlots: readU64LE(data, base + PARAMS_MAX_CRANK_STALENESS_OFF),
-    liquidationFeeBps: readU64LE(data, base + PARAMS_LIQUIDATION_FEE_BPS_OFF),
-    liquidationFeeCap: readU128LE(data, base + PARAMS_LIQUIDATION_FEE_CAP_OFF),
-    liquidationBufferBps: readU64LE(data, base + PARAMS_LIQUIDATION_BUFFER_OFF),
-    minLiquidationAbs: readU128LE(data, base + PARAMS_MIN_LIQUIDATION_OFF),
+    // Extended params: only read if V1 (paramsSize >= 144)
+    riskReductionThreshold: 0n,
+    maintenanceFeePerSlot: 0n,
+    maxCrankStalenessSlots: 0n,
+    liquidationFeeBps: 0n,
+    liquidationFeeCap: 0n,
+    liquidationBufferBps: 0n,
+    minLiquidationAbs: 0n,
   };
+
+  if (paramsSize >= 144) {
+    result.riskReductionThreshold = readU128LE(data, base + PARAMS_RISK_THRESHOLD_OFF);
+    result.maintenanceFeePerSlot = readU128LE(data, base + PARAMS_MAINTENANCE_FEE_OFF);
+    result.maxCrankStalenessSlots = readU64LE(data, base + PARAMS_MAX_CRANK_STALENESS_OFF);
+    result.liquidationFeeBps = readU64LE(data, base + PARAMS_LIQUIDATION_FEE_BPS_OFF);
+    result.liquidationFeeCap = readU128LE(data, base + PARAMS_LIQUIDATION_FEE_CAP_OFF);
+    result.liquidationBufferBps = readU64LE(data, base + PARAMS_LIQUIDATION_BUFFER_OFF);
+    result.minLiquidationAbs = readU128LE(data, base + PARAMS_MIN_LIQUIDATION_OFF);
+  }
+
+  return result;
 }
 
 /**
- * Parse RiskEngine state (excluding accounts array).
+ * Parse RiskEngine state (excluding accounts array). Layout-version aware.
  */
 export function parseEngine(data: Uint8Array): EngineState {
-  const base = ENGINE_OFF;
-  const layout = detectLayout(data.length);
-  const minLen = layout ? layout.accountsOff : ENGINE_ACCOUNTS_OFF;
-  if (data.length < base + minLen) {
-    throw new Error("Slab data too short for RiskEngine");
+  const layout = detectSlabLayout(data.length);
+  if (!layout) {
+    throw new Error(`Unrecognized slab data length: ${data.length}. Cannot determine layout version.`);
   }
 
+  const base = layout.engineOff;
+
   return {
-    vault: readU128LE(data, base + ENGINE_VAULT_OFF),
+    vault: readU128LE(data, base),
     insuranceFund: {
-      balance: readU128LE(data, base + ENGINE_INSURANCE_OFF),
-      feeRevenue: readU128LE(data, base + ENGINE_INSURANCE_OFF + 16),
-      isolatedBalance: readU128LE(data, base + ENGINE_INSURANCE_ISOLATED_OFF),
-      isolationBps: readU16LE(data, base + ENGINE_INSURANCE_ISOLATION_BPS_OFF),
+      balance: readU128LE(data, base + layout.engineInsuranceOff),
+      feeRevenue: readU128LE(data, base + layout.engineInsuranceOff + 16),
+      isolatedBalance: layout.hasInsuranceIsolation
+        ? readU128LE(data, base + layout.engineInsuranceIsolatedOff)
+        : 0n,
+      isolationBps: layout.hasInsuranceIsolation
+        ? readU16LE(data, base + layout.engineInsuranceIsolationBpsOff)
+        : 0,
     },
-    currentSlot: readU64LE(data, base + ENGINE_CURRENT_SLOT_OFF),
-    fundingIndexQpbE6: readI128LE(data, base + ENGINE_FUNDING_INDEX_OFF),
-    lastFundingSlot: readU64LE(data, base + ENGINE_LAST_FUNDING_SLOT_OFF),
-    fundingRateBpsPerSlotLast: readI64LE(data, base + ENGINE_FUNDING_RATE_BPS_OFF),
-    lastCrankSlot: readU64LE(data, base + ENGINE_LAST_CRANK_SLOT_OFF),
-    maxCrankStalenessSlots: readU64LE(data, base + ENGINE_MAX_CRANK_STALENESS_OFF),
-    totalOpenInterest: readU128LE(data, base + ENGINE_TOTAL_OI_OFF),
-    longOi: readU128LE(data, base + ENGINE_LONG_OI_OFF),
-    shortOi: readU128LE(data, base + ENGINE_SHORT_OI_OFF),
-    cTot: readU128LE(data, base + ENGINE_C_TOT_OFF),
-    pnlPosTot: readU128LE(data, base + ENGINE_PNL_POS_TOT_OFF),
-    liqCursor: readU16LE(data, base + ENGINE_LIQ_CURSOR_OFF),
-    gcCursor: readU16LE(data, base + ENGINE_GC_CURSOR_OFF),
-    lastSweepStartSlot: readU64LE(data, base + ENGINE_LAST_SWEEP_START_OFF),
-    lastSweepCompleteSlot: readU64LE(data, base + ENGINE_LAST_SWEEP_COMPLETE_OFF),
-    crankCursor: readU16LE(data, base + ENGINE_CRANK_CURSOR_OFF),
-    sweepStartIdx: readU16LE(data, base + ENGINE_SWEEP_START_IDX_OFF),
-    lifetimeLiquidations: readU64LE(data, base + ENGINE_LIFETIME_LIQUIDATIONS_OFF),
-    lifetimeForceCloses: readU64LE(data, base + ENGINE_LIFETIME_FORCE_CLOSES_OFF),
-    // LP Aggregates for funding rate calculation
-    netLpPos: readI128LE(data, base + ENGINE_NET_LP_POS_OFF),
-    lpSumAbs: readU128LE(data, base + ENGINE_LP_SUM_ABS_OFF),
-    lpMaxAbs: readU128LE(data, base + ENGINE_LP_MAX_ABS_OFF),
-    lpMaxAbsSweep: readU128LE(data, base + ENGINE_LP_MAX_ABS_SWEEP_OFF),
-    emergencyOiMode: data[base + ENGINE_EMERGENCY_OI_MODE_OFF] !== 0,
-    emergencyStartSlot: readU64LE(data, base + ENGINE_EMERGENCY_START_SLOT_OFF),
-    lastBreakerSlot: readU64LE(data, base + ENGINE_LAST_BREAKER_SLOT_OFF),
-    markPriceE6: readU64LE(data, base + ENGINE_MARK_PRICE_OFF),
+    currentSlot: readU64LE(data, base + layout.engineCurrentSlotOff),
+    fundingIndexQpbE6: readI128LE(data, base + layout.engineFundingIndexOff),
+    lastFundingSlot: readU64LE(data, base + layout.engineLastFundingSlotOff),
+    fundingRateBpsPerSlotLast: readI64LE(data, base + layout.engineFundingRateBpsOff),
+    lastCrankSlot: readU64LE(data, base + layout.engineLastCrankSlotOff),
+    maxCrankStalenessSlots: readU64LE(data, base + layout.engineMaxCrankStalenessOff),
+    totalOpenInterest: readU128LE(data, base + layout.engineTotalOiOff),
+    longOi: layout.engineLongOiOff >= 0
+      ? readU128LE(data, base + layout.engineLongOiOff)
+      : 0n,
+    shortOi: layout.engineShortOiOff >= 0
+      ? readU128LE(data, base + layout.engineShortOiOff)
+      : 0n,
+    cTot: readU128LE(data, base + layout.engineCTotOff),
+    pnlPosTot: readU128LE(data, base + layout.enginePnlPosTotOff),
+    liqCursor: readU16LE(data, base + layout.engineLiqCursorOff),
+    gcCursor: readU16LE(data, base + layout.engineGcCursorOff),
+    lastSweepStartSlot: readU64LE(data, base + layout.engineLastSweepStartOff),
+    lastSweepCompleteSlot: readU64LE(data, base + layout.engineLastSweepCompleteOff),
+    crankCursor: readU16LE(data, base + layout.engineCrankCursorOff),
+    sweepStartIdx: readU16LE(data, base + layout.engineSweepStartIdxOff),
+    lifetimeLiquidations: readU64LE(data, base + layout.engineLifetimeLiquidationsOff),
+    lifetimeForceCloses: readU64LE(data, base + layout.engineLifetimeForceClosesOff),
+    netLpPos: readI128LE(data, base + layout.engineNetLpPosOff),
+    lpSumAbs: readU128LE(data, base + layout.engineLpSumAbsOff),
+    lpMaxAbs: readU128LE(data, base + layout.engineLpMaxAbsOff),
+    lpMaxAbsSweep: readU128LE(data, base + layout.engineLpMaxAbsSweepOff),
+    emergencyOiMode: layout.engineEmergencyOiModeOff >= 0
+      ? data[base + layout.engineEmergencyOiModeOff] !== 0
+      : false,
+    emergencyStartSlot: layout.engineEmergencyStartSlotOff >= 0
+      ? readU64LE(data, base + layout.engineEmergencyStartSlotOff)
+      : 0n,
+    lastBreakerSlot: layout.engineLastBreakerSlotOff >= 0
+      ? readU64LE(data, base + layout.engineLastBreakerSlotOff)
+      : 0n,
+    markPriceE6: layout.engineMarkPriceOff >= 0
+      ? readU64LE(data, base + layout.engineMarkPriceOff)
+      : 0n,
     numUsedAccounts: (() => {
-      const bw = layout ? layout.bitmapWords : DEFAULT_BITMAP_WORDS;
-      return readU16LE(data, base + ENGINE_BITMAP_OFF + bw * 8);
+      const bw = layout.bitmapWords;
+      return readU16LE(data, base + layout.engineBitmapOff + bw * 8);
     })(),
     nextAccountId: (() => {
-      const bw = layout ? layout.bitmapWords : DEFAULT_BITMAP_WORDS;
-      const numUsedOff = ENGINE_BITMAP_OFF + bw * 8;
-      // next_account_id is u64 (8-byte aligned) after num_used(u16)
+      const bw = layout.bitmapWords;
+      const numUsedOff = layout.engineBitmapOff + bw * 8;
       return readU64LE(data, base + Math.ceil((numUsedOff + 2) / 8) * 8);
     })(),
   };
@@ -789,15 +918,16 @@ export function parseEngine(data: Uint8Array): EngineState {
  * Read bitmap to get list of used account indices.
  */
 export function parseUsedIndices(data: Uint8Array): number[] {
-  const layout = detectLayout(data.length);
-  const bitmapWords = layout ? layout.bitmapWords : DEFAULT_BITMAP_WORDS;
-  const base = ENGINE_OFF + ENGINE_BITMAP_OFF;
-  if (data.length < base + bitmapWords * 8) {
+  const layout = detectSlabLayout(data.length);
+  if (!layout) throw new Error(`Unrecognized slab data length: ${data.length}`);
+
+  const base = layout.engineOff + layout.engineBitmapOff;
+  if (data.length < base + layout.bitmapWords * 8) {
     throw new Error("Slab data too short for bitmap");
   }
 
   const used: number[] = [];
-  for (let word = 0; word < bitmapWords; word++) {
+  for (let word = 0; word < layout.bitmapWords; word++) {
     const bits = readU64LE(data, base + word * 8);
     if (bits === 0n) continue;
     for (let bit = 0; bit < 64; bit++) {
@@ -813,10 +943,10 @@ export function parseUsedIndices(data: Uint8Array): number[] {
  * Check if a specific account index is used.
  */
 export function isAccountUsed(data: Uint8Array, idx: number): boolean {
-  const layout = detectLayout(data.length);
-  const maxAcc = layout ? layout.maxAccounts : DEFAULT_MAX_ACCOUNTS;
-  if (!Number.isInteger(idx) || idx < 0 || idx >= maxAcc) return false;
-  const base = ENGINE_OFF + ENGINE_BITMAP_OFF;
+  const layout = detectSlabLayout(data.length);
+  if (!layout) return false;
+  if (!Number.isInteger(idx) || idx < 0 || idx >= layout.maxAccounts) return false;
+  const base = layout.engineOff + layout.engineBitmapOff;
   const word = Math.floor(idx / 64);
   const bit = idx % 64;
   const bits = readU64LE(data, base + word * 8);
@@ -827,30 +957,30 @@ export function isAccountUsed(data: Uint8Array, idx: number): boolean {
  * Calculate the maximum valid account index for a given slab size.
  */
 export function maxAccountIndex(dataLen: number): number {
-  const layout = detectLayout(dataLen);
-  const accOff = layout ? layout.accountsOff : ENGINE_ACCOUNTS_OFF;
-  const accountsEnd = dataLen - ENGINE_OFF - accOff;
+  const layout = detectSlabLayout(dataLen);
+  if (!layout) return 0;
+  const accountsEnd = dataLen - layout.accountsOff;
   if (accountsEnd <= 0) return 0;
-  return Math.floor(accountsEnd / ACCOUNT_SIZE);
+  return Math.floor(accountsEnd / layout.accountSize);
 }
 
 /**
  * Parse a single account by index.
  */
 export function parseAccount(data: Uint8Array, idx: number): Account {
+  const layout = detectSlabLayout(data.length);
+  if (!layout) throw new Error(`Unrecognized slab data length: ${data.length}`);
+
   const maxIdx = maxAccountIndex(data.length);
   if (!Number.isInteger(idx) || idx < 0 || idx >= maxIdx) {
     throw new Error(`Account index out of range: ${idx} (max: ${maxIdx - 1})`);
   }
 
-  const layout = detectLayout(data.length);
-  const accOff = layout ? layout.accountsOff : ENGINE_ACCOUNTS_OFF;
-  const base = ENGINE_OFF + accOff + idx * ACCOUNT_SIZE;
-  if (data.length < base + ACCOUNT_SIZE) {
+  const base = layout.accountsOff + idx * layout.accountSize;
+  if (data.length < base + layout.accountSize) {
     throw new Error("Slab data too short for account");
   }
 
-  // Read the kind field directly from offset 24 (u8 with 7 bytes padding)
   const kindByte = readU8(data, base + ACCT_KIND_OFF);
   const kind = kindByte === 1 ? AccountKind.LP : AccountKind.User;
 
@@ -875,7 +1005,6 @@ export function parseAccount(data: Uint8Array, idx: number): Account {
 
 /**
  * Parse all used accounts.
- * Filters out indices that would be beyond the slab's account storage capacity.
  */
 export function parseAllAccounts(data: Uint8Array): { idx: number; account: Account }[] {
   const indices = parseUsedIndices(data);
@@ -886,3 +1015,4 @@ export function parseAllAccounts(data: Uint8Array): { idx: number; account: Acco
     account: parseAccount(data, idx),
   }));
 }
+
