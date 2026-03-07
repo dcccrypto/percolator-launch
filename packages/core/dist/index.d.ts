@@ -876,14 +876,20 @@ declare function parseHeader(data: Uint8Array): SlabHeader;
  * Parse market config. Layout-version aware.
  * For V0 slabs, fields beyond the basic config are read if present in the data,
  * otherwise defaults are returned.
+ *
+ * @param data - Slab data (may be a partial slice for discovery; pass layoutHint in that case)
+ * @param layoutHint - Pre-detected layout to use; if omitted, detected from data.length.
  */
-declare function parseConfig(data: Uint8Array): MarketConfig;
+declare function parseConfig(data: Uint8Array, layoutHint?: SlabLayout | null): MarketConfig;
 /**
  * Parse RiskParams from engine data. Layout-version aware.
  * For V0 slabs, extended params (risk_threshold, maintenance_fee, etc.) are
  * not present on-chain, so defaults (0) are returned.
+ *
+ * @param data - Slab data (may be a partial slice; pass layoutHint in that case)
+ * @param layoutHint - Pre-detected layout to use; if omitted, detected from data.length.
  */
-declare function parseParams(data: Uint8Array): RiskParams;
+declare function parseParams(data: Uint8Array, layoutHint?: SlabLayout | null): RiskParams;
 /**
  * Parse RiskEngine state (excluding accounts array). Layout-version aware.
  */
