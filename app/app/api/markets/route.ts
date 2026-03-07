@@ -27,10 +27,19 @@ function sanitizeFundingRate(v: number | null | undefined): number | null {
  */
 const MAX_SANE_PRICE_USD = 1_000_000; // $1M
 
-/** Sanitize a price field from the DB (USD float). Returns null for corrupt/garbage values. */
-function sanitizePrice(v: number | null | undefined): number | null {
+/**
+ * Sanitize a price field from the DB (USD float). Returns null for corrupt/garbage values.
+ * Logs a Sentry warning when sanitization fires so we can track data quality. (#882)
+ */
+function sanitizePrice(v: number | null | undefined, field?: string, slabAddress?: string): number | null {
   if (v == null) return null;
-  if (!Number.isFinite(v) || v <= 0 || v > MAX_SANE_PRICE_USD) return null;
+  if (!Number.isFinite(v) || v <= 0 || v > MAX_SANE_PRICE_USD) {
+    Sentry.captureMessage(`Price sanitization: ${field ?? "price"} = ${v} nulled for slab ${slabAddress ?? "unknown"}`, {
+      level: "warning",
+      tags: { endpoint: "/api/markets", sanitization: "price" },
+    });
+    return null;
+  }
   return v;
 }
 
@@ -91,8 +100,8 @@ export async function GET() {
         funding_rate: sanitizeFundingRate(m.funding_rate as number | null),
         // #856: Null out corrupt admin-set test prices (raw unscaled u64 values or billions/trillions).
         // Matches Rust MAX_ORACLE_PRICE = $1B USD ceiling.
-        last_price: sanitizePrice(m.last_price as number | null),
-        mark_price: sanitizePrice(m.mark_price as number | null),
+        last_price: sanitizePrice(m.last_price as number | null, "last_price", m.slab_address as string),
+        mark_price: sanitizePrice(m.mark_price as number | null, "mark_price", m.slab_address as string),
       };
     });
 
