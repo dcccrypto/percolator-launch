@@ -19,6 +19,21 @@ function sanitizeFundingRate(v: number | null | undefined): number | null {
   return v;
 }
 
+/**
+ * Maximum sane mark/last price in USD for API output.
+ * Set at $1M — well above any real crypto price today (BTC ~$100K) but below
+ * the unscaled admin-set test garbage values (e.g. $100M, $900M, $7.9T).
+ * Note: Rust MAX_ORACLE_PRICE is $1B; this is a stricter display-layer guard. (#856)
+ */
+const MAX_SANE_PRICE_USD = 1_000_000; // $1M
+
+/** Sanitize a price field from the DB (USD float). Returns null for corrupt/garbage values. */
+function sanitizePrice(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  if (!Number.isFinite(v) || v <= 0 || v > MAX_SANE_PRICE_USD) return null;
+  return v;
+}
+
 // #868: Blocklist for markets with corrupt state or wrong oracle_authority (e.g. issue #837).
 // Populated from BLOCKED_MARKET_ADDRESSES env var (comma-separated slab addresses).
 const BLOCKED_MARKET_ADDRESSES: ReadonlySet<string> = new Set(
@@ -74,6 +89,10 @@ export async function GET() {
         ...m,
         oracle_mode,
         funding_rate: sanitizeFundingRate(m.funding_rate as number | null),
+        // #856: Null out corrupt admin-set test prices (raw unscaled u64 values or billions/trillions).
+        // Matches Rust MAX_ORACLE_PRICE = $1B USD ceiling.
+        last_price: sanitizePrice(m.last_price as number | null),
+        mark_price: sanitizePrice(m.mark_price as number | null),
       };
     });
 
