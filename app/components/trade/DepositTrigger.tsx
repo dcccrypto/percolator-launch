@@ -9,6 +9,7 @@ import { formatTokenAmount } from "@/lib/format";
 import { DepositWithdrawCard } from "./DepositWithdrawCard";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
+import { getNetwork } from "@/lib/config";
 
 function lsKey(slabAddress: string) {
   return `percolator:deposited:${slabAddress}`;
@@ -26,6 +27,26 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
 
   const [expanded, setExpanded] = useState(false);
   const [hasDeposited, setHasDeposited] = useState(true); // default true to avoid flash
+
+  // PERC-475: Detect devnet mirror markets (oracle_mode=admin AND mainnet_ca set)
+  // so DepositWithdrawCard can show the self-service faucet button.
+  const [isDevnetMirror, setIsDevnetMirror] = useState(false);
+  useEffect(() => {
+    if (getNetwork() !== "devnet") return;
+    let cancelled = false;
+    fetch(`/api/markets/${slabAddress}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const m = d.market;
+        // A devnet mirror market has a mainnet CA and uses admin oracle mode
+        if (m?.mainnet_ca && m?.oracle_mode === "admin") {
+          setIsDevnetMirror(true);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [slabAddress]);
 
   const capital = userAccount?.account.capital ?? 0n;
   const prevCapitalRef = useRef(capital);
@@ -71,7 +92,7 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
         </button>
         {expanded && (
           <div className="mt-1">
-            <DepositWithdrawCard slabAddress={slabAddress} />
+            <DepositWithdrawCard slabAddress={slabAddress} isDevnetMirror={isDevnetMirror} />
           </div>
         )}
       </div>
@@ -102,7 +123,7 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
       </div>
       {expanded && (
         <div className="mt-1">
-          <DepositWithdrawCard slabAddress={slabAddress} />
+          <DepositWithdrawCard slabAddress={slabAddress} isDevnetMirror={isDevnetMirror} />
         </div>
       )}
     </div>

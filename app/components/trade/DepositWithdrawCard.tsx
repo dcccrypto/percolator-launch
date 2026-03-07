@@ -4,6 +4,7 @@ import { explorerTxUrl } from "@/lib/config";
 import { FC, useState, useEffect, useRef } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { DevnetTokenFaucetButton } from "./DevnetTokenFaucetButton";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useDeposit } from "@/hooks/useDeposit";
@@ -16,7 +17,16 @@ import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 
-export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+interface DepositWithdrawCardProps {
+  slabAddress: string;
+  /**
+   * PERC-475: When true (devnet mirror market with a mainnet_ca), show a
+   * "Get [SYMBOL] Tokens" faucet button so users can mint $500 of devnet tokens.
+   */
+  isDevnetMirror?: boolean;
+}
+
+export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress, isDevnetMirror = false }) => {
   const { connected: walletConnected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const realUserAccount = useUserAccount();
@@ -77,15 +87,21 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
           </p>
         )}
         {!hasTokens && (
-          <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
+          <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2 space-y-2">
             <p className="text-[10px] text-[var(--warning)]">
-              You need {symbol} tokens to trade this market.{" "}
-              {mktConfig?.collateralMint && (
-                <a href="/devnet-mint" className="underline underline-offset-2 hover:text-[var(--warning)]/80">
-                  Mint some from the faucet →
-                </a>
-              )}
+              You need {symbol} tokens to trade this market.
             </p>
+            {/* PERC-475: Devnet mirror market — show self-service faucet button */}
+            {isDevnetMirror && mktConfig?.collateralMint ? (
+              <DevnetTokenFaucetButton
+                mintAddress={mktConfig.collateralMint.toBase58()}
+                symbol={symbol}
+              />
+            ) : mktConfig?.collateralMint ? (
+              <a href="/devnet-mint" className="text-[10px] text-[var(--warning)] underline underline-offset-2 hover:text-[var(--warning)]/80">
+                Mint some from the faucet →
+              </a>
+            ) : null}
           </div>
         )}
         {hasTokens ? (
@@ -190,14 +206,22 @@ export const DepositWithdrawCard: FC<{ slabAddress: string }> = ({ slabAddress }
         </div>
       </div>
       {mode === "deposit" && walletBalance !== null && walletBalance === 0n && mktConfig?.collateralMint && (
-        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
+        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2 space-y-2">
           <p className="text-[10px] text-[var(--warning)]">
-            Wallet has 0 {symbol}. You may have a different token with the same name.{" "}
-            <a href={`/devnet-mint`} className="underline underline-offset-2 hover:text-[var(--warning)]/80">
+            Wallet has 0 {symbol}. You may have a different token with the same name.
+          </p>
+          {/* PERC-475: Devnet mirror market — self-service faucet button */}
+          {isDevnetMirror ? (
+            <DevnetTokenFaucetButton
+              mintAddress={mktConfig.collateralMint.toBase58()}
+              symbol={symbol}
+            />
+          ) : (
+            <a href="/devnet-mint" className="text-[10px] text-[var(--warning)] underline underline-offset-2 hover:text-[var(--warning)]/80">
               Mint more →
             </a>
-          </p>
-          <p className="mt-1 text-[9px] text-[var(--text-dim)] break-all" style={{ fontFamily: "var(--font-mono)" }}>
+          )}
+          <p className="text-[9px] text-[var(--text-dim)] break-all" style={{ fontFamily: "var(--font-mono)" }}>
             Mint: {mktConfig.collateralMint.toBase58()}
           </p>
         </div>
