@@ -16,6 +16,16 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+// Mock next/navigation for MintAndTradeButton
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+}));
+
+// Mock useWalletCompat for MintAndTradeButton
+vi.mock("@/hooks/useWalletCompat", () => ({
+  useWalletCompat: () => ({ publicKey: null, connected: false }),
+}));
+
 // Mock LogoUpload
 vi.mock("@/components/create/LogoUpload", () => ({
   LogoUpload: () => <div data-testid="logo-upload" />,
@@ -195,8 +205,10 @@ describe("LaunchSuccess", () => {
 
   it("shows trade and deploy another CTAs", () => {
     render(<LaunchSuccess {...defaultProps} />);
-    const tradeLink = screen.getByText("TRADE THIS MARKET →");
-    expect(tradeLink.closest("a")?.getAttribute("href")).toContain(defaultProps.marketAddress);
+    // On devnet: MintAndTradeButton renders as a <button> (not <a>)
+    // when wallet is disconnected, showing "TRADE THIS MARKET →"
+    const tradeCta = screen.getByText("TRADE THIS MARKET →");
+    expect(tradeCta).toBeDefined();
     expect(screen.getByText("DEPLOY ANOTHER MARKET")).toBeDefined();
   });
 

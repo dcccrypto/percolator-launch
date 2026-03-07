@@ -7,6 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatTokenAmount } from "@/lib/format";
 import { DepositWithdrawCard } from "./DepositWithdrawCard";
+import { AirdropButton } from "./AirdropButton";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 
@@ -57,7 +58,7 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
     );
   }
 
-  // First-time state: shimmer button
+  // First-time state: shimmer button + devnet airdrop
   if (!hasDeposited && capital === 0n) {
     return (
       <div data-deposit-trigger>
@@ -74,6 +75,11 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
             <DepositWithdrawCard slabAddress={slabAddress} />
           </div>
         )}
+        {/* PERC-475: Show airdrop button in deposit area for devnet markets */}
+        <div className="mt-1.5 flex items-center gap-2">
+          <AirdropButton marketAddress={slabAddress} symbol={symbol} />
+          <span className="text-[9px] text-[var(--text-dim)]">Get free devnet tokens to start trading</span>
+        </div>
       </div>
     );
   }

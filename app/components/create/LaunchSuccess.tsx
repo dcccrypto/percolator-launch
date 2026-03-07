@@ -1,9 +1,11 @@
 "use client";
 
-import { FC, useState } from "react";
+import { FC, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { LogoUpload } from "./LogoUpload";
 import { getNetwork } from "@/lib/config";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
 
 interface LaunchSuccessProps {
   tokenSymbol: string;
@@ -196,12 +198,16 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
 
       {/* CTAs */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-        <Link
-          href={`/trade/${marketAddress}`}
-          className="w-full sm:w-auto border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-8 py-3 text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hud-btn-corners hover:bg-[var(--accent)]/[0.15]"
-        >
-          TRADE THIS MARKET →
-        </Link>
+        {isDevnet ? (
+          <MintAndTradeButton marketAddress={marketAddress} tokenSymbol={tokenSymbol} />
+        ) : (
+          <Link
+            href={`/trade/${marketAddress}`}
+            className="w-full sm:w-auto border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-8 py-3 text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hud-btn-corners hover:bg-[var(--accent)]/[0.15]"
+          >
+            TRADE THIS MARKET →
+          </Link>
+        )}
         <button
           type="button"
           onClick={onDeployAnother}
@@ -236,5 +242,85 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         </div>
       )}
     </div>
+  );
+};
+
+/**
+ * PERC-475: "Mint & Trade" CTA button for devnet success page.
+ * Calls /api/airdrop to mint $500 worth of tokens, then redirects to /trade/[slab].
+ */
+const MintAndTradeButton: FC<{ marketAddress: string; tokenSymbol: string }> = ({
+  marketAddress,
+  tokenSymbol,
+}) => {
+  const router = useRouter();
+  const { publicKey, connected } = useWalletCompat();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleMintAndTrade = useCallback(async () => {
+    if (!publicKey) {
+      // No wallet — just navigate to trade page (airdrop button there)
+      router.push(`/trade/${marketAddress}`);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const resp = await fetch("/api/airdrop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          marketAddress,
+          walletAddress: publicKey.toBase58(),
+        }),
+      });
+
+      const data = await resp.json();
+
+      if (resp.status === 429) {
+        // Already claimed — still navigate to trade
+        router.push(`/trade/${marketAddress}`);
+        return;
+      }
+
+      if (!resp.ok) {
+        // Mint failed — navigate anyway, user can retry with airdrop button
+        console.warn("Mint failed, navigating to trade:", data.error);
+      }
+
+      // Success or recoverable error — navigate to trade page
+      router.push(`/trade/${marketAddress}`);
+    } catch (e) {
+      setError("Mint failed — redirecting...");
+      // Navigate anyway after a brief delay
+      setTimeout(() => router.push(`/trade/${marketAddress}`), 1500);
+    } finally {
+      setLoading(false);
+    }
+  }, [publicKey, marketAddress, router]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleMintAndTrade}
+      disabled={loading}
+      className="w-full sm:w-auto border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-8 py-3 text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] transition-all hud-btn-corners hover:bg-[var(--accent)]/[0.15] disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {loading ? (
+        <span className="flex items-center justify-center gap-2">
+          <span className="animate-spin">⟳</span> MINTING {tokenSymbol}...
+        </span>
+      ) : connected ? (
+        <>MINT & TRADE →</>
+      ) : (
+        <>TRADE THIS MARKET →</>
+      )}
+      {error && (
+        <span className="block text-[10px] text-[var(--short)] mt-1">{error}</span>
+      )}
+    </button>
   );
 };
