@@ -4,6 +4,7 @@ import { FC, useRef, useEffect } from "react";
 import gsap from "gsap";
 import { useEngineState } from "@/hooks/useEngineState";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { sanitizeFundingRateBps } from "@/lib/health";
 
 export const FundingRate: FC = () => {
   const { fundingRate, engine, loading } = useEngineState();
@@ -11,9 +12,13 @@ export const FundingRate: FC = () => {
   const prevAnnualizedRef = useRef<number | null>(null);
   const prefersReduced = usePrefersReducedMotion();
 
-  const bpsPerSlot = Number(fundingRate ?? 0n);
-  const hourlyRate = bpsPerSlot * 2.5 * 3600;
-  const annualizedRate = bpsPerSlot * 2.5 * 3600 * 24 * 365;
+  // sanitizeFundingRateBps: clamp to valid on-chain range [-10_000, 10_000] bps/slot.
+  // Values outside this range are garbage (wrong offset / uninit slab) — show zero.
+  const sanitized = sanitizeFundingRateBps(fundingRate);
+  const bpsPerSlot = sanitized !== null ? Number(sanitized) : 0;
+  // Slots ≈ 400ms → 9000 slots/hr; divide by 100 to convert bps → %
+  const hourlyRate = (bpsPerSlot * 9000) / 10000;
+  const annualizedRate = hourlyRate * 24 * 365;
   const rateColor = bpsPerSlot === 0 ? "text-[var(--text-muted)]" : bpsPerSlot > 0 ? "text-[var(--long)]" : "text-[var(--short)]";
 
   useEffect(() => {
@@ -50,11 +55,11 @@ export const FundingRate: FC = () => {
         </div>
         <div>
           <p className="text-xs text-[var(--text-muted)]">Hourly</p>
-          <p className={`text-sm font-medium ${rateColor}`}>{hourlyRate.toFixed(4)} bps</p>
+          <p className={`text-sm font-medium ${rateColor}`}>{hourlyRate >= 0 ? "+" : ""}{hourlyRate.toFixed(4)}%/hr</p>
         </div>
         <div>
           <p className="text-xs text-[var(--text-muted)]">Annualized</p>
-          <p ref={annualizedRef} className={`text-lg font-bold ${rateColor}`}>{(annualizedRate / 100).toFixed(2)}%</p>
+          <p ref={annualizedRef} className={`text-lg font-bold ${rateColor}`}>{annualizedRate >= 0 ? "+" : ""}{annualizedRate.toFixed(2)}%</p>
         </div>
       </div>
     </div>

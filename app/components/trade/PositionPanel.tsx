@@ -20,6 +20,7 @@ import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { WarmupProgress } from "./WarmupProgress";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
+import { sanitizeFundingRateBps } from "@/lib/health";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -123,8 +124,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Compute estimated 24h funding from on-chain funding rate
   let estFunding24hDisplay = "—";
   let estFundingColor = "text-[var(--text-muted)]";
-  if (hasPosition && fundingRate != null) {
-    const rateBpsPerSlot = Number(fundingRate);
+  if (hasPosition && sanitizeFundingRateBps(fundingRate) !== null) {
+    const rateBpsPerSlot = Number(sanitizeFundingRateBps(fundingRate)!);
     const slotsPerHour = 9000; // Solana ~400ms per slot
     const hourlyRatePercent = (rateBpsPerSlot * slotsPerHour) / 10000;
     const positionTokens = Number(absPosition) / (10 ** decimals);

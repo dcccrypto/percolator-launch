@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue, sanitizeAccountCount } from "../../lib/health";
+import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue, sanitizeAccountCount, sanitizeFundingRateBps } from "../../lib/health";
 import type { HealthLevel } from "../../lib/health";
 
 /** Stub EngineState with only the fields computeMarketHealth uses */
@@ -296,5 +296,33 @@ describe("sanitizeAccountCount", () => {
     expect(sanitizeAccountCount(5000, 0)).toBe(0); // default 4096 applies
     expect(sanitizeAccountCount(5000, -1)).toBe(0);
     expect(sanitizeAccountCount(3000, 0)).toBe(3000); // under 4096
+  });
+});
+
+describe("sanitizeFundingRateBps", () => {
+  it("returns null for garbage values like the designer-reported bug (+1595987084267292)", () => {
+    // Raw on-chain integer shown as "+1595987084267292.0000%/hr" — must be rejected.
+    // Before formula: rateBps ≈ (1595987084267292 * 10000) / 9000 ≈ 1.77e15
+    expect(sanitizeFundingRateBps(1_595_987_084_267_292n)).toBeNull();
+    expect(sanitizeFundingRateBps(-1_595_987_084_267_292n)).toBeNull();
+  });
+
+  it("returns null for values exceeding on-chain guard (abs > 10_000)", () => {
+    expect(sanitizeFundingRateBps(10_001n)).toBeNull();
+    expect(sanitizeFundingRateBps(-10_001n)).toBeNull();
+    expect(sanitizeFundingRateBps(1_000_000n)).toBeNull();
+  });
+
+  it("returns the value for valid bps/slot rates", () => {
+    expect(sanitizeFundingRateBps(0n)).toBe(0n);
+    expect(sanitizeFundingRateBps(11n)).toBe(11n);   // ~0.0099%/hr — typical
+    expect(sanitizeFundingRateBps(-11n)).toBe(-11n);
+    expect(sanitizeFundingRateBps(10_000n)).toBe(10_000n); // on-chain max
+    expect(sanitizeFundingRateBps(-10_000n)).toBe(-10_000n);
+  });
+
+  it("returns null for null/undefined", () => {
+    expect(sanitizeFundingRateBps(null)).toBeNull();
+    expect(sanitizeFundingRateBps(undefined)).toBeNull();
   });
 });

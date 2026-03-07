@@ -8,6 +8,7 @@ import { InfoIcon } from "@/components/ui/Tooltip";
 import { FundingExplainerModal } from "./FundingExplainerModal";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
+import { sanitizeFundingRateBps } from "@/lib/health";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 
 interface FundingData {
@@ -76,8 +77,8 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
         setError(null);
       } catch {
         // Silently fall back to on-chain data — no error shown to user
-        if (engine && fundingRate !== null) {
-          const rate = Number(fundingRate);
+        if (engine && sanitizeFundingRateBps(fundingRate) !== null) {
+          const rate = Number(sanitizeFundingRateBps(fundingRate)!);
           const hourly = (rate * 9000) / 10000;
           const apr = hourly * 24 * 365;
           const netLp = engine?.netLpPos ?? 0n;

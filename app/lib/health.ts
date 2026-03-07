@@ -67,6 +67,23 @@ export function sanitizeAccountCount(count: number, maxAccounts?: number): numbe
 }
 
 /**
+ * Sanitize a raw on-chain `funding_rate_bps_per_slot_last` (i64) value.
+ *
+ * The Rust program enforces: if abs(rate) > 10_000, it zeroes the field and skips
+ * accrual. Any value outside [-10_000, 10_000] in the account data is therefore
+ * stale/garbage (wrong offset, uninitialized slab, or layout mismatch) and must
+ * be treated as "no data" to avoid rendering astronomically large percentages.
+ *
+ * Returns null when the value is out of range so callers can show "—".
+ */
+export const FUNDING_RATE_BPS_MAX = 10_000n; // matches on-chain guard
+export function sanitizeFundingRateBps(v: bigint | null | undefined): bigint | null {
+  if (v == null) return null;
+  if (v < -FUNDING_RATE_BPS_MAX || v > FUNDING_RATE_BPS_MAX) return null;
+  return v;
+}
+
+/**
  * Compute market health from on-chain EngineState.
  * Handles sentinel values (u64::MAX for uninitialized insurance) and
  * treats them as zero rather than showing absurd numbers.

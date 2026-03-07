@@ -7,7 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatTokenAmount, formatCompactTokenAmount, formatUsd, formatBps } from "@/lib/format";
-import { sanitizeOnChainValue, sanitizeAccountCount, sanitizeBps } from "@/lib/health";
+import { sanitizeOnChainValue, sanitizeAccountCount, sanitizeBps, sanitizeFundingRateBps } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { resolveMarketPriceE6, sanitizePriceE6, detectOracleMode } from "@/lib/oraclePrice";
 import { FundingRateCard } from "./FundingRateCard";
@@ -80,7 +80,12 @@ export const MarketStatsCard: FC = () => {
   }, [mktConfig]);
 
   // ─── Funding Rate ──────────────────────────────────────────────────────────
-  const fundingHourlyPct = fundingRate !== null ? fundingRateBpsToHourly(fundingRate) : null;
+  // sanitizeFundingRateBps guards against garbage on-chain values (e.g. wrong
+  // offset reads on old devnet slabs) that would render as e.g. "+1.6e15%/hr".
+  // Valid range matches the on-chain guard: abs(rate) <= 10_000 bps/slot.
+  const fundingHourlyPct = sanitizeFundingRateBps(fundingRate) !== null
+    ? fundingRateBpsToHourly(sanitizeFundingRateBps(fundingRate)!)
+    : null;
 
   if (loading || !engine || !config || !params) {
     return (
