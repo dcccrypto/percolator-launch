@@ -478,4 +478,109 @@ describe('LiquidationService', () => {
       expect(liquidationService.getStatus().running).toBe(false);
     });
   });
+
+  describe('PERC-484: InvalidSlabLen (0x4) permanent skip', () => {
+    it('should permanently skip a market after 0x4 error in liquidate()', async () => {
+      const mockMarket = {
+        slabAddress: { toBase58: () => 'CorruptSlab111111111111111111111111111111' },
+        programId: { toBase58: () => 'Program11111111111111111111111111111111' },
+        config: {
+          collateralMint: { toBase58: () => 'So11111111111111111111111111111111111111112' },
+          oracleAuthority: mockNonZeroKey(),
+          indexFeedId: mockZeroKey(),
+        },
+        params: { maintenanceMarginBps: 500n },
+        header: { admin: { toBase58: () => 'Admin111111111111111111111111111111111' } },
+      };
+
+      // Simulate 0x4 error from sendWithRetryKeeper
+      vi.mocked(shared.sendWithRetryKeeper).mockRejectedValueOnce(
+        new Error('Transaction simulation failed: custom program error: 0x4'),
+      );
+      vi.mocked(core.fetchSlab).mockResolvedValue(new Uint8Array(1024));
+      vi.mocked(core.parseEngine).mockReturnValue({} as any);
+      vi.mocked(core.parseParams).mockReturnValue({ maintenanceMarginBps: 500n } as any);
+      vi.mocked(core.parseConfig).mockReturnValue({
+        oracleAuthority: mockNonZeroKey(),
+        indexFeedId: mockZeroKey(),
+        authorityPriceE6: 1_000_000n,
+        lastEffectivePriceE6: 1_000_000n,
+        authorityTimestamp: BigInt(Math.floor(Date.now() / 1000)),
+      } as any);
+      vi.mocked(core.parseUsedIndices).mockReturnValue([1]);
+      vi.mocked(core.parseAccount).mockReturnValue({
+        kind: 0,
+        owner: { toBase58: () => 'User3111111111111111111111111111111111111' },
+        positionSize: 10_000_000_000n,
+        capital: 1_000_000n,
+        entryPrice: 1_000_000n,
+      } as any);
+
+      const result = await liquidationService.liquidate(mockMarket as any, 1);
+      expect(result).toBeNull();
+
+      const status = liquidationService.getStatus();
+      expect(status.permanentlySkippedCount).toBe(1);
+      expect(status.permanentlySkippedMarkets).toContain('CorruptSlab111111111111111111111111111111');
+    });
+
+    it('should skip permanently-skipped markets in scanAndLiquidateAll', async () => {
+      const corruptAddr = 'CorruptSlab222222222222222222222222222222';
+
+      // Pre-populate the skip list via a fresh service instance
+      const svc = new LiquidationService(mockOracleService as any);
+
+      // Manually trigger a 0x4 error so it gets added to skip list
+      const mockMarket = {
+        slabAddress: { toBase58: () => corruptAddr },
+        programId: { toBase58: () => 'Program11111111111111111111111111111111' },
+        config: {
+          collateralMint: { toBase58: () => 'So11111111111111111111111111111111111111112' },
+          oracleAuthority: mockNonZeroKey(),
+          indexFeedId: mockZeroKey(),
+        },
+        params: { maintenanceMarginBps: 500n },
+        header: { admin: { toBase58: () => 'Admin111111111111111111111111111111111' } },
+      };
+
+      vi.mocked(shared.sendWithRetryKeeper).mockRejectedValueOnce(
+        new Error('custom program error: 0x4'),
+      );
+      vi.mocked(core.fetchSlab).mockResolvedValue(new Uint8Array(1024));
+      vi.mocked(core.parseEngine).mockReturnValue({} as any);
+      vi.mocked(core.parseParams).mockReturnValue({ maintenanceMarginBps: 500n } as any);
+      vi.mocked(core.parseConfig).mockReturnValue({
+        oracleAuthority: mockNonZeroKey(),
+        indexFeedId: mockZeroKey(),
+        authorityPriceE6: 1_000_000n,
+        lastEffectivePriceE6: 1_000_000n,
+        authorityTimestamp: BigInt(Math.floor(Date.now() / 1000)),
+      } as any);
+      vi.mocked(core.parseUsedIndices).mockReturnValue([1]);
+      vi.mocked(core.parseAccount).mockReturnValue({
+        kind: 0,
+        owner: { toBase58: () => 'User3111111111111111111111111111111111111' },
+        positionSize: 10_000_000_000n,
+        capital: 1_000_000n,
+        entryPrice: 1_000_000n,
+      } as any);
+
+      // First liquidation attempt → 0x4 → marked as permanently skipped
+      await svc.liquidate(mockMarket as any, 1);
+      expect(svc.getStatus().permanentlySkippedCount).toBe(1);
+
+      // Now run scanAndLiquidateAll — the corrupt market should be skipped entirely
+      vi.mocked(shared.sendWithRetryKeeper).mockClear();
+      vi.mocked(core.fetchSlab).mockClear();
+      const markets = new Map([
+        [corruptAddr, { market: mockMarket as any }],
+      ]);
+      const result = await svc.scanAndLiquidateAll(markets);
+
+      // scanMarket should NOT have been called (filtered before batch)
+      // so no send should have been attempted
+      expect(shared.sendWithRetryKeeper).not.toHaveBeenCalled();
+      expect(result.scanned).toBe(0);
+    });
+  });
 });

@@ -147,6 +147,9 @@ export class LiquidationService {
   // PERC-134: Exponential backoff on consecutive scan failures
   private consecutiveFailures = 0;
   private readonly maxBackoffMs = 300_000; // 5 minutes max backoff
+  // PERC-484: Track markets that permanently fail with InvalidSlabLen (0x4).
+  // These are test/corrupt markets with wrong slab size — skip them indefinitely.
+  private readonly permanentlySkipped = new Set<string>();
 
   constructor(oracleService: OracleService, intervalMs = 60_000) {
     this.oracleService = oracleService;
@@ -438,8 +441,27 @@ export class LiquidationService {
       
       return sig;
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      // PERC-484: InvalidSlabLen (0x4) means the slab has wrong size for the program.
+      // These are test/corrupt markets that will never succeed — permanently skip them
+      // so the liquidation service stops retrying every 60 seconds.
+      if (errMsg.includes("custom program error: 0x4")) {
+        this.permanentlySkipped.add(slabAddress.toBase58());
+        logger.warn(
+          "Market slab size mismatch (0x4 InvalidSlabLen) — permanently skipping for liquidation. " +
+          "Fix: run `npx tsx scripts/reinit-slab.ts --slab <ADDRESS>` to recreate with correct size.",
+          {
+            slabAddress: slabAddress.toBase58(),
+            accountIdx,
+            programId: market.programId.toBase58(),
+          },
+        );
+        return null;
+      }
+
       logger.error("Liquidation failed", {
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg,
         stack: err instanceof Error ? err.stack : undefined,
         slabAddress: slabAddress.toBase58(),
         accountIdx,
@@ -449,7 +471,7 @@ export class LiquidationService {
       
       eventBus.publish("liquidation.failure", slabAddress.toBase58(), {
         accountIdx,
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg,
       });
       return null;
     }
@@ -475,8 +497,17 @@ export class LiquidationService {
 
     for (let i = 0; i < entries.length; i += BATCH_SIZE) {
       const batch = entries.slice(i, i + BATCH_SIZE);
+      // PERC-484: Skip markets permanently flagged as invalid slab (0x4 InvalidSlabLen).
+      const filteredBatch = batch.filter((state) => {
+        const addr = state.market.slabAddress.toBase58();
+        if (this.permanentlySkipped.has(addr)) {
+          logger.debug("Skipping permanently-skipped market", { slabAddress: addr });
+          return false;
+        }
+        return true;
+      });
       const batchResults = await Promise.allSettled(
-        batch.map((state) => this.scanMarket(state.market)),
+        filteredBatch.map((state) => this.scanMarket(state.market)),
       );
 
       for (let j = 0; j < batchResults.length; j++) {
@@ -491,7 +522,7 @@ export class LiquidationService {
 
         // Liquidations are sequential (each is a transaction)
         for (const candidate of candidates) {
-          const sig = await this.liquidate(batch[j]!.market, candidate.accountIdx);
+          const sig = await this.liquidate(filteredBatch[j]!.market, candidate.accountIdx);
           if (sig) liquidated++;
         }
       }
@@ -562,6 +593,8 @@ export class LiquidationService {
       scanCount: this.scanCount,
       lastScanTime: this.lastScanTime,
       running: this.timer !== null,
+      permanentlySkippedCount: this.permanentlySkipped.size,
+      permanentlySkippedMarkets: Array.from(this.permanentlySkipped),
     };
   }
 }
