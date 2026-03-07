@@ -15,7 +15,7 @@
  * 4. Mint to walletAddress using DEVNET_MINT_AUTHORITY_KEYPAIR
  * 5. Return { signature, amount, symbol }
  *
- * Rate limit: 1 request per wallet per mint per 24h (in-memory).
+ * Rate limit: 1 request per wallet per mint per 24h (Supabase-backed, distributed-safe).
  * Only callable on devnet.
  *
  * Requires: DEVNET_MINT_AUTHORITY_KEYPAIR env var (JSON secret key bytes)
@@ -50,34 +50,64 @@ const AIRDROP_USD_VALUE = 500;
 const MIN_RAW = 1_000n;        // 0.001 tokens — floor for high-priced assets
 const MAX_RAW = 3_200_000_000n; // 3,200 tokens — cap prevents draining low-price mints
 
-/** Rate limit: 1 claim per wallet per mint per 24h */
+/** Rate limit: 1 claim per wallet per mint per 24h (Supabase-backed) */
 const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
-interface ClaimEntry { claimedAt: number }
-const claimMap = new Map<string, ClaimEntry>();
 
-function checkRateLimit(walletAddress: string, mintAddress: string): { allowed: boolean; retryAfterSecs: number } {
-  const key = `${walletAddress}:${mintAddress}`;
-  const now = Date.now();
+/**
+ * Check whether a claim is allowed for this wallet+mint pair.
+ * Uses Supabase devnet_airdrop_claims table — distributed-safe across Vercel instances.
+ * Returns { allowed, retryAfterSecs, claimedAt? }.
+ */
+async function checkRateLimit(
+  supabase: ReturnType<typeof getServiceClient>,
+  walletAddress: string,
+  mintAddress: string,
+): Promise<{ allowed: boolean; retryAfterSecs: number }> {
+  const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
 
-  // GC stale entries occasionally
-  if (Math.random() < 0.02) {
-    for (const [k, v] of claimMap) {
-      if (now - v.claimedAt > RATE_LIMIT_WINDOW_MS) claimMap.delete(k);
-    }
+  const { data, error } = await (supabase as any)
+    .from("devnet_airdrop_claims")
+    .select("claimed_at")
+    .eq("wallet", walletAddress)
+    .eq("mint", mintAddress)
+    .gte("claimed_at", windowStart)
+    .maybeSingle();
+
+  if (error) {
+    // DB error — fail open (allow claim) to avoid blocking users on DB issues
+    console.warn("[devnet-airdrop] rate limit DB check failed:", error.message);
+    return { allowed: true, retryAfterSecs: 0 };
   }
 
-  const entry = claimMap.get(key);
-  if (entry) {
-    const age = now - entry.claimedAt;
-    if (age < RATE_LIMIT_WINDOW_MS) {
-      return { allowed: false, retryAfterSecs: Math.ceil((RATE_LIMIT_WINDOW_MS - age) / 1000) };
-    }
+  if (data) {
+    const age = Date.now() - new Date(data.claimed_at as string).getTime();
+    const retryAfterSecs = Math.ceil((RATE_LIMIT_WINDOW_MS - age) / 1000);
+    return { allowed: false, retryAfterSecs: Math.max(0, retryAfterSecs) };
   }
+
   return { allowed: true, retryAfterSecs: 0 };
 }
 
-function recordClaim(walletAddress: string, mintAddress: string) {
-  claimMap.set(`${walletAddress}:${mintAddress}`, { claimedAt: Date.now() });
+/**
+ * Record a successful claim for wallet+mint.
+ * Uses UPSERT (ON CONFLICT DO UPDATE) so a retry after expiry resets the 24h window.
+ */
+async function recordClaim(
+  supabase: ReturnType<typeof getServiceClient>,
+  walletAddress: string,
+  mintAddress: string,
+): Promise<void> {
+  const { error } = await (supabase as any)
+    .from("devnet_airdrop_claims")
+    .upsert(
+      { wallet: walletAddress, mint: mintAddress, claimed_at: new Date().toISOString() },
+      { onConflict: "wallet,mint" },
+    );
+
+  if (error) {
+    // Non-fatal — log and continue (claim already succeeded on-chain)
+    console.warn("[devnet-airdrop] failed to record claim in DB:", error.message);
+  }
 }
 
 /** Fetch token price from DexScreener for the mainnet CA */
@@ -165,8 +195,8 @@ export async function POST(req: NextRequest) {
     const { mainnet_ca: mainnetCa, symbol, decimals: rawDecimals } = mintRow;
     const decimals: number = rawDecimals ?? 6;
 
-    // 2. Rate limit: 1 per wallet per mint per 24h
-    const { allowed, retryAfterSecs } = checkRateLimit(walletAddress, mintAddress);
+    // 2. Rate limit: 1 per wallet per mint per 24h (Supabase-backed)
+    const { allowed, retryAfterSecs } = await checkRateLimit(supabase, walletAddress, mintAddress);
     if (!allowed) {
       const h = Math.floor(retryAfterSecs / 3600);
       const m = Math.floor((retryAfterSecs % 3600) / 60);
@@ -247,8 +277,8 @@ export async function POST(req: NextRequest) {
       30_000,
     );
 
-    // Record claim only after successful mint
-    recordClaim(walletAddress, mintAddress);
+    // Record claim only after successful mint (Supabase-backed)
+    await recordClaim(supabase, walletAddress, mintAddress);
 
     const humanAmount = Number(rawAmount) / 10 ** decimals;
 
