@@ -3,14 +3,21 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { resolveMarketPriceE6, sanitizePriceE6 } from "@/lib/oraclePrice";
+import { getBackendUrl } from "@/lib/config";
 
 // Derive WebSocket URL from API URL: https://... → wss://...
 function getWsUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_WS_URL;
   if (explicit) return explicit;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
-  if (!apiUrl) return "";
-  return apiUrl.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+  // Use getBackendUrl() which has the Railway production fallback,
+  // instead of reading env vars directly (which returns "" in production
+  // when NEXT_PUBLIC_API_URL is not explicitly set).
+  try {
+    const apiUrl = getBackendUrl();
+    return apiUrl.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+  } catch {
+    return "";
+  }
 }
 const WS_URL = getWsUrl();
 if (!WS_URL && typeof window !== "undefined") {
