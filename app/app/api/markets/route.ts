@@ -6,6 +6,19 @@ import { getServiceClient } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
 
+/**
+ * Maximum valid funding rate in bps/slot (matches on-chain guard).
+ * Raw DB values outside [-MAX, MAX] are garbage from uninitialized slabs.
+ */
+const FUNDING_RATE_BPS_MAX = 10_000;
+
+/** Sanitize a numeric funding_rate from the DB view. Returns null for garbage values. */
+function sanitizeFundingRate(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  if (!Number.isFinite(v) || Math.abs(v) > FUNDING_RATE_BPS_MAX) return null;
+  return v;
+}
+
 export const dynamic = "force-dynamic";
 
 // GET /api/markets — list all active markets with stats
@@ -28,7 +41,14 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ markets: data }, {
+    // Sanitize funding_rate: raw DB values from uninitialized slabs can be
+    // garbage (e.g. 17733189824741436). Clamp to valid bps range. (#817)
+    const sanitized = (data ?? []).map((m: Record<string, unknown>) => ({
+      ...m,
+      funding_rate: sanitizeFundingRate(m.funding_rate as number | null),
+    }));
+
+    return NextResponse.json({ markets: sanitized }, {
       headers: {
         "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
       },
