@@ -32,7 +32,14 @@ export async function GET(
       return NextResponse.json({ error: "Market not found" }, { status: 404 });
     }
 
-    const rateBpsPerSlot = Number(stats.funding_rate ?? 0);
+    // Sanitize: valid on-chain funding rate is capped to [-10_000, 10_000] bps/slot.
+    // Values outside this range are garbage (wrong offset / uninitialized slab stored in DB).
+    // Treat them as zero to avoid rendering astronomical percentages in the UI.
+    const MAX_FUNDING_RATE_BPS = 10_000;
+    const rawRateBps = Number(stats.funding_rate ?? 0);
+    const rateBpsPerSlot = Number.isFinite(rawRateBps) && Math.abs(rawRateBps) <= MAX_FUNDING_RATE_BPS
+      ? rawRateBps
+      : 0;
     // ~9000 slots per hour on Solana (400ms slot time)
     const slotsPerHour = 9000;
     const hourlyRatePercent = (rateBpsPerSlot * slotsPerHour) / 10000;
