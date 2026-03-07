@@ -82,7 +82,9 @@ export function useOracleFreshness(): OracleFreshnessState {
     const currentMode = detectOracleMode(config);
 
     if (currentMode === "admin") {
-      // Admin mode: authorityTimestamp is a real unix timestamp
+      // Admin mode: authorityTimestamp is a real unix timestamp.
+      // NOTE: For hyperp mode, authorityTimestamp stores the funding rate — NOT a timestamp.
+      // This branch is only entered for admin mode, so authorityTimestamp is safe to use here.
       const ts = config.authorityTimestamp;
       if (ts > 0n) {
         setLastUpdateMs(Number(ts) * 1000);
@@ -105,8 +107,14 @@ export function useOracleFreshness(): OracleFreshnessState {
         }
       }
     } else {
-      // Hyperp / Pyth: track when the price value changes
-      const currentPrice = config.lastEffectivePriceE6;
+      // Hyperp / Pyth: track when the price value changes.
+      // IMPORTANT: For hyperp mode, UpdateHyperpMark writes to authorityPriceE6 (mark price).
+      // lastEffectivePriceE6 is only updated by KeeperCrank — on fresh markets with no trades,
+      // KeeperCrank never runs so lastEffectivePriceE6 never changes → staleness never resets.
+      // Pyth-pinned: lastEffectivePriceE6 is correct (updated by KeeperCrank / price feed).
+      const currentPrice = currentMode === "hyperp"
+        ? config.authorityPriceE6
+        : config.lastEffectivePriceE6;
       if (prevPriceRef.current !== null && currentPrice !== prevPriceRef.current) {
         setLastUpdateMs(Date.now());
       } else if (prevPriceRef.current === null && currentPrice > 0n) {
