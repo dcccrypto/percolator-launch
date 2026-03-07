@@ -102,6 +102,10 @@ export async function GET() {
         // Matches Rust MAX_ORACLE_PRICE = $1B USD ceiling.
         last_price: sanitizePrice(m.last_price as number | null, "last_price", m.slab_address as string),
         mark_price: sanitizePrice(m.mark_price as number | null, "mark_price", m.slab_address as string),
+        // #855: Apply same sanitization to index_price — same DB column type and
+        // corruption vector as last_price/mark_price. Inconsistent sanitization
+        // means a corrupt index price still reaches consumers.
+        index_price: sanitizePrice(m.index_price as number | null, "index_price", m.slab_address as string),
       };
     });
 

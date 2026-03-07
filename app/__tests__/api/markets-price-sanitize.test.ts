@@ -171,4 +171,30 @@ describe("GET /api/markets — price sanitization (#856)", () => {
     expect(symbols).not.toContain("BLOCKED");
     expect(symbols).toContain("GOOD");
   });
+
+  it("sanitizes index_price with same bounds as last_price/mark_price (#855)", async () => {
+    mockMarkets = [
+      // Corrupt index_price — should be nulled
+      mkMarket({ symbol: "A", index_price: 900_000_000 } as Record<string, unknown>),
+      // Legit index_price — should pass through
+      mkMarket({ symbol: "B", index_price: 42_500 } as Record<string, unknown>),
+      // Null index_price — stays null
+      mkMarket({ symbol: "C", index_price: null } as Record<string, unknown>),
+    ];
+
+    vi.resetModules();
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET();
+    const body = (await res.json()) as {
+      markets: { symbol: string; index_price: number | null }[];
+    };
+
+    const a = body.markets.find((m) => m.symbol === "A");
+    const b = body.markets.find((m) => m.symbol === "B");
+    const c = body.markets.find((m) => m.symbol === "C");
+
+    expect(a?.index_price).toBeNull();   // corrupt value nulled
+    expect(b?.index_price).toBe(42_500); // legit value preserved
+    expect(c?.index_price).toBeNull();   // already-null preserved
+  });
 });
