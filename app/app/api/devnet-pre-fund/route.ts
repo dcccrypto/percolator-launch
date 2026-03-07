@@ -112,16 +112,37 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate mintAddress: check static allowlist OR dynamic devnet_mints table.
-    // PERC-456: Mirror mints are validated by mint authority ownership (on-chain) below.
-    // We permit any valid base58 pubkey here and let the on-chain authority check
-    // (getMint pre-flight below) be the true permission gate — if our keypair is
-    // not the mint authority, the pre-flight will reject with a clear error.
-    // Static allowlist still supported for explicit env-based overrides.
-    const mintPermitted =
-      DEVNET_ALLOWED_MINTS.size === 0 || DEVNET_ALLOWED_MINTS.has(mintAddress);
-    // When allowlist is configured AND mint is not on it, check the dynamic table.
-    let finallyPermitted = mintPermitted;
-    if (!mintPermitted) {
+    // #873 fix: ALWAYS check DB when no static allowlist is configured.
+    // Previously, DEVNET_ALLOWED_MINTS.size === 0 short-circuited to mintPermitted=true,
+    // skipping the DB lookup entirely. The DB is the real security gate — only mirror mints
+    // (created by our /api/devnet-mirror-mint endpoint) should be fundable.
+    // On-chain getMint authority check remains the final gate; on-chain checks below
+    // also catch any DB-level bypass (our keypair can only mint its own authority mints).
+    let finallyPermitted: boolean;
+    if (DEVNET_ALLOWED_MINTS.size > 0) {
+      // Static allowlist present: approve immediately if matched, then fall through to DB
+      if (DEVNET_ALLOWED_MINTS.has(mintAddress)) {
+        finallyPermitted = true;
+      } else {
+        // Not in static list — check dynamic mirror-mint table as fallback
+        try {
+          const supabase = getServiceClient();
+          const { data: mirrorRow } = await (supabase as any)
+            .from("devnet_mints")
+            .select("devnet_mint")
+            .eq("devnet_mint", mintAddress)
+            .maybeSingle();
+          finallyPermitted = !!mirrorRow?.devnet_mint;
+        } catch (e) {
+          Sentry.captureException(e, {
+            tags: { endpoint: "/api/devnet-pre-fund", phase: "dynamic-mint-check" },
+          });
+          // DB unavailable and not in static list: fail-closed (on-chain check would catch anyway)
+          finallyPermitted = false;
+        }
+      }
+    } else {
+      // #873: No static allowlist — ALWAYS query DB (never default to permitted=true)
       try {
         const supabase = getServiceClient();
         const { data: mirrorRow } = await (supabase as any)
@@ -131,11 +152,10 @@ export async function POST(req: NextRequest) {
           .maybeSingle();
         finallyPermitted = !!mirrorRow?.devnet_mint;
       } catch (e) {
-        // If DB is unavailable, fall back to authority check below
         Sentry.captureException(e, {
           tags: { endpoint: "/api/devnet-pre-fund", phase: "dynamic-mint-check" },
         });
-        // Allow through — on-chain authority check will be the gate
+        // DB unavailable and no static allowlist: allow through — on-chain authority is the gate
         finallyPermitted = true;
       }
     }
@@ -177,6 +197,28 @@ export async function POST(req: NextRequest) {
     }
 
     const cfg = getConfig();
+
+    // #873 defense-in-depth: verify RPC endpoint is devnet before any on-chain operation.
+    // getRpcEndpoint() returns the actual Helius URL server-side (not the /api/rpc proxy).
+    // Mainnet Helius URL contains "mainnet"; devnet contains "devnet".
+    // Public devnet RPC (api.devnet.solana.com) and localhost are also allowed.
+    try {
+      const rpcHostname = new URL(cfg.rpcUrl).hostname;
+      const isDevnetRpc =
+        rpcHostname.includes("devnet") ||
+        rpcHostname === "localhost" ||
+        rpcHostname === "127.0.0.1";
+      if (!isDevnetRpc) {
+        Sentry.captureMessage(
+          `devnet-pre-fund called with non-devnet RPC: ${rpcHostname}`,
+          { level: "warning", tags: { endpoint: "/api/devnet-pre-fund" } },
+        );
+        return NextResponse.json({ error: "Only available on devnet" }, { status: 403 });
+      }
+    } catch {
+      // Malformed RPC URL — getConfig() validated it, so this should never happen
+    }
+
     const connection = new Connection(cfg.rpcUrl, "confirmed");
 
     // Pre-flight: verify the configured keypair is actually the mint authority
