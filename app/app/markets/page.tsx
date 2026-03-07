@@ -99,15 +99,9 @@ function MarketsPageInner() {
   const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();
   const { statsMap, loading: statsLoading } = useAllMarketStats();
 
-  // Canonical "active markets" count from Supabase (single source of truth)
-  // Uses shared isActiveMarket filter — consistent with homepage & /api/stats
-  const totalActiveMarkets = useMemo(() => {
-    let count = 0;
-    for (const m of statsMap.values()) {
-      if (isActiveMarket(m)) count++;
-    }
-    return count;
-  }, [statsMap]);
+  // NOTE: totalActiveMarkets (Supabase-only count) removed — was inconsistent with
+  // activeMarkets.length which includes on-chain discovered markets (#847).
+  // Use activeMarkets.length as single source of truth for header + footer counts.
   
   // P-MED-2: Read filters from URL params
   const [search, setSearch] = useState(searchParams.get("q") || "");
@@ -534,11 +528,11 @@ function MarketsPageInner() {
               </button>
             )}
 
-            {/* Results count — show filtered/total when filters are active */}
+            {/* Results count — use activeMarkets.length as single source of truth (#847) */}
             <span className="ml-auto text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-              {(hasSearch || hasActiveFilters) && filtered.length !== totalActiveMarkets
-                ? `${filtered.length} / ${totalActiveMarkets} market${totalActiveMarkets !== 1 ? "s" : ""}`
-                : `${totalActiveMarkets} market${totalActiveMarkets !== 1 ? "s" : ""}`}
+              {(hasSearch || hasActiveFilters) && filtered.length !== activeMarkets.length
+                ? `${filtered.length} / ${activeMarkets.length} market${activeMarkets.length !== 1 ? "s" : ""}`
+                : `${activeMarkets.length} market${activeMarkets.length !== 1 ? "s" : ""}`}
             </span>
           </div>
         </ScrollReveal>
