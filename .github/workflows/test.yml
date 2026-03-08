@@ -59,6 +59,9 @@ jobs:
       - name: Run unit tests (indexer)
         run: pnpm --filter @percolator/indexer test
 
+      - name: Run unit tests (app)
+        run: pnpm --filter app test
+
       - name: Upload coverage (shared)
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         if: always() && env.HAS_CODECOV_TOKEN == 'true'

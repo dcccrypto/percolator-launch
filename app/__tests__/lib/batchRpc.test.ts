@@ -16,6 +16,7 @@ describe("createBatchRpc", () => {
 
   it("batches multiple requests into a single HTTP call", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
       status: 200,
       json: async () => [
         { jsonrpc: "2.0", result: { value: 1000 }, id: 1 },
@@ -56,6 +57,7 @@ describe("createBatchRpc", () => {
 
   it("deduplicates identical requests", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
       status: 200,
       json: async () => [
         { jsonrpc: "2.0", result: { value: 42 }, id: 1 },
@@ -88,6 +90,7 @@ describe("createBatchRpc", () => {
 
   it("flushes immediately when batch size is reached", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
       status: 200,
       json: async () =>
         Array.from({ length: 3 }, (_, i) => ({
@@ -132,6 +135,7 @@ describe("createBatchRpc", () => {
         };
       }
       return {
+        ok: true,
         status: 200,
         json: async () => [{ jsonrpc: "2.0", result: "ok", id: 1 }],
         headers: new Headers({ "Content-Type": "application/json" }),
@@ -161,6 +165,7 @@ describe("createBatchRpc", () => {
   describe("batchFetch", () => {
     it("intercepts RPC POST requests", async () => {
       const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
         status: 200,
         json: async () => [
           { jsonrpc: "2.0", result: { value: 100 }, id: 1 },
