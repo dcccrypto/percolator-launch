@@ -89,14 +89,24 @@ describe("RecoverSolBanner", () => {
     expect(screen.getByText(/VIEW ON EXPLORER/i)).toBeDefined();
   });
 
-  it("calls onResume with slab address when resume clicked", () => {
+  it("calls onResume with slab address and fromStep=1 when resume clicked on initialized slab", () => {
     const kp = Keypair.generate();
     mockStuckSlab = makeStuckSlab({ isInitialized: true, exists: true, publicKey: kp.publicKey });
     const onResume = vi.fn();
     render(<RecoverSolBanner onResume={onResume} />);
 
     fireEvent.click(screen.getByRole("button", { name: /RESUME/i }));
-    expect(onResume).toHaveBeenCalledWith(kp.publicKey.toBase58());
+    expect(onResume).toHaveBeenCalledWith(kp.publicKey.toBase58(), 1);
+  });
+
+  it("calls onResume with slab address and fromStep=0 when retry clicked on uninitialized slab", () => {
+    const kp = Keypair.generate();
+    mockStuckSlab = makeStuckSlab({ isInitialized: false, exists: true, publicKey: kp.publicKey });
+    const onResume = vi.fn();
+    render(<RecoverSolBanner onResume={onResume} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /RETRY/i }));
+    expect(onResume).toHaveBeenCalledWith(kp.publicKey.toBase58(), 0);
   });
 
   it("calls clearStuck when discard clicked", () => {

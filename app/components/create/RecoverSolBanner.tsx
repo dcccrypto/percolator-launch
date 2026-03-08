@@ -4,8 +4,12 @@ import { FC, useState } from "react";
 import { useStuckSlabs, type StuckSlab } from "@/hooks/useStuckSlabs";
 
 interface RecoverSolBannerProps {
-  /** Called when user wants to resume market creation with the stuck slab */
-  onResume?: (slabPublicKey: string) => void;
+  /**
+   * Called when user wants to resume market creation with the stuck slab.
+   * `fromStep` is 1 when the market is initialized (need oracle/LP/insurance),
+   * or 0 when the slab exists but InitMarket didn't complete (retry from scratch).
+   */
+  onResume?: (slabPublicKey: string, fromStep: 0 | 1) => void;
 }
 
 /**
@@ -113,7 +117,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume }) => {
           {onResume && (
             <button
               type="button"
-              onClick={() => onResume(stuckSlab.publicKey.toBase58())}
+              onClick={() => onResume(stuckSlab.publicKey.toBase58(), 1)}
               className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] hover:bg-[var(--accent)]/[0.15] transition-colors"
             >
               RESUME CREATION →
@@ -175,7 +179,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume }) => {
         {onResume && (
           <button
             type="button"
-            onClick={() => onResume(stuckSlab.publicKey.toBase58())}
+            onClick={() => onResume(stuckSlab.publicKey.toBase58(), 0)}
             className="border border-[var(--warning)]/50 bg-[var(--warning)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--warning)] hover:bg-[var(--warning)]/[0.15] transition-colors"
           >
             RETRY INITIALIZATION →

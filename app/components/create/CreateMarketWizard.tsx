@@ -81,6 +81,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     mintAddress: initialMint ?? "",
   }));
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  /**
+   * PERC-513: Track which step to resume from when recovering a stuck slab.
+   * Set by onResume from RecoverSolBanner; null = fresh creation (step 0).
+   * When non-null, handleLaunch skips slab creation and resumes from this step.
+   */
+  const [resumeFromStep, setResumeFromStep] = useState<number | null>(null);
 
   // Quick launch auto-detection for parameters
   const quickMintForHook = wizard.mode === "quick" && wizard.mintAddress.length >= 32 ? wizard.mintAddress : null;
@@ -343,7 +349,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     return { oracleFeed: "0".repeat(64), priceE6 };
   };
 
-  // Launch market
+  // Launch market (or resume from a stuck slab when resumeFromStep is set)
   const handleLaunch = () => {
     if (!allValid || !publicKey) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
@@ -387,7 +393,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
       } : {}),
     };
-    create(params);
+    // PERC-513: If resuming from a stuck slab, skip slab creation (step 0).
+    // The existing slab keypair is already in slabKpRef (loaded from localStorage).
+    create(params, resumeFromStep ?? undefined);
   };
 
   // Retry from failed step
@@ -435,6 +443,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     setWizard({ ...DEFAULT_STATE });
     setCompletedSteps(new Set());
     setDevnetMintAddress(null);
+    setResumeFromStep(null);
   };
 
   // --- Render ---
@@ -500,13 +509,40 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     <div className="space-y-6 p-4 sm:p-6">
       {/* Stuck slab recovery banner */}
       <RecoverSolBanner
-        onResume={(slabAddress) => {
-          // The stuck slab's keypair is already in localStorage —
-          // useCreateMarket will pick it up. Just trigger a retry from step 1.
-          resetCreate();
-          // Start the wizard at step 1 so user can fill in parameters
+        onResume={(_slabAddress, fromStep) => {
+          // PERC-513 fix: DO NOT call resetCreate() here — that clears slabKpRef
+          // and removes the localStorage keypair, making the Continue button a no-op.
+          // The keypair is already loaded into slabKpRef by useCreateMarket's useEffect.
+          // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
+          setResumeFromStep(fromStep);
         }}
       />
+
+      {/* PERC-513: Resume mode indicator — shown when user clicked "Resume Creation" from the banner */}
+      {resumeFromStep !== null && (
+        <div className="border border-[var(--accent)]/40 bg-[var(--accent)]/[0.06] px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[var(--accent)] text-[12px]">⚡</span>
+            <span className="text-[11px] text-[var(--text-secondary)]">
+              <span className="font-semibold text-[var(--accent)]">Resume mode</span>
+              {" — "}
+              {resumeFromStep === 1
+                ? "Slab is initialized. Re-enter your parameters to complete oracle setup, LP, and insurance."
+                : "Re-enter your parameters to retry market initialization."}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setResumeFromStep(null);
+              resetCreate();
+            }}
+            className="flex-shrink-0 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)] transition-colors px-2 py-1 border border-[var(--border)]"
+          >
+            CANCEL
+          </button>
+        </div>
+      )}
 
       {/* Mode Selector */}
       <ModeSelector mode={wizard.mode} onModeChange={handleModeChange} />
