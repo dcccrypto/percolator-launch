@@ -18,12 +18,13 @@
  *
  * Environment:
  *   See config.ts for full list. Key variables:
- *   - FILLER_KEYPAIR / MAKER_KEYPAIR  — wallet paths
- *   - BOOTSTRAP_KEYPAIR               — shared wallet (fallback)
- *   - RPC_URL or HELIUS_API_KEY       — Solana RPC
- *   - SPREAD_BPS                       — half-spread for maker
- *   - CRANK_INTERVAL_MS                — crank frequency for filler
- *   - DRY_RUN=true                     — simulate without sending txs
+ *   - FILLER_KEYPAIR / MAKER_KEYPAIR      — wallet keypair file paths
+ *   - FILLER_KEYPAIR_JSON / MAKER_KEYPAIR_JSON — raw JSON array (Railway/K8s secrets)
+ *   - BOOTSTRAP_KEYPAIR / BOOTSTRAP_KEYPAIR_JSON — shared wallet (fallback)
+ *   - RPC_URL or HELIUS_API_KEY            — Solana RPC
+ *   - SPREAD_BPS                            — half-spread for maker
+ *   - CRANK_INTERVAL_MS                     — crank frequency for filler
+ *   - DRY_RUN=true                          — simulate without sending txs
  */
 
 import { Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";

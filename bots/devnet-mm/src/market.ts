@@ -17,6 +17,8 @@ import {
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
+  getAccount,
+  createAssociatedTokenAccountInstruction,
 } from "@solana/spl-token";
 import {
   encodeInitUser,
@@ -174,6 +176,51 @@ async function ensureSolBalance(
   }
 }
 
+/**
+ * Ensure a wallet's Associated Token Account (ATA) exists for the given mint.
+ * Creates it on-chain if missing. The wallet pays for the ATA rent (~0.002 SOL).
+ *
+ * This must be called before any instruction that debits the walletAta (e.g.
+ * InitUser, DepositCollateral) to avoid an InvalidTokenAccount program error.
+ */
+async function ensureWalletAta(
+  connection: Connection,
+  payer: Keypair,
+  owner: PublicKey,
+  mint: PublicKey,
+  label: string,
+  dryRun = false,
+): Promise<PublicKey> {
+  const ata = await getAssociatedTokenAddress(mint, owner);
+  try {
+    await getAccount(connection, ata);
+    return ata; // already exists
+  } catch {
+    // ATA does not exist — create it
+    log("setup", `${label}: walletAta missing — creating ATA for mint ${mint.toBase58().slice(0, 12)}...`);
+    if (dryRun) {
+      log("setup", `${label}: [DRY RUN] would create ATA ${ata.toBase58().slice(0, 16)}...`);
+      return ata;
+    }
+    const ix = createAssociatedTokenAccountInstruction(payer.publicKey, ata, owner, mint);
+    const tx = new Transaction();
+    tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
+    tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
+    tx.add(ix);
+    try {
+      const sig = await sendAndConfirmTransaction(connection, tx, [payer], {
+        commitment: "confirmed",
+        skipPreflight: false,
+      });
+      log("setup", `${label}: ✅ created ATA ${ata.toBase58().slice(0, 16)}... → ${sig.slice(0, 16)}...`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logError("setup", `${label}: failed to create ATA`, msg.slice(0, 150));
+    }
+    return ata;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Market Discovery
 // ═══════════════════════════════════════════════════════════════
@@ -218,7 +265,8 @@ export async function setupMarketAccounts(
   const mint = market.config.collateralMint;
   const programId = market.programId;
 
-  const walletAta = await getAssociatedTokenAddress(mint, wallet.publicKey);
+  // walletAta is let so ensureWalletAta can reassign after ATA creation
+  let walletAta = await getAssociatedTokenAddress(mint, wallet.publicKey);
   const [vaultPda] = deriveVaultAuthority(programId, slab);
   const vaultAta = await getAssociatedTokenAddress(mint, vaultPda, true);
 
@@ -246,6 +294,8 @@ export async function setupMarketAccounts(
   // Create LP if needed and requested
   if (!lpAccount && createLp) {
     await ensureSolBalance(connection, wallet, symbol);
+    // Ensure walletAta exists before attempting LP init (fee is debited from it)
+    walletAta = await ensureWalletAta(connection, wallet, wallet.publicKey, mint, symbol, config.dryRun);
     log("setup", `${symbol}: creating LP account...`);
     const initLpData = encodeInitLP({
       matcherProgram: config.matcherProgramId,
@@ -282,6 +332,8 @@ export async function setupMarketAccounts(
   // Create user if needed
   if (!userAccount) {
     await ensureSolBalance(connection, wallet, symbol);
+    // Ensure walletAta exists before attempting InitUser (1 USDC fee is debited from it)
+    walletAta = await ensureWalletAta(connection, wallet, wallet.publicKey, mint, symbol, config.dryRun);
     log("setup", `${symbol}: creating user account...`);
     const initUserData = encodeInitUser({ feePayment: "1000000" });
     const initUserKeys = buildAccountMetas(ACCOUNTS_INIT_USER, [
