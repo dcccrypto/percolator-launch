@@ -1,6 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
 import { NextRequest, NextResponse } from "next/server";
-import { PublicKey } from "@solana/web3.js";
 
 export const dynamic = "force-dynamic";
 
