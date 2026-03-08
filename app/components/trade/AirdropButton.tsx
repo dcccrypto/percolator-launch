@@ -79,7 +79,7 @@ export function AirdropButton({ mintAddress, symbol, isUserCreated = true }: Air
       } else if (!resp.ok) {
         setError(data.error ?? "Airdrop failed");
       } else {
-        setResult({ tokens: data.amount, nextClaimAt: data.nextClaimAt });
+        setResult({ tokens: data.amount ?? data.tokens ?? 0, nextClaimAt: data.nextClaimAt });
         setError(null);
       }
     } catch (e: any) {
@@ -108,7 +108,7 @@ export function AirdropButton({ mintAddress, symbol, isUserCreated = true }: Air
     return (
       <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--long)]/10 border border-[var(--long)]/20 text-[11px]">
         <span className="text-[var(--long)] font-medium">
-          ✓ {result.tokens.toLocaleString(undefined, { maximumFractionDigits: 2 })} {symbol} airdropped
+          ✓ {(result.tokens ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} {symbol} airdropped
         </span>
       </div>
     );
