@@ -103,11 +103,11 @@ export default function GuidePage() {
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {[
-                ["Oracle", "Admin pushes prices manually", "Live Pyth / DexScreener / Jupiter feeds"],
+                ["Oracle", "Live Pyth feeds + Hyperp EMA (oracle keeper) or admin-pushed", "Live Pyth / DexScreener / Jupiter feeds"],
                 ["Tokens", "Test tokens from faucet", "Real SPL tokens with DEX pools"],
                 ["SOL", "Free from faucet", "Real SOL"],
                 ["Risk", "Play money — test freely", "Real money at risk"],
-                ["Markets", "Anyone can create (free)", "Anyone can create (~7 SOL rent deposit)"],
+                ["Markets", "Anyone can create (free, 3 tiers)", "Anyone can create (0.44–7 SOL rent deposit)"],
               ].map(([aspect, devnet, mainnet]) => (
                 <tr key={aspect} className="transition-colors hover:bg-[var(--bg-elevated)]">
                   <td className={`${cellClass} font-medium text-white`}>{aspect}</td>
@@ -199,7 +199,7 @@ export default function GuidePage() {
         <div className="border border-[var(--accent)]/30 bg-[var(--accent)]/[0.06] px-4 py-3 text-[12px] text-[var(--accent)] leading-relaxed flex items-start gap-2">
           <span className="mt-0.5 flex-shrink-0">✦</span>
           <span>
-            The <strong>Large</strong> tier is live on devnet. <strong>Small</strong> and <strong>Medium</strong> tiers are configured and will be available once their on-chain programs are deployed (coming soon).
+            All three tiers — <strong>Small</strong>, <strong>Medium</strong>, and <strong>Large</strong> — are live on devnet. Choose the tier that matches your expected trader count and budget.
           </span>
         </div>
         <div className={`${cardClass} overflow-x-auto`}>
@@ -214,24 +214,18 @@ export default function GuidePage() {
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {[
-                ["Small", "256", "~$65 (~0.44 SOL)", "coming-soon"],
-                ["Medium", "1,024", "~$260 (~1.8 SOL)", "coming-soon"],
+                ["Small", "256", "~$65 (~0.44 SOL)", "available"],
+                ["Medium", "1,024", "~$260 (~1.8 SOL)", "available"],
                 ["Large", "4,096", "~$1,000 (~7 SOL)", "available"],
               ].map(([tier, slots, cost, status]) => (
-                <tr key={tier} className={`transition-colors hover:bg-[var(--bg-elevated)] ${status === "coming-soon" ? "opacity-50" : ""}`}>
+                <tr key={tier} className="transition-colors hover:bg-[var(--bg-elevated)]">
                   <td className={`${cellClass} font-medium text-white`}>{tier}</td>
                   <td className={`${cellClass} text-[var(--text-secondary)]`}>{slots}</td>
                   <td className={`${cellClass} text-[var(--text-secondary)]`}>{cost}</td>
                   <td className={cellClass}>
-                    {status === "available" ? (
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--accent)] border border-[var(--accent)]/30 bg-[var(--accent)]/[0.08]">
-                        Available
-                      </span>
-                    ) : (
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)] border border-[var(--border)]">
-                        Coming Soon
-                      </span>
-                    )}
+                    <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--accent)] border border-[var(--accent)]/30 bg-[var(--accent)]/[0.08]">
+                      Available
+                    </span>
                   </td>
                 </tr>
               ))}

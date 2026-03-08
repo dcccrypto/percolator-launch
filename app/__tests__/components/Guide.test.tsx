@@ -111,7 +111,7 @@ describe('Guide Page', () => {
     expect(screen.getByText('Mainnet')).toBeInTheDocument();
 
     // Check for table content
-    expect(screen.getByText(/Admin pushes prices manually/i)).toBeInTheDocument();
+    expect(screen.getByText(/Live Pyth feeds.*Hyperp EMA/i)).toBeInTheDocument();
     expect(screen.getByText(/Live Pyth \/ DexScreener \/ Jupiter feeds/i)).toBeInTheDocument();
     expect(screen.getByText(/Test tokens from faucet/i)).toBeInTheDocument();
     expect(screen.getByText(/Real SPL tokens with DEX pools/i)).toBeInTheDocument();
