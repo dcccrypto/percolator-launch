@@ -57,6 +57,10 @@ config/sim-bot-wallets.json
 # Slab reinit — ephemeral new keypairs (devnet only, never commit)
 new-slab-keypair-*.json
 
+# Compiled Solana program binaries — build from source, never deploy from these
+deploy-artifacts/*.so
+*.so
+
 Percolator-Deck-Final.pdf
 Percolator-Deck-v2.pdf
 Percolator-Pitch-Deck.pdf
