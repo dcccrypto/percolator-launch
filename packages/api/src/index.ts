@@ -88,7 +88,7 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// IP Blocklist Middleware — runs first, before rate-limiting and auth.
+// IP Blocklist Middleware — runs after CORS, before rate-limiting and auth.
 // Configure via IP_BLOCKLIST env var (comma-separated IPs or CIDRs).
 // Example: IP_BLOCKLIST=88.97.223.158,10.0.0.0/8
 app.use("*", ipBlocklist());
