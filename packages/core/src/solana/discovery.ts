@@ -48,20 +48,22 @@ const MAGIC_BYTES = new Uint8Array([0x54, 0x41, 0x4c, 0x4f, 0x43, 0x52, 0x45, 0x
  *       RiskEngine grew by 32 bytes (PERC-298: long_oi + short_oi) + 24 (PERC-299: emergency OI).
  *       Values below must be verified against BPF build before deployment.
  */
-// V0 sizes (deployed devnet program: HEADER=72, CONFIG=408, ENGINE_OFF=480, ACCOUNT_SIZE=240)
-// V1 sizes (future upgrade: HEADER=104, CONFIG=536, ENGINE_OFF=640, ACCOUNT_SIZE=248)
+// V1 sizes (deployed devnet program: HEADER=104, CONFIG=536, ENGINE_OFF=640, ACCOUNT_SIZE=248)
 export const SLAB_TIERS = {
+  small:  { maxAccounts: 256,  dataSize: 65_352,    label: "Small",  description: "256 slots · ~0.45 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 257_448,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
+  large:  { maxAccounts: 4096, dataSize: 1_025_832, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
+} as const;
+
+/** @deprecated V0 slab sizes — kept for backward compatibility with old on-chain slabs */
+export const SLAB_TIERS_V0 = {
   small:  { maxAccounts: 256,  dataSize: 62_808,    label: "Small",  description: "256 slots · ~0.44 SOL" },
   medium: { maxAccounts: 1024, dataSize: 248_760,   label: "Medium", description: "1,024 slots · ~1.73 SOL" },
   large:  { maxAccounts: 4096, dataSize: 992_568,   label: "Large",  description: "4,096 slots · ~6.90 SOL" },
 } as const;
 
-/** V1 slab tier sizes (for use when program is upgraded to V1 layout) */
-export const SLAB_TIERS_V1 = {
-  small:  { maxAccounts: 256,  dataSize: 65_352,    label: "Small",  description: "256 slots · ~0.45 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 257_448,   label: "Medium", description: "1,024 slots · ~1.79 SOL" },
-  large:  { maxAccounts: 4096, dataSize: 1_025_832, label: "Large",  description: "4,096 slots · ~7.14 SOL" },
-} as const;
+/** @deprecated Alias — use SLAB_TIERS (already V1) */
+export const SLAB_TIERS_V1 = SLAB_TIERS;
 
 export type SlabTierKey = keyof typeof SLAB_TIERS;
 
@@ -119,7 +121,7 @@ export function validateSlabTierMatch(dataSize: number, programSlabLen: number):
 /** All known slab data sizes for discovery (V0 + V1 tiers) */
 const ALL_SLAB_SIZES = [
   ...Object.values(SLAB_TIERS).map(t => t.dataSize),
-  ...Object.values(SLAB_TIERS_V1).map(t => t.dataSize),
+  ...Object.values(SLAB_TIERS_V0).map(t => t.dataSize),
 ];
 
 /** Legacy constant for backward compat */
@@ -295,7 +297,7 @@ export async function discoverMarkets(
   // and pass that layout to all parse functions (avoids wrong-version offsets on partial slices).
   const ALL_TIERS = [
     ...Object.values(SLAB_TIERS),
-    ...Object.values(SLAB_TIERS_V1),
+    ...Object.values(SLAB_TIERS_V0),
   ];
   type RawEntry = { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number; dataSize: number };
   let rawAccounts: RawEntry[] = [];

@@ -1525,15 +1525,16 @@ async function fetchTokenAccount(connection, address, tokenProgramId = TOKEN_PRO
 var ENGINE_BITMAP_OFF_V0 = 320;
 var MAGIC_BYTES = new Uint8Array([84, 65, 76, 79, 67, 82, 69, 80]);
 var SLAB_TIERS = {
-  small: { maxAccounts: 256, dataSize: 62808, label: "Small", description: "256 slots \xB7 ~0.44 SOL" },
-  medium: { maxAccounts: 1024, dataSize: 248760, label: "Medium", description: "1,024 slots \xB7 ~1.73 SOL" },
-  large: { maxAccounts: 4096, dataSize: 992568, label: "Large", description: "4,096 slots \xB7 ~6.90 SOL" }
-};
-var SLAB_TIERS_V1 = {
   small: { maxAccounts: 256, dataSize: 65352, label: "Small", description: "256 slots \xB7 ~0.45 SOL" },
   medium: { maxAccounts: 1024, dataSize: 257448, label: "Medium", description: "1,024 slots \xB7 ~1.79 SOL" },
   large: { maxAccounts: 4096, dataSize: 1025832, label: "Large", description: "4,096 slots \xB7 ~7.14 SOL" }
 };
+var SLAB_TIERS_V0 = {
+  small: { maxAccounts: 256, dataSize: 62808, label: "Small", description: "256 slots \xB7 ~0.44 SOL" },
+  medium: { maxAccounts: 1024, dataSize: 248760, label: "Medium", description: "1,024 slots \xB7 ~1.73 SOL" },
+  large: { maxAccounts: 4096, dataSize: 992568, label: "Large", description: "4,096 slots \xB7 ~6.90 SOL" }
+};
+var SLAB_TIERS_V1 = SLAB_TIERS;
 function slabDataSize(maxAccounts) {
   const ENGINE_OFF_V0 = 480;
   const ENGINE_BITMAP_OFF_V02 = 320;
@@ -1561,7 +1562,7 @@ function validateSlabTierMatch(dataSize, programSlabLen) {
 }
 var ALL_SLAB_SIZES = [
   ...Object.values(SLAB_TIERS).map((t) => t.dataSize),
-  ...Object.values(SLAB_TIERS_V1).map((t) => t.dataSize)
+  ...Object.values(SLAB_TIERS_V0).map((t) => t.dataSize)
 ];
 var SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 var HEADER_SLICE_LENGTH = 1940;
@@ -1686,7 +1687,7 @@ function parseEngineLight(data, layout, maxAccounts = 4096) {
 async function discoverMarkets(connection, programId) {
   const ALL_TIERS = [
     ...Object.values(SLAB_TIERS),
-    ...Object.values(SLAB_TIERS_V1)
+    ...Object.values(SLAB_TIERS_V0)
   ];
   let rawAccounts = [];
   try {
@@ -2928,6 +2929,7 @@ export {
   RAMP_START_BPS,
   RAYDIUM_CLMM_PROGRAM_ID,
   SLAB_TIERS,
+  SLAB_TIERS_V0,
   SLAB_TIERS_V1,
   STAKE_IX,
   STAKE_POOL_SIZE,
