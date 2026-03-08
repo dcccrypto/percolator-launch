@@ -40,6 +40,16 @@ vi.mock("@/hooks/useCloseMarket", () => ({
   }),
 }));
 
+const mockReclaim = vi.fn();
+vi.mock("@/hooks/useReclaimSlabRent", () => ({
+  useReclaimSlabRent: () => ({
+    status: "idle",
+    error: null,
+    txSig: null,
+    reclaim: mockReclaim,
+  }),
+}));
+
 // ─── Helpers ───
 
 function makeStuckSlab(overrides: Partial<typeof mockStuckSlab & object> = {}) {
@@ -100,9 +110,18 @@ describe("RecoverSolBanner", () => {
     mockStuckSlab = makeStuckSlab({ isInitialized: false, exists: true });
     const onResume = vi.fn();
     render(<RecoverSolBanner onResume={onResume} />);
-    expect(screen.getByText(/Stuck Slab Account Detected/i)).toBeDefined();
+    // PERC-511: banner text updated to reflect recoverability
+    expect(screen.getByText(/Stuck Slab — SOL Recoverable/i)).toBeDefined();
+    expect(screen.getByRole("button", { name: /RECLAIM/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /RETRY INITIALIZATION/i })).toBeDefined();
     expect(screen.getByText(/VIEW ON EXPLORER/i)).toBeDefined();
+  });
+
+  it("calls reclaim with slab keypair when Reclaim SOL clicked", () => {
+    mockStuckSlab = makeStuckSlab({ isInitialized: false, exists: true });
+    render(<RecoverSolBanner />);
+    fireEvent.click(screen.getByRole("button", { name: /RECLAIM/i }));
+    expect(mockReclaim).toHaveBeenCalledWith(mockStuckSlab!.keypair);
   });
 
   it("calls onResume with slab address and fromStep=1 when resume clicked on initialized slab", () => {
