@@ -13,6 +13,7 @@ import {
   ComputeBudgetProgram,
   sendAndConfirmTransaction,
   SYSVAR_CLOCK_PUBKEY,
+  LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -130,8 +131,46 @@ async function sendTx(
     return sig;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    logError("tx", label, msg.slice(0, 150));
+    // Extract custom program error code if present
+    const customMatch = msg.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
+    const instrMatch = msg.match(/InstructionError.*?Custom\((\d+)\)/);
+    const errorDetail = customMatch
+      ? `Custom error 0x${customMatch[1]} (${parseInt(customMatch[1], 16)})`
+      : instrMatch
+        ? `Custom error ${instrMatch[1]} (0x${Number(instrMatch[1]).toString(16)})`
+        : null;
+    logError("tx", label, errorDetail ? `${errorDetail} — ${msg.slice(0, 200)}` : msg.slice(0, 300));
     return null;
+  }
+}
+
+/**
+ * Ensure wallet has enough SOL for transactions. On devnet, attempt airdrop if low.
+ * Returns true if balance is sufficient, false if critically low and airdrop failed.
+ */
+const MIN_SOL_FOR_TX = 0.01;
+const AIRDROP_SOL = 1;
+
+async function ensureSolBalance(
+  connection: Connection,
+  wallet: Keypair,
+  label: string,
+): Promise<boolean> {
+  const balance = await connection.getBalance(wallet.publicKey);
+  const balSol = balance / LAMPORTS_PER_SOL;
+  if (balSol >= MIN_SOL_FOR_TX) return true;
+
+  log("setup", `${label}: wallet ${wallet.publicKey.toBase58().slice(0, 12)}... has ${balSol.toFixed(4)} SOL — attempting devnet airdrop`);
+  try {
+    const sig = await connection.requestAirdrop(wallet.publicKey, AIRDROP_SOL * LAMPORTS_PER_SOL);
+    await connection.confirmTransaction(sig, "confirmed");
+    const newBal = await connection.getBalance(wallet.publicKey);
+    log("setup", `${label}: airdrop OK — now ${(newBal / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logError("setup", `${label}: airdrop failed (${msg.slice(0, 100)}) — wallet has ${balSol.toFixed(4)} SOL, InitUser/InitLP will likely fail`);
+    return false;
   }
 }
 
@@ -206,6 +245,7 @@ export async function setupMarketAccounts(
 
   // Create LP if needed and requested
   if (!lpAccount && createLp) {
+    await ensureSolBalance(connection, wallet, symbol);
     log("setup", `${symbol}: creating LP account...`);
     const initLpData = encodeInitLP({
       matcherProgram: config.matcherProgramId,
@@ -241,6 +281,7 @@ export async function setupMarketAccounts(
 
   // Create user if needed
   if (!userAccount) {
+    await ensureSolBalance(connection, wallet, symbol);
     log("setup", `${symbol}: creating user account...`);
     const initUserData = encodeInitUser({ feePayment: "1000000" });
     const initUserKeys = buildAccountMetas(ACCOUNTS_INIT_USER, [
