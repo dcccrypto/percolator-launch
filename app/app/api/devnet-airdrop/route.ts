@@ -336,8 +336,16 @@ export async function POST(req: NextRequest) {
       mintSucceeded = true;
     } finally {
       // Release the claim slot on ANY failure so user isn't locked out 24h.
+      // Wrapped in try/catch so a releaseClaim() throw doesn't mask the original
+      // mint error and lose its stack trace from Sentry.
       if (!mintSucceeded && claimId !== undefined) {
-        await releaseClaim(supabase, claimId);
+        try {
+          await releaseClaim(supabase, claimId);
+        } catch (releaseErr) {
+          Sentry.captureException(releaseErr, {
+            tags: { endpoint: "/api/devnet-airdrop", step: "release_claim_finally" },
+          });
+        }
       }
     }
 
