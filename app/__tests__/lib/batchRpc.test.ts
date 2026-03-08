@@ -129,6 +129,7 @@ describe("createBatchRpc", () => {
       callCount++;
       if (callCount <= 2) {
         return {
+          ok: false,
           status: 429,
           headers: new Headers({ "Retry-After": "1" }),
           text: async () => "rate limited",
