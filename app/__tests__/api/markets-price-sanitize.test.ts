@@ -6,8 +6,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock Sentry
-vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
+// Mock Sentry (must include all methods called in route — captureMessage is used by sanitizePrice)
+vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn(), captureMessage: vi.fn() }));
 
 // Mock config
 vi.mock("@/lib/config", () => ({

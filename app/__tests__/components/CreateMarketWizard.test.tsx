@@ -16,6 +16,13 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+// Mock next/navigation — LaunchSuccess calls useRouter() for post-mint navigation
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 // Mock LogoUpload
 vi.mock("@/components/create/LogoUpload", () => ({
   LogoUpload: () => <div data-testid="logo-upload" />,
