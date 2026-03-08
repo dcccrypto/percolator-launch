@@ -561,6 +561,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     <div className="space-y-6 p-4 sm:p-6">
       {/* Stuck slab recovery banner */}
       <RecoverSolBanner
+        onReset={handleReset}
         onResume={(_slabAddress, fromStep) => {
           // PERC-513 fix: DO NOT call resetCreate() here — that clears slabKpRef
           // and removes the localStorage keypair, making the Continue button a no-op.

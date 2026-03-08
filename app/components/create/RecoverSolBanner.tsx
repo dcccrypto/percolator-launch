@@ -12,6 +12,8 @@ interface RecoverSolBannerProps {
    * or 0 when the slab exists but InitMarket didn't complete (retry from scratch).
    */
   onResume?: (slabPublicKey: string, fromStep: 0 | 1) => void;
+  /** Called when user clicks "Clear & Start Fresh" or "Discard & Start New" to reset the wizard. */
+  onReset?: () => void;
 }
 
 /**
@@ -25,7 +27,7 @@ interface RecoverSolBannerProps {
  * With the atomic createAccount + InitMarket flow, scenario 2 is extremely rare —
  * it would only happen if the tx landed on-chain but the client lost the confirmation.
  */
-export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume }) => {
+export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset }) => {
   const { stuckSlab, loading, clearStuck, refresh } = useStuckSlabs();
   const { closeSlab, loading: closeLoading, error: closeError } = useCloseMarket();
   const [dismissed, setDismissed] = useState(false);
@@ -72,6 +74,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume }) => {
           type="button"
           onClick={() => {
             clearStuck();
+            onReset?.();
             setDismissed(true);
           }}
           className="mt-3 border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--text)] transition-colors"
@@ -164,6 +167,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume }) => {
             type="button"
             onClick={() => {
               clearStuck();
+              onReset?.();
               setDismissed(true);
             }}
             className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--text)] transition-colors"
@@ -178,7 +182,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume }) => {
   // Account exists but NOT initialized — slab is program-owned but uninitialised (magic = 0).
   // PERC-511: We can now reclaim the SOL via the ReclaimSlabRent instruction (tag 52).
   // The slab keypair signs the tx to prove ownership.
-  return <UninitialisedSlabBanner stuckSlab={stuckSlab} onResume={onResume} clearStuck={clearStuck} />;
+  return <UninitialisedSlabBanner stuckSlab={stuckSlab} onResume={onResume} clearStuck={clearStuck} onReset={onReset} />;
 };
 
 /** Sub-component: handles the uninitialised slab case with ReclaimSlabRent. */
@@ -186,7 +190,8 @@ const UninitialisedSlabBanner: FC<{
   stuckSlab: StuckSlab;
   onResume?: (slabPublicKey: string, fromStep: 0 | 1) => void;
   clearStuck: () => void;
-}> = ({ stuckSlab, onResume, clearStuck }) => {
+  onReset?: () => void;
+}> = ({ stuckSlab, onResume, clearStuck, onReset }) => {
   const { status, error: reclaimError, txSig, reclaim } = useReclaimSlabRent();
   const [dismissed, setDismissed] = useState(false);
 
@@ -226,6 +231,7 @@ const UninitialisedSlabBanner: FC<{
           type="button"
           onClick={() => {
             clearStuck();
+            onReset?.();
             setDismissed(true);
           }}
           className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
@@ -300,6 +306,7 @@ const UninitialisedSlabBanner: FC<{
           disabled={isSending}
           onClick={() => {
             clearStuck();
+            onReset?.();
             setDismissed(true);
           }}
           className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--text)] transition-colors disabled:opacity-50"
