@@ -1,3 +1,4 @@
+import { PublicKey } from "@solana/web3.js";
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 
@@ -99,7 +100,9 @@ export async function GET(
 ) {
   const { mint } = await params;
 
-  // Validate mint is a valid Solana pubkey via PublicKey decode (matches pattern in markets/[slab]/route.ts)
+  // Validate mint is a properly decodable Solana public key.
+  // PublicKey constructor ensures the bytes decode to a valid 32-byte point,
+  // not just a base58-alphabet string. Matches /api/markets/[slab]/route.ts.
   try {
     if (!mint) throw new Error("missing");
     new PublicKey(mint);
