@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PublicKey } from "@solana/web3.js";
 
 export const dynamic = "force-dynamic";
 
@@ -98,8 +99,11 @@ export async function GET(
 ) {
   const { mint } = await params;
 
-  // Validate mint is a valid base58 Solana pubkey (32–44 chars, base58 alphabet only)
-  if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
+  // Validate mint is a valid Solana pubkey via PublicKey decode (matches pattern in markets/[slab]/route.ts)
+  try {
+    if (!mint) throw new Error("missing");
+    new PublicKey(mint);
+  } catch {
     return NextResponse.json({ error: "Invalid mint address" }, { status: 400 });
   }
 
