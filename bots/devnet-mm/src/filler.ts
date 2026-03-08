@@ -212,10 +212,13 @@ export class FillerBot {
               this.stats.crankFailed++;
               logError("filler", `Crank failed: ${state.market.symbol}`, e);
 
-              // Detect NotInitialized error — permanently skip
+              // InvalidSlabLen (0x4) — slab has wrong on-chain size for this program binary.
+              // Permanently skip: cranking will always fail until the slab is reinit'd.
+              // After reinit (reinit-slab.ts), restart the bot to discover the new slab address.
               const msg = e instanceof Error ? e.message : String(e);
               if (msg.includes("custom program error: 0x4")) {
                 state.permanentlySkipped = true;
+                logError("filler", `${state.market.symbol}: InvalidSlabLen (0x4) — slab needs reinit, skipping permanently`, e);
               }
             }
           }),

@@ -94,12 +94,25 @@ function loadKeypair(path: string): Keypair {
 
 /**
  * Determine which SLAB_TIERS key best matches a given data size.
- * Prefers exact match; falls back to closest (for legacy undersized slabs).
+ * Checks current tier sizes first, then V1 legacy sizes (which map to the same
+ * tier key — e.g. V1 small → reinit as current small).
+ * Returns null if no match found.
  */
 function detectTierFromSize(dataSize: number): keyof typeof SLAB_TIERS | null {
-  // Exact match first
+  // Exact match against current (v0/v2) tier sizes
   for (const [key, tier] of Object.entries(SLAB_TIERS)) {
     if (tier.dataSize === dataSize) return key as keyof typeof SLAB_TIERS;
+  }
+  // V1 legacy sizes — map each V1 size to its equivalent current tier key
+  // V1: small=65_352, medium=257_448, large=1_025_832
+  const V1_SIZE_TO_TIER: Record<number, keyof typeof SLAB_TIERS> = {
+    65_352:    "small",
+    257_448:   "medium",
+    1_025_832: "large",
+  };
+  if (V1_SIZE_TO_TIER[dataSize] !== undefined) {
+    console.log(`  Note: V1 legacy size detected (${dataSize} bytes → ${V1_SIZE_TO_TIER[dataSize]} tier). Will reinit to current size.`);
+    return V1_SIZE_TO_TIER[dataSize];
   }
   // Return null — caller will fall back to --tier flag or heuristic
   return null;
@@ -121,11 +134,16 @@ const PRIORITY_FEE = 50_000;
  * Devnet program IDs → slab tier.
  * Allows auto-detecting the intended tier from the program owner even when
  * the slab has a wrong/legacy size (which breaks size-based detection).
+ *
+ * Source of truth: app/scripts/deploy-all-tiers.ts
+ *   Small  (256 slots,  62_808 bytes): FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD
+ *   Medium (1024 slots, 248_760 bytes): FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn
+ *   Large  (4096 slots, 992_568 bytes): g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in
  */
 const PROGRAM_TO_TIER: Record<string, keyof typeof SLAB_TIERS> = {
-  "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn": "small",   // 256 slots
-  "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in":  "medium",  // 1024 slots
-  "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD": "large",   // 4096 slots
+  "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD": "small",   // 256 slots  (~0.44 SOL)
+  "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn": "medium",  // 1024 slots (~1.73 SOL)
+  "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in":  "large",   // 4096 slots (~6.90 SOL)
 };
 
 // ============================================================================
@@ -183,7 +201,17 @@ async function main() {
   console.log(`  Owner program: ${PROGRAM_ID.toBase58()}`);
   console.log(`  On-chain size: ${dataSize} bytes`);
 
-  // Detect tier: --tier flag > exact size match > owner program ID > heuristic
+  // Detect tier: --tier flag > owner program ID > exact current-size match > heuristic
+  //
+  // Priority rationale:
+  //  1. --tier flag is explicit — always wins.
+  //  2. Program owner is the most reliable source: the program's compiled SLAB_LEN
+  //     determines what slab size is ACCEPTED. A 65352-byte V1-small slab under
+  //     FwfBKZXb... (medium program) must be reinitialised as medium (248760 bytes).
+  //     Size-based detection would wrongly pick "small" for V1 legacy slabs, which
+  //     still won't match the medium program binary.
+  //  3. Exact size match (current SLAB_TIERS) — only used if program not in the map.
+  //  4. Heuristic — last resort.
   const detectedTier = detectTierFromSize(dataSize);
   const argTier = args.tier as keyof typeof SLAB_TIERS | undefined;
   const programTier = PROGRAM_TO_TIER[PROGRAM_ID.toBase58()];
@@ -197,12 +225,16 @@ async function main() {
   } else if (argTier && SLAB_TIERS[argTier]) {
     targetTier = argTier;
     console.log(`  Tier:          ${targetTier} (from --tier flag)`);
-  } else if (detectedTier) {
-    targetTier = detectedTier;
-    console.log(`  Tier:          ${targetTier} (exact size match)`);
   } else if (programTier) {
     targetTier = programTier;
-    console.log(`  Tier:          ${targetTier} (inferred from owner program — broken size)`);
+    console.log(`  Tier:          ${targetTier} (from owner program — authoritative)`);
+    if (detectedTier && detectedTier !== programTier) {
+      console.log(`  Note: size-based detection suggested "${detectedTier}" but program-based is preferred.`);
+      console.log(`        Use --tier ${detectedTier} to override if you know the program was recompiled.`);
+    }
+  } else if (detectedTier) {
+    targetTier = detectedTier;
+    console.log(`  Tier:          ${targetTier} (exact size match — program not in known-program map)`);
   } else {
     targetTier = heuristicTier(dataSize);
     console.log(`  Tier:          ${targetTier} (heuristic fallback — unknown program owner)`);
