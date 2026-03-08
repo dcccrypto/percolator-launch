@@ -1,5 +1,5 @@
 import { Connection, PublicKey, type ParsedTransactionWithMeta } from "@solana/web3.js";
-import { IX_TAG, ENGINE_OFF, ENGINE_MARK_PRICE_OFF } from "@percolator/sdk";
+import { IX_TAG, detectSlabLayout } from "@percolator/sdk";
 import { config, getConnection, insertTrade, tradeExistsBySignature, getMarkets, eventBus, decodeBase58, readU128LE, parseTradeSize, withRetry, createLogger, captureException, addBreadcrumb } from "@percolator/shared";
 
 const logger = createLogger("indexer:trade-indexer");
@@ -357,9 +357,17 @@ export class TradeIndexerPolling {
   private async readMarkPriceFromSlab(connection: Connection, slabAddress: string): Promise<number> {
     try {
       const info = await connection.getAccountInfo(new PublicKey(slabAddress));
-      if (!info?.data || info.data.length < ENGINE_OFF + ENGINE_MARK_PRICE_OFF + 8) return 0;
+      if (!info?.data) return 0;
 
-      const off = ENGINE_OFF + ENGINE_MARK_PRICE_OFF;
+      // Auto-detect V0 vs V1 layout from the actual slab data length.
+      // V0 (deployed devnet): ENGINE_OFF=480, no mark_price field (engineMarkPriceOff=-1).
+      // V1 (future upgrade): ENGINE_OFF=640, mark_price at +400.
+      const layout = detectSlabLayout(info.data.length);
+      if (!layout || layout.engineMarkPriceOff < 0) return 0; // V0 has no mark_price
+
+      const off = layout.engineOff + layout.engineMarkPriceOff;
+      if (info.data.length < off + 8) return 0;
+
       const dv = new DataView(info.data.buffer, info.data.byteOffset, info.data.byteLength);
       const markPriceE6 = dv.getBigUint64(off, true);
 

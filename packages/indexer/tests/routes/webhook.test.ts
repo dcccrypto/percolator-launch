@@ -2,8 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@percolator/sdk', () => ({
   IX_TAG: { TradeNoCpi: 10, TradeCpi: 11 },
-  ENGINE_OFF: 8,
-  ENGINE_MARK_PRICE_OFF: 1032,
+  // detectSlabLayout: returns a V1-style layout so engineOff + engineMarkPriceOff = 1040,
+  // matching the mock slab buffers built in tests below.
+  detectSlabLayout: vi.fn((dataLen: number) => {
+    if (dataLen < 8) return null; // too small
+    return { version: 1, engineOff: 640, engineMarkPriceOff: 400, engineBitmapOff: 656 };
+  }),
 }));
 
 vi.mock('@percolator/shared', () => ({

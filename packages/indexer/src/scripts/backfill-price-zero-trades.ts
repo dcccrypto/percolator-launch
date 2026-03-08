@@ -8,7 +8,8 @@
  * 1. Fetch all trades WHERE price = 0 AND tx_signature IS NOT NULL
  * 2. Batch-request Helius Parse Transactions API (up to 100 sigs per call)
  * 3. Extract mark_price_e6 from slab account post-state data (same logic as
- *    the PERC-421 webhook fix: ENGINE_OFF=640 + ENGINE_MARK_PRICE_OFF=400)
+ *    the PERC-421 webhook fix, auto-detecting V0/V1 layout from data length;
+ *    V0 slabs have no mark_price field; V1: ENGINE_OFF=640 + ENGINE_MARK_PRICE_OFF=400)
  * 4. UPDATE trades SET price = <recovered> WHERE id = <id>
  * 5. Print a summary (fixed / skipped / failed)
  *
@@ -22,11 +23,7 @@
 
 import { getSupabase } from "@percolator/shared";
 import { config } from "@percolator/shared";
-
-// Slab layout constants (from packages/core/src/solana/slab.ts)
-const ENGINE_OFF = 640;
-const ENGINE_MARK_PRICE_OFF = 400;
-const MARK_PRICE_OFFSET = ENGINE_OFF + ENGINE_MARK_PRICE_OFF; // 1040
+import { detectSlabLayout } from "@percolator/sdk";
 
 // Helius Parse Transactions batch limit
 const HELIUS_BATCH_SIZE = 100;
@@ -77,10 +74,17 @@ function extractPriceFromAccountData(tx: any, slabAddress: string): number {
     }
     if (!raw) continue;
 
-    if (raw.length < MARK_PRICE_OFFSET + 8) continue;
+    // Auto-detect V0 vs V1 layout from the actual slab data length.
+    // V0 (deployed devnet): ENGINE_OFF=480, no mark_price field (engineMarkPriceOff=-1).
+    // V1 (future upgrade): ENGINE_OFF=640, mark_price at ENGINE_OFF+400=1040.
+    const layout = detectSlabLayout(raw.length);
+    if (!layout || layout.engineMarkPriceOff < 0) continue; // V0 has no mark_price
+
+    const markPriceOffset = layout.engineOff + layout.engineMarkPriceOff;
+    if (raw.length < markPriceOffset + 8) continue;
 
     const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
-    const markPriceE6 = dv.getBigUint64(MARK_PRICE_OFFSET, true);
+    const markPriceE6 = dv.getBigUint64(markPriceOffset, true);
 
     // Sanity range: $0.001 → $1 000 000 (in e6 units)
     if (markPriceE6 > 0n && markPriceE6 < 1_000_000_000_000n) {

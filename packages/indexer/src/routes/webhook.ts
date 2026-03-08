@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { IX_TAG, ENGINE_OFF, ENGINE_MARK_PRICE_OFF } from "@percolator/sdk";
+import { IX_TAG, detectSlabLayout } from "@percolator/sdk";
 import { config, insertTrade, eventBus, decodeBase58, readU128LE, parseTradeSize, createLogger } from "@percolator/shared";
 
 const logger = createLogger("indexer:webhook");
@@ -220,8 +220,13 @@ function extractPriceFromAccountData(tx: any, slabAddress: string): number {
     }
     if (!raw) continue;
 
-    // mark_price_e6 is a u64 at ENGINE_OFF + ENGINE_MARK_PRICE_OFF
-    const off = ENGINE_OFF + ENGINE_MARK_PRICE_OFF;
+    // Auto-detect V0 vs V1 layout from the actual slab data length.
+    // V0 (deployed devnet): ENGINE_OFF=480, no mark_price field (engineMarkPriceOff=-1).
+    // V1 (future upgrade): ENGINE_OFF=640, mark_price at +400.
+    const layout = detectSlabLayout(raw.length);
+    if (!layout || layout.engineMarkPriceOff < 0) continue; // V0 has no mark_price
+
+    const off = layout.engineOff + layout.engineMarkPriceOff;
     if (raw.length < off + 8) continue;
 
     const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
