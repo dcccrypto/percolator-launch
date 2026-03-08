@@ -98,7 +98,8 @@ export async function GET(
 ) {
   const { mint } = await params;
 
-  if (!mint || mint.length < 32) {
+  // Validate mint is a valid base58 Solana pubkey (32–44 chars, base58 alphabet only)
+  if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
     return NextResponse.json({ error: "Invalid mint address" }, { status: 400 });
   }
 
@@ -133,10 +134,14 @@ export async function GET(
   // Cache result
   cache.set(cacheKey, { candles, poolAddress, fetchedAt: Date.now() });
 
-  // Prune old cache entries (keep max 100)
+  // Prune old cache entries (keep max 100, evict 10 oldest to prevent gradual growth)
   if (cache.size > 100) {
-    const firstKey = cache.keys().next().value;
-    if (firstKey) cache.delete(firstKey);
+    const keys = cache.keys();
+    for (let i = 0; i < 10; i++) {
+      const k = keys.next();
+      if (k.done) break;
+      cache.delete(k.value);
+    }
   }
 
   return NextResponse.json(
