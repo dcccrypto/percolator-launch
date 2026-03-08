@@ -23,6 +23,19 @@ import { SlabTierPicker } from "./SlabTierPicker";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 import { useToast } from "@/hooks/useToast";
 
+/**
+ * PERC-509: Small and Medium slab programs on devnet have not been redeployed
+ * after the slab struct layout change (120-byte discrepancy vs SDK SLAB_TIERS).
+ * Only the Large program is confirmed working on devnet.
+ * Use "large" as the default Quick mode tier on devnet until small/medium are redeployed.
+ */
+function getDefaultQuickTier(): SlabTierKey {
+  try {
+    if (getNetwork() === "devnet") return "large";
+  } catch { /* SSR safe */ }
+  return "small";
+}
+
 type WizardStep = 1 | 2 | 3 | 4;
 
 interface WizardState {
@@ -56,9 +69,10 @@ const DEFAULT_STATE: WizardState = {
   oracleFeed: "",
   dexPool: null,
   pythFeed: null,
-  // Quick mode defaults to small — cheapest tier for quick testing.
-  // Manual mode users can choose their own tier (defaults to large in the picker).
-  slabTier: "small",
+  // PERC-509: Quick mode defaults to "large" on devnet — small/medium programs are
+  // outdated (120-byte slab struct discrepancy) and trigger InvalidSlabLen on-chain.
+  // On mainnet, "small" remains the cheapest entry point.
+  slabTier: getDefaultQuickTier(),
   tradingFeeBps: 30,
   initialMarginBps: 1000,
   lpCollateral: "",
@@ -249,7 +263,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         dexPool: null,
         pythFeed: null,
         // Reset slab tier to mode-appropriate default
-        slabTier: mode === "quick" ? "small" : "large",
+        // PERC-509: Use "large" in quick mode on devnet (small/medium programs need redeployment)
+        slabTier: mode === "quick" ? getDefaultQuickTier() : "large",
       }));
     },
     []

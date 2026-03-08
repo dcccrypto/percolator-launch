@@ -5,18 +5,41 @@
  */
 
 // Percolator program custom error codes (from percolator-prog/src/percolator.rs)
+// Error codes are the 0-indexed ordinal of each variant in the PercolatorError enum.
+// WARNING: This mapping MUST stay in sync with the enum in percolator-prog/src/percolator.rs.
+// Run `grep -n 'pub enum PercolatorError' percolator-prog/src/percolator.rs` if unsure.
 const PERCOLATOR_ERRORS: Record<number, string> = {
-  0: "Market is already initialized. Cannot re-initialize.",
-  1: "Market is not initialized. The slab account may be corrupted.",
-  2: "Invalid slab length. The account size doesn't match the program.",
-  3: "Account not found in the market.",
-  4: "Insufficient balance to complete this operation.",
-  5: "Math overflow — values are too large.",
-  6: "Margin requirement not met. Increase collateral.",
-  7: "Invalid version — program upgrade may be needed.",
-  8: "Insufficient seed deposit. The vault needs at least 500 USDC before market initialization.",
-  9: "Market is paused by admin.",
-  10: "Oracle price is invalid or stale.",
+  0:  "Invalid magic bytes — the slab account is not a Percolator market.",
+  1:  "Invalid program version — a program upgrade may be required.",
+  2:  "Market is already initialized. Cannot re-initialize.",
+  3:  "Market is not initialized. The slab account may be corrupted.",
+  4:  "Invalid slab length — the account size doesn't match the compiled program. " +
+      "On devnet, try using the Large slab tier (Small/Medium programs may need redeployment).",
+  5:  "Invalid oracle key.",
+  6:  "Oracle price is stale.",
+  7:  "Oracle confidence too wide.",
+  8:  "Invalid vault ATA — the vault's token account does not match the expected address.",
+  9:  "Invalid mint — the collateral mint does not match.",
+  10: "Expected a signer account.",
+  11: "Expected a writable account.",
+  12: "Oracle price is invalid.",
+  13: "Insufficient balance to complete this operation.",
+  14: "Position is undercollateralized.",
+  15: "Unauthorized — caller is not the admin or oracle authority.",
+  16: "Invalid matching engine.",
+  17: "PnL not warmed up — wait for the warmup period to complete.",
+  18: "Math overflow — values are too large.",
+  19: "Account not found in the market.",
+  20: "Account is not an LP account.",
+  21: "Position size mismatch.",
+  22: "Risk reduction only mode — no new positions allowed.",
+  23: "Account kind mismatch.",
+  24: "Invalid token account.",
+  25: "Invalid token program.",
+  26: "Invalid config parameter.",
+  33: "Market is paused by admin.",
+  36: "Insufficient seed deposit. The vault needs at least 500 tokens before market initialization.",
+  37: "Insufficient DEX liquidity — the pool does not have enough reserves for a safe Hyperp oracle.",
 };
 
 export function parseMarketCreationError(error: unknown): string {
