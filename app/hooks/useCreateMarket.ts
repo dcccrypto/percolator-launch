@@ -478,7 +478,10 @@ export function useCreateMarket() {
                     wallet.publicKey,
                     Math.max(2_000_000_000, minSolRequired - solBalance + 500_000_000),
                   );
-                  await connection.confirmTransaction(airdropSig, "confirmed");
+                  const airdropConfirm = await connection.confirmTransaction(airdropSig, "confirmed");
+                  if (airdropConfirm.value.err) {
+                    throw new Error(`Airdrop transaction failed on-chain: ${JSON.stringify(airdropConfirm.value.err)}`);
+                  }
                   setState((s) => ({ ...s, stepLabel: STEP_LABELS[0] }));
                 } catch (airdropErr) {
                   throw new Error(

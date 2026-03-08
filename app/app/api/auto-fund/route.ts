@@ -96,7 +96,10 @@ export async function POST(req: NextRequest) {
     if (balance < MIN_SOL_BALANCE) {
       try {
         const sig = await publicConnection.requestAirdrop(walletPk, AIRDROP_AMOUNT);
-        await publicConnection.confirmTransaction(sig, "confirmed");
+        const airdropResult = await publicConnection.confirmTransaction(sig, "confirmed");
+        if (airdropResult.value.err) {
+          throw new Error(`Airdrop confirmed but failed on-chain: ${JSON.stringify(airdropResult.value.err)}`);
+        }
         results.sol_airdropped = true;
         results.sol_amount = AIRDROP_AMOUNT / LAMPORTS_PER_SOL;
       } catch (e: any) {

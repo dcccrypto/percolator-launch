@@ -16,6 +16,8 @@ export default defineConfig({
       // Test environment is always devnet; prevents getConfig() mainnet validation errors
       // when NEXT_PUBLIC_DEFAULT_NETWORK is not set in the test process env.
       NEXT_PUBLIC_DEFAULT_NETWORK: 'devnet',
+      // Valid program ID for tests (module-level consts evaluated at load time need a real pubkey)
+      NEXT_PUBLIC_PROGRAM_ID: '5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf',
     },
     coverage: {
       provider: 'v8',

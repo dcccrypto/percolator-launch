@@ -127,10 +127,16 @@ export function useReclaimSlabRent(): UseReclaimSlabRentResult {
           skipPreflight: false,
         });
 
-        await connection.confirmTransaction(
+        const confirmation = await connection.confirmTransaction(
           { signature: sig, blockhash, lastValidBlockHeight },
           "confirmed"
         );
+
+        if (confirmation.value.err) {
+          throw new Error(
+            `Transaction landed on-chain but was rejected by the program: ${JSON.stringify(confirmation.value.err)}`
+          );
+        }
 
         setTxSig(sig);
         setStatus("success");
