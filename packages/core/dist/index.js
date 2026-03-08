@@ -575,13 +575,27 @@ var ACCOUNTS_UNPAUSE_MARKET = [
   { name: "slab", signer: false, writable: true }
 ];
 function buildAccountMetas(spec, keys) {
-  if (keys.length !== spec.length) {
+  let keysArray;
+  if (Array.isArray(keys)) {
+    keysArray = keys;
+  } else {
+    keysArray = spec.map((s) => {
+      const key = keys[s.name];
+      if (!key) {
+        throw new Error(
+          `buildAccountMetas: missing key for account "${s.name}". Provided keys: [${Object.keys(keys).join(", ")}]`
+        );
+      }
+      return key;
+    });
+  }
+  if (keysArray.length !== spec.length) {
     throw new Error(
-      `Account count mismatch: expected ${spec.length}, got ${keys.length}`
+      `Account count mismatch: expected ${spec.length}, got ${keysArray.length}`
     );
   }
   return spec.map((s, i) => ({
-    pubkey: keys[i],
+    pubkey: keysArray[i],
     isSigner: s.signer,
     isWritable: s.writable
   }));

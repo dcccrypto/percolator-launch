@@ -264,19 +264,43 @@ export const ACCOUNTS_UNPAUSE_MARKET: readonly AccountSpec[] = [
 
 /**
  * Build AccountMeta array from spec and provided pubkeys.
- * Keys must be provided in the same order as the spec.
+ *
+ * Accepts either:
+ *   - `PublicKey[]`  — ordered array, one entry per spec account (legacy form)
+ *   - `Record<string, PublicKey>` — named map keyed by account `name` (preferred form)
+ *
+ * Named-map form resolves accounts by spec name so callers don't have to
+ * remember the positional order, and errors clearly on missing names.
  */
 export function buildAccountMetas(
   spec: readonly AccountSpec[],
-  keys: PublicKey[]
+  keys: PublicKey[] | Record<string, PublicKey>
 ): AccountMeta[] {
-  if (keys.length !== spec.length) {
+  let keysArray: PublicKey[];
+
+  if (Array.isArray(keys)) {
+    keysArray = keys;
+  } else {
+    // Named map: resolve by spec name
+    keysArray = spec.map((s) => {
+      const key = (keys as Record<string, PublicKey>)[s.name];
+      if (!key) {
+        throw new Error(
+          `buildAccountMetas: missing key for account "${s.name}". ` +
+          `Provided keys: [${Object.keys(keys).join(", ")}]`
+        );
+      }
+      return key;
+    });
+  }
+
+  if (keysArray.length !== spec.length) {
     throw new Error(
-      `Account count mismatch: expected ${spec.length}, got ${keys.length}`
+      `Account count mismatch: expected ${spec.length}, got ${keysArray.length}`
     );
   }
   return spec.map((s, i) => ({
-    pubkey: keys[i],
+    pubkey: keysArray[i],
     isSigner: s.signer,
     isWritable: s.writable,
   }));

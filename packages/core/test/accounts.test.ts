@@ -318,6 +318,38 @@ describe("buildAccountMetas", () => {
     );
     expect(metas[0].pubkey).toBe(key);
   });
+
+  // Named-map form (Record<string, PublicKey>)
+  it("accepts a named-map object for CloseSlab (2 accounts)", () => {
+    const [admin, slab] = makeKeys(2);
+    const metas = buildAccountMetas(ACCOUNTS_CLOSE_SLAB, { admin, slab });
+    expect(metas).toHaveLength(2);
+    expect(metas[0].pubkey.equals(admin)).toBe(true);
+    expect(metas[0].isSigner).toBe(true);
+    expect(metas[0].isWritable).toBe(true);
+    expect(metas[1].pubkey.equals(slab)).toBe(true);
+    expect(metas[1].isSigner).toBe(false);
+    expect(metas[1].isWritable).toBe(true);
+  });
+
+  it("accepts a named-map object for InitMarket (9 accounts)", () => {
+    const [admin, slab, mint, vault, tokenProgram, clock, rent, dummyAta, systemProgram] = makeKeys(9);
+    const metas = buildAccountMetas(ACCOUNTS_INIT_MARKET, {
+      admin, slab, mint, vault, tokenProgram, clock, rent, dummyAta, systemProgram,
+    });
+    expect(metas).toHaveLength(9);
+    expect(metas[0].pubkey.equals(admin)).toBe(true);
+    expect(metas[1].pubkey.equals(slab)).toBe(true);
+    expect(metas[8].pubkey.equals(systemProgram)).toBe(true);
+  });
+
+  it("throws a clear error when a named-map is missing a required key", () => {
+    const [admin] = makeKeys(1);
+    // ACCOUNTS_CLOSE_SLAB needs both "admin" and "slab"
+    expect(() => buildAccountMetas(ACCOUNTS_CLOSE_SLAB, { admin } as Record<string, PublicKey>)).toThrow(
+      'buildAccountMetas: missing key for account "slab"'
+    );
+  });
 });
 
 // ============================================================================

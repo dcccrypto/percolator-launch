@@ -596,9 +596,15 @@ declare const ACCOUNTS_PAUSE_MARKET: readonly AccountSpec[];
 declare const ACCOUNTS_UNPAUSE_MARKET: readonly AccountSpec[];
 /**
  * Build AccountMeta array from spec and provided pubkeys.
- * Keys must be provided in the same order as the spec.
+ *
+ * Accepts either:
+ *   - `PublicKey[]`  — ordered array, one entry per spec account (legacy form)
+ *   - `Record<string, PublicKey>` — named map keyed by account `name` (preferred form)
+ *
+ * Named-map form resolves accounts by spec name so callers don't have to
+ * remember the positional order, and errors clearly on missing names.
  */
-declare function buildAccountMetas(spec: readonly AccountSpec[], keys: PublicKey[]): AccountMeta[];
+declare function buildAccountMetas(spec: readonly AccountSpec[], keys: PublicKey[] | Record<string, PublicKey>): AccountMeta[];
 /**
  * CreateInsuranceMint: 9 accounts
  * Creates SPL mint PDA for insurance LP tokens. Admin only, once per market.
