@@ -78,16 +78,27 @@ const nextConfig: NextConfig = {
 
 export default withSentryConfig(nextConfig, {
   // Sentry webpack plugin options
-  silent: true, // Suppresses all logs
-  
-  // Source maps: enabled when SENTRY_AUTH_TOKEN is set (CI/CD only)
-  // Set SENTRY_AUTH_TOKEN, SENTRY_ORG, and SENTRY_PROJECT in your CI environment
+  silent: true, // Suppress verbose upload logs in CI
+
+  // Source maps: enabled when SENTRY_AUTH_TOKEN is set (CI/Vercel only).
+  // To enable: add SENTRY_AUTH_TOKEN + SENTRY_ORG + SENTRY_PROJECT to Vercel env vars.
+  //   SENTRY_ORG=dcc-pz
+  //   SENTRY_PROJECT=percolator-frontend
+  //   SENTRY_AUTH_TOKEN=<token from https://sentry.io/settings/auth-tokens/>
   sourcemaps: {
     disable: !process.env.SENTRY_AUTH_TOKEN,
+    deleteSourcemapsAfterUpload: true, // do not ship source maps to browsers
   },
 
-  // Upload source maps during build when auth token is available
-  org: process.env.SENTRY_ORG || "percolator",
-  project: process.env.SENTRY_PROJECT || "percolator-app",
+  // Sentry org/project — must match your Sentry workspace.
+  // Defaults are the production values; override via env vars if needed.
+  org: process.env.SENTRY_ORG || "dcc-pz",
+  project: process.env.SENTRY_PROJECT || "percolator-frontend",
   authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Automatically instrument server components and route handlers
+  autoInstrumentServerFunctions: true,
+
+  // Disable the Sentry telemetry/privacy popup in the Next.js dev overlay
+  disableLogger: true,
 });
