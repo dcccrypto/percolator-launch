@@ -359,10 +359,10 @@ async function main() {
     buildIx({
       programId: PROGRAM_ID,
       data: encodeCloseSlab(),
-      keys: buildAccountMetas(ACCOUNTS_CLOSE_SLAB, {
-        admin: payer.publicKey,
-        slab: slabPubkey,
-      }),
+      keys: buildAccountMetas(ACCOUNTS_CLOSE_SLAB, [
+        payer.publicKey,   // admin
+        slabPubkey,        // slab
+      ]),
     }),
   );
 
@@ -472,17 +472,17 @@ async function main() {
     minLiquidationAbs:      params.minLiquidationAbs.toString(),
   });
 
-  const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, {
-    admin:          payer.publicKey,
-    slab:           newSlabKp.publicKey,
-    mint:           mint,
-    vault:          vault,
-    tokenProgram:   TOKEN_PROGRAM_ID,
-    clock:          SYSVAR_CLOCK_PUBKEY,
-    rent:           SYSVAR_RENT_PUBKEY,
-    dummyAta:       vault,  // same vault ATA used as dummyAta
-    systemProgram:  SystemProgram.programId,
-  });
+  const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
+    payer.publicKey,        // admin
+    newSlabKp.publicKey,    // slab
+    mint,                   // mint
+    vault,                  // vault
+    TOKEN_PROGRAM_ID,       // tokenProgram
+    SYSVAR_CLOCK_PUBKEY,    // clock
+    SYSVAR_RENT_PUBKEY,     // rent
+    vault,                  // dummyAta (same vault ATA)
+    SystemProgram.programId, // systemProgram
+  ]);
 
   const initTx = new Transaction();
   initTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE }));
