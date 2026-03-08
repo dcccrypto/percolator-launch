@@ -125,6 +125,13 @@ export function createBatchRpc(config: BatchRpcConfig) {
           continue;
         }
 
+        // Non-2xx (excluding 429 handled above): throw so the retry loop catches it.
+        // Without this guard, a 5xx with an empty body causes response.json() to throw
+        // "SyntaxError: Unexpected end of JSON input" — masking the real HTTP error.
+        if (!response.ok) {
+          throw new Error(`RPC batch request failed: HTTP ${response.status}`);
+        }
+
         // Reset backoff on success
         backoffUntil = 0;
 

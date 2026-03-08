@@ -226,6 +226,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid walletAddress" }, { status: 400 });
     }
 
+    // Guard: SPL token accounts require an on-curve (Ed25519) owner.
+    // Passing a PDA (off-curve) as the destination wallet causes
+    // TokenOwnerOffCurveError during createAssociatedTokenAccountInstruction.
+    // Reject early with a clear 400 before touching the DB or chain.
+    if (!PublicKey.isOnCurve(walletPk.toBytes())) {
+      return NextResponse.json(
+        { error: "walletAddress must be a regular wallet, not a program-derived address (PDA)" },
+        { status: 400 },
+      );
+    }
+
     // 1. Validate mintAddress exists in devnet_mints table → get mainnet_ca + metadata
     const supabase = getServiceClient();
     const { data: mintRow, error: dbErr } = await (supabase as any)
