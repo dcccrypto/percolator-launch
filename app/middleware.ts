@@ -37,7 +37,77 @@ function getRateLimit(ip: string, isRpc: boolean = false): { remaining: number; 
   };
 }
 
+// ── IP Blocklist ────────────────────────────────────────────────────────────
+// Parsed once at module load (Edge Runtime: module is re-evaluated per region,
+// not per request, so this is effectively a startup cost).
+// Configure via IP_BLOCKLIST env var: comma-separated IPs or /8|/16|/24|/32 CIDRs.
+// Example (Railway): IP_BLOCKLIST=88.97.223.158,10.0.0.0/8
+const _rawBlocklist = (process.env.IP_BLOCKLIST ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+interface _BlockEntry {
+  type: "exact" | "cidr";
+  ip?: string;
+  network?: number;
+  mask?: number;
+}
+
+function _ipToInt(ip: string): number {
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => isNaN(n) || n < 0 || n > 255)) return -1;
+  return ((p[0]! << 24) | (p[1]! << 16) | (p[2]! << 8) | p[3]!) >>> 0;
+}
+
+const _blocklist: _BlockEntry[] = _rawBlocklist
+  .map((entry): _BlockEntry | null => {
+    if (entry.includes("/")) {
+      const [addr, prefStr] = entry.split("/");
+      const prefix = Number(prefStr);
+      if (!addr || isNaN(prefix) || prefix < 0 || prefix > 32) return null;
+      const net = _ipToInt(addr);
+      if (net === -1) return null;
+      const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+      return { type: "cidr", network: (net & mask) >>> 0, mask };
+    }
+    return { type: "exact", ip: entry };
+  })
+  .filter((e): e is _BlockEntry => e !== null);
+
+function _isBlocked(clientIp: string): boolean {
+  if (_blocklist.length === 0) return false;
+  const clientInt = _ipToInt(clientIp);
+  for (const e of _blocklist) {
+    if (e.type === "exact" && clientIp === e.ip) return true;
+    if (e.type === "cidr" && clientInt !== -1) {
+      if ((clientInt & e.mask!) >>> 0 === e.network) return true;
+    }
+  }
+  return false;
+}
+
 export async function middleware(request: NextRequest) {
+  // ── IP Blocklist check ─────────────────────────────────────────────────────
+  // Resolve client IP using the same proxy-depth logic as the rate limiter.
+  if (_blocklist.length > 0) {
+    const _proxyDepth = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
+    let _clientIp = "unknown";
+    if (_proxyDepth > 0) {
+      const _fwd = request.headers.get("x-forwarded-for");
+      if (_fwd) {
+        const _ips = _fwd.split(",").map((s) => s.trim());
+        _clientIp = _ips[Math.max(0, _ips.length - _proxyDepth)] ?? "unknown";
+      }
+    }
+    if (_isBlocked(_clientIp)) {
+      return new NextResponse(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
   // ── Admin route guard (server-side session check) ──────────────────────────
   // The /admin page component does a client-side auth check, but that fires
   // after pre-render HTML is served (visible with JS disabled).  This guard

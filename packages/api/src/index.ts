@@ -21,6 +21,7 @@ import { statsRoutes } from "./routes/stats.js";
 import { docsRoutes } from "./routes/docs.js";
 import { setupWebSocket } from "./routes/ws.js";
 import { readRateLimit, writeRateLimit } from "./middleware/rate-limit.js";
+import { ipBlocklist } from "./middleware/ip-blocklist.js";
 import { cacheMiddleware } from "./middleware/cache.js";
 
 const logger = createLogger("api");
@@ -86,6 +87,11 @@ app.use("*", async (c, next) => {
   }
   return next();
 });
+
+// IP Blocklist Middleware — runs first, before rate-limiting and auth.
+// Configure via IP_BLOCKLIST env var (comma-separated IPs or CIDRs).
+// Example: IP_BLOCKLIST=88.97.223.158,10.0.0.0/8
+app.use("*", ipBlocklist());
 
 // Compression Middleware (gzip/brotli for JSON responses)
 app.use("*", compress());
