@@ -23,6 +23,7 @@ import {
   executeTrade,
   pushOraclePrice,
   refreshPosition,
+  resolveSymbolFromSlab,
 } from "./market.js";
 import { fetchPrice } from "./prices.js";
 import { log, logError } from "./logger.js";
@@ -196,10 +197,23 @@ export class MakerBot {
    * Single quote cycle for one market.
    */
   async quoteMarket(market: ManagedMarket): Promise<void> {
+    // If symbol was not resolved at discovery time (Hyperp market with no initial
+    // oracle price), re-check on-chain — filler may have pushed a price since startup.
+    if (market.symbol === "UNKNOWN" && market.oracleMode === "authority") {
+      const resolved = await resolveSymbolFromSlab(this.connection, market.slabAddress);
+      if (resolved !== "UNKNOWN") {
+        log("maker", `${market.slabAddress.toBase58().slice(0, 16)}...: resolved symbol → ${resolved} (was UNKNOWN)`);
+        market.symbol = resolved;
+      } else {
+        log("maker", `⚠️ UNKNOWN market ${market.slabAddress.toBase58().slice(0, 16)}...: no oracle price yet — set MARKET_SYMBOL_OVERRIDES env var`);
+        return;
+      }
+    }
+
     // Fetch price
     const priceData = await fetchPrice(market.symbol);
     if (!priceData) {
-      log("maker", `⚠️ ${market.symbol}: no price, skipping`);
+      log("maker", `⚠️ ${market.symbol}: no price from Binance/CoinGecko, skipping`);
       return;
     }
 

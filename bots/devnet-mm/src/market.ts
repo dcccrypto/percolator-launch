@@ -84,24 +84,111 @@ const KNOWN_FEEDS: Record<string, string> = {
   ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace: "ETH",
 };
 
+/**
+ * Explicit slab-address → symbol overrides via MARKET_SYMBOL_OVERRIDES env var.
+ *
+ * Format: comma-separated `<slabAddress>:<SYMBOL>` pairs.
+ * Example: MARKET_SYMBOL_OVERRIDES=AB3ZN1vx...:BTC,Fy7WiqBy...:SOL
+ *
+ * Required for Hyperp-mode markets on cold start (when authorityPriceE6 = 0
+ * because no oracle price has been pushed yet). Without this, inferSymbol
+ * returns "UNKNOWN" and both filler and maker are unable to push/use prices.
+ */
+const SYMBOL_OVERRIDES: Record<string, string> = Object.fromEntries(
+  (process.env.MARKET_SYMBOL_OVERRIDES ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [slab, sym] = entry.split(":");
+      return [slab?.trim() ?? "", sym?.trim().toUpperCase() ?? ""];
+    })
+    .filter(([slab, sym]) => slab && sym),
+);
+
+if (Object.keys(SYMBOL_OVERRIDES).length > 0) {
+  console.log(
+    `[market] MARKET_SYMBOL_OVERRIDES loaded: ${JSON.stringify(SYMBOL_OVERRIDES)}`,
+  );
+}
+
+/**
+ * Infer a human-readable symbol from a DiscoveredMarket.
+ *
+ * Priority:
+ *   1. MARKET_SYMBOL_OVERRIDES env var (explicit slab → symbol)
+ *   2. Known Pyth feed ID lookup
+ *   3. Hyperp mode: price-range heuristic using authorityPriceE6
+ *   4. Hyperp mode: fallback to lastEffectivePriceE6 (may be set from trading)
+ *   5. "UNKNOWN" — operator must set MARKET_SYMBOL_OVERRIDES
+ */
 function inferSymbol(market: DiscoveredMarket): string {
+  // 1. Explicit env override (highest priority — works on cold start)
+  const override = SYMBOL_OVERRIDES[market.slabAddress.toBase58()];
+  if (override) return override;
+
   const feedId = market.config.indexFeedId;
   const feedHex = Buffer.from(
     feedId instanceof PublicKey ? feedId.toBytes() : (feedId as Uint8Array),
   ).toString("hex");
 
+  // 2. Known Pyth feed
   if (KNOWN_FEEDS[feedHex]) return KNOWN_FEEDS[feedHex];
 
-  // Hyperp mode (admin oracle) — guess from price
+  // 3 & 4. Hyperp mode (admin oracle) — guess from price
   if (feedHex === "0".repeat(64)) {
-    const markUsd = Number(market.config.authorityPriceE6 ?? 0n) / 1_000_000;
-    if (markUsd > 50_000) return "BTC";
-    if (markUsd > 2_000) return "ETH";
-    if (markUsd > 50) return "SOL";
-    return "UNKNOWN";
+    return inferSymbolFromPrice(market.config.authorityPriceE6, market.config.lastEffectivePriceE6);
   }
 
   return "UNKNOWN";
+}
+
+/**
+ * Map a USD price (as BigInt e6) to a symbol using known price ranges.
+ * Tries authorityPriceE6 first, then lastEffectivePriceE6 as fallback.
+ */
+function inferSymbolFromPrice(
+  authorityPriceE6: bigint,
+  lastEffectivePriceE6: bigint,
+): string {
+  for (const priceE6 of [authorityPriceE6, lastEffectivePriceE6]) {
+    if (!priceE6 || priceE6 === 0n) continue;
+    const markUsd = Number(priceE6) / 1_000_000;
+    if (markUsd > 50_000) return "BTC";
+    if (markUsd > 2_000) return "ETH";
+    if (markUsd > 50) return "SOL";
+  }
+  return "UNKNOWN";
+}
+
+/**
+ * Re-fetch on-chain slab data and attempt to resolve the symbol.
+ * Used when a market is stored as "UNKNOWN" — the filler may have pushed
+ * a price since initial discovery, updating authorityPriceE6 on-chain.
+ *
+ * Returns the resolved symbol, or "UNKNOWN" if still unresolvable.
+ */
+export async function resolveSymbolFromSlab(
+  connection: Connection,
+  slabAddress: PublicKey,
+): Promise<string> {
+  // Env override takes priority
+  const override = SYMBOL_OVERRIDES[slabAddress.toBase58()];
+  if (override) return override;
+
+  try {
+    const info = await connection.getAccountInfo(slabAddress);
+    if (!info) return "UNKNOWN";
+    const data = new Uint8Array(info.data);
+    // Read authorityPriceE6 and lastEffectivePriceE6 from the on-chain config.
+    // These are parsed by the SDK's parseConfig; here we use the public SDK instead
+    // of re-parsing manually. We import from the SDK only what we need.
+    const { parseConfig } = await import("@percolator/sdk");
+    const config = parseConfig(data);
+    return inferSymbolFromPrice(config.authorityPriceE6, config.lastEffectivePriceE6);
+  } catch {
+    return "UNKNOWN";
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -378,7 +465,15 @@ export async function setupMarketAccounts(
   ).toString("hex");
   const isHyperp = feedHex === "0".repeat(64);
 
-  log("setup", `✅ ${symbol}: LP idx=${lpAccount.idx}, User idx=${userAccount.idx}`);
+  if (symbol === "UNKNOWN") {
+    logError(
+      "setup",
+      `Market ${slab.toBase58().slice(0, 16)}... resolved as UNKNOWN symbol — oracle price not yet pushed`,
+      `Fix: set MARKET_SYMBOL_OVERRIDES=${slab.toBase58()}:BTC (or ETH/SOL) in your env`,
+    );
+  } else {
+    log("setup", `✅ ${symbol}: LP idx=${lpAccount.idx}, User idx=${userAccount.idx}`);
+  }
 
   return {
     slabAddress: slab,

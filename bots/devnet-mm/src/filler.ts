@@ -26,6 +26,7 @@ import {
   crankMarket,
   pushOraclePrice,
   refreshPosition,
+  resolveSymbolFromSlab,
 } from "./market.js";
 import { fetchPrice } from "./prices.js";
 import { log, logError } from "./logger.js";
@@ -161,13 +162,35 @@ export class FillerBot {
             try {
               // Push oracle price first for Hyperp markets
               if (this.config.pushOraclePrices && state.market.oracleMode === "authority") {
-                const priceData = await fetchPrice(state.market.symbol);
-                if (priceData) {
-                  const priceE6 = BigInt(Math.round(priceData.priceUsd * 1_000_000));
-                  const pushed = await pushOraclePrice(
-                    this.connection, this.config, state.market, this.wallet, priceE6,
+                // Re-resolve UNKNOWN symbols — another bot instance or a prior filler
+                // cycle may have pushed a price to the chain already.
+                if (state.market.symbol === "UNKNOWN") {
+                  const resolved = await resolveSymbolFromSlab(
+                    this.connection,
+                    state.market.slabAddress,
                   );
-                  if (pushed) this.stats.oraclePushes++;
+                  if (resolved !== "UNKNOWN") {
+                    log(
+                      "filler",
+                      `${state.market.slabAddress.toBase58().slice(0, 16)}...: resolved symbol → ${resolved}`,
+                    );
+                    state.market.symbol = resolved;
+                  } else {
+                    log(
+                      "filler",
+                      `⚠️ UNKNOWN market ${state.market.slabAddress.toBase58().slice(0, 16)}...: cannot push oracle — set MARKET_SYMBOL_OVERRIDES env var`,
+                    );
+                  }
+                }
+                if (state.market.symbol !== "UNKNOWN") {
+                  const priceData = await fetchPrice(state.market.symbol);
+                  if (priceData) {
+                    const priceE6 = BigInt(Math.round(priceData.priceUsd * 1_000_000));
+                    const pushed = await pushOraclePrice(
+                      this.connection, this.config, state.market, this.wallet, priceE6,
+                    );
+                    if (pushed) this.stats.oraclePushes++;
+                  }
                 }
               }
 
