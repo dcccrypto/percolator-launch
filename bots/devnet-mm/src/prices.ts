@@ -39,6 +39,22 @@ const COINGECKO_MAP: Record<string, string> = {
   RNDR: "render-token",
 };
 
+// Pyth Hermes feed IDs (same as oracle-keeper)
+const PYTH_FEED_IDS: Record<string, string> = {
+  SOL: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+  BTC: "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+  ETH: "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+  BONK: "72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419",
+  WIF: "4ca4beeca86f0d164160323817a4e42b10010a724c2217c6ee41b54cd4cc61fc",
+  JUP: "0a0408d619e9380abad35060f9192039ed5042fa6f82301d0e48bb52be830996",
+  PYTH: "0bbf28e9a841a1cc788f6a361b17ca072d0ea3098a1e5df1c3922d06719579ff",
+  RAY: "91568baa8beb53db23eb3fb7f22c6e8bd303d103919e19733f2bb642d3e7987a",
+  JTO: "b43660a5f790c69354b0729a5ef9d50d68f1df92107540210b9cccba1f947cc2",
+  RNDR: "ab7f5d5aab10d6e7e0a72db2cccfbf35f15e0e1b29a1e5f3e1f1e0a1b2c3d4e5",
+};
+
+const HERMES_URL = process.env.HERMES_URL ?? "https://hermes.pyth.network";
+
 // ── Cache ───────────────────────────────────────────────
 
 const cache = new Map<string, PriceData>();
@@ -96,6 +112,29 @@ async function fetchCoinGecko(symbol: string): Promise<number | null> {
   }
 }
 
+async function fetchPyth(symbol: string): Promise<number | null> {
+  const feedId = PYTH_FEED_IDS[symbol.toUpperCase()];
+  if (!feedId) return null;
+  try {
+    const resp = await fetch(
+      `${HERMES_URL}/v2/updates/price/latest?ids[]=${feedId}&parsed=true`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (!resp.ok) return null;
+    const json = (await resp.json()) as {
+      parsed?: Array<{ id: string; price: { price: string; expo: number } }>;
+    };
+    const entry = json.parsed?.[0];
+    if (!entry) return null;
+    const raw = parseInt(entry.price.price, 10);
+    const expo = entry.price.expo;
+    const price = raw * Math.pow(10, expo);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Public API ──────────────────────────────────────────
 
 /**
@@ -119,6 +158,14 @@ export async function fetchPrice(symbol: string): Promise<PriceData | null> {
   const cgPrice = await fetchCoinGecko(symbol);
   if (cgPrice !== null) {
     const data: PriceData = { priceUsd: cgPrice, source: "coingecko", timestamp: Date.now() };
+    setCache(symbol, data);
+    return data;
+  }
+
+  // Fallback: Pyth Hermes (same feed oracle-keeper uses)
+  const pythPrice = await fetchPyth(symbol);
+  if (pythPrice !== null) {
+    const data: PriceData = { priceUsd: pythPrice, source: "pyth", timestamp: Date.now() };
     setCache(symbol, data);
     return data;
   }
