@@ -222,7 +222,7 @@ export class MakerBot {
     // Fetch price
     const priceData = await fetchPrice(market.symbol);
     if (!priceData) {
-      log("maker", `⚠️ ${market.symbol}: no price from Binance/CoinGecko, skipping`);
+      log("maker", `⚠️ ${market.symbol}: no price from Binance/CoinGecko/Pyth, skipping`);
       return;
     }
 
