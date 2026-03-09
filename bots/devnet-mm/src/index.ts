@@ -159,6 +159,26 @@ async function checkPrograms(connection: Connection, config: BotConfig): Promise
 // Main
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// Global Error Handlers — prevent Railway restart loops
+// ═══════════════════════════════════════════════════════════════
+
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  // 429s during setup are expected under load — log and continue
+  if (msg.includes("429") || msg.includes("Too Many Requests")) {
+    logError("global", `Unhandled 429 (suppressed): ${msg.slice(0, 200)}`);
+    return;
+  }
+  logError("global", `Unhandled rejection: ${msg.slice(0, 300)}`);
+});
+
+process.on("uncaughtException", (err) => {
+  logError("global", `Uncaught exception: ${err.message.slice(0, 300)}`);
+  // Give logger time to flush, then exit
+  setTimeout(() => process.exit(1), 2000);
+});
+
 async function main() {
   const config = loadConfig();
   printBanner(config);

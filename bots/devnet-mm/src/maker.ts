@@ -196,6 +196,8 @@ export class MakerBot {
       } catch (e) {
         logError("maker", `Failed to setup ${key.slice(0, 12)}`, e);
       }
+      // Throttle setup: 500ms between markets to avoid RPC 429 floods
+      await new Promise((r) => setTimeout(r, 500));
     }
 
     this.stats.marketsActive = this.markets.length;

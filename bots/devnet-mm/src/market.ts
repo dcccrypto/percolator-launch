@@ -233,11 +233,21 @@ async function sendTx(
     // Extract custom program error code if present
     const customMatch = msg.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
     const instrMatch = msg.match(/InstructionError.*?Custom\((\d+)\)/);
-    const errorDetail = customMatch
-      ? `Custom error 0x${customMatch[1]} (${parseInt(customMatch[1], 16)})`
+    const errorCode = customMatch
+      ? parseInt(customMatch[1], 16)
       : instrMatch
-        ? `Custom error ${instrMatch[1]} (0x${Number(instrMatch[1]).toString(16)})`
+        ? Number(instrMatch[1])
         : null;
+    const errorDetail = errorCode !== null
+      ? `Custom error ${errorCode} (0x${errorCode.toString(16)})`
+      : null;
+
+    // Custom:1 = UserExists / LPExists — account already created, treat as success
+    if (errorCode === 1 && (label.includes("InitUser") || label.includes("InitLP"))) {
+      log("tx", `⚠️ ${label} → already exists (Custom:1), skipping`);
+      return "(already-exists)";
+    }
+
     logError("tx", label, errorDetail ? `${errorDetail} — ${msg.slice(0, 200)}` : msg.slice(0, 300));
     return null;
   }
