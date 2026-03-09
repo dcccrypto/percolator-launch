@@ -681,7 +681,7 @@ export class TraderFleetBot {
 
       // Refresh on-chain position state
       try {
-        await refreshPosition(this.conn, market, trader.wallet);
+        await refreshPosition(this.conn, market, trader.wallet, this.rpc);
       } catch {
         // Non-fatal
       }
@@ -760,7 +760,7 @@ export class TraderFleetBot {
     for (const trader of this.traders) {
       for (const market of trader.markets) {
         try {
-          await refreshPosition(this.conn, market, trader.wallet);
+          await refreshPosition(this.conn, market, trader.wallet, this.rpc);
         } catch {
           // Non-fatal
         }

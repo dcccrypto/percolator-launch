@@ -47,6 +47,25 @@ import type { BotConfig } from "./config.js";
 import { log, logError } from "./logger.js";
 
 // ═══════════════════════════════════════════════════════════════
+// RPC resilience helper
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Execute an RPC read with retry via ResilientRpc when available.
+ * Falls back to a direct call on the bare connection when rpc is undefined.
+ * This ensures ALL connection reads (not just tx sends) get 429 backoff.
+ */
+async function withRpc<T>(
+  rpc: ResilientRpc | undefined,
+  connection: Connection,
+  op: (conn: Connection) => Promise<T>,
+  label: string,
+): Promise<T> {
+  if (rpc) return rpc.withRetry(op, label);
+  return op(connection);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════
 
@@ -172,13 +191,14 @@ function inferSymbolFromPrice(
 export async function resolveSymbolFromSlab(
   connection: Connection,
   slabAddress: PublicKey,
+  rpc?: ResilientRpc,
 ): Promise<string> {
   // Env override takes priority
   const override = SYMBOL_OVERRIDES[slabAddress.toBase58()];
   if (override) return override;
 
   try {
-    const info = await connection.getAccountInfo(slabAddress);
+    const info = await withRpc(rpc, connection, (c) => c.getAccountInfo(slabAddress), "resolveSymbol");
     if (!info) return "UNKNOWN";
     const data = new Uint8Array(info.data);
     // Read authorityPriceE6 and lastEffectivePriceE6 from the on-chain config.
@@ -196,6 +216,13 @@ export async function resolveSymbolFromSlab(
 // Transaction helpers
 // ═══════════════════════════════════════════════════════════════
 
+/**
+ * Sentinel returned by sendTx when the instruction fails with Custom:1
+ * (UserExists / AlreadyInitialized). Callers should treat this as a
+ * non-fatal "already set up" result and re-fetch on-chain state.
+ */
+export const ALREADY_INITIALIZED = "ALREADY_INITIALIZED" as const;
+
 async function sendTx(
   connection: Connection,
   ixs: any[],
@@ -204,7 +231,7 @@ async function sendTx(
   computeUnits = 400_000,
   dryRun = false,
   rpc?: ResilientRpc,
-): Promise<string | null> {
+): Promise<string | typeof ALREADY_INITIALIZED | null> {
   if (dryRun) {
     log("tx", `[DRY RUN] ${label}`);
     return "(dry-run)";
@@ -230,6 +257,16 @@ async function sendTx(
     return sig;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
+    // Custom:1 = UserExists / AlreadyInitialized — not an error, account already set up.
+    // Return sentinel so callers can skip re-init and refetch on-chain state.
+    const isUserExists =
+      msg.includes("Custom:1") ||
+      msg.match(/custom program error:\s*0x1\b/) ||
+      msg.match(/InstructionError.*?Custom\(1\)/);
+    if (isUserExists) {
+      log("tx", `${label}: already initialized (Custom:1) — skipping`);
+      return ALREADY_INITIALIZED;
+    }
     // Extract custom program error code if present
     const customMatch = msg.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
     const instrMatch = msg.match(/InstructionError.*?Custom\((\d+)\)/);
@@ -254,15 +291,16 @@ async function ensureSolBalance(
   connection: Connection,
   wallet: Keypair,
   label: string,
+  rpc?: ResilientRpc,
 ): Promise<boolean> {
-  const balance = await connection.getBalance(wallet.publicKey);
+  const balance = await withRpc(rpc, connection, (c) => c.getBalance(wallet.publicKey), `${label} getBalance`);
   const balSol = balance / LAMPORTS_PER_SOL;
   if (balSol >= MIN_SOL_FOR_TX) return true;
 
   log("setup", `${label}: wallet ${wallet.publicKey.toBase58().slice(0, 12)}... has ${balSol.toFixed(4)} SOL — attempting devnet airdrop`);
   try {
-    const sig = await connection.requestAirdrop(wallet.publicKey, AIRDROP_SOL * LAMPORTS_PER_SOL);
-    await connection.confirmTransaction(sig, "confirmed");
+    const sig = await withRpc(rpc, connection, (c) => c.requestAirdrop(wallet.publicKey, AIRDROP_SOL * LAMPORTS_PER_SOL), `${label} airdrop`);
+    await withRpc(rpc, connection, (c) => c.confirmTransaction(sig, "confirmed"), `${label} confirmAirdrop`);
     const newBal = await connection.getBalance(wallet.publicKey);
     log("setup", `${label}: airdrop OK — now ${(newBal / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
     return true;
@@ -291,7 +329,7 @@ async function ensureWalletAta(
 ): Promise<PublicKey> {
   const ata = await getAssociatedTokenAddress(mint, owner);
   try {
-    await getAccount(connection, ata);
+    await withRpc(rpc, connection, (c) => getAccount(c, ata), `${label} getATA`);
     return ata; // already exists
   } catch (e) {
     // Only proceed to create if the account genuinely doesn't exist.
@@ -380,7 +418,7 @@ export async function setupMarketAccounts(
   const vaultAta = await getAssociatedTokenAddress(mint, vaultPda, true);
 
   // Fetch full slab to find existing accounts
-  const slabInfo = await connection.getAccountInfo(slab);
+  const slabInfo = await withRpc(rpc, connection, (c) => c.getAccountInfo(slab), `${symbol} fetchSlab`);
   if (!slabInfo) {
     logError("setup", `${symbol}: slab not found`);
     return null;
@@ -402,7 +440,7 @@ export async function setupMarketAccounts(
 
   // Create LP if needed and requested
   if (!lpAccount && createLp) {
-    await ensureSolBalance(connection, wallet, symbol);
+    await ensureSolBalance(connection, wallet, symbol, rpc);
     // Ensure walletAta exists before attempting LP init (fee is debited from it)
     walletAta = await ensureWalletAta(connection, wallet, wallet.publicKey, mint, symbol, config.dryRun, rpc);
     log("setup", `${symbol}: creating LP account...`);
@@ -418,9 +456,9 @@ export async function setupMarketAccounts(
     const sig = await sendTx(connection, [ix], [wallet], `${symbol} InitLP`, 200_000, config.dryRun, rpc);
     if (!sig) return null;
 
-    // Refetch
+    // Refetch (skip if already initialized — account exists on-chain)
     await sleep(1500);
-    const slabInfo2 = await connection.getAccountInfo(slab);
+    const slabInfo2 = await withRpc(rpc, connection, (c) => c.getAccountInfo(slab), `${symbol} refetchSlab-LP`);
     if (slabInfo2) {
       accounts = parseAllAccounts(new Uint8Array(slabInfo2.data));
       lpAccount = accounts.find(
@@ -440,7 +478,7 @@ export async function setupMarketAccounts(
 
   // Create user if needed
   if (!userAccount) {
-    await ensureSolBalance(connection, wallet, symbol);
+    await ensureSolBalance(connection, wallet, symbol, rpc);
     // Ensure walletAta exists before attempting InitUser (1 USDC fee is debited from it)
     walletAta = await ensureWalletAta(connection, wallet, wallet.publicKey, mint, symbol, config.dryRun, rpc);
     log("setup", `${symbol}: creating user account...`);
@@ -450,10 +488,11 @@ export async function setupMarketAccounts(
     ]);
     const ix = buildIx({ programId, keys: initUserKeys, data: initUserData });
     const sig = await sendTx(connection, [ix], [wallet], `${symbol} InitUser`, 200_000, config.dryRun, rpc);
+    // null = real failure; ALREADY_INITIALIZED = account exists (Custom:1) — refetch and continue
     if (!sig) return null;
 
     await sleep(1500);
-    const slabInfo2 = await connection.getAccountInfo(slab);
+    const slabInfo2 = await withRpc(rpc, connection, (c) => c.getAccountInfo(slab), `${symbol} refetchSlab-User`);
     if (slabInfo2) {
       accounts = parseAllAccounts(new Uint8Array(slabInfo2.data));
       userAccount = accounts.find(
@@ -633,9 +672,10 @@ export async function refreshPosition(
   connection: Connection,
   market: ManagedMarket,
   wallet: Keypair,
+  rpc?: ResilientRpc,
 ): Promise<void> {
   try {
-    const slabInfo = await connection.getAccountInfo(market.slabAddress);
+    const slabInfo = await withRpc(rpc, connection, (c) => c.getAccountInfo(market.slabAddress), `${market.symbol} refreshPos`);
     if (!slabInfo) return;
     const accounts = parseAllAccounts(new Uint8Array(slabInfo.data));
     const userAcc = accounts.find(

@@ -87,6 +87,31 @@ materializeKeypairFromEnv("MAKER_KEYPAIR_JSON", "MAKER_KEYPAIR", "maker.json");
 materializeKeypairFromEnv("BOOTSTRAP_KEYPAIR_JSON", "BOOTSTRAP_KEYPAIR", "bootstrap.json");
 
 // ═══════════════════════════════════════════════════════════════
+// Global rejection safety net — prevent 429 / transient RPC errors
+// from crashing the process. Log and continue instead.
+// ═══════════════════════════════════════════════════════════════
+process.on("unhandledRejection", (reason: unknown) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  // 429 / network transients are expected under high load — don't crash
+  const isTransient =
+    msg.includes("429") ||
+    msg.includes("Too Many Requests") ||
+    msg.includes("rate limit") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("fetch failed") ||
+    msg.includes("socket hang up");
+  if (isTransient) {
+    console.warn(`[main] unhandledRejection (transient, ignored): ${msg.slice(0, 200)}`);
+  } else {
+    console.error(`[main] unhandledRejection: ${msg.slice(0, 500)}`);
+    if (reason instanceof Error && reason.stack) {
+      console.error(reason.stack.slice(0, 1000));
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
 // Banner
 // ═══════════════════════════════════════════════════════════════
 

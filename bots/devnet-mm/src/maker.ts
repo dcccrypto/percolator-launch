@@ -209,7 +209,7 @@ export class MakerBot {
     // If symbol was not resolved at discovery time (Hyperp market with no initial
     // oracle price), re-check on-chain — filler may have pushed a price since startup.
     if (market.symbol === "UNKNOWN" && market.oracleMode === "authority") {
-      const resolved = await resolveSymbolFromSlab(this.conn, market.slabAddress);
+      const resolved = await resolveSymbolFromSlab(this.conn, market.slabAddress, this.rpc);
       if (resolved !== "UNKNOWN") {
         log("maker", `${market.slabAddress.toBase58().slice(0, 16)}...: resolved symbol → ${resolved} (was UNKNOWN)`);
         market.symbol = resolved;
@@ -233,7 +233,7 @@ export class MakerBot {
     }
 
     // Refresh position periodically
-    await refreshPosition(this.conn, market, this.wallet);
+    await refreshPosition(this.conn, market, this.wallet, this.rpc);
 
     // Calculate quotes
     const quotes = calculateQuotes(

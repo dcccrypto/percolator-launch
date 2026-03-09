@@ -178,6 +178,7 @@ export class FillerBot {
                   const resolved = await resolveSymbolFromSlab(
                     this.conn,
                     state.market.slabAddress,
+                    this.rpc,
                   );
                   if (resolved !== "UNKNOWN") {
                     log(
