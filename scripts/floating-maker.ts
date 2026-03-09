@@ -29,9 +29,13 @@ import {
   PublicKey,
   Transaction,
   ComputeBudgetProgram,
-  sendAndConfirmTransaction,
   SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
+import {
+  ResilientConnection,
+  buildEndpointList,
+  withRetry,
+} from "./rpc-resilience.js";
 import {
   encodeInitUser,
   encodeInitLP,
@@ -64,6 +68,7 @@ import * as fs from "fs";
 // Configuration
 // ═══════════════════════════════════════════════════════════════
 
+// RPC_URL kept for single-endpoint backwards compat; prefer RPC_URLS for rotation
 const RPC_URL =
   process.env.RPC_URL ??
   `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? ""}`;
@@ -166,9 +171,29 @@ function loadKeypair(path: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(raw));
 }
 
-const connection = new Connection(RPC_URL, "confirmed");
+// ── Resilient RPC connection ──────────────────────────────────────────────────
+// Picks up RPC_URLS (comma-separated), RPC_URL, Helius key, and public devnet
+// fallback automatically. Applies exponential backoff + endpoint rotation on 429.
+const rpc = new ResilientConnection(buildEndpointList());
+
+// Keep a bare Connection alias for legacy call-sites that haven't been migrated yet.
+// Always refers to the currently active endpoint inside rpc.
+Object.defineProperty(globalThis, "_rpcConn", {
+  get: () => rpc.conn,
+  configurable: true,
+});
+
 let makerWallet: Keypair;
 
+function rpcLog(msg: string) {
+  const ts = new Date().toISOString().slice(11, 19);
+  console.warn(`[${ts}]${msg}`);
+}
+
+/**
+ * Build and send a transaction with automatic 429 backoff + endpoint rotation.
+ * Never crashes the bot on rate-limit errors — retries up to 7 times (~1 min).
+ */
 async function sendTx(
   ixs: any[],
   signers: Keypair[],
@@ -177,10 +202,7 @@ async function sendTx(
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
   for (const ix of ixs) tx.add(ix);
-  return sendAndConfirmTransaction(connection, tx, signers, {
-    commitment: "confirmed",
-    skipPreflight: true,
-  });
+  return rpc.sendAndConfirm(tx, signers, { label: "sendTx", logFn: rpcLog });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -315,7 +337,10 @@ function inferSymbol(market: DiscoveredMarket): string {
 async function discoverAndSetupMarkets(): Promise<ManagedMarket[]> {
   log("discovery", `Scanning for markets on program ${PROGRAM_ID.toBase58().slice(0, 8)}...`);
 
-  const discovered = await discoverMarkets(connection, PROGRAM_ID);
+  const discovered = await rpc.call(
+    (c) => discoverMarkets(c, PROGRAM_ID),
+    { label: "discoverMarkets", logFn: rpcLog },
+  );
   log("discovery", `Found ${discovered.length} market(s) on-chain`);
 
   const managedMarkets: ManagedMarket[] = [];
@@ -362,7 +387,7 @@ async function setupMarket(
   const mint = market.config.collateralMint;
 
   // Fetch full slab data to find existing accounts
-  const slabInfo = await connection.getAccountInfo(slabAddress);
+  const slabInfo = await rpc.getAccountInfo(slabAddress);
   if (!slabInfo) throw new Error("Slab account not found");
 
   const data = new Uint8Array(slabInfo.data);
@@ -409,7 +434,7 @@ async function setupMarket(
       await sendTx([initLpIx], [makerWallet]);
 
       // Refetch to find our new LP account index
-      const postLpSlabInfo = await connection.getAccountInfo(slabAddress);
+      const postLpSlabInfo = await rpc.getAccountInfo(slabAddress);
       if (!postLpSlabInfo) throw new Error("Slab refetch failed after InitLP");
       const postLpAccounts = parseAllAccounts(postLpSlabInfo.data);
       lpAccount = postLpAccounts.find(
@@ -442,7 +467,7 @@ async function setupMarket(
       log("setup", `Deposited $${Number(INITIAL_COLLATERAL) / 1_000_000} collateral to LP`);
 
       // Refetch accounts again
-      const newSlabInfo = await connection.getAccountInfo(slabAddress);
+      const newSlabInfo = await rpc.getAccountInfo(slabAddress);
       if (!newSlabInfo) throw new Error("Slab refetch failed");
       const newAccounts = parseAllAccounts(newSlabInfo.data);
       lpAccount = newAccounts.find(
@@ -477,7 +502,7 @@ async function setupMarket(
       await sendTx([initUserIx], [makerWallet]);
 
       // Refetch to find our user index
-      const postUserSlabInfo = await connection.getAccountInfo(slabAddress);
+      const postUserSlabInfo = await rpc.getAccountInfo(slabAddress);
       if (!postUserSlabInfo) throw new Error("Slab refetch failed after InitUser");
       const postUserAccounts = parseAllAccounts(postUserSlabInfo.data);
       userAccount = postUserAccounts.find(
@@ -510,7 +535,7 @@ async function setupMarket(
       log("setup", `Deposited $${Number(INITIAL_COLLATERAL) / 1_000_000} collateral to user`);
 
       // Refetch
-      const newSlabInfo = await connection.getAccountInfo(slabAddress);
+      const newSlabInfo = await rpc.getAccountInfo(slabAddress);
       if (!newSlabInfo) throw new Error("Slab refetch failed");
       const newAccounts = parseAllAccounts(newSlabInfo.data);
       userAccount = newAccounts.find(
@@ -749,7 +774,7 @@ async function quoteMarket(market: ManagedMarket): Promise<void> {
 
   // Refresh position from on-chain state periodically
   try {
-    const slabInfo = await connection.getAccountInfo(market.slabAddress);
+    const slabInfo = await rpc.getAccountInfo(market.slabAddress);
     if (slabInfo) {
       const accounts = parseAllAccounts(slabInfo.data);
       const userAcc = accounts.find(
@@ -869,7 +894,7 @@ async function main() {
   }
 
   // Check wallet balance
-  const balance = await connection.getBalance(makerWallet.publicKey);
+  const balance = await rpc.getBalance(makerWallet.publicKey);
   const balSol = balance / 1e9;
   log("main", `SOL balance: ${balSol.toFixed(4)} SOL`);
   if (balSol < 0.01) {
@@ -880,12 +905,18 @@ async function main() {
   if (DRY_RUN) log("main", "🔸 DRY RUN MODE — no transactions will be sent");
   if (MARKETS_FILTER) log("main", `🔸 Markets filter: ${MARKETS_FILTER.join(", ")}`);
 
-  // Discover and setup markets
-  let markets = await discoverAndSetupMarkets();
+  // Discover and setup markets — withRetry guards against 429 during startup
+  let markets = await withRetry(
+    () => discoverAndSetupMarkets(),
+    "discoverAndSetupMarkets",
+  );
   if (markets.length === 0) {
     log("main", "No tradeable markets found. Will retry in 30s...");
     await new Promise((r) => setTimeout(r, 30_000));
-    markets = await discoverAndSetupMarkets();
+    markets = await withRetry(
+      () => discoverAndSetupMarkets(),
+      "discoverAndSetupMarkets-retry",
+    );
     if (markets.length === 0) {
       log("main", "Still no markets. Exiting.");
       process.exit(1);
