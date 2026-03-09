@@ -50,7 +50,7 @@ const PYTH_FEED_IDS: Record<string, string> = {
   PYTH: "0bbf28e9a841a1cc788f6a361b17ca072d0ea3098a1e5df1c3922d06719579ff",
   RAY: "91568baa8beb53db23eb3fb7f22c6e8bd303d103919e19733f2bb642d3e7987a",
   JTO: "b43660a5f790c69354b0729a5ef9d50d68f1df92107540210b9cccba1f947cc2",
-  RNDR: "ab7f5d5aab10d6e7e0a72db2cccfbf35f15e0e1b29a1e5f3e1f1e0a1b2c3d4e5",
+  RNDR: "3d4a2bd9535be6ce8059d75eadeba507b043257321aa544717c56fa19b49e35d",
 };
 
 const HERMES_URL = process.env.HERMES_URL ?? "https://hermes.pyth.network";
