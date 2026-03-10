@@ -39,6 +39,7 @@ import {
   WELL_KNOWN,
   deriveVaultAuthority,
   deriveLpPda,
+  derivePythPushOraclePDA,
   discoverMarkets,
   parseAllAccounts,
   type DiscoveredMarket,
@@ -80,6 +81,8 @@ export interface ManagedMarket {
   matcherProgram: PublicKey;
   matcherContext: PublicKey;
   oracleMode: "authority" | "pyth";
+  /** Hex-encoded Pyth feed ID (64 chars). All-zeros for authority-mode markets. */
+  oracleFeedHex: string;
   // State tracking
   positionSize: bigint;
   collateral: bigint;
@@ -547,6 +550,7 @@ export async function setupMarketAccounts(
     matcherProgram: lpAccount.account.matcherProgram ?? config.matcherProgramId,
     matcherContext: lpAccount.account.matcherContext ?? PublicKey.default,
     oracleMode: isHyperp ? "authority" : "pyth",
+    oracleFeedHex: feedHex,
     positionSize: userAccount.account.positionSize ?? 0n,
     collateral: userAccount.account.capital ?? depositCollateral,
     lastOraclePriceE6: 0n,
@@ -570,7 +574,10 @@ export async function crankMarket(
   rpc?: ResilientRpc,
 ): Promise<boolean> {
   const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
-  const oracleKey = market.oracleMode === "authority" ? market.slabAddress : market.slabAddress; // TODO: derive pyth PDA
+  const oracleKey =
+    market.oracleMode === "authority"
+      ? market.slabAddress
+      : derivePythPushOraclePDA(market.oracleFeedHex)[0];
   const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
     wallet.publicKey,
     market.slabAddress,
@@ -625,7 +632,10 @@ export async function executeTrade(
 
   // Crank first to apply latest oracle
   const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
-  const oracleKey = market.oracleMode === "authority" ? market.slabAddress : market.slabAddress;
+  const oracleKey =
+    market.oracleMode === "authority"
+      ? market.slabAddress
+      : derivePythPushOraclePDA(market.oracleFeedHex)[0];
   const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
     wallet.publicKey, market.slabAddress, SYSVAR_CLOCK_PUBKEY, oracleKey,
   ]);
