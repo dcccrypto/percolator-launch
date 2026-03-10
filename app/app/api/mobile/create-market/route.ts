@@ -133,8 +133,14 @@ export async function POST(req: NextRequest) {
       initial_price_e6 = "1000000",
     } = body;
 
-    // Cap name to 64 chars to prevent oversized payloads propagating to the DB (#998)
-    const name = (typeof rawName === "string" ? rawName : "Mobile Market").slice(0, 64);
+    // Validate name length — reject >64 chars with 400 rather than silently truncating (#998)
+    const name = typeof rawName === "string" ? rawName : "Mobile Market";
+    if (name.length > 64) {
+      return NextResponse.json(
+        { error: "name must be 64 characters or fewer" },
+        { status: 400 },
+      );
+    }
 
     // ── Input validation ─────────────────────────────────────────────────────
     if (!deployer || !mint) {

@@ -1,54 +1,58 @@
 /**
- * Tests for name field sanitisation in /api/mobile/create-market (#998).
+ * Tests for name field validation in /api/mobile/create-market (#998).
  *
- * The route truncates the name to 64 chars to prevent oversized payloads
- * propagating to the DB. These tests validate the sanitisation logic in isolation.
+ * The route now rejects names longer than 64 chars with HTTP 400 instead of
+ * silently truncating. These tests validate the validation logic in isolation.
  */
 
 import { describe, it, expect } from "vitest";
 
-/** Mirror of the sanitisation logic in route.ts */
-function sanitiseName(rawName: unknown): string {
-  return (typeof rawName === "string" ? rawName : "Mobile Market").slice(0, 64);
+/**
+ * Mirror of the validation logic in route.ts.
+ * Returns the name string, or throws with a 400-style message if it is too long.
+ */
+function validateName(rawName: unknown): string {
+  const name = typeof rawName === "string" ? rawName : "Mobile Market";
+  if (name.length > 64) {
+    throw new Error("name must be 64 characters or fewer");
+  }
+  return name;
 }
 
-describe("create-market name sanitisation (#998)", () => {
+describe("create-market name validation (#998 polish)", () => {
   it("passes through short names unchanged", () => {
-    expect(sanitiseName("BTC/USDC")).toBe("BTC/USDC");
+    expect(validateName("BTC/USDC")).toBe("BTC/USDC");
   });
 
-  it("truncates names longer than 64 characters", () => {
+  it("rejects names longer than 64 characters with an error", () => {
     const long = "A".repeat(200);
-    const result = sanitiseName(long);
-    expect(result).toHaveLength(64);
-    expect(result).toBe("A".repeat(64));
+    expect(() => validateName(long)).toThrow("name must be 64 characters or fewer");
   });
 
   it("allows exactly 64 characters through", () => {
     const exact = "B".repeat(64);
-    expect(sanitiseName(exact)).toHaveLength(64);
+    expect(validateName(exact)).toHaveLength(64);
   });
 
   it("uses default when name is undefined", () => {
-    expect(sanitiseName(undefined)).toBe("Mobile Market");
+    expect(validateName(undefined)).toBe("Mobile Market");
   });
 
   it("uses default when name is null", () => {
-    expect(sanitiseName(null)).toBe("Mobile Market");
+    expect(validateName(null)).toBe("Mobile Market");
   });
 
   it("uses default when name is a number", () => {
-    expect(sanitiseName(42)).toBe("Mobile Market");
+    expect(validateName(42)).toBe("Mobile Market");
   });
 
-  it("truncates an attacker-supplied 10k char string", () => {
+  it("rejects an attacker-supplied 10k char string with an error", () => {
     const attack = "x".repeat(10_000);
-    const result = sanitiseName(attack);
-    expect(result).toHaveLength(64);
+    expect(() => validateName(attack)).toThrow("name must be 64 characters or fewer");
   });
 
-  it("preserves unicode correctly (slice operates on UTF-16 code units)", () => {
+  it("accepts valid unicode names within the 64-char limit", () => {
     const unicodeName = "Percolator 🔥 BTC-PERP Market 2026"; // well under 64 chars
-    expect(sanitiseName(unicodeName).length).toBeLessThanOrEqual(64);
+    expect(validateName(unicodeName).length).toBeLessThanOrEqual(64);
   });
 });
