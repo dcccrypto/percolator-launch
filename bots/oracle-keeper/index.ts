@@ -46,10 +46,21 @@ const PUSH_INTERVAL_MS = Number(process.env.PUSH_INTERVAL_MS ?? "3000");
 const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? "18810");
 const MAX_PRICE_MOVE_PCT = Number(process.env.MAX_PRICE_MOVE_PCT ?? "10");
 const STALE_THRESHOLD_S = Number(process.env.STALE_THRESHOLD_S ?? "30");
+// Hardcoded slab addresses that can never be fixed (different slab_admin — not our keypair).
+// PERCOLATOR-PERP: user-created markets with slab_admin=3ee9...b55 (not FF7KFfU5...)
+// oracle_authority on-chain = DJKjmSbWjhx925kuk1fS1BENCBnqXCfwUJjb9EKwSEnV ≠ keeper key.
+// Confirmed 2026-03-10: SetOracleAuthority fails with 0xf (admin check).
+const HARDCODED_BLOCKED_MARKETS = new Set<string>([
+  "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT", // PERCOLATOR-PERP-1 (Small)
+  "484DG6KQi5eVXuaXzWxaWMWeXDp9LFXyshNi33UnWfxV", // PERCOLATOR-PERP-2 (Small)
+  "GDyHCzpiuEsWDkLuji3NEFYJfqbDTzMCKn9ugUzTZqAW", // PERCOLATOR-PERP-3 (Large)
+]);
+
 // Comma-separated list of slab addresses to permanently skip (wrong oracle_authority, etc.)
-const ORACLE_KEEPER_BLOCKED_MARKETS = new Set<string>(
-  (process.env.ORACLE_KEEPER_BLOCKED_MARKETS ?? "").split(",").map(s => s.trim()).filter(Boolean)
-);
+const ORACLE_KEEPER_BLOCKED_MARKETS = new Set<string>([
+  ...HARDCODED_BLOCKED_MARKETS,
+  ...(process.env.ORACLE_KEEPER_BLOCKED_MARKETS ?? "").split(",").map(s => s.trim()).filter(Boolean),
+]);
 const ADMIN_KP_PATH = process.env.ADMIN_KEYPAIR_PATH ??
   `${process.env.HOME}/.config/solana/percolator-upgrade-authority.json`;
 const RPC_URL = process.env.RPC_URL ?? "https://api.devnet.solana.com";
@@ -343,8 +354,11 @@ async function pushAndCrank(market: MarketInfo, programId: PublicKey): Promise<v
       authorityVerified.add(market.slab);
       log(`✓ ${market.label}: oracle authority verified (${admin.publicKey.toBase58().slice(0, 12)}...)`);
     } catch (e) {
-      log(`⚠️ ${market.label}: failed to verify oracle authority (attempt ${s.totalErrors + 1}): ${(e as Error).message?.slice(0, 80)}`);
-      // Continue anyway — the tx will fail with a clear program error if authority is wrong
+      // fetchSlab/parseConfig failed — we cannot confirm we have authority.
+      // Skip this tick rather than pushing blindly and generating 'Provided owner is not allowed' spam.
+      log(`⚠️ ${market.label}: failed to verify oracle authority — skipping tick (attempt ${s.totalErrors + 1}): ${(e as Error).message?.slice(0, 80)}`);
+      s.totalErrors++;
+      return;
     }
   }
 
