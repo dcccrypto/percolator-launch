@@ -168,6 +168,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const validOracleModes = ["admin", "hyperp", "pyth"] as const;
+    if (!validOracleModes.includes(oracle_mode as typeof validOracleModes[number])) {
+      return NextResponse.json(
+        { error: `Invalid oracle_mode. Must be one of: ${validOracleModes.join(", ")}` },
+        { status: 400 },
+      );
+    }
+
     let priceE6: bigint;
     try {
       priceE6 = BigInt(initial_price_e6);
