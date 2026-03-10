@@ -33,9 +33,165 @@
   --timing-normal: 300ms;
   --timing-slow: 500ms;
 
+  /* ─── Button Tokens ─── */
+
+  /* Base */
+  --btn-radius: 8px;
+  --btn-font-weight: 600;
+  --btn-letter-spacing: 0.01em;
+  --btn-transition: all 0.18s ease;
+  --btn-focus-ring-width: 2px;
+  --btn-focus-ring-offset: 2px;
+
+  /* Sizing: height / horizontal-padding / font-size / icon-size */
+  --btn-h-sm: 32px;
+  --btn-px-sm: 12px;
+  --btn-fs-sm: 12px;
+  --btn-icon-sm: 14px;
+
+  --btn-h-md: 40px;
+  --btn-px-md: 16px;
+  --btn-fs-md: 14px;
+  --btn-icon-md: 16px;
+
+  --btn-h-lg: 48px;
+  --btn-px-lg: 24px;
+  --btn-fs-lg: 16px;
+  --btn-icon-lg: 18px;
+
+  /* Primary (cyan — main CTA) */
+  --btn-primary-bg: #0ea5e9;
+  --btn-primary-bg-hover: #38bdf8;
+  --btn-primary-bg-active: #0284c7;
+  --btn-primary-text: #06070a;
+  --btn-primary-border: transparent;
+  --btn-primary-shadow: 0 0 16px rgba(56, 189, 248, 0.35);
+  --btn-primary-shadow-hover: 0 0 28px rgba(56, 189, 248, 0.55);
+  --btn-primary-focus-ring: rgba(56, 189, 248, 0.60);
+
+  /* Secondary (ghost / outlined) */
+  --btn-secondary-bg: rgba(255, 255, 255, 0.04);
+  --btn-secondary-bg-hover: rgba(255, 255, 255, 0.08);
+  --btn-secondary-bg-active: rgba(255, 255, 255, 0.03);
+  --btn-secondary-text: var(--text);
+  --btn-secondary-border: rgba(255, 255, 255, 0.14);
+  --btn-secondary-border-hover: rgba(255, 255, 255, 0.26);
+  --btn-secondary-shadow: none;
+  --btn-secondary-shadow-hover: 0 0 12px rgba(255, 255, 255, 0.06);
+  --btn-secondary-focus-ring: rgba(246, 247, 251, 0.40);
+
+  /* Destructive (danger / delete) */
+  --btn-destructive-bg: rgba(239, 68, 68, 0.12);
+  --btn-destructive-bg-hover: rgba(239, 68, 68, 0.22);
+  --btn-destructive-bg-active: rgba(239, 68, 68, 0.08);
+  --btn-destructive-text: #fca5a5;
+  --btn-destructive-text-hover: #fecaca;
+  --btn-destructive-border: rgba(239, 68, 68, 0.30);
+  --btn-destructive-border-hover: rgba(239, 68, 68, 0.55);
+  --btn-destructive-shadow: none;
+  --btn-destructive-shadow-hover: 0 0 16px rgba(239, 68, 68, 0.25);
+  --btn-destructive-focus-ring: rgba(239, 68, 68, 0.50);
+
+  /* Disabled (universal) */
+  --btn-disabled-bg: rgba(255, 255, 255, 0.04);
+  --btn-disabled-text: rgba(246, 247, 251, 0.24);
+  --btn-disabled-border: rgba(255, 255, 255, 0.06);
+  --btn-disabled-cursor: not-allowed;
+  --btn-disabled-shadow: none;
+
   /* HUD Lines */
   --hud-line: rgba(153,69,255,0.20);
   --hud-line-hover: rgba(153,69,255,0.45);
+}
+
+/* ─── Button Component Classes ─── */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-semibold tracking-[0.01em] rounded-[8px] transition-all duration-[180ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#06070a] cursor-pointer select-none whitespace-nowrap;
+  }
+
+  /* Sizes */
+  .btn-sm { @apply h-8 px-3 text-xs; }
+  .btn-md { @apply h-10 px-4 text-sm; }
+  .btn-lg { @apply h-12 px-6 text-base; }
+
+  /* Icon-only square variants */
+  .btn-icon-sm { @apply h-8 w-8 p-0 text-xs; }
+  .btn-icon-md { @apply h-10 w-10 p-0 text-sm; }
+  .btn-icon-lg { @apply h-12 w-12 p-0 text-base; }
+
+  /* Primary */
+  .btn-primary {
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
+    box-shadow: var(--btn-primary-shadow);
+    border: 1px solid var(--btn-primary-border);
+  }
+  .btn-primary:hover:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--btn-primary-bg-hover);
+    box-shadow: var(--btn-primary-shadow-hover);
+  }
+  .btn-primary:active:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--btn-primary-bg-active);
+  }
+  .btn-primary:focus-visible {
+    --tw-ring-color: var(--btn-primary-focus-ring);
+  }
+
+  /* Secondary */
+  .btn-secondary {
+    background: var(--btn-secondary-bg);
+    color: var(--btn-secondary-text);
+    border: 1px solid var(--btn-secondary-border);
+    box-shadow: var(--btn-secondary-shadow);
+  }
+  .btn-secondary:hover:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--btn-secondary-bg-hover);
+    border-color: var(--btn-secondary-border-hover);
+    box-shadow: var(--btn-secondary-shadow-hover);
+  }
+  .btn-secondary:active:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--btn-secondary-bg-active);
+  }
+  .btn-secondary:focus-visible {
+    --tw-ring-color: var(--btn-secondary-focus-ring);
+  }
+
+  /* Destructive */
+  .btn-destructive {
+    background: var(--btn-destructive-bg);
+    color: var(--btn-destructive-text);
+    border: 1px solid var(--btn-destructive-border);
+    box-shadow: var(--btn-destructive-shadow);
+  }
+  .btn-destructive:hover:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--btn-destructive-bg-hover);
+    color: var(--btn-destructive-text-hover);
+    border-color: var(--btn-destructive-border-hover);
+    box-shadow: var(--btn-destructive-shadow-hover);
+  }
+  .btn-destructive:active:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--btn-destructive-bg-active);
+  }
+  .btn-destructive:focus-visible {
+    --tw-ring-color: var(--btn-destructive-focus-ring);
+  }
+
+  /* Disabled (all variants) */
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    background: var(--btn-disabled-bg) !important;
+    color: var(--btn-disabled-text) !important;
+    border-color: var(--btn-disabled-border) !important;
+    box-shadow: none !important;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+}
+
+/* ─── Button Spinner ─── */
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
 }
 
 html {
