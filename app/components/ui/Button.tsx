@@ -8,12 +8,20 @@ import {
 
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** Visual style variant. Defaults to `secondary`. */
   variant?: "primary" | "secondary" | "destructive";
+  /** Size preset. Defaults to `md`. */
   size?: "sm" | "md" | "lg";
+  /** Show a spinner and disable interaction while an async action is in progress. */
   loading?: boolean;
+  /** Optional icon rendered to the left of the label. */
   iconLeft?: ReactNode;
+  /** Optional icon rendered to the right of the label. */
   iconRight?: ReactNode;
+  /** Stretch the button to full container width. */
   fullWidth?: boolean;
+  children?: ReactNode;
+  className?: string;
 }
 
 const sizeClass: Record<string, string> = {
@@ -41,12 +49,23 @@ const spinnerSize: Record<string, number> = {
 };
 
 /**
- * Design-system button. Single source of truth for all button variants.
+ * Design-system button — single source of truth.
+ *
+ * Uses the `.btn`, `.btn-{variant}`, `.btn-{size}` CSS layer classes
+ * defined in `globals.css` and the `--btn-*` custom property tokens.
  *
  * @example
- * <Button variant="primary" size="lg">Launch Market</Button>
- * <Button variant="destructive" loading>Closing…</Button>
- * <Button variant="secondary" iconLeft={<XIcon />} size="sm">Cancel</Button>
+ * <Button variant="primary" size="lg" onClick={handleSubmit}>
+ *   Launch Market
+ * </Button>
+ *
+ * @example Icon-only (always supply aria-label)
+ * <Button variant="secondary" size="md" aria-label="Close">
+ *   <XIcon />
+ * </Button>
+ *
+ * @example Loading state
+ * <Button variant="primary" loading>Submitting…</Button>
  */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   (
@@ -87,27 +106,31 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {loading && (
           <svg
-            className="animate-[btn-spin_0.75s_linear_infinite] shrink-0"
+            className="shrink-0"
+            style={{ animation: "spin 0.75s linear infinite" }}
             width={spinnerSize[sizeKey]}
             height={spinnerSize[sizeKey]}
             viewBox="0 0 24 24"
             fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+            strokeLinecap="round"
             aria-hidden="true"
           >
-            <circle
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeDasharray="31.4 31.4"
-            />
+            <path d="M12 2a10 10 0 0 1 10 10" />
           </svg>
         )}
-        {!loading && iconLeft}
+        {!loading && iconLeft && (
+          <span aria-hidden="true" className="shrink-0">
+            {iconLeft}
+          </span>
+        )}
         {children}
-        {!loading && iconRight}
+        {!loading && iconRight && (
+          <span aria-hidden="true" className="shrink-0">
+            {iconRight}
+          </span>
+        )}
       </button>
     );
   },
