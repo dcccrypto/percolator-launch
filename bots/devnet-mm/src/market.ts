@@ -564,6 +564,17 @@ export async function setupMarketAccounts(
 // ═══════════════════════════════════════════════════════════════
 
 /**
+ * Derive the oracle account key for a market.
+ * Authority-mode markets use the slab address directly;
+ * Pyth-mode markets use the Pyth push oracle PDA.
+ */
+function getOracleKey(market: ManagedMarket): PublicKey {
+  return market.oracleMode === "authority"
+    ? market.slabAddress
+    : derivePythPushOraclePDA(market.oracleFeedHex)[0];
+}
+
+/**
  * Crank a market (process funding, liquidations, etc).
  */
 export async function crankMarket(
@@ -574,15 +585,11 @@ export async function crankMarket(
   rpc?: ResilientRpc,
 ): Promise<boolean> {
   const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
-  const oracleKey =
-    market.oracleMode === "authority"
-      ? market.slabAddress
-      : derivePythPushOraclePDA(market.oracleFeedHex)[0];
   const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
     wallet.publicKey,
     market.slabAddress,
     SYSVAR_CLOCK_PUBKEY,
-    oracleKey,
+    getOracleKey(market),
   ]);
   const ix = buildIx({ programId: market.programId, keys: crankKeys, data: crankData });
   const sig = await sendTx(connection, [ix], [wallet], `${market.symbol} Crank`, 200_000, config.dryRun, rpc);
@@ -632,12 +639,8 @@ export async function executeTrade(
 
   // Crank first to apply latest oracle
   const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
-  const oracleKey =
-    market.oracleMode === "authority"
-      ? market.slabAddress
-      : derivePythPushOraclePDA(market.oracleFeedHex)[0];
   const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
-    wallet.publicKey, market.slabAddress, SYSVAR_CLOCK_PUBKEY, oracleKey,
+    wallet.publicKey, market.slabAddress, SYSVAR_CLOCK_PUBKEY, getOracleKey(market),
   ]);
   const crankIx = buildIx({ programId: market.programId, keys: crankKeys, data: crankData });
 
@@ -651,7 +654,7 @@ export async function executeTrade(
     wallet.publicKey,
     market.lpOwner,
     market.slabAddress,
-    oracleKey,
+    getOracleKey(market),
     market.matcherProgram,
     market.matcherContext,
     lpPda,
