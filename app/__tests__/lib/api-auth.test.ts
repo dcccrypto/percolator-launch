@@ -76,5 +76,18 @@ describe("requireAuth", () => {
       process.env.INDEXER_API_KEY = "Secret-123";
       expect(requireAuth(mockRequest({ "x-api-key": "secret-123" }))).toBe(false);
     });
+
+    it("uses timing-safe comparison (PERC-597): does not throw on long vs short keys", () => {
+      // timingSafeEqual throws when buffers differ in length if called directly on raw strings;
+      // our hash-based wrapper must handle this without error.
+      process.env.INDEXER_API_KEY = "a";
+      expect(requireAuth(mockRequest({ "x-api-key": "a-very-long-key-value-that-differs-in-length" }))).toBe(false);
+    });
+
+    it("uses timing-safe comparison (PERC-597): correct long key accepted", () => {
+      const longKey = "a-very-long-api-key-value-1234567890abcdef";
+      process.env.INDEXER_API_KEY = longKey;
+      expect(requireAuth(mockRequest({ "x-api-key": longKey }))).toBe(true);
+    });
   });
 });

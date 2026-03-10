@@ -1,10 +1,10 @@
+import { timingSafeEqual, createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
 
 /**
  * Simple API key auth for internal/indexer routes.
  * Checks `x-api-key` header against INDEXER_API_KEY env var.
- * Uses timing-safe comparison to prevent timing attacks (PERC-597).
+ * Uses timing-safe comparison (PERC-597) to prevent timing-oracle attacks.
  * R2-S9: In production without a configured key, rejects all requests.
  */
 export function requireAuth(req: NextRequest): boolean {
@@ -17,11 +17,15 @@ export function requireAuth(req: NextRequest): boolean {
   const providedKey = req.headers.get("x-api-key");
   if (!providedKey) return false;
 
-  // PERC-597: timing-safe comparison to prevent timing side-channel attacks
-  const expected = Buffer.from(expectedKey, "utf8");
-  const provided = Buffer.from(providedKey, "utf8");
-  if (expected.length !== provided.length) return false;
-  return timingSafeEqual(expected, provided);
+  // Hash both values to guarantee equal buffer length for timingSafeEqual.
+  // This avoids leaking key length via an early-return on length mismatch.
+  const expectedHash = createHash("sha256").update(expectedKey).digest();
+  const providedHash = createHash("sha256").update(providedKey).digest();
+  try {
+    return timingSafeEqual(expectedHash, providedHash);
+  } catch {
+    return false;
+  }
 }
 
 export const UNAUTHORIZED = NextResponse.json(

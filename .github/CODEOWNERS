@@ -5,14 +5,19 @@
 *                           @dcccrypto
 
 # Security-sensitive paths — require explicit security sign-off
-/wallet/                    @dcccrypto
-/app/wallet/                @dcccrypto
-/packages/*/wallet/         @dcccrypto
-/airdrop/                   @dcccrypto
-/app/airdrop/               @dcccrypto
-/auth/                      @dcccrypto
-/app/auth/                  @dcccrypto
-/program/                   @dcccrypto
-/packages/sdk/              @dcccrypto
-/packages/core/src/program/ @dcccrypto
+/wallet/                          @dcccrypto
+/app/wallet/                      @dcccrypto
+/packages/*/wallet/               @dcccrypto
+/airdrop/                         @dcccrypto
+/app/airdrop/                     @dcccrypto
+/auth/                            @dcccrypto
+/app/auth/                        @dcccrypto
+/program/                         @dcccrypto
+/packages/sdk/                    @dcccrypto
+/packages/core/src/program/       @dcccrypto
+
+# API auth helpers — any change here requires security sign-off (PERC-597)
+/app/lib/api-auth.ts              @dcccrypto
+/packages/api/src/middleware/auth.ts  @dcccrypto
+/app/app/api/bugs/                @dcccrypto
 
