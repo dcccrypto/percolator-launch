@@ -63,55 +63,12 @@ import {
   type SlabTierKey,
 } from "@percolator/sdk";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
+import { getClientIp } from "@/lib/get-client-ip";
+import {
+  checkCreateMarketRateLimit,
+  CREATE_MARKET_RATE_LIMIT,
+} from "@/lib/create-market-rate-limit";
 import * as Sentry from "@sentry/nextjs";
-
-export const dynamic = "force-dynamic";
-
-// ── Per-endpoint rate limiter: 5 req/min per IP (closes #990) ─────────────
-const CREATE_MARKET_RATE_MAP = new Map<string, { count: number; resetAt: number }>();
-const CREATE_MARKET_RATE_LIMIT = 5;
-const CREATE_MARKET_RATE_WINDOW_MS = 60_000;
-
-function checkCreateMarketRateLimit(req: NextRequest): NextResponse | null {
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-real-ip") ??
-    "unknown";
-  const now = Date.now();
-  let entry = CREATE_MARKET_RATE_MAP.get(ip);
-
-  if (!entry || now > entry.resetAt) {
-    entry = { count: 0, resetAt: now + CREATE_MARKET_RATE_WINDOW_MS };
-    CREATE_MARKET_RATE_MAP.set(ip, entry);
-  }
-
-  entry.count++;
-
-  // Periodic cleanup (~0.1% of requests)
-  if (Math.random() < 0.001) {
-    for (const [key, val] of CREATE_MARKET_RATE_MAP) {
-      if (now > val.resetAt) CREATE_MARKET_RATE_MAP.delete(key);
-    }
-  }
-
-  if (entry.count > CREATE_MARKET_RATE_LIMIT) {
-    const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
-    return NextResponse.json(
-      { error: "Rate limit exceeded — max 5 create-market requests per minute" },
-      {
-        status: 429,
-        headers: {
-          "Retry-After": String(retryAfter),
-          "X-RateLimit-Limit": String(CREATE_MARKET_RATE_LIMIT),
-          "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": String(Math.ceil(entry.resetAt / 1000)),
-        },
-      },
-    );
-  }
-
-  return null;
-}
 
 /** Minimum token amount for vault seed transfer (matches on-chain guard). */
 const MIN_INIT_MARKET_SEED = 500_000_000n;
@@ -146,9 +103,24 @@ interface MobileCreateMarketBody {
 }
 
 export async function POST(req: NextRequest) {
-  // ── Rate limit check (5 req/min per IP, #990) ──────────────────────────
-  const rateLimitResponse = checkCreateMarketRateLimit(req);
-  if (rateLimitResponse) return rateLimitResponse;
+  // ── Rate limit check: sliding-window 5 req/min per IP (#990, #PERC-577) ─
+  const clientIp = getClientIp(req);
+  const rl = await checkCreateMarketRateLimit(clientIp);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded — max 5 create-market requests per minute" },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rl.retryAfterSecs),
+          "X-RateLimit-Limit": String(CREATE_MARKET_RATE_LIMIT),
+          "X-RateLimit-Remaining": "0",
+          // seconds-until-reset (matches middleware.ts convention)
+          "X-RateLimit-Reset": String(Math.max(0, rl.retryAfterSecs)),
+        },
+      },
+    );
+  }
 
   try {
     const body: MobileCreateMarketBody = await req.json();
