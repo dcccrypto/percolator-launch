@@ -23,6 +23,8 @@
     "@solana/web3.js": "^1.98.4",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.97.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.4",
     "bn.js": "^5.2.3",
     "buffer": "^6.0.3",
     "gsap": "^3.14.2",
