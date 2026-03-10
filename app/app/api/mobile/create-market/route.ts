@@ -128,10 +128,13 @@ export async function POST(req: NextRequest) {
       deployer,
       mint,
       tier = "small",
-      name = "Mobile Market",
+      name: rawName = "Mobile Market",
       oracle_mode = "admin",
       initial_price_e6 = "1000000",
     } = body;
+
+    // Cap name to 64 chars to prevent oversized payloads propagating to the DB (#998)
+    const name = (typeof rawName === "string" ? rawName : "Mobile Market").slice(0, 64);
 
     // ── Input validation ─────────────────────────────────────────────────────
     if (!deployer || !mint) {
