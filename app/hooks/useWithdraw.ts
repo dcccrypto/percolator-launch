@@ -23,7 +23,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 export function useWithdraw(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, programId: slabProgramId } = useSlabState();
+  const { config: mktConfig, programId: slabProgramId, refresh: refreshSlab } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
@@ -109,7 +109,11 @@ export function useWithdraw(slabAddress: string) {
           data: encodeWithdrawCollateral({ userIdx: params.userIdx, amount: params.amount.toString() }),
         }));
 
-        return await sendTx({ connection, wallet, instructions, computeUnits: 300_000 });
+        const sig = await sendTx({ connection, wallet, instructions, computeUnits: 300_000 });
+        // Force immediate slab re-read so balance updates without waiting for the next poll.
+        refreshSlab();
+        setTimeout(() => refreshSlab(), 2000);
+        return sig;
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         throw e;
@@ -118,7 +122,7 @@ export function useWithdraw(slabAddress: string) {
         setLoading(false);
       }
     },
-    [connection, wallet, mktConfig, slabAddress, slabProgramId]
+    [connection, wallet, mktConfig, slabAddress, slabProgramId, refreshSlab]
   );
 
   return { withdraw, loading, error };

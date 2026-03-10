@@ -84,6 +84,7 @@ describe("useDeposit", () => {
         vaultPubkey: mockVault,
       },
       programId: mockProgramId,
+      refresh: vi.fn(),
     };
 
     ( useConnectionCompat as any).mockReturnValue({ connection: mockConnection });
@@ -312,7 +313,7 @@ describe("useDeposit", () => {
     });
 
     it("should throw error if market config not loaded", async () => {
-      (useSlabState as any).mockReturnValue({ config: null, programId: null });
+      (useSlabState as any).mockReturnValue({ config: null, programId: null, refresh: vi.fn() });
 
       const { result } = renderHook(() => useDeposit(mockSlabAddress));
 

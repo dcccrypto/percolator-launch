@@ -42,7 +42,17 @@ export interface SlabState {
   programId: PublicKey | null;
 }
 
-const defaultState: SlabState = {
+/** Full context value exposed to consumers — includes stable callbacks on top of SlabState. */
+export interface SlabContextValue extends SlabState {
+  /**
+   * Force an immediate re-fetch of the slab account from the RPC.
+   * Call this after any tx that mutates the slab (deposit, withdraw, open/close position)
+   * so the UI reflects the confirmed on-chain state without waiting for the next poll cycle.
+   */
+  refresh: () => void;
+}
+
+const defaultSlabState: SlabState = {
   slabAddress: "",
   raw: null,
   header: null,
@@ -55,7 +65,9 @@ const defaultState: SlabState = {
   programId: null,
 };
 
-const SlabContext = createContext<SlabState>(defaultState);
+const defaultContextValue: SlabContextValue = { ...defaultSlabState, refresh: () => {} };
+
+const SlabContext = createContext<SlabContextValue>(defaultContextValue);
 
 export const useSlabState = () => useContext(SlabContext);
 
@@ -63,7 +75,7 @@ const POLL_INTERVAL_MS = 3000;
 
 export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({ children, slabAddress }) => {
   const { connection } = useConnectionCompat();
-  const [state, setState] = useState<SlabState>({ ...defaultState, slabAddress });
+  const [state, setState] = useState<SlabState>({ ...defaultSlabState, slabAddress });
   const wsActive = useRef(false);
   const fetchRef = useRef<() => void>(() => {});
 
@@ -212,5 +224,11 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     return () => document.removeEventListener("visibilitychange", handler);
   }, []);
 
-  return <SlabContext.Provider value={state}>{children}</SlabContext.Provider>;
+  const refresh = useCallback(() => { fetchRef.current(); }, []);
+
+  return (
+    <SlabContext.Provider value={{ ...state, refresh }}>
+      {children}
+    </SlabContext.Provider>
+  );
 };
