@@ -13,7 +13,7 @@ interface VaultCardProps {
  * Shows key metrics and links to the deposit/withdraw page.
  */
 export function VaultCard({ vault }: VaultCardProps) {
-  const vaultUsd = vault.vaultBalance / 1e6;
+  const vaultUsd = vault.vaultBalance / (10 ** vault.decimals);
 
   return (
     <Link
@@ -65,7 +65,7 @@ export function VaultCard({ vault }: VaultCardProps) {
             />
             <MetricCell
               label="Insurance"
-              value={`$${formatCompact(vault.insuranceFund / 1e6)}`}
+              value={`$${formatCompact(vault.insuranceFund / (10 ** vault.decimals))}`}
             />
             <MetricCell
               label="Max Leverage"

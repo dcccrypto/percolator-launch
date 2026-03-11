@@ -11,6 +11,8 @@ import { useStakeWithdraw } from '@/hooks/useStakeWithdraw';
 import { useEngineState } from '@/hooks/useEngineState';
 import { useEarnStats, type MarketVaultInfo } from '@/hooks/useEarnStats';
 import { getSupabase } from '@/lib/supabase';
+import { useSlabState } from '@/components/providers/SlabProvider';
+import { useTokenMeta } from '@/hooks/useTokenMeta';
 import { OiCapMeter } from '@/components/earn/OiCapMeter';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
@@ -65,6 +67,13 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const { withdraw: stakeWithdraw, loading: withdrawLoading } = useStakeWithdraw();
   const { engine, totalOI, vault: engineVault } = useEngineState();
 
+  // Get actual collateral decimals and symbol from on-chain mint
+  const slabState = useSlabState();
+  const collateralMint = slabState.config?.collateralMint ?? null;
+  const tokenMeta = useTokenMeta(collateralMint);
+  const collateralDecimals = tokenMeta?.decimals ?? 6;
+  const collateralSymbol = tokenMeta?.symbol ?? 'TOKEN';
+
   // Get market info from earn stats
   const { stats: earnStats, loading: earnLoading } = useEarnStats();
   const marketInfo = useMemo<MarketVaultInfo | null>(() => {
@@ -111,9 +120,10 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
 
   const symbol = marketInfo?.symbol ?? fallbackSymbol ?? 'UNKNOWN';
   const maxOI = marketInfo?.maxOI ?? 0;
-  const currentOI = marketInfo?.totalOI ?? (totalOI ? Number(totalOI) / 1e6 : 0);
+  const collDivisor = 10 ** collateralDecimals;
+  const currentOI = marketInfo?.totalOI ?? (totalOI ? Number(totalOI) / collDivisor : 0);
   const estimatedApy = marketInfo?.estimatedApyPct ?? 0;
-  const vaultUsd = Number(poolState.vaultBalance) / 1e6;
+  const vaultUsd = Number(poolState.vaultBalance) / collDivisor;
   const insuranceFund = marketInfo?.insuranceFund ?? 0;
 
   return (
@@ -199,7 +209,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             </StatCell>
             <StatCell label="LP Supply" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-white">
-                {formatCompact(Number(poolState.lpSupply) / 1e6)}
+                {formatCompact(Number(poolState.lpSupply) / collDivisor)}
               </span>
             </StatCell>
             <StatCell label="Open Interest" loading={loading}>
@@ -209,7 +219,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             </StatCell>
             <StatCell label="Insurance" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-white">
-                ${formatCompact(insuranceFund / 1e6)}
+                ${formatCompact(insuranceFund / collDivisor)}
               </span>
             </StatCell>
             <StatCell label="Max Leverage" loading={loading}>
@@ -235,8 +245,8 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               userLpBalance={poolState.userLpBalance}
               lpSupply={poolState.lpSupply}
               vaultBalance={poolState.vaultBalance}
-              decimals={6}
-              collateralSymbol="USDC"
+              decimals={collateralDecimals}
+              collateralSymbol={collateralSymbol}
               estimatedApyPct={estimatedApy}
               redemptionRateE6={poolState.redemptionRateE6}
               loading={loading}
@@ -250,8 +260,8 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               userLpBalance={poolState.userLpBalance}
               vaultBalance={poolState.vaultBalance}
               lpSupply={poolState.lpSupply}
-              decimals={6}
-              collateralSymbol="USDC"
+              decimals={collateralDecimals}
+              collateralSymbol={collateralSymbol}
               loading={loading || depositLoading || withdrawLoading}
               cooldownElapsed={poolState.cooldownElapsed}
               onDeposit={handleDeposit}
@@ -291,7 +301,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
                 label="Deposit Cap"
                 value={
                   poolState.depositCap > 0n
-                    ? `${formatCompact(Number(poolState.depositCap) / 1e6)} USDC`
+                    ? `${formatCompact(Number(poolState.depositCap) / collDivisor)} ${collateralSymbol}`
                     : 'Unlimited'
                 }
               />
