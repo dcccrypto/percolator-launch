@@ -346,27 +346,26 @@ export default function AdminDashboard() {
   const fetchPlatformStats = useCallback(async () => {
     setStatsLoading(true);
     try {
-      const [marketsRes, healthRes] = await Promise.all([
-        getAuthClient()
-          .from("markets_with_stats")
-          .select(
-            "slab_address, total_open_interest, open_interest_long, open_interest_short, volume_24h, trade_count_24h"
-          ),
+      // Use the server-side /api/stats endpoint which:
+      // 1. Uses service role client (bypasses RLS)
+      // 2. Applies activeMarketFilter + isSaneMarketValue (filters sentinel u64::MAX values)
+      // 3. Queries trades table for real trade counts
+      // Previously this queried Supabase directly from the browser client, which
+      // returned empty results due to RLS policy on markets_with_stats.
+      const [statsRes, healthRes] = await Promise.all([
+        fetch("/api/stats")
+          .then((r) => r.json())
+          .catch(() => null),
         fetch("/api/health")
           .then((r) => r.json())
           .catch(() => ({ status: "unknown", checks: {} })),
       ]);
 
-      const markets = (marketsRes.data ?? []) as MarketStat[];
       setPlatformStats({
-        totalMarkets: markets.length,
-        totalVolume24h: markets.reduce((s, m) => s + (m.volume_24h ?? 0), 0),
-        totalOpenInterest: markets.reduce(
-          (s, m) =>
-            s + ((m.open_interest_long ?? 0) + (m.open_interest_short ?? 0)),
-          0
-        ),
-        trades24h: markets.reduce((s, m) => s + (m.trade_count_24h ?? 0), 0),
+        totalMarkets: statsRes?.totalMarkets ?? 0,
+        totalVolume24h: statsRes?.totalVolume24h ?? 0,
+        totalOpenInterest: statsRes?.totalOpenInterest ?? 0,
+        trades24h: statsRes?.trades24h ?? 0,
         health: {
           status: healthRes.status ?? "unknown",
           checks: healthRes.checks ?? {},
