@@ -98,7 +98,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
                 symbol={symbol}
               />
             ) : mktConfig?.collateralMint ? (
-              <a href="/devnet-mint" className="text-[10px] text-[var(--warning)] underline underline-offset-2 hover:text-[var(--warning)]/80">
+              <a
+                href={`/devnet-mint?mint=${mktConfig.collateralMint.toBase58()}&symbol=${encodeURIComponent(symbol)}`}
+                className="text-[10px] text-[var(--warning)] underline underline-offset-2 hover:text-[var(--warning)]/80"
+              >
                 Mint some from the faucet →
               </a>
             ) : null}
@@ -217,7 +220,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
               symbol={symbol}
             />
           ) : (
-            <a href="/devnet-mint" className="text-[10px] text-[var(--warning)] underline underline-offset-2 hover:text-[var(--warning)]/80">
+            <a
+              href={mktConfig?.collateralMint ? `/devnet-mint?mint=${mktConfig.collateralMint.toBase58()}&symbol=${encodeURIComponent(symbol)}` : "/devnet-mint"}
+              className="text-[10px] text-[var(--warning)] underline underline-offset-2 hover:text-[var(--warning)]/80"
+            >
               Mint more →
             </a>
           )}

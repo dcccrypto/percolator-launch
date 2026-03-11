@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useCallback, useState, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
   Connection,
@@ -47,6 +48,66 @@ const DevnetMintContent: FC = () => {
   const { publicKey, signTransaction } = useWalletCompat();
   const prefersReducedMotion = usePrefersReducedMotion();
   const successCardRef = useRef<HTMLDivElement>(null);
+  const searchParams = useSearchParams();
+
+  // ── Get Market Tokens (via /api/devnet-airdrop) ──────────────────────────────
+  // Pre-populated when navigating from a market page with ?mint=<devnetMint>[&symbol=TOKEN]
+  const [faucetMint, setFaucetMint] = useState<string>("");
+  const [faucetSymbol, setFaucetSymbol] = useState<string>("");
+  const [faucetLoading, setFaucetLoading] = useState(false);
+  const [faucetResult, setFaucetResult] = useState<{
+    amount: number;
+    symbol: string;
+    sig: string;
+  } | null>(null);
+  const [faucetError, setFaucetError] = useState<string | null>(null);
+  const [faucetRateLimited, setFaucetRateLimited] = useState<string | null>(null); // nextClaimAt ISO string
+
+  // Auto-populate from URL params (?mint=&symbol=)
+  useEffect(() => {
+    const mint = searchParams?.get("mint") ?? "";
+    const sym = searchParams?.get("symbol") ?? "";
+    if (mint) {
+      setFaucetMint(mint);
+      if (sym) setFaucetSymbol(sym);
+    }
+  }, [searchParams]);
+
+  const handleFaucetClaim = useCallback(async () => {
+    if (!publicKey || !faucetMint || faucetLoading) return;
+    setFaucetLoading(true);
+    setFaucetError(null);
+    setFaucetResult(null);
+    setFaucetRateLimited(null);
+    try {
+      const resp = await fetch("/api/devnet-airdrop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mintAddress: faucetMint.trim(),
+          walletAddress: publicKey.toBase58(),
+        }),
+      });
+      const data = await resp.json();
+      if (resp.status === 429) {
+        setFaucetRateLimited(data.nextClaimAt ?? null);
+        setFaucetError(`Already claimed — next claim at ${data.nextClaimAt ? new Date(data.nextClaimAt).toLocaleString() : "later"}`);
+      } else if (!resp.ok) {
+        setFaucetError(data.error ?? `Request failed (HTTP ${resp.status})`);
+      } else {
+        setFaucetResult({
+          amount: data.amount,
+          symbol: faucetSymbol || data.symbol || "TOKEN",
+          sig: data.signature,
+        });
+        if (!faucetSymbol && data.symbol) setFaucetSymbol(data.symbol);
+      }
+    } catch (e: unknown) {
+      setFaucetError(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setFaucetLoading(false);
+    }
+  }, [publicKey, faucetMint, faucetSymbol, faucetLoading]);
 
   const [balance, setBalance] = useState<number | null>(null);
   const MAX_DECIMALS = 12; // Safe limit for u64 arithmetic on Solana
@@ -429,6 +490,95 @@ const DevnetMintContent: FC = () => {
         </ScrollReveal>
 
         <div className="max-w-xl mx-auto space-y-6">
+
+          {/* ── Get Market Test Tokens ─────────────────────────────────────────── */}
+          {/* Shown when ?mint= is in the URL OR when the user pastes a devnet mirror mint.
+              Calls /api/devnet-airdrop (server-side, no mint authority required). */}
+          <div className={`${cardClass} border-[var(--accent)]/20`}>
+            <h2 className="mb-1 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--accent)]/70">
+              Get Test Tokens for a Market
+            </h2>
+            {faucetMint && faucetSymbol ? (
+              <p className="mb-3 text-xs text-[var(--text-secondary)]">
+                You need{" "}
+                <span className="font-semibold text-white">{faucetSymbol}</span>{" "}
+                to trade on this market. Get $500 worth of devnet test tokens below.
+              </p>
+            ) : (
+              <p className="mb-3 text-xs text-[var(--text-secondary)]">
+                Paste a devnet mirror mint address to get $500 worth of test tokens airdropped to your wallet.
+                <br />
+                <span className="text-[var(--text-dim)] text-[10px]">
+                  Token must be a mirrored market mint (created by the launch wizard).
+                </span>
+              </p>
+            )}
+            <div className="space-y-2">
+              <div>
+                <label className="mb-1 block text-xs text-[var(--text-secondary)]">Devnet Mirror Mint Address</label>
+                <input
+                  type="text"
+                  value={faucetMint}
+                  onChange={(e) => {
+                    setFaucetMint(e.target.value.trim());
+                    setFaucetError(null);
+                    setFaucetResult(null);
+                    setFaucetRateLimited(null);
+                  }}
+                  placeholder="Paste devnet mint address..."
+                  className={inputClass}
+                  disabled={faucetLoading}
+                />
+              </div>
+              {/* Inline status */}
+              {faucetLoading && (
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
+                  <span className="text-xs text-[var(--text-muted)]">Minting tokens to your wallet…</span>
+                </div>
+              )}
+              {faucetError && !faucetLoading && (
+                <p className="text-xs text-[var(--short)]">{faucetError}</p>
+              )}
+              {faucetResult && !faucetLoading && (
+                <div className="border border-[var(--long)]/30 bg-[var(--long)]/[0.05] px-3 py-2">
+                  <p className="text-xs text-[var(--long)]">
+                    ✓ Got{" "}
+                    <span className="font-semibold text-white">
+                      {faucetResult.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })} {faucetResult.symbol}
+                    </span>
+                  </p>
+                  <a
+                    href={`https://explorer.solana.com/tx/${faucetResult.sig}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1 inline-block text-[10px] text-[var(--accent)] underline hover:text-white"
+                  >
+                    View on Explorer ↗
+                  </a>
+                </div>
+              )}
+              <button
+                className={`${btnPrimary} w-full`}
+                onClick={handleFaucetClaim}
+                disabled={faucetLoading || !faucetMint || !walletReady}
+              >
+                {!walletReady
+                  ? "Connect Wallet First"
+                  : faucetLoading
+                    ? "Minting…"
+                    : faucetRateLimited
+                      ? "Already Claimed (24h limit)"
+                      : faucetResult
+                        ? "Claim Again"
+                        : `Get ${faucetSymbol || "Test"} Tokens`}
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--border)]/20 pt-2">
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em]">// Token Factory — Create new devnet tokens</p>
+          </div>
 
           {/* Step 1 — Wallet */}
           <ScrollReveal delay={0}>
