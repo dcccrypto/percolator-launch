@@ -91,16 +91,12 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
             <p className="text-[10px] text-[var(--warning)]">
               You need {symbol} tokens to trade this market.
             </p>
-            {/* PERC-475: Devnet mirror market — show self-service faucet button */}
-            {isDevnetMirror && mktConfig?.collateralMint ? (
+            {/* Show devnet faucet button for all devnet markets */}
+            {mktConfig?.collateralMint ? (
               <DevnetTokenFaucetButton
                 mintAddress={mktConfig.collateralMint.toBase58()}
                 symbol={symbol}
               />
-            ) : mktConfig?.collateralMint ? (
-              <a href="/devnet-mint" className="text-[10px] text-[var(--warning)] underline underline-offset-2 hover:text-[var(--warning)]/80">
-                Mint some from the faucet →
-              </a>
             ) : null}
           </div>
         )}
@@ -210,17 +206,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
           <p className="text-[10px] text-[var(--warning)]">
             Wallet has 0 {symbol}. You may have a different token with the same name.
           </p>
-          {/* PERC-475: Devnet mirror market — self-service faucet button */}
-          {isDevnetMirror ? (
-            <DevnetTokenFaucetButton
-              mintAddress={mktConfig.collateralMint.toBase58()}
-              symbol={symbol}
-            />
-          ) : (
-            <a href="/devnet-mint" className="text-[10px] text-[var(--warning)] underline underline-offset-2 hover:text-[var(--warning)]/80">
-              Mint more →
-            </a>
-          )}
+          <DevnetTokenFaucetButton
+            mintAddress={mktConfig.collateralMint.toBase58()}
+            symbol={symbol}
+          />
           <p className="text-[9px] text-[var(--text-dim)] break-all" style={{ fontFamily: "var(--font-mono)" }}>
             Mint: {mktConfig.collateralMint.toBase58()}
           </p>

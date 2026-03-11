@@ -90,37 +90,51 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
     setMirrorMeta(null);
 
     if (isDevnet) {
-      // DEVNET: First check if the mint already exists on devnet.
-      // - If it does (owned by Token Program): it's a devnet-native token — use directly.
-      // - If it doesn't: treat as mainnet CA → call devnet-mirror-mint to create a devnet copy.
-      // BUG-2 FIX: previously always called mirror-mint, which fails for devnet-created tokens
-      // because DexScreener/Jupiter cannot resolve devnet-only addresses on mainnet.
+      // DEVNET: First check if the mint already exists on-chain as a valid SPL token.
+      // If it does (user-created devnet mint), use it directly — no mirror needed.
+      // If it doesn't, call mirror-mint to create a devnet mirror from mainnet metadata.
       setMintNetworkStatus("loading");
       (async () => {
         try {
-          // Step 1: Check if this mint exists on devnet
+          // Step 1: Check if mint exists on devnet
           const accountInfo = await connection.getAccountInfo(mintPk);
           if (cancelled) return;
 
-          const isDevnetNative =
-            accountInfo !== null &&
-            (accountInfo.owner.equals(TOKEN_PROGRAM_ID) ||
-              accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID));
+          if (accountInfo) {
+            const isTokenMint =
+              accountInfo.owner.equals(TOKEN_PROGRAM_ID) ||
+              accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
 
-          if (isDevnetNative) {
-            // Mint already exists on devnet — use it directly, no mirror needed.
-            const nativeMeta = tokenMeta
-              ? { name: tokenMeta.name ?? debounced.slice(0, 8), symbol: tokenMeta.symbol ?? debounced.slice(0, 4).toUpperCase(), decimals: tokenMeta.decimals ?? 6 }
-              : { name: `Token ${debounced.slice(0, 6)}`, symbol: debounced.slice(0, 4).toUpperCase(), decimals: 6 };
-            setMirrorMeta(nativeMeta);
-            onDevnetMintResolved?.(debounced, nativeMeta);
-            onTokenResolved(nativeMeta);
-            setMintNetworkStatus("valid");
-            onMintNetworkValidChange?.(true);
-            return;
+            if (isTokenMint) {
+              // Mint already exists on devnet — use it directly, no mirror needed.
+              const devnetMeta = {
+                name: tokenMeta?.name ?? `Token ${debounced.slice(0, 6)}`,
+                symbol: tokenMeta?.symbol ?? debounced.slice(0, 4).toUpperCase(),
+                decimals: tokenMeta?.decimals ?? 6,
+              };
+              setMirrorMeta(devnetMeta);
+              onDevnetMintResolved?.(debounced, devnetMeta);
+              onTokenResolved(devnetMeta);
+              setMintNetworkStatus("valid");
+              onMintNetworkValidChange?.(true);
+
+              // Best-effort: register in devnet_mints for airdrop endpoint lookup
+              fetch("/api/devnet-register-mint", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  mintAddress: debounced,
+                  name: devnetMeta.name,
+                  symbol: devnetMeta.symbol,
+                  decimals: devnetMeta.decimals,
+                }),
+              }).catch(() => {}); // fire-and-forget
+              return;
+            }
           }
 
-          // Step 2: Mint not on devnet → try to mirror from mainnet
+          // Step 2: Mint doesn't exist on devnet — try mirror from mainnet
+          if (cancelled) return;
           setMintNetworkStatus("mirroring");
           const resp = await fetch("/api/devnet-mirror-mint", {
             method: "POST",
@@ -142,16 +156,14 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
             decimals: data.decimals ?? 6,
           };
           setMirrorMeta(resolvedMirrorMeta);
-          // Wire devnet mint CA up to CreateMarketWizard (effectiveMint in handleLaunch)
           onDevnetMintResolved?.(data.devnetMint, resolvedMirrorMeta);
-          // Also push metadata to parent (useTokenMeta won't find mainnet token on devnet)
           onTokenResolved(resolvedMirrorMeta);
           setMintNetworkStatus("valid");
           onMintNetworkValidChange?.(true);
         } catch {
           if (!cancelled) {
             setMintNetworkStatus("mirror-failed");
-            setMirrorError("Network error — could not validate token");
+            setMirrorError("Network error — could not validate mint");
             onMintNetworkValidChange?.(false);
           }
         }

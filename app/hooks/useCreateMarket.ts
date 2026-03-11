@@ -938,44 +938,45 @@ export function useCreateMarket() {
           // PERC-465: mainnet_ca is already written to the markets table via /api/markets POST above.
           // The oracle keeper auto-discovers new markets from Supabase every 30s.
 
-          // Mint devnet token + airdrop $500 to creator
-          setState((s) => ({ ...s, stepLabel: "Minting devnet tokens..." }));
+          // Mint devnet token + airdrop $500 to creator.
+          // Use the devnet-airdrop endpoint (not devnet-mint-token) because the
+          // mirror mint was already created by StepTokenSelect → devnet-mirror-mint.
+          // devnet-mint-token expected a mainnet CA but received the devnet mirror
+          // address, causing DexScreener lookup to fail → no tokens → untradeable market.
+          setState((s) => ({ ...s, stepLabel: "Airdropping devnet tokens..." }));
           try {
-            // BUG-1 FIX: pass the original mainnet CA (params.mainnetCA), not the
-            // devnet mirror mint address (mintAddr). devnet-mint-token looks up by
-            // mainnet_ca; passing the devnet mirror address causes a DB miss → API
-            // tries to fetch it from DexScreener → fails → creator never gets tokens.
-            const mintTokenCA = params.mainnetCA ?? mintAddr;
-            const mintResp = await fetch("/api/devnet-mint-token", {
+            const airdropResp = await fetch("/api/devnet-airdrop", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                mainnetCA: mintTokenCA,
-                marketAddress: slabAddr,
-                creatorWallet: wallet.publicKey.toBase58(),
+                mintAddress: mintAddr,
+                walletAddress: wallet.publicKey.toBase58(),
               }),
             });
-            const mintData = await mintResp.json();
-            if (mintResp.ok) {
+            const airdropData = await airdropResp.json();
+            if (airdropResp.ok || airdropResp.status === 429) {
+              // 429 = already claimed, which is fine — user has tokens
               setState((s) => ({
                 ...s,
-                devnetMint: mintData.devnetMint ?? null,
-                devnetAirdropAmount: mintData.airdropTokens ?? null,
-                devnetAirdropSymbol: mintData.symbol ?? null,
+                devnetMint: mintAddr,
+                devnetAirdropAmount: airdropData.amount ?? null,
+                devnetAirdropSymbol: airdropData.symbol ?? null,
               }));
             } else {
-              console.warn("Devnet mint failed:", mintData.error ?? mintResp.status);
-              // Non-fatal — market is live, just no tokens minted
+              console.warn("Devnet airdrop failed:", airdropData.error ?? airdropResp.status);
+              // Non-fatal — market is live, user can use faucet button on trade page
               setState((s) => ({
                 ...s,
-                devnetMintError: mintData.error ?? `HTTP ${mintResp.status}`,
+                devnetMint: mintAddr, // Still set devnetMint so "Mint & Trade" works
+                devnetMintError: airdropData.error ?? `HTTP ${airdropResp.status}`,
               }));
             }
           } catch (mintErr) {
-            console.warn("Devnet mint error:", mintErr);
+            console.warn("Devnet airdrop error:", mintErr);
             setState((s) => ({
               ...s,
-              devnetMintError: mintErr instanceof Error ? mintErr.message : "Mint request failed",
+              devnetMint: mintAddr, // Still set so "Mint & Trade" button appears
+              devnetMintError: mintErr instanceof Error ? mintErr.message : "Airdrop request failed",
             }));
           }
         }
