@@ -344,10 +344,10 @@ async function pushAndCrank(market: MarketInfo, programId: PublicKey): Promise<v
   // Skip markets where we've already confirmed we're not the oracle authority
   if (skippedMarkets.has(market.slab)) return;
 
-  // Validate oracle authority on-chain: run on first attempt, or every 50 errors
-  // (catches cases where fetchSlab failed transiently on the first check)
-  const needsAuthorityCheck = !authorityVerified.has(market.slab) &&
-    (s.totalErrors === 0 || s.totalErrors % 50 === 0);
+  // Validate oracle authority on-chain whenever not yet verified.
+  // A Custom:15 (EngineUnauthorized) failure clears authorityVerified so the
+  // re-check triggers here on the very next tick rather than waiting 50 errors.
+  const needsAuthorityCheck = !authorityVerified.has(market.slab);
   if (needsAuthorityCheck) {
     try {
       // Use getAccountInfo directly (not fetchSlab) so we can also cache the
@@ -753,6 +753,17 @@ async function main() {
         if (txLogs.length > 0) {
           // Print last 5 program log lines — this reveals the actual on-chain error
           log(`   TX logs: ${txLogs.slice(-5).join(" | ").slice(0, 400)}`);
+        }
+        // Custom:15 = EngineUnauthorized on PushOraclePrice.
+        // Invalidate the cached authority-verified state so we re-verify on the
+        // next tick instead of hammering with a transaction that will always fail.
+        const isUnauthorized =
+          msg.includes("Custom:15") ||
+          txLogs.some(l => l.includes("Custom:15") || l.includes("EngineUnauthorized"));
+        if (isUnauthorized) {
+          authorityVerified.delete(market.slab);
+          slabProgramId.delete(market.slab);
+          log(`⚠️ ${market.label}: Custom:15 (EngineUnauthorized) — authority state invalidated, will re-verify next tick`);
         }
       })
     );
