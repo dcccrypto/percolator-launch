@@ -1,3 +1,8 @@
+// PUBLIC endpoint — no auth required. Intentionally unauthenticated.
+// IMPORTANT: Only add aggregate, non-user-specific fields here.
+// Any user-specific or admin-sensitive data MUST go behind requireAuth().
+// (Security issue #1031)
+
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
@@ -8,12 +13,24 @@ type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 
 // ---------------------------------------------------------------------------
 // PERC-660: In-memory rate limiter — 60 req/min per IP (matches /api/trader pattern)
+// Note: per-process only (multi-instance: effective limit = 60 × N). At mainnet
+// scale, replace with Redis-backed rate limiting. On Vercel (serverless) functions
+// are short-lived so memory growth is bounded.
 // ---------------------------------------------------------------------------
 const RATE_LIMIT = 60;
 const RATE_WINDOW_MS = 60_000;
 const rateMap = new Map<string, { count: number; resetAt: number }>();
 
+/** Prune expired entries to prevent unbounded memory growth on long-running instances. */
+function pruneExpired(): void {
+  const now = Date.now();
+  for (const [ip, entry] of rateMap.entries()) {
+    if (now > entry.resetAt) rateMap.delete(ip);
+  }
+}
+
 function isRateLimited(ip: string): boolean {
+  pruneExpired();
   const now = Date.now();
   const entry = rateMap.get(ip);
   if (!entry || now > entry.resetAt) {
