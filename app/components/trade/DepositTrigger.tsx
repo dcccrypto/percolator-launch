@@ -76,7 +76,7 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
         </button>
         {expanded && (
           <div className="mt-1">
-            <DepositWithdrawCard slabAddress={slabAddress} isDevnetMirror={isDevnet} />
+            <DepositWithdrawCard slabAddress={slabAddress} />
           </div>
         )}
       </div>
@@ -107,7 +107,7 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
       </div>
       {expanded && (
         <div className="mt-1">
-          <DepositWithdrawCard slabAddress={slabAddress} isDevnetMirror={isDevnet} />
+          <DepositWithdrawCard slabAddress={slabAddress} />
         </div>
       )}
     </div>

@@ -32,8 +32,9 @@ async function getMintFromSlab(slabPubkey: PublicKey): Promise<PublicKey> {
       console.log(`  Candidate pubkey at offset ${off}: ${str}`);
     }
   }
-  // Return the mint at offset 40 (admin=8..40, mint=40..72 is common)
-  return new PublicKey(data.slice(40, 72));
+  // V0 slab header layout: discriminator(8) + admin(32) + config_or_padding(32) + collateral_mint(32) starting at offset 72
+  // V0_HEADER_LEN = 72 bytes before collateral_mint
+  return new PublicKey(data.slice(72, 104));
 }
 
 async function testInitUser(programId: PublicKey, slab: PublicKey, wallet: Keypair) {
@@ -47,11 +48,11 @@ async function testInitUser(programId: PublicKey, slab: PublicKey, wallet: Keypa
   const [vaultPda] = deriveVaultAuthority(programId, slab);
   console.log(`  Vault PDA: ${vaultPda.toBase58()}`);
 
-  // Get collateral mint from slab data (offset 40 based on struct layout)
+  // Get collateral mint from slab data
+  // V0_HEADER_LEN = 72: discriminator(8) + admin(32) + config_or_padding(32); collateral_mint at 72..104
   const data = Buffer.from(slabInfo.data);
-  // Try offsets 40 and 8+32=40
-  const mint = new PublicKey(data.slice(40, 72));
-  console.log(`  Collateral mint (offset 40): ${mint.toBase58()}`);
+  const mint = new PublicKey(data.slice(72, 104));
+  console.log(`  Collateral mint (offset 72): ${mint.toBase58()}`);
 
   // Get ATAs
   const walletAta = await getAssociatedTokenAddress(mint, wallet.publicKey);

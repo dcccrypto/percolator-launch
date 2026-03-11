@@ -59,7 +59,7 @@ pub const PHASE2_MAX_LEVERAGE_BPS: u64 = 50_000;
 
 ## 3. State Machine
 
-```
+```text
           market_created_slot set
                     │
                     ▼
@@ -255,7 +255,7 @@ pub fn maybe_advance_phase(&mut self, current_slot: u64) {
 ## 8. Instruction Changes
 
 ### `InitMarket` (new fields)
-```
+```text
 phase1_oracle_authority: [u8; 32]
 phase1_anchor_price_e6: u64
 phase1_anchor_timestamp: i64

@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
+import * as Sentry from "@sentry/nextjs";
 import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -58,7 +59,8 @@ export async function POST(req: NextRequest) {
     );
 
     return NextResponse.json({ status: "registered", mintAddress });
-  } catch {
+  } catch (error) {
+    Sentry.captureException(error, { tags: { endpoint: "/api/devnet-register-mint" } });
     return NextResponse.json({ error: "Registration failed" }, { status: 500 });
   }
 }
