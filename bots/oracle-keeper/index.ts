@@ -754,6 +754,18 @@ async function main() {
           // Print last 5 program log lines — this reveals the actual on-chain error
           log(`   TX logs: ${txLogs.slice(-5).join(" | ").slice(0, 400)}`);
         }
+        // Auto-skip markets that fail with Custom:15 (InvalidOracleAuthority / 0xf).
+        // The pre-flight authority check can pass if the slab config was updated between
+        // the check and the tx, or if parseConfig read stale data. Catching the on-chain
+        // error here prevents infinite retry spam.
+        const isAuthorityError = msg.includes("custom program error: 0xf") ||
+          msg.includes("Custom:15") ||
+          txLogs.some(l => l.includes("0xf") || l.includes("Custom:15"));
+        if (isAuthorityError) {
+          log(`🚫 ${market.label}: Custom:15 = InvalidOracleAuthority — permanently skipping this market`);
+          skippedMarkets.add(market.slab);
+          authorityVerified.delete(market.slab);
+        }
       })
     );
     await Promise.allSettled(promises);
