@@ -203,13 +203,12 @@ export function setNetwork(network: Network) {
 export function getBackendUrl(): string {
   const url = process.env.NEXT_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL;
   if (!url) {
-    // On non-production, require explicit backend URL to prevent silent proxy to production
-    if (process.env.NODE_ENV !== "production") {
-      throw new Error(
-        "NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL must be set in non-production environments"
-      );
-    }
-    return "https://percolator-api-production.up.railway.app";
+    // Backend URL is required in all environments — no hardcoded fallback
+    // This prevents misconfigured deployments from silently routing to production
+    throw new Error(
+      "NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL must be explicitly set. " +
+      "No hardcoded fallback is provided — ensure your environment configuration is correct."
+    );
   }
   return url;
 }

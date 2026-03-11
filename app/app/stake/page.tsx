@@ -426,7 +426,7 @@ function DepositWidget({
                 style={{ fontFamily: "var(--font-mono)" }}
                 title="Click to use max balance"
               >
-                Balance: {walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
+                Balance: {walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {pool?.symbol ?? 'Token'}
               </button>
             )}
           </div>

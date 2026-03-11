@@ -323,9 +323,10 @@ export async function discoverMarkets(
         );
       }
     }
-    // If any tier queries failed and we found no accounts, fall back to memcmp discovery
-    if (hadRejection && rawAccounts.length === 0) {
-      console.warn("[discoverMarkets] All tier queries failed, falling back to memcmp");
+    // NOTE: hadRejection guard removed — dataSize filters silently return 0 when on-chain
+    // account size changed; RPC returns no error, so we must fallback on empty results too.
+    if (rawAccounts.length === 0) {
+      console.warn("[discoverMarkets] dataSize filters returned 0 markets, falling back to memcmp");
       const fallback = await connection.getProgramAccounts(programId, {
         filters: [
           {

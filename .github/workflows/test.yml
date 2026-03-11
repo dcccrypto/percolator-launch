@@ -143,6 +143,7 @@ jobs:
       # otherwise fall back to a 25-char placeholder so the server starts in CI.
       NEXT_PUBLIC_PRIVY_APP_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_APP_ID || 'cltestappid00000000000000' }}
       NEXT_PUBLIC_DEFAULT_NETWORK: devnet
+      NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'https://percolator-api-production.up.railway.app' }}
     
     steps:
       - name: Checkout code
@@ -324,6 +325,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Type check
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'https://percolator-api-production.up.railway.app' }}
         run: pnpm run build
 
   merge-gate:

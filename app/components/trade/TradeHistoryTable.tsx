@@ -108,8 +108,13 @@ export function TradeHistoryTable({
       <div className="border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/50 p-8 text-center">
         <p className="text-[13px] text-[var(--text-dim)]">No trades yet</p>
         <p className="mt-1 text-[10px] text-[var(--text-dim)]/60">
-          Your executed trades will appear here
+          Your executed trades will appear here once the trade indexer has processed them.
         </p>
+        {process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet" && (
+          <p className="mt-2 text-[10px] text-[var(--warning)]/60">
+            ⚠ Devnet: trade indexer may not be running. Trades are on-chain but not yet indexed.
+          </p>
+        )}
       </div>
     );
   }

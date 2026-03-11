@@ -31,6 +31,8 @@ export interface MarketVaultInfo {
   estimatedApyPct: number;
   /** OI utilization percentage (totalOI / maxOI × 100) */
   oiUtilPct: number;
+  /** Collateral token decimals */
+  decimals: number;
 }
 
 export interface EarnStats {
@@ -81,7 +83,7 @@ function generateMockStats(): EarnStats {
       tradingFeeBps: 10,
       maxLeverage: 20,
       estimatedApyPct: 18.7,
-      oiUtilPct: 18.1,
+      oiUtilPct: 18.1, decimals: 9,
     },
     {
       slabAddress: 'mock-bonk-perp',
@@ -95,7 +97,7 @@ function generateMockStats(): EarnStats {
       tradingFeeBps: 15,
       maxLeverage: 10,
       estimatedApyPct: 24.3,
-      oiUtilPct: 13.0,
+      oiUtilPct: 13.0, decimals: 6,
     },
     {
       slabAddress: 'mock-wif-perp',
@@ -109,7 +111,7 @@ function generateMockStats(): EarnStats {
       tradingFeeBps: 15,
       maxLeverage: 10,
       estimatedApyPct: 31.2,
-      oiUtilPct: 18.8,
+      oiUtilPct: 18.8, decimals: 6,
     },
     {
       slabAddress: 'mock-jup-perp',
@@ -123,14 +125,14 @@ function generateMockStats(): EarnStats {
       tradingFeeBps: 12,
       maxLeverage: 15,
       estimatedApyPct: 15.8,
-      oiUtilPct: 12.4,
+      oiUtilPct: 12.4, decimals: 6,
     },
   ];
 
-  const tvl = markets.reduce((s, m) => s + m.vaultBalance / 1e9, 0);
+  const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
   const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
   const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
-  const totalInsurance = markets.reduce((s, m) => s + m.insuranceFund / 1e9, 0);
+  const totalInsurance = markets.reduce((s, m) => s + m.insuranceFund / (10 ** m.decimals), 0);
   const dailyFeeRevenue = markets.reduce(
     (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
     0,
@@ -205,8 +207,10 @@ export function useEarnStats() {
           // Sentinel filter: u64::MAX (≈1.84e19) leaks from uninitialized on-chain fields.
           // Any value above 1e18 is garbage — treat as 0.
           const isSentinel = (v: number) => v > 1e18;
-          // OI values are stored in USDC micro-units (6 decimals) — convert to USD
-          const totalOI = isSentinel(totalOIRaw) ? 0 : totalOIRaw / 1e6;
+          const collDecimals = m.decimals ?? 6;
+          const collDivisor = 10 ** collDecimals;
+          // OI values are stored in collateral micro-units — convert to human units
+          const totalOI = isSentinel(totalOIRaw) ? 0 : totalOIRaw / collDivisor;
           const maxLeverage = m.max_leverage ?? 10;
           const vaultBalanceRaw = m.lp_collateral ?? 0;
           const vaultBalance = isSentinel(vaultBalanceRaw) ? 0 : vaultBalanceRaw;
@@ -220,7 +224,7 @@ export function useEarnStats() {
           const insurance = insuranceRaw < 1e13 ? insuranceRaw : 0;
 
           // Max OI = vault collateral × max leverage (simplified)
-          const vaultUsd = vaultBalance / 1e6; // collateral in USDC (6 decimals)
+          const vaultUsd = vaultBalance / collDivisor;
           const maxOI = vaultUsd * maxLeverage;
           const oiUtilPct = maxOI > 0 ? (totalOI / maxOI) * 100 : 0;
 
@@ -243,14 +247,15 @@ export function useEarnStats() {
             maxLeverage,
             estimatedApyPct: Math.min(estimatedApyPct, 999), // cap display
             oiUtilPct: Math.min(oiUtilPct, 100),
+            decimals: collDecimals,
           };
         });
 
-      const tvl = markets.reduce((s, m) => s + m.vaultBalance / 1e6, 0);
+      const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
       const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
       const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
       const totalInsurance = markets.reduce(
-        (s, m) => s + m.insuranceFund / 1e6,
+        (s, m) => s + m.insuranceFund / (10 ** m.decimals),
         0,
       );
       const dailyFeeRevenue = markets.reduce(

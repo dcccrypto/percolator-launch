@@ -137,16 +137,16 @@ export async function POST(req: NextRequest) {
       .eq("mainnet_ca", mainnetCA)
       .maybeSingle();
 
-    if (existing?.devnet_mint) {
-      return NextResponse.json({
-        status: "already_exists",
-        devnetMint: existing.devnet_mint,
-      });
-    }
-
-    // Load mint authority
+    // Load mint authority (needed for both already_exists airdrop and new mint creation)
     const mintAuthKeyJson = process.env.DEVNET_MINT_AUTHORITY_KEYPAIR;
     if (!mintAuthKeyJson) {
+      // If mint authority not configured and an existing mint is found, return it without airdrop
+      if (existing?.devnet_mint) {
+        return NextResponse.json({
+          status: "already_exists",
+          devnetMint: existing.devnet_mint,
+        });
+      }
       return NextResponse.json(
         { error: "Server not configured for minting (DEVNET_MINT_AUTHORITY_KEYPAIR missing)" },
         { status: 500 },
@@ -159,6 +159,13 @@ export async function POST(req: NextRequest) {
     // Fetch token info from DexScreener
     const tokenInfo = await fetchTokenInfo(mainnetCA);
     if (!tokenInfo) {
+      // If we have an existing devnet mint, return it even if token info fetch fails
+      if (existing?.devnet_mint) {
+        return NextResponse.json({
+          status: "already_exists",
+          devnetMint: existing.devnet_mint,
+        });
+      }
       return NextResponse.json(
         { error: "Cannot fetch token info. Token may not have liquidity on any DEX." },
         { status: 400 },
@@ -167,6 +174,65 @@ export async function POST(req: NextRequest) {
 
     const cfg = getConfig();
     const connection = new Connection(cfg.rpcUrl, "confirmed");
+
+    // BUG-1 FIX: If devnet mint already exists, airdrop tokens to creator instead of
+    // creating a new mint. devnet-mirror-mint creates the mint during wizard Step 1, so
+    // by the time this endpoint is called (post-market-creation), the mint already exists.
+    if (existing?.devnet_mint) {
+      try {
+        const existingMintPk = new PublicKey(existing.devnet_mint);
+        const decimals = tokenInfo.decimals;
+        const tokensFloat = AIRDROP_USD_VALUE / tokenInfo.priceUsd;
+        const airdropAmount = BigInt(Math.floor(tokensFloat * 10 ** decimals));
+
+        const creatorAta = await getAssociatedTokenAddress(existingMintPk, creatorPk);
+        const airdropTx = new Transaction();
+
+        // Create creator ATA if it doesn't exist
+        const ataInfo = await connection.getAccountInfo(creatorAta);
+        if (!ataInfo) {
+          airdropTx.add(
+            createAssociatedTokenAccountInstruction(
+              mintAuthority.publicKey,
+              creatorAta,
+              creatorPk,
+              existingMintPk,
+            ),
+          );
+        }
+
+        airdropTx.add(
+          createMintToInstruction(
+            existingMintPk,
+            creatorAta,
+            mintAuthority.publicKey,
+            airdropAmount,
+          ),
+        );
+
+        await sendAndConfirmTransaction(connection, airdropTx, [mintAuthority], {
+          commitment: "confirmed",
+        });
+
+        return NextResponse.json({
+          status: "already_exists",
+          devnetMint: existing.devnet_mint,
+          symbol: tokenInfo.symbol,
+          name: tokenInfo.name,
+          decimals,
+          priceUsd: tokenInfo.priceUsd,
+          airdropTokens: tokensFloat,
+          airdropUsd: AIRDROP_USD_VALUE,
+        });
+      } catch (airdropErr) {
+        // Non-fatal — return existing mint even if airdrop fails
+        console.warn("devnet-mint-token: airdrop to existing mint failed:", airdropErr);
+        return NextResponse.json({
+          status: "already_exists",
+          devnetMint: existing.devnet_mint,
+        });
+      }
+    }
 
     // Create new devnet mint
     const mintKeypair = Keypair.generate();

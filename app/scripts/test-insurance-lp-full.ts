@@ -90,6 +90,8 @@ async function send(conn: Connection, payer: Keypair, ix: any, cu = 300_000): Pr
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: cu }));
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   tx.add(ix);
+  // Note: skipPreflight is used in test scripts to speed up test execution.
+  // Production code should not use this flag without explicit justification.
   return sendAndConfirmTransaction(conn, tx, [payer], { commitment: 'confirmed', skipPreflight: true });
 }
 
@@ -98,6 +100,8 @@ async function sendMulti(conn: Connection, payer: Keypair, ixs: any[], cu = 400_
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: cu }));
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   for (const ix of ixs) tx.add(ix);
+  // Note: skipPreflight is used in test scripts to speed up test execution.
+  // Production code should not use this flag without explicit justification.
   return sendAndConfirmTransaction(conn, tx, [payer], { commitment: 'confirmed', skipPreflight: true });
 }
 
@@ -107,6 +111,8 @@ async function expectFail(conn: Connection, payer: Keypair, ix: any): Promise<bo
     tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
     tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
     tx.add(ix);
+    // Note: skipPreflight is used in test scripts to speed up test execution.
+    // Production code should not use this flag without explicit justification.
     await sendAndConfirmTransaction(conn, tx, [payer], { commitment: 'confirmed', skipPreflight: true });
     return false;
   } catch { return true; }

@@ -19,14 +19,9 @@ import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 
 interface DepositWithdrawCardProps {
   slabAddress: string;
-  /**
-   * PERC-475: When true (devnet mirror market with a mainnet_ca), show a
-   * "Get [SYMBOL] Tokens" faucet button so users can mint $500 of devnet tokens.
-   */
-  isDevnetMirror?: boolean;
 }
 
-export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress, isDevnetMirror = false }) => {
+export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress }) => {
   const { connected: walletConnected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const realUserAccount = useUserAccount();
@@ -91,8 +86,8 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
             <p className="text-[10px] text-[var(--warning)]">
               You need {symbol} tokens to trade this market.
             </p>
-            {/* PERC-475: Devnet mirror market — show self-service faucet button */}
-            {isDevnetMirror && mktConfig?.collateralMint ? (
+            {/* Show devnet faucet button for all devnet markets */}
+            {mktConfig?.collateralMint ? (
               <DevnetTokenFaucetButton
                 mintAddress={mktConfig.collateralMint.toBase58()}
                 symbol={symbol}

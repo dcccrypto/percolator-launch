@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://percolator-api1-production.up.railway.app";
+// NEXT_PUBLIC_API_URL must be explicitly set — no hardcoded fallback
+// This ensures misconfigured deployments fail loudly, not silently to production
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+if (!API_URL && process.env.NODE_ENV === "production") {
+  throw new Error(
+    "NEXT_PUBLIC_API_URL environment variable is required in production. " +
+    "Please configure this before deploying."
+  );
+}
 
 const nextConfig: NextConfig = {
   // @solana/kit must be transpiled: its browser export resolves to an ESM .mjs file
