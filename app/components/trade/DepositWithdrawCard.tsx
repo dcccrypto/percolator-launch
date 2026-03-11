@@ -19,9 +19,10 @@ import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 
 interface DepositWithdrawCardProps {
   slabAddress: string;
+  isDevnetMirror?: boolean;
 }
 
-export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress }) => {
+export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress, isDevnetMirror = false }) => {
   const { connected: walletConnected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const realUserAccount = useUserAccount();
