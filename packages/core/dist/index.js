@@ -137,12 +137,16 @@ var IX_TAG = {
   /** PERC-315: Withdraw LP collateral (position must be closed) */
   WithdrawLpCollateral: 46,
   // Tags 47-53 reserved
-  /** PERC-623: Top up keeper fund (permissionless) */
-  TopUpKeeperFund: 54,
-  /** PERC-623: Withdraw keeper reward (keeper only) */
-  WithdrawKeeperReward: 55,
+  /** Cross-Market Portfolio Margining: SetOffsetPair */
+  SetOffsetPair: 54,
+  /** Cross-Market Portfolio Margining: AttestCrossMargin */
+  AttestCrossMargin: 55,
   /** PERC-622: Advance oracle phase (permissionless crank) */
-  AdvanceOraclePhase: 56
+  AdvanceOraclePhase: 56,
+  /** PERC-623: Top up keeper fund (permissionless) */
+  TopUpKeeperFund: 57,
+  /** PERC-629: Slash creation deposit (permissionless crank) */
+  SlashCreationDeposit: 58
 };
 function encodeFeedId(feedId) {
   const hex = feedId.startsWith("0x") ? feedId.slice(2) : feedId;
@@ -470,9 +474,6 @@ function checkPhaseTransition(currentSlot, marketCreatedSlot, oraclePhase, cumul
 function encodeTopUpKeeperFund(args) {
   return concatBytes(encU8(IX_TAG.TopUpKeeperFund), encU64(args.amount));
 }
-function encodeWithdrawKeeperReward(args) {
-  return concatBytes(encU8(IX_TAG.WithdrawKeeperReward), encU64(args.amount));
-}
 
 // src/abi/accounts.ts
 import {
@@ -699,14 +700,7 @@ var ACCOUNTS_ADVANCE_ORACLE_PHASE = [
 var ACCOUNTS_TOPUP_KEEPER_FUND = [
   { name: "funder", signer: true, writable: true },
   { name: "slab", signer: false, writable: true },
-  { name: "keeperFund", signer: false, writable: true },
-  { name: "systemProgram", signer: false, writable: false }
-];
-var ACCOUNTS_WITHDRAW_KEEPER_REWARD = [
-  { name: "keeper", signer: true, writable: true },
-  { name: "slab", signer: false, writable: true },
-  { name: "keeperFund", signer: false, writable: true },
-  { name: "systemProgram", signer: false, writable: false }
+  { name: "keeperFund", signer: false, writable: true }
 ];
 var WELL_KNOWN = {
   tokenProgram: TOKEN_PROGRAM_ID,
@@ -2989,7 +2983,6 @@ export {
   ACCOUNTS_WITHDRAW_COLLATERAL,
   ACCOUNTS_WITHDRAW_INSURANCE,
   ACCOUNTS_WITHDRAW_INSURANCE_LP,
-  ACCOUNTS_WITHDRAW_KEEPER_REWARD,
   AccountKind,
   CHAINLINK_ANSWER_OFFSET,
   CHAINLINK_DECIMALS_OFFSET,
@@ -3131,7 +3124,6 @@ export {
   encodeWithdrawCollateral,
   encodeWithdrawInsurance,
   encodeWithdrawInsuranceLP,
-  encodeWithdrawKeeperReward,
   fetchSlab,
   fetchTokenAccount,
   flushToInsuranceAccounts,

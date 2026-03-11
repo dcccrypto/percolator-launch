@@ -72,12 +72,16 @@ export const IX_TAG = {
   /** PERC-315: Withdraw LP collateral (position must be closed) */
   WithdrawLpCollateral: 46,
   // Tags 47-53 reserved
-  /** PERC-623: Top up keeper fund (permissionless) */
-  TopUpKeeperFund: 54,
-  /** PERC-623: Withdraw keeper reward (keeper only) */
-  WithdrawKeeperReward: 55,
+  /** Cross-Market Portfolio Margining: SetOffsetPair */
+  SetOffsetPair: 54,
+  /** Cross-Market Portfolio Margining: AttestCrossMargin */
+  AttestCrossMargin: 55,
   /** PERC-622: Advance oracle phase (permissionless crank) */
   AdvanceOraclePhase: 56,
+  /** PERC-623: Top up keeper fund (permissionless) */
+  TopUpKeeperFund: 57,
+  /** PERC-629: Slash creation deposit (permissionless crank) */
+  SlashCreationDeposit: 58,
 } as const;
 
 /**
@@ -925,21 +929,6 @@ export function encodeTopUpKeeperFund(args: TopUpKeeperFundArgs): Uint8Array {
   return concatBytes(encU8(IX_TAG.TopUpKeeperFund), encU64(args.amount));
 }
 
-/**
- * WithdrawKeeperReward (Tag 55) — keeper withdraws earned rewards.
- *
- * Instruction data: tag(1) + amount(8) = 9 bytes
- *
- * Accounts:
- *   0. [signer, writable] Keeper (must match keeper in fund state)
- *   1. [writable]         Slab
- *   2. [writable]         Keeper fund PDA
- *   3. []                 System program
- */
-export interface WithdrawKeeperRewardArgs {
-  amount: bigint | string;
-}
-
-export function encodeWithdrawKeeperReward(args: WithdrawKeeperRewardArgs): Uint8Array {
-  return concatBytes(encU8(IX_TAG.WithdrawKeeperReward), encU64(args.amount));
-}
+// Note: WithdrawKeeperReward does NOT exist as a separate instruction.
+// Keeper rewards are paid automatically during KeeperCrank (tag 5).
+// The keeper fund PDA is debited in-place when a successful crank is executed.

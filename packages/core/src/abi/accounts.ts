@@ -401,26 +401,17 @@ export const ACCOUNTS_ADVANCE_ORACLE_PHASE: readonly AccountSpec[] = [
 // ============================================================================
 
 /**
- * TopUpKeeperFund: 4 accounts
- * Permissionless — anyone can fund.
+ * TopUpKeeperFund: 3 accounts
+ * Permissionless — anyone can fund. Transfers lamports directly (no system program).
  */
 export const ACCOUNTS_TOPUP_KEEPER_FUND: readonly AccountSpec[] = [
   { name: "funder", signer: true, writable: true },
   { name: "slab", signer: false, writable: true },
   { name: "keeperFund", signer: false, writable: true },
-  { name: "systemProgram", signer: false, writable: false },
 ] as const;
 
-/**
- * WithdrawKeeperReward: 4 accounts
- * Keeper-only — signer must match fund state.
- */
-export const ACCOUNTS_WITHDRAW_KEEPER_REWARD: readonly AccountSpec[] = [
-  { name: "keeper", signer: true, writable: true },
-  { name: "slab", signer: false, writable: true },
-  { name: "keeperFund", signer: false, writable: true },
-  { name: "systemProgram", signer: false, writable: false },
-] as const;
+// Note: WithdrawKeeperReward has no separate instruction.
+// Rewards are paid automatically during KeeperCrank (tag 5).
 
 // ============================================================================
 // WELL-KNOWN PROGRAM/SYSVAR KEYS
