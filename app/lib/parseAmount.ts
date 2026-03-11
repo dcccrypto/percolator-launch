@@ -15,12 +15,11 @@ export function parseHumanAmount(input: string, decimals: number): bigint {
   const whole = parts[0] || "0";
   const fracPart = parts[1] || "";
   
-  // M1: Throw error if decimals exceed token precision
-  if (fracPart.length > decimals) {
-    throw new Error(`Input has ${fracPart.length} decimals, but token only supports ${decimals}`);
-  }
+  // Truncate excess decimals instead of throwing — this is called during render
+  // and unhandled throws crash the component tree (issue #1046)
+  const truncatedFrac = fracPart.length > decimals ? fracPart.slice(0, decimals) : fracPart;
   
-  const frac = fracPart.padEnd(decimals, "0");
+  const frac = truncatedFrac.padEnd(decimals, "0");
   const result = BigInt(whole) * (10n ** BigInt(decimals)) + BigInt(frac);
   return negative ? -result : result;
 }

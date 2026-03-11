@@ -42,8 +42,11 @@ describe("parseHumanAmount", () => {
     expect(parseHumanAmount("1.2.3", 6)).toBe(0n);
   });
 
-  it("throws if too many decimal places", () => {
-    expect(() => parseHumanAmount("1.1234567", 6)).toThrow(/Input has 7 decimals/);
+  it("truncates excess decimal places instead of throwing", () => {
+    // "1.1234567" with 6 decimals → truncates to "1.123456" → 1_123_456n
+    expect(parseHumanAmount("1.1234567", 6)).toBe(1_123456n);
+    // "0.0000001" with 6 decimals → truncates to "0.000000" → 0n
+    expect(parseHumanAmount("0.0000001", 6)).toBe(0n);
   });
 
   it("handles 9-decimal tokens (SOL)", () => {
