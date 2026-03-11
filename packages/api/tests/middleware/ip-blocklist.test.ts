@@ -117,4 +117,14 @@ describe("ipBlocklist middleware", () => {
     const res = await app.request(req);
     expect(res.status).toBe(200);
   });
+
+  it("exports isBlocked for use by WebSocket handler (PERC-690)", async () => {
+    vi.resetModules();
+    process.env.IP_BLOCKLIST = "88.97.223.158,10.0.0.0/24";
+    const mod = await import("../../src/middleware/ip-blocklist.js");
+    expect(mod.isBlocked).toBeDefined();
+    expect(mod.isBlocked("88.97.223.158")).toBe(true);
+    expect(mod.isBlocked("10.0.0.42")).toBe(true);
+    expect(mod.isBlocked("1.2.3.4")).toBe(false);
+  });
 });

@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import type { IncomingMessage } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eventBus, getSupabase, createLogger, sanitizeSlabAddress } from "@percolator/shared";
+import { isBlocked } from "../middleware/ip-blocklist.js";
 
 const logger = createLogger("api:ws");
 
@@ -12,7 +13,8 @@ const MAX_CONNECTIONS_PER_SLAB = 100; // New: per-slab connection limit
 const MAX_BUFFER_BYTES = 64 * 1024; // 64KB
 const MAX_SUBSCRIPTIONS_PER_CLIENT = 50; // Prevent Helius WS subscription exhaustion
 const MAX_GLOBAL_SUBSCRIPTIONS = 1000; // Global subscription cap to prevent DoS
-const MAX_CONNECTIONS_PER_IP = 5; // Max concurrent connections per IP
+const MAX_CONNECTIONS_PER_IP = 5; // Max concurrent connections per IP (authenticated)
+const MAX_UNAUTH_CONNECTIONS_PER_IP = 3; // Max concurrent connections per IP (unauthenticated)
 
 // Authentication settings
 // In production, WS_AUTH_REQUIRED must be explicitly set. Defaults to true unless NODE_ENV=development.
@@ -365,6 +367,7 @@ export function getWebSocketMetrics(): any {
       maxGlobalConnections: MAX_WS_CONNECTIONS,
       maxConnectionsPerSlab: MAX_CONNECTIONS_PER_SLAB,
       maxConnectionsPerIp: MAX_CONNECTIONS_PER_IP,
+      maxUnauthConnectionsPerIp: MAX_UNAUTH_CONNECTIONS_PER_IP,
     },
   };
 }
@@ -474,6 +477,13 @@ export function setupWebSocket(server: Server): WebSocketServer {
       return;
     }
     
+    // Reject blocklisted IPs before any other processing (PERC-690)
+    if (isBlocked(clientIp)) {
+      logger.warn("Rejected WS connection from blocklisted IP", { ip: clientIp });
+      ws.close(1008, "Forbidden");
+      return;
+    }
+
     // Reject IPs temporarily banned for repeated auth failures (issue #839)
     if (isAuthBanned(clientIp)) {
       logger.warn("Rejected connection from auth-banned IP", { ip: clientIp });
@@ -481,11 +491,16 @@ export function setupWebSocket(server: Server): WebSocketServer {
       return;
     }
 
-    // Check connections per IP
+    // Check connections per IP — use stricter limit for unauthenticated (PERC-690)
+    // At connection time we only have the query-param token; if absent, apply unauth limit.
+    const url = new URL(req.url || "", `http://${req.headers.host}`);
+    const connectToken = url.searchParams.get("token");
+    const hasValidToken = connectToken ? verifyWsToken(connectToken).isValid : false;
+    const ipLimit = hasValidToken ? MAX_CONNECTIONS_PER_IP : MAX_UNAUTH_CONNECTIONS_PER_IP;
     const ipConnections = connectionsPerIp.get(clientIp) || 0;
-    if (ipConnections >= MAX_CONNECTIONS_PER_IP) {
-      logger.warn("Max connections per IP reached", { ip: clientIp, count: ipConnections });
-      ws.close(1008, `Max ${MAX_CONNECTIONS_PER_IP} connections per IP`);
+    if (ipConnections >= ipLimit) {
+      logger.warn("Max connections per IP reached", { ip: clientIp, count: ipConnections, limit: ipLimit, authenticated: hasValidToken });
+      ws.close(1008, `Max ${ipLimit} connections per IP`);
       return;
     }
     
@@ -493,8 +508,8 @@ export function setupWebSocket(server: Server): WebSocketServer {
     connectionsPerIp.set(clientIp, ipConnections + 1);
     
     // Check for auth token in query params (optional)
-    const url = new URL(req.url || "", `http://${req.headers.host}`);
-    const token = url.searchParams.get("token");
+    // (url + connectToken already parsed above for per-IP limit check)
+    const token = connectToken;
     
     // Determine if authenticated
     let authenticated = !WS_AUTH_REQUIRED; // If auth not required, auto-authenticate

@@ -65,7 +65,7 @@ const PARSED_BLOCKLIST: ParsedEntry[] = RAW_BLOCKLIST.map(parseEntry).filter(
   (e): e is ParsedEntry => e !== null
 );
 
-function isBlocked(clientIp: string): boolean {
+export function isBlocked(clientIp: string): boolean {
   if (PARSED_BLOCKLIST.length === 0) return false;
 
   const clientInt = ipToInt(clientIp);
