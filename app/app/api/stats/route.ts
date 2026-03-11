@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
 import type { Database } from "@/lib/database.types";
@@ -6,13 +6,43 @@ export const dynamic = "force-dynamic";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 
+// ---------------------------------------------------------------------------
+// PERC-660: In-memory rate limiter — 60 req/min per IP (matches /api/trader pattern)
+// ---------------------------------------------------------------------------
+const RATE_LIMIT = 60;
+const RATE_WINDOW_MS = 60_000;
+const rateMap = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  if (entry.count >= RATE_LIMIT) return true;
+  entry.count++;
+  return false;
+}
+
 /**
  * GET /api/stats — Platform-wide aggregated statistics
  *
  * Uses isActiveMarket() from shared activeMarketFilter for consistent
  * market counts across homepage, /api/stats, and markets page.
+ *
+ * Rate limited: 60 req/min per IP (PERC-660, security issue #1031).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? request.headers.get("x-real-ip")
+    ?? "unknown";
+  if (isRateLimited(ip)) {
+    return NextResponse.json(
+      { error: "Rate limited. Max 60 requests per minute." },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
   const supabase = getServiceClient();
 
   const [statsRes, tradersRes, recentTradesRes] = await Promise.all([
