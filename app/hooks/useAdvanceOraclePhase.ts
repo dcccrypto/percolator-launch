@@ -33,8 +33,19 @@ export function useAdvanceOraclePhase(slabAddress?: string) {
     // Already mature — nothing to do
     if (config.oraclePhase >= ORACLE_PHASE_MATURE) return;
 
+<<<<<<< HEAD
     // Always attempt if phase < 2. The tx is cheap (~5K CU) and the
     // on-chain program will no-op if no transition is due.
+=======
+    // Check if transition is due
+    const isPythPinned = !config.oracleAuthority.equals(PublicKey.default) === false
+      && config.indexFeedId && !config.indexFeedId.equals(PublicKey.default);
+
+    // We can't know the exact current slot without an RPC call, but we can
+    // use a rough estimate. If a transition _might_ be due, just send the tx —
+    // the on-chain program will no-op if it's not ready.
+    // For simplicity: always attempt if phase < 2. The tx is cheap (~5K CU).
+>>>>>>> a496b06d (feat(sdk+app): PERC-622 AdvanceOraclePhase + PERC-623 Keeper Fund SDK)
 
     attemptedRef.current = slabAddress;
 
