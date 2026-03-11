@@ -47,6 +47,20 @@ export function deriveLpPda(
   );
 }
 
+/**
+ * Derive keeper fund PDA.
+ * Seeds: ["keeper_fund", slab_key]
+ */
+export function deriveKeeperFund(
+  programId: PublicKey,
+  slab: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [textEncoder.encode("keeper_fund"), slab.toBytes()],
+    programId
+  );
+}
+
 // ---------------------------------------------------------------------------
 // DEX Program IDs
 // ---------------------------------------------------------------------------

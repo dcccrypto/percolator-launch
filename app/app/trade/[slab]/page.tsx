@@ -16,6 +16,7 @@ import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { MarketBookCard } from "@/components/trade/MarketBookCard";
 import { TradingChart } from "@/components/trade/TradingChart";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
+import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { TradeHistory } from "@/components/trade/TradeHistory";
 import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
 import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
@@ -152,6 +153,7 @@ function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
 
   const { engine, config, header, accounts, loading: slabLoading, error: slabError } = useSlabState();
+  useAdvanceOraclePhase(slab);
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
   const health = engine ? computeMarketHealth(engine) : null;

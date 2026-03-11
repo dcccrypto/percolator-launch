@@ -135,7 +135,14 @@ var IX_TAG = {
   /** PERC-315: Deposit LP vault tokens as perp collateral */
   DepositLpCollateral: 45,
   /** PERC-315: Withdraw LP collateral (position must be closed) */
-  WithdrawLpCollateral: 46
+  WithdrawLpCollateral: 46,
+  // Tags 47-53 reserved
+  /** PERC-623: Top up keeper fund (permissionless) */
+  TopUpKeeperFund: 54,
+  /** PERC-623: Withdraw keeper reward (keeper only) */
+  WithdrawKeeperReward: 55,
+  /** PERC-622: Advance oracle phase (permissionless crank) */
+  AdvanceOraclePhase: 56
 };
 function encodeFeedId(feedId) {
   const hex = feedId.startsWith("0x") ? feedId.slice(2) : feedId;
@@ -426,6 +433,46 @@ function computeVammQuote(params, oraclePriceE6, tradeSize, isLong) {
     return oraclePriceE6 * (BPS_DENOM - totalBps) / BPS_DENOM;
   }
 }
+function encodeAdvanceOraclePhase() {
+  return encU8(IX_TAG.AdvanceOraclePhase);
+}
+var ORACLE_PHASE_NASCENT = 0;
+var ORACLE_PHASE_GROWING = 1;
+var ORACLE_PHASE_MATURE = 2;
+var PHASE1_MIN_SLOTS = 648000n;
+var PHASE1_VOLUME_MIN_SLOTS = 36000n;
+var PHASE2_VOLUME_THRESHOLD = 100000000000n;
+var PHASE2_MATURITY_SLOTS = 3024000n;
+function checkPhaseTransition(currentSlot, marketCreatedSlot, oraclePhase, cumulativeVolumeE6, phase2DeltaSlots, hasMatureOracle) {
+  switch (oraclePhase) {
+    case 0: {
+      const elapsed = currentSlot - (marketCreatedSlot > 0n ? marketCreatedSlot : currentSlot);
+      const timeReady = elapsed >= PHASE1_MIN_SLOTS;
+      const volumeReady = elapsed >= PHASE1_VOLUME_MIN_SLOTS && cumulativeVolumeE6 >= PHASE2_VOLUME_THRESHOLD;
+      if (timeReady || volumeReady) {
+        return [ORACLE_PHASE_GROWING, true];
+      }
+      return [ORACLE_PHASE_NASCENT, false];
+    }
+    case 1: {
+      if (hasMatureOracle) return [ORACLE_PHASE_MATURE, true];
+      const phase2Start = marketCreatedSlot + BigInt(phase2DeltaSlots);
+      const elapsedSincePhase2 = currentSlot - phase2Start;
+      if (elapsedSincePhase2 >= PHASE2_MATURITY_SLOTS) {
+        return [ORACLE_PHASE_MATURE, true];
+      }
+      return [ORACLE_PHASE_GROWING, false];
+    }
+    default:
+      return [ORACLE_PHASE_MATURE, false];
+  }
+}
+function encodeTopUpKeeperFund(args) {
+  return concatBytes(encU8(IX_TAG.TopUpKeeperFund), encU64(args.amount));
+}
+function encodeWithdrawKeeperReward(args) {
+  return concatBytes(encU8(IX_TAG.WithdrawKeeperReward), encU64(args.amount));
+}
 
 // src/abi/accounts.ts
 import {
@@ -645,6 +692,21 @@ var ACCOUNTS_SET_INSURANCE_ISOLATION = [
 var ACCOUNTS_EXECUTE_ADL = [
   { name: "keeper", signer: true, writable: false },
   { name: "slab", signer: false, writable: true }
+];
+var ACCOUNTS_ADVANCE_ORACLE_PHASE = [
+  { name: "slab", signer: false, writable: true }
+];
+var ACCOUNTS_TOPUP_KEEPER_FUND = [
+  { name: "funder", signer: true, writable: true },
+  { name: "slab", signer: false, writable: true },
+  { name: "keeperFund", signer: false, writable: true },
+  { name: "systemProgram", signer: false, writable: false }
+];
+var ACCOUNTS_WITHDRAW_KEEPER_REWARD = [
+  { name: "keeper", signer: true, writable: true },
+  { name: "slab", signer: false, writable: true },
+  { name: "keeperFund", signer: false, writable: true },
+  { name: "systemProgram", signer: false, writable: false }
 ];
 var WELL_KNOWN = {
   tokenProgram: TOKEN_PROGRAM_ID,
@@ -1230,6 +1292,9 @@ function parseConfig(data, layoutHint) {
   let oiRampSlots = 0n;
   let resolvedSlot = 0n;
   let insuranceIsolationBps = 0;
+  let oraclePhase = 0;
+  let cumulativeVolumeE6 = 0n;
+  let phase2DeltaSlots = 0;
   if (remaining >= 40) {
     adaptiveFundingEnabled = readU8(data, off) !== 0;
     off += 1;
@@ -1248,6 +1313,12 @@ function parseConfig(data, layoutHint) {
     off += 8;
     if (remaining >= 42) {
       insuranceIsolationBps = readU16LE(data, off);
+      if (remaining >= 56) {
+        const padOff = off + 2;
+        oraclePhase = Math.min(readU8(data, padOff + 2), 2);
+        cumulativeVolumeE6 = readU64LE(data, padOff + 3);
+        phase2DeltaSlots = data[padOff + 11] | data[padOff + 12] << 8 | data[padOff + 13] << 16;
+      }
     }
   }
   return {
@@ -1289,7 +1360,10 @@ function parseConfig(data, layoutHint) {
     marketCreatedSlot,
     oiRampSlots,
     resolvedSlot,
-    insuranceIsolationBps
+    insuranceIsolationBps,
+    oraclePhase,
+    cumulativeVolumeE6,
+    phase2DeltaSlots
   };
 }
 function parseParams(data, layoutHint) {
@@ -1477,6 +1551,12 @@ function deriveLpPda(programId, slab, lpIdx) {
   new DataView(idxBuf.buffer).setUint16(0, lpIdx, true);
   return PublicKey4.findProgramAddressSync(
     [textEncoder.encode("lp"), slab.toBytes(), idxBuf],
+    programId
+  );
+}
+function deriveKeeperFund(programId, slab) {
+  return PublicKey4.findProgramAddressSync(
+    [textEncoder.encode("keeper_fund"), slab.toBytes()],
     programId
   );
 }
@@ -2878,6 +2958,7 @@ function getCurrentNetwork() {
   return "mainnet";
 }
 export {
+  ACCOUNTS_ADVANCE_ORACLE_PHASE,
   ACCOUNTS_CLOSE_ACCOUNT,
   ACCOUNTS_CLOSE_SLAB,
   ACCOUNTS_CREATE_INSURANCE_MINT,
@@ -2899,6 +2980,7 @@ export {
   ACCOUNTS_SET_ORACLE_PRICE_CAP,
   ACCOUNTS_SET_RISK_THRESHOLD,
   ACCOUNTS_TOPUP_INSURANCE,
+  ACCOUNTS_TOPUP_KEEPER_FUND,
   ACCOUNTS_TRADE_CPI,
   ACCOUNTS_TRADE_NOCPI,
   ACCOUNTS_UNPAUSE_MARKET,
@@ -2907,6 +2989,7 @@ export {
   ACCOUNTS_WITHDRAW_COLLATERAL,
   ACCOUNTS_WITHDRAW_INSURANCE,
   ACCOUNTS_WITHDRAW_INSURANCE_LP,
+  ACCOUNTS_WITHDRAW_KEEPER_REWARD,
   AccountKind,
   CHAINLINK_ANSWER_OFFSET,
   CHAINLINK_DECIMALS_OFFSET,
@@ -2920,7 +3003,14 @@ export {
   MARK_PRICE_EMA_WINDOW_SLOTS,
   MAX_DECIMALS,
   METEORA_DLMM_PROGRAM_ID,
+  ORACLE_PHASE_GROWING,
+  ORACLE_PHASE_MATURE,
+  ORACLE_PHASE_NASCENT,
   PERCOLATOR_ERRORS,
+  PHASE1_MIN_SLOTS,
+  PHASE1_VOLUME_MIN_SLOTS,
+  PHASE2_MATURITY_SLOTS,
+  PHASE2_VOLUME_THRESHOLD,
   PROGRAM_IDS,
   PUMPSWAP_PROGRAM_ID,
   PYTH_PUSH_ORACLE_PROGRAM_ID,
@@ -2940,6 +3030,7 @@ export {
   WELL_KNOWN,
   buildAccountMetas,
   buildIx,
+  checkPhaseTransition,
   computeDexSpotPriceE6,
   computeDynamicFeeBps,
   computeDynamicTradingFee,
@@ -2965,6 +3056,7 @@ export {
   depositAccounts,
   deriveDepositPda,
   deriveInsuranceLpMint,
+  deriveKeeperFund,
   deriveLpPda,
   derivePythPriceUpdateAccount,
   derivePythPushOraclePDA,
@@ -2986,6 +3078,7 @@ export {
   encU64,
   encU8,
   encodeAdminForceClose,
+  encodeAdvanceOraclePhase,
   encodeCloseAccount,
   encodeCloseSlab,
   encodeCreateInsuranceMint,
@@ -3025,6 +3118,7 @@ export {
   encodeStakeUpdateConfig,
   encodeStakeWithdraw,
   encodeTopUpInsurance,
+  encodeTopUpKeeperFund,
   encodeTradeCpi,
   encodeTradeCpiV2,
   encodeTradeNoCpi,
@@ -3037,6 +3131,7 @@ export {
   encodeWithdrawCollateral,
   encodeWithdrawInsurance,
   encodeWithdrawInsuranceLP,
+  encodeWithdrawKeeperReward,
   fetchSlab,
   fetchTokenAccount,
   flushToInsuranceAccounts,

@@ -385,6 +385,44 @@ export const ACCOUNTS_EXECUTE_ADL: readonly AccountSpec[] = [
 ] as const;
 
 // ============================================================================
+// PERC-622: AdvanceOraclePhase (permissionless)
+// ============================================================================
+
+/**
+ * AdvanceOraclePhase: 1 account
+ * Permissionless — no signer required beyond fee payer.
+ */
+export const ACCOUNTS_ADVANCE_ORACLE_PHASE: readonly AccountSpec[] = [
+  { name: "slab", signer: false, writable: true },
+] as const;
+
+// ============================================================================
+// PERC-623: Keeper Fund Instructions
+// ============================================================================
+
+/**
+ * TopUpKeeperFund: 4 accounts
+ * Permissionless — anyone can fund.
+ */
+export const ACCOUNTS_TOPUP_KEEPER_FUND: readonly AccountSpec[] = [
+  { name: "funder", signer: true, writable: true },
+  { name: "slab", signer: false, writable: true },
+  { name: "keeperFund", signer: false, writable: true },
+  { name: "systemProgram", signer: false, writable: false },
+] as const;
+
+/**
+ * WithdrawKeeperReward: 4 accounts
+ * Keeper-only — signer must match fund state.
+ */
+export const ACCOUNTS_WITHDRAW_KEEPER_REWARD: readonly AccountSpec[] = [
+  { name: "keeper", signer: true, writable: true },
+  { name: "slab", signer: false, writable: true },
+  { name: "keeperFund", signer: false, writable: true },
+  { name: "systemProgram", signer: false, writable: false },
+] as const;
+
+// ============================================================================
 // WELL-KNOWN PROGRAM/SYSVAR KEYS
 // ============================================================================
 

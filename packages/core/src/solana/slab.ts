@@ -417,6 +417,12 @@ export interface MarketConfig {
   oiRampSlots: bigint;
   resolvedSlot: bigint;
   insuranceIsolationBps: number;
+  /** PERC-622: Oracle phase (0=Nascent, 1=Growing, 2=Mature) */
+  oraclePhase: number;
+  /** PERC-622: Cumulative trade volume in e6 format */
+  cumulativeVolumeE6: bigint;
+  /** PERC-622: Slots elapsed from market creation to Phase 2 entry (u24) */
+  phase2DeltaSlots: number;
 }
 
 export interface InsuranceFund {
@@ -727,6 +733,9 @@ export function parseConfig(data: Uint8Array, layoutHint?: SlabLayout | null): M
   let oiRampSlots = 0n;
   let resolvedSlot = 0n;
   let insuranceIsolationBps = 0;
+  let oraclePhase = 0;
+  let cumulativeVolumeE6 = 0n;
+  let phase2DeltaSlots = 0;
 
   if (remaining >= 40) {
     // V1 extended fields (adaptive funding, maturity ramp, auto-unresolve)
@@ -750,6 +759,16 @@ export function parseConfig(data: Uint8Array, layoutHint?: SlabLayout | null): M
     off += 8; // _perc301_reserved
     if (remaining >= 42) {
       insuranceIsolationBps = readU16LE(data, off);
+      // PERC-622: Read oracle phase fields from _insurance_isolation_padding
+      // padding starts at off + 2 (after u16 insuranceIsolationBps)
+      // [0..2] = mark_oracle_weight (PERC-118), [2] = oracle_phase, [3..11] = cumulative_volume, [11..14] = phase2_delta
+      if (remaining >= 56) { // 42 + 14 bytes padding
+        const padOff = off + 2;
+        oraclePhase = Math.min(readU8(data, padOff + 2), 2);
+        cumulativeVolumeE6 = readU64LE(data, padOff + 3);
+        // phase2_delta_slots is u24 LE (3 bytes)
+        phase2DeltaSlots = data[padOff + 11] | (data[padOff + 12] << 8) | (data[padOff + 13] << 16);
+      }
     }
   }
 
@@ -793,6 +812,9 @@ export function parseConfig(data: Uint8Array, layoutHint?: SlabLayout | null): M
     oiRampSlots,
     resolvedSlot,
     insuranceIsolationBps,
+    oraclePhase,
+    cumulativeVolumeE6,
+    phase2DeltaSlots,
   };
 }
 
