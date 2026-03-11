@@ -4,8 +4,7 @@ import Link from "next/link";
 import { usePortfolio, getLiquidationSeverity, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
-import { isMockMode } from "@/lib/mock-mode";
-import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
+
 import { GlowButton } from "@/components/ui/GlowButton";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 
@@ -174,12 +173,10 @@ function PositionCard({ pos, symbol }: { pos: PortfolioPosition; symbol: string 
 
 export function PositionSummary() {
   const { connected } = useWalletCompat();
-  const mockMode = isMockMode();
   const portfolio = usePortfolio();
 
-  const mockPositions = mockMode && !connected ? getMockPortfolioPositions() : null;
-  const positions = (mockPositions ?? portfolio.positions ?? []) as PortfolioPosition[];
-  const loading = mockPositions ? false : portfolio.loading;
+  const positions = (portfolio.positions ?? []) as PortfolioPosition[];
+  const loading = portfolio.loading;
 
   const collateralMints = positions.map((pos) => pos.market.config.collateralMint);
   const tokenMetaMap = useMultiTokenMeta(collateralMints);

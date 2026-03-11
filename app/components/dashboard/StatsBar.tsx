@@ -1,38 +1,47 @@
 "use client";
 
-import { getMockDashboardStats } from "@/lib/mock-dashboard-data";
+import { usePortfolio } from "@/hooks/usePortfolio";
 
 function formatUsd(val: number): string {
+  if (val === 0) return "--";
   const sign = val >= 0 ? "+" : "";
   return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function StatsBar() {
-  const stats = getMockDashboardStats();
+  const { positions, loading } = usePortfolio();
+
+  // Calculate real stats from portfolio positions
+  const totalPnlRaw = positions.reduce((sum, p) => sum + (p.unrealizedPnl ?? 0n), 0n);
+  const totalPnl = Number(totalPnlRaw) / 1e6; // e6 → human
+  const wins = positions.filter((p) => (p.unrealizedPnl ?? 0n) > 0n).length;
+  const losses = positions.filter((p) => (p.unrealizedPnl ?? 0n) < 0n).length;
+  const total = wins + losses;
+  const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : "--";
 
   const cards = [
     {
       label: "Total PnL",
-      value: formatUsd(stats.totalPnl),
+      value: loading ? "..." : formatUsd(totalPnl),
       sub: "All time",
-      color: stats.totalPnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
+      color: totalPnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
     },
     {
       label: "Today's PnL",
-      value: formatUsd(stats.todayPnl),
+      value: "--",
       sub: "Last 24h",
-      color: stats.todayPnl >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
+      color: "text-[var(--text-muted)]",
     },
     {
       label: "Win Rate",
-      value: `${stats.winRate}%`,
-      sub: `${stats.wins}W / ${stats.losses}L`,
+      value: loading ? "..." : `${winRate}%`,
+      sub: total > 0 ? `${wins}W / ${losses}L` : "No trades yet",
       color: "text-white",
     },
     {
       label: "Fee Tier",
-      value: `Maker ${stats.feeTier.maker}% / Taker ${stats.feeTier.taker}%`,
-      sub: `Tier ${stats.feeTier.tier} of ${stats.feeTier.maxTier}`,
+      value: "Maker 0.02% / Taker 0.06%",
+      sub: "Standard",
       color: "text-[var(--warning)]",
     },
   ];

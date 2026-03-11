@@ -3,7 +3,6 @@
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { formatTokenAmount } from "@/lib/format";
-import { isMockMode } from "@/lib/mock-mode";
 import { useState } from "react";
 
 function CopyableAddress({ address }: { address: string }) {
@@ -36,18 +35,16 @@ function CopyableAddress({ address }: { address: string }) {
 
 export function DashboardHeader() {
   const { publicKey } = useWalletCompat();
-  const mockMode = isMockMode();
   const portfolio = usePortfolio();
 
-  const address = publicKey?.toBase58() ?? (mockMode ? "7xBk...Rp3q" : "");
+  const address = publicKey?.toBase58() ?? "";
   const totalValue = portfolio.totalValue ?? 0n;
   const totalPnl = portfolio.totalUnrealizedPnl ?? 0n;
   const positionCount = portfolio.positions?.length ?? 0;
 
-  // Mock portfolio value for demo
   const displayValue = totalValue > 0n
     ? formatTokenAmount(totalValue)
-    : mockMode ? "$12,450.32" : "$0.00";
+    : "$0.00";
 
   const pnlPositive = totalPnl >= 0n;
 
@@ -69,11 +66,11 @@ export function DashboardHeader() {
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
             {displayValue}
-            {(totalPnl !== 0n || mockMode) && (
+            {totalPnl !== 0n && (
               <span
                 className={`ml-2 text-[10px] ${pnlPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
               >
-                {pnlPositive ? "▲" : "▼"} {mockMode ? "+2.3%" : `${((Number(totalPnl) / Math.max(Number(totalValue), 1)) * 100).toFixed(1)}%`}
+                {pnlPositive ? "▲" : "▼"} {`${((Number(totalPnl) / Math.max(Number(totalValue), 1)) * 100).toFixed(1)}%`}
               </span>
             )}
           </p>
@@ -89,7 +86,7 @@ export function DashboardHeader() {
             className="text-sm font-bold text-white"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
-            {mockMode && positionCount === 0 ? "3" : positionCount}
+            {positionCount}
           </p>
         </div>
       </div>
