@@ -90,11 +90,38 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
     setMirrorMeta(null);
 
     if (isDevnet) {
-      // DEVNET: Always call mirror-mint to get/create the canonical devnet mint address.
-      // Do NOT early-return — devnetMintAddress must be resolved before the wizard can proceed.
-      setMintNetworkStatus("mirroring");
+      // DEVNET: First check if the mint already exists on devnet.
+      // - If it does (owned by Token Program): it's a devnet-native token — use directly.
+      // - If it doesn't: treat as mainnet CA → call devnet-mirror-mint to create a devnet copy.
+      // BUG-2 FIX: previously always called mirror-mint, which fails for devnet-created tokens
+      // because DexScreener/Jupiter cannot resolve devnet-only addresses on mainnet.
+      setMintNetworkStatus("loading");
       (async () => {
         try {
+          // Step 1: Check if this mint exists on devnet
+          const accountInfo = await connection.getAccountInfo(mintPk);
+          if (cancelled) return;
+
+          const isDevnetNative =
+            accountInfo !== null &&
+            (accountInfo.owner.equals(TOKEN_PROGRAM_ID) ||
+              accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID));
+
+          if (isDevnetNative) {
+            // Mint already exists on devnet — use it directly, no mirror needed.
+            const nativeMeta = tokenMeta
+              ? { name: tokenMeta.name ?? debounced.slice(0, 8), symbol: tokenMeta.symbol ?? debounced.slice(0, 4).toUpperCase(), decimals: tokenMeta.decimals ?? 6 }
+              : { name: `Token ${debounced.slice(0, 6)}`, symbol: debounced.slice(0, 4).toUpperCase(), decimals: 6 };
+            setMirrorMeta(nativeMeta);
+            onDevnetMintResolved?.(debounced, nativeMeta);
+            onTokenResolved(nativeMeta);
+            setMintNetworkStatus("valid");
+            onMintNetworkValidChange?.(true);
+            return;
+          }
+
+          // Step 2: Mint not on devnet → try to mirror from mainnet
+          setMintNetworkStatus("mirroring");
           const resp = await fetch("/api/devnet-mirror-mint", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -124,7 +151,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
         } catch {
           if (!cancelled) {
             setMintNetworkStatus("mirror-failed");
-            setMirrorError("Network error — could not reach mirror-mint endpoint");
+            setMirrorError("Network error — could not validate token");
             onMintNetworkValidChange?.(false);
           }
         }

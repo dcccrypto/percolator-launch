@@ -941,11 +941,16 @@ export function useCreateMarket() {
           // Mint devnet token + airdrop $500 to creator
           setState((s) => ({ ...s, stepLabel: "Minting devnet tokens..." }));
           try {
+            // BUG-1 FIX: pass the original mainnet CA (params.mainnetCA), not the
+            // devnet mirror mint address (mintAddr). devnet-mint-token looks up by
+            // mainnet_ca; passing the devnet mirror address causes a DB miss → API
+            // tries to fetch it from DexScreener → fails → creator never gets tokens.
+            const mintTokenCA = params.mainnetCA ?? mintAddr;
             const mintResp = await fetch("/api/devnet-mint-token", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                mainnetCA: mintAddr,
+                mainnetCA: mintTokenCA,
                 marketAddress: slabAddr,
                 creatorWallet: wallet.publicKey.toBase58(),
               }),
