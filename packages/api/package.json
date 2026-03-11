@@ -20,7 +20,7 @@
     "@solana/web3.js": "^1.98.0",
     "@supabase/supabase-js": "^2.49.1",
     "dotenv": "^16.4.7",
-    "hono": "^4.12.2",
+    "hono": "^4.12.7",
     "ws": "^8.18.0"
   },
   "devDependencies": {
