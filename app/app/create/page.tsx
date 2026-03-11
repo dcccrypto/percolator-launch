@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
+import Link from "next/link";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -39,6 +40,16 @@ function CreatePageInner() {
       <div className="absolute inset-x-0 top-0 h-16 bg-grid pointer-events-none opacity-50" />
 
       <div className="relative mx-auto max-w-4xl px-4 pt-4 pb-10">
+        {/* Back nav */}
+        <div className="mb-4">
+          <Link
+            href="/markets"
+            className="inline-flex items-center gap-1.5 text-[11px] font-mono text-[var(--text-muted)] transition-colors hover:text-[var(--text)] uppercase tracking-[0.1em]"
+          >
+            ← Markets
+          </Link>
+        </div>
+
         {/* Page header */}
         <ScrollReveal>
           <div className="mb-8">

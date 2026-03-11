@@ -435,12 +435,20 @@ export default function LeaderboardPage() {
     setError(null);
     try {
       const res = await fetch(`/api/leaderboard?period=${p}&limit=100`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 429) {
+          throw new Error("Leaderboard is temporarily unavailable — too many requests. Try again in a moment.");
+        }
+        if (res.status >= 500) {
+          throw new Error("Leaderboard service is temporarily down. Please try again shortly.");
+        }
+        throw new Error("Failed to load leaderboard. Please try again.");
+      }
       const json = await res.json();
       setEntries(json.leaderboard ?? []);
       setGeneratedAt(json.generatedAt ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load leaderboard");
+      setError(err instanceof Error ? err.message : "Failed to load leaderboard. Please try again.");
     } finally {
       setLoading(false);
     }

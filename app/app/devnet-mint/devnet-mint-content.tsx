@@ -489,6 +489,23 @@ const DevnetMintContent: FC = () => {
           </div>
         </ScrollReveal>
 
+        {/* ── Wallet gate — show connect prompt if no wallet connected ─────── */}
+        {!walletReady && (
+          <div className="max-w-xl mx-auto mb-6 border border-[var(--warning)]/30 bg-[var(--warning)]/[0.04] px-5 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-6 w-6 items-center justify-center border border-[var(--warning)]/40 shrink-0">
+                <span className="text-[11px] text-[var(--warning)]">!</span>
+              </div>
+              <div>
+                <p className="text-[13px] font-medium text-[var(--warning)]">Wallet required</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                  Connect your wallet using the button in the header to use the Token Factory.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="max-w-xl mx-auto space-y-6">
 
           {/* ── Get Market Test Tokens ─────────────────────────────────────────── */}
