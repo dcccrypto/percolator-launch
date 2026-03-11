@@ -316,6 +316,45 @@ export async function POST(req: NextRequest) {
       const cfg = getConfig();
       const connection = new Connection(cfg.rpcUrl, "confirmed");
 
+      // Verify we are the mint authority — if not, we cannot mint tokens.
+      // This happens for devnet-native tokens (e.g. user pasted a token address
+      // that exists on devnet but was created by someone else).
+      try {
+        const mintInfo = await connection.getAccountInfo(mintPk);
+        if (!mintInfo) {
+          return NextResponse.json(
+            { error: `Mint ${mintAddress} does not exist on devnet. The token may need to be mirrored first.` },
+            { status: 400 },
+          );
+        }
+        // SPL Token mint layout: bytes 0-3 = coption(u32), bytes 4-35 = mint_authority (32 bytes)
+        // If coption == 0, no mint authority (fixed supply). If coption == 1, authority is at offset 4.
+        const mintData = new Uint8Array(mintInfo.data);
+        if (mintData.length >= 36) {
+          const hasAuthority = new DataView(mintData.buffer, mintData.byteOffset).getUint32(0, true) === 1;
+          if (hasAuthority) {
+            const onChainAuthority = new PublicKey(mintData.slice(4, 36));
+            if (!onChainAuthority.equals(mintAuthority.publicKey)) {
+              return NextResponse.json(
+                {
+                  error: `Cannot mint tokens: this mint's authority is ${onChainAuthority.toBase58().slice(0, 8)}…, not our devnet mint authority. This token was not created by the Percolator mirror system. You need to obtain tokens from the original source.`,
+                  mintAuthority: onChainAuthority.toBase58(),
+                },
+                { status: 400 },
+              );
+            }
+          } else {
+            return NextResponse.json(
+              { error: "This mint has no mint authority (fixed supply). Cannot airdrop new tokens." },
+              { status: 400 },
+            );
+          }
+        }
+      } catch (authCheckErr) {
+        console.warn("[devnet-airdrop] mint authority check failed:", authCheckErr);
+        // Continue anyway — the mintTo will fail with a clear Solana error if authority is wrong
+      }
+
       // Derive user's ATA
       const ata = await getAssociatedTokenAddress(mintPk, walletPk);
       let ataExists = false;
