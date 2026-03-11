@@ -146,14 +146,21 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
 
-  const parsedAmount = maxRawRef.current ?? (amount ? parseHumanAmount(amount, decimals) : 0n);
+  let parsedAmount = 0n;
+  let decimalError: string | null = null;
+  try {
+    parsedAmount = maxRawRef.current ?? (amount ? parseHumanAmount(amount, decimals) : 0n);
+  } catch {
+    decimalError = `Too many decimals (max ${decimals})`;
+  }
   const isOverWithdraw = mode === "withdraw" && parsedAmount > 0n && parsedAmount > capital;
   const isOverDeposit = mode === "deposit" && parsedAmount > 0n && walletBalance !== null && parsedAmount > walletBalance;
-  const validationError = isOverWithdraw
-    ? "Insufficient capital"
-    : isOverDeposit
-    ? "Insufficient wallet balance"
-    : null;
+  const validationError = decimalError
+    ?? (isOverWithdraw
+      ? "Insufficient capital"
+      : isOverDeposit
+      ? "Insufficient wallet balance"
+      : null);
   const hasOpenPosition = positionSize !== 0n;
 
   async function handleSubmit() {
