@@ -911,7 +911,7 @@ export function checkPhaseTransition(
 // ============================================================================
 
 /**
- * TopUpKeeperFund (Tag 54) — permissionless keeper fund top-up.
+ * TopUpKeeperFund (Tag 57) — permissionless keeper fund top-up.
  *
  * Instruction data: tag(1) + amount(8) = 9 bytes
  *

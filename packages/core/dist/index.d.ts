@@ -524,7 +524,7 @@ declare const PHASE2_MATURITY_SLOTS = 3024000n;
  */
 declare function checkPhaseTransition(currentSlot: bigint, marketCreatedSlot: bigint, oraclePhase: number, cumulativeVolumeE6: bigint, phase2DeltaSlots: number, hasMatureOracle: boolean): [number, boolean];
 /**
- * TopUpKeeperFund (Tag 54) — permissionless keeper fund top-up.
+ * TopUpKeeperFund (Tag 57) — permissionless keeper fund top-up.
  *
  * Instruction data: tag(1) + amount(8) = 9 bytes
  *
