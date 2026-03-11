@@ -68,76 +68,33 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress 
     );
   }
 
-  if (!userAccount) {
-    const hasTokens = walletBalance !== null && walletBalance > 0n;
-    const suggestedDeposit = walletBalance !== null && walletBalance > 0n
-      ? walletBalance > 10_000_000n ? 10_000_000n : walletBalance
-      : 0n;
+  // P0 FIX: No separate "Create Account" gate. When userAccount is null,
+  // we fall through to the normal deposit form. The useDeposit hook auto-
+  // bundles InitUser + Deposit in one tx, so users just click "Deposit".
+  // The faucet warning still shows when wallet has no tokens.
+  if (!userAccount && walletBalance !== null && walletBalance === 0n) {
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <p className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Create Account</p>
-        {walletBalance !== null && (
-          <p className="mb-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-            Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}
+        <p className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Deposit</p>
+        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2 space-y-2">
+          <p className="text-[10px] text-[var(--warning)]">
+            You need {symbol} tokens to trade this market.
           </p>
-        )}
-        {!hasTokens && (
-          <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2 space-y-2">
-            <p className="text-[10px] text-[var(--warning)]">
-              You need {symbol} tokens to trade this market.
-            </p>
-            {/* Show devnet faucet button for all devnet markets */}
-            {mktConfig?.collateralMint ? (
-              <DevnetTokenFaucetButton
-                mintAddress={mktConfig.collateralMint.toBase58()}
-                symbol={symbol}
-              />
-            ) : null}
-          </div>
-        )}
-        {hasTokens ? (
-          <>
-            <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
-              Create an account with an initial deposit to start trading.
-            </p>
-            <button
-              onClick={async () => { 
-                try { 
-                  const sig = await initUser(suggestedDeposit); 
-                  setLastSig(sig ?? null); 
-                } catch (err) {
-                  if (process.env.NODE_ENV === 'development') {
-                    console.error('initUser failed:', err);
-                  }
-                }
-              }}
-              disabled={initLoading}
-              className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
-            >
-              {initLoading ? "Creating..." : `Create Account (deposit ${formatTokenAmount(suggestedDeposit, decimals)} ${symbol})`}
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
-              Get tokens first, then create your account.
-            </p>
-            <button
-              disabled
-              className="w-full rounded-none bg-[var(--bg-surface)] py-2 text-[10px] font-medium text-[var(--text-muted)] cursor-not-allowed opacity-50"
-            >
-              Create Account
-            </button>
-          </>
-        )}
+          {mktConfig?.collateralMint ? (
+            <DevnetTokenFaucetButton
+              mintAddress={mktConfig.collateralMint.toBase58()}
+              symbol={symbol}
+            />
+          ) : null}
+        </div>
         {initError && <p className="mt-2 text-[10px] text-[var(--short)]">{initError}</p>}
-        {lastSig && <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>Tx: {lastSig.slice(0, 12)}...</p>}
+        {depositError && <p className="mt-2 text-[10px] text-[var(--short)]">{depositError}</p>}
       </div>
     );
   }
 
-  const capital = userAccount.account.capital;
-  const positionSize = userAccount.account.positionSize ?? 0n;
+  const capital = userAccount?.account.capital ?? 0n;
+  const positionSize = userAccount?.account.positionSize ?? 0n;
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
 
@@ -152,23 +109,27 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress 
   const hasOpenPosition = positionSize !== 0n;
 
   async function handleSubmit() {
-    if (!amount || !userAccount || validationError) return;
+    // Allow deposits without userAccount — useDeposit auto-calls InitUser.
+    // Withdrawals still require an existing account.
+    if (!amount || validationError) return;
+    if (mode === "withdraw" && !userAccount) return;
     if (mockMode) { setAmount(""); return; }
     try {
       const amtNative = maxRawRef.current ?? parseHumanAmount(amount, decimals);
       if (amtNative <= 0n) return;
       let sig: string | undefined;
       if (mode === "deposit") {
-        sig = await deposit({ userIdx: userAccount.idx, amount: amtNative });
+        // userIdx=0 is a placeholder when no account exists;
+        // useDeposit will auto-detect and override with the correct idx.
+        sig = await deposit({ userIdx: userAccount?.idx ?? 0, amount: amtNative });
       } else {
-        sig = await withdraw({ userIdx: userAccount.idx, amount: amtNative });
+        sig = await withdraw({ userIdx: userAccount!.idx, amount: amtNative });
       }
       setLastSig(sig ?? null);
       setAmount("");
     } catch (err) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error(`${mode} failed:`, err);
-      }
+      // Show errors in all environments (was production-silent before)
+      console.error(`${mode} failed:`, err);
       // Error state is already handled by deposit/withdraw hooks
     }
   }
