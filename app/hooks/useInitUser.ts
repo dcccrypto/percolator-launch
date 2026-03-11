@@ -19,10 +19,11 @@ import {
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 
+
 export function useInitUser(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, programId: slabProgramId } = useSlabState();
+  const { config: mktConfig, programId: slabProgramId, refresh: refreshSlab } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,7 +60,12 @@ export function useInitUser(slabAddress: string) {
           data: encodeInitUser({ feePayment: feePayment.toString() }),
         });
         instructions.push(ix);
-        return await sendTx({ connection, wallet, instructions });
+        const sig = await sendTx({ connection, wallet, instructions });
+        // Force immediate slab re-read so the new user sub-account is visible
+        // without waiting for the next poll cycle (up to 30 s with WS active).
+        refreshSlab();
+        setTimeout(() => refreshSlab(), 2000);
+        return sig;
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         throw e;
@@ -67,7 +73,7 @@ export function useInitUser(slabAddress: string) {
         setLoading(false);
       }
     },
-    [connection, wallet, mktConfig, slabAddress, slabProgramId]
+    [connection, wallet, mktConfig, slabAddress, slabProgramId, refreshSlab]
   );
 
   return { initUser, loading, error };

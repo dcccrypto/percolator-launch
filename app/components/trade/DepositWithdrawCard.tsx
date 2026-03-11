@@ -70,9 +70,6 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress 
 
   if (!userAccount) {
     const hasTokens = walletBalance !== null && walletBalance > 0n;
-    const suggestedDeposit = walletBalance !== null && walletBalance > 0n
-      ? walletBalance > 10_000_000n ? 10_000_000n : walletBalance
-      : 0n;
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <p className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Create Account</p>
@@ -98,23 +95,23 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress 
         {hasTokens ? (
           <>
             <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
-              Create an account with an initial deposit to start trading.
+              Create your trading account on this market to start trading.
             </p>
             <button
               onClick={async () => { 
                 try { 
-                  const sig = await initUser(suggestedDeposit); 
+                  // feePayment=0 — just registers the slot.
+                  // Actual deposit follows in the deposit form once account exists.
+                  const sig = await initUser(0n); 
                   setLastSig(sig ?? null); 
-                } catch (err) {
-                  if (process.env.NODE_ENV === 'development') {
-                    console.error('initUser failed:', err);
-                  }
+                } catch {
+                  // initError state is set by the hook and shown below
                 }
               }}
               disabled={initLoading}
               className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white hover:bg-[var(--accent-muted)] hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
             >
-              {initLoading ? "Creating..." : `Create Account (deposit ${formatTokenAmount(suggestedDeposit, decimals)} ${symbol})`}
+              {initLoading ? "Creating account..." : "Create Trading Account"}
             </button>
           </>
         ) : (
