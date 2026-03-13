@@ -31,6 +31,7 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { LogoUpload } from "@/components/create/LogoUpload";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { getBatchRpc } from "@/lib/batchRpc";
+import { isValidBase58Pubkey } from "@/lib/createWizardUtils";
 
 /**
  * Use the server-side RPC proxy to avoid exposing HELIUS_API_KEY in the client bundle.
@@ -465,6 +466,9 @@ const DevnetMintContent: FC = () => {
     }
   }, [publicKey, signTransaction, existingMint, mintMoreAmount, recipient, refreshBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Issue #1139: Validate faucet mint is a real Solana address before enabling the button
+  const isFaucetMintValid = isValidBase58Pubkey(faucetMint.trim());
+
   const cardClass = "bg-[var(--panel-bg)] border border-[var(--border)] p-4 sm:p-6";
   const btnPrimary = "border border-[var(--accent)]/40 text-[var(--accent)] bg-transparent px-5 py-2.5 text-sm font-semibold transition-all duration-200 hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.08] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100";
   const inputClass = "w-full bg-[var(--panel-bg)] border border-[var(--border)] px-3 py-2 text-sm text-white placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none transition-shadow duration-200";
@@ -543,9 +547,12 @@ const DevnetMintContent: FC = () => {
                     setFaucetRateLimited(null);
                   }}
                   placeholder="Paste devnet mint address..."
-                  className={inputClass}
+                  className={`${inputClass} ${faucetMint && !isFaucetMintValid ? "border-[var(--short)]/60" : ""}`}
                   disabled={faucetLoading}
                 />
+                {faucetMint && !isFaucetMintValid && (
+                  <p className="mt-1 text-[11px] text-[var(--short)]/80">Not a valid Solana address (base58, 32–44 chars)</p>
+                )}
               </div>
               {/* Inline status */}
               {faucetLoading && (
@@ -578,7 +585,7 @@ const DevnetMintContent: FC = () => {
               <button
                 className={`${btnPrimary} w-full`}
                 onClick={handleFaucetClaim}
-                disabled={faucetLoading || !faucetMint || !walletReady}
+                disabled={faucetLoading || !faucetMint || !isFaucetMintValid || !walletReady}
               >
                 {!walletReady
                   ? "Connect Wallet First"

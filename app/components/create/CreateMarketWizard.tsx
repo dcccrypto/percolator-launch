@@ -487,9 +487,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   };
 
   // Reset wizard completely
+  // Issue #1141: Re-apply initialMint from URL param so 'Clear & Start Fresh'
+  // doesn't lose the ?mint= address the user navigated here with.
   const handleReset = () => {
     resetCreate();
-    setWizard({ ...DEFAULT_STATE });
+    setWizard({ ...DEFAULT_STATE, mintAddress: initialMint ?? "" });
     setCompletedSteps(new Set());
     setDevnetMintAddress(null);
     // PERC-516: Clear persisted wizard state
