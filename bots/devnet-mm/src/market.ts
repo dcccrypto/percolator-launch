@@ -253,7 +253,7 @@ async function sendTx(
       const { sendAndConfirmTransaction } = await import("@solana/web3.js");
       sig = await sendAndConfirmTransaction(connection, tx, signers, {
         commitment: "confirmed",
-        skipPreflight: true,
+        skipPreflight: false,
       });
     }
     log("tx", `✅ ${label} → ${sig.slice(0, 16)}...`);

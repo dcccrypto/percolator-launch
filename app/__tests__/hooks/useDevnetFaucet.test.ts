@@ -31,9 +31,13 @@ describe("useDevnetFaucet", () => {
     expect(process.env.NEXT_PUBLIC_SOLANA_NETWORK).toBe("mainnet");
   });
 
-  it("should export correct types", async () => {
-    // Type-level test — ensure the module exports expected types
-    const mod = await import("@/hooks/useDevnetFaucet");
-    expect(typeof mod.useDevnetFaucet).toBe("function");
-  });
+  it(
+    "should export correct types",
+    async () => {
+      // Type-level test — ensure the module exports expected types
+      const mod = await import("@/hooks/useDevnetFaucet");
+      expect(typeof mod.useDevnetFaucet).toBe("function");
+    },
+    30000
+  ); // Increased timeout for dynamic import
 });

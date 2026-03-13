@@ -100,7 +100,7 @@ async function sendIx(
 
   const sig = await sendAndConfirmTransaction(connection, tx, [payer], {
     commitment: 'confirmed',
-    skipPreflight: true,
+    skipPreflight: false,
   });
   console.log(`  ✅ ${label}: ${sig}`);
   return sig;
