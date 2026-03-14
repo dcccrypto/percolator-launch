@@ -217,7 +217,11 @@ export function useEarnStats() {
           const tradingFeeBpsRaw = m.trading_fee_bps ?? 10;
           const tradingFeeBps = tradingFeeBpsRaw > 5_000 ? 0 : tradingFeeBpsRaw;
           const volume24hRaw = m.volume_24h ?? 0;
-          const volume24h = isSentinel(volume24hRaw) ? 0 : volume24hRaw;
+          // Normalize to human-readable collateral units (same as totalOI).
+          // volume_24h is stored as raw on-chain micro-units — divide by collDivisor
+          // before using in APY calculation or display. Without this, a $100K USDC
+          // market would show "$100B" volume and ~73,000,000% APY.
+          const volume24h = isSentinel(volume24hRaw) ? 0 : volume24hRaw / collDivisor;
           const insuranceRaw = m.insurance_fund ?? 0;
           // Sanity cap: insurance_fund values > 10 billion USDC micro-units ($10M)
           // are corrupt data from bad slab tier detection — clamp to 0
