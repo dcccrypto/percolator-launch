@@ -236,7 +236,7 @@ export default function Home() {
                   },
                   {
                     label: "24h Volume",
-                    value: statsLoaded ? (stats.volume > 0 ? formatCompact(stats.volume) : "$0") : null,
+                    value: statsLoaded ? (stats.volume > 0 ? formatCompact(stats.volume) : "—") : null,
                     suffix: network !== "mainnet" ? " (devnet)" : undefined,
                     color: stats.volume > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]",
                   },

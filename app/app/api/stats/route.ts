@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
   const supabase = getServiceClient();
 
   const [statsRes, tradersRes, recentTradesRes] = await Promise.all([
-    supabase.from("markets_with_stats").select("volume_24h, open_interest_long, open_interest_short, total_open_interest, last_price").limit(500),
+    supabase.from("markets_with_stats").select("volume_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals").limit(500),
     supabase.from("trades").select("trader").limit(5000),
     supabase
       .from("trades")
@@ -77,18 +77,30 @@ export async function GET(request: NextRequest) {
   const activeData = statsData.filter(isActiveMarket);
   const totalMarkets = activeData.length;
 
+  // Convert raw on-chain token micro-units to USD using decimals + price
+  // Without this, sentinel-like values (2e12) leak through as $2T (#1154)
+  const MAX_PER_MARKET_USD = 10_000_000_000; // $10B cap — no single market should exceed this
+  const toUsd = (raw: number, m: { decimals?: number | null; last_price?: number | null }): number => {
+    if (!isSaneMarketValue(raw)) return 0;
+    const d = Math.min(Math.max((m as Record<string, unknown>).decimals as number ?? 6, 0), 18);
+    const p = m.last_price ?? 0;
+    if (p <= 0) return 0;
+    const usd = (raw / 10 ** d) * p;
+    return usd > MAX_PER_MARKET_USD ? 0 : usd;
+  };
+
   const totalVolume24h = activeData.reduce(
-    (sum, m) => sum + (isSaneMarketValue(m.volume_24h) ? m.volume_24h! : 0),
+    (sum, m) => sum + toUsd(m.volume_24h ?? 0, m),
     0
   );
   const totalOpenInterest = activeData.reduce(
     (sum, m) => {
-      const oi = isSaneMarketValue(m.total_open_interest)
+      const rawOi = isSaneMarketValue(m.total_open_interest)
         ? m.total_open_interest!
         : (isSaneMarketValue((m.open_interest_long ?? 0) + (m.open_interest_short ?? 0))
             ? (m.open_interest_long ?? 0) + (m.open_interest_short ?? 0)
             : 0);
-      return sum + oi;
+      return sum + toUsd(rawOi, m);
     },
     0
   );

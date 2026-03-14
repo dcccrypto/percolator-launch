@@ -742,7 +742,7 @@ export default function AdminDashboard() {
             <div className="text-2xl font-bold mt-1 text-[var(--accent)]">
               {statsLoading
                 ? "—"
-                : platformStats
+                : platformStats && platformStats.totalVolume24h > 0
                 ? formatCompact(platformStats.totalVolume24h)
                 : "—"}
             </div>
@@ -752,7 +752,7 @@ export default function AdminDashboard() {
             <div className="text-2xl font-bold mt-1 text-[var(--cyan)]">
               {statsLoading
                 ? "—"
-                : platformStats
+                : platformStats && platformStats.totalOpenInterest > 0
                 ? formatCompact(platformStats.totalOpenInterest)
                 : "—"}
             </div>
