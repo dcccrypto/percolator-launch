@@ -241,7 +241,11 @@ export function useEarnStats() {
 
           // Max OI = vault collateral × max leverage (simplified)
           const vaultUsd = vaultBalance / collDivisor;
-          const maxOI = vaultUsd * maxLeverage;
+          const rawMaxOI = vaultUsd * maxLeverage;
+          // GH#1231: on devnet, vault deposits can be tiny while accumulated OI is large.
+          // Clamp displayMaxOI so it is never less than totalOI — prevents confusing
+          // "Max: $343" display when Current OI is already $57K.
+          const maxOI = Math.max(rawMaxOI, totalOI);
           const oiUtilPct = maxOI > 0 ? (totalOI / maxOI) * 100 : 0;
 
           // Estimated APY: (daily fees × 365) / TVL × 100
