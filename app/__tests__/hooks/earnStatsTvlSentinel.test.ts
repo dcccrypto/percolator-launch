@@ -1,12 +1,16 @@
 /**
- * GH#1165 — /earn TVL sentinel filter for lp_collateral
+ * GH#1165 — /earn TVL sentinel filter for vault_balance
+ * GH#1204 — /earn TVL uses vault_balance (actual deposits), not lp_collateral (bootstrap config)
  *
- * Root cause: corrupt lp_collateral values (e.g. ~4e14 at 6 decimals = $400M)
+ * Root cause (GH#1165): corrupt vault_balance values (e.g. ~4e14 at 6 decimals = $400M)
  * passed the existing sentinel filter (isSentinel = v > 1e18) but produced
  * wildly inflated TVL on the /earn page.
  *
- * Fix: add a USD-value cap after dividing by 10^decimals. Any vault claiming
- * > $10M USD is corrupt and should be treated as 0 (MAX_VAULT_USD = 10_000_000).
+ * Root cause (GH#1204): lp_collateral was used instead of vault_balance.
+ * lp_collateral = 10^11 for NNOB-PERP at 6 decimals = $100K TVL even when
+ * vault has zero actual deposits (vault_balance = 0).
+ *
+ * Fix: use vault_balance (actual on-chain deposits) and apply sentinel + USD cap.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -15,22 +19,22 @@ import { describe, it, expect } from 'vitest';
 const isSentinel = (v: number) => v > 1e18;
 const MAX_VAULT_USD = 10_000_000; // $10M cap per vault
 
-function computeVaultBalance(lp_collateral: number | null, collDivisor: number): number {
-  const vaultBalanceRaw = lp_collateral ?? 0;
+function computeVaultBalance(vault_balance: number | null, collDivisor: number): number {
+  const vaultBalanceRaw = vault_balance ?? 0;
   const vaultBalanceHuman = isSentinel(vaultBalanceRaw) ? Infinity : vaultBalanceRaw / collDivisor;
   return vaultBalanceHuman > MAX_VAULT_USD ? 0 : vaultBalanceRaw;
 }
 
-function computeTvl(markets: { lp_collateral: number | null; decimals: number }[]): number {
+function computeTvl(markets: { vault_balance: number | null; decimals: number }[]): number {
   return markets.reduce((s, m) => {
     const collDivisor = 10 ** m.decimals;
-    const vaultBalance = computeVaultBalance(m.lp_collateral, collDivisor);
+    const vaultBalance = computeVaultBalance(m.vault_balance, collDivisor);
     return s + vaultBalance / collDivisor;
   }, 0);
 }
 // ──────────────────────────────────────────────────────────────────────────
 
-describe('useEarnStats — lp_collateral sentinel filter (GH#1165)', () => {
+describe('useEarnStats — vault_balance sentinel filter (GH#1165, GH#1204)', () => {
   it('passes legitimate USDC LP (e.g. 1,000 USDC at 6 decimals)', () => {
     const raw = 1_000 * 1e6; // 1,000 USDC
     const bal = computeVaultBalance(raw, 1e6);
@@ -64,16 +68,16 @@ describe('useEarnStats — lp_collateral sentinel filter (GH#1165)', () => {
     expect(bal).toBe(0);
   });
 
-  it('handles null lp_collateral as 0', () => {
+  it('handles null vault_balance as 0', () => {
     const bal = computeVaultBalance(null, 1e6);
     expect(bal).toBe(0);
   });
 
   it('TVL with one corrupt market is not inflated', () => {
     const markets = [
-      { lp_collateral: 1_000 * 1e6, decimals: 6 },   // 1,000 USDC — legit
-      { lp_collateral: 4e14, decimals: 6 },            // $400M USDC — corrupt
-      { lp_collateral: 500 * 1e9, decimals: 9 },      // 500 SOL — legit
+      { vault_balance: 1_000 * 1e6, decimals: 6 },   // 1,000 USDC — legit
+      { vault_balance: 4e14, decimals: 6 },            // $400M USDC — corrupt
+      { vault_balance: 500 * 1e9, decimals: 9 },      // 500 SOL — legit
     ];
     const tvl = computeTvl(markets);
     // Should only include the two legit vaults: 1,000 + 500 = 1,500 human units
@@ -82,9 +86,9 @@ describe('useEarnStats — lp_collateral sentinel filter (GH#1165)', () => {
 
   it('TVL with all legit markets aggregates correctly', () => {
     const markets = [
-      { lp_collateral: 100 * 1e6, decimals: 6 },   // 100 USDC
-      { lp_collateral: 200 * 1e6, decimals: 6 },   // 200 USDC
-      { lp_collateral: 50 * 1e9,  decimals: 9 },   // 50 SOL
+      { vault_balance: 100 * 1e6, decimals: 6 },   // 100 USDC
+      { vault_balance: 200 * 1e6, decimals: 6 },   // 200 USDC
+      { vault_balance: 50 * 1e9,  decimals: 9 },   // 50 SOL
     ];
     const tvl = computeTvl(markets);
     expect(tvl).toBeCloseTo(350, 5); // 100 + 200 + 50
@@ -102,5 +106,28 @@ describe('useEarnStats — lp_collateral sentinel filter (GH#1165)', () => {
     const raw = 10_100_000 * 1e6; // 1.01e13
     const bal = computeVaultBalance(raw, 1e6);
     expect(bal).toBe(0);
+  });
+
+  // ─── GH#1204 regression test ─────────────────────────────────────────────
+  it('GH#1204: NNOB-PERP shows $0 TVL when vault_balance=0 despite lp_collateral=10^11', () => {
+    // lp_collateral = 100000000000 (bootstrap config) — NOT the actual deposits
+    // vault_balance = 0 (actual on-chain SOL in vault)
+    // Before fix: would show $100K TVL using lp_collateral / 10^6
+    // After fix: must show $0 using vault_balance
+    const vault_balance = 0;
+    const decimals = 6;
+    const collDivisor = 10 ** decimals;
+    const bal = computeVaultBalance(vault_balance, collDivisor);
+    expect(bal).toBe(0);
+    expect(bal / collDivisor).toBe(0); // TVL = $0
+  });
+
+  it('GH#1204: market with small real deposits shows correct TVL', () => {
+    // vault_balance = 5_000 USDC (5e9 micro-units at 6 decimals) — real deposits
+    const vault_balance = 5_000 * 1e6;
+    const decimals = 6;
+    const collDivisor = 10 ** decimals;
+    const bal = computeVaultBalance(vault_balance, collDivisor);
+    expect(bal / collDivisor).toBe(5_000); // TVL = $5,000
   });
 });

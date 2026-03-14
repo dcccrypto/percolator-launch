@@ -215,12 +215,14 @@ export function useEarnStats() {
           // OI values are stored in collateral micro-units — convert to human units
           const totalOI = isSentinel(totalOIRaw) ? 0 : totalOIRaw / collDivisor;
           const maxLeverage = m.max_leverage ?? 10;
-          const vaultBalanceRaw = m.lp_collateral ?? 0;
-          // Two-stage filter for lp_collateral:
+          // Fix GH#1204: use vault_balance (actual on-chain deposits) not lp_collateral
+          // (bootstrap config constant). lp_collateral = 10^11 for NNOB-PERP at 6 decimals
+          // = $100K TVL even when vault has zero actual deposits.
+          const vaultBalanceRaw = m.vault_balance ?? 0;
+          // Two-stage filter for vault_balance:
           // 1. Sentinel guard: u64::MAX (>1e18) leaks from uninitialized on-chain fields.
           // 2. USD cap: compute human-readable amount and reject if > $10M per vault.
-          //    Without this, a corrupt lp_collateral of ~4e14 at 6 decimals = $400M TVL
-          //    passes the sentinel filter but produces wildly inflated TVL (GH#1165).
+          //    Without this, a corrupt value at 6 decimals could produce wildly inflated TVL.
           const MAX_VAULT_USD = 10_000_000; // $10M per vault — generous devnet ceiling
           const vaultBalanceHuman = isSentinel(vaultBalanceRaw) ? Infinity : vaultBalanceRaw / collDivisor;
           const vaultBalance = vaultBalanceHuman > MAX_VAULT_USD ? 0 : vaultBalanceRaw;
