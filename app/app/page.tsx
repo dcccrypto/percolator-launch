@@ -201,7 +201,8 @@ export default function Home() {
     <div className="relative">
       {/* ═══════════════════════ HERO (PERC-158 refresh) ═══════════════════════ */}
       <ErrorBoundary label="Hero Section">
-        <HeroSection />
+        {/* Pass marketsCount so hero and "Built Different" show the same number (#1145) */}
+        <HeroSection marketsCount={statsLoaded ? stats.markets : undefined} />
       </ErrorBoundary>
 
       {/* ═══════════════════════ STATS ═══════════════════════ */}
