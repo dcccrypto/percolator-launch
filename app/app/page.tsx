@@ -196,7 +196,10 @@ export default function Home() {
           });
           setStatsLoaded(true);
           // Convert to USD first, then sort by converted volume
-          const converted = data.map((m) => ({
+          // GH#1224: exclude blocked slab addresses (same filter as activeData/stats)
+          const converted = data
+            .filter((m) => !isBlockedSlab(m.slab_address))
+            .map((m) => ({
             slab_address: m.slab_address,
             symbol: m.symbol,
             // GH#1195: same $10M USD per-market cap as stats.volume above.
