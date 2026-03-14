@@ -62,9 +62,17 @@ export function HeroSection({ marketsCount }: HeroSectionProps = {}) {
     }
     async function loadHeroStats() {
       try {
-        const { data } = await getSupabase()
-          .from("markets_with_stats")
-          .select("volume_24h, total_accounts, last_price, decimals, total_open_interest, open_interest_long, open_interest_short");
+        // Fetch market data and platform stats in parallel.
+        // Use /api/stats for totalTraders — it counts unique trader wallet addresses
+        // from the trades table, which is the correct definition.
+        // Do NOT sum total_accounts across markets: that counts sub-accounts per slab
+        // (which is ~500 per market × 191 markets ≈ 99,000 — wildly misleading).
+        const [{ data }, statsRes] = await Promise.all([
+          getSupabase()
+            .from("markets_with_stats")
+            .select("volume_24h, last_price, decimals, total_open_interest, open_interest_long, open_interest_short"),
+          fetch("/api/stats", { cache: "no-store" }).then((r) => r.ok ? r.json() : null).catch(() => null),
+        ]);
         if (data && data.length > 0) {
           const activeData = data.filter(isActiveMarket);
           const volume = activeData.reduce((s: number, m: { volume_24h: number | null; last_price: number | null; decimals: number | null }) => {
@@ -72,7 +80,8 @@ export function HeroSection({ marketsCount }: HeroSectionProps = {}) {
             const price = m.last_price ?? 0;
             return s + (Number(m.volume_24h || 0) / d) * price;
           }, 0);
-          const traders = activeData.reduce((s: number, m: { total_accounts: number | null }) => s + (m.total_accounts ?? 0), 0);
+          // Prefer /api/stats totalTraders (unique wallets). Fall back to 0 if unavailable.
+          const traders: number = (statsRes as { totalTraders?: number } | null)?.totalTraders ?? 0;
           setStats({ markets: activeData.length, volume, traders });
         }
       } catch {
