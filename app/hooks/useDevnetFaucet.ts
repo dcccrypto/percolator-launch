@@ -58,8 +58,17 @@ export interface DevnetFaucetState {
 
 const PUBLIC_DEVNET_RPC = "https://api.devnet.solana.com";
 const SOL_THRESHOLD = 0.05 * LAMPORTS_PER_SOL;
-const USDC_THRESHOLD = 1_000_000n; // 1 USDC (6 decimals)
+const USDC_THRESHOLD = 1_000_000_000n; // 1,000 USDC (6 decimals) — PERC-808
 const DISMISSED_KEY = "percolator:faucet-dismissed";
+
+/**
+ * PERC-808: Helius devnet faucet for SOL airdrop (more reliable than Solana's).
+ * Falls back to Solana devnet faucet if Helius is unavailable.
+ */
+const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_API_KEY ?? "";
+const HELIUS_DEVNET_RPC = HELIUS_API_KEY
+  ? `https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
+  : "";
 
 export function useDevnetFaucet(): DevnetFaucetState {
   const { publicKey, connected } = useWalletCompat();
@@ -135,16 +144,16 @@ export function useDevnetFaucet(): DevnetFaucetState {
     refreshBalances();
   }, [connected, publicKey, isDevnet, checked, refreshBalances]);
 
-  // Determine whether to show the modal
+  // PERC-808: Show modal when wallet USDC < 1000 or SOL < 0.05
+  // Also show for users without a Percolator account (first-time setup)
   const shouldShow =
     isDevnet &&
     connected &&
     !!publicKey &&
     !dismissed &&
-    !userAccount && // No existing Percolator account
     checked &&
     solBalance !== null &&
-    (solBalance < 0.05 || (usdcBalance !== null && usdcBalance < 1));
+    (!userAccount || (usdcBalance !== null && usdcBalance < 1000) || solBalance < 0.05);
 
   const dismiss = useCallback(() => {
     setDismissed(true);
@@ -152,7 +161,11 @@ export function useDevnetFaucet(): DevnetFaucetState {
       const key = `${DISMISSED_KEY}:${publicKey.toBase58()}`;
       localStorage.setItem(key, Date.now().toString());
     }
-  }, [publicKey]);
+    // PERC-808: Signal faucet completion so auto-deposit can trigger
+    if (solDone && usdcDone) {
+      markFaucetComplete();
+    }
+  }, [publicKey, solDone, usdcDone]);
 
   const airdropSol = useCallback(async () => {
     if (!publicKey) return;
@@ -160,21 +173,46 @@ export function useDevnetFaucet(): DevnetFaucetState {
     setLoading(true);
     setError(null);
     try {
-      const sig = await airdropConnection.current.requestAirdrop(
-        publicKey,
-        2 * LAMPORTS_PER_SOL,
-      );
-      // Poll for confirmation
-      const start = Date.now();
-      while (Date.now() - start < 60_000) {
-        const { value } = await airdropConnection.current.getSignatureStatuses([sig]);
-        const s = value?.[0];
-        if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") {
-          if (s.err) throw new Error("SOL airdrop transaction failed");
-          break;
+      // PERC-808: Try Helius devnet faucet first (more reliable, higher limits)
+      let sig: string | null = null;
+      if (HELIUS_DEVNET_RPC) {
+        try {
+          const heliusConn = new Connection(HELIUS_DEVNET_RPC, "confirmed");
+          sig = await heliusConn.requestAirdrop(publicKey, 2 * LAMPORTS_PER_SOL);
+          // Confirm via Helius
+          const start = Date.now();
+          while (Date.now() - start < 60_000) {
+            const { value } = await heliusConn.getSignatureStatuses([sig]);
+            const s = value?.[0];
+            if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") {
+              if (s.err) throw new Error("SOL airdrop transaction failed");
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        } catch {
+          sig = null; // Fall through to Solana faucet
         }
-        await new Promise((r) => setTimeout(r, 2000));
       }
+
+      // Fallback: Solana devnet faucet
+      if (!sig) {
+        sig = await airdropConnection.current.requestAirdrop(
+          publicKey,
+          2 * LAMPORTS_PER_SOL,
+        );
+        const start = Date.now();
+        while (Date.now() - start < 60_000) {
+          const { value } = await airdropConnection.current.getSignatureStatuses([sig]);
+          const s = value?.[0];
+          if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") {
+            if (s.err) throw new Error("SOL airdrop transaction failed");
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+
       setSolDone(true);
       await refreshBalances();
     } catch (e) {
@@ -253,4 +291,49 @@ export function useDevnetFaucet(): DevnetFaucetState {
     fundAll,
     refreshBalances,
   };
+}
+
+// ────────────────────────────────────────────────────────────────
+// PERC-808: Faucet completion signal
+// Uses sessionStorage so useAutoDeposit can detect faucet completion
+// without needing shared React context across different component trees.
+// ────────────────────────────────────────────────────────────────
+
+const FAUCET_COMPLETE_KEY = "percolator:faucet-complete";
+const FAUCET_COMPLETE_WINDOW_MS = 30_000; // 30s window for auto-deposit to react
+
+/** Mark faucet as complete (called on dismiss after successful funding). */
+export function markFaucetComplete(): void {
+  try {
+    sessionStorage.setItem(FAUCET_COMPLETE_KEY, Date.now().toString());
+  } catch {
+    // SSR guard
+  }
+}
+
+/**
+ * Returns true if faucet completed within the last 30 seconds.
+ * Used by useAutoDeposit to trigger deposit after faucet modal dismiss.
+ */
+export function useFaucetComplete(): boolean {
+  const [complete, setComplete] = useState(false);
+
+  useEffect(() => {
+    const check = () => {
+      try {
+        const ts = sessionStorage.getItem(FAUCET_COMPLETE_KEY);
+        if (ts && Date.now() - parseInt(ts, 10) < FAUCET_COMPLETE_WINDOW_MS) {
+          setComplete(true);
+        }
+      } catch {
+        // SSR guard
+      }
+    };
+    check();
+    // Re-check periodically in case faucet completes while auto-deposit is mounted
+    const interval = setInterval(check, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return complete;
 }

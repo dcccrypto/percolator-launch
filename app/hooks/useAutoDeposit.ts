@@ -45,6 +45,8 @@ import { useUserAccount } from "@/hooks/useUserAccount";
 import { useInitUser } from "@/hooks/useInitUser";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useAutoFundResult } from "@/components/providers/AutoFundProvider";
+import { useFaucetComplete } from "@/hooks/useDevnetFaucet";
+// PERC-808: useFaucetComplete returns true within 30s of faucet modal completion
 
 const AUTO_DEPOSIT_AMOUNT = 500_000_000n; // 500 USDC (6 decimals) — reasonable starter
 const MIN_WALLET_BALANCE = 10_000_000n; // 10 USDC minimum to bother depositing
@@ -69,6 +71,7 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
   const { initUser } = useInitUser(slabAddress);
   const { config: mktConfig } = useSlabState();
   const { result: fundResult } = useAutoFundResult();
+  const faucetComplete = useFaucetComplete();
 
   const [depositing, setDepositing] = useState(false);
   const [deposited, setDeposited] = useState(false);
@@ -135,10 +138,11 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
     // Don't auto-deposit if user already has an account
     if (userAccount) return;
 
-    // GH#1107: only auto-deposit when auto-fund JUST completed.
+    // GH#1107: only auto-deposit when auto-fund JUST completed or faucet modal
+    // was completed and dismissed (PERC-808).
     // Without this guard any wallet navigation to a trade page with no Percolator
     // account would immediately pop the Privy "Confirm transaction" modal.
-    if (!fundResult?.funded) return;
+    if (!fundResult?.funded && !faucetComplete) return;
 
     // Wait a short delay to let auto-fund balances settle on-chain
     const timer = setTimeout(() => {
@@ -146,7 +150,7 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
     }, 2000);
 
     return () => clearTimeout(timer);
-  }, [connected, publicKey, userAccount, fundResult, isDevnet, attemptAutoDeposit]);
+  }, [connected, publicKey, userAccount, fundResult, faucetComplete, isDevnet, attemptAutoDeposit]);
 
   return { depositing, deposited, error, signature, amountUsdc };
 }

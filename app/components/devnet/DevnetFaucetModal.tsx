@@ -102,7 +102,7 @@ export const DevnetFaucetModal: FC = () => {
 
   const solSufficient = faucet.solBalance !== null && faucet.solBalance >= 0.05;
   const usdcSufficient =
-    faucet.usdcBalance !== null && faucet.usdcBalance >= 1;
+    faucet.usdcBalance !== null && faucet.usdcBalance >= 1000;
 
   const solStepStatus = faucet.solDone || solSufficient
     ? "done"
