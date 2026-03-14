@@ -179,7 +179,7 @@ export default function Home() {
             symbol: m.symbol,
             volume_24h: toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price),
             last_price: m.last_price,
-            total_open_interest: toUsd(Number(m.total_open_interest || 0), m.decimals, m.last_price),
+            total_open_interest: toUsd(Number(m.total_open_interest ?? ((m.open_interest_long ?? 0) + (m.open_interest_short ?? 0))), m.decimals, m.last_price),
           }));
           // #1159: Sort by volume first, fall back to OI when volume is 0 for all
           const sorted = converted.sort((a, b) => {
