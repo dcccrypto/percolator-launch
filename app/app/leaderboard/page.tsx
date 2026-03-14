@@ -61,26 +61,20 @@ function pad(n: number): string {
 }
 
 /** Format raw bigint volume as a compact human-readable string */
-/** Micro-unit divisor: 6 decimal places used for all devnet collateral tokens */
-const MICRO_UNIT_DIVISOR = 1_000_000;
+/** Base-unit divisor: 9 decimal places matching devnet market collateral (PERC token).
+ *  Previous value (10^6) was incorrect — caused volumes to display 1000x too high.
+ *  TODO: fetch actual collateral decimals per-market for multi-collateral support. */
+const BASE_UNIT_DIVISOR = 1_000_000_000;
 
 function fmtVolume(raw: string): string {
   try {
     const n = BigInt(raw);
-    // Display in "units" (divide by MICRO_UNIT_DIVISOR for micro-units used on devnet)
-    const units = Number(n) / MICRO_UNIT_DIVISOR;
+    // Display in "units" (divide by BASE_UNIT_DIVISOR for devnet collateral decimals)
+    const units = Number(n) / BASE_UNIT_DIVISOR;
     if (units >= 1_000_000_000) return `${(units / 1_000_000_000).toFixed(2)}B`;
     if (units >= 1_000_000) return `${(units / 1_000_000).toFixed(2)}M`;
     if (units >= 1_000) return `${(units / 1_000).toFixed(1)}K`;
-    if (units < 1 && n > 0n) {
-      // Raw units might not need division — show raw with compact suffix
-      const rawN = Number(n);
-      if (rawN >= 1_000_000_000) return `${(rawN / 1_000_000_000).toFixed(2)}B`;
-      if (rawN >= 1_000_000) return `${(rawN / 1_000_000).toFixed(2)}M`;
-      if (rawN >= 1_000) return `${(rawN / 1_000).toFixed(1)}K`;
-      return rawN.toLocaleString();
-    }
-    return units.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    return units.toLocaleString(undefined, { maximumFractionDigits: units < 1 ? 6 : 2 });
   } catch {
     return "—";
   }
