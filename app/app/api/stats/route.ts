@@ -111,6 +111,9 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     totalMarkets,
+    // #1172: totalListedMarkets includes all non-blocked markets (even those with
+    // zero stats). totalMarkets counts only "active" markets (at least one sane stat).
+    totalListedMarkets: statsData.length,
     totalVolume24h,
     totalOpenInterest,
     totalTraders: uniqueTraders,
