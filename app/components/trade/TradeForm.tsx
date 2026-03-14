@@ -291,6 +291,19 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       )}
 
+      {/* No oracle price warning — trading requires a valid oracle price to calculate
+          PnL and liquidation levels. When priceUsd is null (WebSocket not connected or
+          oracle feed unavailable), we disable the trade button to prevent 0-price
+          transactions that would fail on-chain with a cryptic error. */}
+      {!priceUsd && !mockMode && (
+        <div className="mb-3 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 p-2.5">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">No Oracle Price</p>
+          <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
+            Waiting for price feed. Trades will be enabled once oracle data is available.
+          </p>
+        </div>
+      )}
+
       {/* Direction toggle */}
       <div className="mb-3 flex gap-1">
         <button
@@ -444,10 +457,10 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       ) : (
         <button
           onClick={() => {
-            if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || tradePhase !== "idle" || loading) return;
+            if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || tradePhase !== "idle" || loading || (!priceUsd && !mockMode)) return;
             setShowConfirmModal(true);
           }}
-          disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || lpUnderfunded}
+          disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || lpUnderfunded || (!priceUsd && !mockMode)}
           className={`w-full rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
             direction === "long"
               ? "bg-[var(--long)] hover:brightness-110 focus-visible:ring-[var(--long)]"
