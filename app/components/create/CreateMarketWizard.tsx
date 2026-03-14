@@ -584,6 +584,20 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
         }}
+        onReclaimSuccess={() => {
+          // Clear wizard localStorage state so the user starts completely fresh
+          // after a successful reclaim. Without this the form would repopulate with
+          // the old token/oracle/parameter values from the failed attempt.
+          try {
+            localStorage.removeItem(WIZARD_STORAGE_KEY);
+          } catch {
+            // localStorage unavailable — non-critical
+          }
+          setWizard({ ...DEFAULT_STATE });
+          setResumeFromStep(null);
+          setCompletedSteps(new Set());
+          resetCreate();
+        }}
       />
 
       {/* PERC-513: Resume mode indicator — shown when user clicked "Resume Creation" from the banner */}

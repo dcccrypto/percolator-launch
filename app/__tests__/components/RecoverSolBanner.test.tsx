@@ -41,11 +41,15 @@ vi.mock("@/hooks/useCloseMarket", () => ({
 }));
 
 const mockReclaim = vi.fn();
+let mockReclaimStatus: "idle" | "sending" | "success" | "error" = "idle";
+let mockReclaimError: string | null = null;
+let mockReclaimTxSig: string | null = null;
+
 vi.mock("@/hooks/useReclaimSlabRent", () => ({
   useReclaimSlabRent: () => ({
-    status: "idle",
-    error: null,
-    txSig: null,
+    status: mockReclaimStatus,
+    error: mockReclaimError,
+    txSig: mockReclaimTxSig,
     reclaim: mockReclaim,
   }),
 }));
@@ -74,6 +78,9 @@ describe("RecoverSolBanner", () => {
     mockCloseLoading = false;
     mockCloseError = null;
     mockCloseSlab = vi.fn().mockResolvedValue(null);
+    mockReclaimStatus = "idle";
+    mockReclaimError = null;
+    mockReclaimTxSig = null;
     vi.clearAllMocks();
   });
 
@@ -223,5 +230,49 @@ describe("RecoverSolBanner", () => {
     render(<RecoverSolBanner />);
     const reclaimBtn = screen.getByRole("button", { name: /RECLAIMING/i });
     expect(reclaimBtn).toHaveProperty("disabled", true);
+  });
+
+  // ── onReclaimSuccess callback ─────────────────────────────────────────────
+
+  it("calls onReclaimSuccess + onReset when 'START NEW MARKET' clicked after reclaim success", () => {
+    // Simulate the banner being in the post-reclaim success state
+    mockStuckSlab = makeStuckSlab({ isInitialized: false, exists: true });
+    mockReclaimStatus = "success";
+    mockReclaimTxSig = "abc123txsig";
+
+    const onReclaimSuccess = vi.fn();
+    const onReset = vi.fn();
+    render(<RecoverSolBanner onReclaimSuccess={onReclaimSuccess} onReset={onReset} />);
+
+    const btn = screen.getByRole("button", { name: /START NEW MARKET/i });
+    expect(btn).toBeDefined();
+    fireEvent.click(btn);
+
+    expect(onReclaimSuccess).toHaveBeenCalledOnce();
+    expect(onReset).toHaveBeenCalledOnce();
+    expect(mockClearStuck).toHaveBeenCalledOnce();
+  });
+
+  it("shows error message from useReclaimSlabRent when reclaim fails", () => {
+    mockStuckSlab = makeStuckSlab({ isInitialized: false, exists: true });
+    mockReclaimStatus = "error";
+    mockReclaimError = "Transaction cancelled — you rejected the signing request.";
+
+    render(<RecoverSolBanner />);
+    expect(screen.getByText(/Transaction cancelled/i)).toBeDefined();
+  });
+
+  it("does NOT call onReclaimSuccess if user resets from non-success uninitialized banner", () => {
+    mockStuckSlab = makeStuckSlab({ isInitialized: false, exists: true });
+    mockReclaimStatus = "idle";
+
+    const onReclaimSuccess = vi.fn();
+    const onReset = vi.fn();
+    render(<RecoverSolBanner onReclaimSuccess={onReclaimSuccess} onReset={onReset} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /DISCARD/i }));
+    // onReset called (wizard reset), but onReclaimSuccess NOT called (no SOL was reclaimed)
+    expect(onReset).toHaveBeenCalledOnce();
+    expect(onReclaimSuccess).not.toHaveBeenCalled();
   });
 });

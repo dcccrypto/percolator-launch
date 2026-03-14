@@ -14,6 +14,11 @@ interface RecoverSolBannerProps {
   onResume?: (slabPublicKey: string, fromStep: 0 | 1) => void;
   /** Called when user clicks "Clear & Start Fresh" or "Discard & Start New" to reset the wizard. */
   onReset?: () => void;
+  /**
+   * Called immediately after a successful reclaim so the parent wizard can
+   * clear its own persisted state (localStorage) and reset to the initial step.
+   */
+  onReclaimSuccess?: () => void;
 }
 
 /**
@@ -27,7 +32,7 @@ interface RecoverSolBannerProps {
  * With the atomic createAccount + InitMarket flow, scenario 2 is extremely rare —
  * it would only happen if the tx landed on-chain but the client lost the confirmation.
  */
-export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset }) => {
+export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset, onReclaimSuccess }) => {
   const { stuckSlab, loading, clearStuck, refresh } = useStuckSlabs();
   const { closeSlab, loading: closeLoading, error: closeError } = useCloseMarket();
   const [dismissed, setDismissed] = useState(false);
@@ -182,7 +187,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset 
   // Account exists but NOT initialized — slab is program-owned but uninitialised (magic = 0).
   // PERC-511: We can now reclaim the SOL via the ReclaimSlabRent instruction (tag 52).
   // The slab keypair signs the tx to prove ownership.
-  return <UninitialisedSlabBanner stuckSlab={stuckSlab} onResume={onResume} clearStuck={clearStuck} onReset={onReset} />;
+  return <UninitialisedSlabBanner stuckSlab={stuckSlab} onResume={onResume} clearStuck={clearStuck} onReset={onReset} onReclaimSuccess={onReclaimSuccess} />;
 };
 
 /** Sub-component: handles the uninitialised slab case with ReclaimSlabRent. */
@@ -191,7 +196,8 @@ const UninitialisedSlabBanner: FC<{
   onResume?: (slabPublicKey: string, fromStep: 0 | 1) => void;
   clearStuck: () => void;
   onReset?: () => void;
-}> = ({ stuckSlab, onResume, clearStuck, onReset }) => {
+  onReclaimSuccess?: () => void;
+}> = ({ stuckSlab, onResume, clearStuck, onReset, onReclaimSuccess }) => {
   const { status, error: reclaimError, txSig, reclaim } = useReclaimSlabRent();
   const [dismissed, setDismissed] = useState(false);
 
@@ -231,6 +237,9 @@ const UninitialisedSlabBanner: FC<{
           type="button"
           onClick={() => {
             clearStuck();
+            // Notify parent wizard to clear its own persisted state so the user
+            // starts completely fresh (wizard localStorage + form fields reset).
+            onReclaimSuccess?.();
             onReset?.();
             setDismissed(true);
           }}
