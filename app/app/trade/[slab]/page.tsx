@@ -323,7 +323,7 @@ function TradePageInner({ slab }: { slab: string }) {
               {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
             </span>
           )}
-          <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={!!supabaseMarket?.mainnet_ca} />
+          <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={supabaseMarket ? !!supabaseMarket.mainnet_ca : true} />
           <ShareButton
             slabAddress={slab}
             marketName={symbol}
@@ -391,7 +391,7 @@ function TradePageInner({ slab }: { slab: string }) {
 
         {/* Right-aligned controls */}
         <div className="ml-auto flex items-center gap-3">
-          <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={!!supabaseMarket?.mainnet_ca} />
+          <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={supabaseMarket ? !!supabaseMarket.mainnet_ca : true} />
           <UsdToggleButton />
           <ShareButton
             slabAddress={slab}
