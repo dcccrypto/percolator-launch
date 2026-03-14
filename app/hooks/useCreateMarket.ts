@@ -332,8 +332,9 @@ export function useCreateMarket() {
           }
           if (existingAccount) {
             // Slab already created — check if market is initialized
+            // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
             const headerMagic = existingAccount.data.length >= 8
-              ? existingAccount.data.readBigUInt64LE(0)
+              ? new DataView(existingAccount.data.buffer, existingAccount.data.byteOffset, existingAccount.data.byteLength).getBigUint64(0, /* littleEndian= */ true)
               : 0n;
             const isInitialized = headerMagic === 0x504552434f4c4154n; // "PERCOLAT"
 

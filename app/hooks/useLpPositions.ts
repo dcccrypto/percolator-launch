@@ -178,7 +178,9 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
               //   is_initialized: u8 (1) + bump: u8 (1) + _padding: [u8;6] (6)
               //   pool: [u8;32] (32) + user: [u8;32] (32) → last_deposit_slot: u64 at offset 72
               //   lp_amount: u64 at offset 80 → total minimum size = 80 bytes
-              const depositSlot = depositInfo.data.readBigUInt64LE(72);
+              // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
+              const _dv72 = new DataView(depositInfo.data.buffer, depositInfo.data.byteOffset, depositInfo.data.byteLength);
+              const depositSlot = _dv72.getBigUint64(72, /* littleEndian= */ true);
               const cooldownSlots = BigInt(pool.cooldownSlots);
               cooldownElapsed = depositSlot === 0n || cooldownSlots === 0n
                 || BigInt(slotNow) >= depositSlot + cooldownSlots;
