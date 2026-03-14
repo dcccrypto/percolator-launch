@@ -172,7 +172,14 @@ export default function Home() {
             .filter(isActiveMarket);
           setStats({
             markets: activeData.length,
-            volume: activeData.reduce((s, m) => s + toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price), 0),
+            // GH#1195: apply USD-value cap per market AFTER decimal conversion.
+            // Raw-token guards (e.g. raw > 1e13) are decimal-unaware and block
+            // legitimate TEST market (raw=1.5e13, dec=9, price=$1 → $15K USD).
+            // Instead, skip per-market contributions > $10M USD as corrupt.
+            volume: activeData.reduce((s, m) => {
+              const usd = toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price);
+              return usd > 10_000_000 ? s : s + usd;
+            }, 0),
             insurance: activeData.reduce((s, m) => {
               // Use insurance_fund (raw on-chain value in token micro-units) consistent with earn page.
               // Fall back to insurance_balance if insurance_fund is missing.
@@ -192,7 +199,11 @@ export default function Home() {
           const converted = data.map((m) => ({
             slab_address: m.slab_address,
             symbol: m.symbol,
-            volume_24h: toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price),
+            // GH#1195: same $10M USD per-market cap as stats.volume above.
+            volume_24h: (() => {
+              const usd = toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price);
+              return usd > 10_000_000 ? 0 : usd;
+            })(),
             last_price: m.last_price,
             total_open_interest: toUsd(Number(m.total_open_interest ?? ((m.open_interest_long ?? 0) + (m.open_interest_short ?? 0))), m.decimals, m.last_price),
           }));
