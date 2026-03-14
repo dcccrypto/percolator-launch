@@ -203,6 +203,49 @@ const V1_ENGINE_EMERGENCY_START_SLOT_OFF = 640;
 const V1_ENGINE_LAST_BREAKER_SLOT_OFF = 648;
 const V1_ENGINE_BITMAP_OFF = 656;
 
+// ---- V1D layout constants (actually deployed devnet V1 program, rev ac18a0e) ----
+// The deployed V1 program has a DIFFERENT struct layout than the V1 constants above.
+// Key differences:
+//   - MarketConfig is smaller (BPF CONFIG_LEN=320 vs V1's 496) — older revision
+//   - InsuranceFund is 80 bytes (V1 assumed 56), so params starts at engine+96 (not 72)
+//   - Engine lacks lp_max_abs, lp_max_abs_sweep, emergency_oi, trade_twap fields
+//   - Bitmap at engine+624 (not 656)
+// Confirmed by on-chain probing of slab 6ZytbpV4 (the only active V1 market).
+const V1D_CONFIG_LEN = 320;
+const V1D_ENGINE_OFF = 424;   // align_up(104 + 320, 8) = 424
+const V1D_ACCOUNT_SIZE = 248;
+
+// V1D engine field offsets (relative to engineOff):
+// vault(16) + InsuranceFund(80) → params at 96; RiskParams(288) → runtime at 384
+const V1D_ENGINE_INSURANCE_OFF = 16;
+const V1D_ENGINE_PARAMS_OFF = 96;
+const V1D_PARAMS_SIZE = 288;
+const V1D_ENGINE_CURRENT_SLOT_OFF = 384;
+const V1D_ENGINE_FUNDING_INDEX_OFF = 392;
+const V1D_ENGINE_LAST_FUNDING_SLOT_OFF = 408;
+const V1D_ENGINE_FUNDING_RATE_BPS_OFF = 416;
+const V1D_ENGINE_MARK_PRICE_OFF = 424;
+// funding_frozen(1+7pad) at 432, funding_frozen_rate(8) at 440
+const V1D_ENGINE_LAST_CRANK_SLOT_OFF = 448;
+const V1D_ENGINE_MAX_CRANK_STALENESS_OFF = 456;
+const V1D_ENGINE_TOTAL_OI_OFF = 464;
+const V1D_ENGINE_LONG_OI_OFF = 480;
+const V1D_ENGINE_SHORT_OI_OFF = 496;
+const V1D_ENGINE_C_TOT_OFF = 512;
+const V1D_ENGINE_PNL_POS_TOT_OFF = 528;
+const V1D_ENGINE_LIQ_CURSOR_OFF = 544;
+const V1D_ENGINE_GC_CURSOR_OFF = 546;
+const V1D_ENGINE_LAST_SWEEP_START_OFF = 552;
+const V1D_ENGINE_LAST_SWEEP_COMPLETE_OFF = 560;
+const V1D_ENGINE_CRANK_CURSOR_OFF = 568;
+const V1D_ENGINE_SWEEP_START_IDX_OFF = 570;
+const V1D_ENGINE_LIFETIME_LIQUIDATIONS_OFF = 576;
+const V1D_ENGINE_LIFETIME_FORCE_CLOSES_OFF = 584;
+const V1D_ENGINE_NET_LP_POS_OFF = 592;
+const V1D_ENGINE_LP_SUM_ABS_OFF = 608;
+// lp_max_abs, lp_max_abs_sweep, emergency_*, trade_twap_* do NOT exist in this version
+const V1D_ENGINE_BITMAP_OFF = 624;
+
 // For backward compatibility, export ENGINE_OFF and ENGINE_MARK_PRICE_OFF
 // (used by reinit-slab and other scripts). These refer to V1 layout.
 export const ENGINE_OFF = V1_ENGINE_OFF;
@@ -232,10 +275,13 @@ const V0_SIZES = new Map<number, number>();
 const V1_SIZES = new Map<number, number>();
 // Legacy V1 sizes using incorrect ENGINE_OFF=640 (pre-PERC-1094). Orphaned on devnet; read-only.
 const V1_SIZES_LEGACY = new Map<number, number>();
+// V1D: actually deployed V1 program (ENGINE_OFF=424, BITMAP_OFF=624)
+const V1D_SIZES = new Map<number, number>();
 for (const n of TIERS) {
   V0_SIZES.set(computeSlabSize(V0_ENGINE_OFF, V0_ENGINE_BITMAP_OFF, V0_ACCOUNT_SIZE, n), n);
   V1_SIZES.set(computeSlabSize(V1_ENGINE_OFF, V1_ENGINE_BITMAP_OFF, V1_ACCOUNT_SIZE, n), n);
   V1_SIZES_LEGACY.set(computeSlabSize(V1_ENGINE_OFF_LEGACY, V1_ENGINE_BITMAP_OFF, V1_ACCOUNT_SIZE, n), n);
+  V1D_SIZES.set(computeSlabSize(V1D_ENGINE_OFF, V1D_ENGINE_BITMAP_OFF, V1D_ACCOUNT_SIZE, n), n);
 }
 
 function buildLayout(version: 0 | 1, maxAccounts: number, engineOffOverride?: number): SlabLayout {
@@ -301,6 +347,71 @@ function buildLayout(version: 0 | 1, maxAccounts: number, engineOffOverride?: nu
 }
 
 /**
+ * Build layout for V1D (actually deployed V1 program, rev ac18a0e).
+ * Uses correct field offsets derived from on-chain probing.
+ */
+function buildLayoutV1D(maxAccounts: number): SlabLayout {
+  const engineOff = V1D_ENGINE_OFF;
+  const bitmapOff = V1D_ENGINE_BITMAP_OFF;
+  const accountSize = V1D_ACCOUNT_SIZE;
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const bitmapBytes = bitmapWords * 8;
+  const postBitmap = 18;
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
+
+  return {
+    version: 1,
+    headerLen: V1_HEADER_LEN,
+    configOffset: V1_HEADER_LEN,
+    configLen: V1D_CONFIG_LEN,
+    reservedOff: V1_RESERVED_OFF,
+    engineOff,
+    accountSize,
+    maxAccounts,
+    bitmapWords,
+    accountsOff: engineOff + accountsOffRel,
+
+    engineInsuranceOff: V1D_ENGINE_INSURANCE_OFF,
+    engineParamsOff: V1D_ENGINE_PARAMS_OFF,
+    paramsSize: V1D_PARAMS_SIZE,
+    engineCurrentSlotOff: V1D_ENGINE_CURRENT_SLOT_OFF,
+    engineFundingIndexOff: V1D_ENGINE_FUNDING_INDEX_OFF,
+    engineLastFundingSlotOff: V1D_ENGINE_LAST_FUNDING_SLOT_OFF,
+    engineFundingRateBpsOff: V1D_ENGINE_FUNDING_RATE_BPS_OFF,
+    engineMarkPriceOff: V1D_ENGINE_MARK_PRICE_OFF,
+    engineLastCrankSlotOff: V1D_ENGINE_LAST_CRANK_SLOT_OFF,
+    engineMaxCrankStalenessOff: V1D_ENGINE_MAX_CRANK_STALENESS_OFF,
+    engineTotalOiOff: V1D_ENGINE_TOTAL_OI_OFF,
+    engineLongOiOff: V1D_ENGINE_LONG_OI_OFF,
+    engineShortOiOff: V1D_ENGINE_SHORT_OI_OFF,
+    engineCTotOff: V1D_ENGINE_C_TOT_OFF,
+    enginePnlPosTotOff: V1D_ENGINE_PNL_POS_TOT_OFF,
+    engineLiqCursorOff: V1D_ENGINE_LIQ_CURSOR_OFF,
+    engineGcCursorOff: V1D_ENGINE_GC_CURSOR_OFF,
+    engineLastSweepStartOff: V1D_ENGINE_LAST_SWEEP_START_OFF,
+    engineLastSweepCompleteOff: V1D_ENGINE_LAST_SWEEP_COMPLETE_OFF,
+    engineCrankCursorOff: V1D_ENGINE_CRANK_CURSOR_OFF,
+    engineSweepStartIdxOff: V1D_ENGINE_SWEEP_START_IDX_OFF,
+    engineLifetimeLiquidationsOff: V1D_ENGINE_LIFETIME_LIQUIDATIONS_OFF,
+    engineLifetimeForceClosesOff: V1D_ENGINE_LIFETIME_FORCE_CLOSES_OFF,
+    engineNetLpPosOff: V1D_ENGINE_NET_LP_POS_OFF,
+    engineLpSumAbsOff: V1D_ENGINE_LP_SUM_ABS_OFF,
+    engineLpMaxAbsOff: -1,              // not present in deployed V1
+    engineLpMaxAbsSweepOff: -1,         // not present in deployed V1
+    engineEmergencyOiModeOff: -1,       // not present in deployed V1
+    engineEmergencyStartSlotOff: -1,    // not present in deployed V1
+    engineLastBreakerSlotOff: -1,       // not present in deployed V1
+    engineBitmapOff: V1D_ENGINE_BITMAP_OFF,
+
+    hasInsuranceIsolation: true,
+    engineInsuranceIsolatedOff: 48,     // same within InsuranceFund
+    engineInsuranceIsolationBpsOff: 64, // same within InsuranceFund
+  };
+}
+
+/**
  * Detect slab layout version from data length.
  * Returns a full SlabLayout descriptor or null if unrecognized.
  */
@@ -309,7 +420,11 @@ export function detectSlabLayout(dataLen: number): SlabLayout | null {
   const v0n = V0_SIZES.get(dataLen);
   if (v0n !== undefined) return buildLayout(0, v0n);
 
-  // Check V1 sizes (deployed devnet V1 program — ENGINE_OFF=600, PERC-1094 corrected)
+  // Check V1D sizes (actually deployed V1 program — ENGINE_OFF=424, correct struct layout)
+  const v1dn = V1D_SIZES.get(dataLen);
+  if (v1dn !== undefined) return buildLayoutV1D(v1dn);
+
+  // Check V1 sizes (future V1 program — ENGINE_OFF=600, PERC-1094 corrected)
   const v1n = V1_SIZES.get(dataLen);
   if (v1n !== undefined) return buildLayout(1, v1n);
 
