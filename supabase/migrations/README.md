@@ -47,6 +47,7 @@ Migrations are automatically applied when pushed to the linked Supabase project 
 | 022 | `insurance_tables.sql` | Insurance snapshots and LP events tables |
 | 023 | `drop_simulation_tables.sql` | Drop simulation tables (feature removed in PRs #225-#227) |
 | 029 | `auto_fund_log.sql` | Auto-fund faucet rate-limit log for devnet wallet funding |
+| 044 | `fix_admin_users_rls.sql` | GH#1211: Restrict admin_users SELECT to self-check only (closes email enumeration); tighten job_applications UPDATE to service_role |
 
 ## Database Schema Overview
 
