@@ -229,16 +229,20 @@ function MarketsPageInner() {
     let list = activeMarkets;
     // Text search — matches on-chain symbol, name, slab address, mint address,
     // OR Supabase market name/symbol (e.g. "BTC-PERP-1", "BTC") — fixes #1132
+    // Fix #1146: address fields (slab/mint) are only searched when query is ≥8 chars
+    // to prevent short token queries (e.g. "btc") from matching random substrings
+    // inside base58 addresses (e.g. slab HC4...1HbTCu9wK contains "btc" lowercased).
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.toLowerCase();
+      const isAddressSearch = q.length >= 8;
       list = list.filter((m) => {
         const onChainMeta = tokenMetaMap.get(m.mintAddress);
         return onChainMeta?.symbol?.toLowerCase().includes(q) ||
           onChainMeta?.name?.toLowerCase().includes(q) ||
           m.supabase?.name?.toLowerCase().includes(q) ||
           m.supabase?.symbol?.toLowerCase().includes(q) ||
-          m.slabAddress.toLowerCase().includes(q) ||
-          m.mintAddress.toLowerCase().includes(q);
+          (isAddressSearch && m.slabAddress.toLowerCase().includes(q)) ||
+          (isAddressSearch && m.mintAddress.toLowerCase().includes(q));
       });
     }
     // Leverage filter — exclude markets with invalid leverage (0, NaN, Infinity)

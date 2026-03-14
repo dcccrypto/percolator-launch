@@ -14,7 +14,14 @@ import { HeroCtaGroup } from "./HeroCtaGroup";
 import { LiveMarketCard } from "./LiveMarketCard";
 import { HeroDataChip } from "./HeroDataChip";
 
-export function HeroSection() {
+interface HeroSectionProps {
+  /** When provided, overrides the hero's independently-fetched market count.
+   *  Pass `stats.markets` from the parent Home component to ensure the hero
+   *  and "Built Different" section always show the same number (#1145). */
+  marketsCount?: number;
+}
+
+export function HeroSection({ marketsCount }: HeroSectionProps = {}) {
   const containerRef = useRef<HTMLElement>(null);
   const prefersReduced = usePrefersReducedMotion();
   const [network] = useState(getConfig().network);
@@ -173,9 +180,10 @@ export function HeroSection() {
             </span>
           </p>
 
-          {/* Stats row */}
+          {/* Stats row — use marketsCount from parent (Home) when available so
+              hero and "Built Different" section always show the same number (#1145) */}
           <HeroStats
-            markets={stats.markets}
+            markets={marketsCount ?? stats.markets}
             volume={stats.volume}
             traders={stats.traders}
             isDevnet={network !== "mainnet"}
