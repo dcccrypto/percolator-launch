@@ -5,7 +5,7 @@ import { parseHeader } from "@percolator/sdk";
 import { getServiceClient } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
-import { isSaneMarketValue } from "@/lib/activeMarketFilter";
+import { isSaneMarketValue, isActiveMarket } from "@/lib/activeMarketFilter";
 import { BLOCKED_SLAB_ADDRESSES as HARDCODED_BLOCKED_MARKETS } from "@/lib/blocklist";
 
 /**
@@ -165,7 +165,10 @@ export async function GET() {
 
     // #1168: Include total count so API consumers can get market count without
     // fetching all records. Reflects post-filter count (blocked markets excluded).
-    return NextResponse.json({ total: sanitized.length, markets: sanitized }, {
+    // #1172: Add activeTotal — markets with at least one sane stat (price/volume/OI).
+    // This matches the count shown by /api/stats totalMarkets.
+    const activeTotal = sanitized.filter((m) => isActiveMarket(m as Parameters<typeof isActiveMarket>[0])).length;
+    return NextResponse.json({ total: sanitized.length, activeTotal, markets: sanitized }, {
       headers: {
         "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
       },
