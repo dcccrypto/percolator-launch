@@ -150,10 +150,15 @@ export default function Home() {
           };
           // For insurance/TVL: when price is missing, fall back to raw token amount
           // (correct for stablecoins like USDC where 1 token ≈ $1)
+          // GH#1187: corrupt devnet last_price values (e.g. $11M–$100M/token) multiply
+          // small but legitimate insurance balances into billions. Cap price at $10K/token
+          // — no Percolator collateral token should legitimately exceed this on devnet.
+          // Corrupt prices fall back to the stablecoin assumption (p=0 → raw/10^d).
+          const MAX_SANE_PRICE_USD = 10_000; // $10K — reject as corrupt above this
           const toUsdWithFallback = (raw: number, decimals: number | null, price: number | null): number => {
             if (!isSaneMarketValue(raw)) return 0;
             const d = Math.min(Math.max(decimals ?? 6, 0), 18);
-            const p = price ?? 0;
+            const p = (price != null && price > 0 && price <= MAX_SANE_PRICE_USD) ? price : 0;
             const usd = p > 0 ? (raw / 10 ** d) * p : raw / 10 ** d;
             return usd > MAX_PER_MARKET_USD ? 0 : usd;
           };

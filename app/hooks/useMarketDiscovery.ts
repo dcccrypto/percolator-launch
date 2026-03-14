@@ -5,6 +5,7 @@ import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { discoverMarkets, type DiscoveredMarket } from "@percolator/sdk";
 import { getConfig } from "@/lib/config";
+import { isBlockedSlab } from "@/lib/blocklist";
 
 /** Get all unique program IDs to scan (default + all slab tier programs) */
 function getAllProgramIds(): PublicKey[] {
@@ -45,11 +46,14 @@ export function useMarketDiscovery() {
         if (!cancelled) {
           // GH#1115: deduplicate across program-ID scans — same slab can appear from
           // multiple discoverMarkets calls if programsBySlabTier overlaps with programId.
+          // GH#1189: also filter out blocked slab addresses from the on-chain discovery
+          // path. PR #1186 only patched the Supabase path; this closes the on-chain gap.
           const seenSlabs = new Set<string>();
           const flat = results.flat().filter((m) => {
             const addr = m.slabAddress.toBase58();
             if (seenSlabs.has(addr)) return false;
             seenSlabs.add(addr);
+            if (isBlockedSlab(addr)) return false; // GH#1189: exclude blocked slabs
             return true;
           });
           setMarkets(flat);
