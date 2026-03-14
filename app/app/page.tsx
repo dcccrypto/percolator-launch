@@ -143,7 +143,7 @@ export default function Home() {
           // GH#1187/1193: corrupt devnet last_price values (e.g. $11M–$100M/token) cause
           // hero stats (volume, OI) to show absurd numbers. Cap price at $10K/token —
           // no Percolator collateral token should legitimately exceed this on devnet.
-          const MAX_SANE_PRICE_USD = 10_000; // $10K — reject as corrupt above this
+          const MAX_SANE_PRICE_USD = 100_000; // $100K — reject as corrupt above this (covers BTC/ETH; raised from $10K per GH#1195 QA review)
           const toUsd = (raw: number, decimals: number | null, price: number | null): number => {
             if (!isSaneMarketValue(raw)) return 0;
             const d = Math.min(Math.max(decimals ?? 6, 0), 18); // clamp decimals 0–18
@@ -172,7 +172,15 @@ export default function Home() {
             .filter(isActiveMarket);
           setStats({
             markets: activeData.length,
-            volume: activeData.reduce((s, m) => s + toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price), 0),
+            volume: activeData.reduce((s, m) => {
+              // Sanity cap: raw volume_24h values > 1e13 micro-units are corrupt data
+              // (same guard as insurance_fund). Corrupt values (1e14-1e17) pass
+              // isSaneMarketValue (allows up to 1e18) but produce $10B+ per market
+              // and $106B+ in total after capping. GH#1195.
+              const raw = Number(m.volume_24h || 0);
+              if (raw > 1e13) return s;
+              return s + toUsd(raw, m.decimals, m.last_price);
+            }, 0),
             insurance: activeData.reduce((s, m) => {
               // Use insurance_fund (raw on-chain value in token micro-units) consistent with earn page.
               // Fall back to insurance_balance if insurance_fund is missing.
@@ -192,7 +200,13 @@ export default function Home() {
           const converted = data.map((m) => ({
             slab_address: m.slab_address,
             symbol: m.symbol,
-            volume_24h: toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price),
+            volume_24h: (() => {
+              // Same 1e13 raw guard as stats.volume — prevents corrupt markets from
+              // dominating the featured-markets sort (GH#1195).
+              const raw = Number(m.volume_24h || 0);
+              if (raw > 1e13) return 0;
+              return toUsd(raw, m.decimals, m.last_price);
+            })(),
             last_price: m.last_price,
             total_open_interest: toUsd(Number(m.total_open_interest ?? ((m.open_interest_long ?? 0) + (m.open_interest_short ?? 0))), m.decimals, m.last_price),
           }));
