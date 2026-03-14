@@ -2144,22 +2144,59 @@ function deriveDepositPda(pool, user, programId = STAKE_PROGRAM_ID) {
     programId
   );
 }
+function readU64LE4(data, off) {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getBigUint64(
+    off,
+    /* littleEndian= */
+    true
+  );
+}
+function readU16LE3(data, off) {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getUint16(
+    off,
+    /* littleEndian= */
+    true
+  );
+}
 function u64Le(v) {
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64LE(BigInt(v));
-  return buf;
+  const arr = new Uint8Array(8);
+  new DataView(arr.buffer).setBigUint64(
+    0,
+    BigInt(v),
+    /* littleEndian= */
+    true
+  );
+  return Buffer.from(arr);
 }
 function u128Le(v) {
-  const buf = Buffer.alloc(16);
+  const arr = new Uint8Array(16);
+  const view = new DataView(arr.buffer);
   const big = BigInt(v);
-  buf.writeBigUInt64LE(big & 0xFFFFFFFFFFFFFFFFn, 0);
-  buf.writeBigUInt64LE(big >> 64n, 8);
-  return buf;
+  view.setBigUint64(
+    0,
+    big & 0xFFFFFFFFFFFFFFFFn,
+    /* littleEndian= */
+    true
+  );
+  view.setBigUint64(
+    8,
+    big >> 64n,
+    /* littleEndian= */
+    true
+  );
+  return Buffer.from(arr);
 }
 function u16Le(v) {
-  const buf = Buffer.alloc(2);
-  buf.writeUInt16LE(v);
-  return buf;
+  const arr = new Uint8Array(2);
+  new DataView(arr.buffer).setUint16(
+    0,
+    v,
+    /* littleEndian= */
+    true
+  );
+  return Buffer.from(arr);
 }
 function encodeStakeInitPool(cooldownSlots, depositCap) {
   return Buffer.concat([
@@ -2256,62 +2293,62 @@ function decodeStakePool(data) {
   if (data.length < STAKE_POOL_SIZE) {
     throw new Error(`StakePool data too short: ${data.length} < ${STAKE_POOL_SIZE}`);
   }
-  const buf = Buffer.from(data);
+  const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   let off = 0;
-  const isInitialized = buf[off] === 1;
+  const isInitialized = bytes[off] === 1;
   off += 1;
-  const bump = buf[off];
+  const bump = bytes[off];
   off += 1;
-  const vaultAuthorityBump = buf[off];
+  const vaultAuthorityBump = bytes[off];
   off += 1;
-  const adminTransferred = buf[off] === 1;
+  const adminTransferred = bytes[off] === 1;
   off += 1;
   off += 4;
-  const slab = new PublicKey7(buf.subarray(off, off + 32));
+  const slab = new PublicKey7(bytes.subarray(off, off + 32));
   off += 32;
-  const admin = new PublicKey7(buf.subarray(off, off + 32));
+  const admin = new PublicKey7(bytes.subarray(off, off + 32));
   off += 32;
-  const collateralMint = new PublicKey7(buf.subarray(off, off + 32));
+  const collateralMint = new PublicKey7(bytes.subarray(off, off + 32));
   off += 32;
-  const lpMint = new PublicKey7(buf.subarray(off, off + 32));
+  const lpMint = new PublicKey7(bytes.subarray(off, off + 32));
   off += 32;
-  const vault = new PublicKey7(buf.subarray(off, off + 32));
+  const vault = new PublicKey7(bytes.subarray(off, off + 32));
   off += 32;
-  const totalDeposited = buf.readBigUInt64LE(off);
+  const totalDeposited = readU64LE4(bytes, off);
   off += 8;
-  const totalLpSupply = buf.readBigUInt64LE(off);
+  const totalLpSupply = readU64LE4(bytes, off);
   off += 8;
-  const cooldownSlots = buf.readBigUInt64LE(off);
+  const cooldownSlots = readU64LE4(bytes, off);
   off += 8;
-  const depositCap = buf.readBigUInt64LE(off);
+  const depositCap = readU64LE4(bytes, off);
   off += 8;
-  const totalFlushed = buf.readBigUInt64LE(off);
+  const totalFlushed = readU64LE4(bytes, off);
   off += 8;
-  const totalReturned = buf.readBigUInt64LE(off);
+  const totalReturned = readU64LE4(bytes, off);
   off += 8;
-  const totalWithdrawn = buf.readBigUInt64LE(off);
+  const totalWithdrawn = readU64LE4(bytes, off);
   off += 8;
-  const percolatorProgram = new PublicKey7(buf.subarray(off, off + 32));
+  const percolatorProgram = new PublicKey7(bytes.subarray(off, off + 32));
   off += 32;
-  const totalFeesEarned = buf.readBigUInt64LE(off);
+  const totalFeesEarned = readU64LE4(bytes, off);
   off += 8;
-  const lastFeeAccrualSlot = buf.readBigUInt64LE(off);
+  const lastFeeAccrualSlot = readU64LE4(bytes, off);
   off += 8;
-  const lastVaultSnapshot = buf.readBigUInt64LE(off);
+  const lastVaultSnapshot = readU64LE4(bytes, off);
   off += 8;
-  const poolMode = buf[off];
+  const poolMode = bytes[off];
   off += 1;
   off += 7;
   const reservedStart = off;
-  const hwmEnabled = buf[reservedStart + 9] === 1;
-  const hwmTvlLow = buf.readBigUInt64LE(reservedStart + 10);
-  const hwmTvlHigh = buf.readBigUInt64LE(reservedStart + 18);
+  const hwmEnabled = bytes[reservedStart + 9] === 1;
+  const hwmTvlLow = readU64LE4(bytes, reservedStart + 10);
+  const hwmTvlHigh = readU64LE4(bytes, reservedStart + 18);
   const epochHighWaterTvl = hwmTvlLow + (hwmTvlHigh << 64n);
-  const hwmFloorBps = buf.readUInt16LE(reservedStart + 26);
-  const trancheEnabled = buf[reservedStart + 32] === 1;
-  const juniorBalance = buf.readBigUInt64LE(reservedStart + 33);
-  const juniorTotalLp = buf.readBigUInt64LE(reservedStart + 41);
-  const juniorFeeMultBps = buf.readUInt16LE(reservedStart + 49);
+  const hwmFloorBps = readU16LE3(bytes, reservedStart + 26);
+  const trancheEnabled = bytes[reservedStart + 32] === 1;
+  const juniorBalance = readU64LE4(bytes, reservedStart + 33);
+  const juniorTotalLp = readU64LE4(bytes, reservedStart + 41);
+  const juniorFeeMultBps = readU16LE3(bytes, reservedStart + 49);
   return {
     isInitialized,
     bump,

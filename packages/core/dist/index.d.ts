@@ -1504,6 +1504,7 @@ interface StakePoolState {
 declare const STAKE_POOL_SIZE = 352;
 /**
  * Decode a StakePool account from raw data buffer.
+ * Uses DataView for all u64/u16 reads — browser-safe (no Buffer.readBigUInt64LE).
  */
 declare function decodeStakePool(data: Buffer | Uint8Array): StakePoolState;
 interface StakeAccounts {

@@ -94,21 +94,29 @@ const DEFAULT_STATE: StakePoolState = {
  *   - total_deposited: u64     (8 bytes)
  * Total: 1 + 32*5 + 1 + 8*3 = 186 bytes
  */
+// Browser-safe u64 reader — DataView instead of Buffer.readBigUInt64LE
+// (Buffer BigInt methods are Node.js-only; the browser polyfill may lack them)
+function readU64LE(data: Uint8Array, off: number): bigint {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getBigUint64(off, /* littleEndian= */ true);
+}
+
 function parseStakePoolAccount(data: Buffer) {
   if (data.length < 186) return null;
-  const isInitialized = data[0] === 1;
+  const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  const isInitialized = bytes[0] === 1;
   if (!isInitialized) return null;
 
   let offset = 1;
-  const admin = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-  const slab = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-  const lpMint = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-  const vault = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-  const vaultAuth = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-  const vaultAuthBump = data[offset]; offset += 1;
-  const cooldownSlots = data.readBigUInt64LE(offset); offset += 8;
-  const depositCap = data.readBigUInt64LE(offset); offset += 8;
-  const totalDeposited = data.readBigUInt64LE(offset); offset += 8;
+  const admin = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
+  const slab = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
+  const lpMint = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
+  const vault = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
+  const vaultAuth = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
+  const vaultAuthBump = bytes[offset]; offset += 1;
+  const cooldownSlots = readU64LE(bytes, offset); offset += 8;
+  const depositCap = readU64LE(bytes, offset); offset += 8;
+  const totalDeposited = readU64LE(bytes, offset); offset += 8;
 
   return {
     admin,
@@ -135,14 +143,15 @@ function parseStakePoolAccount(data: Buffer) {
  */
 function parseDepositPdaAccount(data: Buffer) {
   if (data.length < 81) return null;
-  const isInitialized = data[0] === 1;
+  const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  const isInitialized = bytes[0] === 1;
   if (!isInitialized) return null;
 
   let offset = 1;
-  const pool = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-  const user = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-  const depositSlot = data.readBigUInt64LE(offset); offset += 8;
-  const amount = data.readBigUInt64LE(offset); offset += 8;
+  const pool = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
+  const user = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
+  const depositSlot = readU64LE(bytes, offset); offset += 8;
+  const amount = readU64LE(bytes, offset); offset += 8;
 
   return { pool, user, depositSlot, amount };
 }

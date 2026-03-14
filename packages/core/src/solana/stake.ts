@@ -76,27 +76,47 @@ export function deriveDepositPda(pool: PublicKey, user: PublicKey, programId = S
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Browser-safe binary helpers (DataView — no Buffer BigInt methods)
+// Buffer.writeBigUInt64LE / readBigUInt64LE are Node.js-only; the
+// browser polyfill may not implement them. DataView.getBigUint64 /
+// setBigUint64 are part of the ECMAScript spec and work everywhere.
+// ═══════════════════════════════════════════════════════════════
+
+/** Read a u64 little-endian from a Uint8Array at the given offset. */
+function readU64LE(data: Uint8Array, off: number): bigint {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getBigUint64(off, /* littleEndian= */ true);
+}
+
+/** Read a u16 little-endian from a Uint8Array at the given offset. */
+function readU16LE(data: Uint8Array, off: number): number {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getUint16(off, /* littleEndian= */ true);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Instruction Encoders
 // ═══════════════════════════════════════════════════════════════
 
 function u64Le(v: bigint | number): Buffer {
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64LE(BigInt(v));
-  return buf;
+  const arr = new Uint8Array(8);
+  new DataView(arr.buffer).setBigUint64(0, BigInt(v), /* littleEndian= */ true);
+  return Buffer.from(arr);
 }
 
 function u128Le(v: bigint | number): Buffer {
-  const buf = Buffer.alloc(16);
+  const arr = new Uint8Array(16);
+  const view = new DataView(arr.buffer);
   const big = BigInt(v);
-  buf.writeBigUInt64LE(big & 0xFFFFFFFFFFFFFFFFn, 0);
-  buf.writeBigUInt64LE(big >> 64n, 8);
-  return buf;
+  view.setBigUint64(0, big & 0xFFFFFFFFFFFFFFFFn, /* littleEndian= */ true);
+  view.setBigUint64(8, big >> 64n, /* littleEndian= */ true);
+  return Buffer.from(arr);
 }
 
 function u16Le(v: number): Buffer {
-  const buf = Buffer.alloc(2);
-  buf.writeUInt16LE(v);
-  return buf;
+  const arr = new Uint8Array(2);
+  new DataView(arr.buffer).setUint16(0, v, /* littleEndian= */ true);
+  return Buffer.from(arr);
 }
 
 /** Tag 0: InitPool — create stake pool for a slab. */
@@ -294,59 +314,62 @@ export const STAKE_POOL_SIZE = 352;
 
 /**
  * Decode a StakePool account from raw data buffer.
+ * Uses DataView for all u64/u16 reads — browser-safe (no Buffer.readBigUInt64LE).
  */
 export function decodeStakePool(data: Buffer | Uint8Array): StakePoolState {
   if (data.length < STAKE_POOL_SIZE) {
     throw new Error(`StakePool data too short: ${data.length} < ${STAKE_POOL_SIZE}`);
   }
-  const buf = Buffer.from(data);
+  // Wrap in a Uint8Array view so readU64LE / readU16LE helpers work in any environment.
+  // Buffer extends Uint8Array, so new Uint8Array(data.buffer, ...) works for both types.
+  const bytes: Uint8Array = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   let off = 0;
 
-  const isInitialized = buf[off] === 1; off += 1;
-  const bump = buf[off]; off += 1;
-  const vaultAuthorityBump = buf[off]; off += 1;
-  const adminTransferred = buf[off] === 1; off += 1;
+  const isInitialized = bytes[off] === 1; off += 1;
+  const bump = bytes[off]; off += 1;
+  const vaultAuthorityBump = bytes[off]; off += 1;
+  const adminTransferred = bytes[off] === 1; off += 1;
   off += 4; // _padding
 
-  const slab = new PublicKey(buf.subarray(off, off + 32)); off += 32;
-  const admin = new PublicKey(buf.subarray(off, off + 32)); off += 32;
-  const collateralMint = new PublicKey(buf.subarray(off, off + 32)); off += 32;
-  const lpMint = new PublicKey(buf.subarray(off, off + 32)); off += 32;
-  const vault = new PublicKey(buf.subarray(off, off + 32)); off += 32;
+  const slab = new PublicKey(bytes.subarray(off, off + 32)); off += 32;
+  const admin = new PublicKey(bytes.subarray(off, off + 32)); off += 32;
+  const collateralMint = new PublicKey(bytes.subarray(off, off + 32)); off += 32;
+  const lpMint = new PublicKey(bytes.subarray(off, off + 32)); off += 32;
+  const vault = new PublicKey(bytes.subarray(off, off + 32)); off += 32;
 
-  const totalDeposited = buf.readBigUInt64LE(off); off += 8;
-  const totalLpSupply = buf.readBigUInt64LE(off); off += 8;
-  const cooldownSlots = buf.readBigUInt64LE(off); off += 8;
-  const depositCap = buf.readBigUInt64LE(off); off += 8;
-  const totalFlushed = buf.readBigUInt64LE(off); off += 8;
-  const totalReturned = buf.readBigUInt64LE(off); off += 8;
-  const totalWithdrawn = buf.readBigUInt64LE(off); off += 8;
+  const totalDeposited = readU64LE(bytes, off); off += 8;
+  const totalLpSupply = readU64LE(bytes, off); off += 8;
+  const cooldownSlots = readU64LE(bytes, off); off += 8;
+  const depositCap = readU64LE(bytes, off); off += 8;
+  const totalFlushed = readU64LE(bytes, off); off += 8;
+  const totalReturned = readU64LE(bytes, off); off += 8;
+  const totalWithdrawn = readU64LE(bytes, off); off += 8;
 
-  const percolatorProgram = new PublicKey(buf.subarray(off, off + 32)); off += 32;
+  const percolatorProgram = new PublicKey(bytes.subarray(off, off + 32)); off += 32;
 
   // PERC-272 fields
-  const totalFeesEarned = buf.readBigUInt64LE(off); off += 8;
-  const lastFeeAccrualSlot = buf.readBigUInt64LE(off); off += 8;
-  const lastVaultSnapshot = buf.readBigUInt64LE(off); off += 8;
-  const poolMode = buf[off]; off += 1;
+  const totalFeesEarned = readU64LE(bytes, off); off += 8;
+  const lastFeeAccrualSlot = readU64LE(bytes, off); off += 8;
+  const lastVaultSnapshot = readU64LE(bytes, off); off += 8;
+  const poolMode = bytes[off]; off += 1;
   off += 7; // _mode_padding
 
   // _reserved (64 bytes) starts at off
   const reservedStart = off;
   // _reserved[8] = version (skipped)
   // PERC-313: _reserved[9] = hwm_enabled, [10..26] = epoch_high_water_tvl (u128), [26..28] = hwm_floor_bps (u16)
-  const hwmEnabled = buf[reservedStart + 9] === 1;
+  const hwmEnabled = bytes[reservedStart + 9] === 1;
   // Read u128 as two u64 parts
-  const hwmTvlLow = buf.readBigUInt64LE(reservedStart + 10);
-  const hwmTvlHigh = buf.readBigUInt64LE(reservedStart + 18);
+  const hwmTvlLow = readU64LE(bytes, reservedStart + 10);
+  const hwmTvlHigh = readU64LE(bytes, reservedStart + 18);
   const epochHighWaterTvl = hwmTvlLow + (hwmTvlHigh << 64n);
-  const hwmFloorBps = buf.readUInt16LE(reservedStart + 26);
+  const hwmFloorBps = readU16LE(bytes, reservedStart + 26);
 
   // PERC-303: _reserved[32] = tranche_enabled, [33..41] = junior_balance, [41..49] = junior_total_lp, [49..51] = junior_fee_mult_bps
-  const trancheEnabled = buf[reservedStart + 32] === 1;
-  const juniorBalance = buf.readBigUInt64LE(reservedStart + 33);
-  const juniorTotalLp = buf.readBigUInt64LE(reservedStart + 41);
-  const juniorFeeMultBps = buf.readUInt16LE(reservedStart + 49);
+  const trancheEnabled = bytes[reservedStart + 32] === 1;
+  const juniorBalance = readU64LE(bytes, reservedStart + 33);
+  const juniorTotalLp = readU64LE(bytes, reservedStart + 41);
+  const juniorFeeMultBps = readU16LE(bytes, reservedStart + 49);
 
   return {
     isInitialized,

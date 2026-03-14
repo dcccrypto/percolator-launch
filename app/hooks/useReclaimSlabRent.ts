@@ -91,10 +91,11 @@ export function useReclaimSlabRent(): UseReclaimSlabRentResult {
         }
 
         // Guard: if magic bytes = MAGIC, the market is initialised — use CloseSlab instead
+        // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
         const MAGIC = 0x504552434f4c4154n;
         if (
           accountInfo.data.length >= 8 &&
-          accountInfo.data.readBigUInt64LE(0) === MAGIC
+          new DataView(accountInfo.data.buffer, accountInfo.data.byteOffset, accountInfo.data.byteLength).getBigUint64(0, /* littleEndian= */ true) === MAGIC
         ) {
           setError(
             "This slab is already initialised (market exists). Use the normal market close flow instead of rent reclaim."

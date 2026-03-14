@@ -81,9 +81,10 @@ export function useStuckSlabs() {
       }
 
       // Account exists — check if market was initialized
+      // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
       const isInitialized =
         accountInfo.data.length >= 8 &&
-        accountInfo.data.readBigUInt64LE(0) === PERCOLAT_MAGIC;
+        new DataView(accountInfo.data.buffer, accountInfo.data.byteOffset, accountInfo.data.byteLength).getBigUint64(0, /* littleEndian= */ true) === PERCOLAT_MAGIC;
 
       setStuckSlab({
         publicKey: keypair.publicKey,
