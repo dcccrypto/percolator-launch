@@ -140,21 +140,21 @@ export default function Home() {
           // 2. Clamp decimals to sane range (0-18) — some on-chain mints have garbage
           // 3. Cap per-market USD contribution to $10B to prevent overflow from bad data
           const MAX_PER_MARKET_USD = 10_000_000_000; // $10B cap — no single market should exceed this
+          // GH#1187/1193: corrupt devnet last_price values (e.g. $11M–$100M/token) cause
+          // hero stats (volume, OI) to show absurd numbers. Cap price at $10K/token —
+          // no Percolator collateral token should legitimately exceed this on devnet.
+          const MAX_SANE_PRICE_USD = 10_000; // $10K — reject as corrupt above this
           const toUsd = (raw: number, decimals: number | null, price: number | null): number => {
             if (!isSaneMarketValue(raw)) return 0;
             const d = Math.min(Math.max(decimals ?? 6, 0), 18); // clamp decimals 0–18
-            const p = price ?? 0;
+            const p = (price != null && price > 0 && price <= MAX_SANE_PRICE_USD) ? price : 0;
             if (p <= 0) return 0;
             const usd = (raw / 10 ** d) * p;
             return usd > MAX_PER_MARKET_USD ? 0 : usd; // discard absurd values
           };
           // For insurance/TVL: when price is missing, fall back to raw token amount
-          // (correct for stablecoins like USDC where 1 token ≈ $1)
-          // GH#1187: corrupt devnet last_price values (e.g. $11M–$100M/token) multiply
-          // small but legitimate insurance balances into billions. Cap price at $10K/token
-          // — no Percolator collateral token should legitimately exceed this on devnet.
+          // (correct for stablecoins like USDC where 1 token ≈ $1).
           // Corrupt prices fall back to the stablecoin assumption (p=0 → raw/10^d).
-          const MAX_SANE_PRICE_USD = 10_000; // $10K — reject as corrupt above this
           const toUsdWithFallback = (raw: number, decimals: number | null, price: number | null): number => {
             if (!isSaneMarketValue(raw)) return 0;
             const d = Math.min(Math.max(decimals ?? 6, 0), 18);
