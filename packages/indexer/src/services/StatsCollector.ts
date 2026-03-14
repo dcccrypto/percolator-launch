@@ -118,6 +118,18 @@ export class StatsCollector {
           const oracleAuthority = market.config.oracleAuthority.toBase58();
           const priceE6 = Number(market.config.authorityPriceE6);
           const initialMarginBps = Number(market.params.initialMarginBps);
+
+          // Guard: skip slabs with invalid/zero initialMarginBps — division by zero
+          // gives Infinity which violates the NOT NULL integer constraint in DB.
+          // These are corrupted/incomplete on-chain accounts; skip gracefully.
+          if (!initialMarginBps || initialMarginBps <= 0 || !Number.isFinite(initialMarginBps)) {
+            logger.warn("Skipping market registration — invalid initialMarginBps (corrupted slab?)", {
+              slabAddress,
+              initialMarginBps,
+            });
+            continue;
+          }
+
           const maxLeverage = Math.floor(10000 / initialMarginBps);
           
           // Try to resolve token metadata from on-chain (Helius DAS / Metaplex)
