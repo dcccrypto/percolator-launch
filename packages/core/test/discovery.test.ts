@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SLAB_TIERS,
   SLAB_TIERS_V0,
+  SLAB_TIERS_V1D,
   slabDataSize,
   slabDataSizeV1,
   type SlabTierKey,
@@ -132,6 +133,57 @@ describe("slabDataSizeV1", () => {
   it("produces larger values than V0 slabDataSize for same account count", () => {
     for (const n of [256, 1024, 4096]) {
       expect(slabDataSizeV1(n)).toBeGreaterThan(slabDataSize(n));
+    }
+  });
+});
+
+// ============================================================================
+// SLAB_TIERS_V1D — GH#1205: V1D tiers must be exported and present for discovery
+// ENGINE_OFF=424, BITMAP_OFF=624, ACCOUNT_SIZE=248
+// ============================================================================
+
+describe("SLAB_TIERS_V1D (GH#1205)", () => {
+  it("is exported from discovery.ts", () => {
+    expect(SLAB_TIERS_V1D).toBeDefined();
+  });
+
+  it("has micro, small, medium, large tiers", () => {
+    expect(Object.keys(SLAB_TIERS_V1D)).toEqual(["micro", "small", "medium", "large"]);
+  });
+
+  it("micro tier: 64 accounts, dataSize=17080", () => {
+    expect(SLAB_TIERS_V1D.micro.maxAccounts).toBe(64);
+    expect(SLAB_TIERS_V1D.micro.dataSize).toBe(17_080);
+  });
+
+  it("small tier: 256 accounts, dataSize=65104", () => {
+    expect(SLAB_TIERS_V1D.small.maxAccounts).toBe(256);
+    expect(SLAB_TIERS_V1D.small.dataSize).toBe(65_104);
+  });
+
+  it("medium tier: 1024 accounts, dataSize=257200", () => {
+    expect(SLAB_TIERS_V1D.medium.maxAccounts).toBe(1024);
+    expect(SLAB_TIERS_V1D.medium.dataSize).toBe(257_200);
+  });
+
+  it("large tier: 4096 accounts, dataSize=1025584", () => {
+    expect(SLAB_TIERS_V1D.large.maxAccounts).toBe(4096);
+    expect(SLAB_TIERS_V1D.large.dataSize).toBe(1_025_584);
+  });
+
+  it("V1D sizes are distinct from V1 and V0 sizes (no collision)", () => {
+    const v1Sizes = new Set(Object.values(SLAB_TIERS).map(t => t.dataSize));
+    const v0Sizes = new Set(Object.values(SLAB_TIERS_V0).map(t => t.dataSize));
+    for (const tier of Object.values(SLAB_TIERS_V1D)) {
+      expect(v1Sizes.has(tier.dataSize), `V1D ${tier.dataSize} collides with V1`).toBe(false);
+      expect(v0Sizes.has(tier.dataSize), `V1D ${tier.dataSize} collides with V0`).toBe(false);
+    }
+  });
+
+  it("data sizes are in ascending order", () => {
+    const sizes = Object.values(SLAB_TIERS_V1D).map(t => t.dataSize);
+    for (let i = 1; i < sizes.length; i++) {
+      expect(sizes[i]).toBeGreaterThan(sizes[i - 1]);
     }
   });
 });

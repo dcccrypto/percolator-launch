@@ -66,6 +66,25 @@ export const SLAB_TIERS_V0 = {
   large:  { maxAccounts: 4096, dataSize: 992_568,   label: "Large",  description: "4,096 slots · ~6.90 SOL" },
 } as const;
 
+/**
+ * V1D slab sizes — actually-deployed devnet V1 program (ENGINE_OFF=424, BITMAP_OFF=624).
+ * PR #1200 added V1D layout detection in slab.ts but discovery.ts ALL_TIERS was missing
+ * these sizes, causing V1D slabs to fall through to the memcmp fallback with wrong dataSize
+ * hints → detectSlabLayout returning null → parse failure (GH#1205).
+ *
+ * Sizes computed via computeSlabSize(ENGINE_OFF=424, BITMAP_OFF=624, ACCOUNT_SIZE=248, N):
+ *   micro  =  17,080  (64 slots)
+ *   small  =  65,104  (256 slots)
+ *   medium = 257,200  (1,024 slots)
+ *   large  = 1,025,584 (4,096 slots)
+ */
+export const SLAB_TIERS_V1D = {
+  micro:  { maxAccounts: 64,   dataSize: 17_080,     label: "Micro",  description: "64 slots (V1D devnet)" },
+  small:  { maxAccounts: 256,  dataSize: 65_104,     label: "Small",  description: "256 slots (V1D devnet)" },
+  medium: { maxAccounts: 1024, dataSize: 257_200,    label: "Medium", description: "1,024 slots (V1D devnet)" },
+  large:  { maxAccounts: 4096, dataSize: 1_025_584,  label: "Large",  description: "4,096 slots (V1D devnet)" },
+} as const;
+
 /** @deprecated Alias — use SLAB_TIERS (already V1) */
 export const SLAB_TIERS_V1 = SLAB_TIERS;
 
@@ -130,10 +149,11 @@ export function validateSlabTierMatch(dataSize: number, programSlabLen: number):
   return dataSize === programSlabLen;
 }
 
-/** All known slab data sizes for discovery (V0 + V1 tiers) */
+/** All known slab data sizes for discovery (V0 + V1 + V1D tiers) */
 const ALL_SLAB_SIZES = [
   ...Object.values(SLAB_TIERS).map(t => t.dataSize),
   ...Object.values(SLAB_TIERS_V0).map(t => t.dataSize),
+  ...Object.values(SLAB_TIERS_V1D).map(t => t.dataSize),
 ];
 
 /** Legacy constant for backward compat */
@@ -304,12 +324,15 @@ export async function discoverMarkets(
   connection: Connection,
   programId: PublicKey,
 ): Promise<DiscoveredMarket[]> {
-  // Query all known slab sizes in parallel — both V0 (deployed devnet) and V1 (upgraded) tiers.
+  // Query all known slab sizes in parallel — V0, V1D (deployed devnet), and V1 (upgraded) tiers.
   // We track the actual dataSize per entry so detectSlabLayout can determine the correct layout,
   // and pass that layout to all parse functions (avoids wrong-version offsets on partial slices).
+  // GH#1205: V1D tiers were missing here — V1D slabs fell through to memcmp fallback with wrong
+  // dataSize hints → detectSlabLayout returned null → parse failure in discoverMarkets.
   const ALL_TIERS = [
     ...Object.values(SLAB_TIERS),
     ...Object.values(SLAB_TIERS_V0),
+    ...Object.values(SLAB_TIERS_V1D),
   ];
   type RawEntry = { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number; dataSize: number };
   let rawAccounts: RawEntry[] = [];

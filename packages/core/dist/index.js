@@ -1742,6 +1742,12 @@ var SLAB_TIERS_V0 = {
   medium: { maxAccounts: 1024, dataSize: 248760, label: "Medium", description: "1,024 slots \xB7 ~1.73 SOL" },
   large: { maxAccounts: 4096, dataSize: 992568, label: "Large", description: "4,096 slots \xB7 ~6.90 SOL" }
 };
+var SLAB_TIERS_V1D = {
+  micro: { maxAccounts: 64, dataSize: 17080, label: "Micro", description: "64 slots (V1D devnet)" },
+  small: { maxAccounts: 256, dataSize: 65104, label: "Small", description: "256 slots (V1D devnet)" },
+  medium: { maxAccounts: 1024, dataSize: 257200, label: "Medium", description: "1,024 slots (V1D devnet)" },
+  large: { maxAccounts: 4096, dataSize: 1025584, label: "Large", description: "4,096 slots (V1D devnet)" }
+};
 var SLAB_TIERS_V1 = SLAB_TIERS;
 function slabDataSize(maxAccounts) {
   const ENGINE_OFF_V0 = 480;
@@ -1770,7 +1776,8 @@ function validateSlabTierMatch(dataSize, programSlabLen) {
 }
 var ALL_SLAB_SIZES = [
   ...Object.values(SLAB_TIERS).map((t) => t.dataSize),
-  ...Object.values(SLAB_TIERS_V0).map((t) => t.dataSize)
+  ...Object.values(SLAB_TIERS_V0).map((t) => t.dataSize),
+  ...Object.values(SLAB_TIERS_V1D).map((t) => t.dataSize)
 ];
 var SLAB_DATA_SIZE = SLAB_TIERS.large.dataSize;
 var HEADER_SLICE_LENGTH = 1940;
@@ -1897,7 +1904,8 @@ function parseEngineLight(data, layout, maxAccounts = 4096) {
 async function discoverMarkets(connection, programId) {
   const ALL_TIERS = [
     ...Object.values(SLAB_TIERS),
-    ...Object.values(SLAB_TIERS_V0)
+    ...Object.values(SLAB_TIERS_V0),
+    ...Object.values(SLAB_TIERS_V1D)
   ];
   let rawAccounts = [];
   try {
@@ -3193,6 +3201,7 @@ export {
   SLAB_TIERS,
   SLAB_TIERS_V0,
   SLAB_TIERS_V1,
+  SLAB_TIERS_V1D,
   STAKE_IX,
   STAKE_POOL_SIZE,
   STAKE_PROGRAM_ID,
