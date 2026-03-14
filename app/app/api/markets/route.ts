@@ -170,7 +170,9 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ markets: sanitized }, {
+    // #1168: Include total count so API consumers can get market count without
+    // fetching all records. Reflects post-filter count (blocked markets excluded).
+    return NextResponse.json({ total: sanitized.length, markets: sanitized }, {
       headers: {
         "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
       },
