@@ -87,6 +87,9 @@ const HARDCODED_BLOCKED_MARKETS: ReadonlySet<string> = new Set([
   // issue #837: wrong oracle_authority (5Eb8PY personal wallet), hardcoded $1 price,
   // never timestamped — price manipulation risk on devnet.
   "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT",
+  // GH#1177: Stale SOL/USD admin-oracle market — slab no longer exists on-chain
+  // (shows $100 while SOL oracle is ~$178, causes "Failed to load market" on trade page).
+  "BxJPaMaCfEGTBsjZ8wfj3Yfzf4wpasmxKAEvqZZRcGPP",
 ]);
 
 const BLOCKED_MARKET_ADDRESSES: ReadonlySet<string> = new Set([
