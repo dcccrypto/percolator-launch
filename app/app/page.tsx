@@ -179,9 +179,13 @@ export default function Home() {
             symbol: m.symbol,
             volume_24h: toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price),
             last_price: m.last_price,
-            total_open_interest: toUsd(Number(m.total_open_interest || 0), m.decimals, m.last_price),
+            total_open_interest: toUsd(Number(m.total_open_interest ?? ((m.open_interest_long ?? 0) + (m.open_interest_short ?? 0))), m.decimals, m.last_price),
           }));
-          const sorted = converted.sort((a, b) => b.volume_24h - a.volume_24h).slice(0, 5);
+          // #1159: Sort by volume first, fall back to OI when volume is 0 for all
+          const sorted = converted.sort((a, b) => {
+            const volDiff = b.volume_24h - a.volume_24h;
+            return volDiff !== 0 ? volDiff : b.total_open_interest - a.total_open_interest;
+          }).slice(0, 5);
           setFeatured(sorted);
         }
       } catch (err) {
@@ -195,7 +199,8 @@ export default function Home() {
   // Health check moved to HeroSection component (PERC-158)
 
   const hasStats = stats.markets > 0;
-  const hasMarkets = featured.length > 0 && featured.some((m) => m.volume_24h > 0);
+  // #1159: Show featured markets when ANY have volume OR OI (not just volume)
+  const hasMarkets = featured.length > 0 && featured.some((m) => m.volume_24h > 0 || m.total_open_interest > 0);
 
   return (
     <div className="relative">
@@ -414,10 +419,10 @@ export default function Home() {
                         : "\u2014"}
                     </div>
                     <div className="text-right text-[12px] text-[var(--text-secondary)]">
-                      {formatCompact(m.volume_24h)}
+                      {m.volume_24h > 0 ? formatCompact(m.volume_24h) : "—"}
                     </div>
                     <div className="text-right text-[12px] text-[var(--text-secondary)]">
-                      {formatCompact(m.total_open_interest)}
+                      {m.total_open_interest > 0 ? formatCompact(m.total_open_interest) : "—"}
                     </div>
                     <div className="text-right text-[11px] text-[var(--long)]">LIVE</div>
                   </Link>
