@@ -34,6 +34,18 @@ import {
   addBreadcrumb,
 } from "@percolator/shared";
 
+/**
+ * How often to sync volume/trade_count for ALL DB markets, including those not
+ * in the on-chain market provider (stale/uncranked markets). This ensures
+ * volume_24h and trade_count_24h stay accurate even for markets that are no
+ * longer being actively cranked on-chain.
+ *
+ * Runs every 5 minutes — less frequent than the full collect cycle (2 min)
+ * because it issues a single bulk trade fetch + N upserts (cheap), but still
+ * infrequent enough to avoid hammering the DB under high trade volume.
+ */
+const VOLUME_SYNC_INTERVAL_MS = 5 * 60_000;
+
 const logger = createLogger("indexer:stats-collector");
 
 /** Market provider interface — allows different market discovery strategies */
@@ -49,8 +61,11 @@ const ORACLE_LOG_INTERVAL_MS = 60_000;
 
 export class StatsCollector {
   private timer: ReturnType<typeof setInterval> | null = null;
+  private volumeTimer: ReturnType<typeof setInterval> | null = null;
+  private volumeInitTimeout: ReturnType<typeof setTimeout> | null = null;
   private _running = false;
   private _collecting = false;
+  private _syncingVolume = false;
   private lastOracleLogTime = new Map<string, number>();
   private lastFundingLogSlot = new Map<string, number>();
   private lastOiHistoryTime = new Map<string, number>();
@@ -71,7 +86,12 @@ export class StatsCollector {
     // Periodic collection
     this.timer = setInterval(() => this.collect(), COLLECT_INTERVAL_MS);
 
-    logger.info("StatsCollector started", { intervalMs: COLLECT_INTERVAL_MS });
+    // Volume sync for ALL DB markets (including uncranked ones) — runs independently.
+    // First sync after 30s to let the indexer warm up, then every 5 minutes.
+    this.volumeInitTimeout = setTimeout(() => this.syncVolumeForAllDBMarkets(), 30_000);
+    this.volumeTimer = setInterval(() => this.syncVolumeForAllDBMarkets(), VOLUME_SYNC_INTERVAL_MS);
+
+    logger.info("StatsCollector started", { intervalMs: COLLECT_INTERVAL_MS, volumeSyncIntervalMs: VOLUME_SYNC_INTERVAL_MS });
   }
 
   stop(): void {
@@ -80,7 +100,98 @@ export class StatsCollector {
       clearInterval(this.timer);
       this.timer = null;
     }
+    if (this.volumeTimer) {
+      clearInterval(this.volumeTimer);
+      this.volumeTimer = null;
+    }
+    if (this.volumeInitTimeout) {
+      clearTimeout(this.volumeInitTimeout);
+      this.volumeInitTimeout = null;
+    }
     logger.info("StatsCollector stopped");
+  }
+
+  /**
+   * Sync volume_24h and trade_count_24h for ALL markets in the DB.
+   *
+   * StatsCollector.collect() only processes markets discovered on-chain. Markets
+   * that are deployed but no longer actively cranked (e.g. test markets, stale slabs)
+   * fall out of the on-chain provider map and never get their volume updated.
+   *
+   * This method fetches all trades in the last 24h, aggregates by slab_address, and
+   * bulk-upserts volume_24h + trade_count_24h for every market that has trades.
+   * It intentionally does NOT reset volume to 0 for markets with no trades — those
+   * are left unchanged (they'll naturally reach 0 as their last trades age out and
+   * the on-chain collect cycle picks them up).
+   *
+   * Bug fixed: GH#1171 — volume_24h = 0 for all markets despite trades existing.
+   */
+  private async syncVolumeForAllDBMarkets(): Promise<void> {
+    if (this._syncingVolume || !this._running) return;
+    this._syncingVolume = true;
+
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      // Single bulk fetch: all trades in last 24h (capped at 10k rows to avoid OOM)
+      const { data: trades, error } = await getSupabase()
+        .from("trades")
+        .select("slab_address, size")
+        .gte("created_at", since)
+        .limit(10_000);
+
+      if (error) {
+        logger.warn("syncVolumeForAllDBMarkets: trade fetch failed", { error: error.message });
+        return;
+      }
+
+      if (!trades || trades.length === 0) return;
+
+      // Warn if we hit the row cap — volume will be under-reported for that window
+      if (trades.length === 10_000) {
+        logger.warn("syncVolumeForAllDBMarkets: trade fetch hit 10k row limit — volume may be under-reported", { since, limit: 10_000 });
+      }
+
+      // Aggregate volume + trade count by slab_address in memory
+      const volumeMap = new Map<string, { volume: bigint; count: number }>();
+      for (const trade of trades) {
+        const current = volumeMap.get(trade.slab_address) ?? { volume: 0n, count: 0 };
+        try {
+          const raw = BigInt(trade.size);
+          const abs = raw < 0n ? -raw : raw;
+          volumeMap.set(trade.slab_address, { volume: current.volume + abs, count: current.count + 1 });
+        } catch {
+          const abs = BigInt(Math.abs(Number(trade.size)));
+          volumeMap.set(trade.slab_address, { volume: current.volume + abs, count: current.count + 1 });
+        }
+      }
+
+      // Upsert volume stats for each market that has trades
+      let updated = 0;
+      for (const [slabAddress, { volume, count }] of volumeMap.entries()) {
+        try {
+          await upsertMarketStats({
+            slab_address: slabAddress,
+            volume_24h: Number(volume),
+            trade_count_24h: count,
+          });
+          updated++;
+        } catch (err) {
+          logger.warn("syncVolumeForAllDBMarkets: upsert failed", {
+            slabAddress: slabAddress.slice(0, 8),
+            error: err instanceof Error ? err.message : err,
+          });
+        }
+      }
+
+      if (updated > 0) {
+        logger.info("Volume sync complete", { marketsUpdated: updated, totalTrades: trades.length });
+      }
+    } catch (err) {
+      logger.warn("syncVolumeForAllDBMarkets failed", { error: err instanceof Error ? err.message : err });
+    } finally {
+      this._syncingVolume = false;
+    }
   }
 
   /**
@@ -305,11 +416,13 @@ export class StatsCollector {
             }
             const priceUsd = priceE6 > 0n ? Number(priceE6) / 1_000_000 : null;
 
-            // Calculate 24h volume from trades table
+            // Calculate 24h volume and trade count from trades table
             let volume24h: number | null = null;
+            let tradeCount24h: number | null = null;
             try {
-              const { volume } = await get24hVolume(slabAddress);
+              const { volume, tradeCount } = await get24hVolume(slabAddress);
               volume24h = Number(volume);
+              tradeCount24h = tradeCount;
             } catch (volErr) {
               // Non-fatal — volume calculation failure shouldn't break stats collection
               logger.warn("24h volume calculation failed", { slabAddress, error: volErr instanceof Error ? volErr.message : volErr });
@@ -377,6 +490,7 @@ export class StatsCollector {
               total_accounts: engine.numUsedAccounts,          // INTEGER
               funding_rate: Number(engine.fundingRateBpsPerSlotLast), // NUMERIC
               volume_24h: volume24h,                           // NUMERIC
+              trade_count_24h: tradeCount24h,                  // INT4
               // Hidden features (migration 007)
               total_open_interest: safeBigNum(engine.totalOpenInterest), // NUMERIC
               net_lp_pos: engine.netLpPos.toString(),          // NUMERIC
