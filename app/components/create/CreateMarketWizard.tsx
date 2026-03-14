@@ -96,6 +96,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           dexPool: parsed.dexPool ?? null,
           pythFeed: parsed.pythFeed ?? null,
           tokenMeta: parsed.tokenMeta ?? null,
+          // GH#1182: LARGE tier removed — force returning users to "small"
+          slabTier: "small" as const,
           // initialMint prop overrides persisted mint
           mintAddress: initialMint ?? parsed.mintAddress ?? "",
         };
