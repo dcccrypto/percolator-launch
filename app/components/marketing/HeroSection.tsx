@@ -75,10 +75,25 @@ export function HeroSection({ marketsCount }: HeroSectionProps = {}) {
         ]);
         if (data && data.length > 0) {
           const activeData = data.filter(isActiveMarket);
+          // GH#1195: sanitise raw volume → USD with the same guards as page.tsx.
+          // Without these, corrupt devnet price oracles (e.g. $11M–$100M/token) or
+          // huge raw values produce absurd hero stats (e.g. $106B volume).
+          // Rules (mirror page.tsx loadStats):
+          //   1. Clamp decimals to 0–18.
+          //   2. Reject price > $100K as corrupt (covers BTC/ETH; blocks bad oracle data).
+          //   3. Cap per-market USD contribution at $10M — no devnet market should exceed.
+          const MAX_HERO_PRICE_USD = 100_000; // $100K — same as page.tsx
+          const MAX_HERO_PER_MARKET_USD = 10_000_000; // $10M per market
+          const heroToUsd = (raw: number, decimals: number | null, price: number | null): number => {
+            if (raw <= 0 || !Number.isFinite(raw) || raw >= 1e18) return 0;
+            const d = Math.min(Math.max(decimals ?? 6, 0), 18);
+            const p = (price != null && price > 0 && price <= MAX_HERO_PRICE_USD) ? price : 0;
+            if (p <= 0) return 0;
+            const usd = (raw / 10 ** d) * p;
+            return usd > MAX_HERO_PER_MARKET_USD ? 0 : usd;
+          };
           const volume = activeData.reduce((s: number, m: { volume_24h: number | null; last_price: number | null; decimals: number | null }) => {
-            const d = 10 ** (m.decimals ?? 6);
-            const price = m.last_price ?? 0;
-            return s + (Number(m.volume_24h || 0) / d) * price;
+            return s + heroToUsd(Number(m.volume_24h || 0), m.decimals, m.last_price);
           }, 0);
           // Prefer /api/stats totalTraders (unique wallets). Fall back to 0 if unavailable.
           const traders: number = (statsRes as { totalTraders?: number } | null)?.totalTraders ?? 0;
