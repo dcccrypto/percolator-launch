@@ -5,7 +5,7 @@ const mockGetSignaturesForAddress = vi.fn();
 const mockGetParsedTransaction = vi.fn();
 
 vi.mock('@percolator/sdk', () => ({
-  IX_TAG: { TradeNoCpi: 10, TradeCpi: 11 },
+  IX_TAG: { TradeNoCpi: 10, TradeCpi: 11, TradeCpiV2: 35 },
 }));
 
 vi.mock('@percolator/shared', () => ({
@@ -272,6 +272,40 @@ describe('TradeIndexerPolling', () => {
       await new Promise(r => setTimeout(r, 6500));
 
       expect(shared.insertTrade).not.toHaveBeenCalled();
+    }, 10000);
+
+    it('should index TradeCpiV2 (tag=35, 22-byte layout) — GH#1171 regression', async () => {
+      // TradeCpiV2 was not in TRADE_TAGS, causing all post-PR#18 trades to be silently dropped.
+      vi.mocked(shared.tradeExistsBySignature).mockResolvedValue(false);
+      vi.mocked(shared.getMarkets).mockResolvedValue([{ slab_address: SLAB } as any]);
+      vi.mocked(shared.parseTradeSize).mockReturnValue({ sizeValue: 5_000_000n, side: 'short' as const });
+
+      mockGetSignaturesForAddress.mockResolvedValue([{ signature: VALID_SIG, err: null }]);
+
+      const ixData = new Uint8Array(22); // TradeCpiV2 is 22 bytes
+      ixData[0] = 35; // IX_TAG.TradeCpiV2
+      vi.mocked(shared.decodeBase58).mockReturnValue(ixData);
+
+      mockGetParsedTransaction.mockResolvedValue({
+        meta: { err: null, logMessages: [] },
+        transaction: {
+          message: {
+            instructions: [{
+              programId: new PublicKey(PROGRAM_ID),
+              accounts: [new PublicKey(TRADER), new PublicKey(TRADER), new PublicKey(SLAB)],
+              data: 'somedata',
+            }],
+          },
+        },
+      });
+
+      indexer.start();
+      await new Promise(r => setTimeout(r, 6500));
+
+      expect(shared.insertTrade).toHaveBeenCalledOnce();
+      expect(shared.insertTrade).toHaveBeenCalledWith(
+        expect.objectContaining({ side: 'short', size: '5000000', slab_address: SLAB })
+      );
     }, 10000);
 
     it('should skip non-trade instruction tags', async () => {
