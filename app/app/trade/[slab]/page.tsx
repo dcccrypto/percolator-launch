@@ -290,8 +290,8 @@ function TradePageInner({ slab }: { slab: string }) {
             <UsdToggleButton />
             {health && <HealthBadge level={health.level} />}
             {oracleMode && <OracleBadge mode={oracleMode} status={oracleBadgeStatus} />}
-            {priceDisplay && (
-              <span className="shrink-0 text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
+            {!slabLoading && (
+              <span className={`shrink-0 text-sm font-bold ${priceDisplay ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay ?? "\u2014"}</span>
             )}
           </div>
         </div>
@@ -330,10 +330,10 @@ function TradePageInner({ slab }: { slab: string }) {
 
         <span className="h-3.5 w-px bg-[var(--border)]/40" />
 
-        {/* Price */}
-        {priceDisplay && (
-          <span className="text-sm font-bold tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {priceDisplay}
+        {/* Price — show "—" if market loaded but no oracle price */}
+        {!slabLoading && (
+          <span className={`text-sm font-bold tabular-nums ${priceDisplay ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+            {priceDisplay ?? "\u2014"}
           </span>
         )}
 
@@ -386,6 +386,14 @@ function TradePageInner({ slab }: { slab: string }) {
           />
         </div>
       </div>
+
+      {/* ── No oracle price warning ── */}
+      {!slabLoading && !slabError && engine && priceUsd == null && (
+        <div className="mx-4 mt-2 mb-1 flex items-center gap-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/[0.06] px-3 py-2 text-[11px] text-[var(--warning)]">
+          <span>⚠</span>
+          <span>No oracle price available for this market. Price-dependent features (PnL, liquidations) may be limited until the oracle is configured.</span>
+        </div>
+      )}
 
       {/* ── Quick start guide — desktop only, hidden after first trade ── */}
       {accounts.filter(a => a.account.capital > 0n || a.account.positionSize !== 0n).length === 0 && (

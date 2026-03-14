@@ -99,7 +99,7 @@ export function InsuranceFundDisplay({
                       {m.symbol}-PERP
                     </span>
                     <span className="font-mono tabular-nums text-white">
-                      ${formatCompact(m.insuranceFund / 1e6)}
+                      ${formatCompact(m.insuranceFund / (10 ** m.decimals))}
                     </span>
                   </div>
                 ))}
