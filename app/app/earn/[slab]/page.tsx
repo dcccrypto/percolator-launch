@@ -12,6 +12,7 @@ import { useEngineState } from '@/hooks/useEngineState';
 import { useEarnStats, type MarketVaultInfo } from '@/hooks/useEarnStats';
 import { useTokenMeta } from '@/hooks/useTokenMeta';
 import { getSupabase } from '@/lib/supabase';
+import { BLOCKED_MARKET_ADDRESSES } from '@/lib/blockedMarkets';
 import { OiCapMeter } from '@/components/earn/OiCapMeter';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
@@ -46,6 +47,20 @@ const LpPositionDashboard = dynamic(
 export default function VaultDetailPage() {
   const params = useParams();
   const slabAddress = params?.slab as string;
+
+  // GH#1183: block direct navigation to known-bad markets
+  if (BLOCKED_MARKET_ADDRESSES.has(slabAddress)) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="text-[var(--text-secondary)] text-sm">This market is no longer available.</div>
+          <Link href="/earn" className="text-[var(--accent)] text-sm hover:underline">
+            ← Back to Earn
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <SlabProvider slabAddress={slabAddress}>

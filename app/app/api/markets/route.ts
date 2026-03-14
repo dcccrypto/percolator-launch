@@ -6,6 +6,7 @@ import { getServiceClient } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
 import { isSaneMarketValue } from "@/lib/activeMarketFilter";
+import { BLOCKED_MARKET_ADDRESSES as HARDCODED_BLOCKED_MARKETS } from "@/lib/blockedMarkets";
 
 /**
  * Maximum valid funding rate in bps/slot (matches on-chain guard).
@@ -80,18 +81,7 @@ function sanitizePrice(v: number | null | undefined, field?: string, slabAddress
 }
 
 // #868: Blocklist for markets with corrupt state or wrong oracle_authority (e.g. issue #837).
-// Populated from BLOCKED_MARKET_ADDRESSES env var (comma-separated slab addresses).
-// HARDCODED_BLOCKED_MARKETS provides a code-level safety net for known-bad markets
-// so they are excluded even if the env var is not set in a deployment.
-const HARDCODED_BLOCKED_MARKETS: ReadonlySet<string> = new Set([
-  // issue #837: wrong oracle_authority (5Eb8PY personal wallet), hardcoded $1 price,
-  // never timestamped — price manipulation risk on devnet.
-  "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT",
-  // GH#1177: Stale SOL/USD admin-oracle market — slab no longer exists on-chain
-  // (shows $100 while SOL oracle is ~$178, causes "Failed to load market" on trade page).
-  "BxJPaMaCfEGTBsjZ8wfj3Yfzf4wpasmxKAEvqZZRcGPP",
-]);
-
+// Hardcoded list lives in @/lib/blockedMarkets; env var adds runtime overrides.
 const BLOCKED_MARKET_ADDRESSES: ReadonlySet<string> = new Set([
   ...HARDCODED_BLOCKED_MARKETS,
   ...(process.env.BLOCKED_MARKET_ADDRESSES ?? "")

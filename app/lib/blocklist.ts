@@ -14,6 +14,8 @@ export const BLOCKED_SLAB_ADDRESSES: ReadonlySet<string> = new Set([
   // Stale SOL/USD slab — on-chain slab no longer exists; shows $100 last_price
   // causing "Failed to load market" on click. Blocked via PR #1179.
   "BxJPaMaCfEGTBsjZ8wfj3Yfzf4wpasmxKAEvqZZRcGPP",
+  // GH#837: wrong oracle_authority — price manipulation risk. Blocked via security review.
+  "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT",
 ]);
 
 /**
