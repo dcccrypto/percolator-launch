@@ -11,6 +11,7 @@ import {
   PublicKey,
   Transaction,
   ComputeBudgetProgram,
+  SystemProgram,
   SYSVAR_CLOCK_PUBKEY,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
@@ -65,6 +66,9 @@ async function withRpc<T>(
   if (rpc) return rpc.withRetry(op, label);
   return op(connection);
 }
+
+/** Matcher context account size required by the reference AMM matcher. */
+const MATCHER_CTX_SIZE = 320;
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -446,10 +450,35 @@ export async function setupMarketAccounts(
     await ensureSolBalance(connection, wallet, symbol, rpc);
     // Ensure walletAta exists before attempting LP init (fee is debited from it)
     walletAta = await ensureWalletAta(connection, wallet, wallet.publicKey, mint, symbol, config.dryRun, rpc);
+
+    // Create a real matcher context account (320 bytes, owned by matcher program).
+    // PublicKey.default cannot be used — it's the system program address and cannot
+    // be marked writable, causing ExpectedWritable (0xb) on TradeCpi.
+    const matcherCtxKp = Keypair.generate();
+    log("setup", `${symbol}: creating matcher context account ${matcherCtxKp.publicKey.toBase58().slice(0, 16)}...`);
+    const matcherRent = await withRpc(rpc, connection,
+      (c) => c.getMinimumBalanceForRentExemption(MATCHER_CTX_SIZE),
+      `${symbol} matcherRent`,
+    );
+    const createCtxIx = SystemProgram.createAccount({
+      fromPubkey: wallet.publicKey,
+      newAccountPubkey: matcherCtxKp.publicKey,
+      lamports: matcherRent,
+      space: MATCHER_CTX_SIZE,
+      programId: config.matcherProgramId,
+    });
+    const ctxSig = await sendTx(connection, [createCtxIx], [wallet, matcherCtxKp],
+      `${symbol} CreateMatcherCtx`, 50_000, config.dryRun, rpc);
+    if (!ctxSig) {
+      logError("setup", `${symbol}: failed to create matcher context account`);
+      return null;
+    }
+    await sleep(1000);
+
     log("setup", `${symbol}: creating LP account...`);
     const initLpData = encodeInitLP({
       matcherProgram: config.matcherProgramId,
-      matcherContext: PublicKey.default,
+      matcherContext: matcherCtxKp.publicKey,
       feePayment: "1000000",
     });
     const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
