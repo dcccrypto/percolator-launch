@@ -1,4 +1,4 @@
-import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram } from "@solana/web3.js";
+import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError } from "@solana/web3.js";
 import type { PublicKey, Signer } from "@solana/web3.js";
 import { getConfig } from "./config";
 
@@ -406,10 +406,63 @@ export async function sendTx({
 
       const signed = await wallet.signTransaction(tx);
 
-      lastSignature = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: false,
-        maxRetries: 5,
-      });
+      // GH#1209: devnet RPC batch simulation can fail with "Missing response from batch".
+      // When that happens, retry with skipPreflight: true — safe because we already ran
+      // our own pre-sign simulateTransaction above which catches program errors.
+      try {
+        lastSignature = await connection.sendRawTransaction(signed.serialize(), {
+          skipPreflight: false,
+          maxRetries: 5,
+        });
+      } catch (sendErr) {
+        const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+        const isBatchError =
+          sendMsg.includes("Missing response from batch") ||
+          sendMsg.includes("failed to get recent blockhash") ||
+          sendMsg.includes("RPC response error");
+
+        if (isBatchError) {
+          // Extract logs from SendTransactionError if available
+          let extraLogs = "";
+          if (sendErr instanceof SendTransactionError) {
+            try {
+              const logs = await sendErr.getLogs(connection);
+              if (logs && logs.length > 0) {
+                extraLogs = `\nLogs:\n${logs.slice(-5).join("\n")}`;
+              }
+            } catch {
+              // getLogs() may fail if RPC is unhealthy — don't block
+            }
+          }
+          console.warn(
+            `[sendTx] Batch RPC simulation error (attempt ${attempt + 1}); retrying with skipPreflight: true.${extraLogs}`
+          );
+          // Retry without preflight — we already validated via simulateTransaction
+          lastSignature = await connection.sendRawTransaction(signed.serialize(), {
+            skipPreflight: true,
+            maxRetries: 5,
+          });
+        } else if (sendErr instanceof SendTransactionError) {
+          // Extract logs for non-batch SendTransactionErrors to give a clearer message
+          try {
+            const logs = await sendErr.getLogs(connection);
+            if (logs && logs.length > 0) {
+              const relevantLogs = logs
+                .filter((l: string) =>
+                  l.includes("Error") || l.includes("failed") || l.includes("Program log:")
+                )
+                .slice(-5)
+                .join("\n");
+              throw new Error(`${sendMsg}${relevantLogs ? `\n${relevantLogs}` : ""}`);
+            }
+          } catch (logsErr) {
+            if (logsErr instanceof Error && logsErr.message !== sendMsg) throw logsErr;
+          }
+          throw sendErr;
+        } else {
+          throw sendErr;
+        }
+      }
 
       // Poll for confirmation instead of using confirmTransaction
       // (confirmTransaction falsely reports "block height exceeded" on devnet)
