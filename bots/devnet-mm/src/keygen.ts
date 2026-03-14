@@ -128,7 +128,7 @@ async function main() {
       if (traderIdx >= 0) console.log(`TRADER_KEYPAIR_JSON_${traderIdx}='${kpJson}'`);
     }
   }
-  console.log(`TEST_USDC_MINT=DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs`);
+  console.log(`TEST_USDC_MINT=${process.env.TEST_USDC_MINT ?? "DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs"}`);
   console.log(`BOT_MODE=all`);
   console.log("═".repeat(60));
 
@@ -136,6 +136,7 @@ async function main() {
     console.log(`\n⚠️  Wallets needing SOL: ${needsFunding.join(", ")}`);
     console.log("   Run: npx tsx src/fund-devnet-bots.ts");
     console.log("   (or wait for devnet faucet rate limit to reset — typically 24h per IP)");
+    process.exit(1);
   } else {
     console.log("\n✅ All wallets funded! Next: npx tsx src/fund-devnet-bots.ts to mint USDC");
   }

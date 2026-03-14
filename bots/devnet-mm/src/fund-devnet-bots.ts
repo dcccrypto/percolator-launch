@@ -142,7 +142,21 @@ async function mintUsdc(
         console.log(`  ${label}: ${Number(existing) / 1e6} USDC already ✅`);
         return;
       }
-      console.log(`  ${label}: ${Number(existing) / 1e6} USDC (topping up to ${Number(USDC_AMOUNT) / 1e6})`);
+      const toMint = USDC_AMOUNT - existing;
+      console.log(`  ${label}: ${Number(existing) / 1e6} USDC (minting delta +${Number(toMint) / 1e6} to reach ${Number(USDC_AMOUNT) / 1e6})`);
+      tx.add(
+        createMintToInstruction(
+          USDC_MINT,
+          ata,
+          mintAuth.publicKey,
+          toMint,
+        ),
+      );
+      const sig = await sendAndConfirmTransaction(connection, tx, [mintAuth], {
+        commitment: "confirmed",
+      });
+      console.log(`  ${label}: +${Number(toMint) / 1e6} USDC ✅ (${sig.slice(0, 16)}...)`);
+      return;
     } catch {}
   }
 
@@ -172,7 +186,7 @@ async function main() {
 ╚══════════════════════════════════════════════════════╝
 `);
 
-  console.log(`RPC:         ${RPC_URL.slice(0, 50)}`);
+  console.log(`RPC:         ${new URL(RPC_URL).hostname}`);
   console.log(`USDC mint:   ${USDC_MINT.toBase58()}`);
   console.log(`Wallets dir: ${WALLETS_DIR}\n`);
 

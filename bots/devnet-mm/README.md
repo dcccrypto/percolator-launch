@@ -107,12 +107,13 @@ MAKER_KEYPAIR_JSON   = <contents of maker.json>
 TRADER_KEYPAIR_JSON_0 = <contents of trader1.json>
 TRADER_KEYPAIR_JSON_1 = <contents of trader2.json>
 TRADER_KEYPAIR_JSON_2 = <contents of trader3.json>
-MINT_AUTHORITY_KEYPAIR_JSON = <contents of ~/.config/solana/percolator-devnet-mint-authority.json>
 TEST_USDC_MINT       = DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs
 BOT_MODE             = all
 HELIUS_API_KEY       = <your-helius-api-key>
 MARKETS_FILTER       = SOL,BTC
 ```
+
+> ⚠️ **Do NOT add `MINT_AUTHORITY_KEYPAIR_JSON` to the Railway service.** It is only needed for the one-off `npx tsx src/fund-devnet-bots.ts` funding script run locally. Exposing it in a long-running service unnecessarily widens blast radius.
 
 Run `npx tsx src/keygen.ts` to print the `RAILWAY ENV VARS` block with all JSON values ready to paste.
 
