@@ -18,6 +18,25 @@ const FUNDING_RATE_BPS_MAX = 10_000;
 const MAX_PER_MARKET_USD = 10_000_000_000;
 
 /**
+ * GH#1208: Cap for c_tot raw value.
+ * c_tot is LP collateral in token micro-units. Even the deepest devnet vault
+ * would not exceed $100M USD at any reasonable token price. Raw cap at 5e17
+ * catches near-sentinel corrupted values (e.g. 7.997e17) that slip through
+ * the isSaneMarketValue 1e18 threshold.
+ */
+const MAX_SANE_C_TOT = 5e17;
+
+/**
+ * Return null for c_tot values that are clearly corrupted.
+ * Does NOT convert to USD — just guards the raw value.
+ */
+function sanitizeCtot(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  if (!Number.isFinite(v) || v < 0 || v > MAX_SANE_C_TOT) return null;
+  return v;
+}
+
+/**
  * Convert a raw on-chain token micro-unit amount to USD.
  * Returns null when the raw value is a sentinel/garbage or no price is available.
  * (#1160: expose a pre-computed USD field so API consumers don't have to divide by 10^decimals themselves)
@@ -160,6 +179,9 @@ export async function GET() {
         // Raw open_interest_long / open_interest_short / total_open_interest remain
         // in the response for backward compatibility.
         total_open_interest_usd,
+        // GH#1208: Sanitize c_tot — near-sentinel values (e.g. 7.997e17) pass the
+        // isSaneMarketValue 1e18 check but are clearly corrupt LP collateral totals.
+        c_tot: sanitizeCtot(m.c_tot as number | null),
       };
     });
 
