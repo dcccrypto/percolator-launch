@@ -299,7 +299,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         dexPool: null,
         pythFeed: null,
         // Reset slab tier to mode-appropriate default
-        slabTier: mode === "quick" ? "small" : "large",
+        // GH#1178: Always default to small — cheapest/safest for new users.
+        // Manual mode users can still change to medium/large in the picker.
+        slabTier: "small",
       }));
     },
     []
