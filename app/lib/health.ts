@@ -143,8 +143,9 @@ export function computeMarketHealthFromStats(stats: {
   const insuranceRaw = stats.insurance_balance ?? stats.insurance_fund ?? 0;
   const capitalRaw = stats.c_tot ?? stats.vault_balance ?? 0;
 
-  // Filter out sentinel-like numeric values (JS number precision of u64::MAX ≈ 1.844e19)
-  const isSentinelNum = (v: number) => v > 1e18;
+  // Filter out sentinel-like numeric values (JS number precision of u64::MAX ≈ 1.844e19).
+  // GH#1208: Use 5e17 cap — near-sentinel corrupted values like 7.997e17 also slip through.
+  const isSentinelNum = (v: number) => v > 5e17;
   const oi = isSentinelNum(oiRaw) ? 0 : Math.max(0, oiRaw);
   const insurance = isSentinelNum(insuranceRaw) ? 0 : Math.max(0, insuranceRaw);
   const capital = isSentinelNum(capitalRaw) ? 0 : Math.max(0, capitalRaw);

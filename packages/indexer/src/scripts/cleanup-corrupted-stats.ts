@@ -14,7 +14,9 @@
  */
 import { getSupabase } from "@percolator/shared";
 
-const MAX_SANE_VALUE = 1e18;
+// GH#1208: Use 5e17 instead of 1e18 — values like 7.997e17 are clearly corrupt
+// but slip through the original 1e18 threshold.
+const MAX_SANE_VALUE = 5e17;
 const MAX_VALID_DECIMALS = 18;
 
 async function main() {
