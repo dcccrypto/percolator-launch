@@ -27,7 +27,7 @@ import {
 } from "../packages/core/src/index.js";
 import * as fs from "fs";
 
-const RPC_URL = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? "ecfc91c7-b704-4c37-b10e-a277392830aa"}`;
+const RPC_URL = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? ""}`;
 const DEPLOYER_KP = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync("/tmp/deployer.json", "utf8"))));
 
 // Actual deployed SLAB_LEN values from commit 27acb05 (SLAB_TIERS.*.dataSize + 40 bytes from _reserved field).
