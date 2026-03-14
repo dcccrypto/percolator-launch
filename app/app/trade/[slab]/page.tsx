@@ -302,8 +302,8 @@ function TradePageInner({ slab }: { slab: string }) {
             <UsdToggleButton />
             {health && <HealthBadge level={health.level} />}
             {oracleMode && <OracleBadge mode={oracleMode} status={oracleBadgeStatus} />}
-            {priceDisplay && (
-              <span className="shrink-0 text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay}</span>
+            {!slabLoading && (
+              <span className={`shrink-0 text-sm font-bold ${priceDisplay ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>{priceDisplay ?? "\u2014"}</span>
             )}
           </div>
         </div>
@@ -342,10 +342,10 @@ function TradePageInner({ slab }: { slab: string }) {
 
         <span className="h-3.5 w-px bg-[var(--border)]/40" />
 
-        {/* Price */}
-        {priceDisplay && (
-          <span className="text-sm font-bold tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {priceDisplay}
+        {/* Price — show "—" if market loaded but no oracle price */}
+        {!slabLoading && (
+          <span className={`text-sm font-bold tabular-nums ${priceDisplay ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
+            {priceDisplay ?? "\u2014"}
           </span>
         )}
 
@@ -398,6 +398,7 @@ function TradePageInner({ slab }: { slab: string }) {
           />
         </div>
       </div>
+
 
       {/* ── Quick start guide — desktop only, hidden after first trade ── */}
       {accounts.filter(a => a.account.capital > 0n || a.account.positionSize !== 0n).length === 0 && (

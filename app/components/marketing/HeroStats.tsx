@@ -39,7 +39,9 @@ export function HeroStats({
   const stats = [
     {
       label: "Volume 24h",
-      value: <span className="font-semibold text-white">{formatVolume(volume)}{isDevnet && <span className="ml-1 text-white/25">(devnet)</span>}</span>,
+      value: volume === 0
+        ? <span className="font-semibold text-white/40">{isDevnet ? "devnet" : "N/A"}</span>
+        : <span className="font-semibold text-white">{formatVolume(volume)}{isDevnet && <span className="ml-1 text-white/25">(devnet)</span>}</span>,
     },
     {
       label: "Markets",
