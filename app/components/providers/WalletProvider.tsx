@@ -4,6 +4,7 @@ import { Component, FC, ReactNode, useMemo, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { AutoFundProvider } from "./AutoFundProvider";
 import { PrivyAvailableContext, PrivyLoginContext } from "@/hooks/usePrivySafe";
+import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModal";
 import {
   PreferredWalletContext,
   usePreferredWalletState,
@@ -77,6 +78,9 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
           <PrivyProviderClient appId={appId}>
             <AutoFundProvider>
               {children}
+              {/* PERC-808: Global devnet faucet modal — shown on any page when wallet
+                  has < 0.05 SOL or < 1,000 USDC. Decoupled from SlabProvider. */}
+              <DevnetFaucetModal />
             </AutoFundProvider>
           </PrivyProviderClient>
         </PreferredWalletContext.Provider>

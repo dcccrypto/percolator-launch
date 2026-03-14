@@ -37,7 +37,7 @@ import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 import { OracleBadge } from "@/components/oracle/OracleBadge";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
-import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModal";
+// DevnetFaucetModal moved to WalletProvider (PERC-808: global placement on all pages)
 import { AirdropButton } from "@/components/trade/AirdropButton";
 
 /* ── Reusable tiny components ─────────────────────────────── */
@@ -641,7 +641,6 @@ export default function TradePage({ params }: { params: Promise<{ slab: string }
     <SlabProvider slabAddress={slab}>
       <UsdToggleProvider>
         <AutoDepositProvider slabAddress={slab}>
-          <DevnetFaucetModal />
           <TradePageInner slab={slab} />
         </AutoDepositProvider>
       </UsdToggleProvider>

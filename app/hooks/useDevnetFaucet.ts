@@ -1,13 +1,17 @@
 /**
  * PERC-376: Devnet faucet hook
+ * PERC-808: Decoupled from SlabProvider — can run on any page (global placement)
  *
  * Manages a multi-step faucet flow for devnet:
  *   Step 1: Airdrop SOL (via Solana devnet requestAirdrop)
  *   Step 2: Airdrop USDC (via /api/faucet mint endpoint)
- *   Step 3: Auto-deposit into Percolator account
+ *   Step 3: Auto-deposit into Percolator account (handled by AutoDepositProvider)
  *
  * Target: wallet connect → trading in <60 seconds.
  * Rate limit: 1 claim per wallet per 24h (enforced server-side).
+ *
+ * PERC-808: Threshold raised to 1,000 USDC so users with small leftover
+ * balances still see the welcome modal and get a proper top-up.
  */
 
 "use client";
@@ -16,8 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
-import { useSlabState } from "@/components/providers/SlabProvider";
-import { useUserAccount } from "@/hooks/useUserAccount";
+import { getConfig } from "@/lib/config";
 
 export type FaucetStep = "idle" | "sol" | "usdc" | "deposit" | "done" | "error";
 
@@ -73,9 +76,18 @@ const HELIUS_DEVNET_RPC = HELIUS_API_KEY
 export function useDevnetFaucet(): DevnetFaucetState {
   const { publicKey, connected } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { config: mktConfig } = useSlabState();
-  const userAccount = useUserAccount();
   const isDevnet = process.env.NEXT_PUBLIC_SOLANA_NETWORK === "devnet";
+
+  // PERC-808: Use global config testUsdcMint instead of SlabProvider — works on all pages
+  const usdcMintPk = (() => {
+    try {
+      const cfg = getConfig() as Record<string, unknown>;
+      const mint = cfg.testUsdcMint as string | undefined;
+      return mint ? new PublicKey(mint) : null;
+    } catch {
+      return null;
+    }
+  })();
 
   const [step, setStep] = useState<FaucetStep>("idle");
   const [loading, setLoading] = useState(false);
@@ -87,7 +99,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
   // depositDone is intentionally never set to true here — the actual deposit
   // completion is tracked by AutoDepositProvider. This flag exists in the
   // return type for UI consumers that need a unified status interface.
-  const [depositDone, setDepositDone] = useState(false);
+  const [depositDone] = useState(false);
   const [rateLimited, setRateLimited] = useState(false);
   const [nextClaimAt, setNextClaimAt] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(true); // default true to avoid flash
@@ -101,7 +113,6 @@ export function useDevnetFaucet(): DevnetFaucetState {
     const key = `${DISMISSED_KEY}:${publicKey.toBase58()}`;
     const stored = typeof window !== "undefined" ? localStorage.getItem(key) : null;
     if (stored) {
-      // Check if stored timestamp is within 24h
       const ts = parseInt(stored, 10);
       if (Date.now() - ts < 24 * 60 * 60 * 1000) {
         setDismissed(true);
@@ -118,15 +129,14 @@ export function useDevnetFaucet(): DevnetFaucetState {
     try {
       const bal = await connection.getBalance(publicKey);
       setSolBalance(bal / LAMPORTS_PER_SOL);
-
       if (bal >= SOL_THRESHOLD) setSolDone(true);
     } catch {
       // non-fatal
     }
 
-    if (mktConfig?.collateralMint) {
+    if (usdcMintPk) {
       try {
-        const ata = getAssociatedTokenAddressSync(mktConfig.collateralMint, publicKey);
+        const ata = getAssociatedTokenAddressSync(usdcMintPk, publicKey);
         const info = await connection.getTokenAccountBalance(ata);
         const amount = BigInt(info.value.amount);
         setUsdcBalance(Number(amount) / 1_000_000);
@@ -135,7 +145,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
         setUsdcBalance(0);
       }
     }
-  }, [publicKey, connection, mktConfig]);
+  }, [publicKey, connection, usdcMintPk]);
 
   // Initial balance check after connect
   useEffect(() => {
@@ -144,8 +154,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
     refreshBalances();
   }, [connected, publicKey, isDevnet, checked, refreshBalances]);
 
-  // PERC-808: Show modal when wallet USDC < 1000 or SOL < 0.05
-  // Also show for users without a Percolator account (first-time setup)
+  // PERC-808: Show when SOL < 0.05 OR USDC < 1,000 (no longer gated on userAccount)
   const shouldShow =
     isDevnet &&
     connected &&
@@ -153,7 +162,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
     !dismissed &&
     checked &&
     solBalance !== null &&
-    (!userAccount || (usdcBalance !== null && usdcBalance < 1000) || solBalance < 0.05);
+    (solBalance < 0.05 || (usdcBalance !== null && usdcBalance < 1000));
 
   const dismiss = useCallback(() => {
     setDismissed(true);
@@ -256,18 +265,14 @@ export function useDevnetFaucet(): DevnetFaucetState {
     if (!publicKey) return;
     setError(null);
 
-    // Step 1: SOL (if needed)
     if (!solDone && (solBalance === null || solBalance < 0.05)) {
       await airdropSol();
-      // If SOL airdrop failed, try to continue anyway (user might already have some)
     }
 
-    // Step 2: USDC (if needed)
-    if (!usdcDone && (usdcBalance === null || usdcBalance < 1)) {
+    if (!usdcDone && (usdcBalance === null || usdcBalance < 1000)) {
       await airdropUsdc();
     }
 
-    // Step 3: Mark done — auto-deposit is handled by AutoDepositProvider
     if (!error) {
       setStep("done");
     }
