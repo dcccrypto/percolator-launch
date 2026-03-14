@@ -74,15 +74,7 @@ function fmtVolume(raw: string): string {
     if (units >= 1_000_000_000) return `${(units / 1_000_000_000).toFixed(2)}B`;
     if (units >= 1_000_000) return `${(units / 1_000_000).toFixed(2)}M`;
     if (units >= 1_000) return `${(units / 1_000).toFixed(1)}K`;
-    if (units < 1 && n > 0n) {
-      // Raw units might not need division — show raw with compact suffix
-      const rawN = Number(n);
-      if (rawN >= 1_000_000_000) return `${(rawN / 1_000_000_000).toFixed(2)}B`;
-      if (rawN >= 1_000_000) return `${(rawN / 1_000_000).toFixed(2)}M`;
-      if (rawN >= 1_000) return `${(rawN / 1_000).toFixed(1)}K`;
-      return rawN.toLocaleString();
-    }
-    return units.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    return units.toLocaleString(undefined, { maximumFractionDigits: units < 1 ? 6 : 2 });
   } catch {
     return "—";
   }
