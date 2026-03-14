@@ -25,6 +25,7 @@ export interface MarketStatsRow {
   mark_price: number | null;
   index_price: number | null;
   volume_24h: number | null;
+  trade_count_24h: number | null;
   volume_total: number | null;
   open_interest_long: number | null;
   open_interest_short: number | null;
