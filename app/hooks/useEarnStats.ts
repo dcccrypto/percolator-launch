@@ -213,7 +213,14 @@ export function useEarnStats() {
           const totalOI = isSentinel(totalOIRaw) ? 0 : totalOIRaw / collDivisor;
           const maxLeverage = m.max_leverage ?? 10;
           const vaultBalanceRaw = m.lp_collateral ?? 0;
-          const vaultBalance = isSentinel(vaultBalanceRaw) ? 0 : vaultBalanceRaw;
+          // Two-stage filter for lp_collateral:
+          // 1. Sentinel guard: u64::MAX (>1e18) leaks from uninitialized on-chain fields.
+          // 2. USD cap: compute human-readable amount and reject if > $10M per vault.
+          //    Without this, a corrupt lp_collateral of ~4e14 at 6 decimals = $400M TVL
+          //    passes the sentinel filter but produces wildly inflated TVL (GH#1165).
+          const MAX_VAULT_USD = 10_000_000; // $10M per vault — generous devnet ceiling
+          const vaultBalanceHuman = isSentinel(vaultBalanceRaw) ? Infinity : vaultBalanceRaw / collDivisor;
+          const vaultBalance = vaultBalanceHuman > MAX_VAULT_USD ? 0 : vaultBalanceRaw;
           const tradingFeeBpsRaw = m.trading_fee_bps ?? 10;
           const tradingFeeBps = tradingFeeBpsRaw > 5_000 ? 0 : tradingFeeBpsRaw;
           const volume24hRaw = m.volume_24h ?? 0;
