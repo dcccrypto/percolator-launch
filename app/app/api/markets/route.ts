@@ -6,7 +6,7 @@ import { getServiceClient } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
 import { isSaneMarketValue } from "@/lib/activeMarketFilter";
-import { BLOCKED_MARKET_ADDRESSES as HARDCODED_BLOCKED_MARKETS } from "@/lib/blockedMarkets";
+import { BLOCKED_SLAB_ADDRESSES as HARDCODED_BLOCKED_MARKETS } from "@/lib/blocklist";
 
 /**
  * Maximum valid funding rate in bps/slot (matches on-chain guard).

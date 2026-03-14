@@ -12,7 +12,7 @@ import { useEngineState } from '@/hooks/useEngineState';
 import { useEarnStats, type MarketVaultInfo } from '@/hooks/useEarnStats';
 import { useTokenMeta } from '@/hooks/useTokenMeta';
 import { getSupabase } from '@/lib/supabase';
-import { BLOCKED_MARKET_ADDRESSES } from '@/lib/blockedMarkets';
+import { BLOCKED_SLAB_ADDRESSES as BLOCKED_MARKET_ADDRESSES } from '@/lib/blocklist';
 import { OiCapMeter } from '@/components/earn/OiCapMeter';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
