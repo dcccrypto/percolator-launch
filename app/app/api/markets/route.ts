@@ -89,7 +89,7 @@ export async function GET() {
       .from("markets_with_stats")
       .select(
         "slab_address,mint_address,symbol,name,decimals,deployer,logo_url,max_leverage,trading_fee_bps," +
-        "last_price,mark_price,volume_24h,open_interest_long,open_interest_short,total_open_interest," +
+        "last_price,mark_price,volume_24h,trade_count_24h,open_interest_long,open_interest_short,total_open_interest," +
         "insurance_fund,insurance_balance,total_accounts,funding_rate,net_lp_pos,lp_sum_abs,c_tot," +
         "vault_balance,created_at,stats_updated_at,oracle_mode,dex_pool_address,mainnet_ca,oracle_authority"
       );
