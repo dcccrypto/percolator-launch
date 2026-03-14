@@ -334,13 +334,29 @@ export class StatsCollector {
       const markets = this.marketProvider.getMarkets();
       if (markets.size === 0) return;
 
+      // GH#1218: load indexer_excluded flags from DB to skip corrupt slabs.
+      // These are slabs where on-chain state is permanently corrupt and re-syncing
+      // would overwrite the zeroed DB values with garbage data.
+      let excludedSlabs: Set<string> = new Set();
+      try {
+        const dbMarkets = await getMarkets();
+        excludedSlabs = new Set(
+          dbMarkets.filter((m) => m.indexer_excluded === true).map((m) => m.slab_address),
+        );
+        if (excludedSlabs.size > 0) {
+          logger.info("StatsCollector: skipping indexer_excluded slabs", { count: excludedSlabs.size, slabs: Array.from(excludedSlabs) });
+        }
+      } catch {
+        // Non-fatal — proceed without exclusion list rather than halting all stats collection
+      }
+
       const connection = getConnection();
       let updated = 0;
       let errors = 0;
 
       // Process markets in batches of 5 to avoid RPC rate limits
       // Use getMultipleAccountsInfo for batch fetching to reduce RPC round trips
-      const entries = Array.from(markets.entries());
+      const entries = Array.from(markets.entries()).filter(([slabAddress]) => !excludedSlabs.has(slabAddress));
       for (let i = 0; i < entries.length; i += 5) {
         const batch = entries.slice(i, i + 5);
         const slabPubkeys = batch.map(([slabAddress]) => new PublicKey(slabAddress));

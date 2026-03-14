@@ -16,6 +16,10 @@ export const BLOCKED_SLAB_ADDRESSES: ReadonlySet<string> = new Set([
   "BxJPaMaCfEGTBsjZ8wfj3Yfzf4wpasmxKAEvqZZRcGPP",
   // GH#837: wrong oracle_authority — price manipulation risk. Blocked via security review.
   "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT",
+  // GH#1218: NL/USD slab — corrupt on-chain OI state (9e12 micro-units per side → $89.2M
+  // false total OI). Migration 045 zeroed the DB but the indexer re-synced from on-chain.
+  // Blocked permanently until on-chain state is corrected. PR #1219.
+  "H5Vunzd2yAMygnpFiGUASDSx2s8P3bfPTzjCfrRsPeph",
 ]);
 
 /**
