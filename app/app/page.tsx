@@ -168,6 +168,11 @@ export default function Home() {
               // Fall back to insurance_balance if insurance_fund is missing.
               const raw = Number(m.insurance_fund ?? m.insurance_balance ?? 0);
               if (!isSaneMarketValue(raw)) return s;
+              // Sanity cap: values > 1e13 micro-units are corrupt data from bad slab tier
+              // detection (same guard as useEarnStats). Without this cap, a corrupt
+              // insurance_fund ~2-3e17 passes isSaneMarketValue (< 1e18) and gets
+              // multiplied by the oracle price (e.g. $130 SOL), producing ~$29.8B.
+              if (raw > 1e13) return s;
               // Use fallback converter — insurance should show even when price oracle is unavailable
               return s + toUsdWithFallback(raw, m.decimals, m.last_price);
             }, 0),
