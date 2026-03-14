@@ -387,13 +387,6 @@ function TradePageInner({ slab }: { slab: string }) {
         </div>
       </div>
 
-      {/* ── No oracle price warning ── */}
-      {!slabLoading && !slabError && engine && priceUsd == null && (
-        <div className="mx-4 mt-2 mb-1 flex items-center gap-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/[0.06] px-3 py-2 text-[11px] text-[var(--warning)]">
-          <span>⚠</span>
-          <span>No oracle price available for this market. Price-dependent features (PnL, liquidations) may be limited until the oracle is configured.</span>
-        </div>
-      )}
 
       {/* ── Quick start guide — desktop only, hidden after first trade ── */}
       {accounts.filter(a => a.account.capital > 0n || a.account.positionSize !== 0n).length === 0 && (
