@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Keypair, PublicKey, TransactionInstruction, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, TransactionInstruction, Transaction, SendTransactionError } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getConfig } from "@/lib/config";
 
@@ -16,6 +16,71 @@ export interface UseReclaimSlabRentResult {
   txSig: string | null;
   /** Call to send the ReclaimSlabRent instruction on-chain. */
   reclaim: (slabKeypair: Keypair) => Promise<void>;
+}
+
+/**
+ * Translate raw Solana / Percolator program error codes into user-friendly messages.
+ *
+ * Program custom errors (InstructionError.Custom codes) come from percolator-prog's
+ * PercolatorError enum.  The numbers are derived from the on-chain error list.
+ */
+function friendlyReclaimError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+
+  // --- User-rejected / wallet errors ---
+  if (lower.includes("user rejected") || lower.includes("rejected the request")) {
+    return "Transaction cancelled — you rejected the signing request.";
+  }
+  if (lower.includes("not connected") || lower.includes("wallet not connected")) {
+    return "Wallet not connected. Please connect your wallet and try again.";
+  }
+
+  // --- Solana runtime errors (0x prefix = program custom code in hex) ---
+  // 0x4 = AccountNotInitialized / uninit slab already cleaned up
+  if (lower.includes("0x4") || lower.includes("custom: 4")) {
+    return "Slab account is no longer on-chain. It may have already been reclaimed.";
+  }
+  // 0xf = Custom:15 — reserved for skip-thrash in keeper, unlikely here but map it
+  if (lower.includes("0xf") || lower.includes("custom: 15")) {
+    return "Program rejected the request (error 0xf). The slab may still be initialised.";
+  }
+  // 0x0 = InstructionError (slab is already initialized — magic byte set)
+  if (lower.includes("custom: 0") || lower.includes("0x0 ")) {
+    return "This slab is already initialised. Use the market close flow to reclaim rent.";
+  }
+  // Slab already reclaimed / account lamports = 0
+  if (lower.includes("attempt to debit") || lower.includes("insufficient lamport")) {
+    return "Slab account has no SOL to reclaim — it may already be closed.";
+  }
+
+  // --- Transaction simulation / preflight ---
+  if (lower.includes("simulation failed") || lower.includes("preflight")) {
+    // Try to extract the custom error code from the simulation logs
+    const customMatch = msg.match(/custom program error:\s*0x([0-9a-f]+)/i);
+    if (customMatch) {
+      const code = parseInt(customMatch[1], 16);
+      if (code === 0) return "This slab is already initialised. Use the market close flow to reclaim rent.";
+      if (code === 4) return "Slab account is not owned by a recognised Percolator program.";
+      return `Program rejected with error code 0x${customMatch[1]}. Try again or contact support.`;
+    }
+    return "Transaction simulation failed. The slab state may have changed — please refresh and try again.";
+  }
+
+  // --- Network / timeout errors ---
+  if (lower.includes("timeout") || lower.includes("timed out")) {
+    return "Transaction timed out. Check your wallet for a pending signature, or try again.";
+  }
+  if (lower.includes("network") || lower.includes("econnreset") || lower.includes("fetch")) {
+    return "Network error. Check your connection and try again.";
+  }
+  if (lower.includes("blockhash not found") || lower.includes("blockhash expired")) {
+    return "Transaction expired. Please try again.";
+  }
+
+  // --- Generic fallback: keep the original message but trim internal noise ---
+  const short = msg.replace(/Error:\s*/gi, "").slice(0, 120);
+  return `Reclaim failed: ${short}${msg.length > 120 ? "…" : ""}`;
 }
 
 /**
@@ -154,11 +219,11 @@ export function useReclaimSlabRent(): UseReclaimSlabRentResult {
         setStatus("success");
       } catch (err: unknown) {
         console.error("[useReclaimSlabRent] error:", err);
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Transaction failed. Please try again."
-        );
+        // SendTransactionError carries logs — include them for debugging
+        if (err instanceof SendTransactionError) {
+          console.error("[useReclaimSlabRent] logs:", err.logs);
+        }
+        setError(friendlyReclaimError(err));
         setStatus("error");
       }
     },

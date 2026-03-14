@@ -277,4 +277,78 @@ describe("useReclaimSlabRent", () => {
     expect(result.current.error).toMatch(/not owned by a? Percolator program/i);
     expect(mockConnection.sendRawTransaction).not.toHaveBeenCalled();
   });
+
+  // ── Friendly error message translation ───────────────────────────────────
+
+  it("shows friendly message when user rejects the signing request", async () => {
+    mockWallet = makeMockWallet({
+      signTransaction: vi.fn().mockRejectedValue(new Error("User rejected the request")),
+    });
+    vi.mocked(useWalletCompat).mockReturnValue(mockWallet as ReturnType<typeof useWalletCompat>);
+
+    const { result } = renderHook(() => useReclaimSlabRent());
+
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toMatch(/cancelled|rejected/i);
+    // Must NOT contain raw stack trace or internal noise
+    expect(result.current.error).not.toMatch(/Error:/);
+  });
+
+  it("shows friendly message for network errors during broadcast", async () => {
+    mockConnection = makeMockConnection();
+    mockConnection.sendRawTransaction = vi.fn().mockRejectedValue(new Error("Failed to fetch: network error ECONNRESET"));
+    vi.mocked(useConnectionCompat).mockReturnValue({
+      connection: mockConnection,
+    } as ReturnType<typeof useConnectionCompat>);
+
+    const { result } = renderHook(() => useReclaimSlabRent());
+
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toMatch(/network error/i);
+  });
+
+  it("shows friendly message for blockhash expiry", async () => {
+    mockConnection = makeMockConnection();
+    mockConnection.sendRawTransaction = vi.fn().mockRejectedValue(new Error("Blockhash not found"));
+    vi.mocked(useConnectionCompat).mockReturnValue({
+      connection: mockConnection,
+    } as ReturnType<typeof useConnectionCompat>);
+
+    const { result } = renderHook(() => useReclaimSlabRent());
+
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toMatch(/expired/i);
+  });
+
+  it("shows friendly message for 0x4 program error in message", async () => {
+    mockConnection = makeMockConnection();
+    mockConnection.sendRawTransaction = vi.fn().mockRejectedValue(
+      new Error("Transaction simulation failed: Error processing Instruction 0: custom program error: 0x4")
+    );
+    vi.mocked(useConnectionCompat).mockReturnValue({
+      connection: mockConnection,
+    } as ReturnType<typeof useConnectionCompat>);
+
+    const { result } = renderHook(() => useReclaimSlabRent());
+
+    await act(async () => {
+      await result.current.reclaim(slabKeypair);
+    });
+
+    expect(result.current.status).toBe("error");
+    // 0x4 = account already cleaned up / reclaimed
+    expect(result.current.error).toMatch(/already been reclaimed|no longer on-chain/i);
+  });
 });
