@@ -14,6 +14,8 @@
     "dry": "DRY_RUN=true tsx src/index.ts",
     "dry:trader": "DRY_RUN=true BOT_MODE=trader tsx src/index.ts",
     "keygen": "tsx src/keygen.ts",
+    "fund": "tsx src/fund-devnet-bots.ts",
+    "setup": "tsx src/keygen.ts && tsx src/fund-devnet-bots.ts",
     "health": "curl -s http://localhost:18820/health | jq .",
     "test": "vitest run",
     "test:watch": "vitest"

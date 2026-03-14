@@ -1,69 +1,121 @@
-# PERC-377: Devnet Market-Making Bots
+# PERC-377/354: Devnet Market-Making Bots
 
 Production-ready market-making bot service for Percolator devnet. Inspired by [Drift Protocol's keeper-bots-v2](https://github.com/drift-labs/keeper-bots-v2), adapted for Percolator's LP-based matching model.
+
+## PERC-354: 5-Wallet Fleet (BTC-PERP + SOL-PERP)
+
+For a devnet that _looks alive_ to evaluators, we run 5 independent bot wallets:
+
+| Wallet | Role | Markets | SOL needed | USDC needed |
+|--------|------|---------|-----------|------------|
+| **filler** | Crank + oracle push | All | ~0.5 | No |
+| **maker** | Two-sided quotes | BTC-PERP, SOL-PERP | ~0.5 | 10,000 |
+| **trader1** | Simulated aggressive trader | BTC-PERP, SOL-PERP | ~0.5 | 10,000 |
+| **trader2** | Simulated passive trader | BTC-PERP, SOL-PERP | ~0.5 | 10,000 |
+| **trader3** | Simulated trend-follower | SOL-PERP | ~0.5 | 10,000 |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│             Devnet MM Bot Service                    │
-│                                                      │
-│  ┌────────────────┐    ┌────────────────────┐       │
-│  │   FILLER BOT   │    │    MAKER BOT       │       │
-│  │                │    │                    │       │
-│  │ • Crank markets│    │ • Two-sided quotes │       │
-│  │ • Push oracle  │    │ • Position skewing │       │
-│  │   prices       │    │ • Size jitter      │       │
-│  │ • System health│    │ • Multi-source     │       │
-│  │                │    │   price feeds      │       │
-│  │ Wallet: filler │    │ Wallet: maker      │       │
-│  └────────────────┘    └────────────────────┘       │
-│                                                      │
-│  ┌──────────────────────────────────────────┐       │
-│  │        Health / Metrics Server            │       │
-│  │   GET /health  — bot status (JSON)        │       │
-│  │   GET /metrics — Prometheus exposition    │       │
-│  └──────────────────────────────────────────┘       │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│               Devnet MM Bot Service (BOT_MODE=all)        │
+│                                                           │
+│  ┌────────────────┐  ┌──────────────────┐               │
+│  │  FILLER BOT    │  │    MAKER BOT     │               │
+│  │ • Crank markets│  │ • Bid/ask quotes │               │
+│  │ • Push oracle  │  │ • Position skew  │               │
+│  │ • System health│  │ • BTC-PERP+SOL   │               │
+│  │ Wallet: filler │  │ Wallet: maker    │               │
+│  └────────────────┘  └──────────────────┘               │
+│                                                           │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │              TRADER FLEET (3 wallets)             │   │
+│  │  trader1: aggressive — random long/short          │   │
+│  │  trader2: passive   — mean-revert                 │   │
+│  │  trader3: trend     — follows momentum            │   │
+│  │  Each quotes BTC-PERP + SOL-PERP every 30-180s   │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                           │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │          Health / Metrics Server                  │   │
+│  │   GET /health  — bot status (JSON)                │   │
+│  │   GET /metrics — Prometheus exposition            │   │
+│  └──────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## Quick Start (Full Fleet)
 
-### 1. Generate wallet keypairs
+### 1. Generate 5 wallet keypairs
 
 ```bash
 npx tsx src/keygen.ts
-# Creates /tmp/percolator-bots/filler.json + maker.json
-# Auto-airdrops devnet SOL
+# Creates /tmp/percolator-bots/{filler,maker,trader1,trader2,trader3}.json
+# Auto-airdrops devnet SOL (may be rate-limited — retry if needed)
 ```
 
-### 2. Run both bots
+### 2. Mint test USDC to bot wallets
+
+```bash
+# Requires MINT_AUTHORITY_KEYPAIR_JSON or ~/.config/solana/percolator-devnet-mint-authority.json
+npx tsx src/fund-devnet-bots.ts
+# Mints 10,000 USDC to: maker, trader1, trader2, trader3
+```
+
+Or in one step:
+```bash
+pnpm setup   # keygen + fund
+```
+
+### 3. Run full fleet
+
+```bash
+FILLER_KEYPAIR_JSON="$(cat /tmp/percolator-bots/filler.json)" \
+MAKER_KEYPAIR_JSON="$(cat /tmp/percolator-bots/maker.json)" \
+TRADER_KEYPAIR_JSON_0="$(cat /tmp/percolator-bots/trader1.json)" \
+TRADER_KEYPAIR_JSON_1="$(cat /tmp/percolator-bots/trader2.json)" \
+TRADER_KEYPAIR_JSON_2="$(cat /tmp/percolator-bots/trader3.json)" \
+TEST_USDC_MINT=DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs \
+HELIUS_API_KEY=your-key \
+BOT_MODE=all \
+npx tsx src/index.ts
+```
+
+### 4. Run filler + maker only (no simulated traders)
 
 ```bash
 FILLER_KEYPAIR=/tmp/percolator-bots/filler.json \
 MAKER_KEYPAIR=/tmp/percolator-bots/maker.json \
 HELIUS_API_KEY=your-key \
+BOT_MODE=both \
 npx tsx src/index.ts
 ```
 
-### 3. Run individual bots
-
-```bash
-# Filler only (cranking + oracle)
-BOT_MODE=filler BOOTSTRAP_KEYPAIR=/tmp/percolator-bots/filler.json \
-  npx tsx src/index.ts
-
-# Maker only (quoting)
-BOT_MODE=maker BOOTSTRAP_KEYPAIR=/tmp/percolator-bots/maker.json \
-  SPREAD_BPS=25 MAX_QUOTE_SIZE_USDC=500 \
-  npx tsx src/index.ts
-```
-
-### 4. Dry run (no transactions)
+### 5. Dry run (no transactions)
 
 ```bash
 DRY_RUN=true npx tsx src/index.ts
 ```
+
+## Railway Deployment (PERC-354)
+
+Add these env vars to the `devnet-mm-bots` Railway service:
+
+```
+FILLER_KEYPAIR_JSON  = <contents of filler.json>
+MAKER_KEYPAIR_JSON   = <contents of maker.json>
+TRADER_KEYPAIR_JSON_0 = <contents of trader1.json>
+TRADER_KEYPAIR_JSON_1 = <contents of trader2.json>
+TRADER_KEYPAIR_JSON_2 = <contents of trader3.json>
+TEST_USDC_MINT       = DvH13uxzTzo1xVFwkbJ6YASkZWs6bm3vFDH4xu7kUYTs
+BOT_MODE             = all
+HELIUS_API_KEY       = <your-helius-api-key>
+MARKETS_FILTER       = SOL,BTC
+```
+
+> ⚠️ **Do NOT add `MINT_AUTHORITY_KEYPAIR_JSON` to the Railway service.** It is only needed for the one-off `npx tsx src/fund-devnet-bots.ts` funding script run locally. Exposing it in a long-running service unnecessarily widens blast radius.
+
+Run `npx tsx src/keygen.ts` to print the `RAILWAY ENV VARS` block with all JSON values ready to paste.
 
 ## Bot Roles
 
