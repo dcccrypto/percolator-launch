@@ -272,8 +272,20 @@ function TradePageInner({ slab }: { slab: string }) {
     );
   }
 
+  // #1155: Show warning banner when market has loaded but no oracle price available
+  const hasNoPriceData = !slabLoading && engine && priceUsd == null;
+
   return (
     <div ref={pageRef} className="mx-auto max-w-[1920px] overflow-x-hidden gsap-fade">
+
+      {/* #1155: No oracle price banner */}
+      {hasNoPriceData && (
+        <div className="border-b border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-2.5 text-center">
+          <p className="text-[11px] font-medium text-[var(--warning)]">
+            ⚠ No oracle price available for this market — prices may be stale or unavailable
+          </p>
+        </div>
+      )}
 
       {/* ── MOBILE: Sticky header ── */}
       <div className="sticky top-0 z-30 border-b border-[var(--border)]/50 bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">

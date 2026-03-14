@@ -628,14 +628,18 @@ function MarketsPageInner() {
                     : null;
                   
                   // Display values (USD or tokens) — cap token display at 2dp for table readability
-                  // #865: null → "—", known zero → "$0.00" / "0.00" (never bare "0")
-                  const oiDisplay = showUsd && lastPrice != null
-                    ? formatNum(Math.round((Number(oiTokensRaw) / tokenDivisor) * lastPrice * 100) / 100)
-                    : formatStatValue(oiTokensRaw, 'number', mintDecimals);
-                  const insuranceDisplay = showUsd && lastPrice != null
-                    ? formatNum(Math.round((Number(insuranceTokensRaw) / tokenDivisor) * lastPrice * 100) / 100)
-                    : formatStatValue(insuranceTokensRaw, 'number', mintDecimals);
-                  const volumeDisplay = volume24hRaw != null
+                  // #1152/#1153: null/zero → "—" (not "$0.00" which looks broken on devnet)
+                  const oiUsd = showUsd && lastPrice != null
+                    ? Math.round((Number(oiTokensRaw) / tokenDivisor) * lastPrice * 100) / 100
+                    : null;
+                  const oiDisplay = oiTokensRaw === 0n ? "—"
+                    : oiUsd != null ? (oiUsd > 0 ? formatNum(oiUsd) : "—") : formatStatValue(oiTokensRaw, 'number', mintDecimals);
+                  const insUsd = showUsd && lastPrice != null
+                    ? Math.round((Number(insuranceTokensRaw) / tokenDivisor) * lastPrice * 100) / 100
+                    : null;
+                  const insuranceDisplay = insuranceTokensRaw === 0n ? "—"
+                    : insUsd != null ? (insUsd > 0 ? formatNum(insUsd) : "—") : formatStatValue(insuranceTokensRaw, 'number', mintDecimals);
+                  const volumeDisplay = volume24hRaw != null && volume24hRaw > 0n
                     ? (showUsd && lastPrice != null
                         ? formatNum(Math.round((Number(volume24hRaw) / tokenDivisor) * lastPrice * 100) / 100)
                         : formatTokenAmount(volume24hRaw, mintDecimals, 2))
