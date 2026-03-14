@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getBackendUrl } from '@/lib/config';
 import { getSupabase } from '@/lib/supabase';
 import { isMockMode } from '@/lib/mock-mode';
+import { isBlockedSlab } from '@/lib/blocklist';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -199,6 +200,8 @@ export function useEarnStats() {
       }
 
       const markets: MarketVaultInfo[] = data
+        // Skip blocked/stale slabs — excluded from /api/markets but visible to anon client.
+        .filter((m) => !isBlockedSlab(m.slab_address))
         .filter((m) => m.status === 'active' || m.status === 'Active')
         .map((m) => {
           const oiLongRaw = m.open_interest_long ?? 0;

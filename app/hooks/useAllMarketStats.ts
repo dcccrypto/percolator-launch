@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
+import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
@@ -39,7 +40,9 @@ export function useAllMarketStats() {
         } else {
           const map = new Map<string, MarketWithStats>();
           data?.forEach((market) => {
-            if (market.slab_address) {
+            // Skip blocked/stale markets — they are excluded from /api/markets but
+            // still visible to the Supabase anon client via markets_with_stats.
+            if (market.slab_address && !isBlockedSlab(market.slab_address)) {
               map.set(market.slab_address, market);
             }
           });

@@ -7,6 +7,7 @@ import { getConfig } from "@/lib/config";
 import { isMockMode } from "@/lib/mock-mode";
 import { MOCK_SLAB_ADDRESSES, getMockMarketData } from "@/lib/mock-trade-data";
 import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
+import { isBlockedSlab } from "@/lib/blocklist";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GradientText } from "@/components/ui/GradientText";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -158,8 +159,12 @@ export default function Home() {
           };
 
           // Filter out empty/abandoned markets using shared active-market filter
-          // (consistent with /api/stats and markets page)
-          const activeData = data.filter(isActiveMarket);
+          // (consistent with /api/stats and markets page). Also exclude blocked/stale
+          // slab addresses — these pass isActiveMarket (last_price > 0) but are bad
+          // on-chain data that corrupt insurance and volume aggregates (GH#1181).
+          const activeData = data
+            .filter((m) => !isBlockedSlab(m.slab_address))
+            .filter(isActiveMarket);
           setStats({
             markets: activeData.length,
             volume: activeData.reduce((s, m) => s + toUsd(Number(m.volume_24h || 0), m.decimals, m.last_price), 0),
