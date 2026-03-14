@@ -80,10 +80,14 @@ export async function GET(request: NextRequest) {
   // Convert raw on-chain token micro-units to USD using decimals + price
   // Without this, sentinel-like values (2e12) leak through as $2T (#1154)
   const MAX_PER_MARKET_USD = 10_000_000_000; // $10B cap — no single market should exceed this
+  // GH#1191: corrupt devnet last_price values (e.g. $7.9T/token) multiply small but
+  // legitimate token amounts into billions. Cap price at $10K/token — no Percolator
+  // collateral token should legitimately exceed this. Same fix applied to page.tsx in PR #1190 (GH#1187).
+  const MAX_SANE_PRICE_USD = 10_000; // $10K — reject as corrupt above this
   const toUsd = (raw: number, m: { decimals?: number | null; last_price?: number | null }): number => {
     if (!isSaneMarketValue(raw)) return 0;
     const d = Math.min(Math.max((m as Record<string, unknown>).decimals as number ?? 6, 0), 18);
-    const p = m.last_price ?? 0;
+    const p = (m.last_price != null && m.last_price > 0 && m.last_price <= MAX_SANE_PRICE_USD) ? m.last_price : 0;
     if (p <= 0) return 0;
     const usd = (raw / 10 ** d) * p;
     return usd > MAX_PER_MARKET_USD ? 0 : usd;
