@@ -17,6 +17,8 @@ export interface MarketRow {
   status: string;
   created_at: string;
   updated_at: string;
+  /** GH#1218: when true the indexer must NOT write market_stats for this slab (on-chain state is corrupt). */
+  indexer_excluded?: boolean;
 }
 
 export interface MarketStatsRow {
