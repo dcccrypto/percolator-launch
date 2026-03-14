@@ -5,12 +5,30 @@ import { parseHeader } from "@percolator/sdk";
 import { getServiceClient } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
+import { isSaneMarketValue } from "@/lib/activeMarketFilter";
 
 /**
  * Maximum valid funding rate in bps/slot (matches on-chain guard).
  * Raw DB values outside [-MAX, MAX] are garbage from uninitialized slabs.
  */
 const FUNDING_RATE_BPS_MAX = 10_000;
+
+/** Cap per-market USD contribution — prevents sentinel leakage ($10B > any real market). */
+const MAX_PER_MARKET_USD = 10_000_000_000;
+
+/**
+ * Convert a raw on-chain token micro-unit amount to USD.
+ * Returns null when the raw value is a sentinel/garbage or no price is available.
+ * (#1160: expose a pre-computed USD field so API consumers don't have to divide by 10^decimals themselves)
+ */
+function rawToUsd(raw: number | null | undefined, decimals: number | null | undefined, priceUsd: number | null | undefined): number | null {
+  if (!isSaneMarketValue(raw)) return null;
+  const d = Math.min(Math.max(decimals ?? 6, 0), 18);
+  const p = priceUsd ?? 0;
+  if (p <= 0) return null;
+  const usd = (raw! / 10 ** d) * p;
+  return usd > MAX_PER_MARKET_USD ? null : usd;
+}
 
 /** Sanitize a numeric funding_rate from the DB view. Returns null for garbage values. */
 function sanitizeFundingRate(v: number | null | undefined): number | null {
@@ -121,18 +139,34 @@ export async function GET() {
           oracle_mode = "admin"; // safe default
         }
       }
+      // #1160: Compute a USD-denominated OI field so consumers don't need to divide
+      // by 10^decimals manually. Derived from total_open_interest when sane, falls
+      // back to open_interest_long + open_interest_short. Raw fields are preserved.
+      const sanitizedPrice = sanitizePrice(m.last_price as number | null, "last_price", m.slab_address as string);
+      const rawOi = isSaneMarketValue(m.total_open_interest as number | null)
+        ? m.total_open_interest as number
+        : (() => {
+            const combined = (m.open_interest_long as number ?? 0) + (m.open_interest_short as number ?? 0);
+            return isSaneMarketValue(combined) ? combined : null;
+          })();
+      const total_open_interest_usd = rawToUsd(rawOi, m.decimals as number | null, sanitizedPrice);
+
       return {
         ...m,
         oracle_mode,
         funding_rate: sanitizeFundingRate(m.funding_rate as number | null),
         // #856: Null out corrupt admin-set test prices (raw unscaled u64 values or billions/trillions).
         // Matches Rust MAX_ORACLE_PRICE = $1B USD ceiling.
-        last_price: sanitizePrice(m.last_price as number | null, "last_price", m.slab_address as string),
+        last_price: sanitizedPrice,
         mark_price: sanitizePrice(m.mark_price as number | null, "mark_price", m.slab_address as string),
         // #855: Apply same sanitization to index_price — same DB column type and
         // corruption vector as last_price/mark_price. Inconsistent sanitization
         // means a corrupt index price still reaches consumers.
         index_price: sanitizePrice(m.index_price as number | null, "index_price", m.slab_address as string),
+        // #1160: Pre-converted OI in USD (null when price unavailable or value is a sentinel).
+        // Raw open_interest_long / open_interest_short / total_open_interest remain
+        // in the response for backward compatibility.
+        total_open_interest_usd,
       };
     });
 

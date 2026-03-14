@@ -192,6 +192,36 @@ describe("GET /api/markets — price sanitization (#856)", () => {
     expect(symbols).toContain("GOOD");
   });
 
+  it("includes total_open_interest_usd — computed USD field from raw OI + decimals + price (#1160)", async () => {
+    // 1000 micro-units @ 6 decimals = 0.001 tokens; at $1.0/token = $0.001
+    mockMarkets = [
+      mkMarket({ symbol: "NORM", total_open_interest: 1_000, decimals: 6, last_price: 1.0 }),
+      // Sentinel value with no valid long/short fallback — should produce null USD
+      mkMarket({ symbol: "SENTINEL", total_open_interest: 2e19, open_interest_long: 0, open_interest_short: 0, decimals: 6, last_price: 1.0 }),
+      // No price — should produce null USD
+      mkMarket({ symbol: "NOPRICE", total_open_interest: 1_000, decimals: 6, last_price: null }),
+      // total_open_interest null but long+short available
+      mkMarket({ symbol: "FALLBACK", total_open_interest: null, open_interest_long: 600, open_interest_short: 400, decimals: 6, last_price: 1.0 }),
+    ];
+
+    vi.resetModules();
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET();
+    const body = (await res.json()) as {
+      markets: { symbol: string; total_open_interest_usd: number | null }[];
+    };
+
+    const norm = body.markets.find((m) => m.symbol === "NORM");
+    const sentinel = body.markets.find((m) => m.symbol === "SENTINEL");
+    const noprice = body.markets.find((m) => m.symbol === "NOPRICE");
+    const fallback = body.markets.find((m) => m.symbol === "FALLBACK");
+
+    expect(norm?.total_open_interest_usd).toBeCloseTo(0.001, 6);   // 1000 / 1e6 * 1.0
+    expect(sentinel?.total_open_interest_usd).toBeNull();           // sentinel rejected
+    expect(noprice?.total_open_interest_usd).toBeNull();            // no price
+    expect(fallback?.total_open_interest_usd).toBeCloseTo(0.001, 6); // (600+400) / 1e6 * 1.0
+  });
+
   it("sanitizes index_price with same bounds as last_price/mark_price (#855)", async () => {
     mockMarkets = [
       // Corrupt index_price — should be nulled
