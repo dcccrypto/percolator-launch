@@ -1,30 +1,76 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { Redis } from "@upstash/redis";
+import { Ratelimit } from "@upstash/ratelimit";
 
-// In-memory rate limiter (per-IP, resets on deploy)
+// ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
-// RPC requests are cached/deduped server-side, so the higher limit is safe.
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const rpcRateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 120;         // General API endpoints
 const RPC_RATE_LIMIT_MAX = 600;     // /api/rpc — Solana needs many RPC calls per page
 
-function getRateLimit(ip: string, isRpc: boolean = false): { remaining: number; reset: number } {
+// ── Upstash Redis distributed rate limiter (GH#1213) ─────────────────────────
+// Primary: Upstash Redis + @upstash/ratelimit — globally consistent across
+//          Vercel serverless instances (uses REST API, Edge Runtime compatible).
+// Fallback: in-memory sliding window — for local dev / CI / when Redis is unconfigured.
+//
+// The previous pure in-memory Map approach was per-instance: on Vercel each cold
+// start resets counters independently, so an attacker distributing requests across
+// instances could bypass the limit entirely. Upstash Redis solves this.
+let _generalLimiter: Ratelimit | null = null;
+let _rpcLimiter: Ratelimit | null = null;
+let _limitersInitialized = false;
+
+function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | null } {
+  if (_limitersInitialized) return { general: _generalLimiter, rpc: _rpcLimiter };
+  _limitersInitialized = true;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return { general: null, rpc: null };
+
+  try {
+    const redis = new Redis({ url, token });
+    _generalLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(RATE_LIMIT_MAX, "60 s"),
+      prefix: "rl:api",
+      analytics: false,
+    });
+    _rpcLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(RPC_RATE_LIMIT_MAX, "60 s"),
+      prefix: "rl:rpc",
+      analytics: false,
+    });
+  } catch {
+    // Redis init error — fall through to in-memory
+    _generalLimiter = null;
+    _rpcLimiter = null;
+  }
+
+  return { general: _generalLimiter, rpc: _rpcLimiter };
+}
+
+// ── In-memory fallback (per-instance) ────────────────────────────────────────
+// Used when Upstash is unconfigured (local dev / CI) or if Redis throws.
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const rpcRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function _getInMemoryRateLimit(ip: string, isRpc: boolean): { remaining: number; reset: number } {
   const now = Date.now();
   const map = isRpc ? rpcRateLimitMap : rateLimitMap;
   const max = isRpc ? RPC_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
 
   let entry = map.get(ip);
-
   if (!entry || now > entry.resetAt) {
     entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
     map.set(ip, entry);
   }
-
   entry.count++;
 
+  // Probabilistic GC to avoid unbounded map growth
   if (Math.random() < 0.001) {
     for (const [key, val] of map) {
       if (now > val.resetAt) map.delete(key);
@@ -35,6 +81,28 @@ function getRateLimit(ip: string, isRpc: boolean = false): { remaining: number; 
     remaining: Math.max(0, max - entry.count),
     reset: Math.ceil((entry.resetAt - now) / 1000),
   };
+}
+
+async function getRateLimit(
+  ip: string,
+  isRpc: boolean = false,
+): Promise<{ remaining: number; reset: number }> {
+  const { general, rpc } = getUpstashLimiters();
+  const limiter = isRpc ? rpc : general;
+
+  if (limiter) {
+    try {
+      const { success, remaining, reset } = await limiter.limit(ip);
+      return {
+        remaining: success ? remaining : 0,
+        reset: Math.max(0, Math.ceil((reset - Date.now()) / 1000)),
+      };
+    } catch {
+      // Redis request failed — degrade gracefully to in-memory
+    }
+  }
+
+  return _getInMemoryRateLimit(ip, isRpc);
 }
 
 // ── IP Blocklist ────────────────────────────────────────────────────────────
@@ -181,7 +249,7 @@ export async function middleware(request: NextRequest) {
 
   if (isApi) {
     const isRpc = request.nextUrl.pathname === "/api/rpc";
-    const { remaining, reset } = getRateLimit(ip, isRpc);
+    const { remaining, reset } = await getRateLimit(ip, isRpc);
     const limit = isRpc ? RPC_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
 
     if (remaining <= 0) {
