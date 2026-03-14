@@ -32,6 +32,12 @@ const StatsBar = dynamic(
   { ssr: false, loading: () => <div className="h-20 animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
 );
 
+// PERC-808: Live protocol-wide Volume + OI strip
+const ProtocolStatsBar = dynamic(
+  () => import("@/components/dashboard/ProtocolStatsBar").then((m) => m.ProtocolStatsBar),
+  { ssr: false, loading: () => <div className="h-12 animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+);
+
 const TradeHistory = dynamic(
   () => import("@/components/dashboard/TradeHistory").then((m) => m.TradeHistory),
   { ssr: false, loading: () => <div className="h-[400px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
@@ -149,7 +155,14 @@ export default function DashboardPage() {
             </div>
           </ScrollReveal>
 
-          {/* Row 2: Stats Bar */}
+          {/* Row 2: Protocol stats (live Volume + OI) — PERC-808 */}
+          <ScrollReveal delay={0.1}>
+            <div className="mb-2">
+              <ProtocolStatsBar />
+            </div>
+          </ScrollReveal>
+
+          {/* Row 3: Personal Stats Bar */}
           <ScrollReveal delay={0.15}>
             <div className="mb-4">
               <StatsBar />
@@ -201,6 +214,7 @@ export default function DashboardPage() {
           {/* Mobile tab content */}
           {mobileTab === "overview" && (
             <div className="space-y-4">
+              <ProtocolStatsBar />
               <StatsBar />
               <div style={{ minHeight: 300 }}>
                 <PnlChart />
