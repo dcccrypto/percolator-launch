@@ -40,8 +40,9 @@ import {
  * volume_24h and trade_count_24h stay accurate even for markets that are no
  * longer being actively cranked on-chain.
  *
- * Runs every 5 minutes — more frequent than the full collect cycle (2 min)
- * but the query is cheap (one bulk trade fetch + N upserts).
+ * Runs every 5 minutes — less frequent than the full collect cycle (2 min)
+ * because it issues a single bulk trade fetch + N upserts (cheap), but still
+ * infrequent enough to avoid hammering the DB under high trade volume.
  */
 const VOLUME_SYNC_INTERVAL_MS = 5 * 60_000;
 
@@ -61,6 +62,7 @@ const ORACLE_LOG_INTERVAL_MS = 60_000;
 export class StatsCollector {
   private timer: ReturnType<typeof setInterval> | null = null;
   private volumeTimer: ReturnType<typeof setInterval> | null = null;
+  private volumeInitTimeout: ReturnType<typeof setTimeout> | null = null;
   private _running = false;
   private _collecting = false;
   private _syncingVolume = false;
@@ -86,7 +88,7 @@ export class StatsCollector {
 
     // Volume sync for ALL DB markets (including uncranked ones) — runs independently.
     // First sync after 30s to let the indexer warm up, then every 5 minutes.
-    setTimeout(() => this.syncVolumeForAllDBMarkets(), 30_000);
+    this.volumeInitTimeout = setTimeout(() => this.syncVolumeForAllDBMarkets(), 30_000);
     this.volumeTimer = setInterval(() => this.syncVolumeForAllDBMarkets(), VOLUME_SYNC_INTERVAL_MS);
 
     logger.info("StatsCollector started", { intervalMs: COLLECT_INTERVAL_MS, volumeSyncIntervalMs: VOLUME_SYNC_INTERVAL_MS });
@@ -101,6 +103,10 @@ export class StatsCollector {
     if (this.volumeTimer) {
       clearInterval(this.volumeTimer);
       this.volumeTimer = null;
+    }
+    if (this.volumeInitTimeout) {
+      clearTimeout(this.volumeInitTimeout);
+      this.volumeInitTimeout = null;
     }
     logger.info("StatsCollector stopped");
   }
@@ -140,6 +146,11 @@ export class StatsCollector {
       }
 
       if (!trades || trades.length === 0) return;
+
+      // Warn if we hit the row cap — volume will be under-reported for that window
+      if (trades.length === 10_000) {
+        logger.warn("syncVolumeForAllDBMarkets: trade fetch hit 10k row limit — volume may be under-reported", { since, limit: 10_000 });
+      }
 
       // Aggregate volume + trade count by slab_address in memory
       const volumeMap = new Map<string, { volume: bigint; count: number }>();
