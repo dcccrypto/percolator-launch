@@ -314,6 +314,22 @@ function isPriceValid(price: number): boolean {
 const stats = new Map<string, MarketStats>();
 let startTime = Date.now();
 
+// ── Wallet Balance Guard ─────────────────────────────────────
+// Minimum keeper wallet balance (lamports) before pushing is paused.
+// Devops audit 2026-03-14: wallet FF7KFfU5 exhausted twice in one day from
+// ~20+ markets per 3-second cycle. Guard prevents on-chain txn drain when
+// balance is low. Default: 0.05 SOL (50_000_000 lamports).
+const MIN_KEEPER_BALANCE_LAMPORTS = Number(
+  process.env.MIN_KEEPER_BALANCE_SOL
+    ? Math.round(parseFloat(process.env.MIN_KEEPER_BALANCE_SOL) * 1e9)
+    : 50_000_000,
+);
+// Interval between balance refreshes (default: every 30 s = ~10 push cycles at 3s interval)
+const BALANCE_CHECK_INTERVAL_MS = Number(process.env.BALANCE_CHECK_INTERVAL_MS ?? "30000");
+let walletBalanceLamports: number | null = null;
+let lastBalanceCheckAt = 0;
+let walletLow = false;
+
 function getOrCreateStats(market: MarketInfo): MarketStats {
   let s = stats.get(market.slab);
   if (!s) {
@@ -600,10 +616,19 @@ function startHealthServer() {
         };
       }
 
+      // If wallet is low, override status to degraded regardless of market staleness
+      if (walletLow) healthy = false;
+
       const body = JSON.stringify({
         status: healthy ? "ok" : "degraded",
         uptime: `${uptimeS}s`,
         pushIntervalMs: PUSH_INTERVAL_MS,
+        wallet: {
+          address: admin.publicKey.toBase58(),
+          balanceSol: walletBalanceLamports != null ? walletBalanceLamports / 1e9 : null,
+          minBalanceSol: MIN_KEEPER_BALANCE_LAMPORTS / 1e9,
+          low: walletLow,
+        },
         markets,
       }, null, 2);
 
@@ -623,6 +648,12 @@ function startHealthServer() {
 
 // ── Supabase Market Discovery ───────────────────────────────
 const knownSlabs = new Set<string>();
+// Module-level markets array — must be at module scope so discovery functions
+// (discoverHyperpFromOracleTable, discoverNewMarkets) can read/mutate it.
+// Bug fix: was previously `const markets` inside main(), making it inaccessible
+// to module-level async functions → ReferenceError "markets is not defined" on
+// every discovery cycle (oracle_markets discovery error). (Devops audit 2026-03-14)
+let markets: MarketInfo[] = [];
 
 /**
  * Poll Supabase `oracle_markets` table for explicitly-registered oracle configs.
@@ -824,7 +855,8 @@ async function main() {
 
   const deploy = deployRaw ? JSON.parse(deployRaw) : { programId: process.env.PROGRAM_ID, markets: [] };
   const programId = new PublicKey(deploy.programId);
-  const markets: MarketInfo[] = (deploy.markets as MarketInfo[]).filter(m => {
+  // Assign to module-level `markets` so discovery functions can access it.
+  markets = (deploy.markets as MarketInfo[]).filter(m => {
     if (ORACLE_KEEPER_BLOCKED_MARKETS.has(m.slab)) {
       log(`⛔ STARTUP: ${m.label} (${m.slab.slice(0, 12)}...) — in ORACLE_KEEPER_BLOCKED_MARKETS, skipping`);
       return false;
@@ -961,6 +993,31 @@ async function main() {
       } catch (e) {
         log(`⚠️ Discovery poll error: ${(e as Error).message?.slice(0, 60)}`);
       }
+    }
+
+    // ── Wallet balance guard ─────────────────────────────────
+    // Refresh balance every BALANCE_CHECK_INTERVAL_MS; pause all pushes if low.
+    // Devops audit 2026-03-14: wallet exhausted twice in one day from ~20+ markets per cycle.
+    if (now - lastBalanceCheckAt > BALANCE_CHECK_INTERVAL_MS) {
+      lastBalanceCheckAt = now;
+      try {
+        walletBalanceLamports = await conn.getBalance(admin.publicKey, "confirmed");
+        const prevLow = walletLow;
+        walletLow = walletBalanceLamports < MIN_KEEPER_BALANCE_LAMPORTS;
+        if (walletLow && !prevLow) {
+          log(`🚨 WALLET LOW: ${(walletBalanceLamports / 1e9).toFixed(4)} SOL — below ${MIN_KEEPER_BALANCE_LAMPORTS / 1e9} SOL threshold. PAUSING ALL PUSHES. Refund ${admin.publicKey.toBase58().slice(0, 8)}...`);
+        } else if (!walletLow && prevLow) {
+          log(`✅ WALLET REFUNDED: ${(walletBalanceLamports / 1e9).toFixed(4)} SOL — resuming pushes.`);
+        }
+      } catch (e) {
+        log(`⚠️ Wallet balance check failed: ${(e as Error).message?.slice(0, 60)}`);
+      }
+    }
+
+    if (walletLow) {
+      log(`⏸ Wallet balance low (${walletBalanceLamports != null ? (walletBalanceLamports / 1e9).toFixed(4) : "??"} SOL) — skipping push cycle`);
+      await new Promise(r => setTimeout(r, PUSH_INTERVAL_MS));
+      continue;
     }
 
     // Batch-fetch all Pyth prices in a single request

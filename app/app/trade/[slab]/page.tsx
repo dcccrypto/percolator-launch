@@ -163,8 +163,8 @@ function TradePageInner({ slab }: { slab: string }) {
   const pageRef = useRef<HTMLDivElement>(null);
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
-  // Fetch Supabase market data (symbol, name, logo) as fallback for on-chain resolution
-  const [supabaseMarket, setSupabaseMarket] = useState<{ symbol?: string; name?: string; logo_url?: string } | null>(null);
+  // Fetch Supabase market data (symbol, name, logo, mainnet_ca) as fallback for on-chain resolution
+  const [supabaseMarket, setSupabaseMarket] = useState<{ symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/markets/${slab}`)
@@ -175,6 +175,8 @@ function TradePageInner({ slab }: { slab: string }) {
             symbol: d.market.symbol ?? undefined,
             name: d.market.name ?? undefined,
             logo_url: d.market.logo_url ?? undefined,
+            // GH#1210: used to determine whether Get Token button should be shown
+            mainnet_ca: d.market.mainnet_ca ?? null,
           });
         }
       })
@@ -321,7 +323,7 @@ function TradePageInner({ slab }: { slab: string }) {
               {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
             </span>
           )}
-          <AirdropButton mintAddress={mintAddress} symbol={symbol} />
+          <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={!!supabaseMarket?.mainnet_ca} />
           <ShareButton
             slabAddress={slab}
             marketName={symbol}
@@ -389,7 +391,7 @@ function TradePageInner({ slab }: { slab: string }) {
 
         {/* Right-aligned controls */}
         <div className="ml-auto flex items-center gap-3">
-          <AirdropButton mintAddress={mintAddress} symbol={symbol} />
+          <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={!!supabaseMarket?.mainnet_ca} />
           <UsdToggleButton />
           <ShareButton
             slabAddress={slab}
