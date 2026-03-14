@@ -222,6 +222,40 @@ describe("GET /api/markets — price sanitization (#856)", () => {
     expect(fallback?.total_open_interest_usd).toBeCloseTo(0.001, 6); // (600+400) / 1e6 * 1.0
   });
 
+  it("includes total field matching markets array length (#1168)", async () => {
+    mockMarkets = [
+      mkMarket({ symbol: "A" }),
+      mkMarket({ symbol: "B" }),
+      mkMarket({ symbol: "C" }),
+    ];
+
+    vi.resetModules();
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET();
+    const body = (await res.json()) as { total: number; markets: unknown[] };
+
+    expect(body.total).toBe(3);
+    expect(body.total).toBe(body.markets.length);
+  });
+
+  it("total excludes blocked markets (#1168)", async () => {
+    vi.stubEnv("BLOCKED_MARKET_ADDRESSES", "BlockedSlab11111111111111111111111111111111");
+    mockMarkets = [
+      mkMarket({ slab_address: "BlockedSlab11111111111111111111111111111111", symbol: "BLOCKED" }),
+      mkMarket({ symbol: "GOOD_A" }),
+      mkMarket({ symbol: "GOOD_B" }),
+    ];
+
+    vi.resetModules();
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET();
+    const body = (await res.json()) as { total: number; markets: unknown[] };
+
+    // BLOCKED market excluded → total = 2
+    expect(body.total).toBe(2);
+    expect(body.total).toBe(body.markets.length);
+  });
+
   it("sanitizes index_price with same bounds as last_price/mark_price (#855)", async () => {
     mockMarkets = [
       // Corrupt index_price — should be nulled
