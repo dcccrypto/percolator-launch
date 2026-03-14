@@ -5,7 +5,7 @@ import { config, getConnection, insertTrade, tradeExistsBySignature, getMarkets,
 const logger = createLogger("indexer:trade-indexer");
 
 /** Trade instruction tags we want to index */
-const TRADE_TAGS = new Set<number>([IX_TAG.TradeNoCpi, IX_TAG.TradeCpi]);
+const TRADE_TAGS = new Set<number>([IX_TAG.TradeNoCpi, IX_TAG.TradeCpi, IX_TAG.TradeCpiV2]);
 
 /** How many recent signatures to fetch per slab per cycle */
 const MAX_SIGNATURES = 50;
@@ -259,6 +259,7 @@ export class TradeIndexerPolling {
 
       // This is a trade instruction! Parse it.
       // Layout: tag(1) + lpIdx(u16=2) + userIdx(u16=2) + size(i128=16) = 21 bytes
+      // TradeCpiV2 adds bump(u8) at byte 21, total 22 bytes — size offset unchanged.
       if (data.length < 21) continue;
 
       // Parse size as signed i128 (little-endian)

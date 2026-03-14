@@ -5,7 +5,7 @@ import { config, insertTrade, eventBus, decodeBase58, readU128LE, parseTradeSize
 
 const logger = createLogger("indexer:webhook");
 
-const TRADE_TAGS = new Set<number>([IX_TAG.TradeNoCpi, IX_TAG.TradeCpi]);
+const TRADE_TAGS = new Set<number>([IX_TAG.TradeNoCpi, IX_TAG.TradeCpi, IX_TAG.TradeCpiV2]);
 const PROGRAM_IDS = new Set(config.allProgramIds);
 const BASE58_PUBKEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -180,12 +180,14 @@ function extractTradesFromEnhancedTx(tx: any): TradeData[] {
     if (!TRADE_TAGS.has(tag)) continue;
 
     // Parse: tag(1) + lpIdx(u16=2) + userIdx(u16=2) + size(i128=16)
+    // TradeCpiV2 adds an extra bump(u8) at byte 21 — same size offset, different total length (22 vs 21)
     const { sizeValue, side } = parseTradeSize(data.slice(5, 21));
 
     // Account layout (from core/abi/accounts.ts):
     // PERC-199: clock sysvar removed from trade instructions
-    // TradeNoCpi: [0]=user(signer), [1]=lp(signer), [2]=slab(writable), [3]=oracle
-    // TradeCpi:   [0]=user(signer), [1]=lpOwner,    [2]=slab(writable), [3]=oracle, ...
+    // TradeNoCpi:  [0]=user(signer), [1]=lp(signer), [2]=slab(writable), [3]=oracle
+    // TradeCpi:    [0]=user(signer), [1]=lpOwner,    [2]=slab(writable), [3]=oracle, ...
+    // TradeCpiV2:  [0]=user(signer), [1]=lpOwner,    [2]=slab(writable), [3]=oracle, ... (same layout, adds bump in data)
     const accounts: string[] = ix.accounts ?? [];
     const trader = accounts[0] ?? "";
     const slabAddress = accounts.length > 2 ? accounts[2] : "";

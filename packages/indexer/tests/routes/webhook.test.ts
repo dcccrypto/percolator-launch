@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as nodeCrypto from 'node:crypto';
 
 vi.mock('@percolator/sdk', () => ({
-  IX_TAG: { TradeNoCpi: 10, TradeCpi: 11 },
+  IX_TAG: { TradeNoCpi: 10, TradeCpi: 11, TradeCpiV2: 35 },
   // detectSlabLayout: returns a V1-style layout so engineOff + engineMarkPriceOff = 1040,
   // matching the mock slab buffers built in tests below.
   detectSlabLayout: vi.fn((dataLen: number) => {
@@ -282,6 +282,34 @@ describe('POST /webhook/trades — price extraction', () => {
     };
     const res = await app.fetch(makeRequest([tx]));
     expect(res.status).toBe(200);
+  });
+
+  it('indexes TradeCpiV2 (tag=35, 22-byte layout) — GH#1171 regression', async () => {
+    // TradeCpiV2 adds a bump byte at position 21, total 22 bytes.
+    // The TRADE_TAGS set must include IX_TAG.TradeCpiV2 or all such trades are silently dropped.
+    const mockDecodeBase58 = vi.mocked(shared.decodeBase58);
+    mockDecodeBase58.mockReturnValueOnce((() => {
+      const buf = new Uint8Array(22); // 22-byte TradeCpiV2
+      buf[0] = 35; // IX_TAG.TradeCpiV2
+      buf[5] = 0x40; buf[6] = 0x42; buf[7] = 0x0f; // size bytes
+      buf[21] = 0xfe; // bump byte
+      return buf;
+    })());
+
+    const tx = {
+      signature: SIG,
+      instructions: makeBaseInstructions(),
+      innerInstructions: [],
+      accountData: [],
+      logs: ['Program log: 1500000, 2000000, 3000000, 4000000, 5000000'],
+    };
+    await app.fetch(makeRequest([tx]));
+
+    // Must have been indexed — not silently skipped
+    expect(shared.insertTrade).toHaveBeenCalledOnce();
+    expect(shared.insertTrade).toHaveBeenCalledWith(
+      expect.objectContaining({ side: 'long', size: '1000000' })
+    );
   });
 
   it('returns 400 for invalid JSON body', async () => {
