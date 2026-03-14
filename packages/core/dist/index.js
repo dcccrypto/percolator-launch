@@ -1051,6 +1051,35 @@ var V1_ENGINE_EMERGENCY_OI_MODE_OFF = 632;
 var V1_ENGINE_EMERGENCY_START_SLOT_OFF = 640;
 var V1_ENGINE_LAST_BREAKER_SLOT_OFF = 648;
 var V1_ENGINE_BITMAP_OFF = 656;
+var V1D_CONFIG_LEN = 320;
+var V1D_ENGINE_OFF = 424;
+var V1D_ACCOUNT_SIZE = 248;
+var V1D_ENGINE_INSURANCE_OFF = 16;
+var V1D_ENGINE_PARAMS_OFF = 96;
+var V1D_PARAMS_SIZE = 288;
+var V1D_ENGINE_CURRENT_SLOT_OFF = 384;
+var V1D_ENGINE_FUNDING_INDEX_OFF = 392;
+var V1D_ENGINE_LAST_FUNDING_SLOT_OFF = 408;
+var V1D_ENGINE_FUNDING_RATE_BPS_OFF = 416;
+var V1D_ENGINE_MARK_PRICE_OFF = 424;
+var V1D_ENGINE_LAST_CRANK_SLOT_OFF = 448;
+var V1D_ENGINE_MAX_CRANK_STALENESS_OFF = 456;
+var V1D_ENGINE_TOTAL_OI_OFF = 464;
+var V1D_ENGINE_LONG_OI_OFF = 480;
+var V1D_ENGINE_SHORT_OI_OFF = 496;
+var V1D_ENGINE_C_TOT_OFF = 512;
+var V1D_ENGINE_PNL_POS_TOT_OFF = 528;
+var V1D_ENGINE_LIQ_CURSOR_OFF = 544;
+var V1D_ENGINE_GC_CURSOR_OFF = 546;
+var V1D_ENGINE_LAST_SWEEP_START_OFF = 552;
+var V1D_ENGINE_LAST_SWEEP_COMPLETE_OFF = 560;
+var V1D_ENGINE_CRANK_CURSOR_OFF = 568;
+var V1D_ENGINE_SWEEP_START_IDX_OFF = 570;
+var V1D_ENGINE_LIFETIME_LIQUIDATIONS_OFF = 576;
+var V1D_ENGINE_LIFETIME_FORCE_CLOSES_OFF = 584;
+var V1D_ENGINE_NET_LP_POS_OFF = 592;
+var V1D_ENGINE_LP_SUM_ABS_OFF = 608;
+var V1D_ENGINE_BITMAP_OFF = 624;
 var ENGINE_OFF = V1_ENGINE_OFF;
 var ENGINE_MARK_PRICE_OFF = V1_ENGINE_MARK_PRICE_OFF;
 function computeSlabSize(engineOff, bitmapOff, accountSize, maxAccounts) {
@@ -1066,10 +1095,12 @@ var TIERS = [64, 256, 1024, 4096];
 var V0_SIZES = /* @__PURE__ */ new Map();
 var V1_SIZES = /* @__PURE__ */ new Map();
 var V1_SIZES_LEGACY = /* @__PURE__ */ new Map();
+var V1D_SIZES = /* @__PURE__ */ new Map();
 for (const n of TIERS) {
   V0_SIZES.set(computeSlabSize(V0_ENGINE_OFF, V0_ENGINE_BITMAP_OFF, V0_ACCOUNT_SIZE, n), n);
   V1_SIZES.set(computeSlabSize(V1_ENGINE_OFF, V1_ENGINE_BITMAP_OFF, V1_ACCOUNT_SIZE, n), n);
   V1_SIZES_LEGACY.set(computeSlabSize(V1_ENGINE_OFF_LEGACY, V1_ENGINE_BITMAP_OFF, V1_ACCOUNT_SIZE, n), n);
+  V1D_SIZES.set(computeSlabSize(V1D_ENGINE_OFF, V1D_ENGINE_BITMAP_OFF, V1D_ACCOUNT_SIZE, n), n);
 }
 function buildLayout(version, maxAccounts, engineOffOverride) {
   const isV0 = version === 0;
@@ -1129,9 +1160,75 @@ function buildLayout(version, maxAccounts, engineOffOverride) {
     engineInsuranceIsolationBpsOff: isV0 ? -1 : 64
   };
 }
+function buildLayoutV1D(maxAccounts) {
+  const engineOff = V1D_ENGINE_OFF;
+  const bitmapOff = V1D_ENGINE_BITMAP_OFF;
+  const accountSize = V1D_ACCOUNT_SIZE;
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const bitmapBytes = bitmapWords * 8;
+  const postBitmap = 18;
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
+  return {
+    version: 1,
+    headerLen: V1_HEADER_LEN,
+    configOffset: V1_HEADER_LEN,
+    configLen: V1D_CONFIG_LEN,
+    reservedOff: V1_RESERVED_OFF,
+    engineOff,
+    accountSize,
+    maxAccounts,
+    bitmapWords,
+    accountsOff: engineOff + accountsOffRel,
+    engineInsuranceOff: V1D_ENGINE_INSURANCE_OFF,
+    engineParamsOff: V1D_ENGINE_PARAMS_OFF,
+    paramsSize: V1D_PARAMS_SIZE,
+    engineCurrentSlotOff: V1D_ENGINE_CURRENT_SLOT_OFF,
+    engineFundingIndexOff: V1D_ENGINE_FUNDING_INDEX_OFF,
+    engineLastFundingSlotOff: V1D_ENGINE_LAST_FUNDING_SLOT_OFF,
+    engineFundingRateBpsOff: V1D_ENGINE_FUNDING_RATE_BPS_OFF,
+    engineMarkPriceOff: V1D_ENGINE_MARK_PRICE_OFF,
+    engineLastCrankSlotOff: V1D_ENGINE_LAST_CRANK_SLOT_OFF,
+    engineMaxCrankStalenessOff: V1D_ENGINE_MAX_CRANK_STALENESS_OFF,
+    engineTotalOiOff: V1D_ENGINE_TOTAL_OI_OFF,
+    engineLongOiOff: V1D_ENGINE_LONG_OI_OFF,
+    engineShortOiOff: V1D_ENGINE_SHORT_OI_OFF,
+    engineCTotOff: V1D_ENGINE_C_TOT_OFF,
+    enginePnlPosTotOff: V1D_ENGINE_PNL_POS_TOT_OFF,
+    engineLiqCursorOff: V1D_ENGINE_LIQ_CURSOR_OFF,
+    engineGcCursorOff: V1D_ENGINE_GC_CURSOR_OFF,
+    engineLastSweepStartOff: V1D_ENGINE_LAST_SWEEP_START_OFF,
+    engineLastSweepCompleteOff: V1D_ENGINE_LAST_SWEEP_COMPLETE_OFF,
+    engineCrankCursorOff: V1D_ENGINE_CRANK_CURSOR_OFF,
+    engineSweepStartIdxOff: V1D_ENGINE_SWEEP_START_IDX_OFF,
+    engineLifetimeLiquidationsOff: V1D_ENGINE_LIFETIME_LIQUIDATIONS_OFF,
+    engineLifetimeForceClosesOff: V1D_ENGINE_LIFETIME_FORCE_CLOSES_OFF,
+    engineNetLpPosOff: V1D_ENGINE_NET_LP_POS_OFF,
+    engineLpSumAbsOff: V1D_ENGINE_LP_SUM_ABS_OFF,
+    engineLpMaxAbsOff: -1,
+    // not present in deployed V1
+    engineLpMaxAbsSweepOff: -1,
+    // not present in deployed V1
+    engineEmergencyOiModeOff: -1,
+    // not present in deployed V1
+    engineEmergencyStartSlotOff: -1,
+    // not present in deployed V1
+    engineLastBreakerSlotOff: -1,
+    // not present in deployed V1
+    engineBitmapOff: V1D_ENGINE_BITMAP_OFF,
+    hasInsuranceIsolation: true,
+    engineInsuranceIsolatedOff: 48,
+    // same within InsuranceFund
+    engineInsuranceIsolationBpsOff: 64
+    // same within InsuranceFund
+  };
+}
 function detectSlabLayout(dataLen) {
   const v0n = V0_SIZES.get(dataLen);
   if (v0n !== void 0) return buildLayout(0, v0n);
+  const v1dn = V1D_SIZES.get(dataLen);
+  if (v1dn !== void 0) return buildLayoutV1D(v1dn);
   const v1n = V1_SIZES.get(dataLen);
   if (v1n !== void 0) return buildLayout(1, v1n);
   const v1ln = V1_SIZES_LEGACY.get(dataLen);
