@@ -21,9 +21,16 @@ interface AirdropButtonProps {
   symbol: string;
   /** Only show on user-created markets (not SOL-PERP, etc.) */
   isUserCreated?: boolean;
+  /**
+   * GH#1210: Whether this token was created via the mainnet CA mirror flow.
+   * When false the /api/devnet-airdrop endpoint rejects it.
+   * Defaults to true (unknown → show button, let API gate it) so existing
+   * call sites without the prop keep working; trade page passes this explicitly.
+   */
+  isDevnetMirror?: boolean;
 }
 
-export function AirdropButton({ mintAddress, symbol, isUserCreated = true }: AirdropButtonProps) {
+export function AirdropButton({ mintAddress, symbol, isUserCreated = true, isDevnetMirror = true }: AirdropButtonProps) {
   const { publicKey, connected } = useWalletCompat();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ amount: number; nextClaimAt: string } | null>(null);
@@ -92,6 +99,25 @@ export function AirdropButton({ mintAddress, symbol, isUserCreated = true }: Air
   // Don't render on mainnet, non-user-created markets, or missing mint
   if (!isDevnet || !isUserCreated || !mintAddress) return null;
   if (!connected) return null;
+
+  // GH#1210: For tokens NOT created via the mainnet CA mirror flow, the airdrop
+  // endpoint will reject with "not a known devnet mirror mint". Instead of showing
+  // the button and a confusing inline error, show a clear message with a link to
+  // /devnet-mint where users can mint test tokens for any market.
+  if (!isDevnetMirror) {
+    return (
+      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-elevated)] border border-[var(--border)] text-[10px]">
+        <span className="text-[var(--text-muted)]">Get {symbol}:</span>
+        <a
+          href="/devnet-mint"
+          className="text-[var(--accent)] hover:underline font-medium"
+          title="Mint test tokens for this market on the Devnet Faucet page"
+        >
+          Devnet Faucet →
+        </a>
+      </div>
+    );
+  }
 
   // Already claimed — show countdown
   if (countdown) {
