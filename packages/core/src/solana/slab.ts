@@ -287,6 +287,10 @@ for (const n of TIERS) {
   // GH#1234: V1D deployed program omits num_used/pad/next_account_id → postBitmap=2 (free_head only).
   // This yields 65088 (n=256) and 1025568 (n=4096) matching actual devnet account sizes.
   V1D_SIZES.set(computeSlabSize(V1D_ENGINE_OFF, V1D_ENGINE_BITMAP_OFF, V1D_ACCOUNT_SIZE, n, 2), n);
+  // GH#1237: Legacy V1D slabs allocated with postBitmap=18 (65104 for n=256) also exist on-chain.
+  // Both sizes must be recognized — the actual field layout is the same (postBitmap=2 is correct
+  // for parsing), but the on-chain account was allocated with extra trailing padding.
+  V1D_SIZES.set(computeSlabSize(V1D_ENGINE_OFF, V1D_ENGINE_BITMAP_OFF, V1D_ACCOUNT_SIZE, n, 18), n);
 }
 
 function buildLayout(version: 0 | 1, maxAccounts: number, engineOffOverride?: number): SlabLayout {
@@ -451,12 +455,13 @@ export function detectSlabLayout(dataLen: number): SlabLayout | null {
 export function detectLayout(dataLen: number) {
   const layout = detectSlabLayout(dataLen);
   if (!layout) return null;
-  const bitmapBytes = layout.bitmapWords * 8;
-  const postBitmap = 18;
-  const nextFreeBytes = layout.maxAccounts * 2;
-  const preAccountsLen = layout.engineBitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
-  const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
-  return { bitmapWords: layout.bitmapWords, accountsOff, maxAccounts: layout.maxAccounts };
+  // GH#1237: use the layout's computed accountsOff directly instead of re-deriving with
+  // hardcoded postBitmap=18 (which is wrong for V1D where postBitmap=2).
+  return {
+    bitmapWords: layout.bitmapWords,
+    accountsOff: layout.accountsOff - layout.engineOff,
+    maxAccounts: layout.maxAccounts,
+  };
 }
 
 // =============================================================================
