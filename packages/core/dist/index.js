@@ -1080,12 +1080,13 @@ var V1D_ENGINE_LIFETIME_FORCE_CLOSES_OFF = 584;
 var V1D_ENGINE_NET_LP_POS_OFF = 592;
 var V1D_ENGINE_LP_SUM_ABS_OFF = 608;
 var V1D_ENGINE_BITMAP_OFF = 624;
+var V1D_POST_BITMAP = 2;
 var ENGINE_OFF = V1_ENGINE_OFF;
 var ENGINE_MARK_PRICE_OFF = V1_ENGINE_MARK_PRICE_OFF;
-function computeSlabSize(engineOff, bitmapOff, accountSize, maxAccounts) {
+function computeSlabSize(engineOff, bitmapOff, accountSize, maxAccounts, postBitmapOverride) {
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
-  const postBitmap = 18;
+  const postBitmap = postBitmapOverride ?? 18;
   const nextFreeBytes = maxAccounts * 2;
   const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
   const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
@@ -1100,7 +1101,7 @@ for (const n of TIERS) {
   V0_SIZES.set(computeSlabSize(V0_ENGINE_OFF, V0_ENGINE_BITMAP_OFF, V0_ACCOUNT_SIZE, n), n);
   V1_SIZES.set(computeSlabSize(V1_ENGINE_OFF, V1_ENGINE_BITMAP_OFF, V1_ACCOUNT_SIZE, n), n);
   V1_SIZES_LEGACY.set(computeSlabSize(V1_ENGINE_OFF_LEGACY, V1_ENGINE_BITMAP_OFF, V1_ACCOUNT_SIZE, n), n);
-  V1D_SIZES.set(computeSlabSize(V1D_ENGINE_OFF, V1D_ENGINE_BITMAP_OFF, V1D_ACCOUNT_SIZE, n), n);
+  V1D_SIZES.set(computeSlabSize(V1D_ENGINE_OFF, V1D_ENGINE_BITMAP_OFF, V1D_ACCOUNT_SIZE, n, V1D_POST_BITMAP), n);
 }
 function buildLayout(version, maxAccounts, engineOffOverride) {
   const isV0 = version === 0;
@@ -1166,7 +1167,7 @@ function buildLayoutV1D(maxAccounts) {
   const accountSize = V1D_ACCOUNT_SIZE;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
-  const postBitmap = 18;
+  const postBitmap = V1D_POST_BITMAP;
   const nextFreeBytes = maxAccounts * 2;
   const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
   const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
@@ -1238,11 +1239,7 @@ function detectSlabLayout(dataLen) {
 function detectLayout(dataLen) {
   const layout = detectSlabLayout(dataLen);
   if (!layout) return null;
-  const bitmapBytes = layout.bitmapWords * 8;
-  const postBitmap = 18;
-  const nextFreeBytes = layout.maxAccounts * 2;
-  const preAccountsLen = layout.engineBitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
-  const accountsOff = Math.ceil(preAccountsLen / 8) * 8;
+  const accountsOff = layout.accountsOff - layout.engineOff;
   return { bitmapWords: layout.bitmapWords, accountsOff, maxAccounts: layout.maxAccounts };
 }
 var PARAMS_WARMUP_PERIOD_OFF = 0;
