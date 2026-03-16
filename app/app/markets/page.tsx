@@ -274,6 +274,22 @@ function MarketsPageInner() {
           return volB > volA ? 1 : volB < volA ? -1 : 0;
         }
         case "oi": {
+          if (showUsd) {
+            // GH-1327: In USD mode, sort by USD-equivalent OI.
+            // Markets without a valid price get USD OI = 0 (sort to bottom).
+            const usdOI = (m: MergedMarket): number => {
+              const raw = getOI(m);
+              if (raw === 0n) return 0;
+              const price = m.supabase?.last_price ?? null;
+              if (price == null || price <= 0 || price > MAX_SANE_PRICE_USD) return 0;
+              const meta = tokenMetaMap.get(m.mintAddress);
+              const decimals = Math.min(Math.max(meta?.decimals ?? 6, 0), 18);
+              return Number(raw) / (10 ** decimals) * price;
+            };
+            const oiA = usdOI(a);
+            const oiB = usdOI(b);
+            return oiB - oiA;
+          }
           const oiA = getOI(a);
           const oiB = getOI(b);
           return oiB > oiA ? 1 : oiB < oiA ? -1 : 0;
@@ -295,7 +311,7 @@ function MarketsPageInner() {
       }
     });
     return list;
-  }, [effectiveMarkets, debouncedSearch, sortBy, leverageFilter, oracleFilter, tokenMetaMap]);
+  }, [effectiveMarkets, debouncedSearch, sortBy, leverageFilter, oracleFilter, tokenMetaMap, showUsd]);
 
   // P-MED-3: Progressive reveal + intersection observer backup
   // Auto-load items in batches via requestAnimationFrame for instant display.
