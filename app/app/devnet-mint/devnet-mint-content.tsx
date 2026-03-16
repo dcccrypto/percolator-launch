@@ -187,6 +187,7 @@ const DevnetMintContent: FC = () => {
     setAirdropFailed(false);
     try {
       const sig = await airdropConnection.requestAirdrop(publicKey, 2 * LAMPORTS_PER_SOL);
+      setLastTxSig(sig);
       const startTime = Date.now();
       const TIMEOUT_MS = 60_000;
       let confirmed = false;
@@ -201,7 +202,7 @@ const DevnetMintContent: FC = () => {
         await new Promise(r => setTimeout(r, 2000));
       }
       if (!confirmed) {
-        throw new Error("Transaction confirmation timeout after 60s");
+        throw new Error("Transaction confirmation timeout after 60s. Your transaction may still be processing — check Explorer before retrying.");
       }
       setAirdropStatus("Airdrop successful!");
       setAirdropFailed(false);
@@ -359,7 +360,7 @@ const DevnetMintContent: FC = () => {
         await new Promise(r => setTimeout(r, 2000));
       }
       if (!confirmed) {
-        throw new Error("Transaction confirmation timeout after 60s");
+        throw new Error("Transaction confirmation timeout after 60s. Your token may still be created — check Explorer before retrying.");
       }
 
       const colorHash = mintKeypair.publicKey.toBuffer().slice(0, 3);
@@ -465,7 +466,7 @@ const DevnetMintContent: FC = () => {
         await new Promise(r => setTimeout(r, 2000));
       }
       if (!mintMoreConfirmed) {
-        throw new Error("Transaction confirmation timeout after 60s");
+        throw new Error("Transaction confirmation timeout after 60s. Your tokens may still be minting — check Explorer before retrying.");
       }
       setMintMoreStatus(`Minted ${Number(mintMoreAmount).toLocaleString()} tokens!`);
       await refreshBalance();
@@ -664,9 +665,21 @@ const DevnetMintContent: FC = () => {
                 </button>
               </div>
               {airdropStatus && (
-                <p className={`mt-2 text-[10px] ${airdropStatus.startsWith("Airdrop successful") ? "text-[var(--accent)]" : airdropFailed ? "text-[var(--short)]" : "text-[var(--text-muted)]"}`}>
-                  {airdropStatus}
-                </p>
+                <div className="mt-2">
+                  <p className={`text-[10px] ${airdropStatus.startsWith("Airdrop successful") ? "text-[var(--accent)]" : airdropFailed ? "text-[var(--short)]" : "text-[var(--text-muted)]"}`}>
+                    {airdropStatus}
+                  </p>
+                  {airdropFailed && lastTxSig && (
+                    <a
+                      href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-block text-[10px] text-[var(--accent)] underline hover:text-white"
+                    >
+                      Check transaction on Explorer →
+                    </a>
+                  )}
+                </div>
               )}
             </div>
           </ScrollReveal>
@@ -789,7 +802,19 @@ const DevnetMintContent: FC = () => {
 
               {/* Error inline */}
               {!loading && createStatus?.startsWith("Error") && (
-                <p className="mb-3 text-xs text-[var(--short)]">{createStatus}</p>
+                <div className="mb-3">
+                  <p className="text-xs text-[var(--short)]">{createStatus}</p>
+                  {lastTxSig && (
+                    <a
+                      href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-block text-[10px] text-[var(--accent)] underline hover:text-white"
+                    >
+                      Check transaction on Explorer →
+                    </a>
+                  )}
+                </div>
               )}
 
               <button className={`${btnPrimary} w-full`} onClick={handleCreateAndMint} disabled={loading || !recipient || lowSol || !walletReady}>
@@ -825,17 +850,29 @@ const DevnetMintContent: FC = () => {
                 </div>
               )}
               {!mintingMore && mintMoreStatus && (
-                <p className={`text-xs ${mintMoreStatus.startsWith("Error") ? "text-[var(--short)]" : "text-[var(--accent)]"}`}>
-                  {mintMoreStatus}
-                  {lastTxSig && !mintMoreStatus.startsWith("Error") && (
-                    <>
-                      {" "}
-                      <a href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="underline hover:text-white">
-                        View tx →
-                      </a>
-                    </>
+                <div>
+                  <p className={`text-xs ${mintMoreStatus.startsWith("Error") ? "text-[var(--short)]" : "text-[var(--accent)]"}`}>
+                    {mintMoreStatus}
+                    {lastTxSig && !mintMoreStatus.startsWith("Error") && (
+                      <>
+                        {" "}
+                        <a href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`} target="_blank" rel="noopener noreferrer" className="underline hover:text-white">
+                          View tx →
+                        </a>
+                      </>
+                    )}
+                  </p>
+                  {lastTxSig && mintMoreStatus.startsWith("Error") && (
+                    <a
+                      href={`https://explorer.solana.com/tx/${lastTxSig}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-block text-[10px] text-[var(--accent)] underline hover:text-white"
+                    >
+                      Check transaction on Explorer →
+                    </a>
                   )}
-                </p>
+                </div>
               )}
               {/* P-HIGH-4: Disable button during mint authority check */}
               <button className={`${btnPrimary} w-full`} onClick={handleMintMore} disabled={mintingMore || checkingMintAuth || !existingMint || !mintMoreAmount || !!mintAuthError || !walletReady}>
