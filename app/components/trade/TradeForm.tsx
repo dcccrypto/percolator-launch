@@ -21,6 +21,7 @@ import { usePrivyLogin } from "@/hooks/usePrivySafe";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
+import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 
 const LEVERAGE_PRESETS = [1, 2, 3, 5, 10];
 const MARGIN_PRESETS = [25, 50, 75, 100];
@@ -61,6 +62,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const openWalletModal = usePrivyLogin();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const symbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
+  
+  // GH#1330: Oracle staleness guard — block trading when oracle is stale to prevent
+  // on-chain failures with "Oracle is invalid — no price available" errors.
+  const { level: oracleLevel, mode: oracleMode } = useOracleFreshness();
+  const oracleStale = oracleLevel === "stale";
   
   // BUG FIX: Fetch on-chain decimals from token account (like DepositWithdrawCard)
   // Don't rely solely on tokenMeta which may fail for cross-network tokens
@@ -322,6 +328,17 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       )}
 
+      {/* GH#1330: Oracle stale warning — when the on-chain oracle price is expired,
+          trades will fail with "Oracle is invalid". Block the form pre-emptively. */}
+      {oracleStale && priceUsd && !mockMode && (
+        <div className="mb-3 rounded-none border border-[var(--short)]/30 bg-[var(--short)]/5 p-2.5">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--short)]">Oracle Stale</p>
+          <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
+            The oracle price feed has not updated recently. Trading is disabled until fresh price data is available.
+          </p>
+        </div>
+      )}
+
       {/* Direction toggle */}
       <div className="mb-3 flex gap-1">
         <button
@@ -475,10 +492,10 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       ) : (
         <button
           onClick={() => {
-            if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || tradePhase !== "idle" || loading || (!priceUsd && !mockMode)) return;
+            if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || tradePhase !== "idle" || loading || (!priceUsd && !mockMode) || (oracleStale && !mockMode)) return;
             setShowConfirmModal(true);
           }}
-          disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || lpUnderfunded || vaultEmpty || (!priceUsd && !mockMode)}
+          disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || lpUnderfunded || vaultEmpty || (!priceUsd && !mockMode) || (oracleStale && !mockMode)}
           className={`w-full rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
             direction === "long"
               ? "bg-[var(--long)] hover:brightness-110 focus-visible:ring-[var(--long)]"

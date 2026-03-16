@@ -85,6 +85,8 @@ export function useOracleFreshness(): OracleFreshnessState {
       // Admin mode: authorityTimestamp is a real unix timestamp
       const ts = config.authorityTimestamp;
       if (ts > 0n) {
+        // GH#1330: Use the ACTUAL on-chain timestamp — do NOT assume fresh on first load.
+        // This ensures stale admin oracles are detected immediately, not after 30s of no updates.
         setLastUpdateMs(Number(ts) * 1000);
       } else {
         // Fallback: admin price is set but timestamp is zero (legacy/static markets).
