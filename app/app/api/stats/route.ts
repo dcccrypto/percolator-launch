@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
       // GH#1297: Skip phantom markets (no accounts or dust/empty vault) — same guard as /api/markets
       const accountsCount = (m as Record<string, unknown>).total_accounts as number ?? 0;
       const vaultBal = (m as Record<string, unknown>).vault_balance as number ?? 0;
-      if (accountsCount === 0 || vaultBal < MIN_VAULT_FOR_OI_STATS) return sum;
+      if (accountsCount === 0 || vaultBal <= MIN_VAULT_FOR_OI_STATS) return sum;
 
       const rawOi = isSaneMarketValue(m.total_open_interest)
         ? m.total_open_interest!

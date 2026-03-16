@@ -31,6 +31,12 @@ interface StepReviewProps {
   requiredSol?: number;
   hasTokens: boolean;
   hasSufficientTokensForSeed: boolean;
+  /** GH#1301: Whether wallet has enough tokens for LP collateral + insurance */
+  hasSufficientTokensForLaunch?: boolean;
+  /** GH#1301: Total tokens needed (LP + insurance) */
+  totalTokensRequired?: number;
+  /** GH#1301: True when token balance check is skipped (devnet mirror mints) */
+  skipTokenBalanceCheck?: boolean;
   feeConflict: boolean;
   /**
    * GH#1117: True only when the token is a Percolator-managed devnet mirror
@@ -77,6 +83,9 @@ export const StepReview: FC<StepReviewProps> = ({
   requiredSol,
   hasTokens,
   hasSufficientTokensForSeed,
+  hasSufficientTokensForLaunch = true,
+  totalTokensRequired = 0,
+  skipTokenBalanceCheck = false,
   feeConflict,
   isPercolatorMirror = false,
   onBack,
@@ -99,13 +108,17 @@ export const StepReview: FC<StepReviewProps> = ({
     if (!walletConnected) return "Connect Wallet to Launch";
     if (!mintValid) return "❌ Invalid Mint Address";
     if (!mintExistsOnNetwork) return "❌ Mint Not Found on Network";
-    if (!isDevnet && !hasTokens) return "No Tokens — Mint First";
-    if (!isDevnet && !hasSufficientTokensForSeed) return "Insufficient Tokens for Vault Seed (500)";
+    if (!skipTokenBalanceCheck && !hasTokens) return "No Tokens — Mint First";
+    if (!skipTokenBalanceCheck && !hasSufficientTokensForSeed) return "Insufficient Tokens for Vault Seed (500)";
+    // GH#1301: Check total token balance (LP collateral + insurance) unless auto-airdropped
+    if (!skipTokenBalanceCheck && !hasSufficientTokensForLaunch) {
+      return `Insufficient Balance — Need ${totalTokensRequired.toLocaleString(undefined, { maximumFractionDigits: 2 })} Tokens`;
+    }
     if (feeConflict) return "Fix Parameters to Continue";
     if (!hasSufficientBalance) return "Insufficient SOL";
     if (isDevnet) return isPercolatorMirror ? "LAUNCH & MINT TOKENS →" : "LAUNCH MARKET →";
     return "LAUNCH MARKET →";
-  }, [walletConnected, mintValid, mintExistsOnNetwork, hasTokens, hasSufficientTokensForSeed, feeConflict, hasSufficientBalance, isDevnet, isPercolatorMirror]);
+  }, [walletConnected, mintValid, mintExistsOnNetwork, hasTokens, hasSufficientTokensForSeed, hasSufficientTokensForLaunch, totalTokensRequired, skipTokenBalanceCheck, feeConflict, hasSufficientBalance, isDevnet, isPercolatorMirror]);
 
   return (
     <div className="space-y-5">
@@ -123,6 +136,13 @@ export const StepReview: FC<StepReviewProps> = ({
       {mintValid && mintExistsOnNetwork && (
         <div className="p-3 bg-green-500/20 border border-green-500 rounded text-green-500 text-sm">
           ✅ Mint verified on {getNetwork() === "devnet" ? "devnet" : "mainnet"}
+        </div>
+      )}
+
+      {/* GH#1301: Insufficient token balance warning */}
+      {!skipTokenBalanceCheck && !hasSufficientTokensForLaunch && walletConnected && (
+        <div className="p-3 bg-red-500/20 border border-red-500 rounded text-red-400 text-sm">
+          ⚠️ Insufficient balance: you need <strong>{totalTokensRequired.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong> {tokenSymbol} (LP + Insurance) but your wallet balance is too low.
         </div>
       )}
 

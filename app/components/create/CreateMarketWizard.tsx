@@ -254,7 +254,19 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // (devnetMintAddress differs from the user's input = mirror flow ran).
   // False for custom tokens entered directly (user = mint authority; no auto-airdrop).
   const isPercolatorMirror = devnetMintAddress !== null && devnetMintAddress !== wizard.mintAddress;
-  const allValid = step1Valid && step2Valid && step3Valid && (isDevnet || (hasTokens && hasSufficientTokensForSeed)) && hasSufficientSol;
+  // GH#1301: Only skip token balance check for Percolator mirror mints (which get auto-airdropped).
+  // Non-mirror tokens (e.g. SOL, custom mints) need real balance validation even on devnet.
+  const skipTokenBalanceCheck = isDevnet && isPercolatorMirror;
+  // GH#1301: Compute total tokens required (LP collateral + insurance) for balance validation
+  const totalTokensRequired = useMemo(() => {
+    const lp = parseFloat(wizard.lpCollateral || "0");
+    const ins = parseFloat(wizard.insuranceAmount || "0");
+    return lp + ins;
+  }, [wizard.lpCollateral, wizard.insuranceAmount]);
+  const hasSufficientTokensForLaunch = wizard.walletBalance !== null
+    ? Number(wizard.walletBalance) / Math.pow(10, decimals) >= totalTokensRequired
+    : false;
+  const allValid = step1Valid && step2Valid && step3Valid && (skipTokenBalanceCheck || (hasTokens && hasSufficientTokensForSeed && hasSufficientTokensForLaunch)) && hasSufficientSol;
 
   // Quick Launch auto-advance: step 1 → step 2 when token is resolved and params ready
   const quickAutoAdvancedRef = useRef(false);
@@ -837,6 +849,9 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             requiredSol={requiredSol}
             hasTokens={hasTokens}
             hasSufficientTokensForSeed={hasSufficientTokensForSeed}
+            hasSufficientTokensForLaunch={hasSufficientTokensForLaunch}
+            totalTokensRequired={totalTokensRequired}
+            skipTokenBalanceCheck={skipTokenBalanceCheck}
             feeConflict={feeConflict}
             isPercolatorMirror={isPercolatorMirror}
             onBack={goBack}

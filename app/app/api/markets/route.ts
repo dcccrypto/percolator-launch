@@ -180,7 +180,7 @@ export async function GET() {
       // and migration 051. Suppressing only total_open_interest_usd left the raw
       // total_open_interest atom value in the response, which fed phantom OI into
       // computeMarketHealthFromStats and the markets page sort/filter.
-      const isPhantomOI = accountsCount === 0 || vaultBal < MIN_VAULT_FOR_OI;
+      const isPhantomOI = accountsCount === 0 || vaultBal <= MIN_VAULT_FOR_OI;
       const displayOiUsd = isPhantomOI ? null : total_open_interest_usd;
 
       // GH#1270: Pre-compute volume_24h in USD so consumers (e.g. Watchlist) don't need
