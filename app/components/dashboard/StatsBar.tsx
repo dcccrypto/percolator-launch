@@ -12,7 +12,10 @@ export function StatsBar() {
   const { positions, loading } = usePortfolio();
 
   // Calculate real stats from portfolio positions
-  const totalPnlRaw = positions.reduce((sum, p) => sum + (p.unrealizedPnl ?? 0n), 0n);
+  // GH#1331: Cap individual position PnL to reject sentinel values (u64::MAX overflow)
+  const MAX_PNL_E6 = 1_000_000_000_000_000n; // $1B — anything above is corrupt data
+  const sanitizePnl = (v: bigint) => (v > MAX_PNL_E6 || v < -MAX_PNL_E6) ? 0n : v;
+  const totalPnlRaw = positions.reduce((sum, p) => sum + sanitizePnl(p.unrealizedPnl ?? 0n), 0n);
   const totalPnl = Number(totalPnlRaw) / 1e6; // e6 → human
   const wins = positions.filter((p) => (p.unrealizedPnl ?? 0n) > 0n).length;
   const losses = positions.filter((p) => (p.unrealizedPnl ?? 0n) < 0n).length;

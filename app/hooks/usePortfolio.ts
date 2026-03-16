@@ -169,9 +169,13 @@ export function usePortfolio(): PortfolioData {
                 );
 
                 // Compute unrealized PnL using oracle price
+                // GH#1331: Sanitize the on-chain PnL fallback — account.pnl can be a u64
+                // sentinel value (~1.8e19) when uninitialized, which displays as $2.8 septillion.
+                const rawFallbackPnl = account.pnl;
+                const sanitizedFallbackPnl = rawFallbackPnl > 0n && rawFallbackPnl > 1_000_000_000_000_000n ? 0n : rawFallbackPnl;
                 const unrealizedPnl = oraclePriceE6 > 0n
                   ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePriceE6)
-                  : account.pnl;
+                  : sanitizedFallbackPnl;
 
                 // PnL percentage
                 const pnlPercent = computePnlPercent(unrealizedPnl, account.capital);
@@ -220,7 +224,7 @@ export function usePortfolio(): PortfolioData {
                   leverage,
                   maintenanceMarginBps,
                 });
-                pnlSum += account.pnl;
+                pnlSum += sanitizedFallbackPnl;
                 depositSum += account.capital;
                 unrealizedPnlSum += unrealizedPnl;
               }
