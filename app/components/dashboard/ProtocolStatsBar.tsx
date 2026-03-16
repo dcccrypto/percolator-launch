@@ -9,9 +9,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getSupabase } from "@/lib/supabase";
-import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
-import { isBlockedSlab } from "@/lib/blocklist";
+// GH#1332: Moved OI/volume calculation to /api/stats (single source of truth)
 
 interface ProtocolStats {
   volume24h: number;
@@ -37,7 +35,6 @@ function Pulse() {
 }
 
 const POLL_INTERVAL_MS = 30_000;
-const MAX_USD_PER_MARKET = 10_000_000; // $10M cap per market to filter corrupted data
 
 export function ProtocolStatsBar() {
   const [stats, setStats] = useState<ProtocolStats | null>(null);
@@ -46,72 +43,19 @@ export function ProtocolStatsBar() {
 
   async function fetchStats() {
     try {
-      const { data } = await getSupabase()
-        .from("markets_with_stats")
-        .select("slab_address, symbol, volume_24h, last_price, decimals, total_open_interest, open_interest_long, open_interest_short")
-        .returns<{
-          slab_address: string;
-          symbol: string | null;
-          volume_24h: number | null;
-          last_price: number | null;
-          decimals: number | null;
-          total_open_interest: number | null;
-          open_interest_long: number | null;
-          open_interest_short: number | null;
-        }[]>();
-
-      if (!data || data.length === 0) {
-        setStats({ volume24h: 0, openInterest: 0, activeMarkets: 0, traders: null });
-        return;
-      }
-
-      // GH#1268: Match /api/stats conversion logic — cap price at $10K, fallback OI to long+short
-      const MAX_SANE_PRICE_USD = 10_000;
-
-      let vol24h = 0;
-      let oi = 0;
-      let activeCount = 0;
-
-      for (const row of data) {
-        if (!row.slab_address || isBlockedSlab(row.slab_address)) continue;
-
-        const dec = Math.pow(10, Math.min(Math.max(row.decimals ?? 6, 0), 18));
-        // Use $1 fallback when last_price is missing/invalid — matches api/stats route logic
-        // so admin-mode markets (no oracle price) are still counted at face value (GH#1274)
-        const price = (row.last_price != null && row.last_price > 0 && row.last_price <= MAX_SANE_PRICE_USD)
-          ? row.last_price
-          : 1;
-
-        const toUsd = (raw: number): number => {
-          if (!isSaneMarketValue(raw) || price <= 0) return 0;
-          const usd = (raw / dec) * price;
-          return usd > MAX_USD_PER_MARKET ? 0 : usd;
-        };
-
-        // Volume: stored in token units, convert to USD
-        const capVol = toUsd(Number(row.volume_24h ?? 0));
-
-        // OI: fallback to long+short if total_open_interest is missing (GH#1268)
-        const rawOi = isSaneMarketValue(row.total_open_interest)
-          ? row.total_open_interest!
-          : (isSaneMarketValue((row.open_interest_long ?? 0) + (row.open_interest_short ?? 0))
-              ? (row.open_interest_long ?? 0) + (row.open_interest_short ?? 0)
-              : 0);
-        const capOi = toUsd(rawOi);
-
-        if (isActiveMarket({ volume_24h: capVol, total_open_interest: capOi })) {
-          activeCount++;
-        }
-
-        vol24h += capVol;
-        oi += capOi;
-      }
+      // GH#1332: Fetch from /api/stats instead of duplicating OI/volume logic.
+      // The API route has proper phantom OI guards (vault check, accounts check,
+      // no $1 fallback) that the previous client-side calculation was missing,
+      // causing dashboard to show $117K OI vs /api/stats $64.6K.
+      const res = await fetch("/api/stats");
+      if (!res.ok) throw new Error(`stats ${res.status}`);
+      const data = await res.json();
 
       setStats({
-        volume24h: vol24h,
-        openInterest: oi,
-        activeMarkets: activeCount,
-        traders: null, // Not available in current view
+        volume24h: data.totalVolume24h ?? 0,
+        openInterest: data.totalOpenInterest ?? 0,
+        activeMarkets: data.totalMarkets ?? 0,
+        traders: data.totalTraders ?? null,
       });
     } catch {
       // non-fatal — keep showing stale stats
