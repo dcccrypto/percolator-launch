@@ -139,6 +139,13 @@ export async function GET(request: NextRequest) {
     const ZERO_PUBKEY = "11111111111111111111111111111111";
     const sanitized = ((data ?? []) as unknown as Record<string, unknown>[])
       .filter((m) => !BLOCKED_MARKET_ADDRESSES.has(m.slab_address as string))
+      // GH#1398: Filter out garbage markets with system program as oracle_authority.
+      // These markets cannot receive valid oracle price updates and are likely
+      // accidental deployments (e.g. symbol '11111111', 333x leverage).
+      .filter((m) => {
+        const auth = m.oracle_authority as string | null;
+        return auth !== ZERO_PUBKEY;
+      })
       .map((m) => {
       let oracle_mode = m.oracle_mode as string | null;
       if (!oracle_mode) {

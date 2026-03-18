@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
     // GH#1218: include slab_address so we can filter blocked markets (same as /api/markets)
     // GH#1265: also fetch trade_count_24h so we can sum it directly (replaces buggy trades table count query)
     // GH#1297: include vault_balance + total_accounts to apply phantom OI guard (consistent with /api/markets)
-    supabase.from("markets_with_stats").select("slab_address, volume_24h, trade_count_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals, vault_balance, total_accounts").limit(500),
+    supabase.from("markets_with_stats").select("slab_address, volume_24h, trade_count_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals, vault_balance, total_accounts, oracle_authority").limit(500),
     supabase.from("trades").select("trader").limit(5000),
   ]);
 
@@ -81,8 +81,12 @@ export async function GET(request: NextRequest) {
       .map((s) => s.trim())
       .filter(Boolean),
   ]);
+  // GH#1398: Filter out garbage markets with system program oracle_authority
+  const ZERO_PUBKEY = "11111111111111111111111111111111";
   const statsData = (statsRes.data ?? []).filter(
     (m) => !BLOCKED_MARKET_ADDRESSES.has((m as Record<string, unknown>).slab_address as string ?? ""),
+  ).filter(
+    (m) => (m as Record<string, unknown>).oracle_authority !== ZERO_PUBKEY,
   );
 
   // GH#1337: Suppress phantom OI before counting active markets.

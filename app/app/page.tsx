@@ -129,7 +129,7 @@ export default function Home() {
       }
 
       try {
-        const { data, error: dbError } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, insurance_fund, last_price, total_open_interest, open_interest_long, open_interest_short, decimals") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; insurance_fund: number | null; last_price: number | null; total_open_interest: number | null; open_interest_long: number | null; open_interest_short: number | null; decimals: number | null }[] | null; error: { message: string } | null };
+        const { data, error: dbError } = await getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, insurance_fund, last_price, total_open_interest, open_interest_long, open_interest_short, decimals, oracle_authority") as { data: { slab_address: string; symbol: string | null; volume_24h: number | null; insurance_balance: number | null; insurance_fund: number | null; last_price: number | null; total_open_interest: number | null; open_interest_long: number | null; open_interest_short: number | null; decimals: number | null; oracle_authority: string | null }[] | null; error: { message: string } | null };
         if (dbError) {
           console.error("Failed to query markets_with_stats:", dbError.message);
           throw new Error(dbError.message);
@@ -167,8 +167,11 @@ export default function Home() {
           // (consistent with /api/stats and markets page). Also exclude blocked/stale
           // slab addresses — these pass isActiveMarket (last_price > 0) but are bad
           // on-chain data that corrupt insurance and volume aggregates (GH#1181).
+          const ZERO_PUBKEY = "11111111111111111111111111111111";
           const activeData = data
             .filter((m) => !isBlockedSlab(m.slab_address))
+            // GH#1398: Filter out garbage markets with system program oracle_authority
+            .filter((m) => m.oracle_authority !== ZERO_PUBKEY)
             .filter(isActiveMarket);
           setStats({
             markets: activeData.length,
@@ -199,6 +202,7 @@ export default function Home() {
           // GH#1224: exclude blocked slab addresses (same filter as activeData/stats)
           const converted = data
             .filter((m) => !isBlockedSlab(m.slab_address))
+            .filter((m) => m.oracle_authority !== ZERO_PUBKEY)
             .map((m) => ({
             slab_address: m.slab_address,
             symbol: m.symbol,
