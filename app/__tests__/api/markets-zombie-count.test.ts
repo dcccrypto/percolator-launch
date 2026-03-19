@@ -212,3 +212,66 @@ describe("GH#1445 zombie market frontend count fix", () => {
     expect(isSaneMarketValue(100)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GH#1455: activeTotal must be zombie-independent (same with or without include_zombie)
+// ---------------------------------------------------------------------------
+
+describe("GH#1455 — activeTotal is independent of include_zombie flag", () => {
+  function isSaneVal(v: number | null | undefined): boolean {
+    if (v == null) return false;
+    return v > 0 && v < 1e18 && Number.isFinite(v);
+  }
+
+  type MarketRow = {
+    slab_address: string;
+    is_zombie: boolean;
+    last_price?: number | null;
+    volume_24h?: number | null;
+    total_open_interest?: number | null;
+    open_interest_long?: number | null;
+    open_interest_short?: number | null;
+  };
+
+  function computeActiveTotal(sanitized: MarketRow[]): number {
+    // Fixed: always use non-zombie subset only
+    const nonZombieOnly = sanitized.filter((m) => !m.is_zombie);
+    return nonZombieOnly.filter((m) => isActiveMarket(m)).length;
+  }
+
+  it("returns same activeTotal regardless of include_zombie flag", () => {
+    const sanitized: MarketRow[] = [
+      // 2 active non-zombie markets
+      { slab_address: "A1", is_zombie: false, last_price: 150, volume_24h: 1_000_000 },
+      { slab_address: "A2", is_zombie: false, last_price: 50, volume_24h: 500_000 },
+      // 2 zombie markets with stale volume that would pass isActiveMarket
+      { slab_address: "Z1", is_zombie: true, last_price: null, volume_24h: 800_000_000 },
+      { slab_address: "Z2", is_zombie: true, last_price: null, volume_24h: 500_000_000 },
+    ];
+
+    // activeTotal should be 2 regardless of include_zombie
+    expect(computeActiveTotal(sanitized)).toBe(2);
+    // Verify zombies WOULD have inflated the count if we used nonZombie (the bug)
+    // When include_zombie=true, nonZombie = sanitized (all 4 markets)
+    const buggyCount = sanitized.filter((m) => isActiveMarket(m)).length;
+    expect(buggyCount).toBe(4); // demonstrates the inflation
+  });
+
+  it("activeTotal === 69 even when include_zombie returns 71 total non-zombie (simulated production)", () => {
+    // Simulate the production scenario: 69 active non-zombies, 2 zombie with stale volume
+    const actives: MarketRow[] = Array.from({ length: 69 }, (_, i) => ({
+      slab_address: `active-${i}`,
+      is_zombie: false,
+      last_price: 100 + i,
+      volume_24h: 1_000_000,
+    }));
+    const staleZombies: MarketRow[] = [
+      { slab_address: "zombie-btc", is_zombie: true, last_price: null, volume_24h: 500_000_000 },
+      { slab_address: "zombie-sol", is_zombie: true, last_price: null, volume_24h: 300_000_000 },
+    ];
+    const sanitized = [...actives, ...staleZombies];
+
+    // Fixed behavior: activeTotal = 69 (zombie-independent)
+    expect(computeActiveTotal(sanitized)).toBe(69);
+  });
+});

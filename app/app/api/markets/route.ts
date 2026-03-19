@@ -269,7 +269,13 @@ export async function GET(request: NextRequest) {
     // fetching all records. Reflects post-filter count (blocked markets excluded).
     // #1172: Add activeTotal — markets with at least one sane stat (price/volume/OI).
     // This matches the count shown by /api/stats totalMarkets.
-    const activeTotal = nonZombie.filter((m) => isActiveMarket(m as Parameters<typeof isActiveMarket>[0])).length;
+    // GH#1455: activeTotal must always be computed from the non-zombie subset only,
+    // regardless of include_zombie. When include_zombie=true, nonZombie includes all
+    // markets (zombies + non-zombies). Computing activeTotal from nonZombie would
+    // count zombie markets that have stale volume/OI stats, inflating the count
+    // (e.g. 71 vs 69). Fix: filter out is_zombie before applying isActiveMarket.
+    const nonZombieOnly = sanitized.filter((m) => !(m as Record<string, unknown>).is_zombie);
+    const activeTotal = nonZombieOnly.filter((m) => isActiveMarket(m as Parameters<typeof isActiveMarket>[0])).length;
 
     // GH#1348: Respect ?limit= query param to avoid returning 100+ markets
     const limitParam = request?.nextUrl?.searchParams?.get("limit") ?? null;
