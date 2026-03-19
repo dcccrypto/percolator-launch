@@ -58,7 +58,8 @@ const nextConfig: NextConfig = {
       { source: "/api/funding/:slab/history", destination: `${API_URL}/funding/:slab/history` },
       { source: "/api/funding/:slab", destination: `${API_URL}/funding/:slab` },
       { source: "/api/insurance/:slab", destination: `${API_URL}/insurance/:slab` },
-      { source: "/api/open-interest/:slab", destination: `${API_URL}/open-interest/:slab` },
+      // GH#1462: Moved to app/api/open-interest/[slab]/route.ts for defense-in-depth phantom OI filtering.
+      // { source: "/api/open-interest/:slab", destination: `${API_URL}/open-interest/:slab` },
       { source: "/api/prices/:path*", destination: `${API_URL}/prices/:path*` },
       { source: "/api/crank/status", destination: `${API_URL}/crank/status` },
       { source: "/api/trades/recent", destination: `${API_URL}/trades/recent` },

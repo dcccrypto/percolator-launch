@@ -13,18 +13,28 @@ import { sanitizeSlabAddress } from "@percolator/shared";
  * Extend via BLOCKED_MARKET_ADDRESSES env var (comma-separated pubkeys).
  */
 const HARDCODED_BLOCKED_SLABS: ReadonlySet<string> = new Set([
-  // SEX/USD — devnet-only token, empty vault, phantom OI (migration 048)
-  "3bmCyPee8GWJR5aPGTyN5EyyQJLzYyD8Wkg9m1Afd1SD",
-  // Empty-vault phantom-OI slab (migration 048)
-  "3YDqCJGz88xGiPBiRvx4vrM51mWTiTZPZ95hxYDZqKpJ",
-  // Empty-vault phantom-OI slab (no on-chain liquidity)
-  "3ZKKwsKoo5UP28cYmMpvGpwoFpWLVgEWLQJCejJnECQn",
-  // GH#1413: DfLoAzny/USD slab — phantom market with vault_balance=1M (at threshold),
-  // stale on-chain OI (2T micro-units ≈ 2,000,000 tokens). Added to frontend blocklist
-  // (app/lib/blocklist.ts) via PR #1415 but missing from backend validateSlab middleware.
-  // /api/open-interest/8eFFEFBY returns 200 with phantom data without this entry.
-  // Also covers /api/funding/8eFFEFBY returning stale zero-rate data.
-  "8eFFEFBY3HHbBgzxJJP5hyxdzMNMAumnYNhkWXErBM4c",
+  // Synced with app/lib/blocklist.ts — keep both in sync (GH#1461/1462).
+  "BxJPaMaCfEGTBsjZ8wfj3Yfzf4wpasmxKAEvqZZRcGPP", // Stale SOL/USD slab (PR #1179)
+  "HjBePQZnoZVftg9B52gyeuHGjBvt2f8FNCVP4FeoP3YT", // GH#837: wrong oracle_authority
+  "H5Vunzd2yAMygnpFiGUASDSx2s8P3bfPTzjCfrRsPeph", // GH#1218: NL/USD corrupt OI
+  "3bmCyPee8GWJR5aPGTyN5EyyQJLzYyD8Wkg9m1Afd1SD", // SEX/USD — empty vault (PR #1377)
+  "3YDqCJGz88xGiPBiRvx4vrM51mWTiTZPZ95hxYDZqKpJ", // Empty-vault phantom-OI (PR #1377)
+  "3ZKKwsKoo5UP28cYmMpvGpwoFpWLVgEWLQJCejJnECQn", // Empty-vault phantom-OI (PR #1377)
+  "CRJH9Gtk7qQDdjzDufnAZdfa7AHisfvxCmVVvzpzQN9v", // GH#1398: garbage test market
+  // GH#1398 follow-up: phantom slabs with oracle_authority = system program
+  "J6UU4VHbYXpCAACr5o5xjUVmquagiP2NGbbMp68VUCX9",
+  "8L47yqvQRLxZ6PzW3b9jawEM79CmokBvUzeLR7mvtyuU",
+  "8kkED3uZznGzSidr8kYJPd3VhzSh7LVngNUx2V1qnW9L",
+  "8pKtAV3z6iTKekieF9EenQ4tk1rkAVa9oYsqe7h1PGjx",
+  "Eekuz2TgXRPq3rsp5brRW5hofxLdwt6KUXbLUQCKHK9G",
+  "Av3zVrW5deLpLo1qZZ7yNJ5Lq5ja4Z9ixijVhV4MuRzE",
+  "CrbDmfiooBUTFfGyMhJ1hpToCrBLAXXKySBwEnLHV6kj",
+  "FhpPmmuh5UDAjvEjrYBPFwmj4CP4otvsYMxtTb46p1Ss",
+  "7xozYEbKhEdjQn5pCAV8bUDQGugZttqZTduPeHkoqRb8",
+  "3dp3e288oPjs5w92fg26cVYQMHGuUpsj8YbSFn6wrzp4",
+  "8nzjXMvdkC4fRF491QkpKE6aFTLmEcpXEnbh4wQT4iUA",
+  "3bmCyPeeDwAfLbhfnRpYJHkWVqAf3Q5JaWXGfZjbmjNp", // GH#1410: phantom SEX/USD
+  "8eFFEFBY3HHbBgzxJJP5hyxdzMNMAumnYNhkWXErBM4c", // GH#1413: DfLoAzny/USD phantom
 ]);
 
 /**
