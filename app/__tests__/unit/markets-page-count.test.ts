@@ -13,7 +13,7 @@
 
 import { describe, it, expect } from "vitest";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
-import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
+import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 
 const MAX_SANE_PRICE_FOR_ACTIVE = 1_000_000; // mirrors /api/stats
 
@@ -28,19 +28,14 @@ function filterMarket(row: {
   total_open_interest: number | null;
   open_interest_long?: number | null;
   open_interest_short?: number | null;
+  c_tot?: number | null;
 }): boolean {
   const accountsCount = row.total_accounts ?? 0;
   const vaultBal = row.vault_balance ?? 0;
   const isPhantom = isPhantomOpenInterest(accountsCount, vaultBal);
 
-  const hasNoStats =
-    !isSaneMarketValue(row.last_price) &&
-    !isSaneMarketValue(row.volume_24h) &&
-    !isSaneMarketValue(row.total_open_interest) &&
-    accountsCount === 0;
-  const isZombie =
-    (row.vault_balance != null && row.vault_balance === 0) ||
-    (row.vault_balance == null && hasNoStats);
+  // GH#1531: Use shared isZombieMarket() — single source of truth
+  const isZombie = isZombieMarket(row);
 
   if (isZombie) {
     return isActiveMarket({
@@ -192,6 +187,35 @@ describe("GH#1452: /markets page active market filtering aligns with /api/stats"
         total_open_interest: null,
       }),
     ).toBe(false);
+  });
+
+  it("GH#1531: c_tot>0 but vault=0, no price, no accounts → zombie (not shown)", () => {
+    // This was the root cause of GH#1531: the inline zombie check had
+    // `cTot > 0 ? false : ...` which exempted these dead markets.
+    // The shared isZombieMarket() requires hasActivity (price or accounts) too.
+    expect(
+      filterMarket({
+        total_accounts: 0,
+        vault_balance: 0,
+        last_price: null,
+        volume_24h: null,
+        total_open_interest: 500_000,
+        c_tot: 100_000_000_000, // legacy collateral but no active keeper
+      } as any),
+    ).toBe(false);
+  });
+
+  it("GH#1531: c_tot>0, vault=0, but HAS price → not zombie (keeper active)", () => {
+    expect(
+      filterMarket({
+        total_accounts: 0,
+        vault_balance: 0,
+        last_price: 42.5,
+        volume_24h: null,
+        total_open_interest: 0,
+        c_tot: 100_000_000_000,
+      } as any),
+    ).toBe(true);
   });
 
   it("isPhantomOpenInterest is used — vault=1M+accounts>0 is NOT phantom", () => {

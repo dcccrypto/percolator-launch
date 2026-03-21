@@ -9,7 +9,7 @@ import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
 import { getSupabase } from "@/lib/supabase";
-import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
+import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { isPhantomOpenInterest } from "@/lib/phantom-oi";
 import type { Database } from "@/lib/database.types";
 
@@ -236,26 +236,11 @@ function MarketsPageInner() {
       // determination across /api/stats, /api/markets, and the markets page.
       const isPhantom = isPhantomOpenInterest(accountsCount, vaultBal);
 
-      // GH#1445: Match the API route's zombie definition exactly so the frontend
-      // count agrees with /api/markets. The API nulls out last_price AND volume_24h
-      // for zombie markets before running isActiveMarket(). Without this, zombie
-      // markets with stale cached prices pass the active check on the frontend,
-      // inflating the count (168 UI vs 122 API).
-      //
-      // Zombie = vault explicitly 0 (drained LP) OR vault null with no real stats
-      // (GH#1427 phantom — never had LP capital). Mirrors the API route's is_zombie:
-      //   vault_balance === 0  →  zombie
-      //   vault_balance == null AND !sane(price) AND !sane(vol) AND !sane(OI) AND accounts==0  →  zombie
-      const hasNoStats =
-        !isSaneMarketValue(m.supabase?.last_price) &&
-        !isSaneMarketValue(m.supabase?.volume_24h) &&
-        !isSaneMarketValue(m.supabase?.total_open_interest) &&
-        accountsCount === 0;
-      // If c_tot > 0, market has real on-chain collateral — not a zombie
-      const cTot = m.supabase?.c_tot ?? 0;
-      const isZombie = cTot > 0 ? false :
-        ((m.supabase?.vault_balance != null && m.supabase.vault_balance === 0) ||
-        (m.supabase?.vault_balance == null && hasNoStats));
+      // GH#1531: Use shared isZombieMarket() — single source of truth for zombie
+      // determination. Previously this was an inline duplicate that diverged from the
+      // shared function (missing GH#1499 c_tot+hasActivity check), causing the frontend
+      // to show more markets than the API (168 vs 115).
+      const isZombie = m.supabase ? isZombieMarket(m.supabase) : false;
 
       // If we have Supabase stats, use isActiveMarket with zombie + phantom OI suppression
       if (m.supabase) {
