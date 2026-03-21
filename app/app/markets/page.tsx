@@ -9,8 +9,7 @@ import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
 import { getSupabase } from "@/lib/supabase";
-import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
-import { isPhantomOpenInterest } from "@/lib/phantom-oi";
+import { isSaneMarketValue } from "@/lib/activeMarketFilter";
 import type { Database } from "@/lib/database.types";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
@@ -216,90 +215,40 @@ function MarketsPageInner() {
   }, [effectiveMarkets]);
   const tokenMetaMap = useMultiTokenMeta(allMints);
 
-  // Filter out empty/abandoned markets and flag bogus prices
-  // A market is "empty" if it has no meaningful data: no price, no volume, no OI
-  // GH#1337: Unified active market counting — use the same isActiveMarket() filter
-  // as /api/stats and /api/markets, with phantom OI suppression, so all three agree.
-  // Previously this used a broader custom filter that included on-chain-only markets
-  // and markets with phantom OI, inflating the count vs the API endpoints.
+  // GH#1531: Filter out zombie markets only — show ALL non-zombie markets in the list
+  // and counter. Previously we also gated on isActiveMarket() (price/volume/OI present),
+  // which meant markets with no price yet were hidden from the list but still indexed
+  // as valid non-zombie markets in /api/markets (total=168). Counter showed 115
+  // (activeTotal) but API total was 168, confusing users.
   //
-  // GH#1452: Replaced inline custom phantom predicate with shared isPhantomOpenInterest()
-  // from lib/phantom-oi.ts. Also added MAX_SANE_PRICE_USD null-out to match
-  // /api/stats behaviour: corrupt oracle prices (> $1M) are zeroed before isActiveMarket()
-  // so they don't inflate the count (105 UI vs 69 API).
+  // Fix: keep the zombie exclusion logic intact (mirrors isZombieMarket() in the API),
+  // but drop the isActiveMarket() gate for non-zombie markets. All 168 non-zombie
+  // markets are shown; markets with no price display "—" in the price column.
+  // On-chain-only markets (no Supabase row) are still excluded to match /api/markets.
   const activeMarkets = useMemo(() => {
     return effectiveMarkets.filter((m) => {
-      // Build a phantom-OI-aware stats object for isActiveMarket()
       const accountsCount = m.supabase?.total_accounts ?? 0;
-      const vaultBal = m.supabase?.vault_balance ?? 0;
-      // GH#1452: Use shared isPhantomOpenInterest() — single source of truth for phantom
-      // determination across /api/stats, /api/markets, and the markets page.
-      const isPhantom = isPhantomOpenInterest(accountsCount, vaultBal);
 
-      // GH#1445: Match the API route's zombie definition exactly so the frontend
-      // count agrees with /api/markets. The API nulls out last_price AND volume_24h
-      // for zombie markets before running isActiveMarket(). Without this, zombie
-      // markets with stale cached prices pass the active check on the frontend,
-      // inflating the count (168 UI vs 122 API).
-      //
-      // Zombie = vault explicitly 0 (drained LP) OR vault null with no real stats
-      // (GH#1427 phantom — never had LP capital). Mirrors the API route's is_zombie:
-      //   vault_balance === 0  →  zombie
-      //   vault_balance == null AND !sane(price) AND !sane(vol) AND !sane(OI) AND accounts==0  →  zombie
+      // GH#1445: Zombie definition mirrors isZombieMarket() in activeMarketFilter.ts.
+      // Zombie = vault explicitly 0 (drained LP) OR vault null with no real stats.
       const hasNoStats =
         !isSaneMarketValue(m.supabase?.last_price) &&
         !isSaneMarketValue(m.supabase?.volume_24h) &&
         !isSaneMarketValue(m.supabase?.total_open_interest) &&
         accountsCount === 0;
-      // If c_tot > 0, market has real on-chain collateral — not a zombie
+      // If c_tot > 0 AND there is corroborating activity, market has real collateral — not zombie.
       const cTot = m.supabase?.c_tot ?? 0;
-      const isZombie = cTot > 0 ? false :
+      const isZombie = (cTot > 0 && !hasNoStats) ? false :
         ((m.supabase?.vault_balance != null && m.supabase.vault_balance === 0) ||
         (m.supabase?.vault_balance == null && hasNoStats));
 
-      // If we have Supabase stats, use isActiveMarket with zombie + phantom OI suppression
+      // GH#1531: Show all non-zombie Supabase markets — counter matches /api/markets total.
       if (m.supabase) {
-        if (isZombie) {
-          // Zombie: null out ALL signals — stale prices with no liquidity are misleading
-          // and would otherwise pass isActiveMarket via last_price (GH#1445).
-          return isActiveMarket({
-            last_price: null,
-            volume_24h: null,
-            total_open_interest: 0,
-            open_interest_long: 0,
-            open_interest_short: 0,
-          });
-        }
-        // GH#1452: Sanitize corrupt prices (> $1M) before isActiveMarket(), mirroring
-        // /api/stats MAX_SANE_PRICE_USD guard so the count agrees.
-        const rawPrice = m.supabase.last_price;
-        const sanitizedPrice = (rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_USD)
-          ? rawPrice
-          : null;
-        if (isPhantom) {
-          // Phantom: zero out OI to suppress sentinel values, but keep sanitized price/volume.
-          return isActiveMarket({
-            last_price: sanitizedPrice,
-            volume_24h: m.supabase.volume_24h,
-            total_open_interest: 0,
-            open_interest_long: 0,
-            open_interest_short: 0,
-          });
-        }
-        // Non-phantom, non-zombie: pass sanitized price and real stats.
-        return isActiveMarket({
-          last_price: sanitizedPrice,
-          volume_24h: m.supabase.volume_24h,
-          total_open_interest: m.supabase.total_open_interest,
-          open_interest_long: m.supabase.open_interest_long,
-          open_interest_short: m.supabase.open_interest_short,
-        });
+        return !isZombie;
       }
 
-      // GH#1346: On-chain-only markets (no Supabase stats) are NOT counted as
-      // "active" for the header total. /api/stats only sees Supabase data, so
-      // counting on-chain-only markets here causes a 2-market mismatch.
-      // These markets are not displayed (filtered from the active list).
+      // GH#1346: On-chain-only markets (no Supabase stats) are NOT shown —
+      // /api/markets only sees Supabase data, so including them inflates the count.
       return false;
     });
   }, [effectiveMarkets]);
@@ -637,7 +586,7 @@ function MarketsPageInner() {
               </button>
             )}
 
-            {/* Results count — use activeMarkets.length as single source of truth (#847) */}
+            {/* Results count — GH#1531: show all non-zombie markets (matches /api/markets total) */}
             <span className="ml-auto text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
               {(hasSearch || hasActiveFilters) && filtered.length !== activeMarkets.length
                 ? `${filtered.length} / ${activeMarkets.length} market${activeMarkets.length !== 1 ? "s" : ""}`
