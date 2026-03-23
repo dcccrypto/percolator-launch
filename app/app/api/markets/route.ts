@@ -80,9 +80,14 @@ function numericOrNull(v: unknown): number | null {
 /**
  * Convert a raw on-chain token micro-unit amount to USD.
  * Returns null when the raw value is a sentinel/garbage or no price is available.
+ * GH#1578: Explicitly return 0 when raw value is exactly 0 — isSaneMarketValue requires
+ * v > 0 and would otherwise return null for zero-OI/volume markets.
  * (#1160: expose a pre-computed USD field so API consumers don't have to divide by 10^decimals themselves)
  */
 function rawToUsd(raw: number | null | undefined, decimals: number | null | undefined, priceUsd: number | null | undefined): number | null {
+  if (raw == null || !Number.isFinite(raw as number)) return null;
+  // GH#1578: zero is a valid and expected value — return 0 immediately without price check
+  if (raw === 0) return 0;
   if (!isSaneMarketValue(raw)) return null;
   const d = Math.min(Math.max(decimals ?? 6, 0), 18);
   const p = priceUsd ?? 0;
@@ -215,9 +220,14 @@ export async function GET(request: NextRequest) {
       // by 10^decimals manually. Derived from total_open_interest when sane, falls
       // back to open_interest_long + open_interest_short. Raw fields are preserved.
       const sanitizedPrice = sanitizePrice(n_last_price, "last_price", m.slab_address as string);
-      const rawOi = isSaneMarketValue(n_total_open_interest)
+      // GH#1578: treat explicit 0 as a valid zero-OI value — isSaneMarketValue requires v > 0
+      // and would otherwise return null for zero-OI markets.
+      // Guard: only short-circuit for 0 when total_open_interest is explicitly 0 (valid data).
+      // If total_open_interest is a garbage sentinel (e.g. 2e19), fall through to combined path.
+      const rawOi = (n_total_open_interest === 0 || isSaneMarketValue(n_total_open_interest))
         ? n_total_open_interest!
         : (() => {
+            // total_open_interest was null or garbage → try long+short fallback
             const combined = (n_open_interest_long ?? 0) + (n_open_interest_short ?? 0);
             return isSaneMarketValue(combined) ? combined : null;
           })();

@@ -33,8 +33,10 @@ vi.mock('@/lib/tx', () => ({
 
 vi.mock('@percolator/sdk', () => {
   const { PublicKey: PK } = require('@solana/web3.js');
+  const devnetProgramId = new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k');
   return {
-    STAKE_PROGRAM_ID: new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k'),
+    STAKE_PROGRAM_ID: devnetProgramId,
+    getStakeProgramId: vi.fn().mockReturnValue(devnetProgramId),
     STAKE_POOL_SIZE: 352,
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),

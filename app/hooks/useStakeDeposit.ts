@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
-  STAKE_PROGRAM_ID,
+  getStakeProgramId,
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,
@@ -82,7 +82,8 @@ export function useStakeDeposit() {
         if (!poolInfo || poolInfo.data.length < 186) {
           throw new Error('Stake pool not initialized for this market. Contact admin.');
         }
-        if (!poolInfo.owner.equals(STAKE_PROGRAM_ID)) {
+        const stakeProgramId = getStakeProgramId();
+        if (!poolInfo.owner.equals(stakeProgramId)) {
           throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
         }
 
@@ -141,7 +142,7 @@ export function useStakeDeposit() {
 
         instructions.push(
           new TransactionInstruction({
-            programId: STAKE_PROGRAM_ID,
+            programId: stakeProgramId,
             keys,
             data,
           }),

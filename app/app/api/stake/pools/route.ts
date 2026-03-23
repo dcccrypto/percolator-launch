@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getServiceClient } from "@/lib/supabase";
 import { getRpcEndpoint } from "@/lib/config";
+import { getStakeProgramId } from "@percolator/sdk";
 import * as Sentry from "@sentry/nextjs";
 
 // ── APR helpers ───────────────────────────────────────────────────────────────
@@ -150,10 +151,8 @@ export const dynamic = "force-dynamic";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Percolator Stake program (devnet). */
-const STAKE_PROGRAM_ID = new PublicKey(
-  "6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k"
-);
+/** Percolator Stake program — resolved for current network via env var or network constant. */
+const STAKE_PROGRAM_ID = getStakeProgramId();
 
 /** Expected on-chain size of a StakePool account (must match Rust struct). */
 const STAKE_POOL_SIZE = 352;

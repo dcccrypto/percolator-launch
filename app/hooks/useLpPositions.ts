@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { getAssociatedTokenAddressSync, unpackAccount } from '@solana/spl-token';
-import { STAKE_PROGRAM_ID, deriveDepositPda } from '@percolator/sdk';
+import { getStakeProgramId, deriveDepositPda } from '@percolator/sdk';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -119,8 +119,8 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       }
 
       const walletPk = new PublicKey(walletKeyStr);
-      // STAKE_PROGRAM_ID is already a PublicKey instance from @percolator/sdk
-      const stakeProgramPk = STAKE_PROGRAM_ID;
+      // Resolve stake program ID for current network
+      const stakeProgramPk = getStakeProgramId();
 
       // 2. For each pool, fetch user's LP token ATA and deposit PDA in parallel
       const slotNow = await connection.getSlot();

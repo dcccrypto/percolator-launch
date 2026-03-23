@@ -4,7 +4,6 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
-  STAKE_PROGRAM_ID,
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,

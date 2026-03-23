@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
-  STAKE_PROGRAM_ID,
+  getStakeProgramId,
   STAKE_POOL_SIZE,
   deriveStakePool,
   deriveStakeVaultAuth,
@@ -100,7 +100,8 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
         // Defense-in-depth: validate pool account owner matches stake program.
         // The pool is a PDA so an attacker cannot substitute a malicious account,
         // but this guards against edge cases in test environments or network misconfigs.
-        if (!poolInfo.owner.equals(STAKE_PROGRAM_ID)) {
+        const stakeProgramId = getStakeProgramId();
+        if (!poolInfo.owner.equals(stakeProgramId)) {
           throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
         }
 
@@ -157,7 +158,7 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
 
         instructions.push(
           new TransactionInstruction({
-            programId: STAKE_PROGRAM_ID,
+            programId: stakeProgramId,
             keys,
             data,
           }),
