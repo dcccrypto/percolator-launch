@@ -132,18 +132,40 @@ describe("GH#1564: volume_24h_usd and total_open_interest_usd when Supabase retu
     expect(market.total_open_interest_usd).toBeNull();
   });
 
-  it("returns null total_open_interest_usd for phantom OI market (total_accounts=0, vault<1M)", async () => {
+  it("returns null total_open_interest_usd for phantom OI market (total_accounts=0, vault<1M, non-zero OI)", async () => {
     mockRows = [makeMarket({
       total_accounts: "0",
       vault_balance: "0",
       c_tot: "0",
+      // total_open_interest retains default non-zero value (1500000000)
     })];
     const res = await GET(makeRequest({ include_zombie: "true" }));
     const body = await res.json();
     const market = body.markets[0];
 
-    // Phantom OI guard: total_accounts=0 → displayOiUsd = null
+    // Phantom OI guard fires when OI is non-zero but vault/accounts indicate no real positions.
     expect(market.total_open_interest_usd).toBeNull();
+  });
+
+  it("GH#1599: returns total_open_interest_usd=0 (not null) for vault=0 market with zero OI and valid price", async () => {
+    // Pattern: vault_balance=0 + total_open_interest=0 + last_price set.
+    // Before fix: isPhantomOI fired unconditionally → displayOiUsd=null even though OI is genuinely 0.
+    // After fix: phantom guard only suppresses non-zero OI. Zero OI → total_open_interest_usd=0.
+    mockRows = [makeMarket({
+      total_accounts: "0",
+      vault_balance: "0",
+      total_open_interest: "0",
+      open_interest_long: "0",
+      open_interest_short: "0",
+      c_tot: "0",
+      last_price: "1.50", // valid price — ensures the null wasn't from missing price
+    })];
+    const res = await GET(makeRequest({ include_zombie: "true" }));
+    const body = await res.json();
+    const market = body.markets[0];
+
+    expect(market.total_open_interest_usd).toBe(0);
+    expect(market.total_open_interest).toBe(0);
   });
 
   it("correctly computes USD fields for multiple markets with string NUMERIC fields", async () => {

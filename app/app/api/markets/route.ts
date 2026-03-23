@@ -255,7 +255,12 @@ export async function GET(request: NextRequest) {
       const accountsCount = n_total_accounts ?? 0;
       const vaultBal = n_vault_balance ?? 0;
       const isPhantomOI = isPhantomOpenInterest(accountsCount, vaultBal);
-      const displayOiUsd = isPhantomOI ? null : total_open_interest_usd;
+      // GH#1599: Phantom OI guard only suppresses non-zero OI (positions without real backing).
+      // When total_open_interest_usd === 0, the market genuinely has zero OI — returning 0 is
+      // correct regardless of vault_balance. Vault=0 markets with OI=0 were returning null due
+      // to the phantom guard, bypassing the combined===0 fix from GH#1594. Fix: only apply
+      // isPhantomOI suppression when there is actually non-zero OI to suppress.
+      const displayOiUsd = (isPhantomOI && total_open_interest_usd !== 0) ? null : total_open_interest_usd;
 
       // GH#1270: Pre-compute volume_24h in USD so consumers (e.g. Watchlist) don't need
       // to divide by 10^decimals manually. Mirrors the total_open_interest_usd pattern.
