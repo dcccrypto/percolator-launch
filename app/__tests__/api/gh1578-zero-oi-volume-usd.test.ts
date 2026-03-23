@@ -100,7 +100,7 @@ describe("GH#1578: zero OI/volume → USD should be 0, not null", () => {
     expect(market.volume_24h_usd).toBe(0);
   });
 
-  it("still returns null USD fields when mark_price is null (no price = no USD)", async () => {
+  it("returns 0 USD fields when mark_price is null for zero raw values (zero OI/volume → 0 regardless of price)", async () => {
     mockRows = [makeZeroOiMarket({ last_price: null, mark_price: null, index_price: null })];
     const res = await GET(makeRequest());
     const body = await res.json();
