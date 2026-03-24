@@ -380,20 +380,25 @@ function MarketsPageInner() {
           // instead of "empty", causing client/server sort disagreement at the threshold boundary.
           // Guard: return false (not oracle-down) for sub-threshold markets so they sort as "empty".
           const computeIsOracleDown = (m: MergedMarket): boolean => {
-            // Vault guard — mirrors route.ts MIN_VAULT_FOR_OI check (PERC-816 / GH#1639)
-            const vaultBal = numericOrNullForSort(m.supabase?.vault_balance);
-            if (vaultBal !== null && vaultBal < MIN_VAULT_FOR_OI) {
-              // Sub-threshold vault: phantom OI suppressed server-side → treat as empty, not oracle-down
-              return false;
-            }
+            // GH#1646: On-chain oracle check takes priority over vault guard.
+            // If we have on-chain data and price resolves to 0, oracle IS down
+            // regardless of vault balance — this matches the badge logic.
             if (m.onChain) {
               const priceE6 = resolveMarketPriceE6(m.onChain.config);
               return priceE6 === 0n;
             }
+            // Vault guard — mirrors route.ts MIN_VAULT_FOR_OI check (PERC-816 / GH#1639)
+            // Only applied to Supabase-only markets (no on-chain data) to prevent
+            // sub-threshold phantom-OI markets from being mis-ranked as oracle-down.
+            const vaultBal = numericOrNullForSort(m.supabase?.vault_balance);
+            if (vaultBal !== null && vaultBal < MIN_VAULT_FOR_OI) {
+              return false;
+            }
             if (m.supabase) {
               const mp = numericOrNullForSort(m.supabase.mark_price);
               const ip = numericOrNullForSort(m.supabase.index_price);
-              return (mp == null || mp <= 0) && (ip == null || ip <= 0);
+              const lp = numericOrNullForSort(m.supabase.last_price);
+              return (mp == null || mp <= 0) && (ip == null || ip <= 0) && (lp == null || lp <= 0);
             }
             return false;
           };
