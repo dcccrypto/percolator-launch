@@ -59,7 +59,10 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol }) =
   })();
 
   return (
-    <div className="bg-[var(--bg)]/95 border-b border-[var(--border)]/50 px-4 py-2 flex items-center gap-4 overflow-x-auto whitespace-nowrap">
+    <div
+      data-testid="market-info-bar"
+      className="bg-[var(--bg)]/95 border-b border-[var(--border)]/50 px-4 py-2 flex items-center gap-4 overflow-x-auto whitespace-nowrap backdrop-blur-sm"
+    >
       {/* Symbol */}
       <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
         {symbol}/USD

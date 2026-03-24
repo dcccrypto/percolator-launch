@@ -334,8 +334,8 @@ function TradePageInner({ slab }: { slab: string }) {
         </div>
       </div>
 
-      {/* ── DESKTOP: Market info bar ── */}
-      <div className="hidden lg:block">
+      {/* ── DESKTOP: Market info bar — sticky so it stays visible while scrolling ── */}
+      <div className="sticky top-0 z-30 hidden lg:block">
         <MarketInfoBar slabAddress={slab} symbol={symbol} logoUrl={logoUrl} />
       </div>
 
