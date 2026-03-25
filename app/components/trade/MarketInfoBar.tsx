@@ -164,7 +164,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
       </div>
 
       {/* P3-3: Market health badge — far right, always visible */}
-      <span className="h-4 w-px bg-[var(--border)]/40 shrink-0" />
+      <span className="ml-auto h-4 w-px bg-[var(--border)]/40 shrink-0" />
       <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} />
     </div>
   );
