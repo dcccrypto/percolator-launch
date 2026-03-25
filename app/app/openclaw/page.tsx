@@ -10,16 +10,16 @@ export const metadata: Metadata = {
 /* ---------- raw HTML sourced from ~/percolator-ops/content/openclaw-workshop.html ---------- */
 
 const workshopStyle = `
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    .oc-workshop *, .oc-workshop *::before, .oc-workshop *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    .oc-workshop {
       --bg: #0D0D0F; --bg2: #141418; --bg3: #1A1A20; --border: #2A2A35;
       --accent: #FF4444; --accent2: #FF6B6B; --cyan: #22D3EE; --purple: #9945FF;
       --white: #F8F8F2; --muted: #888898; --code-bg: #0A0A0E;
       --font-mono: 'JetBrains Mono','Fira Code','Cascadia Code','Courier New',monospace;
       --font-body: 'Inter','Segoe UI',system-ui,sans-serif;
+      font-size:14px; background:var(--bg); color:var(--white); font-family:var(--font-body); line-height:1.6;
     }
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
-    .oc-workshop { font-size:14px; background:var(--bg); color:var(--white); font-family:var(--font-body); line-height:1.6; }
     .oc-workshop .page { width:794px; min-height:1123px; margin:0 auto 32px; background:var(--bg); border:1px solid var(--border); position:relative; display:flex; flex-direction:column; overflow:hidden; }
     .oc-workshop .page-num { position:absolute; bottom:20px; right:28px; font-size:11px; color:var(--muted); font-family:var(--font-mono); letter-spacing:0.08em; }
     .oc-workshop .stripe { height:4px; background:linear-gradient(90deg,var(--accent) 0%,var(--accent2) 40%,var(--purple) 100%); flex-shrink:0; }
@@ -64,6 +64,11 @@ const workshopStyle = `
     .oc-workshop .do-list h3 { color:#4ade80; margin-top:0; }
     .oc-workshop .dont-list h3 { color:var(--accent2); margin-top:0; }
     .oc-workshop .do-list li,.oc-workshop .dont-list li { font-size:0.82rem; margin-bottom:5px; }
+    @media (max-width: 820px) {
+      .oc-workshop .page { width:100%; min-height:auto; margin-bottom:16px; }
+      .oc-workshop .content { padding:20px; }
+      .oc-workshop .two-col, .oc-workshop .do-dont { grid-template-columns:1fr; }
+    }
     .oc-workshop .step { display:flex; gap:14px; margin-bottom:14px; align-items:flex-start; }
     .oc-workshop .step-num { flex-shrink:0; width:26px; height:26px; background:var(--accent); color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); font-size:0.75rem; font-weight:700; margin-top:2px; }
     .oc-workshop .step-body { flex:1; }
