@@ -169,6 +169,18 @@ const githubHeaders: HeadersInit = {
     : {}),
 };
 
+/** Fetch a GitHub stats endpoint with 202 retry (exponential backoff, up to 3 attempts) */
+async function fetchGitHubStats(url: string): Promise<Response> {
+  let res = await fetch(url, { headers: githubHeaders, next: { revalidate: 600 } });
+
+  for (let attempt = 0; attempt < 3 && res.status === 202; attempt++) {
+    await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt + 1))); // 2s, 4s, 8s
+    res = await fetch(url, { headers: githubHeaders, next: { revalidate: 600 } });
+  }
+
+  return res;
+}
+
 /** Fetch contributor stats aggregated across all repos */
 export async function getContributorStats(): Promise<ContributorStats> {
   const allLogins = new Set<string>();
@@ -178,23 +190,9 @@ export async function getContributorStats(): Promise<ContributorStats> {
 
   const results = await Promise.allSettled(
     REPOS.map(async (repo) => {
-      // Fetch contributor stats (which includes commit counts)
-      const res = await fetch(
-        `https://api.github.com/repos/dcccrypto/${repo}/stats/contributors`,
-        { headers: githubHeaders, next: { revalidate: 600 } }
+      const res = await fetchGitHubStats(
+        `https://api.github.com/repos/dcccrypto/${repo}/stats/contributors`
       );
-
-      // GitHub returns 202 on first request — retry once after 2s
-      if (res.status === 202) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const retry = await fetch(
-          `https://api.github.com/repos/dcccrypto/${repo}/stats/contributors`,
-          { headers: githubHeaders, next: { revalidate: 600 } }
-        );
-        if (!retry.ok) return [];
-        return retry.json();
-      }
-
       if (!res.ok) return [];
       return res.json();
     })
@@ -246,23 +244,9 @@ export async function getAllCommitActivity(): Promise<CommitActivityMap> {
 
   const results = await Promise.allSettled(
     REPOS.map(async (repo) => {
-      const res = await fetch(
-        `https://api.github.com/repos/dcccrypto/${repo}/stats/commit_activity`,
-        { headers: githubHeaders, next: { revalidate: 600 } }
+      const res = await fetchGitHubStats(
+        `https://api.github.com/repos/dcccrypto/${repo}/stats/commit_activity`
       );
-
-      // GitHub returns 202 on first request — retry once after 2s
-      if (res.status === 202) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const retry = await fetch(
-          `https://api.github.com/repos/dcccrypto/${repo}/stats/commit_activity`,
-          { headers: githubHeaders, next: { revalidate: 600 } }
-        );
-        if (!retry.ok) return { repo, data: [] };
-        const data = await retry.json();
-        return { repo, data: Array.isArray(data) ? data : [] };
-      }
-
       if (!res.ok) return { repo, data: [] };
       const data = await res.json();
       return { repo, data: Array.isArray(data) ? data : [] };

@@ -109,9 +109,13 @@ export const CommitHeatmap: FC<Props> = ({ commitActivity }) => {
     return commitActivity[selectedRepo] || [];
   }, [commitActivity, selectedRepo]);
 
-  /** Determine how many weeks to show (responsive to viewport) */
+  /** Clip leading zero-commit weeks, then apply responsive limit */
   const visibleCount = useResponsiveWeeks();
-  const weeks = weekData.slice(-visibleCount);
+  const trimmedData = useMemo(() => {
+    const firstActiveIdx = weekData.findIndex((w) => w.total > 0);
+    return firstActiveIdx > 0 ? weekData.slice(firstActiveIdx) : weekData;
+  }, [weekData]);
+  const weeks = trimmedData.slice(-visibleCount);
 
   /** Month labels aligned to weeks */
   const monthLabels = useMemo(() => {
