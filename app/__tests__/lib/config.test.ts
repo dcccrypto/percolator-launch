@@ -19,24 +19,28 @@ describe("Mainnet Configuration Validation", () => {
     clearWindow();
   });
 
-  it("should reject mainnet when crankWallet is not configured (Issue #244)", () => {
+  it("should warn (not throw) when mainnet crankWallet is not configured (PERC-8109)", () => {
     // Mainnet crankWallet is intentionally empty until keeper bot is deployed.
-    // getConfig() must throw a descriptive error to prevent accidental mainnet use.
+    // Downgraded from throw to console.warn for mainnet beta launch.
     clearWindow();
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "mainnet";
 
-    expect(() => getConfig()).toThrow("Mainnet Configuration Error: crankWallet not set");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(() => getConfig()).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("crankWallet not set"));
+    warnSpy.mockRestore();
   });
 
   it("should have mainnet matcherProgramId pre-configured", () => {
     // Verify the mainnet matcher program ID is set in CONFIGS.
-    // We can't call getConfig() because mainnet validation throws (crankWallet empty),
-    // so we test the raw config value exists before the safety gate.
+    // crankWallet empty now warns instead of throwing, so getConfig() succeeds.
     clearWindow();
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "mainnet";
 
-    // The matcher program ID should be set even though crankWallet blocks launch
-    expect(() => getConfig()).toThrow("crankWallet not set");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = getConfig();
+    expect(config.matcherProgramId).toBeTruthy();
+    warnSpy.mockRestore();
   });
 
   it("should have valid devnet crankWallet", () => {

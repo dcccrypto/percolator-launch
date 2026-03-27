@@ -11,6 +11,7 @@ import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
 import { TickerBanner } from "@/components/layout/TickerBanner";
 import { CursorGlow } from "@/components/ui/CursorGlow";
 import { MusicPlayer } from "@/components/ui/MusicPlayer";
+import { MainnetBetaBanner } from "@/components/ui/MainnetBetaBanner";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -57,6 +58,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <body suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${interTight.variable} ${outfit.variable} min-h-screen bg-[#050508] text-[#eeeef0] antialiased`} data-nonce={nonce}>
         <Providers>
           <CursorGlow />
+          <MainnetBetaBanner />
           <div className="relative z-[1] flex min-h-screen flex-col">
             <TickerBanner />
             <Header />

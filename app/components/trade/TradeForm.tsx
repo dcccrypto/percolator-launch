@@ -6,7 +6,7 @@ import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import gsap from "gsap";
 import { useTrade } from "@/hooks/useTrade";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
-import { explorerTxUrl } from "@/lib/config";
+import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -650,6 +650,18 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           ))}
         </div>
       </div>
+
+      {/* Mainnet beta safety warnings */}
+      {getNetwork() === "mainnet" && leverage > 2 && (
+        <div className="mb-2 rounded-none border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          <p className="text-[10px] text-amber-400">⚠️ Mainnet beta limited to 2x leverage</p>
+        </div>
+      )}
+      {getNetwork() === "mainnet" && parseFloat(usdcInput || "0") > 10_000 && (
+        <div className="mb-2 rounded-none border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          <p className="text-[10px] text-amber-400">⚠️ Mainnet beta: positions &gt;$10K may have limited liquidity</p>
+        </div>
+      )}
 
       {/* Pre-trade summary */}
       {marginInput && marginNative > 0n && !exceedsMargin && (

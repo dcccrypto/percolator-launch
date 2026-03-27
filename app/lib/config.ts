@@ -138,8 +138,10 @@ function validateMainnetConfig(
 
   const crankWallet = config.crankWallet as string;
   if (!crankWallet || crankWallet.trim() === "") {
-    throw new Error(
-      "Mainnet Configuration Error: crankWallet not set. " +
+    // Temporary for mainnet beta launch — keeper bot not yet deployed (Issue #244).
+    // Downgraded from throw to warn so the app can start without a crank wallet.
+    console.warn(
+      "Mainnet Configuration Warning: crankWallet not set. " +
       "Keeper bot must be deployed to mainnet before production use. " +
       "See Issue #244 for deployment requirements."
     );

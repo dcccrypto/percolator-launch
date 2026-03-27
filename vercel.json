@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "_deployment_notes": {
+    "mainnet_subdomain": "mainnet.percolatorlaunch.com — set NEXT_PUBLIC_DEFAULT_NETWORK=mainnet in Vercel dashboard Environment Variables for this domain"
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        }
+      ]
+    }
+  ]
+}
