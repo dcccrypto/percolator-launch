@@ -13,6 +13,11 @@
  * GH#1382 (PERC-1233): switched from raw Keypair + sendAndConfirmTransaction to
  * getDevnetMintSigner() + sendRawTransaction (sealed signer, same as auto-fund / devnet-airdrop).
  * Added on-chain mint authority check → 400 (not 500) on mismatch.
+ *
+ * GH#1803: DB rate-limit check (tryFaucetGate) now runs a SELECT pre-check BEFORE
+ * any INSERT or RPC call, so rate-limited wallets get 429 consistently on first call.
+ * Previously, a transient DB connection error on first call could cause fail-open,
+ * letting the RPC path run and returning a confusing "devnet unavailable" 503.
  */
 
 import { NextRequest, NextResponse } from "next/server";
