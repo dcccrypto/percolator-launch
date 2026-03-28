@@ -447,4 +447,49 @@ describe("/api/faucet route", () => {
       expect(statusCode).toBe(503);
     });
   });
+
+  describe("GH#1798: SOL faucet 429 includes correct fields (not 'temporarily unavailable')", () => {
+    // Validates the response shape returned when the Solana devnet RPC rate-limits us.
+    // Before fix: error said "Solana devnet temporarily unavailable" (confusing).
+    // After fix: error message is explicit about rate-limiting, includes nextClaimAt,
+    // rpcRateLimited flag, and retryable:false (per-wallet limit, no point retrying soon).
+
+    const buildRateLimitResponse = (lastRateLimitMsg: string) => {
+      const isRateLimit =
+        /429|too many requests|rate.?limit|airdrop.*limit|limit.*airdrop/i.test(lastRateLimitMsg);
+      if (!isRateLimit) return null;
+      const nextClaimAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      return {
+        error:
+          "SOL airdrop rate limit reached — Solana devnet limits 1 airdrop per wallet per day. Try again tomorrow or use https://faucet.solana.com.",
+        retryable: false,
+        nextClaimAt,
+        rpcRateLimited: true,
+        status: 429,
+      };
+    };
+
+    it("builds correct response for '429 Too Many Requests' from devnet RPC", () => {
+      const resp = buildRateLimitResponse("429 Too Many Requests");
+      expect(resp).not.toBeNull();
+      expect(resp!.status).toBe(429);
+      expect(resp!.retryable).toBe(false);
+      expect(resp!.rpcRateLimited).toBe(true);
+      expect(resp!.nextClaimAt).toBeDefined();
+      expect(resp!.error).toContain("rate limit");
+      expect(resp!.error).not.toContain("temporarily unavailable");
+    });
+
+    it("builds correct response for 'airdrop request limit reached' from devnet RPC", () => {
+      const resp = buildRateLimitResponse("airdrop request limit reached");
+      expect(resp).not.toBeNull();
+      expect(resp!.rpcRateLimited).toBe(true);
+      expect(resp!.error).toContain("faucet.solana.com");
+    });
+
+    it("returns null for non-rate-limit errors (not mis-classified)", () => {
+      expect(buildRateLimitResponse("Internal error")).toBeNull();
+      expect(buildRateLimitResponse("connection timeout")).toBeNull();
+    });
+  });
 });

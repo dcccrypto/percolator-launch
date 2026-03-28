@@ -246,7 +246,12 @@ export function useDevnetFaucet(): DevnetFaucetState {
       if (resp.status === 429) {
         setRateLimited(true);
         setNextClaimAt(data.nextClaimAt ?? null);
-        setError("Already claimed in the last 24 hours");
+        // GH#1798: distinguish per-wallet DB gate from RPC rate limit
+        setError(
+          data.rpcRateLimited
+            ? "SOL airdrop rate limit reached — try again tomorrow or use faucet.solana.com"
+            : "Already claimed in the last 24 hours",
+        );
         return;
       }
       if (!resp.ok) {
