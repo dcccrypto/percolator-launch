@@ -5,6 +5,11 @@
  * Concurrent requests race on INSERT — exactly one wins, others get 23505.
  * Eliminates the SELECT→INSERT TOCTOU window.
  *
+ * GH#1803: Pre-check SELECT added before INSERT to catch rate-limited wallets
+ * immediately, before any INSERT attempt or RPC call. Prevents fail-open on
+ * transient DB errors (cold connection, etc.) from allowing rate-limited wallets
+ * to reach the RPC path and receive a confusing "devnet unavailable" error.
+ *
  * Same pattern as tryAirdropClaimGate in /api/airdrop (PR #1587).
  */
 
@@ -28,6 +33,32 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
   const windowStart = new Date(Date.now() - RATE_LIMIT_MS).toISOString();
 
   try {
+    // GH#1803: Step 0 — Pre-check SELECT FIRST.
+    // Catches rate-limited wallets BEFORE any INSERT or RPC call attempt.
+    // This is the canonical rate-limit check: if an active claim exists in the
+    // window, return denied immediately without touching the INSERT path.
+    // Prevents fail-open on INSERT errors (e.g., cold DB connection on first call)
+    // from allowing rate-limited wallets to reach the RPC airdrop path.
+    //
+    // Note: this does NOT re-introduce the TOCTOU race fixed by GH#1595.
+    // The race applies to concurrent FIRST-time requests (two requests both see
+    // no row and race to INSERT). For already-rate-limited wallets (active claim
+    // already exists), the SELECT reliably returns the row without any race.
+    const { data: activeClaim } = await supabase
+      .from("faucet_claims")
+      .select("claimed_at")
+      .eq("wallet", wallet)
+      .eq("fund_type", fundType)
+      .gte("claimed_at", windowStart)
+      .maybeSingle();
+
+    if (activeClaim) {
+      const nextClaimAt = new Date(
+        new Date(activeClaim.claimed_at as string).getTime() + RATE_LIMIT_MS,
+      ).toISOString();
+      return { allowed: false, nextClaimAt };
+    }
+
     // Step 1: Clear expired claim so unique slot is free for re-claim.
     await supabase
       .from("faucet_claims")
@@ -45,7 +76,7 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
 
     if (error) {
       if (error.code === "23505") {
-        // Active claim within window — compute nextClaimAt from existing row.
+        // Concurrent request won the INSERT race — compute nextClaimAt from existing row.
         const { data: existing } = await supabase
           .from("faucet_claims")
           .select("claimed_at")
