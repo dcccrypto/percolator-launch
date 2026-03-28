@@ -172,11 +172,18 @@ export async function POST(req: NextRequest) {
         // Not in static list — check dynamic mirror-mint table as fallback
         try {
           const supabase = getServiceClient();
-          const { data: mirrorRow } = await (supabase as any)
+          const { data: mirrorRows, error: mirrorErr } = await (supabase as any)
             .from("devnet_mints")
             .select("devnet_mint")
             .eq("devnet_mint", mintAddress)
-            .maybeSingle();
+            .order("created_at", { ascending: false })
+            .limit(1);
+          if (mirrorErr) {
+            Sentry.captureException(mirrorErr, {
+              tags: { endpoint: "/api/devnet-pre-fund", phase: "dynamic-mint-check" },
+            });
+          }
+          const mirrorRow = mirrorRows?.[0];
           finallyPermitted = !!mirrorRow?.devnet_mint;
         } catch (e) {
           Sentry.captureException(e, {
@@ -190,11 +197,18 @@ export async function POST(req: NextRequest) {
       // #873: No static allowlist — ALWAYS query DB (never default to permitted=true)
       try {
         const supabase = getServiceClient();
-        const { data: mirrorRow } = await (supabase as any)
+        const { data: mirrorRows, error: mirrorErr } = await (supabase as any)
           .from("devnet_mints")
           .select("devnet_mint")
           .eq("devnet_mint", mintAddress)
-          .maybeSingle();
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (mirrorErr) {
+          Sentry.captureException(mirrorErr, {
+            tags: { endpoint: "/api/devnet-pre-fund", phase: "dynamic-mint-check" },
+          });
+        }
+        const mirrorRow = mirrorRows?.[0];
         finallyPermitted = !!mirrorRow?.devnet_mint;
       } catch (e) {
         Sentry.captureException(e, {
