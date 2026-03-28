@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRpcEndpoint } from "@/lib/config";
+import { createHash } from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -127,7 +128,10 @@ const cache = new Map<string, { data: unknown; expiresAt: number }>();
 const MAX_CACHE_SIZE = 500;
 
 function getCacheKey(method: string, params: unknown): string {
-  return `${method}:${JSON.stringify(params ?? [])}`;
+  // Hash the cache key to prevent leaking sensitive request patterns or wallet identifiers
+  // that might be present in params (e.g., getTokenAccountsByOwner with specific wallet)
+  const plainKey = `${method}:${JSON.stringify(params ?? [])}`;
+  return createHash("sha256").update(plainKey).digest("hex");
 }
 
 function getCached(key: string): unknown | undefined {

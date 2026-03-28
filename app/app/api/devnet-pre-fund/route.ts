@@ -58,6 +58,17 @@ const DEVNET_ALLOWED_MINTS: Set<string> = new Set(
 );
 
 /**
+ * Emergency hardcoded allowlist of known-safe devnet mints.
+ * Used as a fallback when the database is unavailable and no static allowlist is configured.
+ * Only includes mints that are confirmed to be under our control on devnet.
+ * Update this list as new confirmed safe devnet mints are created.
+ */
+const EMERGENCY_DEVNET_MINTS: Set<string> = new Set([
+  // "mint-address-1"  // Example: Replace with actual known-safe devnet mint addresses
+  // "mint-address-2"
+]);
+
+/**
  * Minimum seed the program requires.
  * Kept local to avoid importing a "use client" module into a server route.
  * Source of truth: hooks/useCreateMarket.ts → MIN_INIT_MARKET_SEED.
@@ -156,8 +167,15 @@ export async function POST(req: NextRequest) {
         Sentry.captureException(e, {
           tags: { endpoint: "/api/devnet-pre-fund", phase: "dynamic-mint-check" },
         });
-        // DB unavailable and no static allowlist: allow through — on-chain authority is the gate
-        finallyPermitted = true;
+        // DB unavailable and no static allowlist: check emergency mints list as fallback
+        // If no emergency mints are configured, deny by default (fail-closed security)
+        finallyPermitted = EMERGENCY_DEVNET_MINTS.has(mintAddress);
+        if (!finallyPermitted && EMERGENCY_DEVNET_MINTS.size === 0) {
+          Sentry.captureMessage(
+            "devnet-pre-fund: DB unavailable, no emergency mints configured, and mint not in emergency allowlist",
+            "warning"
+          );
+        }
       }
     }
     if (!finallyPermitted) {

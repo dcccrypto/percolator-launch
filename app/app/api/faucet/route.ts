@@ -66,14 +66,22 @@ export async function POST(req: NextRequest) {
 
     // GH#1399: Validate type before coercing — unknown types must return 400,
     // not silently fall through to the USDC mint path.
+    // Normalize type parameter: trim whitespace and lowercase before validation
     const rawType = body?.type;
-    if (rawType !== undefined && rawType !== "sol" && rawType !== "usdc") {
+    const normalizedType =
+      typeof rawType === "string" ? rawType.trim().toLowerCase() : undefined;
+    if (
+      normalizedType !== undefined &&
+      normalizedType !== "sol" &&
+      normalizedType !== "usdc"
+    ) {
       return NextResponse.json(
         { error: "Invalid type. Use 'sol' or 'usdc'" },
         { status: 400 },
       );
     }
-    const type: "sol" | "usdc" = rawType === "sol" ? "sol" : "usdc";
+    const type: "sol" | "usdc" =
+      normalizedType === "sol" ? "sol" : "usdc";
 
     if (!walletAddress || typeof walletAddress !== "string") {
       return NextResponse.json(

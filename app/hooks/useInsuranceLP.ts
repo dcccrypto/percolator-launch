@@ -179,13 +179,17 @@ export function useInsuranceLP() {
       throw new Error('Wallet not connected or slab not loaded');
     }
 
+    if (!slabState.config) {
+      throw new Error('Slab configuration not loaded');
+    }
+
     setLoading(true);
     setError(null);
     try {
       const slabPubkey = new PublicKey(slabAddress);
       const progPubkey = new PublicKey(programId);
       const [vaultAuth] = deriveVaultAuthority(progPubkey, slabPubkey);
-      const collateralMint = slabState.config!.collateralMint;
+      const collateralMint = slabState.config.collateralMint;
 
       const data = encodeCreateInsuranceMint();
       const keys = buildAccountMetas(ACCOUNTS_CREATE_INSURANCE_MINT, [
@@ -223,14 +227,18 @@ export function useInsuranceLP() {
       throw new Error('Wallet not connected or slab not loaded');
     }
 
+    if (!slabState.config) {
+      throw new Error('Slab configuration not loaded');
+    }
+
     setLoading(true);
     setError(null);
     try {
       const slabPubkey = new PublicKey(slabAddress);
       const progPubkey = new PublicKey(programId);
       const [vaultAuth] = deriveVaultAuthority(progPubkey, slabPubkey);
-      const collateralMint = slabState.config!.collateralMint;
-      const vault = slabState.config!.vaultPubkey;
+      const collateralMint = slabState.config.collateralMint;
+      const vault = slabState.config.vaultPubkey;
 
       // Get or create user's collateral ATA
       const userAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
@@ -302,14 +310,18 @@ export function useInsuranceLP() {
       throw new Error('Wallet not connected or slab not loaded');
     }
 
+    if (!slabState.config) {
+      throw new Error('Slab configuration not loaded');
+    }
+
     setLoading(true);
     setError(null);
     try {
       const slabPubkey = new PublicKey(slabAddress);
       const progPubkey = new PublicKey(programId);
       const [vaultAuth] = deriveVaultAuthority(progPubkey, slabPubkey);
-      const collateralMint = slabState.config!.collateralMint;
-      const vault = slabState.config!.vaultPubkey;
+      const collateralMint = slabState.config.collateralMint;
+      const vault = slabState.config.vaultPubkey;
 
       const userAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
       const userLpAta = await getAssociatedTokenAddress(lpMintInfo.mintPda, wallet.publicKey);

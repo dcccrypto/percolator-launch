@@ -166,6 +166,19 @@ export function createBatchRpc(config: BatchRpcConfig) {
             }
           }
 
+          // Validate that all requested IDs are present in the response
+          const requestedIds = new Set(batch.map((p) => p.id));
+          const receivedIds = new Set(resultById.keys());
+          const missingIds = Array.from(requestedIds).filter(
+            (id) => !receivedIds.has(id)
+          );
+
+          if (missingIds.length > 0) {
+            console.warn(
+              `[batchRpc] Missing responses for IDs: ${missingIds.join(", ")} (sent ${requestedIds.size}, received ${receivedIds.size})`
+            );
+          }
+
           for (const p of batch) {
             const result = resultById.get(p.id);
             p.resolve(JSON.stringify(result ?? {
