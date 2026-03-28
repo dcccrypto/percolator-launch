@@ -176,11 +176,19 @@ export async function POST(req: NextRequest) {
       // ── Post-loop: evaluate outcome ──────────────────────────────────────
       if (lastRateLimitMsg !== null) {
         // GH#1595: release gate so user can retry after RPC rate limit clears
+        // GH#1798: return a user-friendly rate-limit message (not "temporarily unavailable").
+        // RPC devnet rate limits are per-wallet and typically reset in ~24h.
         if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+        const rpcRateLimitNextClaimAt = new Date(
+          Date.now() + 24 * 60 * 60 * 1000,
+        ).toISOString();
         return NextResponse.json(
           {
-            error: "Solana devnet faucet rate-limited. Wait a few minutes and retry.",
-            retryable: true,
+            error:
+              "SOL airdrop rate limit reached — Solana devnet limits 1 airdrop per wallet per day. Try again tomorrow or use https://faucet.solana.com.",
+            retryable: false,
+            nextClaimAt: rpcRateLimitNextClaimAt,
+            rpcRateLimited: true,
           },
           { status: 429 },
         );
