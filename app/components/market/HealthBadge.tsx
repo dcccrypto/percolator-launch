@@ -30,7 +30,7 @@ const TOOLTIPS: Record<HealthLevel, string> = {
 
 export const HealthBadge: FC<{ level: HealthLevel }> = ({ level }) => (
   <Tooltip text={TOOLTIPS[level]}>
-    <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-bold ${STYLES[level]}${level === "warning" || level === "caution" || level === "oracle-down" ? " animate-pulse" : ""}`}>
+    <span className={`inline-block whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-bold ${STYLES[level]}${level === "warning" || level === "caution" || level === "oracle-down" ? " animate-pulse" : ""}`}>
       {LABELS[level]}
     </span>
   </Tooltip>

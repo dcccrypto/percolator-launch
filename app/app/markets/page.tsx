@@ -728,7 +728,7 @@ function MarketsPageInner() {
             <>
               <div className="relative rounded-sm border border-[var(--border)] hud-corners overflow-x-auto">
                 {/* Header row: xs=4 cols (name|price|lev|health), sm+=7 cols */}
-                <div className="grid w-full sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(55px,0.7fr)_minmax(55px,0.7fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 border-b border-[var(--border)] bg-[var(--bg-surface)] px-3 sm:px-5 py-2.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+                <div className="grid w-full sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(50px,0.6fr)_minmax(75px,0.8fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 border-b border-[var(--border)] bg-[var(--bg-surface)] px-3 sm:px-5 py-2.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text-dim)]">
                   <div>token</div>
                   <div className="text-right">price</div>
                   <div className="hidden sm:block text-right">OI</div>
@@ -860,7 +860,7 @@ function MarketsPageInner() {
                       key={m.slabAddress}
                       href={`/trade/${m.slabAddress}`}
                       className={[
-                        "grid w-full sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(55px,0.7fr)_minmax(55px,0.7fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 items-center px-3 sm:px-5 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.06] border-l-2 border-l-transparent hover:border-l-[var(--accent)]/40",
+                        "grid w-full sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(50px,0.6fr)_minmax(75px,0.8fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 items-center px-3 sm:px-5 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.06] border-l-2 border-l-transparent hover:border-l-[var(--accent)]/40",
                         i > 0 ? "border-t border-[var(--border)]" : "",
                         i % 2 === 1 ? "bg-white/[0.05]" : "",
                       ].join(" ")}
