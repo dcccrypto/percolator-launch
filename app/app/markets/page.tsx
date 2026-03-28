@@ -537,14 +537,15 @@ function MarketsPageInner() {
               <p className="mt-2 text-[13px] text-[var(--text-secondary)]">perpetual futures, pick your poison.</p>
             </div>
             <Link href="/create" aria-label="Launch a new market">
-              <GlowButton size="sm">+ launch market</GlowButton>
+              <GlowButton size="sm">+ LAUNCH MARKET</GlowButton>
             </Link>
           </div>
         </ScrollReveal>
 
         {/* Search & Sort */}
         <ScrollReveal delay={0.1}>
-          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+          {/* Row 1: Search + Sort tabs */}
+          <div className="mb-1.5 flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="relative flex-1">
               <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-dim)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -570,81 +571,100 @@ function MarketsPageInner() {
                 </button>
               )}
             </div>
-            <div className="relative flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-1" role="group" aria-label="Sort markets">
-              {([
-                { key: "volume" as SortKey, label: "volume" },
-                { key: "oi" as SortKey, label: "OI" },
-                { key: "health" as SortKey, label: "health" },
-                { key: "recent" as SortKey, label: "recent" },
-              ]).map((opt) => (
-                <button
-                  key={opt.key}
-                  onClick={() => setSortBy(opt.key)}
-                  className={[
-                    "rounded-sm px-3 py-2 sm:py-1.5 text-[11px] font-medium transition-all duration-200 min-h-[40px]",
-                    sortBy === opt.key
-                      ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                      : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
-                  ].join(" ")}
-                  aria-pressed={sortBy === opt.key}
-                  aria-label={`Sort by ${opt.label}`}
-                >
-                  {opt.label}
-                </button>
-              ))}
+            {/* Sort tabs + market count (mobile) on same row */}
+            <div className="flex items-center gap-3 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div className="relative flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-1" role="group" aria-label="Sort markets">
+                {([
+                  { key: "volume" as SortKey, label: "VOLUME" },
+                  { key: "oi" as SortKey, label: "OI" },
+                  { key: "health" as SortKey, label: "HEALTH" },
+                  { key: "recent" as SortKey, label: "RECENT" },
+                ]).map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setSortBy(opt.key)}
+                    className={[
+                      "rounded-sm px-3 py-2 sm:py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[40px]",
+                      sortBy === opt.key
+                        ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                        : "text-white/70 hover:text-white",
+                    ].join(" ")}
+                    aria-pressed={sortBy === opt.key}
+                    aria-label={`Sort by ${opt.label}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Separator — mobile only */}
+              <span className="sm:hidden h-6 w-px bg-white/15 shrink-0" />
+
+              {/* Results count — mobile only, beside sort tabs */}
+              <span className="sm:hidden ml-auto shrink-0 whitespace-nowrap text-sm font-semibold uppercase tracking-[0.08em] text-white tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+                {loading
+                  ? <>&hellip; MARKETS</>
+                  : (hasSearch || hasActiveFilters) && filtered.length !== activeMarkets.length
+                    ? <>{filtered.length} / {activeMarkets.length} {activeMarkets.length !== 1 ? "MARKETS" : "MARKET"}</>
+                    : <>{activeMarkets.length} {activeMarkets.length !== 1 ? "MARKETS" : "MARKET"}</>}
+              </span>
             </div>
           </div>
 
-          {/* Filters row */}
-          <div className="mb-6 flex flex-wrap items-center gap-3">
-            <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">filter:</span>
+          {/* Row 2: Filter pills — single scrollable row on mobile */}
+          <div className="mb-6 flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <span className="hidden sm:inline-block text-[10px] font-semibold uppercase tracking-[0.15em] text-white/70 shrink-0">FILTER:</span>
 
             {/* USD/Token toggle */}
-            <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5" role="group" aria-label="Display currency">
+            <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5 shrink-0" role="group" aria-label="Display currency">
               <button
                 onClick={() => setShowUsd(false)}
                 className={[
-                  "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-medium transition-all duration-200 min-h-[40px]",
+                  "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
                   !showUsd
                     ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                    : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+                    : "text-white/70 hover:text-white",
                 ].join(" ")}
                 aria-pressed={!showUsd}
                 aria-label="Display in tokens"
               >
-                tokens
+                TOKENS
               </button>
               <button
                 onClick={() => setShowUsd(true)}
                 className={[
-                  "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-medium transition-all duration-200 min-h-[40px]",
+                  "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
                   showUsd
                     ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                    : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+                    : "text-white/70 hover:text-white",
                 ].join(" ")}
                 aria-pressed={showUsd}
                 aria-label="Display in USD"
               >
-                usd
+                USD
               </button>
             </div>
 
+            {/* Separator */}
+            <span className="hidden sm:inline-block h-4 w-px bg-[var(--border)] shrink-0" />
+            <span className="sm:hidden text-white/40 text-sm font-bold shrink-0">&middot;</span>
+
             {/* Leverage filter */}
-            <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5" role="group" aria-label="Filter by leverage">
+            <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5 shrink-0" role="group" aria-label="Filter by leverage">
               {([
-                { key: "all" as LeverageFilter, label: "all" },
-                { key: "5x" as LeverageFilter, label: "5x+" },
-                { key: "10x" as LeverageFilter, label: "10x+" },
-                { key: "20x" as LeverageFilter, label: "20x+" },
+                { key: "all" as LeverageFilter, label: "ALL" },
+                { key: "5x" as LeverageFilter, label: "5X+" },
+                { key: "10x" as LeverageFilter, label: "10X+" },
+                { key: "20x" as LeverageFilter, label: "20X+" },
               ]).map((opt) => (
                 <button
                   key={opt.key}
                   onClick={() => setLeverageFilter(opt.key)}
                   className={[
-                    "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-medium transition-all duration-200 min-h-[40px]",
+                    "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
                     leverageFilter === opt.key
                       ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                      : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+                      : "text-white/70 hover:text-white",
                   ].join(" ")}
                   aria-pressed={leverageFilter === opt.key}
                   aria-label={`Filter leverage ${opt.label}`}
@@ -654,21 +674,25 @@ function MarketsPageInner() {
               ))}
             </div>
 
+            {/* Separator */}
+            <span className="hidden sm:inline-block h-4 w-px bg-[var(--border)] shrink-0" />
+            <span className="sm:hidden text-white/40 text-sm font-bold shrink-0">&middot;</span>
+
             {/* Oracle filter */}
-            <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5" role="group" aria-label="Filter by oracle type">
+            <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5 shrink-0" role="group" aria-label="Filter by oracle type">
               {([
-                { key: "all" as OracleFilter, label: "all oracles" },
-                { key: "live" as OracleFilter, label: "live feed" },
-                { key: "admin" as OracleFilter, label: "manual" },
+                { key: "all" as OracleFilter, label: "ALL ORACLES" },
+                { key: "live" as OracleFilter, label: "LIVE FEED" },
+                { key: "admin" as OracleFilter, label: "MANUAL" },
               ]).map((opt) => (
                 <button
                   key={opt.key}
                   onClick={() => setOracleFilter(opt.key)}
                   className={[
-                    "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-medium transition-all duration-200 min-h-[40px]",
+                    "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
                     oracleFilter === opt.key
                       ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                      : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+                      : "text-white/70 hover:text-white",
                   ].join(" ")}
                   aria-pressed={oracleFilter === opt.key}
                   aria-label={`Filter oracle ${opt.label}`}
@@ -682,17 +706,17 @@ function MarketsPageInner() {
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
-                className="text-[10px] text-[var(--short)] hover:text-[var(--short)]/80 underline underline-offset-2"
+                className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--short)] hover:text-[var(--short)]/80 underline underline-offset-2 shrink-0"
               >
-                clear filters
+                CLEAR
               </button>
             )}
 
-            {/* Results count — GH#1531: show all non-zombie markets (matches /api/markets total) */}
-            <span className="ml-auto text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+            {/* Results count — desktop only, in filter row */}
+            <span className="hidden sm:inline-block ml-auto text-xs font-semibold uppercase tracking-[0.08em] text-white shrink-0 whitespace-nowrap tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
               {(hasSearch || hasActiveFilters) && filtered.length !== activeMarkets.length
-                ? `${filtered.length} / ${activeMarkets.length} market${activeMarkets.length !== 1 ? "s" : ""}`
-                : `${activeMarkets.length} market${activeMarkets.length !== 1 ? "s" : ""}`}
+                ? `${filtered.length} / ${activeMarkets.length} MARKETS`
+                : `${activeMarkets.length} ${activeMarkets.length !== 1 ? "MARKETS" : "MARKET"}`}
             </span>
           </div>
         </ScrollReveal>
