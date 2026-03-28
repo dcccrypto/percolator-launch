@@ -64,8 +64,41 @@ const DEVNET_ALLOWED_MINTS: Set<string> = new Set(
  * Update this list as new confirmed safe devnet mints are created.
  */
 const EMERGENCY_DEVNET_MINTS: Set<string> = new Set([
-  // "mint-address-1"  // Example: Replace with actual known-safe devnet mint addresses
-  // "mint-address-2"
+  // Mirror mints — mainnet tokens mirrored to devnet via /api/devnet-mirror-mint
+  // Last synced: 2026-03-28 from devnet_mints table
+  "DJKjmSbWjhx925kuk1fS1BENCBnqXCfwUJjb9EKwSEnV", // Percolator (PERC)
+  "J5XdjMKTboG6VE9VJjMDknqsZ7QfSxbS8PUzqt2rN48c", // USDC
+  "8LiZdZjkgAee7528xwpLsFYDPzn2Dm828WsdwuhrHS2Q", // Wrapped SOL (SOL)
+  "H526MxEigL5a4TFVShK8pDwYyeuciwbcnRq7M99X1KDx", // dogwifhat (WIF)
+  "3xv6Xrx3Qt4AmT9yGrikEsCtYKaiet7eXXAiCmA24dks", // Jupiter (JUP)
+  "CCPHprPU6RsT4KbwVRC5Gk21L3B7VFsPUZFxEjZS4SeC", // Bonk / BONK
+  "VV43EZsULua48p5zbX25Eyd3LCNQK8E5XcHuGc4dN9H", // POPCAT
+  "FXVgdySNqLD8YQxf5inGPLc6XLKNWbxazQaMPUm2zDGR", // Raydium (RAY)
+  "CJUyV594JzJpK2BUakNpm6NbmCkhQoPJWkKjfKTvxJ3C", // BTC
+  "JCuusH5o92KkZ9APSFx9W99k4afj4iEHFLu6S5Qx194c", // hey.lol (HEY)
+  "CEaNDrt7GwBwpU8L6bFeYvJaDFUU3sqUQnBDcxLMSSVZ", // TXDex (TXD)
+  "Eiti4oTMGw4aogh5BCiBk8a5Cy3ahz2QntJbFu71X1as", // 360noscope420blazeit (MLG)
+  "651z3GyGhLXb2HGaovQcmNmyAnXfqaZh8FjXPbZM1C9L", // TAX
+  "Ft57uS9bHXEXGFiLkaMkiTwJC7EjW2x4dAmqocWBPcot", // PumpLiquid
+  "ECFLdZUjefn9wiD9QuRau7m23YgVfbZRBMxtNuKLXMEr", // Wendy's (WENDYS)
+  "4YHaH1JjnNGQuEj7TXYxSyMQxze84FngTVbBD4tDfLnC", // FUEL
+  "4Y2jDc5SLsmMoEcRJwM9F3T5sUBp8cxZm3vXZo6BsjBG", // $WIF
+  "4dbDeRgHk6JPNJZaLLRZHHAWN7Sw1xwFK4cPdNivqHHx", // PEEP
+  "EfaNUwzt6w2yXZPUDyfViZhVJpUDupvu3VUXtqHU9Ey8", // Downald
+  "J2oQxrjVGj3mFPhYF32USbWh4B3vWqMMD6RWoUkQRP8S", // Fartcoin
+  "Bqvnq5M8PmEBYLkH2yUVLe3FhzeimQuEh4CGgnxvnDG4", // MON
+  "bT3YAz8kqgXDdPAoLhXjSLcsrxEQxvWDCM7oD2VhzZo", // FREEDOM
+  "C1fiahWDErUeVpS8orrxHa1S8mHzsBk8oKUtbH4yWAfn", // PERP
+  "cvicXbKJfL16W8ACKHcDtTKfoRZXWRLV9pwzq8YJqBs", // pedgy penguns
+  "3kHuwDB8Gng7TuT2pxicWE9xfZgi1dL6Rofh9wsFmkqF", // The Black Ops
+  "5BYf1gz3Hc9z27omvXijbXr9ihVV9RwHt1EAC94T7P6t", // COLLECTIBLE
+  "E6Ndq3Fh6TXhgD5KMJphzVswRUKk7gxiQTvXqrNJmqfm", // PIXEL
+  "4h7dM19A58876Q3aMUNugs6JkGHiGTWFHGbTUEifv8qN", // CL1
+  "HUKrHYH8KYwpPz8DatHg6PJkikWDNCFDZQ5YpqEvntWj", // SMITH
+  "FV7RUwUQYNeK4oL8g6HacUBaeqURJzUfmWNt4QsTpCn2", // SMORT
+  "4ViuSYeVuU2ULikhZHKfBRYCbfzBrAGWBYthKZ4xZkUf", // RIGGED
+  "4RvZT6qNGihXGiu9L4ZDyGK4AJxqzmRnmEoN8URTUtHe", // GROKIUS
+  "6yEiTM4XYRLr2WsrsHegMXfp8w4EK3Hdw4HEi2mmZgjt", // shitcoin
 ]);
 
 /**
