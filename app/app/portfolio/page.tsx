@@ -46,10 +46,6 @@ export default function PortfolioPage() {
   // In mock mode, use synthetic positions
   const mockPositions = mockMode && !walletConnected ? getMockPortfolioPositions() : null;
   const positions = mockPositions ?? portfolio.positions ?? [];
-  const totalPnl = mockPositions ? mockPositions.reduce((s, p) => s + (p.account.pnl ?? 0n), 0n) : (portfolio.totalPnl ?? 0n);
-  const totalDeposited = mockPositions ? mockPositions.reduce((s, p) => s + (p.account.capital ?? 0n), 0n) : (portfolio.totalDeposited ?? 0n);
-  const totalValue = portfolio.totalValue ?? totalDeposited + totalPnl;
-  const totalUnrealizedPnl = portfolio.totalUnrealizedPnl ?? 0n;
   const atRiskCount = portfolio.atRiskCount ?? 0;
   const loading = mockPositions ? false : portfolio.loading;
   const refresh = portfolio.refresh;
@@ -63,10 +59,46 @@ export default function PortfolioPage() {
 
   // Auto-refresh handled by usePortfolio hook (30s interval + visibility change)
 
-  // Resolve collateral mint addresses to token symbols
+  // Resolve collateral mint addresses to token symbols and decimals
   const collateralMints = positions.map((pos) => pos.market.config.collateralMint);
   const tokenMetaMap = useMultiTokenMeta(collateralMints);
+
+  // Helper: get collateral decimals for a position from token metadata
+  const getDecimals = (pos: typeof positions[number]) =>
+    tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.decimals ?? 6;
+
+  // Compute USD-normalized totals using each position's oracle price and correct decimals.
+  // Raw on-chain capital is in collateral token native units (e.g. lamports for SOL, 9 dec).
+  // Formula: usdValue = (rawCapital / 10^decimals) * (oraclePriceE6 / 10^6)
+  //                    = (rawCapital * oraclePriceE6) / (10^decimals * 10^6)
+  // Filter out empty/closed accounts (FLAT with zero capital) — they clutter the list
+  const activePositions = positions.filter(
+    (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n
+  );
+
   const tokenMetasLoading = collateralMints.length > 0 && tokenMetaMap.size === 0;
+
+  const computeUsdTotals = () => {
+    let depositedUsd = 0;
+    let unrealizedPnlUsd = 0;
+    for (const pos of activePositions) {
+      const decimals = getDecimals(pos);
+      const divisor = 10 ** decimals;
+      const oraclePrice = "oraclePriceE6" in pos ? Number((pos as any).oraclePriceE6) / 1e6 : 0;
+      // Skip positions with no oracle price — don't fallback to 1 which treats raw capital as USD
+      const price = oraclePrice > 0 ? oraclePrice : 0;
+      const capital = Number(pos.account.capital ?? 0n) / divisor;
+      depositedUsd += capital * price;
+      const unrealized = "unrealizedPnl" in pos ? Number((pos as any).unrealizedPnl) / divisor : 0;
+      unrealizedPnlUsd += unrealized * price;
+    }
+    return { depositedUsd, unrealizedPnlUsd, valueUsd: depositedUsd + unrealizedPnlUsd };
+  };
+  // Don't compute USD totals until token metadata (decimals) has loaded —
+  // using the default 6 decimals for a 9-decimal token inflates values 1000x
+  const usdTotals = activePositions.length > 0 && !tokenMetasLoading
+    ? computeUsdTotals()
+    : { depositedUsd: 0, unrealizedPnlUsd: 0, valueUsd: 0 };
 
   if (!connected) {
     return (
@@ -133,19 +165,19 @@ export default function PortfolioPage() {
             {[
               {
                 label: "Portfolio Value",
-                value: !walletConnected ? "—" : loading ? "\u2026" : formatTokenAmount(totalValue),
+                value: !walletConnected ? "—" : (loading || tokenMetasLoading) ? "\u2026" : `$${usdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                 color: !walletConnected ? "text-white/40" : "text-white",
               },
               {
                 label: "Total Deposited",
-                value: !walletConnected ? "—" : loading ? "\u2026" : formatTokenAmount(totalDeposited),
+                value: !walletConnected ? "—" : (loading || tokenMetasLoading) ? "\u2026" : `$${usdTotals.depositedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                 color: !walletConnected ? "text-white/40" : "text-[var(--text-secondary)]",
               },
               {
                 label: "Unrealized PnL",
-                value: !walletConnected ? "—" : loading ? "\u2026" : formatPnl(totalUnrealizedPnl),
-                color: !walletConnected ? "text-white/40" : totalUnrealizedPnl >= 0n ? "text-[var(--long)]" : "text-[var(--short)]",
-                sub: !walletConnected || loading ? undefined : `${totalDeposited > 0n ? formatPnlPct(Number((totalUnrealizedPnl * 10000n) / (totalDeposited || 1n)) / 100) : "0.00%"}`,
+                value: !walletConnected ? "—" : (loading || tokenMetasLoading) ? "\u2026" : `${usdTotals.unrealizedPnlUsd >= 0 ? "+" : ""}$${Math.abs(usdTotals.unrealizedPnlUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                color: !walletConnected ? "text-white/40" : usdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
+                sub: !walletConnected || loading || tokenMetasLoading ? undefined : `${usdTotals.depositedUsd > 0 ? formatPnlPct((usdTotals.unrealizedPnlUsd / usdTotals.depositedUsd) * 100) : "0.00%"}`,
               },
               {
                 label: "LP Value",
@@ -157,7 +189,7 @@ export default function PortfolioPage() {
               },
               {
                 label: "Positions",
-                value: !walletConnected ? "—" : loading ? "\u2026" : positions.length.toString(),
+                value: !walletConnected ? "—" : loading ? "\u2026" : activePositions.length.toString(),
                 color: !walletConnected ? "text-white/40" : "text-white",
                 sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
                 subColor: atRiskCount > 0 ? "text-[var(--short)]" : undefined,
@@ -207,7 +239,7 @@ export default function PortfolioPage() {
                 </div>
               ))}
             </div>
-          ) : positions.length === 0 ? (
+          ) : activePositions.length === 0 ? (
             <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
               <h3 className="mb-1 text-[15px] font-semibold text-white">No positions yet</h3>
               <p className="mb-4 text-[13px] text-[var(--text-secondary)]">Browse markets to start trading.</p>
@@ -217,7 +249,7 @@ export default function PortfolioPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {positions.map((pos, i) => {
+              {activePositions.map((pos, i) => {
                 const posSize = pos.account?.positionSize ?? 0n;
                 const posCapital = pos.account?.capital ?? 0n;
                 const posEntry = pos.account?.entryPrice ?? 0n;
@@ -290,7 +322,7 @@ export default function PortfolioPage() {
                             className={`text-sm font-bold ${pnlPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
                             style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                           >
-                            {formatPnl(unrealizedPnl)}
+                            {formatPnl(unrealizedPnl, getDecimals(pos))}
                           </span>
                           <span
                             className={`ml-2 text-[10px] font-medium ${pnlPositive ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
@@ -305,7 +337,7 @@ export default function PortfolioPage() {
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Size</p>
                           <p className="text-[12px] text-white" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {formatTokenAmount(sizeAbs)}
+                            {formatTokenAmount(sizeAbs, getDecimals(pos))}
                           </p>
                         </div>
                         <div>
@@ -323,7 +355,7 @@ export default function PortfolioPage() {
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Capital</p>
                           <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {formatTokenAmount(posCapital)}
+                            {formatTokenAmount(posCapital, getDecimals(pos))}
                           </p>
                         </div>
                         <div>

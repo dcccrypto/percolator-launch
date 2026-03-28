@@ -261,11 +261,20 @@ export function usePortfolio(): PortfolioData {
         if (!cancelled) {
           // Sort: at-risk positions first, then by PnL
           allPositions.sort((a, b) => {
+            // Active positions (has size) before flat/empty
+            const aActive = a.account.positionSize !== 0n ? 0 : 1;
+            const bActive = b.account.positionSize !== 0n ? 0 : 1;
+            if (aActive !== bActive) return aActive - bActive;
+            // Then by liquidation severity
             const aSev = getLiquidationSeverity(a.liquidationDistancePct);
             const bSev = getLiquidationSeverity(b.liquidationDistancePct);
             const sevOrder = { danger: 0, warning: 1, safe: 2 };
             if (sevOrder[aSev] !== sevOrder[bSev]) return sevOrder[aSev] - sevOrder[bSev];
-            return Number(b.unrealizedPnl - a.unrealizedPnl);
+            // Then by PnL
+            const pnlDiff = Number(b.unrealizedPnl - a.unrealizedPnl);
+            if (pnlDiff !== 0) return pnlDiff;
+            // Stable tiebreaker: sort by slab address to prevent random reordering
+            return a.slabAddress.localeCompare(b.slabAddress);
           });
 
           setPositions(allPositions);
