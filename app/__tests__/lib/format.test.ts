@@ -149,12 +149,12 @@ describe("formatUsd", () => {
 });
 
 describe("formatLiqPrice", () => {
-  it("returns '-' for null", () => {
-    expect(formatLiqPrice(null)).toBe("-");
+  it("returns 'N/A' for null", () => {
+    expect(formatLiqPrice(null)).toBe("N/A");
   });
 
-  it("returns '-' for zero", () => {
-    expect(formatLiqPrice(0n)).toBe("-");
+  it("returns 'N/A' for zero", () => {
+    expect(formatLiqPrice(0n)).toBe("N/A");
   });
 
   it("returns '∞' for unliquidatable sentinel", () => {

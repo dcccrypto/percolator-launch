@@ -116,7 +116,8 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
 
   // Liq price danger color: amber when mark is within 10% of liq, red within 5%
   const liqPriceColor = (() => {
-    if (liqPriceE6 <= 0n || !hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
+    if (liqPriceE6 <= 0n) return "text-[var(--text-muted)]";
+    if (!hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
     const markNum = Number(currentPriceE6);
     const liqNum = Number(liqPriceE6);
     const distPct = Math.abs(markNum - liqNum) / markNum;
