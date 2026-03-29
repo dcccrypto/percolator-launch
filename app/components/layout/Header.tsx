@@ -15,6 +15,19 @@ const ConnectButton = dynamic(
 );
 
 /* ── Navigation groups ── */
+/** Pages hidden on mainnet beta — devnet-only faucets and internal pages */
+const MAINNET_HIDDEN_PATHS = new Set([
+  "/devnet-mint",
+  "/faucet",
+  "/openclaw",
+  "/pitch",
+]);
+
+function filterForNetwork(items: NavItem[], network: string): NavItem[] {
+  if (network !== "mainnet") return items;
+  return items.filter((item) => !MAINNET_HIDDEN_PATHS.has(item.href));
+}
+
 const tradeLinks: NavItem[] = [
   { href: "/markets", label: "Markets" },
   { href: "/dashboard", label: "Dashboard" },
@@ -39,7 +52,7 @@ const communityLinks: NavItem[] = [
 ];
 
 /* ── All links flat (for mobile) ── */
-const mobileGroups = [
+const mobileGroupsAll = [
   { label: "Trade", items: tradeLinks },
   { label: "Build", items: buildLinks },
   { label: "Community", items: communityLinks },
@@ -134,9 +147,9 @@ export const Header: FC = () => {
 
           {/* Desktop nav — dropdown groups */}
           <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main navigation">
-            <NavDropdown label="Trade" items={tradeLinks} />
-            <NavDropdown label="Build" items={buildLinks} />
-            <NavDropdown label="Community" items={communityLinks} />
+            <NavDropdown label="Trade" items={filterForNetwork(tradeLinks, network)} />
+            <NavDropdown label="Build" items={filterForNetwork(buildLinks, network)} />
+            <NavDropdown label="Community" items={filterForNetwork(communityLinks, network)} />
           </nav>
         </div>
 
@@ -182,7 +195,7 @@ export const Header: FC = () => {
         aria-label="Mobile navigation"
       >
         <div className="flex flex-col gap-0.5 p-3">
-          {mobileGroups.map((group) => (
+          {mobileGroupsAll.map((g) => ({ ...g, items: filterForNetwork(g.items, network) })).filter((g) => g.items.length > 0).map((group) => (
             <div key={group.label}>
               {/* Group header — accordion trigger */}
               <button

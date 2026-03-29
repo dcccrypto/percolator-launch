@@ -2,13 +2,14 @@
 -- This prevents the TradeIndexer from inserting the same trade multiple times
 
 -- First, remove any existing duplicates (keep the oldest record for each signature)
-DELETE FROM trades
-WHERE id NOT IN (
-  SELECT MIN(id)
-  FROM trades
-  WHERE tx_signature IS NOT NULL
-  GROUP BY tx_signature
-);
+DELETE FROM trades a
+WHERE a.ctid NOT IN (
+  SELECT MIN(b.ctid)
+  FROM trades b
+  WHERE b.tx_signature IS NOT NULL
+  GROUP BY b.tx_signature
+)
+AND a.tx_signature IS NOT NULL;
 
 -- Add unique constraint on tx_signature (allows NULL values)
 ALTER TABLE trades

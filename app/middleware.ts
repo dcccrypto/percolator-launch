@@ -215,7 +215,21 @@ function _blockedSlabFromPath(pathname: string): string | null {
 // This is belt-and-suspenders alongside the next.config.ts entry (kept for dev).
 const _marketsSlabRe = /^\/markets\/([^/]+)\/?$/;
 
+/** Paths blocked during mainnet beta — devnet-only faucets and internal pages */
+const MAINNET_BETA_BLOCKED_PATHS = [
+  "/devnet-mint", "/faucet", "/openclaw", "/pitch",
+];
+
 export async function middleware(request: NextRequest) {
+  // ── Mainnet beta: block pages not available yet ────────────────────────────
+  const isMainnet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() === "mainnet";
+  if (isMainnet) {
+    const path = request.nextUrl.pathname;
+    if (MAINNET_BETA_BLOCKED_PATHS.some((p) => path === p || path.startsWith(p + "/"))) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+  }
+
   // ── /markets/:slab → /trade/:slab (GH#1558) ─────────────────────────────
   const marketsMatch = _marketsSlabRe.exec(request.nextUrl.pathname);
   if (marketsMatch) {
