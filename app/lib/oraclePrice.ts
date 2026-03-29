@@ -50,10 +50,27 @@ export function detectOracleMode(cfg: {
 }
 
 /**
+ * Apply the market's `invert` flag to a price in E6 format.
+ *
+ * When `invert === 1`, the price represents an inverted pair (e.g., USD/SOL instead of SOL/USD).
+ * We invert by computing: 1e12 / priceE6, which keeps the result in E6 format.
+ * (1e6 USD * 1e6 precision / priceE6 = inverted priceE6)
+ *
+ * Returns 0n if priceE6 is 0 (division by zero guard).
+ */
+export function applyInvert(priceE6: bigint, invert: number | undefined): bigint {
+  if (!invert || priceE6 === 0n) return priceE6;
+  // 1e12 / priceE6 to keep E6 format: (1_000_000 USD * 1_000_000 precision) / priceE6
+  return 1_000_000_000_000n / priceE6;
+}
+
+/**
  * Resolve the correct USD price (in E6 format) for a market based on its oracle mode.
  *
  * For display purposes (markets page, trade page), this returns the best available
  * price from on-chain data. The caller should divide by 1_000_000 to get USD.
+ *
+ * Applies `invert` flag when set to 1: price = 1e12 / raw_price (inverted pair support).
  *
  * @returns priceE6 (bigint) or 0n if no valid price available
  */
@@ -63,6 +80,7 @@ export function resolveMarketPriceE6(cfg: {
   lastEffectivePriceE6: bigint;
   authorityPriceE6: bigint;
   authorityTimestamp?: bigint;
+  invert?: number;
 }): bigint {
   const mode = detectOracleMode(cfg);
 
@@ -91,8 +109,11 @@ export function resolveMarketPriceE6(cfg: {
       return 0n;
   }
 
+  // Apply invert flag: if config.invert === 1, the pair is displayed as the reciprocal
+  const inverted = applyInvert(raw, cfg.invert);
+
   // Sanitize: reject corrupt/uninitialized values that exceed Rust MAX_ORACLE_PRICE
-  return sanitizePriceE6(raw);
+  return sanitizePriceE6(inverted);
 }
 
 /**
