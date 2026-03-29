@@ -9,6 +9,7 @@ import { useUserAccount } from "@/hooks/useUserAccount";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useLiqPrice } from "@/hooks/useLiqPrice";
+import { useChartTheme } from "@/hooks/useChartTheme";
 import { ChartEmptyState } from "./ChartEmptyState";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
@@ -92,6 +93,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 }) => {
   const { config } = useSlabState();
   const { priceUsd } = useLivePrice();
+  const chartTheme = useChartTheme();
   const [chartType, setChartType] = useState<ChartType>("candle");
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
@@ -176,16 +178,16 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     const chart = createChart(containerRef.current, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: "#0D0D0F" },
-        textColor: "rgba(255,255,255,0.45)",
+        background: { type: ColorType.Solid, color: chartTheme.bg },
+        textColor: chartTheme.textColor,
       },
       grid: {
-        vertLines: { color: "rgba(255,255,255,0.04)" },
-        horzLines: { color: "rgba(255,255,255,0.04)" },
+        vertLines: { color: chartTheme.gridColor },
+        horzLines: { color: chartTheme.gridColor },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.06)" },
-      timeScale: { borderColor: "rgba(255,255,255,0.06)", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: chartTheme.borderColor },
+      timeScale: { borderColor: chartTheme.borderColor, timeVisible: true, secondsVisible: false },
     });
 
     chartRef.current = chart;
@@ -199,7 +201,26 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       liqLineRef.current = null;
       entryLineRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Apply theme changes to existing chart without recreating it
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.applyOptions({
+      layout: {
+        background: { type: ColorType.Solid, color: chartTheme.bg },
+        textColor: chartTheme.textColor,
+      },
+      grid: {
+        vertLines: { color: chartTheme.gridColor },
+        horzLines: { color: chartTheme.gridColor },
+      },
+      rightPriceScale: { borderColor: chartTheme.borderColor },
+      timeScale: { borderColor: chartTheme.borderColor },
+    });
+  }, [chartTheme]);
 
   // Derive entry price from user account
   const entryPriceNum = (() => {
@@ -230,12 +251,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
     if (chartType === "candle" && candleData.length > 0) {
       const series = chart.addCandlestickSeries({
-        upColor: "#22c55e",
-        downColor: "#ef4444",
-        borderDownColor: "#ef4444",
-        borderUpColor: "#22c55e",
-        wickDownColor: "#ef4444",
-        wickUpColor: "#22c55e",
+        upColor: chartTheme.upColor,
+        downColor: chartTheme.downColor,
+        borderDownColor: chartTheme.downColor,
+        borderUpColor: chartTheme.upColor,
+        wickDownColor: chartTheme.downColor,
+        wickUpColor: chartTheme.upColor,
       });
 
       const formatted = candleData.map((c) => ({
@@ -264,7 +285,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
         // Phase 2: use a tiny sentinel value so lwc renders the pane even when vol=0
         value: (c.volume ?? 0) > 0 ? c.volume : 0.001,
-        color: c.close >= c.open ? "rgba(34,197,94,0.6)" : "rgba(239,68,68,0.6)",
+        color: c.close >= c.open ? chartTheme.volUpColor : chartTheme.volDownColor,
       }));
       volumeSeries.setData(volumeData);
       volumeSeriesRef.current = volumeSeries;
@@ -307,7 +328,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       }
     } else if (chartType === "line" && lineData.length > 0) {
       const series = chart.addLineSeries({
-        color: "#22c55e",
+        color: chartTheme.upColor,
         lineWidth: 2,
       });
       const formatted = lineData.map((p) => ({
@@ -356,7 +377,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     }
 
     chart.timeScale().fitContent();
-  }, [chartType, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum]);
+  }, [chartType, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme]);
 
   // Update mark price line when live price changes
   useEffect(() => {
@@ -472,7 +493,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
         {/* GH#1652: empty-state overlay — shown when no data yet, sits above canvas */}
         {showEmptyOverlay && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-[#0D0D0F]/90 backdrop-blur-[1px]">
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center backdrop-blur-[1px]" style={{ background: `${chartTheme.bg}e8` }}>
             {priceUsd != null && priceUsd > 0 ? (
               <>
                 <div
