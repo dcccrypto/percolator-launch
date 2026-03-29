@@ -30,7 +30,11 @@ export function useMultiTokenMeta(mints: PublicKey[]): Map<string, TokenMeta> {
         if (!cancelled) setMetaMap(map);
       })
       .catch(() => {
-        // Keep existing map on error
+        // GH#1808: On fetch failure, set an empty map explicitly so callers can detect
+        // completion vs. never-resolved. Keeps existing data if we had partial results.
+        if (!cancelled && metaMap.size === 0) {
+          setMetaMap(new Map());
+        }
       });
 
     return () => { cancelled = true; };

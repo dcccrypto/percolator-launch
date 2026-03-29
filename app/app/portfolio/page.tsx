@@ -76,7 +76,10 @@ export default function PortfolioPage() {
     (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n
   );
 
-  const tokenMetasLoading = collateralMints.length > 0 && tokenMetaMap.size === 0;
+  // GH#1808: Only block on tokenMetas if positions are still loading too. If positions have
+  // loaded (loading=false) but tokenMetas haven't resolved, the fetch likely failed silently —
+  // unblock the UI instead of leaving it stuck in infinite skeleton state.
+  const tokenMetasLoading = collateralMints.length > 0 && tokenMetaMap.size === 0 && loading;
 
   const computeUsdTotals = () => {
     let depositedUsd = 0;

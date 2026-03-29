@@ -143,20 +143,30 @@ async function fetchPythPublishers(feedIdHex: string): Promise<PublishersRespons
   const feedBytes = hexToBytes(feedIdHex);
   const accountAddress = bytesToBase58(feedBytes);
 
-  const resp = await fetch(PYTHNET_RPC, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "getAccountInfo",
-      params: [accountAddress, { encoding: "base64", commitment: "confirmed" }],
-    }),
-    signal: AbortSignal.timeout(8000),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(PYTHNET_RPC, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getAccountInfo",
+        params: [accountAddress, { encoding: "base64", commitment: "confirmed" }],
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (err) {
+    // GH#1807: Pythnet RPC unreachable (timeout, DNS, network) — return empty rather
+    // than propagating a 500 that triggers a client-side retry storm.
+    console.warn("[oracle/publishers] Pythnet RPC unreachable:", (err as Error).message);
+    return { mode: "pyth-pinned", publisherCount: null, publisherTotal: null, publishers: [] };
+  }
 
   if (!resp.ok) {
-    throw new Error(`Pythnet RPC error: ${resp.status}`);
+    // Non-200 from Pythnet — treat as unavailable, not as a server error.
+    console.warn(`[oracle/publishers] Pythnet RPC returned ${resp.status}`);
+    return { mode: "pyth-pinned", publisherCount: null, publisherTotal: null, publishers: [] };
   }
 
   const json = await resp.json();
