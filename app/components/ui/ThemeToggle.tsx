@@ -6,17 +6,21 @@ type Theme = "dark" | "light";
 
 const STORAGE_KEY = "pco-theme";
 
-function getSystemTheme(): Theme {
-  if (typeof window === "undefined") return "dark";
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-}
 
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>("dark");
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    const resolved = stored ?? getSystemTheme();
+    let resolved: Theme = "dark";
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored === "dark" || stored === "light") {
+        resolved = stored;
+      }
+      // default is dark — do not fall back to system preference
+    } catch (e) {
+      // localStorage unavailable (private browsing, etc.) — use dark default
+    }
     setTheme(resolved);
     document.documentElement.setAttribute("data-theme", resolved);
   }, []);

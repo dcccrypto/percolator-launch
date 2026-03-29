@@ -62,18 +62,21 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${interTight.variable} ${outfit.variable}`}>
       <head>
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `
               try {
                 var t = localStorage.getItem('pco-theme');
-                if (!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+                if (t !== 'dark' && t !== 'light') t = 'dark';
                 document.documentElement.setAttribute('data-theme', t);
-              } catch(e) {}
+              } catch(e) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+              }
             `,
           }}
         />
       </head>
-        <body suppressHydrationWarning className="min-h-screen bg-[#050508] text-[#eeeef0] antialiased" data-nonce={nonce}>
+        <body suppressHydrationWarning className="min-h-screen antialiased" data-nonce={nonce}>
         <Providers>
           <CursorGlow />
           <div className="relative z-[1] flex min-h-screen flex-col">
