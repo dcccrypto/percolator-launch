@@ -66,7 +66,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
+    // GH#1820: wrap req.json() so empty/non-JSON bodies return 400 instead of 500.
+    // Next.js throws a SyntaxError (or similar) when the body is absent or malformed.
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Request body must be valid JSON with fields: wallet (string), type ('sol' | 'usdc')" },
+        { status: 400 },
+      );
+    }
     const walletAddress = body?.wallet;
 
     // GH#1399: Validate type before coercing — unknown types must return 400,
