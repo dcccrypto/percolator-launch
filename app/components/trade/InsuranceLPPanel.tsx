@@ -28,6 +28,9 @@ export function InsuranceLPPanel() {
   const tokenSymbol = tokenMeta?.symbol ?? 'Token';
   const tokenDecimals = tokenMeta?.decimals ?? 6;
   const { state, loading, error, createMint, deposit, withdraw } = useInsuranceLP();
+  // LP tokens have their own decimals — separate from collateral token decimals.
+  // Using collateral decimals for LP amounts causes off-by-1000x errors (PERC-8198).
+  const lpDecimals = state.lpDecimals;
   const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [amount, setAmount] = useState('');
   const [txStatus, setTxStatus] = useState<string | null>(null);
@@ -54,7 +57,8 @@ export function InsuranceLPPanel() {
     if (!amount) return;
     setTxStatus('Withdrawing...');
     try {
-      const lpTokens = parseHumanAmount(amount, tokenDecimals);
+      // Withdraw input is LP token amount — use lpDecimals, NOT collateral decimals
+      const lpTokens = parseHumanAmount(amount, lpDecimals);
       await withdraw(lpTokens);
       setTxStatus('Withdrawal successful!');
       setAmount('');
@@ -78,6 +82,8 @@ export function InsuranceLPPanel() {
   };
 
   // Preview calculation — use parseHumanAmount for precision
+  // Deposit: user enters collateral amount → preview shows LP tokens received
+  // Withdraw: user enters LP token amount → preview shows collateral received
   const previewTokens = (() => {
     if (!amount || mode !== 'deposit') return null;
     try {
@@ -92,7 +98,8 @@ export function InsuranceLPPanel() {
   const previewCollateral = (() => {
     if (!amount || mode !== 'withdraw') return null;
     try {
-      const lpTokens = parseHumanAmount(amount, tokenDecimals);
+      // Withdraw input is LP token amount — use lpDecimals, NOT collateral decimals
+      const lpTokens = parseHumanAmount(amount, lpDecimals);
       if (lpTokens <= 0n) return null;
       if (state.lpSupply === 0n) return null;
       return (lpTokens * state.insuranceBalance) / state.lpSupply;
@@ -118,7 +125,7 @@ export function InsuranceLPPanel() {
         </div>
         <div>
           <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">LP Supply</p>
-          <p className="text-sm font-mono text-[var(--text)]">{formatCollateral(state.lpSupply, tokenDecimals)}</p>
+          <p className="text-sm font-mono text-[var(--text)]">{formatCollateral(state.lpSupply, lpDecimals)}</p>
         </div>
         <div>
           <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Rate</p>
@@ -138,7 +145,7 @@ export function InsuranceLPPanel() {
           <div className="flex justify-between items-center">
             <div>
               <p className="text-[10px] text-[var(--text-muted)] uppercase">Your LP Tokens</p>
-              <p className="text-sm font-mono text-[var(--text)]">{formatCollateral(state.userLpBalance, tokenDecimals)}</p>
+              <p className="text-sm font-mono text-[var(--text)]">{formatCollateral(state.userLpBalance, lpDecimals)}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] text-[var(--text-muted)] uppercase">Redeemable</p>
@@ -206,7 +213,7 @@ export function InsuranceLPPanel() {
             />
             {mode === 'withdraw' && state.userLpBalance > 0n && (
               <button
-                onClick={() => setAmount(formatTokenAmount(state.userLpBalance, tokenDecimals))}
+                onClick={() => setAmount(formatTokenAmount(state.userLpBalance, lpDecimals))}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--long)] hover:text-[var(--long)]/80"
               >
                 MAX
@@ -217,7 +224,7 @@ export function InsuranceLPPanel() {
           {/* Preview */}
           {previewTokens !== null && mode === 'deposit' && (
             <p className="text-xs text-[var(--text-muted)] mb-3">
-              You receive: <span className="text-[var(--text-secondary)] font-mono">~{formatCollateral(previewTokens, tokenDecimals)}</span> LP tokens
+              You receive: <span className="text-[var(--text-secondary)] font-mono">~{formatCollateral(previewTokens, lpDecimals)}</span> LP tokens
             </p>
           )}
           {previewCollateral !== null && mode === 'withdraw' && (

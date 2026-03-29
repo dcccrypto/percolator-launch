@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
-import { getAssociatedTokenAddressSync, unpackAccount } from '@solana/spl-token';
+import { getAssociatedTokenAddressSync, unpackAccount, unpackMint } from '@solana/spl-token';
 import { getStakeProgramId, deriveDepositPda } from '@percolator/sdk';
 
 
@@ -133,7 +133,26 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       // Resolve stake program ID for current network
       const stakeProgramPk = getStakeProgramId();
 
-      // 2. For each pool, fetch user's LP token ATA and deposit PDA in parallel
+      // 2a. Batch-fetch LP mint accounts to read per-mint decimals (PERC-8197).
+      // LP tokens are NOT guaranteed to have 6 decimals — hardcoding causes wrong display values.
+      const lpMintKeys = pools.map((p) => new PublicKey(p.lpMint));
+      const lpMintInfos = await connection.getMultipleAccountsInfo(lpMintKeys);
+      const lpDecimalsByMint: Record<string, number> = {};
+      for (let i = 0; i < pools.length; i++) {
+        const mintInfo = lpMintInfos[i];
+        if (mintInfo && mintInfo.data.length >= 82) {
+          try {
+            const mint = unpackMint(lpMintKeys[i], mintInfo);
+            lpDecimalsByMint[pools[i].lpMint] = mint.decimals;
+          } catch {
+            lpDecimalsByMint[pools[i].lpMint] = 6; // safe fallback
+          }
+        } else {
+          lpDecimalsByMint[pools[i].lpMint] = 6; // safe fallback
+        }
+      }
+
+      // 2b. For each pool, fetch user's LP token ATA and deposit PDA in parallel
       const slotNow = await connection.getSlot();
 
       const positionResults = await Promise.allSettled(
@@ -164,15 +183,17 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
           if (lpBalanceRaw === 0n) return null;
 
           // 3. Compute redeemable value: (lpBalance / totalLpSupply) * tvl
-          const DECIMALS = 6; // USDC 6 decimals
-          const lpBalance = Number(lpBalanceRaw) / Math.pow(10, DECIMALS);
+          // Use per-mint decimals — do NOT hardcode 6 (PERC-8197).
+          const lpMintDecimals = lpDecimalsByMint[pool.lpMint] ?? 6;
+          const lpBalance = Number(lpBalanceRaw) / Math.pow(10, lpMintDecimals);
           const totalLpSupply = pool.totalLpSupply;
           const tvlRaw = BigInt(pool.tvlRaw);
 
           const redeemableRaw: bigint = totalLpSupply > 0
             ? (lpBalanceRaw * tvlRaw) / BigInt(Math.round(totalLpSupply))
             : 0n;
-          const redeemable = Number(redeemableRaw) / Math.pow(10, DECIMALS);
+          // Redeemable value is in collateral token (e.g. USDC 6 dec) — use collateral decimals (6)
+          const redeemable = Number(redeemableRaw) / Math.pow(10, 6);
           const userSharePct = totalLpSupply > 0
             ? (Number(lpBalanceRaw) / totalLpSupply) * 100
             : 0;

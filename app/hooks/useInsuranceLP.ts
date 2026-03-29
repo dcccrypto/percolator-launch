@@ -48,6 +48,8 @@ export interface InsuranceLPState {
   mintExists: boolean;
   /** The insurance LP mint address */
   lpMintAddress: PublicKey | null;
+  /** Decimals of the LP token mint (NOT collateral decimals) */
+  lpDecimals: number;
 }
 
 export function useInsuranceLP() {
@@ -67,6 +69,7 @@ export function useInsuranceLP() {
     userRedeemableValue: 0n,
     mintExists: false,
     lpMintAddress: null,
+    lpDecimals: 6,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,12 +108,15 @@ export function useInsuranceLP() {
         mintExists && rawBalance <= U64_MAX / 2n ? rawBalance : 0n;
 
       let lpSupply = 0n;
+      let lpDecimals = 6;
       let userLpBalance = 0n;
 
       if (mintExists) {
-        // Read supply from mint (using static import — dynamic import breaks vi.mock in tests)
+        // Read supply and decimals from LP mint
+        // IMPORTANT: LP tokens have their own decimals — do NOT use collateral decimals here.
         const mint = unpackMint(lpMintInfo.mintPda, mintInfo);
         lpSupply = mint.supply;
+        lpDecimals = mint.decimals;
 
         // Get user's LP token balance — use stabilized string to avoid re-render loops
         if (walletPubkeyStr) {
@@ -153,6 +159,7 @@ export function useInsuranceLP() {
         userRedeemableValue,
         mintExists,
         lpMintAddress: mintExists ? lpMintInfo.mintPda : null,
+        lpDecimals,
       });
     } catch (err) {
       console.error('Failed to refresh insurance LP state:', err);
