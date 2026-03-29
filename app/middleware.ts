@@ -215,11 +215,9 @@ function _blockedSlabFromPath(pathname: string): string | null {
 // This is belt-and-suspenders alongside the next.config.ts entry (kept for dev).
 const _marketsSlabRe = /^\/markets\/([^/]+)\/?$/;
 
-/** Paths blocked during mainnet beta — devnet-only, internal, or not launched yet */
+/** Paths blocked during mainnet beta — devnet-only faucets and internal pages */
 const MAINNET_BETA_BLOCKED_PATHS = [
-  "/devnet-mint", "/faucet", "/admin", "/agents", "/bugs", "/report-bug",
-  "/dashboard", "/leaderboard", "/join", "/openclaw", "/pitch",
-  "/stake", "/create", "/my-markets",
+  "/devnet-mint", "/faucet", "/openclaw", "/pitch",
 ];
 
 export async function middleware(request: NextRequest) {

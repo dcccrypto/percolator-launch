@@ -15,24 +15,12 @@ const ConnectButton = dynamic(
 );
 
 /* ── Navigation groups ── */
-/** Pages hidden on mainnet beta (devnet-only, internal, or not yet launched) */
+/** Pages hidden on mainnet beta — devnet-only faucets and internal pages */
 const MAINNET_HIDDEN_PATHS = new Set([
   "/devnet-mint",
   "/faucet",
-  "/admin",
-  "/agents",
-  "/bugs",
-  "/report-bug",
-  "/dashboard",
-  "/leaderboard",
-  "/join",
   "/openclaw",
   "/pitch",
-  "/stake",
-  "/create",
-  "/my-markets",
-  "/wallet",
-  "/earn",
 ]);
 
 function filterForNetwork(items: NavItem[], network: string): NavItem[] {
