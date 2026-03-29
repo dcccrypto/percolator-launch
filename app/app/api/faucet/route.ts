@@ -1,12 +1,14 @@
 /**
  * PERC-376: Devnet faucet endpoint
  *
- * POST /api/faucet { wallet: string, type?: "sol" | "usdc" }
+ * POST /api/faucet { wallet: string, type: "sol" | "usdc" }
  *
  * GH#1399: Unknown type values now return 400 instead of silently routing to USDC.
+ * GH#1815: type is now REQUIRED — missing type returns 400 (was defaulting to USDC
+ *          which caused TokenOwnerOffCurveError for certain wallets).
  *
  * type="sol"  → airdrops 2 SOL via requestAirdrop on devnet public RPC
- * type="usdc" → mints 10,000 test USDC (default when type omitted)
+ * type="usdc" → mints 10,000 test USDC
  *
  * Rate-limited: 1 claim per wallet per type per 24h (tracked in Supabase auto_fund_log).
  *
@@ -69,24 +71,19 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const walletAddress = body?.wallet;
 
-    // GH#1399: Validate type before coercing — unknown types must return 400,
-    // not silently fall through to the USDC mint path.
+    // GH#1815: type is required — reject early before any RPC/token operations.
+    // GH#1399: Unknown type values return 400 instead of silently routing to USDC.
     // Normalize type parameter: trim whitespace and lowercase before validation
     const rawType = body?.type;
     const normalizedType =
       typeof rawType === "string" ? rawType.trim().toLowerCase() : undefined;
-    if (
-      normalizedType !== undefined &&
-      normalizedType !== "sol" &&
-      normalizedType !== "usdc"
-    ) {
+    if (!normalizedType || (normalizedType !== "sol" && normalizedType !== "usdc")) {
       return NextResponse.json(
-        { error: "Invalid type. Use 'sol' or 'usdc'" },
+        { error: "Missing or invalid type. Must be 'sol' or 'usdc'" },
         { status: 400 },
       );
     }
-    const type: "sol" | "usdc" =
-      normalizedType === "sol" ? "sol" : "usdc";
+    const type: "sol" | "usdc" = normalizedType;
 
     if (!walletAddress || typeof walletAddress !== "string") {
       return NextResponse.json(

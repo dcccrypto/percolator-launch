@@ -111,20 +111,22 @@ describe("/api/faucet route", () => {
     expect(SOL_AIRDROP_AMOUNT).toBe(2_000_000_000);
   });
 
-  it("type field defaults to 'usdc' when omitted", () => {
-    // GH#1399: type validation — only "sol" and "usdc" are accepted.
-    // Unknown/other values must be rejected (return 400), not silently coerced to usdc.
+  it("GH#1815: missing type returns 400 (type is required)", () => {
+    // GH#1815: type is now required — omitting it must return 400, not default to usdc.
+    // GH#1399: unknown types must also be rejected.
     const parseType = (t: unknown): "sol" | "usdc" | "invalid" => {
-      if (t !== undefined && t !== "sol" && t !== "usdc") return "invalid";
-      return t === "sol" ? "sol" : "usdc";
+      const normalized = typeof t === "string" ? t.trim().toLowerCase() : undefined;
+      if (!normalized || (normalized !== "sol" && normalized !== "usdc")) return "invalid";
+      return normalized as "sol" | "usdc";
     };
-    expect(parseType(undefined)).toBe("usdc");
+    expect(parseType(undefined)).toBe("invalid"); // GH#1815: missing → 400
     expect(parseType("sol")).toBe("sol");
     expect(parseType("usdc")).toBe("usdc");
-    // GH#1399: unknown types must be rejected, NOT coerced to "usdc"
     expect(parseType("token")).toBe("invalid");
     expect(parseType("mirror")).toBe("invalid");
     expect(parseType("other")).toBe("invalid");
+    expect(parseType("")).toBe("invalid"); // empty string → 400
+    expect(parseType("  ")).toBe("invalid"); // whitespace-only → 400
   });
 
   it("GH#1399: unknown type returns 400 with descriptive error (not authority_mismatch)", () => {
