@@ -107,7 +107,7 @@ export function formatUsd(priceE6: bigint | null | undefined): string {
  * "-" when zero/null, otherwise delegates to formatUsd.
  */
 export function formatLiqPrice(liqPriceE6: bigint | null | undefined): string {
-  if (liqPriceE6 == null || liqPriceE6 === 0n) return "-";
+  if (liqPriceE6 == null || liqPriceE6 <= 0n) return "N/A";
   if (liqPriceE6 >= LIQ_PRICE_UNLIQUIDATABLE) return "∞";
   return formatUsd(liqPriceE6);
 }

@@ -48,9 +48,9 @@ describe("formatUsd (extended)", () => {
 });
 
 describe("formatLiqPrice", () => {
-  it("returns '-' for null", () => expect(formatLiqPrice(null)).toBe("-"));
-  it("returns '-' for undefined", () => expect(formatLiqPrice(undefined)).toBe("-"));
-  it("returns '-' for zero", () => expect(formatLiqPrice(0n)).toBe("-"));
+  it("returns 'N/A' for null", () => expect(formatLiqPrice(null)).toBe("N/A"));
+  it("returns 'N/A' for undefined", () => expect(formatLiqPrice(undefined)).toBe("N/A"));
+  it("returns 'N/A' for zero", () => expect(formatLiqPrice(0n)).toBe("N/A"));
   it("returns '∞' for unliquidatable sentinel", () => {
     expect(formatLiqPrice(LIQ_PRICE_UNLIQUIDATABLE)).toBe("∞");
   });

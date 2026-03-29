@@ -145,7 +145,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">
             <span className="text-[var(--text-dim)]">Est. Liquidation Price:</span>
             <span className="font-mono font-medium text-[var(--short)]">
-              ${formatPerc(estimatedLiqPrice, 6)}
+              {estimatedLiqPrice <= 0n ? "N/A" : `$${formatPerc(estimatedLiqPrice, 6)}`}
             </span>
           </div>
         </div>
