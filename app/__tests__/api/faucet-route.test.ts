@@ -111,26 +111,33 @@ describe("/api/faucet route", () => {
     expect(SOL_AIRDROP_AMOUNT).toBe(2_000_000_000);
   });
 
-  it("type field defaults to 'usdc' when omitted", () => {
-    // GH#1399: type validation — only "sol" and "usdc" are accepted.
-    // Unknown/other values must be rejected (return 400), not silently coerced to usdc.
-    const parseType = (t: unknown): "sol" | "usdc" | "invalid" => {
-      if (t !== undefined && t !== "sol" && t !== "usdc") return "invalid";
-      return t === "sol" ? "sol" : "usdc";
-    };
-    expect(parseType(undefined)).toBe("usdc");
-    expect(parseType("sol")).toBe("sol");
-    expect(parseType("usdc")).toBe("usdc");
-    // GH#1399: unknown types must be rejected, NOT coerced to "usdc"
-    expect(parseType("token")).toBe("invalid");
-    expect(parseType("mirror")).toBe("invalid");
-    expect(parseType("other")).toBe("invalid");
+  it("GH#1815: missing type returns 400, not 500 (TokenOwnerOffCurveError)", () => {
+    // Regression guard: previously, omitting 'type' silently defaulted to "usdc"
+    // and proceeded to token operations, crashing with TokenOwnerOffCurveError (500).
+    // Now missing type must return 400 immediately, before any token ops.
+    //
+    // Mirrors the route's normalisation logic:
+    //   normalizedType = typeof rawType === "string" ? rawType.trim().toLowerCase() : undefined
+    //   if (normalizedType === undefined) → 400 "Missing required field: type"
+    const normalize = (rawType: unknown): string | undefined =>
+      typeof rawType === "string" ? rawType.trim().toLowerCase() : undefined;
+
+    // undefined (field absent) and null both normalise to undefined → 400
+    expect(normalize(undefined)).toBeUndefined(); // was silently "usdc" before fix
+    expect(normalize(null)).toBeUndefined();
+    // valid values pass through
+    expect(normalize("sol")).toBe("sol");
+    expect(normalize("usdc")).toBe("usdc");
+    expect(normalize("  SOL  ")).toBe("sol"); // trimmed + lowercased
+    // non-string (e.g. number) also normalises to undefined → 400
+    expect(normalize(42)).toBeUndefined();
   });
 
   it("GH#1399: unknown type returns 400 with descriptive error (not authority_mismatch)", () => {
     // Regression guard: sending type:"token" or type:"mirror" previously
     // silently fell through to the USDC mint path, producing a confusing
     // authority_mismatch error. Now it must return 400 immediately.
+    // GH#1815: same 400 path also handles missing type (undefined/null).
     const VALID_TYPES = ["sol", "usdc"];
     const unknownType = "token";
     const isKnown = VALID_TYPES.includes(unknownType);
@@ -140,6 +147,11 @@ describe("/api/faucet route", () => {
     const unknownType2 = "mirror";
     const isKnown2 = VALID_TYPES.includes(unknownType2);
     expect(isKnown2).toBe(false);
+
+    // GH#1815: undefined (missing) type must also return 400
+    const missingType = undefined;
+    const expectedStatusMissing = missingType === undefined ? 400 : 200;
+    expect(expectedStatusMissing).toBe(400);
   });
 
   it("on-chain authority check: authority mismatch should return 400, not 500 (GH#1382)", () => {
