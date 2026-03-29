@@ -3,6 +3,7 @@
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { formatTokenAmount } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
+import { useEffect, useState } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 interface TradeHistoryTableProps {
@@ -19,24 +20,24 @@ function formatPrice(priceNum: number): string {
   return `$${priceNum.toPrecision(4)}`;
 }
 
-function formatFee(feeNum: number): string {
+function formatFee(feeNum: number, decimals = 6): string {
   if (!feeNum) return "—";
-  // fee is stored in token base units (e6 scale) — formatTokenAmount expects bigint
+  // fee is stored in token base units — formatTokenAmount expects bigint
   try {
-    return formatTokenAmount(BigInt(Math.round(feeNum)), 6);
+    return formatTokenAmount(BigInt(Math.round(feeNum)), decimals);
   } catch {
-    return (feeNum / 1_000_000).toFixed(6);
+    return (feeNum / Math.pow(10, decimals)).toFixed(decimals > 4 ? 6 : 4);
   }
 }
 
-function formatSize(sizeStr: string): string {
+function formatSize(sizeStr: string, decimals = 6): string {
   try {
     const raw = BigInt(sizeStr.split(".")[0]);
     const abs = raw < 0n ? -raw : raw;
-    return formatTokenAmount(abs, 6);
+    return formatTokenAmount(abs, decimals);
   } catch {
     const n = Math.abs(parseFloat(sizeStr) || 0);
-    return formatTokenAmount(BigInt(Math.round(n)), 6);
+    return formatTokenAmount(BigInt(Math.round(n)), decimals);
   }
 }
 
@@ -52,6 +53,38 @@ function shortAddress(addr: string): string {
   return addr.length > 12 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
 
+/** Fetch slab → collateral decimals from /api/markets once, cache in module scope. */
+const slabDecimalsCache: Record<string, number> = {};
+let marketsFetchAttempted = false;
+
+async function loadMarketDecimals(): Promise<void> {
+  if (marketsFetchAttempted) return;
+  marketsFetchAttempted = true;
+  try {
+    const res = await fetch("/api/markets?limit=200");
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const m of (data.markets ?? [])) {
+      if (m.slab_address && typeof m.decimals === "number") {
+        slabDecimalsCache[m.slab_address] = m.decimals;
+      }
+    }
+  } catch {
+    // best-effort — fall back to 6
+  }
+}
+
+/** Hook to lazily fetch and return slab → decimals map. */
+function useSlabDecimals(): Record<string, number> {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!marketsFetchAttempted) {
+      loadMarketDecimals().then(() => setTick((t) => t + 1));
+    }
+  }, []);
+  return slabDecimalsCache;
+}
+
 export function TradeHistoryTable({
   wallet,
   slabFilter,
@@ -63,6 +96,9 @@ export function TradeHistoryTable({
     slabFilter,
   });
 
+  // Slab → collateral decimals map (fetched from /api/markets)
+  const slabDecimals = useSlabDecimals();
+
   // Collect unique slab addresses to resolve market symbols
   const slabAddresses = [...new Set(trades.map((t) => t.slab_address))];
   const tokenMetaMap = useMultiTokenMeta(
@@ -72,6 +108,7 @@ export function TradeHistoryTable({
     [],
   );
   void tokenMetaMap; // not used yet — we show slab short address as market id
+  void slabAddresses;
 
   if (!wallet) return null;
 
@@ -140,6 +177,8 @@ export function TradeHistoryTable({
           const txLink = trade.tx_signature
             ? `https://solscan.io/tx/${trade.tx_signature}?cluster=devnet`
             : null;
+          // Use per-slab decimals if available; default 6 (USDC) as safe fallback
+          const tradeDecimals = slabDecimals[trade.slab_address] ?? 6;
 
           return (
             <div
@@ -176,7 +215,7 @@ export function TradeHistoryTable({
                   className="text-[11px] text-white"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {formatSize(trade.size)}
+                  {formatSize(trade.size, tradeDecimals)}
                 </p>
               </div>
 
@@ -196,7 +235,7 @@ export function TradeHistoryTable({
                   className="text-[11px] text-[var(--text-secondary)]"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                 >
-                  {formatFee(trade.fee)}
+                  {formatFee(trade.fee, tradeDecimals)}
                 </p>
               </div>
 

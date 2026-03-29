@@ -5,6 +5,8 @@ import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
 import { explorerTxUrl } from "@/lib/config";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockTrades } from "@/lib/mock-trade-data";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
 
 interface Trade {
   id: string;
@@ -25,6 +27,11 @@ function toBigInt(val: number | string | bigint): bigint {
 }
 
 export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
+  const { config: mktConfig } = useSlabState();
+  const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
+  // Use on-chain decimals — size from API is in raw token units (i128 on-chain)
+  const decimals = tokenMeta?.decimals ?? 6;
+
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -118,7 +125,7 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   </span>
                 </div>
                 <div className="text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {trade.size != null ? formatTokenAmount(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size)))) : "—"}
+                  {trade.size != null ? formatTokenAmount(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size))), decimals) : "—"}
                 </div>
                 <div className="text-right text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
                   {trade.price != null ? formatPriceE6(BigInt(Math.round(Number(trade.price) * 1e6))) : "—"}
