@@ -32,6 +32,7 @@ export const AccountsCard: FC = () => {
   const { params } = useEngineState();
   const { priceE6: livePriceE6 } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
+  const decimals = tokenMeta?.decimals ?? 6;
   const [tab, setTab] = useState<Tab>("open");
   const [sortKey, setSortKey] = useState<SortKey>("position");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -171,7 +172,7 @@ export const AccountsCard: FC = () => {
                     )}
                     {isOpenLike && (
                       <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                        {row.positionSize !== 0n ? formatTokenAmount(absPos) : "-"}
+                        {row.positionSize !== 0n ? formatTokenAmount(absPos, decimals) : "-"}
                       </td>
                     )}
                     {isOpenLike && <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
@@ -188,9 +189,9 @@ export const AccountsCard: FC = () => {
                       </td>
                     )}
                     <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                      {formatPnl(row.pnl)}
+                      {formatPnl(row.pnl, decimals)}
                     </td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{formatTokenAmount(row.capital)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{formatTokenAmount(row.capital, decimals)}</td>
                     {isOpenLike && (
                       <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.marginPct > 50 ? "text-[var(--long)]" : row.marginPct > 20 ? "text-[var(--warning)]" : "text-[var(--short)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                         {row.positionSize !== 0n ? `${row.marginPct.toFixed(1)}%` : "-"}

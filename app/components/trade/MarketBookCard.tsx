@@ -19,6 +19,7 @@ export const MarketBookCard: FC = () => {
   const { priceE6: livePriceE6 } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
+  const decimals = tokenMeta?.decimals ?? 6;
 
   const lps = useMemo(
     () => accounts.filter(({ account }) => account.kind === AccountKind.LP),
@@ -112,7 +113,7 @@ export const MarketBookCard: FC = () => {
             className="text-[11px] font-semibold text-[var(--long)]"
             style={{ fontFamily: "var(--font-mono)" }}
           >
-            {formatTokenAmount(lpTotalCapital)}
+            {formatTokenAmount(lpTotalCapital, decimals)}
           </p>
           {/* 3px utilisation fill bar */}
           <div className="mt-1.5 h-[3px] w-full bg-[var(--border)]/20 overflow-hidden">
@@ -128,7 +129,7 @@ export const MarketBookCard: FC = () => {
             className="text-[11px] font-semibold text-[var(--short)]"
             style={{ fontFamily: "var(--font-mono)" }}
           >
-            {formatTokenAmount(askDepth)}
+            {formatTokenAmount(askDepth, decimals)}
           </p>
           {/* 3px utilisation fill bar */}
           <div className="mt-1.5 h-[3px] w-full bg-[var(--border)]/20 overflow-hidden">
@@ -171,9 +172,9 @@ export const MarketBookCard: FC = () => {
                 <div key={idx} className="flex items-center gap-1 py-1 text-[10px]">
                   <span className="w-5 text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{i + 1}</span>
                   <span className="flex-1 text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>{shortenAddress(account.owner.toBase58())}</span>
-                  <span className="w-20 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(account.capital)}</span>
+                  <span className="w-20 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(account.capital, decimals)}</span>
                   <span className={`w-20 text-right ${account.positionSize >= 0n ? "text-[var(--long)]" : "text-[var(--short)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
-                    {formatTokenAmount(account.positionSize < 0n ? -account.positionSize : account.positionSize)}
+                    {formatTokenAmount(account.positionSize < 0n ? -account.positionSize : account.positionSize, decimals)}
                   </span>
                   <span className={`w-16 text-right font-medium ${utilColor}`} style={{ fontFamily: "var(--font-mono)" }}>
                     {utilPct.toFixed(1)}%

@@ -282,6 +282,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               pnlBarWidth={pnlBarWidth}
               hasValidMark={hasValidMark}
               symbol={symbol}
+              decimals={decimals}
             />
 
             {/* 3.5: Liq warning when <15% away */}
@@ -301,7 +302,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Size</span>
                 <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {formatTokenAmount(absPosition)} {symbol}
+                  {formatTokenAmount(absPosition, decimals)} {symbol}
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">
@@ -420,6 +421,7 @@ interface PnlSectionProps {
   pnlBarWidth: number;
   hasValidMark: boolean;
   symbol: string;
+  decimals: number;
 }
 
 function abs_n(n: bigint): bigint {
@@ -434,6 +436,7 @@ const PnlSection: FC<PnlSectionProps> = ({
   pnlBarWidth,
   hasValidMark,
   symbol,
+  decimals,
 }) => {
   // 3.2: Flash on PnL sign change
   const [flashClass, setFlashClass] = useState("");
@@ -471,7 +474,7 @@ const PnlSection: FC<PnlSectionProps> = ({
                 style={{ fontFamily: "var(--font-mono)" }}
               >
                 {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}
-                {formatTokenAmount(abs_n(pnlTokens))} {symbol}
+                {formatTokenAmount(abs_n(pnlTokens), decimals)} {symbol}
               </span>
               {pnlUsd !== null && (
                 <span

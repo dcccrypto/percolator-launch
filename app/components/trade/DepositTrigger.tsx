@@ -24,6 +24,7 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   const { config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
+  const decimals = tokenMeta?.decimals ?? 6;
 
   const [expanded, setExpanded] = useState(false);
   const [hasDeposited, setHasDeposited] = useState(true); // default true to avoid flash
@@ -99,7 +100,7 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
         <div className="flex items-center gap-2">
           <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Account</span>
           <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-            {formatTokenAmount(capital)} {symbol}
+            {formatTokenAmount(capital, decimals)} {symbol}
           </span>
         </div>
         <div className="flex items-center gap-1.5">

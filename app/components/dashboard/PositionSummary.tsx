@@ -20,7 +20,7 @@ function formatPnlPct(pct: number): string {
   return `${sign}${pct.toFixed(2)}%`;
 }
 
-function PositionCard({ pos, symbol }: { pos: PortfolioPosition; symbol: string }) {
+function PositionCard({ pos, symbol, decimals = 6 }: { pos: PortfolioPosition; symbol: string; decimals?: number }) {
   const posSize = pos.account?.positionSize ?? 0n;
   const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
   const sizeAbs = posSize < 0n ? -posSize : posSize;
@@ -84,7 +84,7 @@ function PositionCard({ pos, symbol }: { pos: PortfolioPosition; symbol: string 
                   className={`text-[11px] font-bold ${pos.unrealizedPnl >= 0n ? "text-[var(--long)]" : "text-[var(--short)]"}`}
                   style={{ fontFamily: "var(--font-jetbrains-mono)" }}
                 >
-                  {formatPnl(pos.unrealizedPnl)}
+                  {formatPnl(pos.unrealizedPnl, decimals)}
                 </span>
                 <span
                   className={`ml-1 text-[9px] ${pos.pnlPercent >= 0 ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
@@ -105,7 +105,7 @@ function PositionCard({ pos, symbol }: { pos: PortfolioPosition; symbol: string 
           <div>
             <span className="text-[var(--text-dim)]">Size: </span>
             <span className="text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-              {formatTokenAmount(sizeAbs)}
+              {formatTokenAmount(sizeAbs, decimals)}
             </span>
           </div>
           <div>
@@ -226,6 +226,7 @@ export function PositionSummary() {
                     ? `${tokenMetaMap.get(pos.market.config.collateralMint.toBase58())!.symbol}/USD`
                     : `${pos.slabAddress.slice(0, 6)}…/USD`
                 }
+                decimals={tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.decimals ?? 6}
               />
             ))}
           </div>
