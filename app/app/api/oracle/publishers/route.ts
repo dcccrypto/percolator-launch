@@ -185,7 +185,10 @@ async function fetchPythPublishers(feedIdHex: string): Promise<PublishersRespons
 
   const magic = data.readUInt32LE(0);
   if (magic !== PYTH_MAGIC) {
-    throw new Error(`Invalid Pyth magic: 0x${magic.toString(16)}`);
+    // GH#1813: Account exists but is not a Pyth price account (wrong magic bytes).
+    // Return empty rather than throwing — same graceful pattern as network error path.
+    console.warn(`[oracle/publishers] Non-Pyth account magic: 0x${magic.toString(16)}`);
+    return { mode: "pyth-pinned", publisherCount: null, publisherTotal: null, publishers: [] };
   }
 
   const numComponents = data.readUInt32LE(24);
