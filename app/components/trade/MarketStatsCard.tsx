@@ -253,7 +253,7 @@ export const MarketStatsCard: FC = () => {
                 {s.label}
               </p>
               <p
-                className={`text-sm font-mono truncate ${s.valueClass ?? "text-white"}`}
+                className={`text-sm font-mono truncate ${s.valueClass ?? "text-[var(--text)]"}`}
                 title={s.tooltip ?? s.value}
                 style={{ fontVariantNumeric: "tabular-nums" }}
               >

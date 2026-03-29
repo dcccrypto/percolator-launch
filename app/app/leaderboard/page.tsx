@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 
@@ -67,20 +67,55 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Format raw bigint volume as a compact human-readable string */
 /**
- * Base-unit divisor for collateral decimals (GH#1573):
- * - Mainnet: USDC (6 decimals) → 10^6
- * - Devnet:  PERC token (9 decimals) → 10^9
- * TODO: fetch actual collateral decimals per-market for multi-collateral support.
+ * Hook to determine the collateral decimals for the current network by fetching
+ * the markets list and finding the modal (most common) decimal value.
+ *
+ * GH#1833: Previously this was a hardcoded per-network constant — mainnet=6 (USDC),
+ * devnet=9 (PERC token). That breaks multi-collateral markets. This hook fetches
+ * actual market data so the displayed divisor matches reality.
+ *
+ * Falls back to the old IS_MAINNET heuristic if the API call fails.
  */
-const BASE_UNIT_DIVISOR = IS_MAINNET ? 1_000_000 : 1_000_000_000;
+function useCollateralDecimals(): number {
+  const fallback = IS_MAINNET ? 6 : 9;
+  const [decimals, setDecimals] = useState<number>(fallback);
 
-function fmtVolume(raw: string): string {
+  useEffect(() => {
+    fetch("/api/markets?limit=200")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data?.markets?.length) return;
+        // Find the modal (most-common) decimal value across all active markets
+        const freq: Record<number, number> = {};
+        for (const m of data.markets) {
+          if (typeof m.decimals === "number" && m.decimals > 0) {
+            freq[m.decimals] = (freq[m.decimals] ?? 0) + 1;
+          }
+        }
+        const entries = Object.entries(freq);
+        if (entries.length === 0) return;
+        const modal = entries.reduce((a, b) => (b[1] > a[1] ? b : a));
+        setDecimals(Number(modal[0]));
+      })
+      .catch(() => {/* keep fallback */});
+  }, []);
+
+  return decimals;
+}
+
+/** Default divisor fallback used by fmtVolume when no divisor is provided. */
+const DEFAULT_DIVISOR = IS_MAINNET ? 1_000_000 : 1_000_000_000;
+
+/** Format raw bigint volume as a compact human-readable string.
+ * @param raw - raw token amount as string (sum of abs(size) from on-chain trades)
+ * @param divisor - 10^decimals for the collateral token (default: network-based heuristic)
+ */
+function fmtVolume(raw: string, divisor = DEFAULT_DIVISOR): string {
   try {
     const n = BigInt(raw);
-    // Display in "units" (divide by BASE_UNIT_DIVISOR for devnet collateral decimals)
-    const units = Number(n) / BASE_UNIT_DIVISOR;
+    // Divide by 10^decimals to convert raw token units to human-readable amount
+    const units = Number(n) / divisor;
     if (units >= 1_000_000_000) return `${(units / 1_000_000_000).toFixed(2)}B`;
     if (units >= 1_000_000) return `${(units / 1_000_000).toFixed(2)}M`;
     if (units >= 1_000) return `${(units / 1_000).toFixed(1)}K`;
@@ -252,10 +287,10 @@ function CompetitionBanner() {
 /* ── Share helpers ────────────────────────────────────────── */
 const LEADERBOARD_URL = "https://percolatorlaunch.com/leaderboard";
 
-function buildShareText(entry: LeaderboardEntry): string {
+function buildShareText(entry: LeaderboardEntry, divisor = DEFAULT_DIVISOR): string {
   const medal = RANK_MEDALS[entry.rank];
   const rankStr = medal ? `${medal} #${entry.rank}` : `#${entry.rank}`;
-  const vol = fmtVolume(entry.totalVolume);
+  const vol = fmtVolume(entry.totalVolume, divisor);
   const network = IS_MAINNET ? "mainnet" : "devnet";
   return (
     `I'm ${rankStr} on the @percolatorlaunch ${network} leaderboard with ${vol} volume!\n\n` +
@@ -283,13 +318,13 @@ interface MyRankCardProps {
   walletConnected: boolean;
 }
 
-function MyRankCard({ entry, walletConnected }: MyRankCardProps) {
+function MyRankCard({ entry, walletConnected, divisor = DEFAULT_DIVISOR }: MyRankCardProps & { divisor?: number }) {
   const [copied, setCopied] = useState(false);
 
   const handleShare = useCallback(() => {
-    const text = entry ? buildShareText(entry) : buildGenericShareText();
+    const text = entry ? buildShareText(entry, divisor) : buildGenericShareText();
     window.open(twitterUrl(text), "_blank", "noopener,noreferrer");
-  }, [entry]);
+  }, [entry, divisor]);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -389,7 +424,7 @@ function MyRankCard({ entry, walletConnected }: MyRankCardProps) {
             <div className="text-xs font-mono" style={{ color: "var(--text-secondary)" }}>
               <span className="tabular-nums">{entry.tradeCount.toLocaleString()} trades</span>
               <span className="mx-2" style={{ color: "var(--text-muted)" }}>·</span>
-              <span className="tabular-nums">{fmtVolume(entry.totalVolume)} vol</span>
+              <span className="tabular-nums">{fmtVolume(entry.totalVolume, divisor)} vol</span>
             </div>
           </div>
         </div>
@@ -435,6 +470,9 @@ export default function LeaderboardPage() {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
   const { publicKey, connected } = useWalletCompat();
+  // GH#1833: use per-network market decimals instead of hardcoded constant
+  const collateralDecimals = useCollateralDecimals();
+  const divisor = useMemo(() => Math.pow(10, collateralDecimals), [collateralDecimals]);
 
   const fetchLeaderboard = useCallback(async (p: Period) => {
     setLoading(true);
@@ -553,7 +591,7 @@ export default function LeaderboardPage() {
 
         {/* ── My Rank / Share ─────────────────────────────────────── */}
         {!loading && (
-          <MyRankCard entry={myEntry} walletConnected={connected} />
+          <MyRankCard entry={myEntry} walletConnected={connected} divisor={divisor} />
         )}
 
         {/* ── Loading skeleton ────────────────────────────────────── */}
@@ -679,7 +717,7 @@ export default function LeaderboardPage() {
                     className="text-right tabular-nums"
                     style={{ color: "var(--text-secondary)" }}
                   >
-                    {fmtVolume(entry.totalVolume)}
+                    {fmtVolume(entry.totalVolume, divisor)}
                   </span>
 
                   {/* Last active */}

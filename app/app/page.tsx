@@ -68,7 +68,7 @@ function HowItWorks() {
             <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
               // how it works
             </div>
-            <h2 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+            <h2 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
               Three steps. <span className="font-normal text-[var(--text-muted)]">Sixty seconds.</span>
             </h2>
           </div>
@@ -85,12 +85,12 @@ function HowItWorks() {
                   <div className="flex h-12 w-12 items-center justify-center border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] transition-colors duration-200 group-hover:border-[var(--accent)]/30 group-hover:bg-[var(--accent)]/[0.08]">
                     <OnboardingIcon type={step.brandIcon} size={32} />
                   </div>
-                  <span className="text-[11px] font-medium tracking-tight text-white/25 transition-colors duration-200 group-hover:text-[var(--accent)]/30" style={{ fontFamily: "var(--font-heading)" }}>
+                  <span className="text-[11px] font-medium tracking-tight text-[var(--text-muted)] transition-colors duration-200 group-hover:text-[var(--accent)]/30" style={{ fontFamily: "var(--font-heading)" }}>
                     {step.number}
                   </span>
                 </div>
 
-                <h3 className="mb-2 text-[13px] sm:text-[14px] font-semibold tracking-tight text-white">
+                <h3 className="mb-2 text-[13px] sm:text-[14px] font-semibold tracking-tight text-[var(--text)]">
                   {step.title}
                 </h3>
                 <p className="text-[12px] sm:text-[12px] leading-relaxed text-[var(--text-secondary)]">{step.desc}</p>
@@ -308,7 +308,7 @@ export default function Home() {
                 <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
                   // protocol metrics
                 </div>
-                <h2 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+                <h2 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
                   Built <GradientText variant="muted">Different</GradientText>
                 </h2>
               </div>
@@ -344,7 +344,7 @@ export default function Home() {
                     ) : (
                       <p className={`text-lg sm:text-xl font-semibold tracking-tight tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-heading)" }}>
                         {stat.value}
-                        {(stat as { suffix?: string }).suffix && <span className="ml-1 text-[11px] font-medium text-white/25">{(stat as { suffix?: string }).suffix}</span>}
+                        {(stat as { suffix?: string }).suffix && <span className="ml-1 text-[11px] font-medium text-[var(--text-muted)]">{(stat as { suffix?: string }).suffix}</span>}
                       </p>
                     )}
                   </div>
@@ -369,7 +369,7 @@ export default function Home() {
                 <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
                   // architecture
                 </div>
-                <h2 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+                <h2 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
                   Purpose-Built <GradientText variant="muted">Infrastructure</GradientText>
                 </h2>
               </div>
@@ -390,7 +390,7 @@ export default function Home() {
                       PERMISSIONLESS
                     </span>
                   </div>
-                  <h3 className="mb-2 text-[15px] font-semibold tracking-tight text-white">No Permission Needed</h3>
+                  <h3 className="mb-2 text-[15px] font-semibold tracking-tight text-[var(--text)]">No Permission Needed</h3>
                   <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
                     No governance, no whitelists, no waiting. Deploy your own perpetual market in 60 seconds.
                   </p>
@@ -457,7 +457,7 @@ export default function Home() {
                       {f.tag}
                     </span>
                   </div>
-                  <h3 className="mb-2 text-[13px] sm:text-[14px] font-semibold tracking-tight text-white">{f.title}</h3>
+                  <h3 className="mb-2 text-[13px] sm:text-[14px] font-semibold tracking-tight text-[var(--text)]">{f.title}</h3>
                   <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">{f.desc}</p>
                   <div className="absolute bottom-0 left-0 right-0 h-px bg-[var(--accent)]/0 transition-all duration-300 group-hover:bg-[var(--accent)]/30" />
                 </article>
@@ -478,7 +478,7 @@ export default function Home() {
                 <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
                   // live data
                 </div>
-                <h2 className="text-xl font-medium tracking-[-0.01em] text-white sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
+                <h2 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
                   Active Markets
                 </h2>
               </div>
@@ -500,7 +500,7 @@ export default function Home() {
                     aria-label={`Trade ${isValidSymbol(m.symbol) ? `${m.symbol}/USD` : `market ${m.slab_address.slice(0, 6)}`}`}
                   >
                     <div className="absolute left-0 top-0 bottom-0 w-px bg-[var(--accent)] opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
-                    <div className="text-[13px] font-semibold text-white">
+                    <div className="text-[13px] font-semibold text-[var(--text)]">
                       {/* GH#1666: isValidSymbol rejects base58 fragments from unresolved mint metadata */}
                       {isValidSymbol(m.symbol) ? `${m.symbol}/USD` : `${m.slab_address.slice(0, 6)}...`}
                     </div>
@@ -552,7 +552,7 @@ export default function Home() {
               className="mb-5 text-3xl font-medium tracking-[-0.02em] sm:text-4xl lg:text-5xl"
               style={{ fontFamily: "var(--font-heading)" }}
             >
-              <span className="font-normal text-white/60">Ready to </span><GradientText variant="bright">Percolate?</GradientText>
+              <span className="font-normal text-[var(--text-secondary)]">Ready to </span><GradientText variant="bright">Percolate?</GradientText>
             </h2>
             <p className="mx-auto mb-8 max-w-md text-[14px] text-[var(--text-secondary)]">
               Deploy a perpetual futures market in 60 seconds. No permission needed.
