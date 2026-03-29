@@ -103,6 +103,61 @@
   --btn-disabled-border: rgba(255, 255, 255, 0.06);
   --btn-disabled-cursor: not-allowed;
   --btn-disabled-shadow: none;
+
+  /* Ambient glow */
+  --glow-ambient: rgba(153, 69, 255, 0.03);
+}
+
+/* ─── Light Mode Overrides ─── */
+[data-theme="light"] {
+  /* Backgrounds */
+  --bg:           #F8F8FC;
+  --bg-elevated:  #FFFFFF;
+  --bg-surface:   #F2F2F8;
+  --panel-bg:     #FAFAFD;
+
+  /* Borders */
+  --border:        #E0E0EC;
+  --border-subtle: #ECEDF5;
+  --border-hover:  #C4C4D8;
+
+  /* Text */
+  --text:           #0D0E15;
+  --text-secondary: #4A4B62;
+  --text-muted:     #8A8BA8;
+  --text-dim:       #B8B9CC;
+
+  /* Accent subtle overlays — lighten on white bg */
+  --accent-subtle:  rgba(153, 69, 255, 0.08);
+  --hud-line:       rgba(153, 69, 255, 0.15);
+  --hud-line-hover: rgba(153, 69, 255, 0.35);
+  --cyan-muted:     rgba(20, 241, 149, 0.10);
+  --glow-ambient:   rgba(153, 69, 255, 0.04);
+
+  /* Buttons: secondary needs higher contrast on light */
+  --btn-secondary-bg:           rgba(0, 0, 0, 0.04);
+  --btn-secondary-bg-hover:     rgba(0, 0, 0, 0.07);
+  --btn-secondary-bg-active:    rgba(0, 0, 0, 0.02);
+  --btn-secondary-text:         var(--text);
+  --btn-secondary-border:       rgba(0, 0, 0, 0.14);
+  --btn-secondary-border-hover: rgba(0, 0, 0, 0.24);
+
+  /* Disabled state */
+  --btn-disabled-bg:     rgba(0, 0, 0, 0.04);
+  --btn-disabled-text:   rgba(13, 14, 21, 0.28);
+  --btn-disabled-border: rgba(0, 0, 0, 0.08);
+}
+
+/* CRT/noise overlays — tone down in light mode */
+[data-theme="light"] body::before {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent, transparent 2px,
+    rgba(0, 0, 0, 0.006) 2px, rgba(0, 0, 0, 0.006) 4px
+  );
+}
+[data-theme="light"] body::after {
+  opacity: 0.008;
 }
 
 html {

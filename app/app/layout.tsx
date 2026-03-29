@@ -60,7 +60,23 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${interTight.variable} ${outfit.variable}`}>
-        <body suppressHydrationWarning className="min-h-screen bg-[#050508] text-[#eeeef0] antialiased" data-nonce={nonce}>
+      <head>
+        <script
+          nonce={nonce}
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                var t = localStorage.getItem('pco-theme');
+                if (t !== 'dark' && t !== 'light') t = 'dark';
+                document.documentElement.setAttribute('data-theme', t);
+              } catch(e) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+              }
+            `,
+          }}
+        />
+      </head>
+        <body suppressHydrationWarning className="min-h-screen antialiased" data-nonce={nonce}>
         <Providers>
           <CursorGlow />
           <div className="relative z-[1] flex min-h-screen flex-col">
