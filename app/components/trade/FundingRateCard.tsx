@@ -87,16 +87,23 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
   // P3-4: last 4 funding rate periods for mini bar chart (8h rates in %)
   const [miniChartRates, setMiniChartRates] = useState<number[]>([]);
 
-  // Fetch funding data from API, fall back to on-chain data
+  // Fetch funding data from API, fall back to on-chain data.
+  // GH#1832: AbortController prevents stale responses from a previous market
+  // overwriting the current market's data on fast market switches.
   useEffect(() => {
     if (mockMode) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     
     const fetchFunding = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/funding/${slabAddress}`);
+        const res = await fetch(`/api/funding/${slabAddress}`, { signal });
         if (!res.ok) throw new Error("API unavailable");
         const data = await res.json();
+        if (cancelled) return;
         setFundingData({
           ...data,
           netLpPosition: BigInt(data.netLpPosition ?? 0),
@@ -105,8 +112,8 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
         // /history returns { rateBpsPerSlot } — convert to 8h rate%:
         // hourly% = (rateBpsPerSlot / 10000) * 9000  →  8h% = hourly * 8
         try {
-          const histRes = await fetch(`/api/funding/${slabAddress}/history?limit=4`);
-          if (histRes.ok) {
+          const histRes = await fetch(`/api/funding/${slabAddress}/history?limit=4`, { signal });
+          if (histRes.ok && !cancelled) {
             const histData = await histRes.json();
             const pts: { rateBpsPerSlot?: number }[] = histData.history ?? [];
             // Clamp outlier values before display — legacy on-chain data can have overflowed
@@ -119,13 +126,15 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
                 return (raw / 10000) * 9000 * 8;
               })
               .filter((r): r is number => r !== null);
-            setMiniChartRates(rates);
+            if (!cancelled) setMiniChartRates(rates);
           }
         } catch { /* silently skip — mini chart is optional */ }
-        setError(null);
-      } catch {
+        if (!cancelled) setError(null);
+      } catch (err) {
+        // Ignore AbortError — this is expected when switching markets
+        if (err instanceof DOMException && err.name === "AbortError") return;
         // Silently fall back to on-chain data — no error shown to user
-        if (engine && sanitizeFundingRateBps(fundingRate) !== null) {
+        if (!cancelled && engine && sanitizeFundingRateBps(fundingRate) !== null) {
           const rate = Number(sanitizeFundingRateBps(fundingRate)!);
           const hourly = (rate * 9000) / 10000;
           const apr = hourly * 24 * 365;
@@ -144,13 +153,17 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
           setMiniChartRates([hourly * 8, hourly * 8, hourly * 8, hourly * 8]);
         }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchFunding();
     const interval = setInterval(fetchFunding, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [slabAddress, mockMode, engine, fundingRate]);
 
   // Update countdown every second

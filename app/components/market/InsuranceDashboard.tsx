@@ -65,16 +65,23 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
   const [showExplainer, setShowExplainer] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
 
-  // Fetch insurance data from API
+  // Fetch insurance data from API.
+  // GH#1832: AbortController prevents stale responses from a previous market
+  // overwriting the current market's data on fast market switches.
   useEffect(() => {
     if (mockMode) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
 
     const fetchInsurance = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/insurance/${slabAddress}`);
+        const res = await fetch(`/api/insurance/${slabAddress}`, { signal });
         if (!res.ok) throw new Error("Failed to fetch insurance data");
         const data = await res.json();
+        if (cancelled) return;
         // Map API response shape to InsuranceData interface
         const balance = data.balance ?? data.currentBalance ?? "0";
         const feeRevenue = data.feeRevenue ?? "0";
@@ -86,40 +93,50 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
           timestamp: typeof h.timestamp === "string" ? new Date(h.timestamp).getTime() : h.timestamp,
           balance: typeof h.balance === "string" ? Number(BigInt(h.balance)) / (10 ** decimals) : h.balance,
         }));
-        setInsuranceData({
-          balance,
-          feeRevenue,
-          totalRisk,
-          coverageRatio,
-          dailyAccumulationRate: data.dailyAccumulationRate ?? 0,
-          historicalBalance,
-        });
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-        // Fallback to on-chain data when API unavailable
-        if (engine) {
-          const balance = engine.insuranceFund?.balance ?? 0n;
-          const feeRev = engine.insuranceFund?.feeRevenue ?? 0n;
-          const totalOi = engine.totalOpenInterest ?? 0n;
-          const ratio = totalOi > 0n ? Number(balance * 10000n / totalOi) / 10000 : 0;
+        if (!cancelled) {
           setInsuranceData({
-            balance: balance.toString(),
-            feeRevenue: feeRev.toString(),
-            totalRisk: totalOi.toString(),
-            coverageRatio: ratio,
-            dailyAccumulationRate: 0,
-            historicalBalance: [],
+            balance,
+            feeRevenue,
+            totalRisk,
+            coverageRatio,
+            dailyAccumulationRate: data.dailyAccumulationRate ?? 0,
+            historicalBalance,
           });
+          setError(null);
+        }
+      } catch (err) {
+        // Ignore AbortError — this is expected when switching markets
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Unknown error");
+          // Fallback to on-chain data when API unavailable
+          if (engine) {
+            const balance = engine.insuranceFund?.balance ?? 0n;
+            const feeRev = engine.insuranceFund?.feeRevenue ?? 0n;
+            const totalOi = engine.totalOpenInterest ?? 0n;
+            const ratio = totalOi > 0n ? Number(balance * 10000n / totalOi) / 10000 : 0;
+            setInsuranceData({
+              balance: balance.toString(),
+              feeRevenue: feeRev.toString(),
+              totalRisk: totalOi.toString(),
+              coverageRatio: ratio,
+              dailyAccumulationRate: 0,
+              historicalBalance: [],
+            });
+          }
         }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchInsurance();
     const interval = setInterval(fetchInsurance, 30000); // Refresh every 30s
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [slabAddress, mockMode, engine]);
 
   // Calculate health status
