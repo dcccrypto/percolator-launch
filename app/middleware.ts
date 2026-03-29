@@ -222,7 +222,7 @@ const MAINNET_BETA_BLOCKED_PATHS = [
 
 export async function middleware(request: NextRequest) {
   // ── Mainnet beta: block pages not available yet ────────────────────────────
-  const isMainnet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK === "mainnet";
+  const isMainnet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() === "mainnet";
   if (isMainnet) {
     const path = request.nextUrl.pathname;
     if (MAINNET_BETA_BLOCKED_PATHS.some((p) => path === p || path.startsWith(p + "/"))) {

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { getNetwork } from "@/lib/config";
 import Link from "next/link";
 
@@ -10,11 +10,8 @@ import Link from "next/link";
  * Usage: <MainnetGate>{children}</MainnetGate>
  */
 export function MainnetGate({ children }: { children: React.ReactNode }) {
-  const [blocked, setBlocked] = useState(false);
+  const [blocked] = useState(() => typeof window !== "undefined" && getNetwork() === "mainnet");
 
-  useEffect(() => {
-    setBlocked(getNetwork() === "mainnet");
-  }, []);
 
   if (!blocked) return <>{children}</>;
 
