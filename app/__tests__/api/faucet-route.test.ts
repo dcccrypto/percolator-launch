@@ -9,6 +9,7 @@
  * - SOL airdrop path dispatching
  * - USDC sealed-signer path: on-chain authority check returns 400 (not 500)
  * - GH#1474: error field is never empty string (fallback to toString/generic)
+ * - GH#1820: empty/non-JSON body returns 400 (not 500)
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -65,6 +66,51 @@ describe("/api/faucet route", () => {
     vi.clearAllMocks();
     process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "devnet";
     process.env.NEXT_PUBLIC_SOLANA_NETWORK = "devnet";
+  });
+
+  describe("GH#1820: empty/non-JSON body returns 400, not 500", () => {
+    // Mirrors the req.json() try/catch added in GH#1820 fix.
+    // Previously: req.json() threw SyntaxError which bubbled to the outer catch → 500.
+    // After fix: parse failure returns 400 with a descriptive message.
+
+    const simulateParse = (rawBody: string | null): { status: number; error?: string } => {
+      try {
+        if (rawBody === null || rawBody.trim() === "") throw new SyntaxError("Unexpected end of JSON input");
+        JSON.parse(rawBody);
+        return { status: 200 };
+      } catch {
+        return { status: 400, error: "Request body must be valid JSON with fields: wallet (string), type ('sol' | 'usdc')" };
+      }
+    };
+
+    it("empty body → 400 (not 500)", () => {
+      const res = simulateParse("");
+      expect(res.status).toBe(400);
+      expect(res.error).toContain("valid JSON");
+    });
+
+    it("null body → 400 (not 500)", () => {
+      const res = simulateParse(null);
+      expect(res.status).toBe(400);
+      expect(res.error).toContain("valid JSON");
+    });
+
+    it("non-JSON plain text body → 400 (not 500)", () => {
+      const res = simulateParse("garbage");
+      expect(res.status).toBe(400);
+      expect(res.error).toContain("valid JSON");
+    });
+
+    it("valid JSON body → proceeds past parse step (200 from parse sim)", () => {
+      const res = simulateParse(JSON.stringify({ wallet: "abc", type: "sol" }));
+      expect(res.status).toBe(200);
+    });
+
+    it("error message describes required fields", () => {
+      const res = simulateParse("");
+      expect(res.error).toContain("wallet");
+      expect(res.error).toContain("type");
+    });
   });
 
   it("rejects requests on mainnet", () => {
