@@ -180,7 +180,7 @@ export function TradeHistory() {
             )}
           </div>
         ) : (
-          <table className="w-full min-w-[600px]">
+          <table className="w-full">
             <thead>
               <tr className="border-b border-[var(--border)] text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
                 <th className="px-4 py-3 text-left">Time</th>

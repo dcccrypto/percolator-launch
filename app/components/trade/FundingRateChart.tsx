@@ -264,7 +264,7 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
         </div>
       </div>
 
-      <svg width={W} height={H} className="w-full" style={{ maxWidth: "100%" }} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ display: "block" }} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
         {/* Grid lines */}
         {yLabels.map((label, i) => (
           <line
