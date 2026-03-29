@@ -162,4 +162,35 @@ describe("GET /api/oracle/publishers", () => {
     // Hyperp fallback returns null (not 0) so UI suppresses "0 publishers" text
     expect(body.publisherCount).toBeNull();
   });
+
+  // GH#1807: Pythnet RPC unreachable — must return 200 with null counts, not 500
+  it("GH#1807: returns 200 with null counts when Pythnet RPC times out", async () => {
+    mockFetch.mockRejectedValueOnce(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+
+    // Use a distinct feedId to avoid the route-level cache returning a prior successful result
+    const feedId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const resp = await GET(makeRequest({ mode: "pyth-pinned", feedId }));
+    expect(resp.status).toBe(200);
+
+    const body = await resp.json();
+    expect(body.mode).toBe("pyth-pinned");
+    expect(body.publisherCount).toBeNull();
+    expect(body.publisherTotal).toBeNull();
+    expect(body.publishers).toHaveLength(0);
+  });
+
+  it("GH#1807: returns 200 with null counts when Pythnet RPC returns non-200", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 429 });
+
+    // Use a distinct feedId to avoid the route-level cache returning a prior successful result
+    const feedId = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const resp = await GET(makeRequest({ mode: "pyth-pinned", feedId }));
+    expect(resp.status).toBe(200);
+
+    const body = await resp.json();
+    expect(body.mode).toBe("pyth-pinned");
+    expect(body.publisherCount).toBeNull();
+    expect(body.publisherTotal).toBeNull();
+    expect(body.publishers).toHaveLength(0);
+  });
 });
