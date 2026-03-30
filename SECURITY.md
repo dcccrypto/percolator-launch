@@ -198,6 +198,14 @@ pnpm --filter=@percolator/api dev
 
 ---
 
+## Recorded internal reviews
+
+| Month | Record |
+| ----- | ------ |
+| 2026-03 | [Internal review (March 2026)](docs/internal-security-review-2026-03.md) |
+
+---
+
 ## 🐛 Responsible Disclosure
 
 We take security seriously and appreciate the work of security researchers who help keep Percolator Launch safe for everyone.
