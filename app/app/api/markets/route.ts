@@ -771,7 +771,7 @@ export async function POST(req: NextRequest) {
   if (mainnet_ca && process.env.KEEPER_REGISTER_SECRET) {
     try {
       const keeperRegisterUrl = `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/oracle-keeper/register`;
-      await fetch(keeperRegisterUrl, {
+      const res = await fetch(keeperRegisterUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -779,8 +779,19 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({ slabAddress: slab_address, mainnetCA: mainnet_ca }),
         signal: AbortSignal.timeout(5000),
-      }).catch(() => {});
-    } catch {
+      }).catch((e: unknown) => {
+        console.warn("[api/markets POST] keeper hot-register fetch failed", e);
+        return null;
+      });
+      if (res && !res.ok) {
+        console.warn(
+          "[api/markets POST] keeper hot-register non-OK",
+          res.status,
+          await res.text().catch(() => ""),
+        );
+      }
+    } catch (e) {
+      console.warn("[api/markets POST] keeper hot-register failed", e);
       // Non-fatal — oracle keeper will discover via Supabase polling
     }
   }
@@ -806,7 +817,8 @@ export async function POST(req: NextRequest) {
         },
         { onConflict: "mainnet_ca", ignoreDuplicates: true },
       );
-    } catch {
+    } catch (e) {
+      console.warn("[api/markets POST] devnet_mints upsert failed", e);
       // Non-fatal — devnet-airdrop has fallback via markets table
     }
   }

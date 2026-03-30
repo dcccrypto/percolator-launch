@@ -109,8 +109,13 @@ function MarketsPageInner() {
   }, []);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { markets: discovered, loading: discoveryLoading } = useMarketDiscovery();
-  const { statsMap, loading: statsLoading } = useAllMarketStats();
+  const { markets: discovered, loading: discoveryLoading, error: discoveryError } = useMarketDiscovery();
+  const { statsMap, loading: statsLoading, error: statsError } = useAllMarketStats();
+
+  const loadErrorMessage = useMemo(() => {
+    const parts = [discoveryError, statsError].filter(Boolean) as string[];
+    return parts.length ? parts.join(" · ") : null;
+  }, [discoveryError, statsError]);
 
   // NOTE: totalActiveMarkets (Supabase-only count) removed — was inconsistent with
   // activeMarkets.length which includes on-chain discovered markets (#847).
@@ -504,6 +509,7 @@ function MarketsPageInner() {
 
   const displayedMarkets = filtered.slice(0, displayCount);
   const loading = discoveryLoading || statsLoading;
+  const showDegradedBanner = Boolean(loadErrorMessage && !loading && filtered.length > 0);
 
   // P-MED-4: Separate clear functions
   const clearFilters = () => {
@@ -721,6 +727,22 @@ function MarketsPageInner() {
           </div>
         </ScrollReveal>
 
+        {showDegradedBanner && (
+          <ScrollReveal delay={0.15}>
+            <div
+              role="alert"
+              className="mb-4 rounded-sm border px-4 py-3 text-center text-sm font-mono"
+              style={{
+                background: "rgba(239,68,68,0.06)",
+                borderColor: "rgba(239,68,68,0.3)",
+                color: "#f87171",
+              }}
+            >
+              Partial market data: {loadErrorMessage}
+            </div>
+          </ScrollReveal>
+        )}
+
         {/* Table */}
         <ErrorBoundary label="Markets Table">
           <ScrollReveal delay={0.2}>
@@ -736,6 +758,21 @@ function MarketsPageInner() {
                 <>
                   <h3 className="text-base font-semibold text-white">nothing here.</h3>
                   <p className="mt-1 text-sm text-[var(--text-secondary)]">try a different search or filter.</p>
+                </>
+              ) : loadErrorMessage ? (
+                <>
+                  <h3 className="text-base font-semibold text-white">couldn&apos;t load markets.</h3>
+                  <p className="mt-2 text-sm text-[var(--text-secondary)]">{loadErrorMessage}</p>
+                  <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+                    <GlowButton type="button" onClick={() => window.location.reload()}>
+                      reload page
+                    </GlowButton>
+                    <Link href="/create">
+                      <GlowButton variant="secondary" size="sm">
+                        launch market
+                      </GlowButton>
+                    </Link>
+                  </div>
                 </>
               ) : (
                 <>
