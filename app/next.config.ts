@@ -62,7 +62,9 @@ const nextConfig: NextConfig = {
     return [
       // Data routes → API service
       { source: "/api/markets/:slab/trades", destination: `${API_URL}/markets/:slab/trades` },
-      { source: "/api/markets/:slab/prices", destination: `${API_URL}/markets/:slab/prices` },
+      // NOTE: Do NOT rewrite /api/markets/:slab/prices — route.ts handles it (proxies to /prices/:slab).
+      // A rewrite here would bypass route.ts and hit the wrong Railway path (/markets/:slab/prices → 404→500).
+      // GH#1936 / PERC-8302 root cause fix.
       { source: "/api/markets/:slab/stats", destination: `${API_URL}/markets/:slab/stats` },
       { source: "/api/markets/:slab/volume", destination: `${API_URL}/markets/:slab/volume` },
       // NOTE: Do NOT rewrite /api/markets/:slab/logo — that stays in Next.js (file upload)
