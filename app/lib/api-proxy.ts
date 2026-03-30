@@ -28,6 +28,11 @@ export interface ProxyOptions {
    * When omitted, the upstream Cache-Control is forwarded (or "no-store" as default).
    */
   cacheControl?: string;
+  /**
+   * Replace the forwarded query string (e.g. after validating `limit`).
+   * Empty string means no query segment. When omitted, the request URL search is used.
+   */
+  queryString?: string;
 }
 
 /**
@@ -54,10 +59,12 @@ export async function proxyToApi(
     );
   }
 
-  // Forward query string from original request
-  const searchParams = req.nextUrl.searchParams.toString();
-  const targetUrl = searchParams
-    ? `${backendUrl}${apiPath}?${searchParams}`
+  const forwardQs =
+    options?.queryString !== undefined
+      ? options.queryString
+      : req.nextUrl.searchParams.toString();
+  const targetUrl = forwardQs
+    ? `${backendUrl}${apiPath}?${forwardQs}`
     : `${backendUrl}${apiPath}`;
 
   // Optionally read and forward the request body for mutation methods

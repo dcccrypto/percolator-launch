@@ -8,9 +8,11 @@ import { NextRequest, NextResponse } from "next/server";
  * R2-S9: In production without a configured key, rejects all requests.
  */
 export function requireAuth(req: NextRequest): boolean {
-  const expectedKey = process.env.INDEXER_API_KEY;
+  const raw = process.env.INDEXER_API_KEY;
+  const expectedKey = typeof raw === "string" ? raw.trim() : "";
   if (!expectedKey) {
     // R2-S9: In production, reject all requests if auth key is not configured
+    // Whitespace-only env counts as unset — avoids accidental "configured" state.
     if (process.env.NODE_ENV === "production") return false;
     return true; // No key configured = open (dev mode only)
   }
