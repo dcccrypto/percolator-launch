@@ -4,6 +4,7 @@ import {
   parseConfig,
   parseParams,
   detectSlabLayout,
+  SLAB_TIERS_V1M,
   SLAB_TIERS_V2,
   type SlabHeader,
   type MarketConfig,
@@ -171,12 +172,13 @@ export function validateSlabTierMatch(dataSize: number, programSlabLen: number):
   return dataSize === programSlabLen;
 }
 
-/** All known slab data sizes for discovery (V0 + V1 + V1D + V1D legacy tiers) */
+/** All known slab data sizes for discovery (V0 + V1 + V1D + V1D legacy + V1M tiers) */
 const ALL_SLAB_SIZES = [
   ...Object.values(SLAB_TIERS).map(t => t.dataSize),
   ...Object.values(SLAB_TIERS_V0).map(t => t.dataSize),
   ...Object.values(SLAB_TIERS_V1D).map(t => t.dataSize),
   ...Object.values(SLAB_TIERS_V1D_LEGACY).map(t => t.dataSize),
+  ...Object.values(SLAB_TIERS_V1M).map(t => t.dataSize),
 ];
 
 /** Legacy constant for backward compat */
@@ -455,6 +457,7 @@ export async function discoverMarkets(
     ...Object.values(SLAB_TIERS_V1D),
     ...Object.values(SLAB_TIERS_V1D_LEGACY),
     ...Object.values(SLAB_TIERS_V2),
+    ...Object.values(SLAB_TIERS_V1M),
   ];
   type RawEntry = { pubkey: PublicKey; account: { data: Buffer | Uint8Array }; maxAccounts: number; dataSize: number };
   let rawAccounts: RawEntry[] = [];

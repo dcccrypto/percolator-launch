@@ -303,6 +303,54 @@ const V2_ENGINE_LP_SUM_ABS_OFF = 520;
 const V2_ENGINE_LP_MAX_ABS_OFF = 536;
 const V2_ENGINE_LP_MAX_ABS_SWEEP_OFF = 552;
 
+// ---- V1M layout constants (mainnet-deployed V1 program, ESa89R5) ----
+// The mainnet program has a LARGER RiskParams (336 bytes vs V1's 288) and 22 extra
+// bytes in the runtime state (trade_twap_e6 + twap_last_slot + alignment padding).
+// ENGINE_OFF=640 (same as V1_LEGACY), CONFIG_LEN=536, ACCOUNT_SIZE=248.
+// Confirmed by byte-level probing of mainnet slab 8NY7rvQ (SOL/USDC Perpetual).
+const V1M_ENGINE_OFF = 640;      // align_up(104 + 536, 8) = 640  (same as V1_LEGACY)
+const V1M_CONFIG_LEN = 536;      // MarketConfig size in native/mainnet build
+const V1M_ACCOUNT_SIZE = 248;
+const V1M_ENGINE_PARAMS_OFF = 72; // vault(16) + InsuranceFund(56) = 72  (same as V1)
+
+// V1M RiskParams: 336 bytes (+48 over V1's 288)
+//   Extra fields: fee_utilization_surge_bps(8) [in SDK V1 already? no → +8],
+//   balance_incentive_reserve configs (+8?), min_nonzero_mm_req(u128=16),
+//   min_nonzero_im_req(u128=16) = +48 total
+const V1M_PARAMS_SIZE = 336;
+
+// V1M runtime state starts at engine+408 (72 + 336) instead of V1's +360
+const V1M_ENGINE_CURRENT_SLOT_OFF = 408;
+const V1M_ENGINE_FUNDING_INDEX_OFF = 416;
+const V1M_ENGINE_LAST_FUNDING_SLOT_OFF = 432;
+const V1M_ENGINE_FUNDING_RATE_BPS_OFF = 440;
+const V1M_ENGINE_MARK_PRICE_OFF = 448;
+// funding_frozen(1+7pad) at 456, funding_frozen_rate(8) at 464
+const V1M_ENGINE_LAST_CRANK_SLOT_OFF = 472;
+const V1M_ENGINE_MAX_CRANK_STALENESS_OFF = 480;
+const V1M_ENGINE_TOTAL_OI_OFF = 488;
+const V1M_ENGINE_LONG_OI_OFF = 504;
+const V1M_ENGINE_SHORT_OI_OFF = 520;
+const V1M_ENGINE_C_TOT_OFF = 536;
+const V1M_ENGINE_PNL_POS_TOT_OFF = 552;
+const V1M_ENGINE_LIQ_CURSOR_OFF = 568;
+const V1M_ENGINE_GC_CURSOR_OFF = 570;
+const V1M_ENGINE_LAST_SWEEP_START_OFF = 576;
+const V1M_ENGINE_LAST_SWEEP_COMPLETE_OFF = 584;
+const V1M_ENGINE_CRANK_CURSOR_OFF = 592;
+const V1M_ENGINE_SWEEP_START_IDX_OFF = 594;
+const V1M_ENGINE_LIFETIME_LIQUIDATIONS_OFF = 600;
+const V1M_ENGINE_LIFETIME_FORCE_CLOSES_OFF = 608;
+const V1M_ENGINE_NET_LP_POS_OFF = 616;
+const V1M_ENGINE_LP_SUM_ABS_OFF = 632;
+const V1M_ENGINE_LP_MAX_ABS_OFF = 648;
+const V1M_ENGINE_LP_MAX_ABS_SWEEP_OFF = 664;
+const V1M_ENGINE_EMERGENCY_OI_MODE_OFF = 680;
+const V1M_ENGINE_EMERGENCY_START_SLOT_OFF = 688;
+const V1M_ENGINE_LAST_BREAKER_SLOT_OFF = 696;
+// trade_twap_e6(8) at 704, twap_last_slot(8) at 712, padding(6) = 726
+const V1M_ENGINE_BITMAP_OFF = 726;
+
 // For backward compatibility, export ENGINE_OFF and ENGINE_MARK_PRICE_OFF
 // (used by reinit-slab and other scripts). These refer to V1 layout.
 export const ENGINE_OFF = V1_ENGINE_OFF;
@@ -348,6 +396,8 @@ const V1D_SIZES = new Map<number, number>();
 // GH#1237: add both size variants so detectSlabLayout handles both old and new V1D on-chain data.
 // V2: ENGINE_OFF=600, BITMAP_OFF=432, ACCOUNT_SIZE=248, postBitmap=18
 const V2_SIZES = new Map<number, number>();
+// V1M: mainnet-deployed V1 program (ENGINE_OFF=640, BITMAP_OFF=726, expanded RiskParams)
+const V1M_SIZES = new Map<number, number>();
 const V1D_SIZES_LEGACY = new Map<number, number>();
 for (const n of TIERS) {
   V0_SIZES.set(computeSlabSize(V0_ENGINE_OFF, V0_ENGINE_BITMAP_OFF, V0_ACCOUNT_SIZE, n), n);
@@ -361,6 +411,9 @@ for (const n of TIERS) {
   // V2: postBitmap=18 — produces same sizes as V1D postBitmap=2 (e.g. 65088 for n=256).
   // Disambiguation requires peeking at the version field in the slab header.
   V2_SIZES.set(computeSlabSize(V2_ENGINE_OFF, V2_ENGINE_BITMAP_OFF, V2_ACCOUNT_SIZE, n, 18), n);
+  // V1M: mainnet program with expanded RiskParams (336 bytes) and trade_twap fields.
+  // e.g. n=1024 → 257512 bytes (confirmed on-chain for slab 8NY7rvQ).
+  V1M_SIZES.set(computeSlabSize(V1M_ENGINE_OFF, V1M_ENGINE_BITMAP_OFF, V1M_ACCOUNT_SIZE, n, 18), n);
 }
 
 /**
@@ -372,6 +425,18 @@ export const SLAB_TIERS_V2 = {
   small: { maxAccounts: 256,  dataSize: 65_088,    label: "Small",  description: "256 slots (V2 BPF intermediate)" },
   large: { maxAccounts: 4096, dataSize: 1_025_568, label: "Large",  description: "4,096 slots (V2 BPF intermediate)" },
 } as const;
+
+/**
+ * V1M slab tier sizes — mainnet-deployed V1 program (ESa89R5).
+ * ENGINE_OFF=640, BITMAP_OFF=726, ACCOUNT_SIZE=248, postBitmap=18.
+ * Expanded RiskParams (336 bytes) and trade_twap runtime fields.
+ * Confirmed by on-chain probing of slab 8NY7rvQ (SOL/USDC Perpetual, 257512 bytes).
+ */
+export const SLAB_TIERS_V1M: Record<string, { maxAccounts: number; dataSize: number; label: string; description: string }> = {};
+for (const [label, n] of [["Micro", 64], ["Small", 256], ["Medium", 1024], ["Large", 4096]] as const) {
+  const size = computeSlabSize(V1M_ENGINE_OFF, V1M_ENGINE_BITMAP_OFF, V1M_ACCOUNT_SIZE, n, 18);
+  SLAB_TIERS_V1M[label.toLowerCase()] = { maxAccounts: n, dataSize: size, label, description: `${n} slots (V1M mainnet)` };
+}
 
 /**
  * Build a complete SlabLayout descriptor for V0 or V1 (including V1-legacy) slabs.
@@ -592,9 +657,77 @@ function buildLayoutV2(maxAccounts: number): SlabLayout {
 }
 
 /**
+ * Build a SlabLayout for the V1M mainnet program (ESa89R5).
+ * ENGINE_OFF=640 (same as V1_LEGACY), but expanded RiskParams (336 bytes)
+ * and trade_twap runtime fields push the bitmap to offset 726.
+ * Confirmed by on-chain probing of slab 8NY7rvQ (257512 bytes, medium tier).
+ */
+function buildLayoutV1M(maxAccounts: number): SlabLayout {
+  const engineOff = V1M_ENGINE_OFF;
+  const bitmapOff = V1M_ENGINE_BITMAP_OFF;
+  const accountSize = V1M_ACCOUNT_SIZE;
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const bitmapBytes = bitmapWords * 8;
+  const postBitmap = 18;
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
+
+  return {
+    version: 1,
+    headerLen: V1_HEADER_LEN,
+    configOffset: V1_HEADER_LEN,
+    configLen: V1M_CONFIG_LEN,
+    reservedOff: V1_RESERVED_OFF,
+    engineOff,
+    accountSize,
+    maxAccounts,
+    bitmapWords,
+    accountsOff: engineOff + accountsOffRel,
+
+    engineInsuranceOff: 16,
+    engineParamsOff: V1M_ENGINE_PARAMS_OFF,
+    paramsSize: V1M_PARAMS_SIZE,
+    engineCurrentSlotOff: V1M_ENGINE_CURRENT_SLOT_OFF,
+    engineFundingIndexOff: V1M_ENGINE_FUNDING_INDEX_OFF,
+    engineLastFundingSlotOff: V1M_ENGINE_LAST_FUNDING_SLOT_OFF,
+    engineFundingRateBpsOff: V1M_ENGINE_FUNDING_RATE_BPS_OFF,
+    engineMarkPriceOff: V1M_ENGINE_MARK_PRICE_OFF,
+    engineLastCrankSlotOff: V1M_ENGINE_LAST_CRANK_SLOT_OFF,
+    engineMaxCrankStalenessOff: V1M_ENGINE_MAX_CRANK_STALENESS_OFF,
+    engineTotalOiOff: V1M_ENGINE_TOTAL_OI_OFF,
+    engineLongOiOff: V1M_ENGINE_LONG_OI_OFF,
+    engineShortOiOff: V1M_ENGINE_SHORT_OI_OFF,
+    engineCTotOff: V1M_ENGINE_C_TOT_OFF,
+    enginePnlPosTotOff: V1M_ENGINE_PNL_POS_TOT_OFF,
+    engineLiqCursorOff: V1M_ENGINE_LIQ_CURSOR_OFF,
+    engineGcCursorOff: V1M_ENGINE_GC_CURSOR_OFF,
+    engineLastSweepStartOff: V1M_ENGINE_LAST_SWEEP_START_OFF,
+    engineLastSweepCompleteOff: V1M_ENGINE_LAST_SWEEP_COMPLETE_OFF,
+    engineCrankCursorOff: V1M_ENGINE_CRANK_CURSOR_OFF,
+    engineSweepStartIdxOff: V1M_ENGINE_SWEEP_START_IDX_OFF,
+    engineLifetimeLiquidationsOff: V1M_ENGINE_LIFETIME_LIQUIDATIONS_OFF,
+    engineLifetimeForceClosesOff: V1M_ENGINE_LIFETIME_FORCE_CLOSES_OFF,
+    engineNetLpPosOff: V1M_ENGINE_NET_LP_POS_OFF,
+    engineLpSumAbsOff: V1M_ENGINE_LP_SUM_ABS_OFF,
+    engineLpMaxAbsOff: V1M_ENGINE_LP_MAX_ABS_OFF,
+    engineLpMaxAbsSweepOff: V1M_ENGINE_LP_MAX_ABS_SWEEP_OFF,
+    engineEmergencyOiModeOff: V1M_ENGINE_EMERGENCY_OI_MODE_OFF,
+    engineEmergencyStartSlotOff: V1M_ENGINE_EMERGENCY_START_SLOT_OFF,
+    engineLastBreakerSlotOff: V1M_ENGINE_LAST_BREAKER_SLOT_OFF,
+    engineBitmapOff: V1M_ENGINE_BITMAP_OFF,
+    acctOwnerOff: ACCT_OWNER_OFF,
+
+    hasInsuranceIsolation: true,
+    engineInsuranceIsolatedOff: 48,
+    engineInsuranceIsolationBpsOff: 64,
+  };
+}
+
+/**
  * Detect the slab layout version from the raw account data length.
  * Returns the full SlabLayout descriptor, or null if the size is unrecognised.
- * Checks V0, V1D, V1D-legacy, V1, and V1-legacy (pre-PERC-1094) sizes in priority order.
+ * Checks V0, V1M, V1D, V1D-legacy, V1, and V1-legacy (pre-PERC-1094) sizes in priority order.
  *
  * When `data` is provided and the size matches V1D, the version field at offset 8 is read
  * to disambiguate V2 slabs (which produce identical sizes to V1D with postBitmap=2).
@@ -604,7 +737,12 @@ function buildLayoutV2(maxAccounts: number): SlabLayout {
  * @param data    - Optional raw slab data for version-field disambiguation
  */
 export function detectSlabLayout(dataLen: number, data?: Uint8Array): SlabLayout | null {
-  // Check V0 sizes first (deployed devnet V0 program)
+  // Check V1M sizes first (mainnet-deployed V1 program, ESa89R5).
+  // Must be checked before V1_LEGACY because V1M sizes are unique and don't overlap.
+  const v1mn = V1M_SIZES.get(dataLen);
+  if (v1mn !== undefined) return buildLayoutV1M(v1mn);
+
+  // Check V0 sizes (deployed devnet V0 program)
   const v0n = V0_SIZES.get(dataLen);
   if (v0n !== undefined) return buildLayout(0, v0n);
 
