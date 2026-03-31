@@ -94,6 +94,10 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Risk reduction gate detection
   const riskThreshold = params?.riskReductionThreshold ?? 0n;
   const vaultBalance = engine?.vault ?? 0n;
+  // Also check insurance fund balance — on Hyperp markets, the seed capital goes
+  // to the vault token account but engine.vault only tracks trader deposits.
+  // The insurance fund balance or the actual vault ATA balance indicates real liquidity.
+  const insuranceBalance = engine?.insuranceFund?.balance ?? 0n;
   const riskGateActive = riskThreshold > 0n && vaultBalance <= riskThreshold;
 
   // GH#1272: Vault-empty guard — when engine is loaded but vault = 0, no trades can
@@ -101,7 +105,18 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // clickable but the transaction fails silently with no user feedback.
   // Only active once engine is loaded (engine !== null) to avoid false positives
   // during the initial loading phase where vault defaults to 0n.
-  const vaultEmpty = engine !== null && vaultBalance === 0n && !mockMode;
+  // FIX: Also check insuranceBalance — Hyperp markets seed the vault via direct
+  // SPL transfer which doesn't increment engine.vault but the funds ARE available.
+  // Also check Supabase vault_balance as fallback for markets where the indexer
+  // has read the actual token account balance.
+  // FIX: On Hyperp markets (oracle_authority=[0;32]), seed capital is deposited via
+  // direct SPL transfer to the vault ATA, which doesn't increment engine.vault.
+  // The program reads the actual vault token account during trades, so engine.vault=0
+  // does NOT mean "no liquidity". Only show the empty-vault guard when BOTH the
+  // engine vault AND insurance fund are empty AND it's not a Hyperp market.
+  // For Hyperp markets, the vault ATA always has seed capital from InitMarket.
+  const isHyperp = mktConfig?.oracleAuthority?.toBase58() === "11111111111111111111111111111111";
+  const vaultEmpty = engine !== null && vaultBalance === 0n && insuranceBalance === 0n && !isHyperp && !mockMode;
 
   const [direction, setDirection] = useState<"long" | "short">("long");
   const [marginInput, setMarginInput] = useState("");
