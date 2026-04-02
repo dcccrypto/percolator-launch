@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
     // PERC-8195: filter by network so devnet/mainnet rows don't mix
     // GH#1874: Graceful fallback — if network column is missing (PERC-8215 migration
     // not yet applied), retry without the filter to keep stats endpoint alive.
-    supabase.from("markets_with_stats").select("slab_address, volume_24h, trade_count_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals, vault_balance, c_tot, total_accounts, stats_updated_at").eq("network", getServerNetwork()).limit(500),
+    supabase.from("markets_with_stats").select("slab_address, volume_24h, trade_count_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals, vault_balance, c_tot, total_accounts, stats_updated_at").eq("network", getServerNetwork()).neq("indexer_excluded", true).limit(500),
     supabase.from("trades").select("trader").eq("network", getServerNetwork()).limit(5000),
   ]);
 
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
       "[/api/stats] PERC-8215: network column missing on markets_with_stats — falling back to unfiltered query. " +
       "Apply 20260329180000_add_network_column.sql to fix."
     );
-    const fallback = await supabase.from("markets_with_stats").select("slab_address, volume_24h, trade_count_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals, vault_balance, c_tot, total_accounts, stats_updated_at").limit(500);
+    const fallback = await supabase.from("markets_with_stats").select("slab_address, volume_24h, trade_count_24h, open_interest_long, open_interest_short, total_open_interest, last_price, decimals, vault_balance, c_tot, total_accounts, stats_updated_at").neq("indexer_excluded", true).limit(500);
     statsData_raw = fallback.data;
   }
   if (tradersRes.error && tradersRes.error.message?.includes("network")) {

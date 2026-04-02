@@ -33,7 +33,8 @@ export function useAllMarketStats() {
       try {
         const { data, error: dbError } = await supabase
           .from("markets_with_stats")
-          .select("*");
+          .select("*")
+          .neq("indexer_excluded", true);
 
         if (dbError) {
           setError(dbError.message);

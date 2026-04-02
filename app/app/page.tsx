@@ -145,7 +145,7 @@ export default function Home() {
         // from /api/stats (which uses the server-side indexer view), causing
         // discrepancies (107 vs 69 after #1449). API count wins.
         const [{ data, error: dbError }, apiStatsRes] = await Promise.all([
-          getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, insurance_fund, last_price, total_open_interest, open_interest_long, open_interest_short, decimals, vault_balance, total_accounts"),
+          getSupabase().from("markets_with_stats").select("slab_address, symbol, volume_24h, insurance_balance, insurance_fund, last_price, total_open_interest, open_interest_long, open_interest_short, decimals, vault_balance, total_accounts").neq("indexer_excluded", true),
           fetch("/api/stats").then((r) => r.ok ? r.json() : null).catch(() => null),
         ]);
         // totalMarkets from /api/stats (authoritative). Fall back to local count if unavailable.

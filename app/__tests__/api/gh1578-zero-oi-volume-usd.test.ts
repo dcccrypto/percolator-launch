@@ -32,10 +32,11 @@ vi.mock("@/lib/supabase", () => ({
   getServerNetwork: () => "devnet",
   getServiceClient: () => {
     const chain: Record<string, unknown> = {};
-    const terminal = () => Promise.resolve({ data: mockRows, error: null });
     chain.select = () => chain;
     chain.eq = () => chain;
-    chain.not = terminal;
+    chain.neq = () => chain;
+    chain.not = () => chain;
+    chain.then = (resolve: (v: unknown) => unknown) => resolve({ data: mockRows, error: null });
     return { from: () => chain };
   },
 }));

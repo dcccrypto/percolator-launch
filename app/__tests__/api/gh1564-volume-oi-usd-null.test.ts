@@ -36,12 +36,14 @@ let mockRows: Record<string, unknown>[] = [];
 vi.mock("@/lib/supabase", () => ({
   getServerNetwork: () => "devnet",
   getServiceClient: () => {
-    // Fully chainable mock: any filter method returns the chain; terminal call resolves data
+    // Fully chainable + thenable mock: any filter method returns the chain;
+    // awaiting the chain resolves the data (Supabase PostgREST builder pattern).
     const chain: Record<string, unknown> = {};
-    const terminal = () => Promise.resolve({ data: mockRows, error: null });
     chain.select = () => chain;
     chain.eq = () => chain;
-    chain.not = terminal;
+    chain.neq = () => chain;
+    chain.not = () => chain;
+    chain.then = (resolve: (v: unknown) => unknown) => resolve({ data: mockRows, error: null });
     return { from: () => chain };
   },
 }));

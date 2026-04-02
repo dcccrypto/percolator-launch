@@ -67,7 +67,9 @@ vi.mock("@/lib/supabase", () => ({
     const terminal = () => Promise.resolve({ data: mockMarkets, error: null });
     chain.select = () => chain;
     chain.eq = () => chain;
-    chain.not = terminal;
+    chain.neq = () => chain;
+    chain.not = () => chain;
+    chain.then = (resolve: (v: unknown) => unknown) => resolve({ data: mockMarkets, error: null });
     return { from: () => chain };
   },
 }));

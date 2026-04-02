@@ -14,7 +14,8 @@ import "@testing-library/jest-dom";
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const mockReturns = vi.fn();
-const mockSelect = vi.fn(() => ({ returns: mockReturns }));
+const mockNeq = vi.fn(() => ({ returns: mockReturns }));
+const mockSelect = vi.fn(() => ({ neq: mockNeq }));
 const mockFrom = vi.fn(() => ({ select: mockSelect }));
 
 vi.mock("@/lib/supabase", () => ({
