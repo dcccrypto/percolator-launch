@@ -124,6 +124,7 @@ describe("TradeForm Component Tests", () => {
     
     vi.mocked(useLivePrice).mockReturnValue({
       priceUsd: 100,
+      priceE6: 100_000_000n,
     });
   });
   

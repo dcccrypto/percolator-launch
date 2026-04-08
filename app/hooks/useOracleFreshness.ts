@@ -141,13 +141,16 @@ export function useOracleFreshness(): OracleFreshnessState {
         // time the slab was last written; engine.lastCrankSlot is the slot of the
         // last oracle crank. The difference, multiplied by ~400ms/slot, gives the
         // elapsed time since the last real update.
-        if (engine !== null && engine.currentSlot > 0n && engine.lastCrankSlot > 0n) {
+        if (engine != null && engine.currentSlot > 0n && engine.lastCrankSlot > 0n) {
           const slotDelta = Number(engine.currentSlot - engine.lastCrankSlot);
           const estimatedElapsedMs = Math.max(0, slotDelta) * 400;
           setLastUpdateMs(Date.now() - estimatedElapsedMs);
         } else {
-          // engine data not yet available — be conservative and treat as stale
-          setLastUpdateMs(Date.now() - AGING_THRESHOLD * 1000);
+          // engine data not yet loaded — optimistically treat as fresh.
+          // The elapsed timer will advance naturally; if the price doesn't change
+          // it will age to "aging"/"stale" on its own. This avoids a false stale
+          // warning on first render before engine state is available.
+          setLastUpdateMs(Date.now());
         }
       }
       prevPriceRef.current = currentPrice;
