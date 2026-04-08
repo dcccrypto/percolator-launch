@@ -89,8 +89,10 @@ const USDC_DEVNET = new PublicKey(
 
 // V12_1 slab sizes: ENGINE_OFF=648, BITMAP_OFF=1016, ACCOUNT_SIZE=320
 // Computed via SDK's computeSlabSize (verified against compile-time assertions)
-const SLAB_SIZE_MEDIUM = 330_896; // maxAccounts=1024 (V12_1)
-const SLAB_SIZE_SMALL  = 83_504;  // maxAccounts=256  (V12_1)
+// SBF layout differs from x86_64 due to i128 alignment. These values are
+// from the deployed program's SLAB_LEN constant (verified via sol_log_64).
+const SLAB_SIZE_MEDIUM = 290_120; // maxAccounts=1024 (V12_1, SBF alignment)
+const SLAB_SIZE_SMALL  = 73_544;  // maxAccounts=256  (V12_1, SBF alignment, estimated)
 
 // Matcher context account size (fixed, per matcher program)
 const MATCHER_CTX_SIZE = 320;
@@ -120,8 +122,8 @@ const DEFAULT_RISK_PARAMS = {
 
 // Fields between header and RiskParams (immutable after init)
 const DEFAULT_INIT_EXTRA = {
-  maxMaintenanceFeePerSlot: 0n,            // disabled (u128)
-  maxInsuranceFloor:        0n,            // disabled (u128)
+  maxMaintenanceFeePerSlot: 1_000_000_000n, // ~1 USDC/slot ceiling (u128, must be > 0)
+  maxInsuranceFloor:        1_000_000_000_000n, // 1M USDC ceiling (u128, must be > 0)
   minOraclePriceCap:        500n,          // 5% min price cap (u64, e2bps)
 } as const;
 
@@ -381,7 +383,7 @@ async function main() {
   );
 
   const tx1 = new Transaction();
-  tx1.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
+  tx1.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
   tx1.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   // Create the slab account (program-owned, rent-exempt)
   tx1.add(
@@ -494,16 +496,18 @@ async function main() {
     }),
   );
   // InitLP instruction (tag 2): connects LP slot to matcher, transfers seed deposit
+  // 6 accounts: [user(signer,writable), slab(writable), userAta(writable), vault(writable), tokenProgram, clock]
   tx3.add(
     new TransactionInstruction({
       programId: cfg.programId,
-      keys: buildAccountMetas(ACCOUNTS_INIT_LP, {
-        user: admin.publicKey,
-        slab: slab.publicKey,
-        userAta: adminAta,
-        vault: vaultAta,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      }),
+      keys: [
+        { pubkey: admin.publicKey, isSigner: true, isWritable: true },
+        { pubkey: slab.publicKey, isSigner: false, isWritable: true },
+        { pubkey: adminAta, isSigner: false, isWritable: true },
+        { pubkey: vaultAta, isSigner: false, isWritable: true },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
+      ],
       data: Buffer.from(
         encodeInitLP({
           matcherProgram: MATCHER_PROG_ID,

@@ -96,6 +96,7 @@ function concatBytes(...arrays) {
 }
 
 // src/abi/instructions.ts
+var MAX_ORACLE_PRICE = 1000000000000n;
 var IX_TAG = {
   InitMarket: 0,
   InitUser: 1,
@@ -119,16 +120,33 @@ var IX_TAG = {
   ResolveMarket: 19,
   WithdrawInsurance: 20,
   AdminForceClose: 21,
+  // Tags 22-23: on-chain these are SetInsuranceWithdrawPolicy / WithdrawInsuranceLimited.
+  // Legacy aliases (UpdateRiskParams/RenounceAdmin) kept for backward compat.
+  SetInsuranceWithdrawPolicy: 22,
+  /** @deprecated Use SetInsuranceWithdrawPolicy */
   UpdateRiskParams: 22,
+  WithdrawInsuranceLimited: 23,
+  /** @deprecated Use WithdrawInsuranceLimited */
   RenounceAdmin: 23,
-  CreateInsuranceMint: 24,
-  DepositInsuranceLP: 25,
-  WithdrawInsuranceLP: 26,
+  // Tags 24–26: on-chain = QueryLpFees/ReclaimEmptyAccount/SettleAccount.
+  // Old insurance LP tags removed — those moved to percolator-stake.
+  QueryLpFees: 24,
+  ReclaimEmptyAccount: 25,
+  SettleAccount: 26,
+  // Tags 27-28: on-chain = DepositFeeCredits/ConvertReleasedPnl.
+  // Legacy aliases (PauseMarket/UnpauseMarket) kept — those instructions don't exist on-chain.
+  DepositFeeCredits: 27,
+  /** @deprecated No on-chain PauseMarket instruction */
   PauseMarket: 27,
+  ConvertReleasedPnl: 28,
+  /** @deprecated No on-chain UnpauseMarket instruction */
   UnpauseMarket: 28,
+  // Tags 29-30: on-chain = ResolvePermissionless/ForceCloseResolved.
+  ResolvePermissionless: 29,
+  /** @deprecated Use ResolvePermissionless */
   AcceptAdmin: 29,
-  SetInsuranceWithdrawPolicy: 30,
-  WithdrawInsuranceLimited: 31,
+  ForceCloseResolved: 30,
+  // Tag 31: gap (no decode arm on-chain)
   SetPythOracle: 32,
   UpdateMarkPrice: 33,
   UpdateHyperpMark: 34,
@@ -212,6 +230,7 @@ var IX_TAG = {
   /** CPI to the matcher program to initialize a matcher context account for an LP slot. Admin-only. */
   InitMatcherCtx: 75
 };
+Object.freeze(IX_TAG);
 var HEX_RE = /^[0-9a-fA-F]{64}$/;
 function encodeFeedId(feedId) {
   const hex = feedId.startsWith("0x") ? feedId.slice(2) : feedId;
@@ -222,11 +241,17 @@ function encodeFeedId(feedId) {
   }
   const bytes = new Uint8Array(32);
   for (let i = 0; i < 64; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+    const byte = parseInt(hex.substring(i, i + 2), 16);
+    if (Number.isNaN(byte)) {
+      throw new Error(
+        `Failed to parse hex byte at position ${i}: "${hex.substring(i, i + 2)}"`
+      );
+    }
+    bytes[i / 2] = byte;
   }
   return bytes;
 }
-var INIT_MARKET_DATA_LEN = 264;
+var INIT_MARKET_DATA_LEN = 352;
 function encodeInitMarket(args) {
   const data = concatBytes(
     encU8(IX_TAG.InitMarket),
@@ -238,6 +263,11 @@ function encodeInitMarket(args) {
     encU8(args.invert),
     encU32(args.unitScale),
     encU64(args.initialMarkPriceE6),
+    // 3 fields between header and RiskParams (immutable after init)
+    encU128(args.maxMaintenanceFeePerSlot ?? 0n),
+    encU128(args.maxInsuranceFloor ?? 0n),
+    encU64(args.minOraclePriceCap ?? 0n),
+    // RiskParams block (15 fields)
     encU64(args.warmupPeriodSlots),
     encU64(args.maintenanceMarginBps),
     encU64(args.initialMarginBps),
@@ -250,7 +280,10 @@ function encodeInitMarket(args) {
     encU64(args.liquidationFeeBps),
     encU128(args.liquidationFeeCap),
     encU64(args.liquidationBufferBps),
-    encU128(args.minLiquidationAbs)
+    encU128(args.minLiquidationAbs),
+    encU128(args.minInitialDeposit),
+    encU128(args.minNonzeroMmReq),
+    encU128(args.minNonzeroImReq)
   );
   if (data.length !== INIT_MARKET_DATA_LEN) {
     throw new Error(
@@ -373,9 +406,16 @@ function encodeSetOracleAuthority(args) {
   );
 }
 function encodePushOraclePrice(args) {
+  const price = typeof args.priceE6 === "string" ? BigInt(args.priceE6) : args.priceE6;
+  if (price === 0n) {
+    throw new Error("encodePushOraclePrice: price cannot be zero (division by zero in engine)");
+  }
+  if (price > MAX_ORACLE_PRICE) {
+    throw new Error(`encodePushOraclePrice: price exceeds maximum (${MAX_ORACLE_PRICE}), got ${price}`);
+  }
   return concatBytes(
     encU8(IX_TAG.PushOraclePrice),
-    encU64(args.priceE6),
+    encU64(price),
     encI64(args.timestamp)
   );
 }
@@ -416,15 +456,6 @@ function encodeRenounceAdmin() {
     encU64(RENOUNCE_ADMIN_CONFIRMATION)
   );
 }
-function encodeCreateInsuranceMint() {
-  return encU8(IX_TAG.CreateInsuranceMint);
-}
-function encodeDepositInsuranceLP(args) {
-  return concatBytes(encU8(IX_TAG.DepositInsuranceLP), encU64(args.amount));
-}
-function encodeWithdrawInsuranceLP(args) {
-  return concatBytes(encU8(IX_TAG.WithdrawInsuranceLP), encU64(args.lpAmount));
-}
 function encodeLpVaultWithdraw(args) {
   return concatBytes(encU8(IX_TAG.LpVaultWithdraw), encU64(args.lpAmount));
 }
@@ -461,8 +492,6 @@ async function derivePythPriceUpdateAccount(feedId, shardId = 0) {
   );
   return pda.toBase58();
 }
-IX_TAG["SetPythOracle"] = 32;
-IX_TAG["UpdateMarkPrice"] = 33;
 function encodeUpdateMarkPrice() {
   return new Uint8Array([33]);
 }
@@ -473,7 +502,7 @@ function computeEmaMarkPrice(markPrevE6, oracleE6, dtSlots, alphaE6 = MARK_PRICE
   if (markPrevE6 === 0n || dtSlots === 0n) return oracleE6;
   let oracleClamped = oracleE6;
   if (capE2bps > 0n) {
-    const maxDelta = markPrevE6 * capE2bps * dtSlots / 1000000n;
+    const maxDelta = markPrevE6 * capE2bps / 1000000n * dtSlots;
     const lo = markPrevE6 > maxDelta ? markPrevE6 - maxDelta : 0n;
     const hi = markPrevE6 + maxDelta;
     if (oracleClamped < lo) oracleClamped = lo;
@@ -483,7 +512,6 @@ function computeEmaMarkPrice(markPrevE6, oracleE6, dtSlots, alphaE6 = MARK_PRICE
   const oneMinusAlpha = 1000000n - effectiveAlpha;
   return (oracleClamped * effectiveAlpha + markPrevE6 * oneMinusAlpha) / 1000000n;
 }
-IX_TAG["UpdateHyperpMark"] = 34;
 function encodeUpdateHyperpMark() {
   return new Uint8Array([34]);
 }
@@ -627,9 +655,6 @@ function encodeTransferOwnershipCpi(args) {
 function encodeSetWalletCap(args) {
   return concatBytes(encU8(IX_TAG.SetWalletCap), encU64(args.capE6));
 }
-function encodeSetDexPool(args) {
-  return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
-}
 function encodeInitMatcherCtx(args) {
   return concatBytes(
     encU8(IX_TAG.InitMatcherCtx),
@@ -645,6 +670,58 @@ function encodeInitMatcherCtx(args) {
     encU16(args.feeToInsuranceBps),
     encU16(args.skewSpreadMultBps)
   );
+}
+function encodeSetInsuranceWithdrawPolicy(args) {
+  return concatBytes(encU8(IX_TAG.SetInsuranceWithdrawPolicy), encPubkey(args.authority), encU64(args.minWithdrawBase), encU16(args.maxWithdrawBps), encU64(args.cooldownSlots));
+}
+function encodeWithdrawInsuranceLimited(args) {
+  return concatBytes(encU8(IX_TAG.WithdrawInsuranceLimited), encU64(args.amount));
+}
+function encodeResolvePermissionless() {
+  return concatBytes(encU8(IX_TAG.ResolvePermissionless));
+}
+function encodeForceCloseResolved(args) {
+  return concatBytes(encU8(IX_TAG.ForceCloseResolved), encU16(args.userIdx));
+}
+function encodeCreateLpVault(args) {
+  const parts = [encU8(IX_TAG.CreateLpVault), encU64(args.feeShareBps)];
+  if (args.utilCurveEnabled !== void 0) {
+    parts.push(encU8(args.utilCurveEnabled ? 1 : 0));
+  }
+  return concatBytes(...parts);
+}
+function encodeLpVaultDeposit(args) {
+  return concatBytes(encU8(IX_TAG.LpVaultDeposit), encU64(args.amount));
+}
+function encodeLpVaultCrankFees() {
+  return concatBytes(encU8(IX_TAG.LpVaultCrankFees));
+}
+function encodeChallengeSettlement(args) {
+  return concatBytes(encU8(IX_TAG.ChallengeSettlement), encU64(args.proposedPriceE6));
+}
+function encodeResolveDispute(args) {
+  return concatBytes(encU8(IX_TAG.ResolveDispute), encU8(args.accept));
+}
+function encodeDepositLpCollateral(args) {
+  return concatBytes(encU8(IX_TAG.DepositLpCollateral), encU16(args.userIdx), encU64(args.lpAmount));
+}
+function encodeWithdrawLpCollateral(args) {
+  return concatBytes(encU8(IX_TAG.WithdrawLpCollateral), encU16(args.userIdx), encU64(args.lpAmount));
+}
+function encodeSetOffsetPair(args) {
+  return concatBytes(encU8(IX_TAG.SetOffsetPair), encU16(args.offsetBps));
+}
+function encodeAttestCrossMargin(args) {
+  return concatBytes(encU8(IX_TAG.AttestCrossMargin), encU16(args.userIdxA), encU16(args.userIdxB));
+}
+function encodeRescueOrphanVault() {
+  return concatBytes(encU8(IX_TAG.RescueOrphanVault));
+}
+function encodeCloseOrphanSlab() {
+  return concatBytes(encU8(IX_TAG.CloseOrphanSlab));
+}
+function encodeSetDexPool(args) {
+  return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
 }
 
 // src/abi/accounts.ts
@@ -4977,6 +5054,7 @@ export {
   MARK_PRICE_EMA_ALPHA_E6,
   MARK_PRICE_EMA_WINDOW_SLOTS,
   MAX_DECIMALS,
+  MAX_ORACLE_PRICE,
   METEORA_DLMM_PROGRAM_ID,
   ORACLE_PHASE_GROWING,
   ORACLE_PHASE_MATURE,
@@ -5074,19 +5152,23 @@ export {
   encodeAdvanceEpoch,
   encodeAdvanceOraclePhase,
   encodeAllocateMarket,
+  encodeAttestCrossMargin,
   encodeAuditCrank,
   encodeBurnPositionNft,
   encodeCancelQueuedWithdrawal,
+  encodeChallengeSettlement,
   encodeClaimEpochWithdrawal,
   encodeClaimQueuedWithdrawal,
   encodeClearPendingSettlement,
   encodeCloseAccount,
+  encodeCloseOrphanSlab,
   encodeCloseSlab,
   encodeCloseStaleSlabs,
-  encodeCreateInsuranceMint,
+  encodeCreateLpVault,
   encodeDepositCollateral,
-  encodeDepositInsuranceLP,
+  encodeDepositLpCollateral,
   encodeExecuteAdl,
+  encodeForceCloseResolved,
   encodeFundMarketInsurance,
   encodeInitLP,
   encodeInitMarket,
@@ -5095,6 +5177,8 @@ export {
   encodeInitUser,
   encodeKeeperCrank,
   encodeLiquidateAtOracle,
+  encodeLpVaultCrankFees,
+  encodeLpVaultDeposit,
   encodeLpVaultWithdraw,
   encodeMintPositionNft,
   encodePauseMarket,
@@ -5103,10 +5187,15 @@ export {
   encodeQueueWithdrawalSV,
   encodeReclaimSlabRent,
   encodeRenounceAdmin,
+  encodeRescueOrphanVault,
+  encodeResolveDispute,
   encodeResolveMarket,
+  encodeResolvePermissionless,
   encodeSetDexPool,
   encodeSetInsuranceIsolation,
+  encodeSetInsuranceWithdrawPolicy,
   encodeSetMaintenanceFee,
+  encodeSetOffsetPair,
   encodeSetOiImbalanceHardBlock,
   encodeSetOracleAuthority,
   encodeSetOraclePriceCap,
@@ -5147,7 +5236,8 @@ export {
   encodeUpdateRiskParams,
   encodeWithdrawCollateral,
   encodeWithdrawInsurance,
-  encodeWithdrawInsuranceLP,
+  encodeWithdrawInsuranceLimited,
+  encodeWithdrawLpCollateral,
   fetchAdlRankedPositions,
   fetchAdlRankings,
   fetchSlab,

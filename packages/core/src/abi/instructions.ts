@@ -12,6 +12,12 @@ import {
 } from "./encode.js";
 
 /**
+ * Oracle price constraints.
+ * Maximum oracle price that can be pushed to the on-chain oracle authority.
+ */
+export const MAX_ORACLE_PRICE = 1_000_000_000_000n; // 1 trillion e6 = 1M USD/unit
+
+/**
  * Instruction tags - exact match to Rust ix::Instruction::decode
  */
 export const IX_TAG = {
@@ -37,16 +43,28 @@ export const IX_TAG = {
   ResolveMarket: 19,
   WithdrawInsurance: 20,
   AdminForceClose: 21,
-  UpdateRiskParams: 22,
-  RenounceAdmin: 23,
-  CreateInsuranceMint: 24,
-  DepositInsuranceLP: 25,
-  WithdrawInsuranceLP: 26,
-  PauseMarket: 27,
-  UnpauseMarket: 28,
-  AcceptAdmin: 29,
-  SetInsuranceWithdrawPolicy: 30,
-  WithdrawInsuranceLimited: 31,
+  // Tags 22-23: on-chain these are SetInsuranceWithdrawPolicy / WithdrawInsuranceLimited.
+  // Legacy aliases (UpdateRiskParams/RenounceAdmin) kept for backward compat.
+  SetInsuranceWithdrawPolicy: 22,
+  /** @deprecated Use SetInsuranceWithdrawPolicy */ UpdateRiskParams: 22,
+  WithdrawInsuranceLimited: 23,
+  /** @deprecated Use WithdrawInsuranceLimited */ RenounceAdmin: 23,
+  // Tags 24–26: on-chain = QueryLpFees/ReclaimEmptyAccount/SettleAccount.
+  // Old insurance LP tags removed — those moved to percolator-stake.
+  QueryLpFees: 24,
+  ReclaimEmptyAccount: 25,
+  SettleAccount: 26,
+  // Tags 27-28: on-chain = DepositFeeCredits/ConvertReleasedPnl.
+  // Legacy aliases (PauseMarket/UnpauseMarket) kept — those instructions don't exist on-chain.
+  DepositFeeCredits: 27,
+  /** @deprecated No on-chain PauseMarket instruction */ PauseMarket: 27,
+  ConvertReleasedPnl: 28,
+  /** @deprecated No on-chain UnpauseMarket instruction */ UnpauseMarket: 28,
+  // Tags 29-30: on-chain = ResolvePermissionless/ForceCloseResolved.
+  ResolvePermissionless: 29,
+  /** @deprecated Use ResolvePermissionless */ AcceptAdmin: 29,
+  ForceCloseResolved: 30,
+  // Tag 31: gap (no decode arm on-chain)
   SetPythOracle: 32,
   UpdateMarkPrice: 33,
   UpdateHyperpMark: 34,
@@ -130,6 +148,7 @@ export const IX_TAG = {
   /** CPI to the matcher program to initialize a matcher context account for an LP slot. Admin-only. */
   InitMatcherCtx: 75,
 } as const;
+Object.freeze(IX_TAG);
 
 /**
  * InitMarket instruction data (256 bytes total)
@@ -144,24 +163,32 @@ export interface InitMarketArgs {
   admin: PublicKey | string;
   collateralMint: PublicKey | string;
   indexFeedId: string;           // Pyth feed ID (hex string, 64 chars without 0x prefix). All zeros = Hyperp mode.
-  maxStalenessSecs: bigint | string;  // Max staleness in SECONDS (Pyth Pull uses unix timestamps)
+  maxStalenessSecs: bigint | string;
   confFilterBps: number;
-  invert: number;              // 0 = no inversion, 1 = invert oracle price (USD/SOL -> SOL/USD)
-  unitScale: number;           // Lamports per unit (0 = no scaling, e.g. 1000 = 1 SOL = 1,000,000 units)
-  initialMarkPriceE6: bigint | string;  // Initial mark price (required non-zero for Hyperp mode)
+  invert: number;
+  unitScale: number;
+  initialMarkPriceE6: bigint | string;
+  // Fields between header and RiskParams (immutable after init, default 0 if omitted)
+  maxMaintenanceFeePerSlot?: bigint | string;  // u128 — max maintenance fee per slot
+  maxInsuranceFloor?: bigint | string;         // u128 — max insurance floor
+  minOraclePriceCap?: bigint | string;         // u64 — min oracle price cap in e2bps
+  // RiskParams block (15 fields, read by read_risk_params on-chain)
   warmupPeriodSlots: bigint | string;
   maintenanceMarginBps: bigint | string;
   initialMarginBps: bigint | string;
   tradingFeeBps: bigint | string;
   maxAccounts: bigint | string;
   newAccountFee: bigint | string;
-  riskReductionThreshold: bigint | string;
+  riskReductionThreshold: bigint | string;    // maps to insurance_floor slot on-chain
   maintenanceFeePerSlot: bigint | string;
   maxCrankStalenessSlots: bigint | string;
   liquidationFeeBps: bigint | string;
   liquidationFeeCap: bigint | string;
   liquidationBufferBps: bigint | string;
   minLiquidationAbs: bigint | string;
+  minInitialDeposit: bigint | string;         // u128 — min deposit to open account
+  minNonzeroMmReq: bigint | string;           // u128 — must be > 0, < minNonzeroImReq
+  minNonzeroImReq: bigint | string;           // u128 — must be > minNonzeroMmReq, <= minInitialDeposit
 }
 
 /**
@@ -178,12 +205,24 @@ function encodeFeedId(feedId: string): Uint8Array {
   }
   const bytes = new Uint8Array(32);
   for (let i = 0; i < 64; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+    const byte = parseInt(hex.substring(i, i + 2), 16);
+    if (Number.isNaN(byte)) {
+      throw new Error(
+        `Failed to parse hex byte at position ${i}: "${hex.substring(i, i + 2)}"`,
+      );
+    }
+    bytes[i / 2] = byte;
   }
   return bytes;
 }
 
-const INIT_MARKET_DATA_LEN = 264;
+// tag(1) + admin(32) + mint(32) + feedId(32) + staleness(8) + conf(2) + invert(1) + scale(4) +
+// markPrice(8) + maxMaintFee(16) + maxInsFloor(16) + minOracleCap(8) +
+// RiskParams: warmup(8) + mmBps(8) + imBps(8) + tradeFee(8) + maxAcct(8) + newAcctFee(16) +
+//   riskRedThresh(16) + maintFee(16) + maxStale(8) + liqFee(8) + liqCap(16) + liqBuf(8) +
+//   minLiqAbs(16) + minDeposit(16) + minMm(16) + minIm(16)
+// = 1+32+32+32+8+2+1+4+8+16+16+8 + 8+8+8+8+8+16+16+16+8+8+16+8+16+16+16+16 = 352
+const INIT_MARKET_DATA_LEN = 352;
 
 export function encodeInitMarket(args: InitMarketArgs): Uint8Array {
   const data = concatBytes(
@@ -196,6 +235,11 @@ export function encodeInitMarket(args: InitMarketArgs): Uint8Array {
     encU8(args.invert),
     encU32(args.unitScale),
     encU64(args.initialMarkPriceE6),
+    // 3 fields between header and RiskParams (immutable after init)
+    encU128(args.maxMaintenanceFeePerSlot ?? 0n),
+    encU128(args.maxInsuranceFloor ?? 0n),
+    encU64(args.minOraclePriceCap ?? 0n),
+    // RiskParams block (15 fields)
     encU64(args.warmupPeriodSlots),
     encU64(args.maintenanceMarginBps),
     encU64(args.initialMarginBps),
@@ -209,6 +253,9 @@ export function encodeInitMarket(args: InitMarketArgs): Uint8Array {
     encU128(args.liquidationFeeCap),
     encU64(args.liquidationBufferBps),
     encU128(args.minLiquidationAbs),
+    encU128(args.minInitialDeposit),
+    encU128(args.minNonzeroMmReq),
+    encU128(args.minNonzeroImReq),
   );
   if (data.length !== INIT_MARKET_DATA_LEN) {
     throw new Error(
@@ -505,10 +552,31 @@ export interface PushOraclePriceArgs {
   timestamp: bigint | string;
 }
 
+/**
+ * Encode PushOraclePrice instruction data with validation.
+ *
+ * Validates oracle price constraints:
+ * - Price cannot be zero (division by zero in on-chain engine)
+ * - Price cannot exceed MAX_ORACLE_PRICE (prevents overflow in price math)
+ *
+ * @param args - PushOraclePrice arguments
+ * @returns Encoded instruction data (17 bytes)
+ * @throws Error if price is 0 or exceeds MAX_ORACLE_PRICE
+ */
 export function encodePushOraclePrice(args: PushOraclePriceArgs): Uint8Array {
+  const price = typeof args.priceE6 === "string" ? BigInt(args.priceE6) : args.priceE6;
+
+  if (price === 0n) {
+    throw new Error("encodePushOraclePrice: price cannot be zero (division by zero in engine)");
+  }
+
+  if (price > MAX_ORACLE_PRICE) {
+    throw new Error(`encodePushOraclePrice: price exceeds maximum (${MAX_ORACLE_PRICE}), got ${price}`);
+  }
+
   return concatBytes(
     encU8(IX_TAG.PushOraclePrice),
-    encU64(args.priceE6),
+    encU64(price),
     encI64(args.timestamp),
   );
 }
@@ -619,38 +687,6 @@ export function encodeRenounceAdmin(): Uint8Array {
     encU8(IX_TAG.RenounceAdmin),
     encU64(RENOUNCE_ADMIN_CONFIRMATION),
   );
-}
-
-/**
- * CreateInsuranceMint instruction data (1 byte)
- * Creates the SPL mint PDA for insurance LP tokens. Admin only, once per market.
- */
-export function encodeCreateInsuranceMint(): Uint8Array {
-  return encU8(IX_TAG.CreateInsuranceMint);
-}
-
-/**
- * DepositInsuranceLP instruction data (9 bytes)
- * Deposit collateral into insurance fund, receive LP tokens proportional to share.
- */
-export interface DepositInsuranceLPArgs {
-  amount: bigint | string;
-}
-
-export function encodeDepositInsuranceLP(args: DepositInsuranceLPArgs): Uint8Array {
-  return concatBytes(encU8(IX_TAG.DepositInsuranceLP), encU64(args.amount));
-}
-
-/**
- * WithdrawInsuranceLP instruction data (9 bytes)
- * Burn LP tokens and withdraw proportional share of insurance fund.
- */
-export interface WithdrawInsuranceLPArgs {
-  lpAmount: bigint | string;
-}
-
-export function encodeWithdrawInsuranceLP(args: WithdrawInsuranceLPArgs): Uint8Array {
-  return concatBytes(encU8(IX_TAG.WithdrawInsuranceLP), encU64(args.lpAmount));
 }
 
 // ============================================================================
@@ -790,14 +826,12 @@ export async function derivePythPriceUpdateAccount(
   return pda.toBase58();
 }
 
-// Add SetPythOracle to the tag registry
-(IX_TAG as Record<string, number>)['SetPythOracle'] = 32;
+// SetPythOracle tag (32) is already defined in IX_TAG above.
 
 // PERC-118: Mark Price EMA Instructions
 // ============================================================================
 
-// Tag 33 — permissionless mark price EMA crank
-(IX_TAG as Record<string, number>)['UpdateMarkPrice'] = 33;
+// Tag 33 — permissionless mark price EMA crank (defined in IX_TAG above).
 
 /**
  * UpdateMarkPrice (Tag 33) — permissionless EMA mark price crank.
@@ -838,7 +872,8 @@ export function computeEmaMarkPrice(
 
   let oracleClamped = oracleE6;
   if (capE2bps > 0n) {
-    const maxDelta = (markPrevE6 * capE2bps * dtSlots) / 1_000_000n;
+    // Avoid overflow: divide early to reduce intermediate product
+    const maxDelta = (markPrevE6 * capE2bps / 1_000_000n) * dtSlots;
     const lo = markPrevE6 > maxDelta ? markPrevE6 - maxDelta : 0n;
     const hi = markPrevE6 + maxDelta;
     if (oracleClamped < lo) oracleClamped = lo;
@@ -854,8 +889,7 @@ export function computeEmaMarkPrice(
 // PERC-119: Hyperp EMA Oracle for Permissionless Tokens
 // ============================================================================
 
-// Tag 34 — permissionless Hyperp mark price oracle (reads DEX AMM pool)
-(IX_TAG as Record<string, number>)['UpdateHyperpMark'] = 34;
+// Tag 34 — permissionless Hyperp mark price oracle (defined in IX_TAG above).
 
 /**
  * UpdateHyperpMark (Tag 34) — permissionless Hyperp EMA oracle crank.
@@ -1571,45 +1605,6 @@ export function encodeSetWalletCap(args: SetWalletCapArgs): Uint8Array {
 }
 
 // ============================================================================
-// PERC-SetDexPool — Pin admin-approved DEX pool for HYPERP markets (tag 74)
-// ============================================================================
-
-/**
- * SetDexPool (Tag 74, PERC-SetDexPool) — admin pins the approved DEX pool address.
- *
- * Only valid for HYPERP markets (indexFeedId == all-zeros). The program validates
- * the pool account before storing: it must be owned by Raydium CLMM, PumpSwap, or
- * Meteora DLMM, and must contain the market's collateral mint.
- *
- * After this call, UpdateHyperpMark rejects any pool that does not match the
- * stored address. This eliminates the Supabase service_role attack vector.
- *
- * Instruction data layout: tag(1) + pool(32) = 33 bytes
- *
- * Accounts:
- *   0. [signer]   admin
- *   1. [writable] slab
- *   2. []         pool_account (DEX pool to validate and store)
- *
- * Example:
- * ```ts
- * const ix = new TransactionInstruction({
- *   programId: PERCOLATOR_PROGRAM_ID,
- *   keys: buildAccountMetas(ACCOUNTS_SET_DEX_POOL, [admin, slab, poolAccount]),
- *   data: Buffer.from(encodeSetDexPool({ pool: poolPubkey })),
- * });
- * ```
- */
-export interface SetDexPoolArgs {
-  /** The approved DEX pool account pubkey to pin for this HYPERP market. */
-  pool: PublicKey | string;
-}
-
-export function encodeSetDexPool(args: SetDexPoolArgs): Uint8Array {
-  return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
-}
-
-// ============================================================================
 // InitMatcherCtx — CPI to matcher program to initialize a matcher context (tag 75)
 // ============================================================================
 
@@ -1631,31 +1626,6 @@ export function encodeSetDexPool(args: SetDexPoolArgs): Uint8Array {
  *   2. [writable] matcherCtx (must match LP's stored matcher_context)
  *   3. []         matcherProg (executable; must match LP's stored matcher_program)
  *   4. []         lpPda (PDA ["lp", slab, lp_idx]; required by CPI as signer)
- *
- * @example
- * ```ts
- * const [lpPda] = PublicKey.findProgramAddressSync(
- *   [Buffer.from("lp"), slab.toBuffer(), Buffer.from(new Uint8Array(new Uint16Array([lpIdx]).buffer))],
- *   PERCOLATOR_PROGRAM_ID,
- * );
- * const ix = new TransactionInstruction({
- *   programId: PERCOLATOR_PROGRAM_ID,
- *   keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, { admin, slab, matcherCtx, matcherProg, lpPda }),
- *   data: Buffer.from(encodeInitMatcherCtx({
- *     lpIdx: 0,
- *     kind: 0,              // 0=Passive, 1=vAMM
- *     tradingFeeBps: 30,
- *     baseSpreadBps: 50,
- *     maxTotalBps: 500,
- *     impactKBps: 0,
- *     liquidityNotionalE6: 0n,
- *     maxFillAbs: BigInt("340282366920938463463374607431768211455"), // u128::MAX
- *     maxInventoryAbs: BigInt("340282366920938463463374607431768211455"),
- *     feeToInsuranceBps: 0,
- *     skewSpreadMultBps: 0,
- *   })),
- * });
- * ```
  */
 export interface InitMatcherCtxArgs {
   /** LP account index in the engine (0-based). */
@@ -1697,4 +1667,98 @@ export function encodeInitMatcherCtx(args: InitMatcherCtxArgs): Uint8Array {
     encU16(args.feeToInsuranceBps),
     encU16(args.skewSpreadMultBps),
   );
+}
+
+// ============================================================================
+// Missing encoders — corrected tag mappings (tags 22-74)
+// ============================================================================
+
+/** SetInsuranceWithdrawPolicy (tag 22): authority + min_withdraw_base + max_withdraw_bps + cooldown_slots */
+export interface SetInsuranceWithdrawPolicyArgs {
+  authority: PublicKey | string;
+  minWithdrawBase: bigint | string;
+  maxWithdrawBps: number;
+  cooldownSlots: bigint | string;
+}
+export function encodeSetInsuranceWithdrawPolicy(args: SetInsuranceWithdrawPolicyArgs): Uint8Array {
+  return concatBytes(encU8(IX_TAG.SetInsuranceWithdrawPolicy), encPubkey(args.authority), encU64(args.minWithdrawBase), encU16(args.maxWithdrawBps), encU64(args.cooldownSlots));
+}
+
+/** WithdrawInsuranceLimited (tag 23): amount */
+export function encodeWithdrawInsuranceLimited(args: { amount: bigint | string }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.WithdrawInsuranceLimited), encU64(args.amount));
+}
+
+/** ResolvePermissionless (tag 29): no args */
+export function encodeResolvePermissionless(): Uint8Array {
+  return concatBytes(encU8(IX_TAG.ResolvePermissionless));
+}
+
+/** ForceCloseResolved (tag 30): user_idx */
+export function encodeForceCloseResolved(args: { userIdx: number }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.ForceCloseResolved), encU16(args.userIdx));
+}
+
+/** CreateLpVault (tag 37): fee_share_bps + util_curve_enabled */
+export function encodeCreateLpVault(args: { feeShareBps: bigint | string; utilCurveEnabled?: boolean }): Uint8Array {
+  const parts = [encU8(IX_TAG.CreateLpVault), encU64(args.feeShareBps)];
+  if (args.utilCurveEnabled !== undefined) {
+    parts.push(encU8(args.utilCurveEnabled ? 1 : 0));
+  }
+  return concatBytes(...parts);
+}
+
+/** LpVaultDeposit (tag 38): amount */
+export function encodeLpVaultDeposit(args: { amount: bigint | string }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.LpVaultDeposit), encU64(args.amount));
+}
+
+/** LpVaultCrankFees (tag 40): no args */
+export function encodeLpVaultCrankFees(): Uint8Array {
+  return concatBytes(encU8(IX_TAG.LpVaultCrankFees));
+}
+
+/** ChallengeSettlement (tag 43): proposed_price_e6 */
+export function encodeChallengeSettlement(args: { proposedPriceE6: bigint | string }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.ChallengeSettlement), encU64(args.proposedPriceE6));
+}
+
+/** ResolveDispute (tag 44): accept (0 = reject, 1 = accept) */
+export function encodeResolveDispute(args: { accept: number }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.ResolveDispute), encU8(args.accept));
+}
+
+/** DepositLpCollateral (tag 45): user_idx + lp_amount */
+export function encodeDepositLpCollateral(args: { userIdx: number; lpAmount: bigint | string }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.DepositLpCollateral), encU16(args.userIdx), encU64(args.lpAmount));
+}
+
+/** WithdrawLpCollateral (tag 46): user_idx + lp_amount */
+export function encodeWithdrawLpCollateral(args: { userIdx: number; lpAmount: bigint | string }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.WithdrawLpCollateral), encU16(args.userIdx), encU64(args.lpAmount));
+}
+
+/** SetOffsetPair (tag 54): offset_bps */
+export function encodeSetOffsetPair(args: { offsetBps: number }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.SetOffsetPair), encU16(args.offsetBps));
+}
+
+/** AttestCrossMargin (tag 55): user_idx_a + user_idx_b */
+export function encodeAttestCrossMargin(args: { userIdxA: number; userIdxB: number }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.AttestCrossMargin), encU16(args.userIdxA), encU16(args.userIdxB));
+}
+
+/** RescueOrphanVault (tag 72): no args */
+export function encodeRescueOrphanVault(): Uint8Array {
+  return concatBytes(encU8(IX_TAG.RescueOrphanVault));
+}
+
+/** CloseOrphanSlab (tag 73): no args */
+export function encodeCloseOrphanSlab(): Uint8Array {
+  return concatBytes(encU8(IX_TAG.CloseOrphanSlab));
+}
+
+/** SetDexPool (tag 74): pool pubkey */
+export function encodeSetDexPool(args: { pool: PublicKey | string }): Uint8Array {
+  return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
 }
