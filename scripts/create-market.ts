@@ -51,6 +51,7 @@ import {
   encodeInitLP,
   encodeInitMatcherCtx,
   encodeTopUpInsurance,
+  encodeTopUpKeeperFund,
 } from "@percolator/sdk";
 import {
   buildAccountMetas,
@@ -297,6 +298,12 @@ async function main() {
     cfg.programId,
   );
 
+  // Derive keeper fund PDA
+  const [keeperFundPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("keeper_fund"), slab.publicKey.toBuffer()],
+    cfg.programId,
+  );
+
   // ATAs
   const vaultAta = await getAssociatedTokenAddress(
     cfg.collateralMint,
@@ -313,6 +320,7 @@ async function main() {
   console.log(`Vault PDA:       ${vaultPda.toBase58()}`);
   console.log(`Vault ATA:       ${vaultAta.toBase58()}`);
   console.log(`LP PDA (idx=0):  ${lpPda.toBase58()}`);
+  console.log(`Keeper fund:     ${keeperFundPda.toBase58()}`);
   console.log();
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -370,20 +378,29 @@ async function main() {
     ),
   );
   // InitMarket instruction (tag 0)
+  // Pass 11 accounts to also create keeper fund PDA (PERC-623):
+  //   [0] admin, [1] slab, [2] mint, [3] vault, [4] tokenProgram,
+  //   [5] clock, [6] rent, [7] dummyAta, [8] systemProgram,
+  //   [9] keeperFundPda (writable), [10] systemProgram (for PDA creation)
   tx1.add(
     new TransactionInstruction({
       programId: cfg.programId,
-      keys: buildAccountMetas(ACCOUNTS_INIT_MARKET, {
-        admin: admin.publicKey,
-        slab: slab.publicKey,
-        mint: cfg.collateralMint,
-        vault: vaultAta,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        clock: SYSVAR_CLOCK_PUBKEY,
-        rent: SYSVAR_RENT_PUBKEY,
-        dummyAta: adminAta,  // admin's own ATA used as dummyAta (checked but not transferred)
-        systemProgram: SystemProgram.programId,
-      }),
+      keys: [
+        ...buildAccountMetas(ACCOUNTS_INIT_MARKET, {
+          admin: admin.publicKey,
+          slab: slab.publicKey,
+          mint: cfg.collateralMint,
+          vault: vaultAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          clock: SYSVAR_CLOCK_PUBKEY,
+          rent: SYSVAR_RENT_PUBKEY,
+          dummyAta: adminAta,
+          systemProgram: SystemProgram.programId,
+        }),
+        // Extra accounts for keeper fund PDA creation
+        { pubkey: keeperFundPda, isSigner: false, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
       data: Buffer.from(initMarketData),
     }),
   );
@@ -566,6 +583,41 @@ async function main() {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
+  // TX6: TopUpKeeperFund — seed the keeper fund with SOL
+  //   InitMarket already created the PDA with minimum rent, but we add more
+  //   so the keeper earns rewards for cranking (0.001 SOL per crank).
+  // ──────────────────────────────────────────────────────────────────────────
+  const KEEPER_FUND_SEED_SOL = 0.1; // 0.1 SOL = 100 cranks worth of rewards
+  const keeperFundLamports = BigInt(Math.floor(KEEPER_FUND_SEED_SOL * 1e9));
+
+  console.log(`TX6: TopUpKeeperFund (${KEEPER_FUND_SEED_SOL} SOL)...`);
+  const tx6 = new Transaction();
+  tx6.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
+  tx6.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
+  tx6.add(
+    new TransactionInstruction({
+      programId: cfg.programId,
+      keys: [
+        { pubkey: admin.publicKey, isSigner: true, isWritable: true },
+        { pubkey: slab.publicKey, isSigner: false, isWritable: true },
+        { pubkey: keeperFundPda, isSigner: false, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from(
+        encodeTopUpKeeperFund({ amount: keeperFundLamports }),
+      ),
+    }),
+  );
+
+  let sig6: string | null = null;
+  try {
+    sig6 = await sendTx(conn, tx6, [admin], "TX6");
+  } catch (e) {
+    console.warn("TX6 WARNING (TopUpKeeperFund):", e instanceof Error ? e.message : e);
+    console.warn("Market is live but keeper fund has minimum balance only.");
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Summary
   // ──────────────────────────────────────────────────────────────────────────
   console.log("\n========== MARKET CREATED SUCCESSFULLY ==========");
@@ -581,6 +633,7 @@ async function main() {
   console.log(`  TX3 InitLP:        ${sig3}`);
   console.log(`  TX4 InitMatcherCtx: ${sig4}`);
   if (sig5) console.log(`  TX5 TopUpInsurance: ${sig5}`);
+  if (sig6) console.log(`  TX6 TopUpKeeperFund: ${sig6}`);
   console.log();
   console.log("Save these addresses — required for keeper and oracle config:");
   console.log(
@@ -589,6 +642,7 @@ async function main() {
         programId: cfg.programId.toBase58(),
         slabAddress: slab.publicKey.toBase58(),
         matcherCtxAddress: matcherCtx.publicKey.toBase58(),
+        keeperFundPda: keeperFundPda.toBase58(),
         lpPda: lpPda.toBase58(),
         vaultAta: vaultAta.toBase58(),
         collateralMint: cfg.collateralMint.toBase58(),
