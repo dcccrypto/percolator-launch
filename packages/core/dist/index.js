@@ -1580,6 +1580,7 @@ var V_ADL_ACCT_FEE_CREDITS_OFF = 224;
 var V_ADL_ACCT_LAST_FEE_SLOT_OFF = 240;
 var V12_1_ENGINE_OFF = 648;
 var V12_1_ACCOUNT_SIZE = 320;
+var V12_1_ACCOUNT_SIZE_SBF = 280;
 var V12_1_ENGINE_BITMAP_OFF = 1016;
 var V12_1_ENGINE_PARAMS_OFF = 96;
 var V12_1_PARAMS_SIZE = 352;
@@ -1615,8 +1616,8 @@ var V12_1_ACCT_MATCHER_CONTEXT_OFF = 176;
 var V12_1_ACCT_OWNER_OFF = 208;
 var V12_1_ACCT_FEE_CREDITS_OFF = 240;
 var V12_1_ACCT_LAST_FEE_SLOT_OFF = 256;
-var V12_1_ACCT_POSITION_SIZE_OFF = 296;
-var V12_1_ACCT_ENTRY_PRICE_OFF = 280;
+var V12_1_ACCT_POSITION_SIZE_OFF = 88;
+var V12_1_ACCT_ENTRY_PRICE_OFF = -1;
 var V12_1_ACCT_FUNDING_INDEX_OFF = 288;
 var V1M_ENGINE_OFF = 640;
 var V1M_CONFIG_LEN = 536;
@@ -1690,6 +1691,15 @@ for (const n of TIERS) {
   V1M2_SIZES.set(computeSlabSize(V1M2_ENGINE_OFF, V1M2_ENGINE_BITMAP_OFF, V1M2_ACCOUNT_SIZE, n, 18), n);
   V_SETDEXPOOL_SIZES.set(computeSlabSize(V_SETDEXPOOL_ENGINE_OFF, V_ADL_ENGINE_BITMAP_OFF, V_ADL_ACCOUNT_SIZE, n, 18), n);
   V12_1_SIZES.set(computeSlabSize(V12_1_ENGINE_OFF, V12_1_ENGINE_BITMAP_OFF, V12_1_ACCOUNT_SIZE, n, 18), n);
+}
+var V12_1_SBF_ACCOUNT_SIZE = 280;
+var V12_1_SBF_ENGINE_PREAMBLE = 558;
+for (const [, n] of [["Micro", 64], ["Small", 256], ["Medium", 1024], ["Large", 4096]]) {
+  const bitmapBytes = Math.ceil(n / 64) * 8;
+  const preAccLen = V12_1_SBF_ENGINE_PREAMBLE + bitmapBytes + 18 + n * 2;
+  const accountsOff = Math.ceil(preAccLen / 8) * 8;
+  const total = V12_1_ENGINE_OFF + accountsOff + n * V12_1_SBF_ACCOUNT_SIZE;
+  V12_1_SIZES.set(total, n);
 }
 var SLAB_TIERS_V2 = {
   small: { maxAccounts: 256, dataSize: 65088, label: "Small", description: "256 slots (V2 BPF intermediate)" },
@@ -2215,10 +2225,12 @@ function buildLayoutVSetDexPool(maxAccounts) {
     engineInsuranceIsolationBpsOff: 64
   };
 }
-function buildLayoutV12_1(maxAccounts) {
+function buildLayoutV12_1(maxAccounts, dataLen) {
   const engineOff = V12_1_ENGINE_OFF;
   const bitmapOff = V12_1_ENGINE_BITMAP_OFF;
-  const accountSize = V12_1_ACCOUNT_SIZE;
+  const hostSize = computeSlabSize(engineOff, bitmapOff, V12_1_ACCOUNT_SIZE, maxAccounts, 18);
+  const isSbf = dataLen !== void 0 && dataLen !== hostSize;
+  const accountSize = isSbf ? V12_1_ACCOUNT_SIZE_SBF : V12_1_ACCOUNT_SIZE;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
   const postBitmap = 18;
@@ -2277,7 +2289,7 @@ function buildLayoutV12_1(maxAccounts) {
 }
 function detectSlabLayout(dataLen, data) {
   const v121n = V12_1_SIZES.get(dataLen);
-  if (v121n !== void 0) return buildLayoutV12_1(v121n);
+  if (v121n !== void 0) return buildLayoutV12_1(v121n, dataLen);
   const vsdpn = V_SETDEXPOOL_SIZES.get(dataLen);
   if (vsdpn !== void 0) return buildLayoutVSetDexPool(vsdpn);
   const v1m2n = V1M2_SIZES.get(dataLen);
@@ -2707,8 +2719,8 @@ function parseAccount(data, idx) {
   if (data.length < base + layout.accountSize) {
     throw new Error("Slab data too short for account");
   }
-  const isV12_1 = layout.accountSize >= 320;
-  const isAdl = layout.accountSize >= 312;
+  const isV12_1 = layout.engineOff === V12_1_ENGINE_OFF && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
+  const isAdl = layout.accountSize >= 312 || isV12_1;
   const warmupStartedOff = isAdl ? V_ADL_ACCT_WARMUP_STARTED_OFF : ACCT_WARMUP_STARTED_OFF;
   const warmupSlopeOff = isAdl ? V_ADL_ACCT_WARMUP_SLOPE_OFF : ACCT_WARMUP_SLOPE_OFF;
   const positionSizeOff = isV12_1 ? V12_1_ACCT_POSITION_SIZE_OFF : isAdl ? V_ADL_ACCT_POSITION_SIZE_OFF : ACCT_POSITION_SIZE_OFF;
@@ -2729,7 +2741,8 @@ function parseAccount(data, idx) {
     warmupStartedAtSlot: readU64LE(data, base + warmupStartedOff),
     warmupSlopePerStep: readU128LE(data, base + warmupSlopeOff),
     positionSize: readI128LE(data, base + positionSizeOff),
-    entryPrice: readU64LE(data, base + entryPriceOff),
+    entryPrice: entryPriceOff >= 0 ? readU64LE(data, base + entryPriceOff) : 0n,
+    // V12_1: entry_price removed
     // V12_1 changed funding_index from i128 to i64 (legacy field moved to end of account)
     fundingIndex: isV12_1 ? BigInt(readI64LE(data, base + fundingIndexOff)) : readI128LE(data, base + fundingIndexOff),
     matcherProgram: new PublicKey3(data.subarray(base + matcherProgOff, base + matcherProgOff + 32)),

@@ -405,7 +405,8 @@ const V_ADL_ACCT_LAST_FEE_SLOT_OFF = 240;      // was 232
 // Engine field ordering completely reorganized from V_ADL.
 // All values verified by cargo build-sbf compile-time assertions.
 const V12_1_ENGINE_OFF = 648;      // align_up(104 + 544, 8) = 648 (same as V_SETDEXPOOL)
-const V12_1_ACCOUNT_SIZE = 320;    // 312 + 8 (position_size now i128 not just legacy)
+const V12_1_ACCOUNT_SIZE = 320;    // aarch64 size (320). SBF uses 280 due to u128 align diff.
+const V12_1_ACCOUNT_SIZE_SBF = 280; // Empirically verified from mainnet SLAB_LEN
 const V12_1_ENGINE_BITMAP_OFF = 1016; // RiskParams grew 16 bytes + lifetime_force_realize_closes added
 const V12_1_ENGINE_PARAMS_OFF = 96;   // vault(16) + InsuranceFund(80) = 96
 const V12_1_PARAMS_SIZE = 352;        // 336 + 16 (new fields)
@@ -450,8 +451,11 @@ const V12_1_ACCT_MATCHER_CONTEXT_OFF = 176; // was 160 in V_ADL (+16 from new AD
 const V12_1_ACCT_OWNER_OFF = 208;           // was 192 in V_ADL (+16 from new ADL fields)
 const V12_1_ACCT_FEE_CREDITS_OFF = 240;     // was 224 in V_ADL
 const V12_1_ACCT_LAST_FEE_SLOT_OFF = 256;   // was 240 in V_ADL
-const V12_1_ACCT_POSITION_SIZE_OFF = 296;    // moved to end (legacy field)
-const V12_1_ACCT_ENTRY_PRICE_OFF = 280;      // moved to end (legacy field)
+// SBF offsets (empirically verified via repr(C) with u128 align=8):
+// position_basis_q is at offset 88 on SBF (between warmup_slope_per_step and adl_a_basis)
+// entry_price was REMOVED from Account in V12_1 upstream rebase
+const V12_1_ACCT_POSITION_SIZE_OFF = 88;     // position_basis_q: i128 at offset 88 (SBF)
+const V12_1_ACCT_ENTRY_PRICE_OFF = -1;       // REMOVED in V12_1 — does not exist
 const V12_1_ACCT_FUNDING_INDEX_OFF = 288;    // moved to end (legacy, i64 not i128)
 
 // ---- V1M layout constants (mainnet-deployed V1 program, ESa89R5) ----
@@ -615,9 +619,21 @@ for (const n of TIERS) {
   // V_SETDEXPOOL: PERC-SetDexPool — engineOff=648, bitmapOff=1008, accountSize=312.
   // e.g. n=4096 → 1288336 bytes.
   V_SETDEXPOOL_SIZES.set(computeSlabSize(V_SETDEXPOOL_ENGINE_OFF, V_ADL_ENGINE_BITMAP_OFF, V_ADL_ACCOUNT_SIZE, n, 18), n);
-  // V12_1: percolator-core v12.1 — accountSize=320, bitmapOff=1016.
-  // e.g. n=4096 → 1321112; n=1024 → 331544; n=256 → 84152; n=64 → 22304.
+  // V12_1: percolator-core v12.1 — accountSize=320 on aarch64, 280 on SBF.
+  // The SBF binary has different struct alignment (u128 align=8 vs 16 on aarch64).
+  // Register BOTH host-computed and SBF-empirical sizes for detection.
   V12_1_SIZES.set(computeSlabSize(V12_1_ENGINE_OFF, V12_1_ENGINE_BITMAP_OFF, V12_1_ACCOUNT_SIZE, n, 18), n);
+}
+// SBF-specific V12_1 sizes (empirically verified from deployed mainnet binary).
+// Account=280 bytes on SBF (vs 320 on aarch64) due to u128 alignment difference.
+const V12_1_SBF_ACCOUNT_SIZE = 280;
+const V12_1_SBF_ENGINE_PREAMBLE = 558;
+for (const [, n] of [["Micro", 64], ["Small", 256], ["Medium", 1024], ["Large", 4096]] as const) {
+  const bitmapBytes = Math.ceil(n / 64) * 8;
+  const preAccLen = V12_1_SBF_ENGINE_PREAMBLE + bitmapBytes + 18 + n * 2;
+  const accountsOff = Math.ceil(preAccLen / 8) * 8;
+  const total = V12_1_ENGINE_OFF + accountsOff + n * V12_1_SBF_ACCOUNT_SIZE;
+  V12_1_SIZES.set(total, n);
 }
 
 /**
@@ -1189,10 +1205,14 @@ function buildLayoutVSetDexPool(maxAccounts: number): SlabLayout {
   };
 }
 
-function buildLayoutV12_1(maxAccounts: number): SlabLayout {
+function buildLayoutV12_1(maxAccounts: number, dataLen?: number): SlabLayout {
   const engineOff = V12_1_ENGINE_OFF;
   const bitmapOff = V12_1_ENGINE_BITMAP_OFF;
-  const accountSize = V12_1_ACCOUNT_SIZE;
+  // Detect SBF vs host alignment from actual slab size.
+  // SBF Account=280 (u128 align=8), host Account=320 (u128 align=16).
+  const hostSize = computeSlabSize(engineOff, bitmapOff, V12_1_ACCOUNT_SIZE, maxAccounts, 18);
+  const isSbf = dataLen !== undefined && dataLen !== hostSize;
+  const accountSize = isSbf ? V12_1_ACCOUNT_SIZE_SBF : V12_1_ACCOUNT_SIZE;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
   const postBitmap = 18;
@@ -1268,7 +1288,7 @@ export function detectSlabLayout(dataLen: number, data?: Uint8Array): SlabLayout
   // Check V12_1 sizes first (percolator-core v12.1, ACCOUNT_SIZE=320, BITMAP_OFF=1016).
   // Largest account size — no size collision with any earlier layout.
   const v121n = V12_1_SIZES.get(dataLen);
-  if (v121n !== undefined) return buildLayoutV12_1(v121n);
+  if (v121n !== undefined) return buildLayoutV12_1(v121n, dataLen);
 
   // Check V_SETDEXPOOL sizes (PERC-SetDexPool, ENGINE_OFF=648, CONFIG_LEN=544).
   // These are the pre-v12.1 newest slabs — largest ENGINE_OFF so no size collision with V_ADL (624).
@@ -2069,8 +2089,10 @@ export function parseAccount(data: Uint8Array, idx: number): Account {
   //   shift matcher/owner/fee offsets +16 from V_ADL, and move legacy fields to end.
   // V_ADL (account_size=312): reserved_pnl grew u64→u128 (PERC-8267), shifting from pre-ADL offsets.
   // Pre-ADL (account_size<312): original offsets.
-  const isV12_1 = layout.accountSize >= 320;
-  const isAdl = layout.accountSize >= 312;
+  // V12_1: engineOff=648 + bitmapOff(rel)=368. Detect by engineOff (most reliable).
+  // Account is 320 on aarch64, 280 on SBF — accountSize alone is ambiguous.
+  const isV12_1 = layout.engineOff === V12_1_ENGINE_OFF && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
+  const isAdl = layout.accountSize >= 312 || isV12_1;
   const warmupStartedOff = isAdl ? V_ADL_ACCT_WARMUP_STARTED_OFF : ACCT_WARMUP_STARTED_OFF;
   const warmupSlopeOff   = isAdl ? V_ADL_ACCT_WARMUP_SLOPE_OFF   : ACCT_WARMUP_SLOPE_OFF;
   const positionSizeOff  = isV12_1 ? V12_1_ACCT_POSITION_SIZE_OFF : (isAdl ? V_ADL_ACCT_POSITION_SIZE_OFF : ACCT_POSITION_SIZE_OFF);
@@ -2093,7 +2115,7 @@ export function parseAccount(data: Uint8Array, idx: number): Account {
     warmupStartedAtSlot: readU64LE(data, base + warmupStartedOff),
     warmupSlopePerStep: readU128LE(data, base + warmupSlopeOff),
     positionSize: readI128LE(data, base + positionSizeOff),
-    entryPrice: readU64LE(data, base + entryPriceOff),
+    entryPrice: entryPriceOff >= 0 ? readU64LE(data, base + entryPriceOff) : 0n, // V12_1: entry_price removed
     // V12_1 changed funding_index from i128 to i64 (legacy field moved to end of account)
     fundingIndex: isV12_1 ? BigInt(readI64LE(data, base + fundingIndexOff)) : readI128LE(data, base + fundingIndexOff),
     matcherProgram: new PublicKey(data.subarray(base + matcherProgOff, base + matcherProgOff + 32)),
