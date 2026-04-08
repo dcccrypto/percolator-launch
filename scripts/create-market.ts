@@ -52,6 +52,7 @@ import {
   encodeInitMatcherCtx,
   encodeTopUpInsurance,
   encodeTopUpKeeperFund,
+  encodeSetOracleAuthority,
 } from "@percolator/sdk";
 import {
   buildAccountMetas,
@@ -113,8 +114,15 @@ const DEFAULT_RISK_PARAMS = {
   liquidationBufferBps:   100n,            // 1%
   minLiquidationAbs:      100n,            // lowered from 1_000_000 (u128)
   minInitialDeposit:      10_000_000n,     // 10 USDC (u128)
-  minNonzeroMmReq:        0n,              // disabled (u128)
-  minNonzeroImReq:        0n,              // disabled (u128)
+  minNonzeroMmReq:        100_000n,        // 0.1 USDC — must be > 0 (u128)
+  minNonzeroImReq:        500_000n,        // 0.5 USDC — must be > mmReq, <= minInitialDeposit (u128)
+} as const;
+
+// Fields between header and RiskParams (immutable after init)
+const DEFAULT_INIT_EXTRA = {
+  maxMaintenanceFeePerSlot: 0n,            // disabled (u128)
+  maxInsuranceFloor:        0n,            // disabled (u128)
+  minOraclePriceCap:        500n,          // 5% min price cap (u64, e2bps)
 } as const;
 
 // InitMatcherCtx defaults — passive vAMM for LP slot 0
@@ -280,6 +288,22 @@ async function main() {
   const admin = loadKeypair(cfg.keypairPath);
   console.log(`Admin public key: ${admin.publicKey.toBase58()}`);
 
+  // Pre-flight checks
+  const adminSol = await conn.getBalance(admin.publicKey);
+  console.log(`Admin SOL:        ${(adminSol / 1e9).toFixed(4)} SOL`);
+  const adminAtaInfo = await conn.getAccountInfo(
+    await getAssociatedTokenAddress(cfg.collateralMint, admin.publicKey),
+  );
+  const adminUsdc = adminAtaInfo
+    ? Number(Buffer.from(adminAtaInfo.data).readBigUInt64LE(64)) / 1e6
+    : 0;
+  console.log(`Admin USDC:       ${adminUsdc.toFixed(2)} USDC`);
+  const neededUsdc = Number(cfg.seedDepositAmount + cfg.insuranceAmount) / 1e6;
+  if (adminUsdc < neededUsdc) {
+    console.error(`ERROR: Need ${neededUsdc} USDC but only have ${adminUsdc.toFixed(2)}. Fund the wallet first.`);
+    process.exit(1);
+  }
+
   // Generate fresh keypairs for slab and matcher context
   const slab = Keypair.generate();
   const matcherCtx = Keypair.generate();
@@ -345,6 +369,7 @@ async function main() {
     invert: 0,
     unitScale: 0,
     initialMarkPriceE6: cfg.initialMarkPriceE6,
+    ...DEFAULT_INIT_EXTRA,
     ...DEFAULT_RISK_PARAMS,
   });
 
@@ -352,7 +377,7 @@ async function main() {
   // internally — this message helps catch SDK version drift when reviewing logs.
   console.log(
     `  encodeInitMarket: ${initMarketData.length} bytes ` +
-      `(expected 312 for current SDK with minInitialDeposit/minNonzeroMmReq/minNonzeroImReq)`,
+      `(expected 352 — header + 3 extra fields + RiskParams with minInitialDeposit/minNonzeroMmReq/minNonzeroImReq)`,
   );
 
   const tx1 = new Transaction();
@@ -618,6 +643,71 @@ async function main() {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
+  // TX7: SetOracleAuthority — set keeper as oracle authority for PushOraclePrice fallback
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log("TX7: SetOracleAuthority (set keeper as fallback oracle authority)...");
+  const tx7 = new Transaction();
+  tx7.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
+  tx7.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
+  tx7.add(
+    new TransactionInstruction({
+      programId: cfg.programId,
+      keys: [
+        { pubkey: admin.publicKey, isSigner: true, isWritable: false },
+        { pubkey: slab.publicKey, isSigner: false, isWritable: true },
+      ],
+      data: Buffer.from(
+        encodeSetOracleAuthority({ newAuthority: admin.publicKey }),
+      ),
+    }),
+  );
+
+  let sig7: string | null = null;
+  try {
+    sig7 = await sendTx(conn, tx7, [admin], "TX7");
+  } catch (e) {
+    console.warn("TX7 WARNING (SetOracleAuthority):", e instanceof Error ? e.message : e);
+    console.warn("Market works without this but PushOraclePrice fallback is unavailable.");
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Save market config to file
+  // ──────────────────────────────────────────────────────────────────────────
+  const marketJson = {
+    programId: cfg.programId.toBase58(),
+    slabAddress: slab.publicKey.toBase58(),
+    matcherCtxAddress: matcherCtx.publicKey.toBase58(),
+    keeperFundPda: keeperFundPda.toBase58(),
+    lpPda: lpPda.toBase58(),
+    vaultAta: vaultAta.toBase58(),
+    collateralMint: cfg.collateralMint.toBase58(),
+    dexPool: cfg.dexPoolAddress.toBase58(),
+    network: cfg.network,
+    createdAt: new Date().toISOString(),
+    transactions: { sig1, sig2, sig3, sig4, sig5, sig6, sig7 },
+  };
+
+  const outFile = path.join(
+    process.cwd(),
+    `market-${cfg.network}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+  );
+  fs.writeFileSync(outFile, JSON.stringify(marketJson, null, 2));
+  console.log(`\nMarket config saved to: ${outFile}`);
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // NOTE: You must manually insert this market into Supabase for the
+  // frontend and indexer to display it properly. Example SQL:
+  //
+  //   INSERT INTO markets (slab_address, symbol, name, collateral_mint,
+  //     dex_pool_address, oracle_mode, program_id, network)
+  //   VALUES ('<slab>', 'SOL-PERP', 'SOL/USDC Perpetual', '<mint>',
+  //     '<dex_pool>', 'hyperp', '<program_id>', '<network>');
+  //
+  // Without this row, the market appears nameless and is not the default
+  // trading pair on the frontend.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Summary
   // ──────────────────────────────────────────────────────────────────────────
   console.log("\n========== MARKET CREATED SUCCESSFULLY ==========");
@@ -634,8 +724,16 @@ async function main() {
   console.log(`  TX4 InitMatcherCtx: ${sig4}`);
   if (sig5) console.log(`  TX5 TopUpInsurance: ${sig5}`);
   if (sig6) console.log(`  TX6 TopUpKeeperFund: ${sig6}`);
+  if (sig7) console.log(`  TX7 SetOracleAuthority: ${sig7}`);
   console.log();
-  console.log("Save these addresses — required for keeper and oracle config:");
+  console.log(`Config saved to: ${outFile}`);
+  console.log();
+  console.log("NEXT STEPS:");
+  console.log("  1. Insert market row into Supabase (see SQL above in script)");
+  console.log("  2. Restart keeper + indexer to discover the new market");
+  console.log("  3. Wait for first crank (~30s) before attempting trades");
+  console.log();
+  console.log("Addresses:");
   console.log(
     JSON.stringify(
       {
