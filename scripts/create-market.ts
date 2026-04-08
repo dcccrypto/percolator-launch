@@ -68,7 +68,7 @@ const PROGRAM_ID_MAINNET = new PublicKey(
   "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
 );
 const PROGRAM_ID_DEVNET = new PublicKey(
-  "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
+  "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
 );
 const MATCHER_PROG_ID = new PublicKey(
   "DHP6DtwXP1yJsz8YzfoeigRFPB979gzmumkmCxDLSkUX",
@@ -85,10 +85,10 @@ const USDC_DEVNET = new PublicKey(
 // Slab constants
 // ============================================================================
 
-// maxAccounts=1024 → slab size for medium tier
-const SLAB_SIZE_MEDIUM = 331_544;
-// maxAccounts=256 → slab size for small tier
-const SLAB_SIZE_SMALL  = 83_352;
+// V12_1 slab sizes: ENGINE_OFF=648, BITMAP_OFF=1016, ACCOUNT_SIZE=320
+// Computed via SDK's computeSlabSize (verified against compile-time assertions)
+const SLAB_SIZE_MEDIUM = 330_896; // maxAccounts=1024 (V12_1)
+const SLAB_SIZE_SMALL  = 83_504;  // maxAccounts=256  (V12_1)
 
 // Matcher context account size (fixed, per matcher program)
 const MATCHER_CTX_SIZE = 320;
