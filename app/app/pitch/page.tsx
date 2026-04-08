@@ -18,7 +18,8 @@ function Slide01Cover({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner pitch-center">
-        <h1 className="pitch-hero-title">Percolator</h1>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/images/logo.png" alt="Percolator" className="pitch-logo" />
         <p className="pitch-hero-sub">
           Perpetual futures for every token on Solana.
         </p>
@@ -104,7 +105,7 @@ function Slide04Solution({ isCurrent }: SlideProps) {
             <div>
               <div className="pitch-solution-name">Mathematically fair liquidation</div>
               <p className="pitch-solution-desc">
-                Our H + A/K engine replaces ADL with proportional haircuts. Everyone gets the same deal. O(1) per account — no queue, no first-mover advantage. Toly is independently building on the same math.
+                Built on Anatoly Yakovenko&apos;s H + A/K risk engine. Proportional haircuts replace ADL — everyone gets the same deal. O(1) per account, no queue, no first-mover advantage.
               </p>
             </div>
           </div>
@@ -161,11 +162,7 @@ function Slide05Proof({ isCurrent }: SlideProps) {
             </div>
             <div className="pitch-milestone">
               <div className="pitch-milestone-dot purple" />
-              <span>Toly independently validating H + A/K design</span>
-            </div>
-            <div className="pitch-milestone">
-              <div className="pitch-milestone-dot purple" />
-              <span>Percolator Inc. — Delaware C-Corp incorporated</span>
+              <span>Built on Toly&apos;s risk engine — production-grade implementation of his research</span>
             </div>
           </div>
         </div>
@@ -209,21 +206,21 @@ function Slide07WhyUs({ isCurrent }: SlideProps) {
         <div className="pitch-why-layout">
           <div className="pitch-why-block">
             <p className="pitch-body-text">
-              Percolator started because we believe leveraged markets shouldn&apos;t
-              require permission. That conviction hasn&apos;t changed. We&apos;ve been shipping
-              every single day — devnet live, 516 proofs verified, 168 markets created,
-              all organic. No paid marketing. No incentive programs.
+              Toly designed the risk engine. We&apos;re building the product. Percolator
+              is the production-grade implementation of Anatoly Yakovenko&apos;s permissionless
+              perp protocol — extended with an on-chain oracle, formal verification,
+              and a full trading interface.
             </p>
             <p className="pitch-body-text" style={{ marginTop: '1.25rem' }}>
-              This is what we want to build for the next decade. Permissionless infrastructure
-              that makes DeFi actually permissionless. Not another fork. Not another me-too
-              exchange. Something new.
+              We&apos;ve been shipping every single day — 516 proofs verified, 168 markets
+              created on devnet, all organic. No paid marketing. No incentive programs.
+              This is what we want to build for the next decade.
             </p>
           </div>
           <div className="pitch-why-signals">
             <div className="pitch-signal">
-              <div className="pitch-signal-label">Incorporated</div>
-              <div className="pitch-signal-value">Percolator Inc. — Delaware C-Corp</div>
+              <div className="pitch-signal-label">Foundation</div>
+              <div className="pitch-signal-value">Built on Toly&apos;s protocol — the Solana co-founder designed the core risk engine</div>
             </div>
             <div className="pitch-signal">
               <div className="pitch-signal-label">Community</div>
@@ -387,6 +384,14 @@ export default function PitchPage() {
             linear-gradient(90deg, rgba(153,69,255,0.04) 1px, transparent 1px);
           background-size: 64px 64px;
           pointer-events: none;
+        }
+
+        /* ── Logo ── */
+        .pitch-logo {
+          max-width: 500px;
+          width: 80%;
+          height: auto;
+          margin-bottom: 2rem;
         }
 
         /* ── Typography ── */
