@@ -138,7 +138,7 @@ function Slide05Proof({ isCurrent }: SlideProps) {
                 <div className="pitch-traction-label">Markets created on devnet</div>
               </div>
               <div className="pitch-traction-card">
-                <div className="pitch-traction-num mono">2,700+</div>
+                <div className="pitch-traction-num mono">3,000+</div>
                 <div className="pitch-traction-label">Organic X followers</div>
               </div>
               <div className="pitch-traction-card">
@@ -224,7 +224,7 @@ function Slide07WhyUs({ isCurrent }: SlideProps) {
             </div>
             <div className="pitch-signal">
               <div className="pitch-signal-label">Community</div>
-              <div className="pitch-signal-value">2,700+ organic followers, active Telegram with early testers</div>
+              <div className="pitch-signal-value">3,000+ organic followers, active Telegram with early testers</div>
             </div>
             <div className="pitch-signal">
               <div className="pitch-signal-label">Open Source</div>
