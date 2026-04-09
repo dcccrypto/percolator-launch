@@ -408,7 +408,11 @@ const V12_1_ENGINE_OFF = 648;      // align_up(104 + 544, 8) = 648 (same as V_SE
 const V12_1_ACCOUNT_SIZE = 320;    // aarch64 size (320). SBF uses 280 due to u128 align diff.
 const V12_1_ACCOUNT_SIZE_SBF = 280; // Empirically verified from mainnet SLAB_LEN
 const V12_1_ENGINE_BITMAP_OFF = 1016; // RiskParams grew 16 bytes + lifetime_force_realize_closes added
-const V12_1_ENGINE_PARAMS_OFF = 96;   // vault(16) + InsuranceFund(80) = 96
+// V12_1 InsuranceFund was simplified to just { balance: U128 } = 16 bytes (was 80 in pre-rebase).
+// SBF: vault(16) + InsuranceFund(16) = 32. Host may differ due to alignment.
+const V12_1_ENGINE_PARAMS_OFF_SBF = 32;
+const V12_1_ENGINE_PARAMS_OFF_HOST = 96; // legacy assumption — keep for host compatibility
+const V12_1_ENGINE_PARAMS_OFF = 96;   // DEFAULT — overridden to 32 for SBF in buildLayoutV12_1
 const V12_1_PARAMS_SIZE = 352;        // 336 + 16 (new fields)
 // Engine field offsets (relative to engineOff):
 const V12_1_ENGINE_CURRENT_SLOT_OFF = 448;
@@ -1239,36 +1243,38 @@ function buildLayoutV12_1(maxAccounts: number, dataLen?: number): SlabLayout {
     accountsOff: engineOff + accountsOffRel,
 
     engineInsuranceOff: 16,
-    engineParamsOff: V12_1_ENGINE_PARAMS_OFF,
+    engineParamsOff: isSbf ? V12_1_ENGINE_PARAMS_OFF_SBF : V12_1_ENGINE_PARAMS_OFF_HOST,
     paramsSize: V12_1_PARAMS_SIZE,
-    engineCurrentSlotOff: V12_1_ENGINE_CURRENT_SLOT_OFF,
-    engineFundingIndexOff: V12_1_ENGINE_FUNDING_INDEX_OFF,
-    engineLastFundingSlotOff: V12_1_ENGINE_LAST_FUNDING_SLOT_OFF,
-    engineFundingRateBpsOff: V12_1_ENGINE_FUNDING_RATE_BPS_OFF,
-    engineMarkPriceOff: V12_1_ENGINE_MARK_PRICE_OFF,
-    engineLastCrankSlotOff: V12_1_ENGINE_LAST_CRANK_SLOT_OFF,
-    engineMaxCrankStalenessOff: V12_1_ENGINE_MAX_CRANK_STALENESS_OFF,
-    engineTotalOiOff: V12_1_ENGINE_TOTAL_OI_OFF,
-    engineLongOiOff: V12_1_ENGINE_LONG_OI_OFF,
-    engineShortOiOff: V12_1_ENGINE_SHORT_OI_OFF,
-    engineCTotOff: V12_1_ENGINE_C_TOT_OFF,
-    enginePnlPosTotOff: V12_1_ENGINE_PNL_POS_TOT_OFF,
-    engineLiqCursorOff: V12_1_ENGINE_LIQ_CURSOR_OFF,
-    engineGcCursorOff: V12_1_ENGINE_GC_CURSOR_OFF,
-    engineLastSweepStartOff: V12_1_ENGINE_LAST_SWEEP_START_OFF,
-    engineLastSweepCompleteOff: V12_1_ENGINE_LAST_SWEEP_COMPLETE_OFF,
-    engineCrankCursorOff: V12_1_ENGINE_CRANK_CURSOR_OFF,
-    engineSweepStartIdxOff: V12_1_ENGINE_SWEEP_START_IDX_OFF,
-    engineLifetimeLiquidationsOff: V12_1_ENGINE_LIFETIME_LIQUIDATIONS_OFF,
-    engineLifetimeForceClosesOff: V12_1_ENGINE_LIFETIME_FORCE_CLOSES_OFF,
-    engineNetLpPosOff: V12_1_ENGINE_NET_LP_POS_OFF,
-    engineLpSumAbsOff: V12_1_ENGINE_LP_SUM_ABS_OFF,
-    engineLpMaxAbsOff: V12_1_ENGINE_LP_MAX_ABS_OFF,
-    engineLpMaxAbsSweepOff: V12_1_ENGINE_LP_MAX_ABS_SWEEP_OFF,
-    engineEmergencyOiModeOff: V12_1_ENGINE_EMERGENCY_OI_MODE_OFF,
-    engineEmergencyStartSlotOff: V12_1_ENGINE_EMERGENCY_START_SLOT_OFF,
-    engineLastBreakerSlotOff: V12_1_ENGINE_LAST_BREAKER_SLOT_OFF,
-    engineBitmapOff: V12_1_ENGINE_BITMAP_OFF,
+    // SBF shift: InsuranceFund=16B (was 80) + RiskParams=184B (was 352) = 232 bytes smaller.
+    // All engine fields after RiskParams are shifted by -232 on SBF.
+    engineCurrentSlotOff: isSbf ? V12_1_ENGINE_CURRENT_SLOT_OFF - 232 : V12_1_ENGINE_CURRENT_SLOT_OFF,
+    engineFundingIndexOff: isSbf ? V12_1_ENGINE_FUNDING_INDEX_OFF - 232 : V12_1_ENGINE_FUNDING_INDEX_OFF,
+    engineLastFundingSlotOff: isSbf ? V12_1_ENGINE_LAST_FUNDING_SLOT_OFF - 232 : V12_1_ENGINE_LAST_FUNDING_SLOT_OFF,
+    engineFundingRateBpsOff: isSbf ? V12_1_ENGINE_FUNDING_RATE_BPS_OFF - 232 : V12_1_ENGINE_FUNDING_RATE_BPS_OFF,
+    engineMarkPriceOff: isSbf ? V12_1_ENGINE_MARK_PRICE_OFF - 232 : V12_1_ENGINE_MARK_PRICE_OFF,
+    engineLastCrankSlotOff: isSbf ? V12_1_ENGINE_LAST_CRANK_SLOT_OFF - 232 : V12_1_ENGINE_LAST_CRANK_SLOT_OFF,
+    engineMaxCrankStalenessOff: isSbf ? V12_1_ENGINE_MAX_CRANK_STALENESS_OFF - 232 : V12_1_ENGINE_MAX_CRANK_STALENESS_OFF,
+    engineTotalOiOff: isSbf ? V12_1_ENGINE_TOTAL_OI_OFF - 232 : V12_1_ENGINE_TOTAL_OI_OFF,
+    engineLongOiOff: isSbf ? V12_1_ENGINE_LONG_OI_OFF - 232 : V12_1_ENGINE_LONG_OI_OFF,
+    engineShortOiOff: isSbf ? V12_1_ENGINE_SHORT_OI_OFF - 232 : V12_1_ENGINE_SHORT_OI_OFF,
+    engineCTotOff: isSbf ? V12_1_ENGINE_C_TOT_OFF - 232 : V12_1_ENGINE_C_TOT_OFF,
+    enginePnlPosTotOff: isSbf ? V12_1_ENGINE_PNL_POS_TOT_OFF - 232 : V12_1_ENGINE_PNL_POS_TOT_OFF,
+    engineLiqCursorOff: isSbf ? V12_1_ENGINE_LIQ_CURSOR_OFF - 232 : V12_1_ENGINE_LIQ_CURSOR_OFF,
+    engineGcCursorOff: isSbf ? V12_1_ENGINE_GC_CURSOR_OFF - 232 : V12_1_ENGINE_GC_CURSOR_OFF,
+    engineLastSweepStartOff: isSbf ? V12_1_ENGINE_LAST_SWEEP_START_OFF - 232 : V12_1_ENGINE_LAST_SWEEP_START_OFF,
+    engineLastSweepCompleteOff: isSbf ? V12_1_ENGINE_LAST_SWEEP_COMPLETE_OFF - 232 : V12_1_ENGINE_LAST_SWEEP_COMPLETE_OFF,
+    engineCrankCursorOff: isSbf ? V12_1_ENGINE_CRANK_CURSOR_OFF - 232 : V12_1_ENGINE_CRANK_CURSOR_OFF,
+    engineSweepStartIdxOff: isSbf ? V12_1_ENGINE_SWEEP_START_IDX_OFF - 232 : V12_1_ENGINE_SWEEP_START_IDX_OFF,
+    engineLifetimeLiquidationsOff: isSbf ? V12_1_ENGINE_LIFETIME_LIQUIDATIONS_OFF - 232 : V12_1_ENGINE_LIFETIME_LIQUIDATIONS_OFF,
+    engineLifetimeForceClosesOff: isSbf ? V12_1_ENGINE_LIFETIME_FORCE_CLOSES_OFF - 232 : V12_1_ENGINE_LIFETIME_FORCE_CLOSES_OFF,
+    engineNetLpPosOff: isSbf ? V12_1_ENGINE_NET_LP_POS_OFF - 232 : V12_1_ENGINE_NET_LP_POS_OFF,
+    engineLpSumAbsOff: isSbf ? V12_1_ENGINE_LP_SUM_ABS_OFF - 232 : V12_1_ENGINE_LP_SUM_ABS_OFF,
+    engineLpMaxAbsOff: isSbf ? V12_1_ENGINE_LP_MAX_ABS_OFF - 232 : V12_1_ENGINE_LP_MAX_ABS_OFF,
+    engineLpMaxAbsSweepOff: isSbf ? V12_1_ENGINE_LP_MAX_ABS_SWEEP_OFF - 232 : V12_1_ENGINE_LP_MAX_ABS_SWEEP_OFF,
+    engineEmergencyOiModeOff: isSbf ? V12_1_ENGINE_EMERGENCY_OI_MODE_OFF - 232 : V12_1_ENGINE_EMERGENCY_OI_MODE_OFF,
+    engineEmergencyStartSlotOff: isSbf ? V12_1_ENGINE_EMERGENCY_START_SLOT_OFF - 232 : V12_1_ENGINE_EMERGENCY_START_SLOT_OFF,
+    engineLastBreakerSlotOff: isSbf ? V12_1_ENGINE_LAST_BREAKER_SLOT_OFF - 232 : V12_1_ENGINE_LAST_BREAKER_SLOT_OFF,
+    engineBitmapOff: bitmapOff,
     postBitmap: 18,
     acctOwnerOff: V12_1_ACCT_OWNER_OFF,
 
