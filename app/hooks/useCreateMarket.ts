@@ -409,6 +409,9 @@ export function useCreateMarket() {
                 liquidationFeeCap: "100000000000",
                 liquidationBufferBps: "50",
                 minLiquidationAbs: "1000000",
+                minInitialDeposit: "1000000",
+                minNonzeroMmReq: "0",
+                minNonzeroImReq: "0",
               });
 
               const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
