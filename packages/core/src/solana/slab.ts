@@ -1206,12 +1206,16 @@ function buildLayoutVSetDexPool(maxAccounts: number): SlabLayout {
 }
 
 function buildLayoutV12_1(maxAccounts: number, dataLen?: number): SlabLayout {
-  const engineOff = V12_1_ENGINE_OFF;
-  const bitmapOff = V12_1_ENGINE_BITMAP_OFF;
-  // Detect SBF vs host alignment from actual slab size.
-  // SBF Account=280 (u128 align=8), host Account=320 (u128 align=16).
-  const hostSize = computeSlabSize(engineOff, bitmapOff, V12_1_ACCOUNT_SIZE, maxAccounts, 18);
+  // SBF vs host detection: SBF has different struct alignment (u128 align=8 vs 16).
+  // This affects ENGINE_OFF, CONFIG_LEN, ACCOUNT_SIZE, and BITMAP_OFF.
+  // Empirically verified from mainnet slab BVjPc6rd (290120 bytes):
+  //   SBF: headerLen=72, configLen=544, engineOff=616, accountSize=280
+  //   Host: headerLen=72, configLen=576, engineOff=648, accountSize=320
+  const hostSize = computeSlabSize(V12_1_ENGINE_OFF, V12_1_ENGINE_BITMAP_OFF, V12_1_ACCOUNT_SIZE, maxAccounts, 18);
   const isSbf = dataLen !== undefined && dataLen !== hostSize;
+  const engineOff = isSbf ? 616 : V12_1_ENGINE_OFF;
+  // SBF bitmap: engine+590 (abs 1206). Host: engine+368 (abs 1016).
+  const bitmapOff = isSbf ? 590 : (V12_1_ENGINE_BITMAP_OFF - V12_1_ENGINE_OFF);
   const accountSize = isSbf ? V12_1_ACCOUNT_SIZE_SBF : V12_1_ACCOUNT_SIZE;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
@@ -1222,9 +1226,11 @@ function buildLayoutV12_1(maxAccounts: number, dataLen?: number): SlabLayout {
 
   return {
     version: 1,
-    headerLen: V1_HEADER_LEN,
-    configOffset: V1_HEADER_LEN,
-    configLen: V_SETDEXPOOL_CONFIG_LEN,   // 544 (same as V_SETDEXPOOL)
+    // V12_1 upstream rebase uses 72-byte header (SlabHeader only, no V1 extension).
+    // Empirically verified: USDC mint found at offset 72 on mainnet slab BVjPc6rd.
+    headerLen: V0_HEADER_LEN,     // 72 (not 104 — V12_1 removed the 32-byte header extension)
+    configOffset: V0_HEADER_LEN,  // 72
+    configLen: isSbf ? 544 : 576,  // SBF=544, host=576 (alignment diff)
     reservedOff: V1_RESERVED_OFF,
     engineOff,
     accountSize,
@@ -1431,10 +1437,10 @@ export interface MarketConfig {
   fundingInvScaleNotionalE6: bigint;
   fundingMaxPremiumBps: bigint;
   fundingMaxBpsPerSlot: bigint;
-  fundingPremiumWeightBps: bigint;
-  fundingSettlementIntervalSlots: bigint;
-  fundingPremiumDampeningE6: bigint;
-  fundingPremiumMaxBpsPerSlot: bigint;
+  /** @deprecated Removed in V12_1 — always 0 */ fundingPremiumWeightBps: bigint;
+  /** @deprecated Removed in V12_1 — always 0 */ fundingSettlementIntervalSlots: bigint;
+  /** @deprecated Removed in V12_1 — always 0 */ fundingPremiumDampeningE6: bigint;
+  /** @deprecated Removed in V12_1 — always 0 */ fundingPremiumMaxBpsPerSlot: bigint;
   threshFloor: bigint;
   threshRiskBps: bigint;
   threshUpdateIntervalSlots: bigint;
@@ -1715,18 +1721,10 @@ export function parseConfig(data: Uint8Array, layoutHint?: SlabLayout | null): M
   const fundingMaxBpsPerSlot = readI64LE(data, off);
   off += 8;
 
-  // Extended funding fields
-  const fundingPremiumWeightBps = readU64LE(data, off);
-  off += 8;
-
-  const fundingSettlementIntervalSlots = readU64LE(data, off);
-  off += 8;
-
-  const fundingPremiumDampeningE6 = readU64LE(data, off);
-  off += 8;
-
-  const fundingPremiumMaxBpsPerSlot = readU64LE(data, off);
-  off += 8;
+  // NOTE: Extended funding fields (fundingPremiumWeightBps, fundingSettlementIntervalSlots,
+  // fundingPremiumDampeningE6, fundingPremiumMaxBpsPerSlot) were removed in V12_1 upstream
+  // rebase. They do NOT exist in the on-chain MarketConfig struct. Reading them here shifted
+  // all subsequent fields by 32 bytes, causing oracle_authority to read garbage.
 
   // Threshold parameters
   const threshFloor = readU128LE(data, off);
@@ -1854,10 +1852,10 @@ export function parseConfig(data: Uint8Array, layoutHint?: SlabLayout | null): M
     fundingInvScaleNotionalE6,
     fundingMaxPremiumBps,
     fundingMaxBpsPerSlot,
-    fundingPremiumWeightBps,
-    fundingSettlementIntervalSlots,
-    fundingPremiumDampeningE6,
-    fundingPremiumMaxBpsPerSlot,
+    fundingPremiumWeightBps: 0n,
+    fundingSettlementIntervalSlots: 0n,
+    fundingPremiumDampeningE6: 0n,
+    fundingPremiumMaxBpsPerSlot: 0n,
     threshFloor,
     threshRiskBps,
     threshUpdateIntervalSlots,

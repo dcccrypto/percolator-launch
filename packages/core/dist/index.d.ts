@@ -1644,10 +1644,10 @@ interface MarketConfig {
     fundingInvScaleNotionalE6: bigint;
     fundingMaxPremiumBps: bigint;
     fundingMaxBpsPerSlot: bigint;
-    fundingPremiumWeightBps: bigint;
-    fundingSettlementIntervalSlots: bigint;
-    fundingPremiumDampeningE6: bigint;
-    fundingPremiumMaxBpsPerSlot: bigint;
+    /** @deprecated Removed in V12_1 — always 0 */ fundingPremiumWeightBps: bigint;
+    /** @deprecated Removed in V12_1 — always 0 */ fundingSettlementIntervalSlots: bigint;
+    /** @deprecated Removed in V12_1 — always 0 */ fundingPremiumDampeningE6: bigint;
+    /** @deprecated Removed in V12_1 — always 0 */ fundingPremiumMaxBpsPerSlot: bigint;
     threshFloor: bigint;
     threshRiskBps: bigint;
     threshUpdateIntervalSlots: bigint;

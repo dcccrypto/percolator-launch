@@ -2226,10 +2226,10 @@ function buildLayoutVSetDexPool(maxAccounts) {
   };
 }
 function buildLayoutV12_1(maxAccounts, dataLen) {
-  const engineOff = V12_1_ENGINE_OFF;
-  const bitmapOff = V12_1_ENGINE_BITMAP_OFF;
-  const hostSize = computeSlabSize(engineOff, bitmapOff, V12_1_ACCOUNT_SIZE, maxAccounts, 18);
+  const hostSize = computeSlabSize(V12_1_ENGINE_OFF, V12_1_ENGINE_BITMAP_OFF, V12_1_ACCOUNT_SIZE, maxAccounts, 18);
   const isSbf = dataLen !== void 0 && dataLen !== hostSize;
+  const engineOff = isSbf ? 616 : V12_1_ENGINE_OFF;
+  const bitmapOff = isSbf ? 590 : V12_1_ENGINE_BITMAP_OFF - V12_1_ENGINE_OFF;
   const accountSize = isSbf ? V12_1_ACCOUNT_SIZE_SBF : V12_1_ACCOUNT_SIZE;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
@@ -2239,10 +2239,14 @@ function buildLayoutV12_1(maxAccounts, dataLen) {
   const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
   return {
     version: 1,
-    headerLen: V1_HEADER_LEN,
-    configOffset: V1_HEADER_LEN,
-    configLen: V_SETDEXPOOL_CONFIG_LEN,
-    // 544 (same as V_SETDEXPOOL)
+    // V12_1 upstream rebase uses 72-byte header (SlabHeader only, no V1 extension).
+    // Empirically verified: USDC mint found at offset 72 on mainnet slab BVjPc6rd.
+    headerLen: V0_HEADER_LEN,
+    // 72 (not 104 — V12_1 removed the 32-byte header extension)
+    configOffset: V0_HEADER_LEN,
+    // 72
+    configLen: isSbf ? 544 : 576,
+    // SBF=544, host=576 (alignment diff)
     reservedOff: V1_RESERVED_OFF,
     engineOff,
     accountSize,
@@ -2456,14 +2460,6 @@ function parseConfig(data, layoutHint) {
   off += 8;
   const fundingMaxBpsPerSlot = readI64LE(data, off);
   off += 8;
-  const fundingPremiumWeightBps = readU64LE(data, off);
-  off += 8;
-  const fundingSettlementIntervalSlots = readU64LE(data, off);
-  off += 8;
-  const fundingPremiumDampeningE6 = readU64LE(data, off);
-  off += 8;
-  const fundingPremiumMaxBpsPerSlot = readU64LE(data, off);
-  off += 8;
   const threshFloor = readU128LE(data, off);
   off += 16;
   const threshRiskBps = readU64LE(data, off);
@@ -2550,10 +2546,10 @@ function parseConfig(data, layoutHint) {
     fundingInvScaleNotionalE6,
     fundingMaxPremiumBps,
     fundingMaxBpsPerSlot,
-    fundingPremiumWeightBps,
-    fundingSettlementIntervalSlots,
-    fundingPremiumDampeningE6,
-    fundingPremiumMaxBpsPerSlot,
+    fundingPremiumWeightBps: 0n,
+    fundingSettlementIntervalSlots: 0n,
+    fundingPremiumDampeningE6: 0n,
+    fundingPremiumMaxBpsPerSlot: 0n,
     threshFloor,
     threshRiskBps,
     threshUpdateIntervalSlots,
