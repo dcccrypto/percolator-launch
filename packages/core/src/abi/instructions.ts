@@ -1762,3 +1762,23 @@ export function encodeCloseOrphanSlab(): Uint8Array {
 export function encodeSetDexPool(args: { pool: PublicKey | string }): Uint8Array {
   return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
 }
+
+// Insurance LP — aliases for LP Vault instructions (tags 37/38/39).
+// The insurance LP feature uses the same on-chain instructions as the LP vault
+// but with insurance-specific account layouts (ACCOUNTS_*_INSURANCE_LP).
+
+/** CreateInsuranceMint: creates the insurance LP mint PDA (tag 37, same as CreateLpVault) */
+export function encodeCreateInsuranceMint(): Uint8Array {
+  // CreateLpVault with default params (fee_share_bps=0, no util curve)
+  return encodeCreateLpVault({ feeShareBps: 0n });
+}
+
+/** DepositInsuranceLP: deposit collateral, receive LP tokens (tag 38, same as LpVaultDeposit) */
+export function encodeDepositInsuranceLP(args: { amount: bigint | string }): Uint8Array {
+  return encodeLpVaultDeposit({ amount: args.amount });
+}
+
+/** WithdrawInsuranceLP: burn LP tokens, withdraw collateral (tag 39, same as LpVaultWithdraw) */
+export function encodeWithdrawInsuranceLP(args: { lpAmount: bigint | string }): Uint8Array {
+  return encodeLpVaultWithdraw({ lpAmount: args.lpAmount });
+}
