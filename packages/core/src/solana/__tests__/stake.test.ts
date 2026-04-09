@@ -242,7 +242,7 @@ describe('Instruction encoders', () => {
 
 describe('Account builders', () => {
   const admin = Keypair.generate().publicKey;
-  const percolatorProgram = new PublicKey('GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24');
+  const percolatorProgram = new PublicKey('ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv');
 
   it('initPoolAccounts returns 11 accounts in correct order', () => {
     const [pool] = deriveStakePool(slab);
