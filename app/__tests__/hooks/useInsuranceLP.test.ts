@@ -471,7 +471,7 @@ describe("useInsuranceLP", () => {
   });
 
   describe("Create Mint", () => {
-    it("should create insurance mint successfully", async () => {
+    it("should throw — moved to percolator-stake", async () => {
       mockConnection.getAccountInfo.mockResolvedValue(null);
 
       const { result } = renderHook(() => useInsuranceLP());
@@ -481,160 +481,28 @@ describe("useInsuranceLP", () => {
       });
 
       await act(async () => {
-        await result.current.createMint();
+        await expect(result.current.createMint()).rejects.toThrow("percolator-stake");
       });
-
-      expect(sendTx).toHaveBeenCalledTimes(1);
-      expect(result.current.loading).toBe(false);
-      expect(result.current.error).toBeNull();
-    });
-
-    it("should set error when wallet not connected", async () => {
-      vi.mocked(useWalletCompat).mockReturnValue({
-        publicKey: null,
-        signTransaction: null,
-        connected: false,
-      });
-      mockConnection.getAccountInfo.mockResolvedValue(null);
-
-      const { result } = renderHook(() => useInsuranceLP());
-
-      // Wait for initial state to settle
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      // createMint should reject because wallet is not connected
-      let threwExpectedError = false;
-      await act(async () => {
-        try {
-          await result.current.createMint();
-        } catch (err: any) {
-          threwExpectedError = err.message.includes("Wallet not connected");
-        }
-      });
-
-      expect(threwExpectedError).toBe(true);
-      // Note: error state may be set via setError or may be null
-      // if the throw happens before the try block in the hook
-      // The important thing is the function throws
-    
     });
   });
 
   describe("Deposit", () => {
-    it("should deposit into insurance fund and mint LP tokens", async () => {
-      mockConnection.getAccountInfo
-        .mockResolvedValueOnce({
-          // Mint exists
-          data: Buffer.alloc(82),
-          executable: false,
-          lamports: 1000000,
-          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        })
-        .mockResolvedValueOnce({
-          // User LP ATA exists
-          data: Buffer.alloc(165),
-          executable: false,
-          lamports: 2000000,
-          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        });
-
-      vi.mocked(unpackMint).mockReturnValue({
-        supply: 1000000n,
-        decimals: 9,
-        isInitialized: true,
-      });
-
+    it("should throw — moved to percolator-stake", async () => {
       const { result } = renderHook(() => useInsuranceLP());
 
-      await waitFor(() => {
-        expect(result.current.state.mintExists).toBe(true);
-      });
-
       await act(async () => {
-        await result.current.deposit(500000n);
+        await expect(result.current.deposit(500000n)).rejects.toThrow("percolator-stake");
       });
-
-      expect(sendTx).toHaveBeenCalledTimes(1);
-      expect(result.current.loading).toBe(false);
-      expect(result.current.error).toBeNull();
-    });
-
-    it("should create LP ATA if it doesn't exist", async () => {
-      mockConnection.getAccountInfo
-        .mockResolvedValueOnce({
-          // Mint exists
-          data: Buffer.alloc(82),
-          executable: false,
-          lamports: 1000000,
-          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        })
-        .mockResolvedValueOnce(null); // User LP ATA doesn't exist
-
-      vi.mocked(unpackMint).mockReturnValue({
-        supply: 1000000n,
-        decimals: 9,
-        isInitialized: true,
-      });
-
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await waitFor(() => {
-        expect(result.current.state.mintExists).toBe(true);
-      });
-
-      await act(async () => {
-        await result.current.deposit(500000n);
-      });
-
-      // Should include ATA creation instruction
-      const txCall = vi.mocked(sendTx).mock.calls[0][0];
-      expect(txCall.instructions.length).toBeGreaterThanOrEqual(2); // Create ATA + deposit
     });
   });
 
   describe("Withdraw", () => {
-    it("should withdraw from insurance fund by burning LP tokens", async () => {
-      mockConnection.getAccountInfo
-        .mockResolvedValueOnce({
-          data: Buffer.alloc(82),
-          executable: false,
-          lamports: 1000000,
-          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        })
-        .mockResolvedValueOnce({
-          data: Buffer.alloc(165),
-          executable: false,
-          lamports: 2000000,
-          owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        });
-
-      vi.mocked(unpackMint).mockReturnValue({
-        supply: 1000000n,
-        decimals: 9,
-        isInitialized: true,
-      });
-
-      vi.mocked(unpackAccount).mockReturnValue({
-        amount: 500000n,
-        mint: mockLpMintPubkey,
-        owner: mockWalletPubkey,
-      });
-
+    it("should throw — moved to percolator-stake", async () => {
       const { result } = renderHook(() => useInsuranceLP());
 
-      await waitFor(() => {
-        expect(result.current.state.userLpBalance).toBe(500000n);
-      });
-
       await act(async () => {
-        await result.current.withdraw(250000n);
+        await expect(result.current.withdraw(250000n)).rejects.toThrow("percolator-stake");
       });
-
-      expect(sendTx).toHaveBeenCalledTimes(1);
-      expect(result.current.loading).toBe(false);
-      expect(result.current.error).toBeNull();
     });
   });
 
@@ -676,8 +544,7 @@ describe("useInsuranceLP", () => {
       });
     });
 
-    it("should set error state on transaction failure", async () => {
-      vi.mocked(sendTx).mockRejectedValue(new Error("Transaction failed"));
+    it("should throw on createMint — moved to percolator-stake", async () => {
       mockConnection.getAccountInfo.mockResolvedValue(null);
 
       const { result } = renderHook(() => useInsuranceLP());
@@ -686,47 +553,14 @@ describe("useInsuranceLP", () => {
         expect(result.current.state.mintExists).toBe(false);
       });
 
-      let threwError = false;
       await act(async () => {
-        try {
-          await result.current.createMint();
-        } catch {
-          threwError = true;
-        }
+        await expect(result.current.createMint()).rejects.toThrow("percolator-stake");
       });
-
-      expect(threwError).toBe(true);
-      expect(result.current.error).toContain("Transaction failed");
     });
   });
 
   describe("Loading State", () => {
-    it("should reset loading to false after a successful operation", async () => {
-      // Verify that loading returns to false after createMint completes
-      vi.mocked(sendTx).mockResolvedValue("mock-sig");
-      mockConnection.getAccountInfo.mockResolvedValue(null);
-
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await waitFor(() => {
-        expect(result.current.state.mintExists).toBe(false);
-      });
-
-      // Loading should be false before starting
-      expect(result.current.loading).toBe(false);
-
-      // Run createMint to completion
-      await act(async () => {
-        await result.current.createMint();
-      });
-
-      // After completion, loading should be false again
-      expect(result.current.loading).toBe(false);
-      expect(result.current.error).toBeNull();
-    });
-
-    it("should reset loading to false after a failed operation", async () => {
-      vi.mocked(sendTx).mockRejectedValue(new Error("TX failed"));
+    it("loading stays false — stubs throw immediately without async work", async () => {
       mockConnection.getAccountInfo.mockResolvedValue(null);
 
       const { result } = renderHook(() => useInsuranceLP());
@@ -737,19 +571,12 @@ describe("useInsuranceLP", () => {
 
       expect(result.current.loading).toBe(false);
 
-      // Run createMint which will fail
       await act(async () => {
-        try {
-          await result.current.createMint();
-        } catch {
-          // Expected
-        }
+        await expect(result.current.createMint()).rejects.toThrow("percolator-stake");
       });
 
-      // After failure, loading should be false
+      // Stubs throw synchronously — loading never transitions
       expect(result.current.loading).toBe(false);
-      // Error should be set
-      expect(result.current.error).toBeTruthy();
     });
   });
 });
