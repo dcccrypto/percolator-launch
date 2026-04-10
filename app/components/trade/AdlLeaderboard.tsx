@@ -17,7 +17,6 @@
  */
 
 import { FC, useEffect, useState, useCallback } from "react";
-import { getBackendUrl } from "@/lib/config";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
 // ─── types ────────────────────────────────────────────────────────────────
@@ -85,9 +84,8 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
 
   const fetchRankings = useCallback(async () => {
     try {
-      const base = getBackendUrl();
       const res = await fetch(
-        `${base}/api/adl/rankings?slab=${encodeURIComponent(slabAddress)}`
+        `/api/adl/rankings?slab=${encodeURIComponent(slabAddress)}`
       );
       if (!res.ok) {
         if (res.status === 404) {
