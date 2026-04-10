@@ -57,7 +57,9 @@ export const MarketStatsCard: FC = () => {
   const { showUsd } = useUsdToggle();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
-  const symbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
+  // BUG FIX: Use Supabase market symbol for display, fall back to collateral token symbol
+  const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
+  const symbol = marketInfo?.symbol ?? collateralSymbol;
   const [showFundingChart, setShowFundingChart] = useState(false);
 
   // ─── Mark / Index / Spread ────────────────────────────────────────────────

@@ -78,7 +78,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const oracleStale = oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp"));
   const openWalletModal = usePrivyLogin();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
-  const symbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
+  const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
   
   // BUG FIX: Fetch on-chain decimals from token account (like DepositWithdrawCard)
   // Don't rely solely on tokenMeta which may fail for cross-network tokens
@@ -129,6 +129,14 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "confirming">("idle");
   const [humanError, setHumanError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  // Snapshot modal props when opening to prevent live price updates from
+  // causing re-renders / flicker while the confirmation modal is open.
+  const [confirmSnapshot, setConfirmSnapshot] = useState<{
+    positionSize: bigint;
+    marginNative: bigint;
+    estimatedLiqPrice: bigint;
+    tradingFee: bigint;
+  } | null>(null);
   const [showCloseModal, setShowCloseModal] = useState(false);
 
   const longBtnRef = useRef<HTMLButtonElement>(null);
@@ -152,6 +160,9 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // data is unavailable (uninitialised slab / initialMarginBps == 0).
   // GH#1962: Fix — do NOT use max(on-chain, Supabase). Supabase must never loosen the cap.
   const { market: marketInfo } = useMarketInfo(slabAddress);
+  // BUG FIX: Use Supabase market symbol for the trading pair display (e.g. "SOL"),
+  // falling back to collateral symbol. Prevents "USDC/USD" when the market is actually SOL/USD.
+  const symbol = marketInfo?.symbol ?? collateralSymbol;
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const maintenanceMarginBps = params?.maintenanceMarginBps ?? 500n;
   const tradingFeeBps = params?.tradingFeeBps ?? 30n;
@@ -590,7 +601,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div className="mb-1.5 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Size<InfoIcon tooltip="Position size — enter in contracts (tokens) or USD. Both fields sync automatically." /></label>
           <span className="text-[10px] text-[var(--text-dim)] whitespace-nowrap min-w-0 shrink-0" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-            Bal: {userAccount ? formatPerc(capital, decimals) : (walletAtaBalance !== null ? formatPerc(walletAtaBalance, decimals) : "—")} {symbol}
+            Bal: {userAccount ? formatPerc(capital, decimals) : (walletAtaBalance !== null ? formatPerc(walletAtaBalance, decimals) : "—")} {collateralSymbol}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
@@ -635,7 +646,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
         {exceedsMargin && (
           <p className="mt-1 text-[10px] text-[var(--short)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-            Exceeds balance ({formatPerc(effectiveBalance, decimals)} {symbol})
+            Exceeds balance ({formatPerc(effectiveBalance, decimals)} {collateralSymbol})
           </p>
         )}
       </div>
@@ -740,6 +751,15 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <button
           onClick={() => {
             if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || tradePhase !== "idle" || loading || (!priceUsd && !mockMode) || (oracleStale && !mockMode)) return;
+            // Snapshot all price-dependent values so the modal doesn't flicker
+            // when WebSocket price updates arrive while it's open.
+            const oracleE6 = priceUsd ? BigInt(Math.round(priceUsd * 1e6)) : 0n;
+            setConfirmSnapshot({
+              positionSize,
+              marginNative,
+              estimatedLiqPrice: computePreTradeLiqPrice(oracleE6, marginNative, positionSize, maintenanceMarginBps, tradingFeeBps, direction),
+              tradingFee: livePriceE6 && livePriceE6 > 0n ? ((positionSize * livePriceE6 / 1_000_000n) * tradingFeeBps) / 10000n : 0n,
+            });
             setShowConfirmModal(true);
           }}
           disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || lpUnderfunded || vaultEmpty || (!priceUsd && !mockMode) || (oracleStale && !mockMode)}
@@ -787,7 +807,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
       {/* Coin-margined info — compact tooltip hint */}
       <div className="mt-3 flex items-center gap-1.5">
-        <InfoIcon tooltip={`This market is margined in ${symbol}, not USD. Position value and liq risk are affected by the collateral token's price. Effective USD leverage ≈ ${leverage > 0 ? `${leverage * 2}x` : "—"} (nominal ${leverage}x × 2 for coin exposure).`} />
+        <InfoIcon tooltip={`This market is margined in ${collateralSymbol}, not USD. Position value and liq risk are affected by the collateral token's price. Effective USD leverage ≈ ${leverage > 0 ? `${leverage * 2}x` : "—"} (nominal ${leverage}x × 2 for coin exposure).`} />
         <span className="text-[9px] text-[var(--text-dim)] uppercase tracking-[0.1em]">Coin-margined market</span>
       </div>
 
@@ -818,29 +838,24 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         />
       )}
 
-      {/* Trade confirmation modal */}
-      {showConfirmModal && marginNative > 0n && positionSize > 0n && (
+      {/* Trade confirmation modal — uses snapshotted values to prevent
+          flicker from live price updates while the modal is open. */}
+      {showConfirmModal && confirmSnapshot && (
         <TradeConfirmationModal
           direction={direction}
-          positionSize={positionSize}
-          margin={marginNative}
+          positionSize={confirmSnapshot.positionSize}
+          margin={confirmSnapshot.marginNative}
           leverage={leverage}
-          estimatedLiqPrice={computePreTradeLiqPrice(
-            priceUsd ? BigInt(Math.round(priceUsd * 1e6)) : 0n,
-            marginNative,
-            positionSize,
-            maintenanceMarginBps,
-            tradingFeeBps,
-            direction,
-          )}
-          tradingFee={livePriceE6 && livePriceE6 > 0n ? ((positionSize * livePriceE6 / 1_000_000n) * tradingFeeBps) / 10000n : 0n}
+          estimatedLiqPrice={confirmSnapshot.estimatedLiqPrice}
+          tradingFee={confirmSnapshot.tradingFee}
           symbol={symbol}
           decimals={decimals}
           onConfirm={() => {
             setShowConfirmModal(false);
+            setConfirmSnapshot(null);
             handleTrade();
           }}
-          onCancel={() => setShowConfirmModal(false)}
+          onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}
         />
       )}
     </div>

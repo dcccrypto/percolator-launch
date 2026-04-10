@@ -188,15 +188,18 @@ function TradePageInner({ slab }: { slab: string }) {
     return () => { cancelled = true; };
   }, [slab]);
 
-  // Resolve symbol: on-chain (useTokenMeta) → Supabase → truncated address
+  // Resolve symbol: Supabase market symbol (trading pair) → on-chain (collateral) → truncated address
+  // BUG FIX: Supabase symbol represents the TRADING PAIR (e.g. "SOL"), while on-chain
+  // tokenMeta symbol is the COLLATERAL token (e.g. "USDC"). Previously on-chain was
+  // preferred, causing a USDC-collateralized SOL market to show as "USDC/USD".
   const mintAddress = config?.collateralMint?.toBase58() ?? "";
   const onChainSymbol = tokenMeta?.symbol ?? null;
   const supabaseSymbol = supabaseMarket?.symbol ?? null;
   const symbol = (() => {
-    // 1. On-chain symbol (if it's a real name, not a truncated address)
-    if (!isPlaceholderSymbol(onChainSymbol, mintAddress)) return onChainSymbol!;
-    // 2. Supabase symbol (if it's a real name, not a placeholder)
+    // 1. Supabase symbol (market trading pair — authoritative for display)
     if (!isPlaceholderSymbol(supabaseSymbol, mintAddress)) return supabaseSymbol!;
+    // 2. On-chain symbol (collateral token — fallback when no DB entry)
+    if (!isPlaceholderSymbol(onChainSymbol, mintAddress)) return onChainSymbol!;
     // 3. Fallback: truncated mint address
     if (config?.collateralMint) {
       const b58 = config.collateralMint.toBase58();
@@ -511,7 +514,10 @@ function TradePageInner({ slab }: { slab: string }) {
           {isLargeScreen && (
             <ErrorBoundary label="TradingChart">
               {/* overflow-hidden prevents lightweight-charts toolbar from escaping chart bounds (GH#1647) */}
-              <div className="flex-1 min-h-[500px] overflow-hidden">
+              {/* BUG FIX: removed flex-1 — it stretched the chart to fill the column,
+                  creating a visible gap between the chart and the positions table below.
+                  h-[500px] gives a fixed chart height without excess whitespace. */}
+              <div className="h-[500px] overflow-hidden">
                 <TradingChart slabAddress={slab} mintAddress={mintAddress || undefined} />
               </div>
             </ErrorBoundary>
