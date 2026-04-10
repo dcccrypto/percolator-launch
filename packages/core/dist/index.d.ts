@@ -1219,7 +1219,7 @@ declare const ACCOUNTS_CLOSE_ACCOUNT: readonly AccountSpec[];
  */
 declare const ACCOUNTS_TOPUP_INSURANCE: readonly AccountSpec[];
 /**
- * TradeCpi: 7 accounts (PERC-199: clock sysvar removed — uses Clock::get() syscall)
+ * TradeCpi: 8 accounts (deployed program expects clock sysvar at index 3)
  */
 declare const ACCOUNTS_TRADE_CPI: readonly AccountSpec[];
 /**

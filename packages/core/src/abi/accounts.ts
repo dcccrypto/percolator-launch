@@ -142,12 +142,13 @@ export const ACCOUNTS_TOPUP_INSURANCE: readonly AccountSpec[] = [
 ] as const;
 
 /**
- * TradeCpi: 7 accounts (PERC-199: clock sysvar removed — uses Clock::get() syscall)
+ * TradeCpi: 8 accounts (deployed program expects clock sysvar at index 3)
  */
 export const ACCOUNTS_TRADE_CPI: readonly AccountSpec[] = [
   { name: "user", signer: true, writable: true },
   { name: "lpOwner", signer: false, writable: false },  // LP delegated to matcher - no signature needed
   { name: "slab", signer: false, writable: true },
+  { name: "clock", signer: false, writable: false },
   { name: "oracle", signer: false, writable: false },
   { name: "matcherProg", signer: false, writable: false },
   { name: "matcherCtx", signer: false, writable: true },

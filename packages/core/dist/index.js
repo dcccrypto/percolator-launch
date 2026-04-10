@@ -828,6 +828,7 @@ var ACCOUNTS_TRADE_CPI = [
   { name: "lpOwner", signer: false, writable: false },
   // LP delegated to matcher - no signature needed
   { name: "slab", signer: false, writable: true },
+  { name: "clock", signer: false, writable: false },
   { name: "oracle", signer: false, writable: false },
   { name: "matcherProg", signer: false, writable: false },
   { name: "matcherCtx", signer: false, writable: true },

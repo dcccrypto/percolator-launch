@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
-  encodeTradeCpiV2,
+  encodeTradeCpi,
   encodeKeeperCrank,
   encodePushOraclePrice,
   ACCOUNTS_TRADE_CPI,
@@ -40,7 +40,7 @@ export function useTrade(slabAddress: string) {
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
-        const [lpPda, lpBump] = deriveLpPda(programId, slabPk, params.lpIdx);
+        const [lpPda] = deriveLpPda(programId, slabPk, params.lpIdx);
 
         // Determine if this is an admin-oracle market:
         // oracleAuthority != default means an admin has been set (regardless of feedId)
@@ -113,19 +113,19 @@ export function useTrade(slabAddress: string) {
         });
         instructions.push(crankIx);
 
-        // PERC-199: clock sysvar removed from TradeCpi — program uses Clock::get() syscall
         const tradeIx = buildIx({
           programId,
           keys: buildAccountMetas(ACCOUNTS_TRADE_CPI, [
             wallet.publicKey,
             lpAccount.account.owner,
             slabPk,
+            WELL_KNOWN.clock,
             oracleAccount,
             lpAccount.account.matcherProgram,
             lpAccount.account.matcherContext,
             lpPda,
           ]),
-          data: encodeTradeCpiV2({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString(), bump: lpBump }),
+          data: encodeTradeCpi({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString() }),
         });
         instructions.push(tradeIx);
 
