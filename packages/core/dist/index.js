@@ -3916,7 +3916,10 @@ function getStakeProgramId(network) {
   }
   const detectedNetwork = network ?? (() => {
     const n = safeEnv("NEXT_PUBLIC_DEFAULT_NETWORK")?.toLowerCase() ?? safeEnv("NETWORK")?.toLowerCase() ?? "";
-    return n === "mainnet" || n === "mainnet-beta" ? "mainnet" : "devnet";
+    if (n === "mainnet" || n === "mainnet-beta") return "mainnet";
+    if (n === "devnet") return "devnet";
+    if (typeof window !== "undefined") return "mainnet";
+    return "devnet";
   })();
   const id = STAKE_PROGRAM_IDS[detectedNetwork];
   if (!id) {

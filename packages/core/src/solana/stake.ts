@@ -46,7 +46,13 @@ export function getStakeProgramId(network?: 'devnet' | 'mainnet'): PublicKey {
     (() => {
       const n = safeEnv('NEXT_PUBLIC_DEFAULT_NETWORK')?.toLowerCase() ??
                 safeEnv('NETWORK')?.toLowerCase() ?? '';
-      return n === 'mainnet' || n === 'mainnet-beta' ? 'mainnet' : 'devnet';
+      if (n === 'mainnet' || n === 'mainnet-beta') return 'mainnet' as const;
+      if (n === 'devnet') return 'devnet' as const;
+      // In browser bundles, process.env is empty (env vars aren't inlined into
+      // third-party SDK code). Default to mainnet to match the app's fail-closed
+      // behavior — devnet must be opted into explicitly.
+      if (typeof window !== 'undefined') return 'mainnet' as const;
+      return 'devnet' as const;
     })();
 
   const id = STAKE_PROGRAM_IDS[detectedNetwork];
