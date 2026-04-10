@@ -224,17 +224,24 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }, [priceUsd, leverage, decimals]);
 
   // Re-sync margin when leverage changes (contracts stay fixed, margin = notional / leverage)
-  // Re-sync margin when leverage or price changes (contracts stay fixed)
+  // Re-sync margin when leverage changes (contracts stay fixed, use current price)
+  const priceRef = useRef(priceUsd);
+  priceRef.current = priceUsd;
+  const prevLeverageRef = useRef(leverage);
   useEffect(() => {
+    if (prevLeverageRef.current === leverage) return;
+    prevLeverageRef.current = leverage;
     if (!contractsInput) return;
     const n = parseFloat(contractsInput);
-    if (!isNaN(n) && n > 0 && priceUsd && priceUsd > 0) {
-      const notionalUsd = n * priceUsd;
+    const price = priceRef.current;
+    if (!isNaN(n) && n > 0 && price && price > 0) {
+      const notionalUsd = n * price;
       const marginAmt = notionalUsd / leverage;
       setMarginInput(marginAmt.toFixed(decimals));
       setUsdcInput(notionalUsd.toFixed(2));
     }
-  }, [leverage, priceUsd, decimals, contractsInput]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leverage]);
 
   // ── Position card data ───────────────────────────────────────────────────────
   const openPositionSize = existingPosition;
