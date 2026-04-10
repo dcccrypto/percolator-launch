@@ -2383,6 +2383,15 @@ var PARAMS_LIQUIDATION_FEE_BPS_OFF = 96;
 var PARAMS_LIQUIDATION_FEE_CAP_OFF = 104;
 var PARAMS_LIQUIDATION_BUFFER_OFF = 120;
 var PARAMS_MIN_LIQUIDATION_OFF = 128;
+var V12_1_PARAMS_MAINT_FEE_OFF = 56;
+var V12_1_PARAMS_MAX_CRANK_OFF = 72;
+var V12_1_PARAMS_LIQ_FEE_BPS_OFF = 80;
+var V12_1_PARAMS_LIQ_FEE_CAP_OFF = 88;
+var V12_1_PARAMS_MIN_LIQ_OFF = 104;
+var V12_1_PARAMS_MIN_INITIAL_DEP_OFF = 120;
+var V12_1_PARAMS_MIN_NZ_MM_OFF = 136;
+var V12_1_PARAMS_MIN_NZ_IM_OFF = 152;
+var V12_1_PARAMS_INS_FLOOR_OFF = 168;
 var ACCT_ACCOUNT_ID_OFF = 0;
 var ACCT_CAPITAL_OFF = 8;
 var ACCT_KIND_OFF = 24;
@@ -2632,6 +2641,7 @@ function parseParams(data, layoutHint) {
   if (data.length < base + Math.min(paramsSize, 56)) {
     throw new Error("Slab data too short for RiskParams");
   }
+  const isV12_1Sbf = layout !== null && layout !== void 0 && layout.engineOff === V12_1_SBF_ENGINE_OFF && paramsSize === 184;
   const result = {
     warmupPeriodSlots: readU64LE(data, base + PARAMS_WARMUP_PERIOD_OFF),
     maintenanceMarginBps: readU64LE(data, base + PARAMS_MAINTENANCE_MARGIN_OFF),
@@ -2639,16 +2649,30 @@ function parseParams(data, layoutHint) {
     tradingFeeBps: readU64LE(data, base + PARAMS_TRADING_FEE_OFF),
     maxAccounts: readU64LE(data, base + PARAMS_MAX_ACCOUNTS_OFF),
     newAccountFee: readU128LE(data, base + PARAMS_NEW_ACCOUNT_FEE_OFF),
-    // Extended params: only read if V1 (paramsSize >= 144)
+    // Extended params: defaults; overwritten below if layout supports them
     riskReductionThreshold: 0n,
     maintenanceFeePerSlot: 0n,
     maxCrankStalenessSlots: 0n,
     liquidationFeeBps: 0n,
     liquidationFeeCap: 0n,
     liquidationBufferBps: 0n,
-    minLiquidationAbs: 0n
+    minLiquidationAbs: 0n,
+    minInitialDeposit: 0n,
+    minNonzeroMmReq: 0n,
+    minNonzeroImReq: 0n,
+    insuranceFloor: 0n
   };
-  if (paramsSize >= 144) {
+  if (isV12_1Sbf) {
+    result.maintenanceFeePerSlot = readU128LE(data, base + V12_1_PARAMS_MAINT_FEE_OFF);
+    result.maxCrankStalenessSlots = readU64LE(data, base + V12_1_PARAMS_MAX_CRANK_OFF);
+    result.liquidationFeeBps = readU64LE(data, base + V12_1_PARAMS_LIQ_FEE_BPS_OFF);
+    result.liquidationFeeCap = readU128LE(data, base + V12_1_PARAMS_LIQ_FEE_CAP_OFF);
+    result.minLiquidationAbs = readU128LE(data, base + V12_1_PARAMS_MIN_LIQ_OFF);
+    result.minInitialDeposit = readU128LE(data, base + V12_1_PARAMS_MIN_INITIAL_DEP_OFF);
+    result.minNonzeroMmReq = readU128LE(data, base + V12_1_PARAMS_MIN_NZ_MM_OFF);
+    result.minNonzeroImReq = readU128LE(data, base + V12_1_PARAMS_MIN_NZ_IM_OFF);
+    result.insuranceFloor = readU128LE(data, base + V12_1_PARAMS_INS_FLOOR_OFF);
+  } else if (paramsSize >= 144) {
     result.riskReductionThreshold = readU128LE(data, base + PARAMS_RISK_THRESHOLD_OFF);
     result.maintenanceFeePerSlot = readU128LE(data, base + PARAMS_MAINTENANCE_FEE_OFF);
     result.maxCrankStalenessSlots = readU64LE(data, base + PARAMS_MAX_CRANK_STALENESS_OFF);

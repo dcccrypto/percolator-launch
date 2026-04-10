@@ -1411,7 +1411,8 @@ const PARAMS_INITIAL_MARGIN_OFF = 16;
 const PARAMS_TRADING_FEE_OFF = 24;
 const PARAMS_MAX_ACCOUNTS_OFF = 32;
 const PARAMS_NEW_ACCOUNT_FEE_OFF = 40;
-// V1-only extended params (offset 56+)
+// V1-only extended params (offset 56+) — legacy offsets (V0/V1/V1D layouts with
+// riskReductionThreshold and liquidationBufferBps fields).
 const PARAMS_RISK_THRESHOLD_OFF = 56;
 const PARAMS_MAINTENANCE_FEE_OFF = 72;
 const PARAMS_MAX_CRANK_STALENESS_OFF = 88;
@@ -1419,6 +1420,20 @@ const PARAMS_LIQUIDATION_FEE_BPS_OFF = 96;
 const PARAMS_LIQUIDATION_FEE_CAP_OFF = 104;
 const PARAMS_LIQUIDATION_BUFFER_OFF = 120;
 const PARAMS_MIN_LIQUIDATION_OFF = 128;
+
+// V12_1 SBF params offsets — deployed struct has NO riskReductionThreshold or
+// liquidationBufferBps. Instead: maintenance_fee_per_slot follows new_account_fee
+// directly, and min_initial_deposit/min_nonzero_mm_req/min_nonzero_im_req/insurance_floor
+// are appended at the end. Verified via cargo build-sbf offset_of! assertions.
+const V12_1_PARAMS_MAINT_FEE_OFF = 56;       // U128
+const V12_1_PARAMS_MAX_CRANK_OFF = 72;        // u64
+const V12_1_PARAMS_LIQ_FEE_BPS_OFF = 80;      // u64
+const V12_1_PARAMS_LIQ_FEE_CAP_OFF = 88;      // U128
+const V12_1_PARAMS_MIN_LIQ_OFF = 104;          // U128
+const V12_1_PARAMS_MIN_INITIAL_DEP_OFF = 120;  // U128
+const V12_1_PARAMS_MIN_NZ_MM_OFF = 136;        // u128
+const V12_1_PARAMS_MIN_NZ_IM_OFF = 152;        // u128
+const V12_1_PARAMS_INS_FLOOR_OFF = 168;        // U128
 
 // =============================================================================
 // Account Layout (240/248 bytes)
@@ -1534,6 +1549,14 @@ export interface RiskParams {
   liquidationFeeCap: bigint;
   liquidationBufferBps: bigint;
   minLiquidationAbs: bigint;
+  /** Minimum initial deposit to open an account (V12_1+ only) */
+  minInitialDeposit: bigint;
+  /** Minimum nonzero maintenance margin requirement (V12_1+ only) */
+  minNonzeroMmReq: bigint;
+  /** Minimum nonzero initial margin requirement (V12_1+ only) */
+  minNonzeroImReq: bigint;
+  /** Insurance fund floor (V12_1+ only) */
+  insuranceFloor: bigint;
 }
 
 export interface EngineState {
@@ -1938,7 +1961,13 @@ export function parseParams(data: Uint8Array, layoutHint?: SlabLayout | null): R
     throw new Error("Slab data too short for RiskParams");
   }
 
-  // Basic params present in both V0 and V1
+  // Detect V12_1 SBF layout — deployed struct has different field order from legacy layouts.
+  // V12_1 SBF: no riskReductionThreshold/liquidationBufferBps; adds minInitialDeposit/
+  // minNonzeroMmReq/minNonzeroImReq/insuranceFloor at the end.
+  const isV12_1Sbf = layout !== null && layout !== undefined &&
+    (layout.engineOff === V12_1_SBF_ENGINE_OFF) && paramsSize === 184;
+
+  // Basic params present in all layouts (offsets 0-55 are identical)
   const result: RiskParams = {
     warmupPeriodSlots: readU64LE(data, base + PARAMS_WARMUP_PERIOD_OFF),
     maintenanceMarginBps: readU64LE(data, base + PARAMS_MAINTENANCE_MARGIN_OFF),
@@ -1946,7 +1975,7 @@ export function parseParams(data: Uint8Array, layoutHint?: SlabLayout | null): R
     tradingFeeBps: readU64LE(data, base + PARAMS_TRADING_FEE_OFF),
     maxAccounts: readU64LE(data, base + PARAMS_MAX_ACCOUNTS_OFF),
     newAccountFee: readU128LE(data, base + PARAMS_NEW_ACCOUNT_FEE_OFF),
-    // Extended params: only read if V1 (paramsSize >= 144)
+    // Extended params: defaults; overwritten below if layout supports them
     riskReductionThreshold: 0n,
     maintenanceFeePerSlot: 0n,
     maxCrankStalenessSlots: 0n,
@@ -1954,9 +1983,25 @@ export function parseParams(data: Uint8Array, layoutHint?: SlabLayout | null): R
     liquidationFeeCap: 0n,
     liquidationBufferBps: 0n,
     minLiquidationAbs: 0n,
+    minInitialDeposit: 0n,
+    minNonzeroMmReq: 0n,
+    minNonzeroImReq: 0n,
+    insuranceFloor: 0n,
   };
 
-  if (paramsSize >= 144) {
+  if (isV12_1Sbf) {
+    // V12_1 SBF deployed struct — no riskReductionThreshold/liquidationBufferBps
+    result.maintenanceFeePerSlot = readU128LE(data, base + V12_1_PARAMS_MAINT_FEE_OFF);
+    result.maxCrankStalenessSlots = readU64LE(data, base + V12_1_PARAMS_MAX_CRANK_OFF);
+    result.liquidationFeeBps = readU64LE(data, base + V12_1_PARAMS_LIQ_FEE_BPS_OFF);
+    result.liquidationFeeCap = readU128LE(data, base + V12_1_PARAMS_LIQ_FEE_CAP_OFF);
+    result.minLiquidationAbs = readU128LE(data, base + V12_1_PARAMS_MIN_LIQ_OFF);
+    result.minInitialDeposit = readU128LE(data, base + V12_1_PARAMS_MIN_INITIAL_DEP_OFF);
+    result.minNonzeroMmReq = readU128LE(data, base + V12_1_PARAMS_MIN_NZ_MM_OFF);
+    result.minNonzeroImReq = readU128LE(data, base + V12_1_PARAMS_MIN_NZ_IM_OFF);
+    result.insuranceFloor = readU128LE(data, base + V12_1_PARAMS_INS_FLOOR_OFF);
+  } else if (paramsSize >= 144) {
+    // Legacy V0/V1/V1D layouts with riskReductionThreshold + liquidationBufferBps
     result.riskReductionThreshold = readU128LE(data, base + PARAMS_RISK_THRESHOLD_OFF);
     result.maintenanceFeePerSlot = readU128LE(data, base + PARAMS_MAINTENANCE_FEE_OFF);
     result.maxCrankStalenessSlots = readU64LE(data, base + PARAMS_MAX_CRANK_STALENESS_OFF);

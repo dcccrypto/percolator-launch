@@ -1715,6 +1715,14 @@ interface RiskParams {
     liquidationFeeCap: bigint;
     liquidationBufferBps: bigint;
     minLiquidationAbs: bigint;
+    /** Minimum initial deposit to open an account (V12_1+ only) */
+    minInitialDeposit: bigint;
+    /** Minimum nonzero maintenance margin requirement (V12_1+ only) */
+    minNonzeroMmReq: bigint;
+    /** Minimum nonzero initial margin requirement (V12_1+ only) */
+    minNonzeroImReq: bigint;
+    /** Insurance fund floor (V12_1+ only) */
+    insuranceFloor: bigint;
 }
 interface EngineState {
     vault: bigint;

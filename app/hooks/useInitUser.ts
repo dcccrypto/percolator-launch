@@ -35,10 +35,14 @@ export function useInitUser(slabAddress: string) {
       try {
         if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
 
-        // PERC-1126: The on-chain program requires fee_payment >= new_account_fee.
-        // If the caller doesn't specify a fee (or passes 0), use the market's
-        // configured newAccountFee so the tx doesn't fail with Custom(13).
-        const minFee = params?.newAccountFee ?? 0n;
+        // The on-chain InitUser handler requires:
+        //   1. fee_payment >= new_account_fee (account registration fee)
+        //   2. fee_payment >= min_initial_deposit (engine.deposit minimum for new accounts)
+        // Both checks return Custom:13 (EngineInsufficientBalance).
+        // Use the greater of the two as the floor.
+        const accountFee = params?.newAccountFee ?? 0n;
+        const minDeposit = params?.minInitialDeposit ?? 0n;
+        const minFee = accountFee > minDeposit ? accountFee : minDeposit;
         const effectiveFee = (feePayment != null && feePayment >= minFee) ? feePayment : minFee;
 
         // PERC-698 / bug bounty: Pre-flight V0/V1 slab version check.
