@@ -52,6 +52,10 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   const prefersReduced = usePrefersReducedMotion();
   const [percent, setPercent] = useState(100);
 
+  // Ref-based callback to prevent WS price ticks from replaying the GSAP animation
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+
   useEffect(() => {
     const overlay = overlayRef.current;
     const modal = modalRef.current;
@@ -75,11 +79,12 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
     }
 
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape") onCancelRef.current();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [onCancel, prefersReduced]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefersReduced]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onCancel();

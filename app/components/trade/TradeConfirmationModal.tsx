@@ -43,6 +43,13 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
 
+  // Keep callback refs so the mount effect never re-runs on parent re-renders.
+  // Without this, every WS price tick creates a new onCancel reference which
+  // re-triggers the useEffect, replaying the GSAP fade-in animation and making
+  // the modal appear to "refresh" constantly.
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+
   useEffect(() => {
     const overlay = overlayRef.current;
     const modal = modalRef.current;
@@ -66,11 +73,12 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
     }
 
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape") onCancelRef.current();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [onCancel, prefersReduced]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefersReduced]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onCancel();
