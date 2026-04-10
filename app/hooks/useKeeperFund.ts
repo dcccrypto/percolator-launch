@@ -72,11 +72,10 @@ export function useKeeperFund(slabAddress?: string) {
   const [error, setError] = useState<string | null>(null);
   const [topUpPending, setTopUpPending] = useState(false);
 
-  // Derive PDA address
-  const pdaInfo = slabAddress && programId
-    ? deriveKeeperFund(new PublicKey(programId), new PublicKey(slabAddress))
+  // Derive PDA address — use string key for stable useCallback dependency
+  const fundAddressStr = slabAddress && programId
+    ? deriveKeeperFund(new PublicKey(programId), new PublicKey(slabAddress))[0].toBase58()
     : null;
-  const fundAddress = pdaInfo?.[0] ?? null;
 
   // Check if connected wallet is the market admin (creator)
   const isAdmin = !!(
@@ -87,19 +86,20 @@ export function useKeeperFund(slabAddress?: string) {
 
   // Fetch keeper fund state
   const refresh = useCallback(async () => {
-    if (!fundAddress) {
+    if (!fundAddressStr) {
       // PDA not derivable yet (programId/slabAddress missing) — stop loading
       setLoading(false);
       return;
     }
+    const fundPk = new PublicKey(fundAddressStr);
     setLoading(true);
     try {
-      const info = await connection.getAccountInfo(fundAddress);
+      const info = await connection.getAccountInfo(fundPk);
       if (!info) {
         setFund(null);
         setError(null);
       } else {
-        const state = parseKeeperFundState(new Uint8Array(info.data), fundAddress);
+        const state = parseKeeperFundState(new Uint8Array(info.data), fundPk);
         setFund(state);
         setError(state ? null : "Invalid keeper fund data");
       }
@@ -108,25 +108,26 @@ export function useKeeperFund(slabAddress?: string) {
     } finally {
       setLoading(false);
     }
-  }, [fundAddress, connection]);
+  }, [fundAddressStr, connection]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
   // Top up keeper fund
   const topUp = useCallback(async (amountLamports: bigint) => {
-    if (!wallet.publicKey || !wallet.signTransaction || !slabAddress || !programId || !fundAddress) {
+    if (!wallet.publicKey || !wallet.signTransaction || !slabAddress || !programId || !fundAddressStr) {
       throw new Error("Wallet not connected or slab not loaded");
     }
     setTopUpPending(true);
     try {
       const progPubkey = new PublicKey(programId);
       const slab = new PublicKey(slabAddress);
+      const fundPk = new PublicKey(fundAddressStr);
 
       const data = encodeTopUpKeeperFund({ amount: amountLamports.toString() });
       const keys = buildAccountMetas(ACCOUNTS_TOPUP_KEEPER_FUND, [
         wallet.publicKey,
         slab,
-        fundAddress,
+        fundPk,
       ]);
       const ix = buildIx({ programId: progPubkey, keys, data });
 
@@ -148,7 +149,7 @@ export function useKeeperFund(slabAddress?: string) {
     } finally {
       setTopUpPending(false);
     }
-  }, [wallet, slabAddress, programId, fundAddress, connection, refresh]);
+  }, [wallet, slabAddress, programId, fundAddressStr, connection, refresh]);
 
   return {
     fund,
@@ -158,6 +159,6 @@ export function useKeeperFund(slabAddress?: string) {
     topUp,
     topUpPending,
     refresh,
-    fundAddress,
+    fundAddress: fundAddressStr ? new PublicKey(fundAddressStr) : null,
   };
 }
