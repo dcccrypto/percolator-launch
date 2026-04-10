@@ -723,6 +723,15 @@ function encodeCloseOrphanSlab() {
 function encodeSetDexPool(args) {
   return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
 }
+function encodeCreateInsuranceMint() {
+  throw new Error("CreateInsuranceMint instruction is not yet implemented on-chain");
+}
+function encodeDepositInsuranceLP(args) {
+  throw new Error("DepositInsuranceLP instruction is not yet implemented on-chain");
+}
+function encodeWithdrawInsuranceLP(args) {
+  throw new Error("WithdrawInsuranceLP instruction is not yet implemented on-chain");
+}
 
 // src/abi/accounts.ts
 import {
@@ -1584,7 +1593,21 @@ var V12_1_ACCOUNT_SIZE_SBF = 280;
 var V12_1_ENGINE_BITMAP_OFF = 1016;
 var V12_1_ENGINE_PARAMS_OFF_SBF = 32;
 var V12_1_ENGINE_PARAMS_OFF_HOST = 96;
+var V12_1_PARAMS_SIZE_SBF = 184;
 var V12_1_PARAMS_SIZE = 352;
+var V12_1_SBF_OFF_CURRENT_SLOT = 216;
+var V12_1_SBF_OFF_FUNDING_RATE = 224;
+var V12_1_SBF_OFF_LAST_CRANK_SLOT = 232;
+var V12_1_SBF_OFF_MAX_CRANK_STALENESS = 240;
+var V12_1_SBF_OFF_C_TOT = 248;
+var V12_1_SBF_OFF_PNL_POS_TOT = 264;
+var V12_1_SBF_OFF_LIQ_CURSOR = 296;
+var V12_1_SBF_OFF_GC_CURSOR = 298;
+var V12_1_SBF_OFF_LAST_SWEEP_START = 304;
+var V12_1_SBF_OFF_LAST_SWEEP_COMPLETE = 312;
+var V12_1_SBF_OFF_CRANK_CURSOR = 320;
+var V12_1_SBF_OFF_SWEEP_START_IDX = 322;
+var V12_1_SBF_OFF_LIFETIME_LIQUIDATIONS = 328;
 var V12_1_ENGINE_CURRENT_SLOT_OFF = 448;
 var V12_1_ENGINE_FUNDING_RATE_BPS_OFF = 456;
 var V12_1_ENGINE_LAST_CRANK_SLOT_OFF = 464;
@@ -1694,12 +1717,13 @@ for (const n of TIERS) {
   V12_1_SIZES.set(computeSlabSize(V12_1_ENGINE_OFF, V12_1_ENGINE_BITMAP_OFF, V12_1_ACCOUNT_SIZE, n, 18), n);
 }
 var V12_1_SBF_ACCOUNT_SIZE = 280;
-var V12_1_SBF_ENGINE_PREAMBLE = 558;
+var V12_1_SBF_ENGINE_OFF = 616;
+var V12_1_SBF_BITMAP_OFF = 584;
 for (const [, n] of [["Micro", 64], ["Small", 256], ["Medium", 1024], ["Large", 4096]]) {
   const bitmapBytes = Math.ceil(n / 64) * 8;
-  const preAccLen = V12_1_SBF_ENGINE_PREAMBLE + bitmapBytes + 18 + n * 2;
+  const preAccLen = V12_1_SBF_BITMAP_OFF + bitmapBytes + 18 + n * 2;
   const accountsOff = Math.ceil(preAccLen / 8) * 8;
-  const total = V12_1_ENGINE_OFF + accountsOff + n * V12_1_SBF_ACCOUNT_SIZE;
+  const total = V12_1_SBF_ENGINE_OFF + accountsOff + n * V12_1_SBF_ACCOUNT_SIZE;
   V12_1_SIZES.set(total, n);
 }
 var SLAB_TIERS_V2 = {
@@ -2229,8 +2253,8 @@ function buildLayoutVSetDexPool(maxAccounts) {
 function buildLayoutV12_1(maxAccounts, dataLen) {
   const hostSize = computeSlabSize(V12_1_ENGINE_OFF, V12_1_ENGINE_BITMAP_OFF, V12_1_ACCOUNT_SIZE, maxAccounts, 18);
   const isSbf = dataLen !== void 0 && dataLen !== hostSize;
-  const engineOff = isSbf ? 616 : V12_1_ENGINE_OFF;
-  const bitmapOff = isSbf ? 590 : V12_1_ENGINE_BITMAP_OFF - V12_1_ENGINE_OFF;
+  const engineOff = isSbf ? V12_1_SBF_ENGINE_OFF : V12_1_ENGINE_OFF;
+  const bitmapOff = isSbf ? V12_1_SBF_BITMAP_OFF : V12_1_ENGINE_BITMAP_OFF - V12_1_ENGINE_OFF;
   const accountSize = isSbf ? V12_1_ACCOUNT_SIZE_SBF : V12_1_ACCOUNT_SIZE;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
@@ -2240,14 +2264,11 @@ function buildLayoutV12_1(maxAccounts, dataLen) {
   const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
   return {
     version: 1,
-    // V12_1 upstream rebase uses 72-byte header (SlabHeader only, no V1 extension).
-    // Empirically verified: USDC mint found at offset 72 on mainnet slab BVjPc6rd.
     headerLen: V0_HEADER_LEN,
-    // 72 (not 104 — V12_1 removed the 32-byte header extension)
+    // 72
     configOffset: V0_HEADER_LEN,
     // 72
     configLen: isSbf ? 544 : 576,
-    // SBF=544, host=576 (alignment diff)
     reservedOff: V1_RESERVED_OFF,
     engineOff,
     accountSize,
@@ -2256,42 +2277,58 @@ function buildLayoutV12_1(maxAccounts, dataLen) {
     accountsOff: engineOff + accountsOffRel,
     engineInsuranceOff: 16,
     engineParamsOff: isSbf ? V12_1_ENGINE_PARAMS_OFF_SBF : V12_1_ENGINE_PARAMS_OFF_HOST,
-    paramsSize: V12_1_PARAMS_SIZE,
-    // SBF shift: InsuranceFund=16B (was 80) + RiskParams=184B (was 352) = 232 bytes smaller.
-    // All engine fields after RiskParams are shifted by -232 on SBF.
-    engineCurrentSlotOff: isSbf ? V12_1_ENGINE_CURRENT_SLOT_OFF - 232 : V12_1_ENGINE_CURRENT_SLOT_OFF,
-    engineFundingIndexOff: isSbf ? V12_1_ENGINE_FUNDING_INDEX_OFF - 232 : V12_1_ENGINE_FUNDING_INDEX_OFF,
-    engineLastFundingSlotOff: isSbf ? V12_1_ENGINE_LAST_FUNDING_SLOT_OFF - 232 : V12_1_ENGINE_LAST_FUNDING_SLOT_OFF,
-    engineFundingRateBpsOff: isSbf ? V12_1_ENGINE_FUNDING_RATE_BPS_OFF - 232 : V12_1_ENGINE_FUNDING_RATE_BPS_OFF,
-    engineMarkPriceOff: isSbf ? V12_1_ENGINE_MARK_PRICE_OFF - 232 : V12_1_ENGINE_MARK_PRICE_OFF,
-    engineLastCrankSlotOff: isSbf ? V12_1_ENGINE_LAST_CRANK_SLOT_OFF - 232 : V12_1_ENGINE_LAST_CRANK_SLOT_OFF,
-    engineMaxCrankStalenessOff: isSbf ? V12_1_ENGINE_MAX_CRANK_STALENESS_OFF - 232 : V12_1_ENGINE_MAX_CRANK_STALENESS_OFF,
-    engineTotalOiOff: isSbf ? V12_1_ENGINE_TOTAL_OI_OFF - 232 : V12_1_ENGINE_TOTAL_OI_OFF,
-    engineLongOiOff: isSbf ? V12_1_ENGINE_LONG_OI_OFF - 232 : V12_1_ENGINE_LONG_OI_OFF,
-    engineShortOiOff: isSbf ? V12_1_ENGINE_SHORT_OI_OFF - 232 : V12_1_ENGINE_SHORT_OI_OFF,
-    engineCTotOff: isSbf ? V12_1_ENGINE_C_TOT_OFF - 232 : V12_1_ENGINE_C_TOT_OFF,
-    enginePnlPosTotOff: isSbf ? V12_1_ENGINE_PNL_POS_TOT_OFF - 232 : V12_1_ENGINE_PNL_POS_TOT_OFF,
-    engineLiqCursorOff: isSbf ? V12_1_ENGINE_LIQ_CURSOR_OFF - 232 : V12_1_ENGINE_LIQ_CURSOR_OFF,
-    engineGcCursorOff: isSbf ? V12_1_ENGINE_GC_CURSOR_OFF - 232 : V12_1_ENGINE_GC_CURSOR_OFF,
-    engineLastSweepStartOff: isSbf ? V12_1_ENGINE_LAST_SWEEP_START_OFF - 232 : V12_1_ENGINE_LAST_SWEEP_START_OFF,
-    engineLastSweepCompleteOff: isSbf ? V12_1_ENGINE_LAST_SWEEP_COMPLETE_OFF - 232 : V12_1_ENGINE_LAST_SWEEP_COMPLETE_OFF,
-    engineCrankCursorOff: isSbf ? V12_1_ENGINE_CRANK_CURSOR_OFF - 232 : V12_1_ENGINE_CRANK_CURSOR_OFF,
-    engineSweepStartIdxOff: isSbf ? V12_1_ENGINE_SWEEP_START_IDX_OFF - 232 : V12_1_ENGINE_SWEEP_START_IDX_OFF,
-    engineLifetimeLiquidationsOff: isSbf ? V12_1_ENGINE_LIFETIME_LIQUIDATIONS_OFF - 232 : V12_1_ENGINE_LIFETIME_LIQUIDATIONS_OFF,
-    engineLifetimeForceClosesOff: isSbf ? V12_1_ENGINE_LIFETIME_FORCE_CLOSES_OFF - 232 : V12_1_ENGINE_LIFETIME_FORCE_CLOSES_OFF,
-    engineNetLpPosOff: isSbf ? V12_1_ENGINE_NET_LP_POS_OFF - 232 : V12_1_ENGINE_NET_LP_POS_OFF,
-    engineLpSumAbsOff: isSbf ? V12_1_ENGINE_LP_SUM_ABS_OFF - 232 : V12_1_ENGINE_LP_SUM_ABS_OFF,
-    engineLpMaxAbsOff: isSbf ? V12_1_ENGINE_LP_MAX_ABS_OFF - 232 : V12_1_ENGINE_LP_MAX_ABS_OFF,
-    engineLpMaxAbsSweepOff: isSbf ? V12_1_ENGINE_LP_MAX_ABS_SWEEP_OFF - 232 : V12_1_ENGINE_LP_MAX_ABS_SWEEP_OFF,
-    engineEmergencyOiModeOff: isSbf ? V12_1_ENGINE_EMERGENCY_OI_MODE_OFF - 232 : V12_1_ENGINE_EMERGENCY_OI_MODE_OFF,
-    engineEmergencyStartSlotOff: isSbf ? V12_1_ENGINE_EMERGENCY_START_SLOT_OFF - 232 : V12_1_ENGINE_EMERGENCY_START_SLOT_OFF,
-    engineLastBreakerSlotOff: isSbf ? V12_1_ENGINE_LAST_BREAKER_SLOT_OFF - 232 : V12_1_ENGINE_LAST_BREAKER_SLOT_OFF,
+    paramsSize: isSbf ? V12_1_PARAMS_SIZE_SBF : V12_1_PARAMS_SIZE,
+    // SBF engine offsets — all verified by cargo build-sbf offset_of! assertions.
+    // Fields that don't exist in the deployed program are set to -1 on SBF.
+    engineCurrentSlotOff: isSbf ? V12_1_SBF_OFF_CURRENT_SLOT : V12_1_ENGINE_CURRENT_SLOT_OFF,
+    engineFundingIndexOff: isSbf ? -1 : V12_1_ENGINE_FUNDING_INDEX_OFF,
+    // not in deployed struct
+    engineLastFundingSlotOff: isSbf ? -1 : V12_1_ENGINE_LAST_FUNDING_SLOT_OFF,
+    // not in deployed struct
+    engineFundingRateBpsOff: isSbf ? V12_1_SBF_OFF_FUNDING_RATE : V12_1_ENGINE_FUNDING_RATE_BPS_OFF,
+    engineMarkPriceOff: isSbf ? -1 : V12_1_ENGINE_MARK_PRICE_OFF,
+    // not in deployed struct
+    engineLastCrankSlotOff: isSbf ? V12_1_SBF_OFF_LAST_CRANK_SLOT : V12_1_ENGINE_LAST_CRANK_SLOT_OFF,
+    engineMaxCrankStalenessOff: isSbf ? V12_1_SBF_OFF_MAX_CRANK_STALENESS : V12_1_ENGINE_MAX_CRANK_STALENESS_OFF,
+    engineTotalOiOff: isSbf ? -1 : V12_1_ENGINE_TOTAL_OI_OFF,
+    // not in deployed struct
+    engineLongOiOff: isSbf ? -1 : V12_1_ENGINE_LONG_OI_OFF,
+    // not in deployed struct
+    engineShortOiOff: isSbf ? -1 : V12_1_ENGINE_SHORT_OI_OFF,
+    // not in deployed struct
+    engineCTotOff: isSbf ? V12_1_SBF_OFF_C_TOT : V12_1_ENGINE_C_TOT_OFF,
+    enginePnlPosTotOff: isSbf ? V12_1_SBF_OFF_PNL_POS_TOT : V12_1_ENGINE_PNL_POS_TOT_OFF,
+    engineLiqCursorOff: isSbf ? V12_1_SBF_OFF_LIQ_CURSOR : V12_1_ENGINE_LIQ_CURSOR_OFF,
+    engineGcCursorOff: isSbf ? V12_1_SBF_OFF_GC_CURSOR : V12_1_ENGINE_GC_CURSOR_OFF,
+    engineLastSweepStartOff: isSbf ? V12_1_SBF_OFF_LAST_SWEEP_START : V12_1_ENGINE_LAST_SWEEP_START_OFF,
+    engineLastSweepCompleteOff: isSbf ? V12_1_SBF_OFF_LAST_SWEEP_COMPLETE : V12_1_ENGINE_LAST_SWEEP_COMPLETE_OFF,
+    engineCrankCursorOff: isSbf ? V12_1_SBF_OFF_CRANK_CURSOR : V12_1_ENGINE_CRANK_CURSOR_OFF,
+    engineSweepStartIdxOff: isSbf ? V12_1_SBF_OFF_SWEEP_START_IDX : V12_1_ENGINE_SWEEP_START_IDX_OFF,
+    engineLifetimeLiquidationsOff: isSbf ? V12_1_SBF_OFF_LIFETIME_LIQUIDATIONS : V12_1_ENGINE_LIFETIME_LIQUIDATIONS_OFF,
+    engineLifetimeForceClosesOff: isSbf ? -1 : V12_1_ENGINE_LIFETIME_FORCE_CLOSES_OFF,
+    // not in deployed struct
+    engineNetLpPosOff: isSbf ? -1 : V12_1_ENGINE_NET_LP_POS_OFF,
+    // not in deployed struct
+    engineLpSumAbsOff: isSbf ? -1 : V12_1_ENGINE_LP_SUM_ABS_OFF,
+    // not in deployed struct
+    engineLpMaxAbsOff: isSbf ? -1 : V12_1_ENGINE_LP_MAX_ABS_OFF,
+    // not in deployed struct
+    engineLpMaxAbsSweepOff: isSbf ? -1 : V12_1_ENGINE_LP_MAX_ABS_SWEEP_OFF,
+    // not in deployed struct
+    engineEmergencyOiModeOff: isSbf ? -1 : V12_1_ENGINE_EMERGENCY_OI_MODE_OFF,
+    // not in deployed struct
+    engineEmergencyStartSlotOff: isSbf ? -1 : V12_1_ENGINE_EMERGENCY_START_SLOT_OFF,
+    // not in deployed struct
+    engineLastBreakerSlotOff: isSbf ? -1 : V12_1_ENGINE_LAST_BREAKER_SLOT_OFF,
+    // not in deployed struct
     engineBitmapOff: bitmapOff,
     postBitmap: 18,
     acctOwnerOff: V12_1_ACCT_OWNER_OFF,
-    hasInsuranceIsolation: true,
-    engineInsuranceIsolatedOff: 48,
-    engineInsuranceIsolationBpsOff: 64
+    // InsuranceFund on deployed program is just {balance: U128} = 16 bytes.
+    // No isolated_balance or insurance_isolation_bps fields.
+    hasInsuranceIsolation: !isSbf,
+    engineInsuranceIsolatedOff: isSbf ? -1 : 48,
+    engineInsuranceIsolationBpsOff: isSbf ? -1 : 64
   };
 }
 function detectSlabLayout(dataLen, data) {
@@ -2627,17 +2664,18 @@ function parseEngine(data) {
     vault: readU128LE(data, base),
     insuranceFund: {
       balance: readU128LE(data, base + layout.engineInsuranceOff),
-      feeRevenue: readU128LE(data, base + layout.engineInsuranceOff + 16),
+      // feeRevenue: only exists in percolator-core (80-byte InsuranceFund), not deployed (16-byte)
+      feeRevenue: layout.hasInsuranceIsolation ? readU128LE(data, base + layout.engineInsuranceOff + 16) : 0n,
       isolatedBalance: layout.hasInsuranceIsolation ? readU128LE(data, base + layout.engineInsuranceIsolatedOff) : 0n,
       isolationBps: layout.hasInsuranceIsolation ? readU16LE(data, base + layout.engineInsuranceIsolationBpsOff) : 0
     },
     currentSlot: readU64LE(data, base + layout.engineCurrentSlotOff),
-    fundingIndexQpbE6: readI128LE(data, base + layout.engineFundingIndexOff),
-    lastFundingSlot: readU64LE(data, base + layout.engineLastFundingSlotOff),
+    fundingIndexQpbE6: layout.engineFundingIndexOff >= 0 ? readI128LE(data, base + layout.engineFundingIndexOff) : 0n,
+    lastFundingSlot: layout.engineLastFundingSlotOff >= 0 ? readU64LE(data, base + layout.engineLastFundingSlotOff) : 0n,
     fundingRateBpsPerSlotLast: readI64LE(data, base + layout.engineFundingRateBpsOff),
     lastCrankSlot: readU64LE(data, base + layout.engineLastCrankSlotOff),
     maxCrankStalenessSlots: readU64LE(data, base + layout.engineMaxCrankStalenessOff),
-    totalOpenInterest: readU128LE(data, base + layout.engineTotalOiOff),
+    totalOpenInterest: layout.engineTotalOiOff >= 0 ? readU128LE(data, base + layout.engineTotalOiOff) : 0n,
     longOi: layout.engineLongOiOff >= 0 ? readU128LE(data, base + layout.engineLongOiOff) : 0n,
     shortOi: layout.engineShortOiOff >= 0 ? readU128LE(data, base + layout.engineShortOiOff) : 0n,
     cTot: readU128LE(data, base + layout.engineCTotOff),
@@ -2649,9 +2687,9 @@ function parseEngine(data) {
     crankCursor: readU16LE(data, base + layout.engineCrankCursorOff),
     sweepStartIdx: readU16LE(data, base + layout.engineSweepStartIdxOff),
     lifetimeLiquidations: readU64LE(data, base + layout.engineLifetimeLiquidationsOff),
-    lifetimeForceCloses: readU64LE(data, base + layout.engineLifetimeForceClosesOff),
-    netLpPos: readI128LE(data, base + layout.engineNetLpPosOff),
-    lpSumAbs: readU128LE(data, base + layout.engineLpSumAbsOff),
+    lifetimeForceCloses: layout.engineLifetimeForceClosesOff >= 0 ? readU64LE(data, base + layout.engineLifetimeForceClosesOff) : 0n,
+    netLpPos: layout.engineNetLpPosOff >= 0 ? readI128LE(data, base + layout.engineNetLpPosOff) : 0n,
+    lpSumAbs: layout.engineLpSumAbsOff >= 0 ? readU128LE(data, base + layout.engineLpSumAbsOff) : 0n,
     lpMaxAbs: layout.engineLpMaxAbsOff >= 0 ? readU128LE(data, base + layout.engineLpMaxAbsOff) : 0n,
     lpMaxAbsSweep: layout.engineLpMaxAbsSweepOff >= 0 ? readU128LE(data, base + layout.engineLpMaxAbsSweepOff) : 0n,
     emergencyOiMode: layout.engineEmergencyOiModeOff >= 0 ? data[base + layout.engineEmergencyOiModeOff] !== 0 : false,
@@ -2718,7 +2756,7 @@ function parseAccount(data, idx) {
   if (data.length < base + layout.accountSize) {
     throw new Error("Slab data too short for account");
   }
-  const isV12_1 = layout.engineOff === V12_1_ENGINE_OFF && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
+  const isV12_1 = (layout.engineOff === V12_1_ENGINE_OFF || layout.engineOff === V12_1_SBF_ENGINE_OFF) && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
   const isAdl = layout.accountSize >= 312 || isV12_1;
   const warmupStartedOff = isAdl ? V_ADL_ACCT_WARMUP_STARTED_OFF : ACCT_WARMUP_STARTED_OFF;
   const warmupSlopeOff = isAdl ? V_ADL_ACCT_WARMUP_SLOPE_OFF : ACCT_WARMUP_SLOPE_OFF;
@@ -5176,8 +5214,10 @@ export {
   encodeCloseOrphanSlab,
   encodeCloseSlab,
   encodeCloseStaleSlabs,
+  encodeCreateInsuranceMint,
   encodeCreateLpVault,
   encodeDepositCollateral,
+  encodeDepositInsuranceLP,
   encodeDepositLpCollateral,
   encodeExecuteAdl,
   encodeForceCloseResolved,
@@ -5248,6 +5288,7 @@ export {
   encodeUpdateRiskParams,
   encodeWithdrawCollateral,
   encodeWithdrawInsurance,
+  encodeWithdrawInsuranceLP,
   encodeWithdrawInsuranceLimited,
   encodeWithdrawLpCollateral,
   fetchAdlRankedPositions,

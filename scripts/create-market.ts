@@ -108,12 +108,10 @@ const DEFAULT_RISK_PARAMS = {
   tradingFeeBps:          10n,             // 0.1%
   maxAccounts:            1024n,           // medium tier
   newAccountFee:          1_000_000n,      // 1 USDC (u128)
-  riskReductionThreshold: 0n,              // disabled (u128)
   maintenanceFeePerSlot:  0n,              // disabled (u128)
   maxCrankStalenessSlots: 300n,            // 5 minutes
   liquidationFeeBps:      50n,             // 0.5%
   liquidationFeeCap:      100_000_000n,    // 100 USDC (u128)
-  liquidationBufferBps:   100n,            // 1%
   minLiquidationAbs:      100n,            // lowered from 1_000_000 (u128)
   minInitialDeposit:      10_000_000n,     // 10 USDC (u128)
   minNonzeroMmReq:        100_000n,        // 0.1 USDC — must be > 0 (u128)

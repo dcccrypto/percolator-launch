@@ -179,16 +179,15 @@ export interface InitMarketArgs {
   tradingFeeBps: bigint | string;
   maxAccounts: bigint | string;
   newAccountFee: bigint | string;
-  riskReductionThreshold: bigint | string;    // maps to insurance_floor slot on-chain
   maintenanceFeePerSlot: bigint | string;
   maxCrankStalenessSlots: bigint | string;
   liquidationFeeBps: bigint | string;
   liquidationFeeCap: bigint | string;
-  liquidationBufferBps: bigint | string;
   minLiquidationAbs: bigint | string;
   minInitialDeposit: bigint | string;         // u128 — min deposit to open account
   minNonzeroMmReq: bigint | string;           // u128 — must be > 0, < minNonzeroImReq
   minNonzeroImReq: bigint | string;           // u128 — must be > minNonzeroMmReq, <= minInitialDeposit
+  insuranceFloor?: bigint | string;           // u128 — insurance fund floor (default 0)
 }
 
 /**
@@ -219,10 +218,10 @@ function encodeFeedId(feedId: string): Uint8Array {
 // tag(1) + admin(32) + mint(32) + feedId(32) + staleness(8) + conf(2) + invert(1) + scale(4) +
 // markPrice(8) + maxMaintFee(16) + maxInsFloor(16) + minOracleCap(8) +
 // RiskParams: warmup(8) + mmBps(8) + imBps(8) + tradeFee(8) + maxAcct(8) + newAcctFee(16) +
-//   riskRedThresh(16) + maintFee(16) + maxStale(8) + liqFee(8) + liqCap(16) + liqBuf(8) +
-//   minLiqAbs(16) + minDeposit(16) + minMm(16) + minIm(16)
-// = 1+32+32+32+8+2+1+4+8+16+16+8 + 8+8+8+8+8+16+16+16+8+8+16+8+16+16+16+16 = 352
-const INIT_MARKET_DATA_LEN = 352;
+//   maintFee(16) + maxStale(8) + liqFee(8) + liqCap(16) +
+//   minLiqAbs(16) + minDeposit(16) + minMm(16) + minIm(16) + insFloor(16)
+// = 1+32+32+32+8+2+1+4+8+16+16+8 + 8+8+8+8+8+16+16+8+8+16+16+16+16+16+16 = 344
+const INIT_MARKET_DATA_LEN = 344;
 
 export function encodeInitMarket(args: InitMarketArgs): Uint8Array {
   const data = concatBytes(
@@ -239,23 +238,22 @@ export function encodeInitMarket(args: InitMarketArgs): Uint8Array {
     encU128(args.maxMaintenanceFeePerSlot ?? 0n),
     encU128(args.maxInsuranceFloor ?? 0n),
     encU64(args.minOraclePriceCap ?? 0n),
-    // RiskParams block (15 fields)
+    // RiskParams block — must match deployed percolator::RiskParams struct order (15 fields)
     encU64(args.warmupPeriodSlots),
     encU64(args.maintenanceMarginBps),
     encU64(args.initialMarginBps),
     encU64(args.tradingFeeBps),
     encU64(args.maxAccounts),
     encU128(args.newAccountFee),
-    encU128(args.riskReductionThreshold),
     encU128(args.maintenanceFeePerSlot),
     encU64(args.maxCrankStalenessSlots),
     encU64(args.liquidationFeeBps),
     encU128(args.liquidationFeeCap),
-    encU64(args.liquidationBufferBps),
     encU128(args.minLiquidationAbs),
     encU128(args.minInitialDeposit),
     encU128(args.minNonzeroMmReq),
     encU128(args.minNonzeroImReq),
+    encU128(args.insuranceFloor ?? 0n),
   );
   if (data.length !== INIT_MARKET_DATA_LEN) {
     throw new Error(
