@@ -197,11 +197,10 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setContractsInput(val.replace(/[^0-9.]/g, ""));
     const n = parseFloat(val);
     if (!isNaN(n) && priceUsd && priceUsd > 0) {
-      const usd = n * priceUsd;
-      setUsdcInput(usd.toFixed(2));
-      // margin = notional / leverage
-      const marginAmt = n / leverage;
-      // Use full token decimals so marginInput matches parsePercToNative(..., decimals) (Prompt 88).
+      const notionalUsd = n * priceUsd;
+      setUsdcInput(notionalUsd.toFixed(2));
+      // margin (in collateral) = notional_usd / leverage
+      const marginAmt = notionalUsd / leverage;
       setMarginInput(marginAmt.toFixed(decimals));
     } else if (val === "" || val === ".") {
       setUsdcInput("");
@@ -215,9 +214,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (!isNaN(usd) && priceUsd && priceUsd > 0) {
       const contracts = usd / priceUsd;
       setContractsInput(contracts.toFixed(6));
-      // margin = contracts / leverage
-      const marginAmt = contracts / leverage;
-      // Use full token decimals so marginInput matches parsePercToNative(..., decimals) (Prompt 88).
+      // margin (in collateral) = notional_usd / leverage
+      const marginAmt = usd / leverage;
       setMarginInput(marginAmt.toFixed(decimals));
     } else if (val === "" || val === ".") {
       setContractsInput("");
@@ -285,12 +283,16 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       if (amount === 0n && pct > 0) amount = 1n;
       const marginStr = formatPerc(amount, decimals);
       setMarginInput(marginStr);
-      // Sync dual size inputs: contracts = margin * leverage
+      // Sync dual size inputs: notional = margin * leverage, contracts = notional / price
       const marginNum = Number(amount) / Math.pow(10, decimals);
-      const contracts = marginNum * leverage;
-      setContractsInput(contracts.toFixed(6));
+      const notionalUsd = marginNum * leverage;
       if (priceUsd && priceUsd > 0) {
-        setUsdcInput((contracts * priceUsd).toFixed(2));
+        const contracts = notionalUsd / priceUsd;
+        setContractsInput(contracts.toFixed(6));
+        setUsdcInput(notionalUsd.toFixed(2));
+      } else {
+        setContractsInput("");
+        setUsdcInput(notionalUsd.toFixed(2));
       }
     },
     [effectiveBalance, decimals, leverage, priceUsd]
