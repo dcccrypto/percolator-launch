@@ -96,7 +96,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
 
     // Compute PnL on the close portion
     const closePositionSigned = isLong ? closeAbs : -closeAbs;
-    const pnl = currentPrice > 0n
+    const pnl = currentPrice > 0n && entryPrice > 0n
       ? computeMarkPnl(closePositionSigned, entryPrice, currentPrice)
       : 0n;
 

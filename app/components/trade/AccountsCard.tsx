@@ -59,7 +59,7 @@ export const AccountsCard: FC = () => {
           liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
         }
       }
-      const computedPnl = account.positionSize !== 0n && oraclePrice > 0n
+      const computedPnl = account.positionSize !== 0n && oraclePrice > 0n && account.entryPrice > 0n
         ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePrice)
         : (account.pnl ?? 0n);
       const marginPct = liqHealthPct;

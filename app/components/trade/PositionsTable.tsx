@@ -100,16 +100,18 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   const absPosition = abs(account.positionSize);
   const onChainPriceE6 = config?.lastEffectivePriceE6 ?? null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
-  const entryPriceE6 = account.entryPrice;
+  const rawEntryPrice = account.entryPrice;
+  const entryPriceE6 = rawEntryPrice > 0n ? rawEntryPrice : currentPriceE6;
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
 
   // PERC-297: Mark price is considered "available" when it's a positive value.
-  // When mark is unavailable (oracle not initialized, price feed stale, or tx
-  // just processed before price arrives), PnL/ROE cannot be computed reliably.
   const hasValidMark = currentPriceE6 > 0n;
 
+  // V12_1 deployed struct has no entry_price — use on-chain pnl directly
   const pnlTokens = hasValidMark
-    ? computeMarkPnl(account.positionSize, entryPriceE6, currentPriceE6)
+    ? (rawEntryPrice > 0n
+        ? computeMarkPnl(account.positionSize, rawEntryPrice, currentPriceE6)
+        : account.pnl)
     : 0n;
   const pnlUsdRaw = priceUsd !== null && hasValidMark
     ? (Number(pnlTokens) / (10 ** decimals)) * priceUsd

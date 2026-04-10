@@ -246,9 +246,9 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const openLiqPriceE6 = hasOpenPosition
     ? computeLiqPrice(openEntryPriceE6, openCapital, openPositionSize, maintenanceMarginBps)
     : 0n;
-  const openPnlTokens = hasOpenPosition && livePriceE6 && livePriceE6 > 0n
+  const openPnlTokens = hasOpenPosition && livePriceE6 && livePriceE6 > 0n && openEntryPriceE6 > 0n
     ? computeMarkPnl(openPositionSize, openEntryPriceE6, livePriceE6)
-    : 0n;
+    : (userAccount?.account.pnl ?? 0n);
   const openPnlPercent = hasOpenPosition ? computePnlPercent(openPnlTokens, openCapital) : 0;
   // Liq danger: within 20% of mark
   const openLiqDanger = (() => {

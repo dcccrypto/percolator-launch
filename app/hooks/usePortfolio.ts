@@ -197,7 +197,7 @@ export function usePortfolio(): PortfolioData {
                 // GH#1331: account.pnl can be u64::MAX sentinel for uninitialized/flat
                 // positions. Guard it with isSentinelValue to prevent billion-dollar
                 // phantom PnL on the dashboard when oracle price is unavailable.
-                const unrealizedPnl = oraclePriceE6 > 0n
+                const unrealizedPnl = oraclePriceE6 > 0n && account.entryPrice > 0n
                   ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePriceE6)
                   : (isSentinelValue(account.pnl) ? 0n : account.pnl);
 

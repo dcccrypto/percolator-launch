@@ -98,17 +98,21 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const onChainPriceE6 = config?.lastEffectivePriceE6 ?? null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
 
-  const entryPriceE6 = account.entryPrice;
+  // V12_1 deployed struct has no per-account entry_price field (returns 0).
+  // When entry_price is absent, derive it from position_basis_q or use on-chain PnL.
+  const rawEntryPrice = account.entryPrice;
+  const entryPriceE6 = rawEntryPrice > 0n ? rawEntryPrice : currentPriceE6;
 
   // PERC-297: Mark price is considered "available" when it's a positive value.
   const hasValidMark = currentPriceE6 > 0n;
 
-  // Bug fix: Don't compute P&L with stale/zero price to avoid flash
-  const pnlTokens = hasValidMark ? computeMarkPnl(
-    account.positionSize,
-    account.entryPrice,
-    currentPriceE6,
-  ) : 0n;
+  // When entry_price is 0 (V12_1 struct), use on-chain pnl directly instead of
+  // computeMarkPnl which would produce garbage (treats 0 entry as free position).
+  const pnlTokens = hasValidMark
+    ? (rawEntryPrice > 0n
+        ? computeMarkPnl(account.positionSize, rawEntryPrice, currentPriceE6)
+        : account.pnl)
+    : 0n;
   const pnlUsdRaw =
     priceUsd !== null && hasValidMark ? (Number(pnlTokens) / 10 ** decimals) * priceUsd : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
