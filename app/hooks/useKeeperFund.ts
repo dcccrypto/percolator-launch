@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { PublicKey, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
+import { PublicKey, Transaction, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/hooks/useSlab";
 import {
@@ -128,6 +128,7 @@ export function useKeeperFund(slabAddress?: string) {
         wallet.publicKey,
         slab,
         fundPk,
+        SystemProgram.programId,
       ]);
       const ix = buildIx({ programId: progPubkey, keys, data });
 

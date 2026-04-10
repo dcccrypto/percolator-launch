@@ -1378,7 +1378,7 @@ declare const ACCOUNTS_AUDIT_CRANK: readonly AccountSpec[];
 declare const ACCOUNTS_ADVANCE_ORACLE_PHASE: readonly AccountSpec[];
 /**
  * TopUpKeeperFund: 3 accounts
- * Permissionless — anyone can fund. Transfers lamports directly (no system program).
+ * Permissionless — anyone can fund. System program required for SOL transfer.
  */
 declare const ACCOUNTS_TOPUP_KEEPER_FUND: readonly AccountSpec[];
 /**

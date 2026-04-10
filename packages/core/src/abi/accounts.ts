@@ -526,12 +526,13 @@ export const ACCOUNTS_ADVANCE_ORACLE_PHASE: readonly AccountSpec[] = [
 
 /**
  * TopUpKeeperFund: 3 accounts
- * Permissionless — anyone can fund. Transfers lamports directly (no system program).
+ * Permissionless — anyone can fund. System program required for SOL transfer.
  */
 export const ACCOUNTS_TOPUP_KEEPER_FUND: readonly AccountSpec[] = [
   { name: "funder", signer: true, writable: true },
   { name: "slab", signer: false, writable: true },
   { name: "keeperFund", signer: false, writable: true },
+  { name: "systemProgram", signer: false, writable: false },
 ] as const;
 
 // Note: WithdrawKeeperReward has no separate instruction.

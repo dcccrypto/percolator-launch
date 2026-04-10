@@ -1013,7 +1013,8 @@ var ACCOUNTS_ADVANCE_ORACLE_PHASE = [
 var ACCOUNTS_TOPUP_KEEPER_FUND = [
   { name: "funder", signer: true, writable: true },
   { name: "slab", signer: false, writable: true },
-  { name: "keeperFund", signer: false, writable: true }
+  { name: "keeperFund", signer: false, writable: true },
+  { name: "systemProgram", signer: false, writable: false }
 ];
 var ACCOUNTS_SET_OI_IMBALANCE_HARD_BLOCK = [
   { name: "admin", signer: true, writable: false },
