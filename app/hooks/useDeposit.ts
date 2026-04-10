@@ -127,6 +127,7 @@ export function useDeposit(slabAddress: string) {
                     userAta,
                     mktConfig.vaultPubkey,
                     WELL_KNOWN.tokenProgram,
+                    WELL_KNOWN.clock,
                   ]),
                   data: encodeInitUser({ feePayment: accountFee.toString() }),
                 }),

@@ -77,7 +77,7 @@ export function useInitUser(slabAddress: string) {
         const ix = buildIx({
           programId,
           keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
-            wallet.publicKey, slabPk, userAta, mktConfig.vaultPubkey, WELL_KNOWN.tokenProgram,
+            wallet.publicKey, slabPk, userAta, mktConfig.vaultPubkey, WELL_KNOWN.tokenProgram, WELL_KNOWN.clock,
           ]),
           data: encodeInitUser({ feePayment: effectiveFee.toString() }),
         });

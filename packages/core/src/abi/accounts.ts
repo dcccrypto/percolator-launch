@@ -45,6 +45,7 @@ export const ACCOUNTS_INIT_USER: readonly AccountSpec[] = [
   { name: "userAta", signer: false, writable: true },
   { name: "vault", signer: false, writable: true },
   { name: "tokenProgram", signer: false, writable: false },
+  { name: "clock", signer: false, writable: false },
 ] as const;
 
 /**
