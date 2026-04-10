@@ -267,19 +267,23 @@ function encodeInitMarket(args) {
     encU128(args.maxMaintenanceFeePerSlot ?? 0n),
     encU128(args.maxInsuranceFloor ?? 0n),
     encU64(args.minOraclePriceCap ?? 0n),
-    // RiskParams block (15 fields)
+    // RiskParams wire format — must match read_risk_params() in percolator.rs
+    // Note: insurance_floor occupies the old riskReductionThreshold slot,
+    // and liquidationBufferBps is read but discarded (kept for wire compat).
     encU64(args.warmupPeriodSlots),
     encU64(args.maintenanceMarginBps),
     encU64(args.initialMarginBps),
     encU64(args.tradingFeeBps),
     encU64(args.maxAccounts),
     encU128(args.newAccountFee),
-    encU128(args.riskReductionThreshold),
+    encU128(args.insuranceFloor ?? 0n),
+    // wire slot: old riskReductionThreshold → now insurance_floor
     encU128(args.maintenanceFeePerSlot),
     encU64(args.maxCrankStalenessSlots),
     encU64(args.liquidationFeeBps),
     encU128(args.liquidationFeeCap),
-    encU64(args.liquidationBufferBps),
+    encU64(args.liquidationBufferBps ?? 0n),
+    // wire slot: read and discarded by program
     encU128(args.minLiquidationAbs),
     encU128(args.minInitialDeposit),
     encU128(args.minNonzeroMmReq),
@@ -724,13 +728,13 @@ function encodeSetDexPool(args) {
   return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
 }
 function encodeCreateInsuranceMint() {
-  throw new Error("CreateInsuranceMint instruction is not yet implemented on-chain");
+  return encodeCreateLpVault({ feeShareBps: 0n });
 }
 function encodeDepositInsuranceLP(args) {
-  throw new Error("DepositInsuranceLP instruction is not yet implemented on-chain");
+  return encodeLpVaultDeposit({ amount: args.amount });
 }
 function encodeWithdrawInsuranceLP(args) {
-  throw new Error("WithdrawInsuranceLP instruction is not yet implemented on-chain");
+  return encodeLpVaultWithdraw({ lpAmount: args.lpAmount });
 }
 
 // src/abi/accounts.ts
@@ -756,7 +760,8 @@ var ACCOUNTS_INIT_USER = [
   { name: "slab", signer: false, writable: true },
   { name: "userAta", signer: false, writable: true },
   { name: "vault", signer: false, writable: true },
-  { name: "tokenProgram", signer: false, writable: false }
+  { name: "tokenProgram", signer: false, writable: false },
+  { name: "clock", signer: false, writable: false }
 ];
 var ACCOUNTS_INIT_LP = [
   { name: "user", signer: true, writable: true },

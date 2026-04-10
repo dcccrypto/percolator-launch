@@ -116,6 +116,7 @@ const DEFAULT_RISK_PARAMS = {
   minInitialDeposit:      10_000_000n,     // 10 USDC (u128)
   minNonzeroMmReq:        100_000n,        // 0.1 USDC — must be > 0 (u128)
   minNonzeroImReq:        500_000n,        // 0.5 USDC — must be > mmReq, <= minInitialDeposit (u128)
+  insuranceFloor:         0n,              // no floor (u128)
 } as const;
 
 // Fields between header and RiskParams (immutable after init)

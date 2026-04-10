@@ -199,12 +199,12 @@ interface InitMarketArgs {
     tradingFeeBps: bigint | string;
     maxAccounts: bigint | string;
     newAccountFee: bigint | string;
-    riskReductionThreshold: bigint | string;
+    insuranceFloor?: bigint | string;
     maintenanceFeePerSlot: bigint | string;
     maxCrankStalenessSlots: bigint | string;
     liquidationFeeBps: bigint | string;
     liquidationFeeCap: bigint | string;
-    liquidationBufferBps: bigint | string;
+    liquidationBufferBps?: bigint | string;
     minLiquidationAbs: bigint | string;
     minInitialDeposit: bigint | string;
     minNonzeroMmReq: bigint | string;
@@ -1157,13 +1157,13 @@ declare function encodeCloseOrphanSlab(): Uint8Array;
 declare function encodeSetDexPool(args: {
     pool: PublicKey | string;
 }): Uint8Array;
-/** CreateInsuranceMint (not yet on-chain) */
+/** CreateInsuranceMint: creates the insurance LP mint PDA (tag 37, same as CreateLpVault) */
 declare function encodeCreateInsuranceMint(): Uint8Array;
-/** DepositInsuranceLP (not yet on-chain) */
+/** DepositInsuranceLP: deposit collateral, receive LP tokens (tag 38, same as LpVaultDeposit) */
 declare function encodeDepositInsuranceLP(args: {
     amount: bigint | string;
 }): Uint8Array;
-/** WithdrawInsuranceLP (not yet on-chain) */
+/** WithdrawInsuranceLP: burn LP tokens, withdraw collateral (tag 39, same as LpVaultWithdraw) */
 declare function encodeWithdrawInsuranceLP(args: {
     lpAmount: bigint | string;
 }): Uint8Array;
