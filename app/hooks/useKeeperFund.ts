@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { PublicKey, Transaction, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
+import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/hooks/useSlab";
 import {
@@ -11,6 +11,7 @@ import {
   buildAccountMetas,
   ACCOUNTS_TOPUP_KEEPER_FUND,
 } from "@percolator/sdk";
+import { sendTx } from "@/lib/tx";
 
 const KEEPER_FUND_MAGIC = 0x4B454550_46554E44n;
 
@@ -132,17 +133,8 @@ export function useKeeperFund(slabAddress?: string) {
       ]);
       const ix = buildIx({ programId: progPubkey, keys, data });
 
-      const tx = new Transaction().add(
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
-        ix,
-      );
-      tx.feePayer = wallet.publicKey;
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      tx.recentBlockhash = blockhash;
-
-      const signed = await wallet.signTransaction(tx);
-      const sig = await connection.sendRawTransaction(signed.serialize());
-      await connection.confirmTransaction(sig, "confirmed");
+      // Use sendTx which handles Lighthouse/Blowfish 0x1900 retry with skipPreflight
+      const sig = await sendTx({ connection, wallet, instructions: [ix], computeUnits: 100_000 });
 
       // Refresh state after top-up
       await refresh();
