@@ -55,11 +55,8 @@ export const IX_TAG = {
   ReclaimEmptyAccount: 25,
   SettleAccount: 26,
   // Tags 27-28: on-chain = DepositFeeCredits/ConvertReleasedPnl.
-  // Legacy aliases (PauseMarket/UnpauseMarket) kept — those instructions don't exist on-chain.
   DepositFeeCredits: 27,
-  /** @deprecated No on-chain PauseMarket instruction */ PauseMarket: 27,
   ConvertReleasedPnl: 28,
-  /** @deprecated No on-chain UnpauseMarket instruction */ UnpauseMarket: 28,
   // Tags 29-30: on-chain = ResolvePermissionless/ForceCloseResolved.
   ResolvePermissionless: 29,
   /** @deprecated Use ResolvePermissionless */ AcceptAdmin: 29,
@@ -147,6 +144,12 @@ export const IX_TAG = {
   SetDexPool: 74,
   /** CPI to the matcher program to initialize a matcher context account for an LP slot. Admin-only. */
   InitMatcherCtx: 75,
+  /** PauseMarket (tag 76): admin emergency pause. Blocks Trade/Deposit/Withdraw/InitUser. */
+  PauseMarket: 76,
+  /** UnpauseMarket (tag 77): admin unpause. Re-enables all operations. */
+  UnpauseMarket: 77,
+  /** CloseKeeperFund (tag 78): close keeper fund PDA and recover lamports to admin. */
+  CloseKeeperFund: 78,
 } as const;
 Object.freeze(IX_TAG);
 
@@ -1763,6 +1766,11 @@ export function encodeCloseOrphanSlab(): Uint8Array {
 /** SetDexPool (tag 74): pool pubkey */
 export function encodeSetDexPool(args: { pool: PublicKey | string }): Uint8Array {
   return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
+}
+
+/** CloseKeeperFund (tag 78): no args. Accounts: [admin(signer,writable), slab, keeper_fund_pda(writable)] */
+export function encodeCloseKeeperFund(): Uint8Array {
+  return concatBytes(encU8(IX_TAG.CloseKeeperFund));
 }
 
 // Insurance LP — aliases for LP Vault instructions (tags 37/38/39).

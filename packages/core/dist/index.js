@@ -134,13 +134,8 @@ var IX_TAG = {
   ReclaimEmptyAccount: 25,
   SettleAccount: 26,
   // Tags 27-28: on-chain = DepositFeeCredits/ConvertReleasedPnl.
-  // Legacy aliases (PauseMarket/UnpauseMarket) kept — those instructions don't exist on-chain.
   DepositFeeCredits: 27,
-  /** @deprecated No on-chain PauseMarket instruction */
-  PauseMarket: 27,
   ConvertReleasedPnl: 28,
-  /** @deprecated No on-chain UnpauseMarket instruction */
-  UnpauseMarket: 28,
   // Tags 29-30: on-chain = ResolvePermissionless/ForceCloseResolved.
   ResolvePermissionless: 29,
   /** @deprecated Use ResolvePermissionless */
@@ -228,7 +223,13 @@ var IX_TAG = {
   /** PERC-SetDexPool: Pin admin-approved DEX pool address for a HYPERP market (admin). */
   SetDexPool: 74,
   /** CPI to the matcher program to initialize a matcher context account for an LP slot. Admin-only. */
-  InitMatcherCtx: 75
+  InitMatcherCtx: 75,
+  /** PauseMarket (tag 76): admin emergency pause. Blocks Trade/Deposit/Withdraw/InitUser. */
+  PauseMarket: 76,
+  /** UnpauseMarket (tag 77): admin unpause. Re-enables all operations. */
+  UnpauseMarket: 77,
+  /** CloseKeeperFund (tag 78): close keeper fund PDA and recover lamports to admin. */
+  CloseKeeperFund: 78
 };
 Object.freeze(IX_TAG);
 var HEX_RE = /^[0-9a-fA-F]{64}$/;
@@ -726,6 +727,9 @@ function encodeCloseOrphanSlab() {
 }
 function encodeSetDexPool(args) {
   return concatBytes(encU8(IX_TAG.SetDexPool), encPubkey(args.pool));
+}
+function encodeCloseKeeperFund() {
+  return concatBytes(encU8(IX_TAG.CloseKeeperFund));
 }
 function encodeCreateInsuranceMint() {
   return encodeCreateLpVault({ feeShareBps: 0n });
@@ -3020,7 +3024,7 @@ import { PublicKey as PublicKey6 } from "@solana/web3.js";
 // src/solana/static-markets.ts
 import { PublicKey as PublicKey5 } from "@solana/web3.js";
 var MAINNET_MARKETS = [
-  { slabAddress: "CBMzT1jxdmFnhT9UiHbgDkFhdsCuKwYSGXxcE8NnFFBn", symbol: "SOL-PERP", name: "SOL/USDC Perpetual" }
+  { slabAddress: "8NY7rvQJXNTinJkAQG1GUV8NQ1hQzdtF7iWNjK9p7tQN", symbol: "SOL-PERP", name: "SOL/USDC Perpetual" }
 ];
 var DEVNET_MARKETS = [
   // Populated from prior discoverMarkets() runs on devnet.
@@ -3941,7 +3945,7 @@ var PROGRAM_IDS = {
     matcher: "GTRgyTDfrMvBubALAqtHuQwT8tbGyXid7svXZKtWfC9k"
   },
   mainnet: {
-    percolator: "GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24",
+    percolator: "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
     matcher: "DHP6DtwXP1yJsz8YzfoeigRFPB979gzmumkmCxDLSkUX"
   }
 };
@@ -5326,6 +5330,7 @@ export {
   encodeClaimQueuedWithdrawal,
   encodeClearPendingSettlement,
   encodeCloseAccount,
+  encodeCloseKeeperFund,
   encodeCloseOrphanSlab,
   encodeCloseSlab,
   encodeCloseStaleSlabs,
