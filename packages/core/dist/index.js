@@ -1653,7 +1653,13 @@ var V12_1_ACCT_FEE_CREDITS_OFF = 240;
 var V12_1_ACCT_LAST_FEE_SLOT_OFF = 256;
 var V12_1_ACCT_POSITION_SIZE_OFF = 88;
 var V12_1_ACCT_ENTRY_PRICE_OFF = -1;
-var V12_1_ACCT_FUNDING_INDEX_OFF = -1;
+var V12_1_EP_SBF_ACCOUNT_SIZE = 288;
+var V12_1_EP_ACCT_ENTRY_PRICE_OFF = 144;
+var V12_1_EP_ACCT_MATCHER_PROGRAM_OFF = 152;
+var V12_1_EP_ACCT_MATCHER_CONTEXT_OFF = 184;
+var V12_1_EP_ACCT_OWNER_OFF = 216;
+var V12_1_EP_ACCT_FEE_CREDITS_OFF = 248;
+var V12_1_EP_ACCT_LAST_FEE_SLOT_OFF = 264;
 var V1M_ENGINE_OFF = 640;
 var V1M_CONFIG_LEN = 536;
 var V1M_ACCOUNT_SIZE = 248;
@@ -1736,6 +1742,14 @@ for (const [, n] of [["Micro", 64], ["Small", 256], ["Medium", 1024], ["Large", 
   const accountsOff = Math.ceil(preAccLen / 8) * 8;
   const total = V12_1_SBF_ENGINE_OFF + accountsOff + n * V12_1_SBF_ACCOUNT_SIZE;
   V12_1_SIZES.set(total, n);
+}
+var V12_1_EP_SIZES = /* @__PURE__ */ new Map();
+for (const [, n] of [["Micro", 64], ["Small", 256], ["Medium", 1024], ["Large", 4096]]) {
+  const bitmapBytes = Math.ceil(n / 64) * 8;
+  const preAccLen = V12_1_SBF_BITMAP_OFF + bitmapBytes + 18 + n * 2;
+  const accountsOff = Math.ceil(preAccLen / 8) * 8;
+  const total = V12_1_SBF_ENGINE_OFF + accountsOff + n * V12_1_EP_SBF_ACCOUNT_SIZE;
+  V12_1_EP_SIZES.set(total, n);
 }
 var SLAB_TIERS_V2 = {
   small: { maxAccounts: 256, dataSize: 65088, label: "Small", description: "256 slots (V2 BPF intermediate)" },
@@ -2338,7 +2352,74 @@ function buildLayoutV12_1(maxAccounts, dataLen) {
     engineInsuranceIsolationBpsOff: isSbf ? -1 : 64
   };
 }
+function buildLayoutV12_1EP(maxAccounts) {
+  const engineOff = V12_1_SBF_ENGINE_OFF;
+  const bitmapOff = V12_1_SBF_BITMAP_OFF;
+  const accountSize = V12_1_EP_SBF_ACCOUNT_SIZE;
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const bitmapBytes = bitmapWords * 8;
+  const postBitmap = 18;
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
+  return {
+    version: 1,
+    headerLen: 72,
+    configOffset: 72,
+    configLen: 544,
+    reservedOff: 80,
+    // V1_RESERVED_OFF
+    engineOff,
+    accountSize,
+    maxAccounts,
+    bitmapWords,
+    accountsOff: engineOff + accountsOffRel,
+    engineInsuranceOff: 16,
+    engineParamsOff: 32,
+    // V12_1_ENGINE_PARAMS_OFF_SBF
+    paramsSize: 184,
+    // V12_1_PARAMS_SIZE_SBF
+    // Engine offsets identical to V12_1 SBF
+    engineCurrentSlotOff: V12_1_SBF_OFF_CURRENT_SLOT,
+    engineFundingIndexOff: -1,
+    engineLastFundingSlotOff: -1,
+    engineFundingRateBpsOff: V12_1_SBF_OFF_FUNDING_RATE,
+    engineMarkPriceOff: V12_1_SBF_OFF_MARK_PRICE_E6,
+    engineLastCrankSlotOff: V12_1_SBF_OFF_LAST_CRANK_SLOT,
+    engineMaxCrankStalenessOff: V12_1_SBF_OFF_MAX_CRANK_STALENESS,
+    engineTotalOiOff: V12_1_SBF_OFF_TOTAL_OI,
+    engineLongOiOff: V12_1_SBF_OFF_LONG_OI,
+    engineShortOiOff: V12_1_SBF_OFF_SHORT_OI,
+    engineCTotOff: V12_1_SBF_OFF_C_TOT,
+    enginePnlPosTotOff: V12_1_SBF_OFF_PNL_POS_TOT,
+    engineLiqCursorOff: V12_1_SBF_OFF_LIQ_CURSOR,
+    engineGcCursorOff: V12_1_SBF_OFF_GC_CURSOR,
+    engineLastSweepStartOff: V12_1_SBF_OFF_LAST_SWEEP_START,
+    engineLastSweepCompleteOff: V12_1_SBF_OFF_LAST_SWEEP_COMPLETE,
+    engineCrankCursorOff: V12_1_SBF_OFF_CRANK_CURSOR,
+    engineSweepStartIdxOff: V12_1_SBF_OFF_SWEEP_START_IDX,
+    engineLifetimeLiquidationsOff: V12_1_SBF_OFF_LIFETIME_LIQUIDATIONS,
+    engineLifetimeForceClosesOff: -1,
+    engineNetLpPosOff: -1,
+    engineLpSumAbsOff: -1,
+    engineLpMaxAbsOff: -1,
+    engineLpMaxAbsSweepOff: -1,
+    engineEmergencyOiModeOff: -1,
+    engineEmergencyStartSlotOff: -1,
+    engineLastBreakerSlotOff: -1,
+    engineBitmapOff: bitmapOff,
+    postBitmap: 18,
+    // Account offsets — shifted +8 from V12_1 due to entry_price insertion
+    acctOwnerOff: V12_1_EP_ACCT_OWNER_OFF,
+    // 216 (was 208)
+    hasInsuranceIsolation: false,
+    engineInsuranceIsolatedOff: -1,
+    engineInsuranceIsolationBpsOff: -1
+  };
+}
 function detectSlabLayout(dataLen, data) {
+  const v121epn = V12_1_EP_SIZES.get(dataLen);
+  if (v121epn !== void 0) return buildLayoutV12_1EP(v121epn);
   const v121n = V12_1_SIZES.get(dataLen);
   if (v121n !== void 0) return buildLayoutV12_1(v121n, dataLen);
   const vsdpn = V_SETDEXPOOL_SIZES.get(dataLen);
@@ -2787,17 +2868,18 @@ function parseAccount(data, idx) {
   if (data.length < base + layout.accountSize) {
     throw new Error("Slab data too short for account");
   }
-  const isV12_1 = (layout.engineOff === V12_1_ENGINE_OFF || layout.engineOff === V12_1_SBF_ENGINE_OFF) && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
-  const isAdl = layout.accountSize >= 312 || isV12_1;
+  const isV12_1EP = layout.accountSize === V12_1_EP_SBF_ACCOUNT_SIZE && layout.engineOff === V12_1_SBF_ENGINE_OFF;
+  const isV12_1 = !isV12_1EP && (layout.engineOff === V12_1_ENGINE_OFF || layout.engineOff === V12_1_SBF_ENGINE_OFF) && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
+  const isAdl = layout.accountSize >= 312 || isV12_1 || isV12_1EP;
   const warmupStartedOff = isAdl ? V_ADL_ACCT_WARMUP_STARTED_OFF : ACCT_WARMUP_STARTED_OFF;
   const warmupSlopeOff = isAdl ? V_ADL_ACCT_WARMUP_SLOPE_OFF : ACCT_WARMUP_SLOPE_OFF;
-  const positionSizeOff = isV12_1 ? V12_1_ACCT_POSITION_SIZE_OFF : isAdl ? V_ADL_ACCT_POSITION_SIZE_OFF : ACCT_POSITION_SIZE_OFF;
-  const entryPriceOff = isV12_1 ? V12_1_ACCT_ENTRY_PRICE_OFF : isAdl ? V_ADL_ACCT_ENTRY_PRICE_OFF : ACCT_ENTRY_PRICE_OFF;
-  const fundingIndexOff = isV12_1 ? V12_1_ACCT_FUNDING_INDEX_OFF : isAdl ? V_ADL_ACCT_FUNDING_INDEX_OFF : ACCT_FUNDING_INDEX_OFF;
-  const matcherProgOff = isV12_1 ? V12_1_ACCT_MATCHER_PROGRAM_OFF : isAdl ? V_ADL_ACCT_MATCHER_PROGRAM_OFF : ACCT_MATCHER_PROGRAM_OFF;
-  const matcherCtxOff = isV12_1 ? V12_1_ACCT_MATCHER_CONTEXT_OFF : isAdl ? V_ADL_ACCT_MATCHER_CONTEXT_OFF : ACCT_MATCHER_CONTEXT_OFF;
-  const feeCreditsOff = isV12_1 ? V12_1_ACCT_FEE_CREDITS_OFF : isAdl ? V_ADL_ACCT_FEE_CREDITS_OFF : ACCT_FEE_CREDITS_OFF;
-  const lastFeeSlotOff = isV12_1 ? V12_1_ACCT_LAST_FEE_SLOT_OFF : isAdl ? V_ADL_ACCT_LAST_FEE_SLOT_OFF : ACCT_LAST_FEE_SLOT_OFF;
+  const positionSizeOff = isV12_1 || isV12_1EP ? V12_1_ACCT_POSITION_SIZE_OFF : isAdl ? V_ADL_ACCT_POSITION_SIZE_OFF : ACCT_POSITION_SIZE_OFF;
+  const entryPriceOff = isV12_1EP ? V12_1_EP_ACCT_ENTRY_PRICE_OFF : isV12_1 ? V12_1_ACCT_ENTRY_PRICE_OFF : isAdl ? V_ADL_ACCT_ENTRY_PRICE_OFF : ACCT_ENTRY_PRICE_OFF;
+  const fundingIndexOff = isV12_1 || isV12_1EP ? -1 : isAdl ? V_ADL_ACCT_FUNDING_INDEX_OFF : ACCT_FUNDING_INDEX_OFF;
+  const matcherProgOff = isV12_1EP ? V12_1_EP_ACCT_MATCHER_PROGRAM_OFF : isV12_1 ? V12_1_ACCT_MATCHER_PROGRAM_OFF : isAdl ? V_ADL_ACCT_MATCHER_PROGRAM_OFF : ACCT_MATCHER_PROGRAM_OFF;
+  const matcherCtxOff = isV12_1EP ? V12_1_EP_ACCT_MATCHER_CONTEXT_OFF : isV12_1 ? V12_1_ACCT_MATCHER_CONTEXT_OFF : isAdl ? V_ADL_ACCT_MATCHER_CONTEXT_OFF : ACCT_MATCHER_CONTEXT_OFF;
+  const feeCreditsOff = isV12_1EP ? V12_1_EP_ACCT_FEE_CREDITS_OFF : isV12_1 ? V12_1_ACCT_FEE_CREDITS_OFF : isAdl ? V_ADL_ACCT_FEE_CREDITS_OFF : ACCT_FEE_CREDITS_OFF;
+  const lastFeeSlotOff = isV12_1EP ? V12_1_EP_ACCT_LAST_FEE_SLOT_OFF : isV12_1 ? V12_1_ACCT_LAST_FEE_SLOT_OFF : isAdl ? V_ADL_ACCT_LAST_FEE_SLOT_OFF : ACCT_LAST_FEE_SLOT_OFF;
   const kindByte = readU8(data, base + ACCT_KIND_OFF);
   const kind = kindByte === 1 ? 1 /* LP */ : 0 /* User */;
   return {
@@ -2810,9 +2892,8 @@ function parseAccount(data, idx) {
     warmupSlopePerStep: readU128LE(data, base + warmupSlopeOff),
     positionSize: readI128LE(data, base + positionSizeOff),
     entryPrice: entryPriceOff >= 0 ? readU64LE(data, base + entryPriceOff) : 0n,
-    // V12_1: entry_price removed
-    // V12_1 changed funding_index from i128 to i64 (legacy field moved to end of account)
-    fundingIndex: isV12_1 ? BigInt(readI64LE(data, base + fundingIndexOff)) : readI128LE(data, base + fundingIndexOff),
+    // V12_1/V12_1_EP: funding_index not present in SBF layout
+    fundingIndex: isV12_1 || isV12_1EP ? fundingIndexOff >= 0 ? BigInt(readI64LE(data, base + fundingIndexOff)) : 0n : readI128LE(data, base + fundingIndexOff),
     matcherProgram: new PublicKey3(data.subarray(base + matcherProgOff, base + matcherProgOff + 32)),
     matcherContext: new PublicKey3(data.subarray(base + matcherCtxOff, base + matcherCtxOff + 32)),
     owner: new PublicKey3(data.subarray(base + layout.acctOwnerOff, base + layout.acctOwnerOff + 32)),

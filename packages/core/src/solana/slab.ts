@@ -490,15 +490,23 @@ const V12_1_ACCT_MATCHER_CONTEXT_OFF = 176; // was 160 in V_ADL (+16 from new AD
 const V12_1_ACCT_OWNER_OFF = 208;           // was 192 in V_ADL (+16 from new ADL fields)
 const V12_1_ACCT_FEE_CREDITS_OFF = 240;     // was 224 in V_ADL
 const V12_1_ACCT_LAST_FEE_SLOT_OFF = 256;   // was 240 in V_ADL
-// SBF offsets (empirically verified via repr(C) with u128 align=8):
-// position_basis_q is at offset 88 on SBF (between warmup_slope_per_step and adl_a_basis)
-// entry_price was removed in V12_1 but re-added alongside ADL fields in the latest build.
-// After re-add: adl_epoch_snap(u64@136) + entry_price(u64@144) → matcher_program shifts to 152.
-// For deployed slabs WITHOUT entry_price (pre re-add), offset is -1.
-// For new slabs WITH entry_price, offset is 144 (after adl_epoch_snap).
 const V12_1_ACCT_POSITION_SIZE_OFF = 88;     // position_basis_q: i128 at offset 88 (SBF)
-const V12_1_ACCT_ENTRY_PRICE_OFF = -1;       // -1 for pre-re-add slabs; 144 for new builds
-const V12_1_ACCT_FUNDING_INDEX_OFF = -1;     // does not exist in SBF layout (was 288 = OOB for 280-byte accounts)
+const V12_1_ACCT_ENTRY_PRICE_OFF = -1;       // -1 for old V12_1 slabs (280-byte accounts)
+const V12_1_ACCT_FUNDING_INDEX_OFF = -1;     // does not exist in SBF layout
+
+// ---- V12_1_EP: V12_1 with entry_price re-added (accountSize=288 on SBF, 304 on host) ----
+// entry_price(u64) inserted after adl_epoch_snap, shifting matcher/owner/fees +8.
+// SBF layout (u128 align=8):
+//   ...adl_epoch_snap(u64@136) → entry_price(u64@144) → matcher_program(@152)
+//   → matcher_context(@184) → owner(@216) → fee_credits(@248) → last_fee_slot(@264)
+//   → fees_earned_total(@272) = 288 bytes
+const V12_1_EP_SBF_ACCOUNT_SIZE = 288;
+const V12_1_EP_ACCT_ENTRY_PRICE_OFF = 144;
+const V12_1_EP_ACCT_MATCHER_PROGRAM_OFF = 152;
+const V12_1_EP_ACCT_MATCHER_CONTEXT_OFF = 184;
+const V12_1_EP_ACCT_OWNER_OFF = 216;
+const V12_1_EP_ACCT_FEE_CREDITS_OFF = 248;
+const V12_1_EP_ACCT_LAST_FEE_SLOT_OFF = 264;
 
 // ---- V1M layout constants (mainnet-deployed V1 program, ESa89R5) ----
 // The mainnet program has a LARGER RiskParams (336 bytes vs V1's 288) and 22 extra
@@ -679,6 +687,15 @@ for (const [, n] of [["Micro", 64], ["Small", 256], ["Medium", 1024], ["Large", 
   const accountsOff = Math.ceil(preAccLen / 8) * 8;
   const total = V12_1_SBF_ENGINE_OFF + accountsOff + n * V12_1_SBF_ACCOUNT_SIZE;
   V12_1_SIZES.set(total, n);
+}
+// V12_1_EP: entry_price re-added, accountSize=288 on SBF. Same engineOff/bitmapOff.
+const V12_1_EP_SIZES = new Map<number, number>();
+for (const [, n] of [["Micro", 64], ["Small", 256], ["Medium", 1024], ["Large", 4096]] as const) {
+  const bitmapBytes = Math.ceil(n / 64) * 8;
+  const preAccLen = V12_1_SBF_BITMAP_OFF + bitmapBytes + 18 + n * 2;
+  const accountsOff = Math.ceil(preAccLen / 8) * 8;
+  const total = V12_1_SBF_ENGINE_OFF + accountsOff + n * V12_1_EP_SBF_ACCOUNT_SIZE;
+  V12_1_EP_SIZES.set(total, n);
 }
 
 /**
@@ -1324,6 +1341,74 @@ function buildLayoutV12_1(maxAccounts: number, dataLen?: number): SlabLayout {
 }
 
 /**
+ * V12_1 with entry_price re-added (SBF only, accountSize=288).
+ * Same engine layout as V12_1 SBF, but account offsets shift +8 after entry_price.
+ */
+function buildLayoutV12_1EP(maxAccounts: number): SlabLayout {
+  const engineOff = V12_1_SBF_ENGINE_OFF; // 616
+  const bitmapOff = V12_1_SBF_BITMAP_OFF; // 584
+  const accountSize = V12_1_EP_SBF_ACCOUNT_SIZE; // 288
+  const bitmapWords = Math.ceil(maxAccounts / 64);
+  const bitmapBytes = bitmapWords * 8;
+  const postBitmap = 18;
+  const nextFreeBytes = maxAccounts * 2;
+  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
+
+  return {
+    version: 1,
+    headerLen: 72,
+    configOffset: 72,
+    configLen: 544,
+    reservedOff: 80, // V1_RESERVED_OFF
+    engineOff,
+    accountSize,
+    maxAccounts,
+    bitmapWords,
+    accountsOff: engineOff + accountsOffRel,
+
+    engineInsuranceOff: 16,
+    engineParamsOff: 32, // V12_1_ENGINE_PARAMS_OFF_SBF
+    paramsSize: 184, // V12_1_PARAMS_SIZE_SBF
+    // Engine offsets identical to V12_1 SBF
+    engineCurrentSlotOff: V12_1_SBF_OFF_CURRENT_SLOT,
+    engineFundingIndexOff: -1,
+    engineLastFundingSlotOff: -1,
+    engineFundingRateBpsOff: V12_1_SBF_OFF_FUNDING_RATE,
+    engineMarkPriceOff: V12_1_SBF_OFF_MARK_PRICE_E6,
+    engineLastCrankSlotOff: V12_1_SBF_OFF_LAST_CRANK_SLOT,
+    engineMaxCrankStalenessOff: V12_1_SBF_OFF_MAX_CRANK_STALENESS,
+    engineTotalOiOff: V12_1_SBF_OFF_TOTAL_OI,
+    engineLongOiOff: V12_1_SBF_OFF_LONG_OI,
+    engineShortOiOff: V12_1_SBF_OFF_SHORT_OI,
+    engineCTotOff: V12_1_SBF_OFF_C_TOT,
+    enginePnlPosTotOff: V12_1_SBF_OFF_PNL_POS_TOT,
+    engineLiqCursorOff: V12_1_SBF_OFF_LIQ_CURSOR,
+    engineGcCursorOff: V12_1_SBF_OFF_GC_CURSOR,
+    engineLastSweepStartOff: V12_1_SBF_OFF_LAST_SWEEP_START,
+    engineLastSweepCompleteOff: V12_1_SBF_OFF_LAST_SWEEP_COMPLETE,
+    engineCrankCursorOff: V12_1_SBF_OFF_CRANK_CURSOR,
+    engineSweepStartIdxOff: V12_1_SBF_OFF_SWEEP_START_IDX,
+    engineLifetimeLiquidationsOff: V12_1_SBF_OFF_LIFETIME_LIQUIDATIONS,
+    engineLifetimeForceClosesOff: -1,
+    engineNetLpPosOff: -1,
+    engineLpSumAbsOff: -1,
+    engineLpMaxAbsOff: -1,
+    engineLpMaxAbsSweepOff: -1,
+    engineEmergencyOiModeOff: -1,
+    engineEmergencyStartSlotOff: -1,
+    engineLastBreakerSlotOff: -1,
+    engineBitmapOff: bitmapOff,
+    postBitmap: 18,
+    // Account offsets — shifted +8 from V12_1 due to entry_price insertion
+    acctOwnerOff: V12_1_EP_ACCT_OWNER_OFF, // 216 (was 208)
+    hasInsuranceIsolation: false,
+    engineInsuranceIsolatedOff: -1,
+    engineInsuranceIsolationBpsOff: -1,
+  };
+}
+
+/**
  * Detect the slab layout version from the raw account data length.
  * Returns the full SlabLayout descriptor, or null if the size is unrecognised.
  * Checks V12_1, V_SETDEXPOOL, V1M2, V_ADL, V1M, V0, V1D, V1D-legacy, V1, and V1-legacy sizes.
@@ -1336,8 +1421,12 @@ function buildLayoutV12_1(maxAccounts: number, dataLen?: number): SlabLayout {
  * @param data    - Optional raw slab data for version-field disambiguation
  */
 export function detectSlabLayout(dataLen: number, data?: Uint8Array): SlabLayout | null {
-  // Check V12_1 sizes first (percolator-core v12.1, ACCOUNT_SIZE=320, BITMAP_OFF=1016).
-  // Largest account size — no size collision with any earlier layout.
+  // Check V12_1_EP sizes first (entry_price re-added, ACCOUNT_SIZE=288 on SBF).
+  // Must be checked before V12_1 (280-byte accounts) to avoid misdetection.
+  const v121epn = V12_1_EP_SIZES.get(dataLen);
+  if (v121epn !== undefined) return buildLayoutV12_1EP(v121epn);
+
+  // Check V12_1 sizes (percolator-core v12.1, ACCOUNT_SIZE=320/280, no entry_price).
   const v121n = V12_1_SIZES.get(dataLen);
   if (v121n !== undefined) return buildLayoutV12_1(v121n, dataLen);
 
@@ -2183,17 +2272,19 @@ export function parseAccount(data: Uint8Array, idx: number): Account {
   // Pre-ADL (account_size<312): original offsets.
   // V12_1: engineOff=648 + bitmapOff(rel)=368. Detect by engineOff (most reliable).
   // Account is 320 on aarch64, 280 on SBF — accountSize alone is ambiguous.
-  const isV12_1 = (layout.engineOff === V12_1_ENGINE_OFF || layout.engineOff === V12_1_SBF_ENGINE_OFF) && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
-  const isAdl = layout.accountSize >= 312 || isV12_1;
+  // V12_1_EP: entry_price re-added, accountSize=288 on SBF. All offsets after entry_price shift +8.
+  const isV12_1EP = layout.accountSize === V12_1_EP_SBF_ACCOUNT_SIZE && layout.engineOff === V12_1_SBF_ENGINE_OFF;
+  const isV12_1 = !isV12_1EP && (layout.engineOff === V12_1_ENGINE_OFF || layout.engineOff === V12_1_SBF_ENGINE_OFF) && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
+  const isAdl = layout.accountSize >= 312 || isV12_1 || isV12_1EP;
   const warmupStartedOff = isAdl ? V_ADL_ACCT_WARMUP_STARTED_OFF : ACCT_WARMUP_STARTED_OFF;
   const warmupSlopeOff   = isAdl ? V_ADL_ACCT_WARMUP_SLOPE_OFF   : ACCT_WARMUP_SLOPE_OFF;
-  const positionSizeOff  = isV12_1 ? V12_1_ACCT_POSITION_SIZE_OFF : (isAdl ? V_ADL_ACCT_POSITION_SIZE_OFF : ACCT_POSITION_SIZE_OFF);
-  const entryPriceOff    = isV12_1 ? V12_1_ACCT_ENTRY_PRICE_OFF   : (isAdl ? V_ADL_ACCT_ENTRY_PRICE_OFF   : ACCT_ENTRY_PRICE_OFF);
-  const fundingIndexOff  = isV12_1 ? V12_1_ACCT_FUNDING_INDEX_OFF : (isAdl ? V_ADL_ACCT_FUNDING_INDEX_OFF : ACCT_FUNDING_INDEX_OFF);
-  const matcherProgOff   = isV12_1 ? V12_1_ACCT_MATCHER_PROGRAM_OFF : (isAdl ? V_ADL_ACCT_MATCHER_PROGRAM_OFF : ACCT_MATCHER_PROGRAM_OFF);
-  const matcherCtxOff    = isV12_1 ? V12_1_ACCT_MATCHER_CONTEXT_OFF : (isAdl ? V_ADL_ACCT_MATCHER_CONTEXT_OFF : ACCT_MATCHER_CONTEXT_OFF);
-  const feeCreditsOff    = isV12_1 ? V12_1_ACCT_FEE_CREDITS_OFF   : (isAdl ? V_ADL_ACCT_FEE_CREDITS_OFF   : ACCT_FEE_CREDITS_OFF);
-  const lastFeeSlotOff   = isV12_1 ? V12_1_ACCT_LAST_FEE_SLOT_OFF : (isAdl ? V_ADL_ACCT_LAST_FEE_SLOT_OFF : ACCT_LAST_FEE_SLOT_OFF);
+  const positionSizeOff  = (isV12_1 || isV12_1EP) ? V12_1_ACCT_POSITION_SIZE_OFF : (isAdl ? V_ADL_ACCT_POSITION_SIZE_OFF : ACCT_POSITION_SIZE_OFF);
+  const entryPriceOff    = isV12_1EP ? V12_1_EP_ACCT_ENTRY_PRICE_OFF : (isV12_1 ? V12_1_ACCT_ENTRY_PRICE_OFF : (isAdl ? V_ADL_ACCT_ENTRY_PRICE_OFF : ACCT_ENTRY_PRICE_OFF));
+  const fundingIndexOff  = (isV12_1 || isV12_1EP) ? -1 : (isAdl ? V_ADL_ACCT_FUNDING_INDEX_OFF : ACCT_FUNDING_INDEX_OFF);
+  const matcherProgOff   = isV12_1EP ? V12_1_EP_ACCT_MATCHER_PROGRAM_OFF : (isV12_1 ? V12_1_ACCT_MATCHER_PROGRAM_OFF : (isAdl ? V_ADL_ACCT_MATCHER_PROGRAM_OFF : ACCT_MATCHER_PROGRAM_OFF));
+  const matcherCtxOff    = isV12_1EP ? V12_1_EP_ACCT_MATCHER_CONTEXT_OFF : (isV12_1 ? V12_1_ACCT_MATCHER_CONTEXT_OFF : (isAdl ? V_ADL_ACCT_MATCHER_CONTEXT_OFF : ACCT_MATCHER_CONTEXT_OFF));
+  const feeCreditsOff    = isV12_1EP ? V12_1_EP_ACCT_FEE_CREDITS_OFF : (isV12_1 ? V12_1_ACCT_FEE_CREDITS_OFF : (isAdl ? V_ADL_ACCT_FEE_CREDITS_OFF : ACCT_FEE_CREDITS_OFF));
+  const lastFeeSlotOff   = isV12_1EP ? V12_1_EP_ACCT_LAST_FEE_SLOT_OFF : (isV12_1 ? V12_1_ACCT_LAST_FEE_SLOT_OFF : (isAdl ? V_ADL_ACCT_LAST_FEE_SLOT_OFF : ACCT_LAST_FEE_SLOT_OFF));
 
   const kindByte = readU8(data, base + ACCT_KIND_OFF);
   const kind = kindByte === 1 ? AccountKind.LP : AccountKind.User;
@@ -2207,9 +2298,9 @@ export function parseAccount(data: Uint8Array, idx: number): Account {
     warmupStartedAtSlot: readU64LE(data, base + warmupStartedOff),
     warmupSlopePerStep: readU128LE(data, base + warmupSlopeOff),
     positionSize: readI128LE(data, base + positionSizeOff),
-    entryPrice: entryPriceOff >= 0 ? readU64LE(data, base + entryPriceOff) : 0n, // V12_1: entry_price removed
-    // V12_1 changed funding_index from i128 to i64 (legacy field moved to end of account)
-    fundingIndex: isV12_1 ? BigInt(readI64LE(data, base + fundingIndexOff)) : readI128LE(data, base + fundingIndexOff),
+    entryPrice: entryPriceOff >= 0 ? readU64LE(data, base + entryPriceOff) : 0n,
+    // V12_1/V12_1_EP: funding_index not present in SBF layout
+    fundingIndex: (isV12_1 || isV12_1EP) ? (fundingIndexOff >= 0 ? BigInt(readI64LE(data, base + fundingIndexOff)) : 0n) : readI128LE(data, base + fundingIndexOff),
     matcherProgram: new PublicKey(data.subarray(base + matcherProgOff, base + matcherProgOff + 32)),
     matcherContext: new PublicKey(data.subarray(base + matcherCtxOff, base + matcherCtxOff + 32)),
     owner: new PublicKey(data.subarray(base + layout.acctOwnerOff, base + layout.acctOwnerOff + 32)),
