@@ -26,6 +26,7 @@ import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsd } from "@/lib/format";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 
 const LEVERAGE_SNAP_POINTS = [1, 2, 5, 10, 20];
 const MARGIN_PRESETS = [25, 50, 75, 100];
@@ -258,13 +259,17 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const openPositionSize = existingPosition;
   const hasOpenPosition = openPositionSize !== 0n;
   const isOpenLong = openPositionSize > 0n;
-  const openEntryPriceE6 = userAccount?.account.entryPrice ?? 0n;
+  const rawOpenEntryPrice = userAccount?.account.entryPrice ?? 0n;
+  // V12_1: entry_price removed from on-chain struct. Fall back to saved entry price.
+  const savedOpenEntryPrice = rawOpenEntryPrice > 0n ? 0n : (userAccount ? getEntryPrice(slabAddress, userAccount.idx) : 0n);
+  const openEntryPriceE6 = rawOpenEntryPrice > 0n ? rawOpenEntryPrice : (savedOpenEntryPrice > 0n ? savedOpenEntryPrice : 0n);
   const openCapital = userAccount?.account.capital ?? 0n;
-  const openLiqPriceE6 = hasOpenPosition
+  const openLiqPriceE6 = hasOpenPosition && openEntryPriceE6 > 0n
     ? computeLiqPrice(openEntryPriceE6, openCapital, openPositionSize, maintenanceMarginBps)
     : 0n;
-  const openPnlTokens = hasOpenPosition && livePriceE6 && livePriceE6 > 0n && openEntryPriceE6 > 0n
-    ? computeMarkPnl(openPositionSize, openEntryPriceE6, livePriceE6)
+  const resolvedOpenEntry = openEntryPriceE6 > 0n ? openEntryPriceE6 : 0n;
+  const openPnlTokens = hasOpenPosition && livePriceE6 && livePriceE6 > 0n && resolvedOpenEntry > 0n
+    ? computeMarkPnl(openPositionSize, resolvedOpenEntry, livePriceE6)
     : (userAccount?.account.pnl ?? 0n);
   const openPnlPercent = hasOpenPosition ? computePnlPercent(openPnlTokens, openCapital) : 0;
   // Liq danger: within 20% of mark
@@ -411,6 +416,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setTradePhase("confirming");
       setLastSig(sig ?? null);
       setMarginInput("");
+      // V12_1: entry_price removed from on-chain struct. Save mark price at
+      // trade time so the frontend can compute unrealized PnL.
+      if (livePriceE6 && livePriceE6 > 0n && userAccount) {
+        saveEntryPrice(slabAddress, userAccount.idx, livePriceE6);
+      }
       // GH#trading-race: Single delayed refresh — give the on-chain state
       // time to settle before re-polling. Avoids the double-refresh that
       // causes provider state thrashing and modal flicker.
@@ -828,9 +838,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           oracleStale={oracleStale && !mockMode}
           onConfirm={async (percent) => {
             await closePosition(percent);
+            // Clear saved entry price on full close
+            if (percent === 100 && userAccount) {
+              clearEntryPrice(slabAddress, userAccount.idx);
+            }
             // Delay modal close until after slab refresh settles.
-            // Closing immediately causes a flash as hasOpenPosition flips
-            // during the refresh, unmounting/remounting the component.
             refreshSlab();
             setTimeout(() => { setShowCloseModal(false); refreshSlab(); }, 1500);
           }}

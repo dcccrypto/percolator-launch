@@ -1615,6 +1615,10 @@ var V12_1_SBF_OFF_LAST_SWEEP_COMPLETE = 312;
 var V12_1_SBF_OFF_CRANK_CURSOR = 320;
 var V12_1_SBF_OFF_SWEEP_START_IDX = 322;
 var V12_1_SBF_OFF_LIFETIME_LIQUIDATIONS = 328;
+var V12_1_SBF_OFF_TOTAL_OI = 448;
+var V12_1_SBF_OFF_LONG_OI = 464;
+var V12_1_SBF_OFF_SHORT_OI = 480;
+var V12_1_SBF_OFF_MARK_PRICE_E6 = 560;
 var V12_1_ENGINE_CURRENT_SLOT_OFF = 448;
 var V12_1_ENGINE_FUNDING_RATE_BPS_OFF = 456;
 var V12_1_ENGINE_LAST_CRANK_SLOT_OFF = 464;
@@ -2293,16 +2297,12 @@ function buildLayoutV12_1(maxAccounts, dataLen) {
     engineLastFundingSlotOff: isSbf ? -1 : V12_1_ENGINE_LAST_FUNDING_SLOT_OFF,
     // not in deployed struct
     engineFundingRateBpsOff: isSbf ? V12_1_SBF_OFF_FUNDING_RATE : V12_1_ENGINE_FUNDING_RATE_BPS_OFF,
-    engineMarkPriceOff: isSbf ? -1 : V12_1_ENGINE_MARK_PRICE_OFF,
-    // not in deployed struct
+    engineMarkPriceOff: isSbf ? V12_1_SBF_OFF_MARK_PRICE_E6 : V12_1_ENGINE_MARK_PRICE_OFF,
     engineLastCrankSlotOff: isSbf ? V12_1_SBF_OFF_LAST_CRANK_SLOT : V12_1_ENGINE_LAST_CRANK_SLOT_OFF,
     engineMaxCrankStalenessOff: isSbf ? V12_1_SBF_OFF_MAX_CRANK_STALENESS : V12_1_ENGINE_MAX_CRANK_STALENESS_OFF,
-    engineTotalOiOff: isSbf ? -1 : V12_1_ENGINE_TOTAL_OI_OFF,
-    // not in deployed struct
-    engineLongOiOff: isSbf ? -1 : V12_1_ENGINE_LONG_OI_OFF,
-    // not in deployed struct
-    engineShortOiOff: isSbf ? -1 : V12_1_ENGINE_SHORT_OI_OFF,
-    // not in deployed struct
+    engineTotalOiOff: isSbf ? V12_1_SBF_OFF_TOTAL_OI : V12_1_ENGINE_TOTAL_OI_OFF,
+    engineLongOiOff: isSbf ? V12_1_SBF_OFF_LONG_OI : V12_1_ENGINE_LONG_OI_OFF,
+    engineShortOiOff: isSbf ? V12_1_SBF_OFF_SHORT_OI : V12_1_ENGINE_SHORT_OI_OFF,
     engineCTotOff: isSbf ? V12_1_SBF_OFF_C_TOT : V12_1_ENGINE_C_TOT_OFF,
     enginePnlPosTotOff: isSbf ? V12_1_SBF_OFF_PNL_POS_TOT : V12_1_ENGINE_PNL_POS_TOT_OFF,
     engineLiqCursorOff: isSbf ? V12_1_SBF_OFF_LIQ_CURSOR : V12_1_ENGINE_LIQ_CURSOR_OFF,

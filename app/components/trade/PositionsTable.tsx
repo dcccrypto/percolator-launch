@@ -23,6 +23,7 @@ import { ClosePositionModal } from "./ClosePositionModal";
 import { WarmupProgress } from "./WarmupProgress";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -101,16 +102,21 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   const onChainPriceE6 = config?.lastEffectivePriceE6 ?? null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
   const rawEntryPrice = account.entryPrice;
-  const entryPriceE6 = rawEntryPrice > 0n ? rawEntryPrice : currentPriceE6;
+  // V12_1: entry_price removed from on-chain struct (returns 0). Fall back to
+  // client-side saved entry price (mark at trade time), then current mark.
+  const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, userAccount.idx);
+  const resolvedEntryPrice = rawEntryPrice > 0n ? rawEntryPrice : (savedEntryPrice > 0n ? savedEntryPrice : 0n);
+  const entryPriceE6 = resolvedEntryPrice > 0n ? resolvedEntryPrice : currentPriceE6;
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
 
   // PERC-297: Mark price is considered "available" when it's a positive value.
   const hasValidMark = currentPriceE6 > 0n;
 
-  // V12_1 deployed struct has no entry_price — use on-chain pnl directly
+  // PnL computation: prefer mark-to-market from entry price (on-chain or saved),
+  // fall back to on-chain realized PnL if neither is available.
   const pnlTokens = hasValidMark
-    ? (rawEntryPrice > 0n
-        ? computeMarkPnl(account.positionSize, rawEntryPrice, currentPriceE6)
+    ? (resolvedEntryPrice > 0n
+        ? computeMarkPnl(account.positionSize, resolvedEntryPrice, currentPriceE6)
         : account.pnl)
     : 0n;
   const pnlUsdRaw = priceUsd !== null && hasValidMark
@@ -155,6 +161,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   const handleConfirmClose = async (percent: number) => {
     try {
       await closePosition(percent);
+      if (percent === 100) clearEntryPrice(slabAddress, userAccount.idx);
       setShowCloseModal(false);
     } catch {
       // error shown via hook state

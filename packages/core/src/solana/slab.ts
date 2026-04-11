@@ -438,6 +438,14 @@ const V12_1_SBF_OFF_LAST_SWEEP_COMPLETE = 312;
 const V12_1_SBF_OFF_CRANK_CURSOR = 320;
 const V12_1_SBF_OFF_SWEEP_START_IDX = 322;
 const V12_1_SBF_OFF_LIFETIME_LIQUIDATIONS = 328;
+// Probed from mainnet slab FLF9ghf6H4sfSexcQzDwse4gcGZKPb6qYCqo5Btat98 (290120 bytes).
+// These fields DO exist in the deployed SBF binary despite earlier "not in deployed struct" notes.
+const V12_1_SBF_OFF_TOTAL_OI = 448;           // u128: totalOpenInterest (verified: 907109 matches sum of abs positions)
+const V12_1_SBF_OFF_LONG_OI = 464;            // u128: longOi (verified: 907109 = all positions are long)
+const V12_1_SBF_OFF_SHORT_OI = 480;           // u128: shortOi (verified: 0)
+const V12_1_SBF_OFF_MARK_PRICE_E6 = 560;      // u64: markPriceE6 (verified: 85187279 = $85.19)
+const V12_1_SBF_OFF_MARK_PRICE_SLOT = 568;    // u64: slot when mark price was last updated
+const V12_1_SBF_OFF_EFFECTIVE_PRICE_E6 = 576;  // u64: lastEffectivePriceE6 (verified: matches mark)
 // ADL state: 336–576 (adl_mult, adl_coeff, adl_epoch, oi_eff, side_mode, etc.)
 // last_oracle_price: 560, last_market_slot: 568, funding_price_sample: 576
 // Bitmap (used field): 584
@@ -1277,12 +1285,12 @@ function buildLayoutV12_1(maxAccounts: number, dataLen?: number): SlabLayout {
     engineFundingIndexOff: isSbf ? -1 : V12_1_ENGINE_FUNDING_INDEX_OFF, // not in deployed struct
     engineLastFundingSlotOff: isSbf ? -1 : V12_1_ENGINE_LAST_FUNDING_SLOT_OFF, // not in deployed struct
     engineFundingRateBpsOff: isSbf ? V12_1_SBF_OFF_FUNDING_RATE : V12_1_ENGINE_FUNDING_RATE_BPS_OFF,
-    engineMarkPriceOff: isSbf ? -1 : V12_1_ENGINE_MARK_PRICE_OFF, // not in deployed struct
+    engineMarkPriceOff: isSbf ? V12_1_SBF_OFF_MARK_PRICE_E6 : V12_1_ENGINE_MARK_PRICE_OFF,
     engineLastCrankSlotOff: isSbf ? V12_1_SBF_OFF_LAST_CRANK_SLOT : V12_1_ENGINE_LAST_CRANK_SLOT_OFF,
     engineMaxCrankStalenessOff: isSbf ? V12_1_SBF_OFF_MAX_CRANK_STALENESS : V12_1_ENGINE_MAX_CRANK_STALENESS_OFF,
-    engineTotalOiOff: isSbf ? -1 : V12_1_ENGINE_TOTAL_OI_OFF, // not in deployed struct
-    engineLongOiOff: isSbf ? -1 : V12_1_ENGINE_LONG_OI_OFF,   // not in deployed struct
-    engineShortOiOff: isSbf ? -1 : V12_1_ENGINE_SHORT_OI_OFF, // not in deployed struct
+    engineTotalOiOff: isSbf ? V12_1_SBF_OFF_TOTAL_OI : V12_1_ENGINE_TOTAL_OI_OFF,
+    engineLongOiOff: isSbf ? V12_1_SBF_OFF_LONG_OI : V12_1_ENGINE_LONG_OI_OFF,
+    engineShortOiOff: isSbf ? V12_1_SBF_OFF_SHORT_OI : V12_1_ENGINE_SHORT_OI_OFF,
     engineCTotOff: isSbf ? V12_1_SBF_OFF_C_TOT : V12_1_ENGINE_C_TOT_OFF,
     enginePnlPosTotOff: isSbf ? V12_1_SBF_OFF_PNL_POS_TOT : V12_1_ENGINE_PNL_POS_TOT_OFF,
     engineLiqCursorOff: isSbf ? V12_1_SBF_OFF_LIQ_CURSOR : V12_1_ENGINE_LIQ_CURSOR_OFF,
