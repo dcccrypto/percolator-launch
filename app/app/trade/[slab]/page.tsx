@@ -192,7 +192,11 @@ function TradePageInner({ slab }: { slab: string }) {
   // BUG FIX: Supabase symbol represents the TRADING PAIR (e.g. "SOL"), while on-chain
   // tokenMeta symbol is the COLLATERAL token (e.g. "USDC"). Previously on-chain was
   // preferred, causing a USDC-collateralized SOL market to show as "USDC/USD".
-  const mintAddress = config?.collateralMint?.toBase58() ?? "";
+  const collateralMintAddress = config?.collateralMint?.toBase58() ?? "";
+  // BUG FIX: Use the trading pair's base asset mint (mainnet_ca from Supabase) for the chart
+  // and logo, NOT the collateral mint. A SOL/USD perp collateralized in USDC should show
+  // SOL candles in the chart, not USDC candles.
+  const mintAddress = supabaseMarket?.mainnet_ca ?? collateralMintAddress;
   const onChainSymbol = tokenMeta?.symbol ?? null;
   const supabaseSymbol = supabaseMarket?.symbol ?? null;
   const symbol = (() => {
