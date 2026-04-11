@@ -21,8 +21,8 @@ import { explorerAccountUrl } from "@/lib/config";
 export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = useUserAccount();
   const { hasMintedNft, nftMint, pendingSettlement, isLoading } = usePositionNft(slabAddress);
-  const { mint: mintNft, loading: mintLoading } = useMintPositionNft(slabAddress);
-  const { burn: burnNft, loading: burnLoading } = useBurnPositionNft(slabAddress);
+  const { mint: mintNft, loading: mintLoading, error: mintError } = useMintPositionNft(slabAddress);
+  const { burn: burnNft, loading: burnLoading, error: burnError } = useBurnPositionNft(slabAddress);
 
   const hasPosition = userAccount !== null && userAccount.account.positionSize !== 0n;
   const mintAddress = nftMint?.toBase58() ?? null;
@@ -141,6 +141,13 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
             {burnLoading ? "Burning…" : "Burn NFT"}
           </button>
         </div>
+
+        {/* Error display */}
+        {(mintError || burnError) && (
+          <div className="rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
+            <p className="text-[10px] text-[var(--short)]">{mintError || burnError}</p>
+          </div>
+        )}
       </div>
     </div>
   );
