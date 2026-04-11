@@ -179,12 +179,12 @@ describe("useAdminActions — PERC-8311 authority pre-flight checks", () => {
   });
 
   describe("createInsuranceMint", () => {
-    it("throws when wallet is not admin", async () => {
+    it("throws — moved to percolator-stake", async () => {
       mockWallet(STRANGER_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
         result.current.createInsuranceMint(makeMarket()),
-      ).rejects.toThrow(/not the market admin/i);
+      ).rejects.toThrow(/percolator-stake/i);
     });
   });
 

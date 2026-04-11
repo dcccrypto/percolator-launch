@@ -44,8 +44,6 @@ import {
   encodePushOraclePrice,
   encodeSetOraclePriceCap,
   encodeUpdateConfig,
-  encodeCreateInsuranceMint,
-  deriveInsuranceLpMint,
   ACCOUNTS_INIT_MARKET,
   ACCOUNTS_INIT_LP,
   ACCOUNTS_DEPOSIT_COLLATERAL,
@@ -55,7 +53,6 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_SET_ORACLE_PRICE_CAP,
   ACCOUNTS_UPDATE_CONFIG,
-  ACCOUNTS_CREATE_INSURANCE_MINT,
   buildAccountMetas,
   WELL_KNOWN,
   buildIx,
@@ -250,8 +247,6 @@ export async function POST(req: NextRequest) {
     const [vaultPda] = deriveVaultAuthority(programId, slabPk);
     const vaultAta = await getAssociatedTokenAddress(mintPk, vaultPda, true);
     const userAta = await getAssociatedTokenAddress(mintPk, deployerPk);
-    const [insLpMint] = deriveInsuranceLpMint(programId, slabPk);
-    const [vaultAuth] = deriveVaultAuthority(programId, slabPk);
 
     // ── Rent ──────────────────────────────────────────────────────────────────
     const [slabRent, matcherCtxRent] = await Promise.all([
@@ -510,29 +505,8 @@ export async function POST(req: NextRequest) {
     const tx3 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });
     tx3.add(...tx3Instructions);
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TX 4: CreateInsuranceLpMint — permissionless insurance deposits
-    // Signed by: deployer only
-    // ═══════════════════════════════════════════════════════════════════════════
-    const createMintKeys = buildAccountMetas(ACCOUNTS_CREATE_INSURANCE_MINT, [
-      deployerPk,     // admin (signer)
-      slabPk,          // slab
-      insLpMint,       // ins_lp_mint (PDA, writable)
-      vaultAuth,       // vault_authority
-      mintPk,          // collateral_mint
-      SystemProgram.programId,      // system_program
-      WELL_KNOWN.tokenProgram,      // token_program
-      WELL_KNOWN.rent,              // rent
-      deployerPk,      // payer (signer, writable)
-    ]);
-    const createMintIx = buildIx({
-      programId,
-      keys: createMintKeys,
-      data: encodeCreateInsuranceMint(),
-    });
-
-    const tx4 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });
-    tx4.add(createMintIx);
+    // Insurance LP mint creation removed — moved to percolator-stake program.
+    // Markets are fully operational without it (TX 0-3 are sufficient).
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Response — client signs each tx with MWA, sends in order, then calls
@@ -541,7 +515,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       slab_address: slabPk.toBase58(),
       /** Base64-encoded partially-signed transactions. Mobile adds deployer signature. */
-      unsigned_txs: [tx0, tx1, tx2, tx3, tx4].map(txToBase64),
+      unsigned_txs: [tx0, tx1, tx2, tx3].map(txToBase64),
       /** Config for the POST /api/markets registration call after all txs succeed. */
       registration: {
         slab_address: slabPk.toBase58(),

@@ -19,7 +19,6 @@ import {
   encodeInitLP,
   encodeDepositCollateral,
   encodeTopUpInsurance,
-  encodeCreateInsuranceMint,
   deriveInsuranceLpMint,
   ACCOUNTS_CREATE_INSURANCE_MINT,
   encodeKeeperCrank,
@@ -924,53 +923,8 @@ export function useCreateMarket() {
           }
         }
 
-        // Step 4: Create Insurance LP Mint (permissionless insurance deposits)
-        // GH#1761: This step is non-fatal. The market is already live and tradeable
-        // after steps 1-4. A tx expiry here (devnet congestion) should NOT block success.
-        // We catch the error, set insuranceMintFailed=true, and proceed to the success screen.
-        // The user can retry step 5 independently; the success screen shows a soft warning.
-        if (startStep <= 4) {
-          setState((s) => ({ ...s, step: 4, stepLabel: STEP_LABELS[4] }));
-
-          const [insLpMint] = deriveInsuranceLpMint(programId, slabPk);
-          const [vaultAuth] = deriveVaultAuthority(programId, slabPk);
-
-          const createMintData = encodeCreateInsuranceMint();
-          const createMintKeys = buildAccountMetas(ACCOUNTS_CREATE_INSURANCE_MINT, [
-            wallet.publicKey,          // admin (signer)
-            slabPk,                    // slab
-            insLpMint,                 // ins_lp_mint (writable, PDA)
-            vaultAuth,                 // vault_authority
-            params.mint,               // collateral_mint
-            SystemProgram.programId,   // system_program
-            WELL_KNOWN.tokenProgram,   // token_program
-            WELL_KNOWN.rent,           // rent
-            wallet.publicKey,          // payer (signer, writable)
-          ]);
-          const createMintIx = buildIx({ programId, keys: createMintKeys, data: createMintData });
-
-          try {
-            const sig = await sendTx({
-              connection, wallet,
-              instructions: [createMintIx],
-              computeUnits: 200_000,
-              // GH#1761: Use maxRetries=3 for step 5 to handle devnet congestion.
-              // The default is 2; an extra retry gives more tolerance for tx expiry.
-              maxRetries: 3,
-            });
-            setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
-          } catch (step5Err) {
-            // GH#1761: Step 5 failure is non-fatal. Market is live from steps 1-4.
-            // Log the error, set the flag, and let flow continue to success screen.
-            console.warn("[useCreateMarket] GH#1761: Insurance LP Mint (step 5) failed:", step5Err);
-            setState((s) => ({
-              ...s,
-              insuranceMintFailed: true,
-              // Mark step as done visually so the progress bar advances past it
-              txSigs: [...s.txSigs, "skipped-insurance-mint-failed"],
-            }));
-          }
-        }
+        // Insurance LP mint creation removed — moved to percolator-stake program.
+        // Markets are fully operational without it (steps 0-3 are sufficient).
 
         // PERC-465: Post-creation hooks — register with oracle keeper + mint devnet token
         const slabAddr = slabPk.toBase58();

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
-import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   encodeSetOracleAuthority,
@@ -10,19 +10,15 @@ import {
   encodeSetOraclePriceCap,
   encodeTopUpInsurance,
   encodeRenounceAdmin,
-  encodeCreateInsuranceMint,
   encodeSetRiskThreshold,
   encodePauseMarket,
   encodeUnpauseMarket,
   buildAccountMetas,
   buildIx,
-  deriveVaultAuthority,
-  deriveInsuranceLpMint,
   ACCOUNTS_SET_ORACLE_AUTHORITY,
   ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_TOPUP_INSURANCE,
   ACCOUNTS_UPDATE_ADMIN,
-  ACCOUNTS_CREATE_INSURANCE_MINT,
   ACCOUNTS_SET_RISK_THRESHOLD,
   ACCOUNTS_PAUSE_MARKET,
   ACCOUNTS_UNPAUSE_MARKET,
@@ -169,34 +165,12 @@ export function useAdminActions() {
     [connection, wallet],
   );
 
+  // Insurance LP mint creation moved to percolator-stake program.
   const createInsuranceMint = useCallback(
-    async (market: DiscoveredMarket) => {
-      if (!wallet.publicKey || !wallet.signTransaction) throw new Error("Wallet not connected");
-      // PERC-8311: Pre-flight authority check — must be admin to create insurance mint
-      requireAdminAuthority(wallet.publicKey, market, "createInsuranceMint");
-      setLoading("createInsuranceMint");
-      try {
-        const [vaultAuth] = deriveVaultAuthority(market.programId, market.slabAddress);
-        const [mintPda] = deriveInsuranceLpMint(market.programId, market.slabAddress);
-        const data = encodeCreateInsuranceMint();
-        const keys = buildAccountMetas(ACCOUNTS_CREATE_INSURANCE_MINT, [
-          wallet.publicKey,
-          market.slabAddress,
-          mintPda,
-          vaultAuth,
-          market.config.collateralMint,
-          SystemProgram.programId,
-          TOKEN_PROGRAM_ID,
-          SYSVAR_RENT_PUBKEY,
-          wallet.publicKey,
-        ]);
-        const ix = buildIx({ programId: market.programId, keys, data });
-        return await sendTx({ connection, wallet, instructions: [ix] });
-      } finally {
-        setLoading(null);
-      }
+    async (_market: DiscoveredMarket) => {
+      throw new Error("Insurance LP mint creation has moved to the percolator-stake program");
     },
-    [connection, wallet],
+    [],
   );
 
   const renounceAdmin = useCallback(
