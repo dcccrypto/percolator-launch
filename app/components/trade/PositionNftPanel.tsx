@@ -3,6 +3,7 @@
 import { FC } from "react";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { useMintPositionNft } from "@/hooks/useMintPositionNft";
+import { useBurnPositionNft } from "@/hooks/useBurnPositionNft";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { explorerAccountUrl } from "@/lib/config";
 
@@ -21,6 +22,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
   const userAccount = useUserAccount();
   const { hasMintedNft, nftMint, pendingSettlement, isLoading } = usePositionNft(slabAddress);
   const { mint: mintNft, loading: mintLoading } = useMintPositionNft(slabAddress);
+  const { burn: burnNft, loading: burnLoading } = useBurnPositionNft(slabAddress);
 
   const hasPosition = userAccount !== null && userAccount.account.positionSize !== 0n;
   const mintAddress = nftMint?.toBase58() ?? null;
@@ -125,17 +127,18 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
 
           {/* Burn NFT — enabled when NFT exists and position is closed (pendingSettlement) */}
           <button
-            disabled={!hasMintedNft || (hasMintedNft && !pendingSettlement)}
+            onClick={() => burnNft()}
+            disabled={!hasMintedNft || burnLoading}
             title={
               !hasMintedNft
                 ? "No NFT to burn"
-                : !pendingSettlement
-                ? "Close position first to burn NFT"
+                : burnLoading
+                ? "Burning…"
                 : "Burn the position NFT"
             }
             className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Burn NFT
+            {burnLoading ? "Burning…" : "Burn NFT"}
           </button>
         </div>
       </div>
