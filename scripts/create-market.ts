@@ -645,32 +645,13 @@ async function main() {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TX7: SetOracleAuthority — set keeper as oracle authority for PushOraclePrice fallback
-  // ──────────────────────────────────────────────────────────────────────────
-  console.log("TX7: SetOracleAuthority (set keeper as fallback oracle authority)...");
-  const tx7 = new Transaction();
-  tx7.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
-  tx7.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
-  tx7.add(
-    new TransactionInstruction({
-      programId: cfg.programId,
-      keys: [
-        { pubkey: admin.publicKey, isSigner: true, isWritable: false },
-        { pubkey: slab.publicKey, isSigner: false, isWritable: true },
-      ],
-      data: Buffer.from(
-        encodeSetOracleAuthority({ newAuthority: admin.publicKey }),
-      ),
-    }),
-  );
-
+  // TX7: SKIPPED — oracle authority stays as system program (Hyperp mode).
+  // In Hyperp mode, the keeper uses UpdateHyperpMark (tag 34) which reads price
+  // directly from the on-chain DEX pool. Setting oracle authority to the keeper
+  // wallet would make it use PushOraclePrice (tag 17) which relies on off-chain
+  // price fetching and can produce wrong prices.
   let sig7: string | null = null;
-  try {
-    sig7 = await sendTx(conn, tx7, [admin], "TX7");
-  } catch (e) {
-    console.warn("TX7 WARNING (SetOracleAuthority):", e instanceof Error ? e.message : e);
-    console.warn("Market works without this but PushOraclePrice fallback is unavailable.");
-  }
+  console.log("TX7: SKIPPED (oracle authority = system program = Hyperp mode, reads from DEX pool)");
 
   // ──────────────────────────────────────────────────────────────────────────
   // Save market config to file
