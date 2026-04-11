@@ -43,11 +43,10 @@ export interface StaticMarketEntry {
  * These are the markets deployed to the mainnet Percolator program
  * (`ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv`).
  *
- * **Last updated:** 2026-04-08 (mainnet SOL-PERP slab from migration
- * 20260330000000, verified on-chain 2026-03-30).
+ * **Last updated:** 2026-04-11 (V12_1_EP mainnet market with entry_price support).
  */
 const MAINNET_MARKETS: StaticMarketEntry[] = [
-  { slabAddress: "8NY7rvQJXNTinJkAQG1GUV8NQ1hQzdtF7iWNjK9p7tQN", symbol: "SOL-PERP", name: "SOL/USDC Perpetual" },
+  { slabAddress: "9TGSmPLTLMii4UqstL629twGeVJ9Ndr8VD3pexnvQTsV", symbol: "SOL-PERP", name: "SOL/USDC Perpetual" },
 ];
 
 /**

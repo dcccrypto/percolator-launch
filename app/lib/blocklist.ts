@@ -61,6 +61,9 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // /api/open-interest/8eFFEFBY returns 200 with raw phantom data. Block to return 404.
   // Also covers /api/funding/8eFFEFBY which was returning 200 with stale zero-rate data.
   "8eFFEFBY3HHbBgzxJJP5hyxdzMNMAumnYNhkWXErBM4c",
+  // Old mainnet SOL-PERP slabs — resolved and closed, replaced by V12_1_EP market.
+  "FLF9ghf6H4sfSexcQzDwse4gcGZKPb6qYCqo5Btat98",
+  "8NY7rvQJXNTinJkAQG1GUV8NQ1hQzdtF7iWNjK9p7tQN",
 ];
 
 /**
