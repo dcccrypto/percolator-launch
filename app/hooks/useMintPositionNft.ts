@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { PublicKey, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemProgram } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
@@ -77,32 +77,23 @@ export function useMintPositionNft(slabAddress: string) {
         TOKEN_2022_PROGRAM_ID,
       );
 
-      // Create the owner's Token-2022 ATA for the NFT mint if it doesn't exist.
-      // The on-chain handler calls mint_to which requires the ATA to already exist.
-      const createAtaIx = createAssociatedTokenAccountInstruction(
-        walletPubkey,    // payer
-        ownerAta,        // ata
-        walletPubkey,    // owner
-        nftMint,         // mint
-        TOKEN_2022_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID,
-      );
-
       // Build MintPositionNft instruction (tag 64)
-      // Accounts: [payer, slab, nft_pda, nft_mint, owner_ata, owner, vault_auth, token22, system, rent]
+      // 11 accounts: [payer, slab, nft_pda, nft_mint, owner_ata, owner, vault_auth, token22, system, rent, ata_program]
+      // The program creates the ATA internally via CPI (account 10 = Associated Token Program)
       const ix = new TransactionInstruction({
         programId,
         keys: [
-          { pubkey: walletPubkey, isSigner: true, isWritable: true },   // payer
-          { pubkey: slabPk, isSigner: false, isWritable: true },        // slab
-          { pubkey: nftPda, isSigner: false, isWritable: true },        // nft_pda
-          { pubkey: nftMint, isSigner: false, isWritable: true },       // nft_mint
-          { pubkey: ownerAta, isSigner: false, isWritable: true },      // owner_ata
-          { pubkey: walletPubkey, isSigner: true, isWritable: false },   // owner (signer)
-          { pubkey: vaultAuth, isSigner: false, isWritable: false },    // vault_auth PDA
+          { pubkey: walletPubkey, isSigner: true, isWritable: true },    // payer
+          { pubkey: slabPk, isSigner: false, isWritable: true },         // slab
+          { pubkey: nftPda, isSigner: false, isWritable: true },         // nft_pda
+          { pubkey: nftMint, isSigner: false, isWritable: true },        // nft_mint
+          { pubkey: ownerAta, isSigner: false, isWritable: true },       // owner_ata
+          { pubkey: walletPubkey, isSigner: true, isWritable: false },    // owner (signer)
+          { pubkey: vaultAuth, isSigner: false, isWritable: false },     // vault_auth PDA
           { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // token-2022
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system
           { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }, // rent
+          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // ata program
         ],
         data: Buffer.from(encodeMintPositionNft({ userIdx })),
       });
@@ -110,7 +101,7 @@ export function useMintPositionNft(slabAddress: string) {
       const sig = await sendTx({
         connection,
         wallet,
-        instructions: [createAtaIx, ix],
+        instructions: [ix],
         computeUnits: 400_000,
       });
 
