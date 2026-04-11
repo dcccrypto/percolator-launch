@@ -2,12 +2,13 @@
 
 import { useState, useCallback } from "react";
 import { PublicKey, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemProgram } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { encodeMintPositionNft } from "@percolator/sdk";
 import { sendTx } from "@/lib/tx";
+import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
 
 /**
@@ -76,6 +77,17 @@ export function useMintPositionNft(slabAddress: string) {
         TOKEN_2022_PROGRAM_ID,
       );
 
+      // Create the owner's Token-2022 ATA for the NFT mint if it doesn't exist.
+      // The on-chain handler calls mint_to which requires the ATA to already exist.
+      const createAtaIx = createAssociatedTokenAccountInstruction(
+        walletPubkey,    // payer
+        ownerAta,        // ata
+        walletPubkey,    // owner
+        nftMint,         // mint
+        TOKEN_2022_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID,
+      );
+
       // Build MintPositionNft instruction (tag 64)
       // Accounts: [payer, slab, nft_pda, nft_mint, owner_ata, owner, vault_auth, token22, system, rent]
       const ix = new TransactionInstruction({
@@ -98,17 +110,18 @@ export function useMintPositionNft(slabAddress: string) {
       const sig = await sendTx({
         connection,
         wallet,
-        instructions: [ix],
+        instructions: [createAtaIx, ix],
         computeUnits: 400_000,
       });
 
       toast("Position NFT minted!", "success");
       return sig;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error("[useMintPositionNft]", msg);
+      const raw = e instanceof Error ? e.message : String(e);
+      const msg = humanizeError(raw);
+      console.error("[useMintPositionNft]", raw);
       setError(msg);
-      toast("Failed to mint NFT: " + msg.slice(0, 80), "error");
+      toast(msg, "error");
     } finally {
       setLoading(false);
     }

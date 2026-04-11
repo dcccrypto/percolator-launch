@@ -9,6 +9,7 @@ import { useUserAccount } from "@/hooks/useUserAccount";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { encodeBurnPositionNft } from "@percolator/sdk";
 import { sendTx } from "@/lib/tx";
+import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
 
 /**
@@ -90,10 +91,11 @@ export function useBurnPositionNft(slabAddress: string) {
       toast("Position NFT burned!", "success");
       return sig;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error("[useBurnPositionNft]", msg);
+      const raw = e instanceof Error ? e.message : String(e);
+      const msg = humanizeError(raw);
+      console.error("[useBurnPositionNft]", raw);
       setError(msg);
-      toast("Failed to burn NFT: " + msg.slice(0, 80), "error");
+      toast(msg, "error");
     } finally {
       setLoading(false);
     }
