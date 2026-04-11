@@ -888,28 +888,24 @@ declare function encodeSetOiImbalanceHardBlock(args: {
  * Creates a PositionNft PDA + Token-2022 mint with metadata, then mints 1 NFT to the
  * position owner's ATA. The NFT represents ownership of `user_idx` in the slab.
  *
+ * The program creates the ATA internally via CPI when the 11th account (Associated Token
+ * Program) is provided. This is required because the NFT mint PDA doesn't exist until the
+ * program creates it, so the ATA can't be created in a preceding instruction.
+ *
  * Instruction data layout: tag(1) + user_idx(2) = 3 bytes
  *
- * Accounts:
- *   0. [signer, writable] payer
- *   1. [writable]         slab
- *   2. [writable]         position_nft PDA  (created — seeds: ["position_nft", slab, user_idx])
- *   3. [writable]         nft_mint PDA      (created)
- *   4. [writable]         owner_ata         (Token-2022 ATA for owner)
- *   5. [signer]           owner             (must match engine account owner)
- *   6. []                 vault_authority PDA
- *   7. []                 token_2022_program
- *   8. []                 system_program
- *   9. []                 rent sysvar
- *
- * @example
- * ```ts
- * const ix = new TransactionInstruction({
- *   programId: PROGRAM_ID,
- *   keys: buildAccountMetas(ACCOUNTS_MINT_POSITION_NFT, [payer, slab, nftPda, nftMint, ownerAta, owner, vaultAuth, TOKEN_2022_PROGRAM_ID, SystemProgram.programId, SYSVAR_RENT_PUBKEY]),
- *   data: Buffer.from(encodeMintPositionNft({ userIdx: 5 })),
- * });
- * ```
+ * Accounts (11):
+ *   0.  [signer, writable] payer
+ *   1.  [writable]         slab
+ *   2.  [writable]         position_nft PDA  (created — seeds: ["position_nft", slab, user_idx_u16_le])
+ *   3.  [writable]         nft_mint PDA      (created — seeds: ["position_nft_mint", slab, user_idx_u16_le])
+ *   4.  [writable]         owner_ata         (Token-2022 ATA for nft_mint — created by program if absent)
+ *   5.  [signer]           owner             (must match engine account owner)
+ *   6.  []                 vault_authority PDA (seeds: ["vault", slab])
+ *   7.  []                 token_2022_program (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb)
+ *   8.  []                 system_program
+ *   9.  []                 rent sysvar
+ *   10. []                 associated_token_program (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)
  */
 interface MintPositionNftArgs {
     userIdx: number;
