@@ -2,6 +2,7 @@
 
 import { FC } from "react";
 import { usePositionNft } from "@/hooks/usePositionNft";
+import { useMintPositionNft } from "@/hooks/useMintPositionNft";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { explorerAccountUrl } from "@/lib/config";
 
@@ -19,6 +20,7 @@ import { explorerAccountUrl } from "@/lib/config";
 export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = useUserAccount();
   const { hasMintedNft, nftMint, pendingSettlement, isLoading } = usePositionNft(slabAddress);
+  const { mint: mintNft, loading: mintLoading } = useMintPositionNft(slabAddress);
 
   const hasPosition = userAccount !== null && userAccount.account.positionSize !== 0n;
   const mintAddress = nftMint?.toBase58() ?? null;
@@ -105,17 +107,20 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
         <div className="flex gap-2 pt-1">
           {/* Mint NFT — enabled when user has a position but no NFT yet */}
           <button
-            disabled={!hasPosition || hasMintedNft}
+            onClick={() => mintNft()}
+            disabled={!hasPosition || hasMintedNft || mintLoading}
             title={
               !hasPosition
                 ? "Open a position first"
                 : hasMintedNft
                 ? "NFT already minted"
+                : mintLoading
+                ? "Minting…"
                 : "Mint a position NFT"
             }
             className="flex-1 rounded-none border border-[var(--long)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--long)] transition-all duration-150 hover:bg-[var(--long)]/8 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Mint NFT
+            {mintLoading ? "Minting…" : "Mint NFT"}
           </button>
 
           {/* Burn NFT — enabled when NFT exists and position is closed (pendingSettlement) */}
