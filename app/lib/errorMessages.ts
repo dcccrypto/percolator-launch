@@ -138,14 +138,25 @@ export function humanizeError(rawMsg: string): string {
     return LIGHTHOUSE_USER_MESSAGE;
   }
 
+  // Handle Solana system errors BEFORE custom code extraction.
+  // These are string-form errors like "InvalidAccountData", "AccountAlreadyInitialized" etc.
+  // They must NOT be confused with Percolator custom program error codes.
+  if (rawMsg.includes('"InvalidAccountData"')) {
+    return "Invalid account data — one of the accounts has unexpected data. The transaction may need different accounts or the market state may have changed.";
+  }
+  if (rawMsg.includes('"AccountAlreadyInitialized"')) {
+    return "Account already exists — this operation was already completed.";
+  }
+  if (rawMsg.includes('"AccountNotFound"') || rawMsg.includes("AccountNotFound")) {
+    return "Account not found on-chain. It may have been closed or not yet created.";
+  }
+  if (rawMsg.includes("insufficient account keys")) {
+    return "Missing accounts in transaction — this is likely a frontend bug. Please report it.";
+  }
+
   const code = extractErrorCode(rawMsg);
   if (code !== null && ERROR_CODE_MAP[code]) {
-    // Also extract which instruction failed for context
-    const ixMatch = rawMsg.match(/"InstructionError"\s*:\s*\[\s*(\d+)/);
-    const ixIdx = ixMatch ? parseInt(ixMatch[1], 10) : null;
-    const ixLabels = ["compute budget", "priority fee", "oracle push", "crank", "trade"];
-    const ixHint = ixIdx !== null && ixIdx < ixLabels.length ? ` (in ${ixLabels[ixIdx]})` : "";
-    return ERROR_CODE_MAP[code] + ixHint;
+    return ERROR_CODE_MAP[code];
   }
   const customIdx = extractCustomIndex(rawMsg);
   if (customIdx !== null && CUSTOM_ERROR_MAP[customIdx]) {
