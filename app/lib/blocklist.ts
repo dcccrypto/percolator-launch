@@ -64,6 +64,8 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // Old mainnet SOL-PERP slabs — resolved and closed, replaced by V12_1_EP market.
   "FLF9ghf6H4sfSexcQzDwse4gcGZKPb6qYCqo5Btat98",
   "8NY7rvQJXNTinJkAQG1GUV8NQ1hQzdtF7iWNjK9p7tQN",
+  // Closed: EWMA stuck at $61 due to oracle authority misconfiguration
+  "9TGSmPLTLMii4UqstL629twGeVJ9Ndr8VD3pexnvQTsV",
 ];
 
 /**

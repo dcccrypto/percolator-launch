@@ -3024,7 +3024,7 @@ import { PublicKey as PublicKey6 } from "@solana/web3.js";
 // src/solana/static-markets.ts
 import { PublicKey as PublicKey5 } from "@solana/web3.js";
 var MAINNET_MARKETS = [
-  { slabAddress: "9TGSmPLTLMii4UqstL629twGeVJ9Ndr8VD3pexnvQTsV", symbol: "SOL-PERP", name: "SOL/USDC Perpetual" }
+  { slabAddress: "7psyeWRts4pRX2cyAWD1NH87bR9ugXP7pe6ARgfG79Do", symbol: "SOL-PERP", name: "SOL/USDC Perpetual" }
 ];
 var DEVNET_MARKETS = [
   // Populated from prior discoverMarkets() runs on devnet.
