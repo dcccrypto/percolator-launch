@@ -87,12 +87,11 @@ const USDC_DEVNET = new PublicKey(
 // Slab constants
 // ============================================================================
 
-// V12_1 slab sizes: ENGINE_OFF=648, BITMAP_OFF=1016, ACCOUNT_SIZE=320
-// Computed via SDK's computeSlabSize (verified against compile-time assertions)
-// SBF layout differs from x86_64 due to i128 alignment. These values are
-// from the deployed program's SLAB_LEN constant (verified via sol_log_64).
-const SLAB_SIZE_MEDIUM = 290_120; // maxAccounts=1024 (V12_1, SBF alignment)
-const SLAB_SIZE_SMALL  = 73_544;  // maxAccounts=256  (V12_1, SBF alignment, estimated)
+// V12_1_EP slab sizes (entry_price re-added): ENGINE_OFF=616, BITMAP_OFF=584, ACCOUNT_SIZE=288
+// Computed: engineOff(616) + accountsOff(2784) + maxAccounts * 288
+// SBF layout: u128 align=8 → Account=288 bytes (was 280 before entry_price).
+const SLAB_SIZE_MEDIUM = 298_312; // maxAccounts=1024 (V12_1_EP, SBF, 288-byte accounts)
+const SLAB_SIZE_SMALL  = 75_496;  // maxAccounts=256  (V12_1_EP, SBF, 288-byte accounts)
 
 // Matcher context account size (fixed, per matcher program)
 const MATCHER_CTX_SIZE = 320;
