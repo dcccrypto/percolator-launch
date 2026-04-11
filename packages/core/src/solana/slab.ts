@@ -492,10 +492,13 @@ const V12_1_ACCT_FEE_CREDITS_OFF = 240;     // was 224 in V_ADL
 const V12_1_ACCT_LAST_FEE_SLOT_OFF = 256;   // was 240 in V_ADL
 // SBF offsets (empirically verified via repr(C) with u128 align=8):
 // position_basis_q is at offset 88 on SBF (between warmup_slope_per_step and adl_a_basis)
-// entry_price was REMOVED from Account in V12_1 upstream rebase
+// entry_price was removed in V12_1 but re-added alongside ADL fields in the latest build.
+// After re-add: adl_epoch_snap(u64@136) + entry_price(u64@144) → matcher_program shifts to 152.
+// For deployed slabs WITHOUT entry_price (pre re-add), offset is -1.
+// For new slabs WITH entry_price, offset is 144 (after adl_epoch_snap).
 const V12_1_ACCT_POSITION_SIZE_OFF = 88;     // position_basis_q: i128 at offset 88 (SBF)
-const V12_1_ACCT_ENTRY_PRICE_OFF = -1;       // REMOVED in V12_1 — does not exist
-const V12_1_ACCT_FUNDING_INDEX_OFF = 288;    // moved to end (legacy, i64 not i128)
+const V12_1_ACCT_ENTRY_PRICE_OFF = -1;       // -1 for pre-re-add slabs; 144 for new builds
+const V12_1_ACCT_FUNDING_INDEX_OFF = -1;     // does not exist in SBF layout (was 288 = OOB for 280-byte accounts)
 
 // ---- V1M layout constants (mainnet-deployed V1 program, ESa89R5) ----
 // The mainnet program has a LARGER RiskParams (336 bytes vs V1's 288) and 22 extra
