@@ -125,7 +125,7 @@ export function deriveStakeVaultAuth(pool: PublicKey, programId?: PublicKey) {
 /** Derive the per-user deposit PDA (tracks cooldown, deposit time). */
 export function deriveDepositPda(pool: PublicKey, user: PublicKey, programId?: PublicKey) {
   return PublicKey.findProgramAddressSync(
-    [TEXT.encode('deposit'), pool.toBytes(), user.toBytes()],    programId ?? getStakeProgramId(),  );
+    [TEXT.encode('stake_deposit'), pool.toBytes(), user.toBytes()],    programId ?? getStakeProgramId(),  );
 }
 
 // ═══════════════════════════════════════════════════════════════
