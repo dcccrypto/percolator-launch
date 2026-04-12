@@ -346,21 +346,24 @@ console.log("\nTesting instruction encoders...\n");
     invert: 0,
     unitScale: 0,
     initialMarkPriceE6: "0",  // Standard market (not Hyperp)
-    warmupPeriodSlots: "1000",
+    hMin: "1000",   // v12.15: replaces warmupPeriodSlots
+    hMax: "2000",   // v12.15: new field
     maintenanceMarginBps: "500",
     initialMarginBps: "1000",
     tradingFeeBps: "10",
     maxAccounts: "1000",
     newAccountFee: "1000000",
-    riskReductionThreshold: "1000000000",
     maintenanceFeePerSlot: "100",
     maxCrankStalenessSlots: "50",
     liquidationFeeBps: "100",
     liquidationFeeCap: "10000000",
     liquidationBufferBps: "50",
     minLiquidationAbs: "1000000",
+    minInitialDeposit: "500000",
+    minNonzeroMmReq: "100000",
+    minNonzeroImReq: "200000",
   });
-  assert(data.length === 264, `InitMarket length: expected 264, got ${data.length}`);
+  assert(data.length === 360, `InitMarket length: expected 360, got ${data.length}`);
   assert(data[0] === IX_TAG.InitMarket, "InitMarket tag byte");
   console.log("✓ encodeInitMarket");
 }

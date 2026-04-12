@@ -95,6 +95,7 @@ export const ACCOUNTS_KEEPER_CRANK: readonly AccountSpec[] = [
   { name: "oracle", signer: false, writable: false },
 ] as const;
 
+
 /**
  * TradeNoCpi: 4 accounts (PERC-199: clock sysvar removed — uses Clock::get() syscall)
  */
@@ -519,24 +520,6 @@ export const ACCOUNTS_AUDIT_CRANK: readonly AccountSpec[] = [
 export const ACCOUNTS_ADVANCE_ORACLE_PHASE: readonly AccountSpec[] = [
   { name: "slab", signer: false, writable: true },
 ] as const;
-
-// ============================================================================
-// PERC-623: Keeper Fund Instructions
-// ============================================================================
-
-/**
- * TopUpKeeperFund: 3 accounts
- * Permissionless — anyone can fund. System program required for SOL transfer.
- */
-export const ACCOUNTS_TOPUP_KEEPER_FUND: readonly AccountSpec[] = [
-  { name: "funder", signer: true, writable: true },
-  { name: "slab", signer: false, writable: true },
-  { name: "keeperFund", signer: false, writable: true },
-  { name: "systemProgram", signer: false, writable: false },
-] as const;
-
-// Note: WithdrawKeeperReward has no separate instruction.
-// Rewards are paid automatically during KeeperCrank (tag 5).
 
 // ============================================================================
 // PERC-8110: SetOiImbalanceHardBlock

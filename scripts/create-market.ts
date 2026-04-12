@@ -36,6 +36,8 @@ import {
 } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
+  MINT_SIZE,
+  ACCOUNT_SIZE as TOKEN_ACCOUNT_SIZE,
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
 } from "@solana/spl-token";
@@ -51,8 +53,6 @@ import {
   encodeInitLP,
   encodeInitMatcherCtx,
   encodeTopUpInsurance,
-  encodeTopUpKeeperFund,
-  encodeSetOracleAuthority,
 } from "@percolator/sdk";
 import {
   buildAccountMetas,
@@ -75,6 +75,9 @@ const PROGRAM_ID_DEVNET = new PublicKey(
 const MATCHER_PROG_ID = new PublicKey(
   "DHP6DtwXP1yJsz8YzfoeigRFPB979gzmumkmCxDLSkUX",
 );
+const STAKE_PROG_ID = new PublicKey(
+  "DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F",
+);
 
 const USDC_MAINNET = new PublicKey(
   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -87,11 +90,9 @@ const USDC_DEVNET = new PublicKey(
 // Slab constants
 // ============================================================================
 
-// V12_1_EP slab sizes (entry_price re-added): ENGINE_OFF=616, BITMAP_OFF=584, ACCOUNT_SIZE=288
-// Computed: engineOff(616) + accountsOff(2784) + maxAccounts * 288
-// SBF layout: u128 align=8 → Account=288 bytes (was 280 before entry_price).
-const SLAB_SIZE_MEDIUM = 298_312; // maxAccounts=1024 (V12_1_EP, SBF, 288-byte accounts)
-const SLAB_SIZE_SMALL  = 75_496;  // maxAccounts=256  (V12_1_EP, SBF, 288-byte accounts)
+// V12.15 slab sizes: ENGINE_OFF=624, ACCOUNT_SIZE=4400 (reserve cohort queues)
+// Verified via `cargo test --features small -- print_slab_layout`
+const SLAB_SIZE_SMALL  = 1_128_448; // maxAccounts=256 (v12.15, --features small)
 
 // Matcher context account size (fixed, per matcher program)
 const MATCHER_CTX_SIZE = 320;
@@ -101,13 +102,13 @@ const MATCHER_CTX_SIZE = 320;
 // ============================================================================
 
 const DEFAULT_RISK_PARAMS = {
-  warmupPeriodSlots:      150n,            // ~1 minute at 2.5s/slot
+  hMin:                   150n,            // warmup horizon min ~1 minute at 2.5s/slot (v12.15: replaces warmupPeriodSlots)
+  hMax:                   600n,            // warmup horizon max ~4 minutes (v12.15: overflow segment horizon)
   maintenanceMarginBps:   500n,            // 5%
   initialMarginBps:       1000n,           // 10% = 10x max leverage
   tradingFeeBps:          10n,             // 0.1%
-  maxAccounts:            1024n,           // medium tier
+  maxAccounts:            256n,            // small tier (v12.15: was 1024)
   newAccountFee:          1_000_000n,      // 1 USDC (u128)
-  maintenanceFeePerSlot:  0n,              // disabled (u128)
   maxCrankStalenessSlots: 300n,            // 5 minutes
   liquidationFeeBps:      50n,             // 0.5%
   liquidationFeeCap:      100_000_000n,    // 100 USDC (u128)
@@ -120,7 +121,6 @@ const DEFAULT_RISK_PARAMS = {
 
 // Fields between header and RiskParams (immutable after init)
 const DEFAULT_INIT_EXTRA = {
-  maxMaintenanceFeePerSlot: 1_000_000_000n, // ~1 USDC/slot ceiling (u128, must be > 0)
   maxInsuranceFloor:        1_000_000_000_000n, // 1M USDC ceiling (u128, must be > 0)
   minOraclePriceCap:        500n,          // 5% min price cap (u64, e2bps)
 } as const;
@@ -218,7 +218,7 @@ function parseArgs(): MarketConfig {
     get("--insurance") ?? process.env.INSURANCE_AMOUNT ?? "0",
   );
 
-  const slabSize = SLAB_SIZE_MEDIUM;
+  const slabSize = SLAB_SIZE_SMALL;
 
   return {
     network,
@@ -322,12 +322,6 @@ async function main() {
     cfg.programId,
   );
 
-  // Derive keeper fund PDA
-  const [keeperFundPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("keeper_fund"), slab.publicKey.toBuffer()],
-    cfg.programId,
-  );
-
   // ATAs
   const vaultAta = await getAssociatedTokenAddress(
     cfg.collateralMint,
@@ -344,7 +338,6 @@ async function main() {
   console.log(`Vault PDA:       ${vaultPda.toBase58()}`);
   console.log(`Vault ATA:       ${vaultAta.toBase58()}`);
   console.log(`LP PDA (idx=0):  ${lpPda.toBase58()}`);
-  console.log(`Keeper fund:     ${keeperFundPda.toBase58()}`);
   console.log();
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -377,7 +370,7 @@ async function main() {
   // internally — this message helps catch SDK version drift when reviewing logs.
   console.log(
     `  encodeInitMarket: ${initMarketData.length} bytes ` +
-      `(expected 352 — header + 3 extra fields + RiskParams with minInitialDeposit/minNonzeroMmReq/minNonzeroImReq)`,
+      `(expected 360 — v12.15 header + hMin/hMax + RiskParams)`,
   );
 
   const tx1 = new Transaction();
@@ -403,29 +396,22 @@ async function main() {
     ),
   );
   // InitMarket instruction (tag 0)
-  // Pass 11 accounts to also create keeper fund PDA (PERC-623):
-  //   [0] admin, [1] slab, [2] mint, [3] vault, [4] tokenProgram,
-  //   [5] clock, [6] rent, [7] dummyAta, [8] systemProgram,
-  //   [9] keeperFundPda (writable), [10] systemProgram (for PDA creation)
+  // 9 accounts: [0] admin, [1] slab, [2] mint, [3] vault, [4] tokenProgram,
+  //   [5] clock, [6] rent, [7] dummyAta, [8] systemProgram
   tx1.add(
     new TransactionInstruction({
       programId: cfg.programId,
-      keys: [
-        ...buildAccountMetas(ACCOUNTS_INIT_MARKET, {
-          admin: admin.publicKey,
-          slab: slab.publicKey,
-          mint: cfg.collateralMint,
-          vault: vaultAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          clock: SYSVAR_CLOCK_PUBKEY,
-          rent: SYSVAR_RENT_PUBKEY,
-          dummyAta: adminAta,
-          systemProgram: SystemProgram.programId,
-        }),
-        // Extra accounts for keeper fund PDA creation
-        { pubkey: keeperFundPda, isSigner: false, isWritable: true },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ],
+      keys: buildAccountMetas(ACCOUNTS_INIT_MARKET, {
+        admin: admin.publicKey,
+        slab: slab.publicKey,
+        mint: cfg.collateralMint,
+        vault: vaultAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        clock: SYSVAR_CLOCK_PUBKEY,
+        rent: SYSVAR_RENT_PUBKEY,
+        dummyAta: adminAta,
+        systemProgram: SystemProgram.programId,
+      }),
       data: Buffer.from(initMarketData),
     }),
   );
@@ -610,48 +596,92 @@ async function main() {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TX6: TopUpKeeperFund — seed the keeper fund with SOL
-  //   InitMarket already created the PDA with minimum rent, but we add more
-  //   so the keeper earns rewards for cranking (0.001 SOL per crank).
+  // TX6: InitStakePool — create an insurance LP staking pool for this market
+  //   Creates LP mint + vault token account + InitPool instruction on stake program.
+  //   Allows users to stake collateral and earn insurance LP rewards.
   // ──────────────────────────────────────────────────────────────────────────
-  const KEEPER_FUND_SEED_SOL = 0.1; // 0.1 SOL = 100 cranks worth of rewards
-  const keeperFundLamports = BigInt(Math.floor(KEEPER_FUND_SEED_SOL * 1e9));
+  console.log("TX6: InitStakePool (create insurance LP staking pool)...");
 
-  console.log(`TX6: TopUpKeeperFund (${KEEPER_FUND_SEED_SOL} SOL)...`);
+  const STAKE_COOLDOWN_SLOTS = 300n;  // ~2 min cooldown before withdrawal
+  const STAKE_DEPOSIT_CAP = 0n;       // 0 = uncapped
+
+  const stakeLpMint = Keypair.generate();
+  const stakeVault = Keypair.generate();
+
+  const [stakePool] = PublicKey.findProgramAddressSync(
+    [Buffer.from("stake_pool"), slab.publicKey.toBuffer()],
+    STAKE_PROG_ID,
+  );
+  const [stakeVaultAuth] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_auth"), stakePool.toBuffer()],
+    STAKE_PROG_ID,
+  );
+
+  console.log(`  Stake pool PDA:   ${stakePool.toBase58()}`);
+  console.log(`  Stake LP mint:    ${stakeLpMint.publicKey.toBase58()}`);
+  console.log(`  Stake vault:      ${stakeVault.publicKey.toBase58()}`);
+  console.log(`  Stake vault auth: ${stakeVaultAuth.toBase58()}`);
+
+  const stakeMintRent = await conn.getMinimumBalanceForRentExemption(MINT_SIZE);
+  const stakeTokenRent = await conn.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SIZE);
+
   const tx6 = new Transaction();
-  tx6.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
+  tx6.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
   tx6.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
+
+  // Create LP mint account
+  tx6.add(
+    SystemProgram.createAccount({
+      fromPubkey: admin.publicKey,
+      newAccountPubkey: stakeLpMint.publicKey,
+      lamports: stakeMintRent,
+      space: MINT_SIZE,
+      programId: TOKEN_PROGRAM_ID,
+    }),
+  );
+  // Create vault token account
+  tx6.add(
+    SystemProgram.createAccount({
+      fromPubkey: admin.publicKey,
+      newAccountPubkey: stakeVault.publicKey,
+      lamports: stakeTokenRent,
+      space: TOKEN_ACCOUNT_SIZE,
+      programId: TOKEN_PROGRAM_ID,
+    }),
+  );
+  // InitPool instruction (tag=0, cooldown_slots, deposit_cap)
+  const initPoolData = Buffer.concat([
+    Buffer.from([0]), // tag = InitPool
+    (() => { const b = Buffer.alloc(8); b.writeBigUInt64LE(STAKE_COOLDOWN_SLOTS); return b; })(),
+    (() => { const b = Buffer.alloc(8); b.writeBigUInt64LE(STAKE_DEPOSIT_CAP); return b; })(),
+  ]);
   tx6.add(
     new TransactionInstruction({
-      programId: cfg.programId,
+      programId: STAKE_PROG_ID,
       keys: [
         { pubkey: admin.publicKey, isSigner: true, isWritable: true },
-        { pubkey: slab.publicKey, isSigner: false, isWritable: true },
-        { pubkey: keeperFundPda, isSigner: false, isWritable: true },
+        { pubkey: slab.publicKey, isSigner: false, isWritable: false },
+        { pubkey: stakePool, isSigner: false, isWritable: true },
+        { pubkey: stakeLpMint.publicKey, isSigner: false, isWritable: true },
+        { pubkey: stakeVault.publicKey, isSigner: false, isWritable: true },
+        { pubkey: stakeVaultAuth, isSigner: false, isWritable: false },
+        { pubkey: cfg.collateralMint, isSigner: false, isWritable: false },
+        { pubkey: cfg.programId, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
       ],
-      data: Buffer.from(
-        encodeTopUpKeeperFund({ amount: keeperFundLamports }),
-      ),
+      data: initPoolData,
     }),
   );
 
   let sig6: string | null = null;
   try {
-    sig6 = await sendTx(conn, tx6, [admin], "TX6");
+    sig6 = await sendTx(conn, tx6, [admin, stakeLpMint, stakeVault], "TX7");
   } catch (e) {
-    console.warn("TX6 WARNING (TopUpKeeperFund):", e instanceof Error ? e.message : e);
-    console.warn("Market is live but keeper fund has minimum balance only.");
+    console.warn("TX6 WARNING (InitStakePool):", e instanceof Error ? e.message : e);
+    console.warn("Market is live but has no stake pool. Run create-stake-pool.ts separately.");
   }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // TX7: SKIPPED — oracle authority stays as system program (Hyperp mode).
-  // In Hyperp mode, the keeper uses UpdateHyperpMark (tag 34) which reads price
-  // directly from the on-chain DEX pool. Setting oracle authority to the keeper
-  // wallet would make it use PushOraclePrice (tag 17) which relies on off-chain
-  // price fetching and can produce wrong prices.
-  let sig7: string | null = null;
-  console.log("TX7: SKIPPED (oracle authority = system program = Hyperp mode, reads from DEX pool)");
 
   // ──────────────────────────────────────────────────────────────────────────
   // Save market config to file
@@ -660,14 +690,18 @@ async function main() {
     programId: cfg.programId.toBase58(),
     slabAddress: slab.publicKey.toBase58(),
     matcherCtxAddress: matcherCtx.publicKey.toBase58(),
-    keeperFundPda: keeperFundPda.toBase58(),
     lpPda: lpPda.toBase58(),
     vaultAta: vaultAta.toBase58(),
     collateralMint: cfg.collateralMint.toBase58(),
     dexPool: cfg.dexPoolAddress.toBase58(),
+    stakePool: stakePool.toBase58(),
+    stakeLpMint: stakeLpMint.publicKey.toBase58(),
+    stakeVault: stakeVault.publicKey.toBase58(),
+    stakeVaultAuth: stakeVaultAuth.toBase58(),
+    stakeProgramId: STAKE_PROG_ID.toBase58(),
     network: cfg.network,
     createdAt: new Date().toISOString(),
-    transactions: { sig1, sig2, sig3, sig4, sig5, sig6, sig7 },
+    transactions: { sig1, sig2, sig3, sig4, sig5, sig6, sig6 },
   };
 
   const outFile = path.join(
@@ -706,8 +740,7 @@ async function main() {
   console.log(`  TX3 InitLP:        ${sig3}`);
   console.log(`  TX4 InitMatcherCtx: ${sig4}`);
   if (sig5) console.log(`  TX5 TopUpInsurance: ${sig5}`);
-  if (sig6) console.log(`  TX6 TopUpKeeperFund: ${sig6}`);
-  if (sig7) console.log(`  TX7 SetOracleAuthority: ${sig7}`);
+  if (sig6) console.log(`  TX6 InitStakePool: ${sig6}`);
   console.log();
   console.log(`Config saved to: ${outFile}`);
   console.log();
@@ -715,6 +748,7 @@ async function main() {
   console.log("  1. Insert market row into Supabase (see SQL above in script)");
   console.log("  2. Restart keeper + indexer to discover the new market");
   console.log("  3. Wait for first crank (~30s) before attempting trades");
+  console.log("  4. Verify stake pool on frontend at /stake");
   console.log();
   console.log("Addresses:");
   console.log(
@@ -723,11 +757,14 @@ async function main() {
         programId: cfg.programId.toBase58(),
         slabAddress: slab.publicKey.toBase58(),
         matcherCtxAddress: matcherCtx.publicKey.toBase58(),
-        keeperFundPda: keeperFundPda.toBase58(),
-        lpPda: lpPda.toBase58(),
+            lpPda: lpPda.toBase58(),
         vaultAta: vaultAta.toBase58(),
         collateralMint: cfg.collateralMint.toBase58(),
         dexPool: cfg.dexPoolAddress.toBase58(),
+        stakePool: stakePool.toBase58(),
+        stakeLpMint: stakeLpMint.publicKey.toBase58(),
+        stakeVault: stakeVault.publicKey.toBase58(),
+        stakeProgramId: STAKE_PROG_ID.toBase58(),
         network: cfg.network,
       },
       null,
