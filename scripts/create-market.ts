@@ -207,7 +207,7 @@ function parseArgs(): MarketConfig {
   const dexPoolAddress = new PublicKey(dexPoolStr);
 
   const initialMarkPriceE6 = BigInt(
-    get("--initial-price-e6") ?? process.env.INITIAL_PRICE_E6 ?? "150000000",
+    get("--initial-price-e6") ?? process.env.INITIAL_PRICE_E6 ?? "0",
   );
 
   const seedDepositAmount = BigInt(
@@ -277,7 +277,7 @@ async function main() {
   console.log(`Program:         ${cfg.programId.toBase58()}`);
   console.log(`Collateral mint: ${cfg.collateralMint.toBase58()}`);
   console.log(`DEX pool:        ${cfg.dexPoolAddress.toBase58()}`);
-  console.log(`Initial price:   $${Number(cfg.initialMarkPriceE6) / 1_000_000}`);
+  console.log(`Initial price:   ${cfg.initialMarkPriceE6 === 0n ? "(will fetch from DEX pool)" : "$" + (Number(cfg.initialMarkPriceE6) / 1_000_000).toFixed(2)}`);
   console.log(`Seed deposit:    ${Number(cfg.seedDepositAmount) / 1_000_000} USDC`);
   console.log(
     `Insurance seed:  ${Number(cfg.insuranceAmount) / 1_000_000} USDC${cfg.insuranceAmount === 0n ? " (skipping TX5)" : ""}`,
@@ -302,6 +302,25 @@ async function main() {
   if (adminUsdc < neededUsdc) {
     console.error(`ERROR: Need ${neededUsdc} USDC but only have ${adminUsdc.toFixed(2)}. Fund the wallet first.`);
     process.exit(1);
+  }
+
+  // Fetch live price from DEX pool if not overridden
+  let markPriceE6 = cfg.initialMarkPriceE6;
+  if (markPriceE6 === 0n) {
+    console.log("Fetching live SOL price from DEX pool...");
+    const poolInfo = await conn.getAccountInfo(cfg.dexPoolAddress);
+    if (!poolInfo) throw new Error("DEX pool not found on-chain");
+    // Raydium CLMM: sqrt_price_x64 (u128) at offset 253
+    const sqrtLo = poolInfo.data.readBigUInt64LE(253);
+    const sqrtHi = poolInfo.data.readBigUInt64LE(261);
+    const sqrtPriceX64 = sqrtLo + (sqrtHi << 64n);
+    const sqrtFloat = Number(sqrtPriceX64) / 2 ** 64;
+    const rawPrice = sqrtFloat * sqrtFloat;
+    // rawPrice = token1/token0 in native units (no decimal adjustment)
+    // For SOL(9 decimals) / USDC(6 decimals): USDC_per_SOL = rawPrice * 10^(9-6) = rawPrice * 1000
+    const priceUsd = rawPrice * 1000;
+    markPriceE6 = BigInt(Math.round(priceUsd * 1_000_000));
+    console.log(`  Live SOL price: $${priceUsd.toFixed(2)} (${markPriceE6} e6)`);
   }
 
   // Generate fresh keypairs for slab and matcher context
@@ -361,7 +380,7 @@ async function main() {
     confFilterBps: 0,
     invert: 0,
     unitScale: 0,
-    initialMarkPriceE6: cfg.initialMarkPriceE6,
+    initialMarkPriceE6: markPriceE6,
     ...DEFAULT_INIT_EXTRA,
     ...DEFAULT_RISK_PARAMS,
   });

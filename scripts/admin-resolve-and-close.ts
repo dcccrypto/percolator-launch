@@ -26,8 +26,8 @@ import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-tok
 import { fetchSlab, parseAllAccounts, parseConfig, parseHeader } from "@percolator/sdk";
 import fs from "fs";
 
-const RPC = "https://mainnet.helius-rpc.com/?api-key=ecfc91c7-b704-4c37-b10e-a277392830aa";
-const SLAB_ADDRESS = "FLF9ghf6H4sfSexcQzDwse4gcGZKPb6qYCqo5Btat98";
+const RPC = "https://mainnet.helius-rpc.com/?api-key=2a089bfd-18ae-48b5-abbe-36b0383ecad3";
+const SLAB_ADDRESS = process.env.SLAB_ADDRESS || "DSz7UykKuHLWAJjEEREAZAoLeYdoKQ9GL5rhA2BU6irH";
 const PROGRAM_ID = "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv";
 
 async function main() {
