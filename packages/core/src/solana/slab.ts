@@ -524,8 +524,9 @@ const V12_1_EP_ACCT_LAST_FEE_SLOT_OFF = 264;
 //   RISK_BUF_OFF = ENGINE_OFF + ENGINE_LEN; RISK_BUF_LEN = 160.
 // SBF SLAB_LEN for --features small (MAX_ACCOUNTS=256): 1,128,448 bytes (verified by native test).
 // All account offsets below match both SBF and native (no alignment divergence for this struct).
-const V12_15_ENGINE_OFF = 624;    // HEADER=72 + CONFIG=552, align_up=624
-const V12_15_ACCOUNT_SIZE = 4400; // sizeof(Account) = 4400 bytes
+const V12_15_ENGINE_OFF = 624;    // HEADER=72 + CONFIG=544, align_up=624
+const V12_15_ACCOUNT_SIZE = 4400; // sizeof(Account) with 62 cohorts (default)
+const V12_15_ACCOUNT_SIZE_SMALL = 944; // sizeof(Account) with 8 cohorts (--features small)
 const V12_15_DEFAULT_MAX_ACCOUNTS = 2048; // was 4096, changed in v12.15
 
 // V12_15 account field offsets (relative to account slot start):
@@ -748,6 +749,8 @@ for (const n of TIERS) {
 }
 // V12_15 additional tier: MAX_ACCOUNTS=2048 (new default, changed from 4096 in v12.15).
 V12_15_SIZES.set(computeSlabSize(V12_15_ENGINE_OFF, V12_15_ENGINE_BITMAP_OFF, V12_15_ACCOUNT_SIZE, 2048, 18), 2048);
+// V12_15_SMALL: --features small (8 cohorts, 944-byte accounts). Hardcoded sizes verified via cargo test.
+V12_15_SIZES.set(243712, 256);  // small: 256 accounts × 944 bytes, SLAB_LEN=243712
 
 // SBF-specific V12_1 sizes (verified via cargo build-sbf compile-time offset_of! assertions).
 // SBF has ENGINE_OFF=616 (not 648) because HEADER=72 + CONFIG=544 = 616, align_up(616,8)=616.
@@ -2367,7 +2370,7 @@ export function parseEngine(data: Uint8Array): EngineState {
   const base = layout.engineOff;
 
   // Detect v12.15 layout: ACCOUNT_SIZE=4400 and ENGINE_OFF=624
-  const isV12_15 = layout.accountSize === V12_15_ACCOUNT_SIZE && layout.engineOff === V12_15_ENGINE_OFF;
+  const isV12_15 = (layout.accountSize === V12_15_ACCOUNT_SIZE || layout.accountSize === V12_15_ACCOUNT_SIZE_SMALL) && layout.engineOff === V12_15_ENGINE_OFF;
 
   // For v12.15: funding_rate_e9 is i128 at offset 240. For pre-v12.15: i64 at engineFundingRateBpsOff.
   const fundingRateBpsPerSlotLast = isV12_15
@@ -2532,7 +2535,7 @@ export function parseAccount(data: Uint8Array, idx: number): Account {
   // V12_1: engineOff=648 + bitmapOff(rel)=368. Detect by engineOff (most reliable).
   // Account is 320 on aarch64, 280 on SBF — accountSize alone is ambiguous.
   // V12_1_EP: entry_price re-added, accountSize=288 on SBF. All offsets after entry_price shift +8.
-  const isV12_15 = layout.accountSize === V12_15_ACCOUNT_SIZE;
+  const isV12_15 = layout.accountSize === V12_15_ACCOUNT_SIZE || layout.accountSize === V12_15_ACCOUNT_SIZE_SMALL;
   const isV12_1EP = !isV12_15 && layout.accountSize === V12_1_EP_SBF_ACCOUNT_SIZE && layout.engineOff === V12_1_SBF_ENGINE_OFF;
   const isV12_1 = !isV12_15 && !isV12_1EP && (layout.engineOff === V12_1_ENGINE_OFF || layout.engineOff === V12_1_SBF_ENGINE_OFF) && (layout.accountSize === V12_1_ACCOUNT_SIZE || layout.accountSize === V12_1_ACCOUNT_SIZE_SBF);
   const isAdl = !isV12_15 && (layout.accountSize >= 312 || isV12_1 || isV12_1EP);
