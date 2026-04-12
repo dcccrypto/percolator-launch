@@ -56,7 +56,7 @@ import {
   parseAccount,
   deriveLpPda,
   fetchSlab,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { loadTestKeypair } from "./setup";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

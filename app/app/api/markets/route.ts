@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
-import { parseHeader, parseConfig } from "@percolator/sdk";
+import { parseHeader, parseConfig } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig } from "@/lib/config";
 import { getClientIp } from "@/lib/get-client-ip";

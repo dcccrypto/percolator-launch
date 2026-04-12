@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { AccountKind, type Account } from "@percolator/sdk";
+import { AccountKind, type Account } from "@percolatorct/sdk";
 
 export interface UserAccountInfo {
   idx: number;

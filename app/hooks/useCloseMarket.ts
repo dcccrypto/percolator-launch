@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { parseHeader } from "@percolator/sdk";
+import { parseHeader } from "@percolatorct/sdk";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 

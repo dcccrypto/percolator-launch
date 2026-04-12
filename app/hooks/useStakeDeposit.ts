@@ -10,7 +10,7 @@ import {
   deriveDepositPda,
   encodeStakeDeposit,
   depositAccounts,
-} from '@percolator/sdk';
+} from '@percolatorct/sdk';
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,

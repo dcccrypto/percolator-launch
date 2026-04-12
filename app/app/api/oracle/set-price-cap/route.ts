@@ -57,7 +57,7 @@ import {
   buildIx,
   buildAccountMetas,
   ACCOUNTS_SET_ORACLE_PRICE_CAP,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { getConfig } from "@/lib/config";
 import { getServiceClient } from "@/lib/supabase";
 

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { getAssociatedTokenAddressSync, unpackAccount, unpackMint } from '@solana/spl-token';
-import { getStakeProgramId, deriveDepositPda } from '@percolator/sdk';
+import { getStakeProgramId, deriveDepositPda } from '@percolatorct/sdk';
 
 
 // ═══════════════════════════════════════════════════════════════

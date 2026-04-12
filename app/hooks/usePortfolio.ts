@@ -18,7 +18,7 @@ import {
   type DiscoveredMarket,
   type Account,
   type RiskParams,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
 import { getConfig, getAllProgramIds } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";

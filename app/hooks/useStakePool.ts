@@ -7,7 +7,7 @@ import {
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,
-} from '@percolator/sdk';
+} from '@percolatorct/sdk';
 import { useSlabState } from '@/components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
 import {

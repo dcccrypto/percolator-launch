@@ -58,7 +58,7 @@ import {
   parseEngine,
   parseAllAccounts,
   fetchSlab,
-} from "../packages/core/src/index.js";
+} from "@percolatorct/sdk";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

@@ -10,7 +10,7 @@ import { HealthBadge } from "@/components/market/HealthBadge";
 import { OracleBadge } from "@/components/oracle/OracleBadge";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { detectOracleMode } from "@/lib/oraclePrice";
-import type { DiscoveredMarket } from "@percolator/sdk";
+import type { DiscoveredMarket } from "@percolatorct/sdk";
 
 const ALL_ZEROS = new PublicKey("11111111111111111111111111111111");
 

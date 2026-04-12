@@ -56,8 +56,8 @@ import {
   parseAllAccounts,
   discoverMarkets,
   type DiscoveredMarket,
-} from "../packages/core/src/index.js";
-import { getProgramId } from "../packages/core/src/config/program-ids.js";
+} from "@percolatorct/sdk";
+import { getProgramId } from "@percolatorct/sdk";
 import * as fs from "fs";
 
 // ═══════════════════════════════════════════════════════════════

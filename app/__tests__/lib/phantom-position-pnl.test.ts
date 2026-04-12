@@ -6,7 +6,7 @@
  * This test validates the defensive guards in the PnL computation path.
  */
 import { describe, it, expect } from "vitest";
-import { computeMarkPnl, computePnlPercent } from "@percolator/sdk";
+import { computeMarkPnl, computePnlPercent } from "@percolatorct/sdk";
 import { formatUsd, formatPnl, formatPercent } from "../../lib/format";
 
 describe("PERC-297: Phantom position PnL guards", () => {

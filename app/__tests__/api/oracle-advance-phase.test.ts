@@ -57,7 +57,7 @@ vi.mock("@solana/web3.js", () => {
   };
 });
 
-vi.mock("@percolator/sdk", () => ({
+vi.mock("@percolatorct/sdk", () => ({
   encodeAdvanceOraclePhase: vi.fn().mockReturnValue(Buffer.from([56])),
   buildIx: vi.fn().mockReturnValue({ type: "ix" }),
   buildAccountMetas: vi.fn().mockReturnValue([]),

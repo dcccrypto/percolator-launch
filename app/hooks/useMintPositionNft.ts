@@ -6,7 +6,7 @@ import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
-import { encodeMintPositionNft } from "@percolator/sdk";
+import { encodeMintPositionNft } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";

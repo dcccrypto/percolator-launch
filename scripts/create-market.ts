@@ -53,14 +53,14 @@ import {
   encodeInitLP,
   encodeInitMatcherCtx,
   encodeTopUpInsurance,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import {
   buildAccountMetas,
   ACCOUNTS_INIT_MARKET,
   ACCOUNTS_INIT_LP,
   ACCOUNTS_INIT_MATCHER_CTX,
   ACCOUNTS_TOPUP_INSURANCE,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 
 // ============================================================================
 // Program IDs

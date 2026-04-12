@@ -15,7 +15,7 @@ import {
   deriveLpPda,
   derivePythPushOraclePDA,
   WELL_KNOWN,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 

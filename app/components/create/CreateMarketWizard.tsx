@@ -7,7 +7,7 @@ import { useCreateMarket, MIN_INIT_MARKET_SEED, type CreateMarketParams } from "
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
-import { SLAB_TIERS, type SlabTierKey } from "@percolator/sdk";
+import { SLAB_TIERS, type SlabTierKey } from "@percolatorct/sdk";
 import { getNetwork } from "@/lib/config";
 
 import { ModeSelector } from "./ModeSelector";

@@ -14,7 +14,7 @@ import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
-import type { DiscoveredMarket } from "@percolator/sdk";
+import type { DiscoveredMarket } from "@percolatorct/sdk";
 import { PublicKey } from "@solana/web3.js";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";

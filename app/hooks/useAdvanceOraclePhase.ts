@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useSlabState } from "@/hooks/useSlab";
-import { ORACLE_PHASE_MATURE } from "@percolator/sdk";
+import { ORACLE_PHASE_MATURE } from "@percolatorct/sdk";
 
 /**
  * PERC-622 / GH#1120: Auto-advance oracle phase on market page load.

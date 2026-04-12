@@ -33,7 +33,7 @@ vi.mock("@solana/web3.js", () => {
   };
 });
 
-vi.mock("@percolator/sdk", () => ({
+vi.mock("@percolatorct/sdk", () => ({
   encodeSetOraclePriceCap: vi.fn().mockReturnValue(Buffer.from([1])),
   buildIx: vi.fn().mockReturnValue({ type: "ix" }),
   buildAccountMetas: vi.fn().mockReturnValue([]),

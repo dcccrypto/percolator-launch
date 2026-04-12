@@ -24,7 +24,7 @@ import {
   encodeKeeperCrank,
   SLAB_TIERS,
   deriveVaultAuthority,
-} from "../packages/core/src/index.js";
+} from "@percolatorct/sdk";
 import * as fs from "fs";
 
 const RPC_URL = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_DEVNET_API_KEY ?? process.env.HELIUS_API_KEY ?? ""}`;

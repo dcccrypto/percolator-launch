@@ -46,8 +46,8 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 vi.mock("@/lib/tx", () => ({
   sendTx: vi.fn().mockResolvedValue({ signature: "abc123" }),
 }));
-vi.mock("@percolator/sdk", async () => {
-  const actual = await vi.importActual("@percolator/sdk");
+vi.mock("@percolatorct/sdk", async () => {
+  const actual = await vi.importActual("@percolatorct/sdk");
   return {
     ...actual,
     encodeSetOracleAuthority: vi.fn(() => Buffer.from([])),

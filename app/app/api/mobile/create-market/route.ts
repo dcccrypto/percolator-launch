@@ -60,7 +60,7 @@ import {
   deriveLpPda,
   SLAB_TIERS,
   type SlabTierKey,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { getClientIp } from "@/lib/get-client-ip";
 import {

@@ -22,9 +22,9 @@ import {
   ACCOUNTS_SET_RISK_THRESHOLD,
   ACCOUNTS_PAUSE_MARKET,
   ACCOUNTS_UNPAUSE_MARKET,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
-import type { DiscoveredMarket } from "@percolator/sdk";
+import type { DiscoveredMarket } from "@percolatorct/sdk";
 
 /**
  * PERC-8311 — Authority pre-flight helpers.

@@ -12,7 +12,7 @@ import { NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getRpcEndpoint } from "@/lib/config";
-import { getStakeProgramId } from "@percolator/sdk";
+import { getStakeProgramId } from "@percolatorct/sdk";
 import * as Sentry from "@sentry/nextjs";
 
 // ── APR helpers ───────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useMemo } from "react";
-import { type SlabTierKey, SLAB_TIERS } from "@percolator/sdk";
+import { type SlabTierKey, SLAB_TIERS } from "@percolatorct/sdk";
 import { CostEstimate } from "./CostEstimate";
 import Link from "next/link";
 import { getNetwork } from "@/lib/config";

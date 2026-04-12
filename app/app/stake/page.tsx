@@ -9,7 +9,7 @@ import {
   deriveDepositPda,
   STAKE_POOL_SIZE,
   decodeStakePool,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
 import { useStakeDepositJunior } from "@/hooks/useStakeDepositJunior";

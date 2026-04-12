@@ -7,7 +7,7 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { usePositionNft } from "@/hooks/usePositionNft";
-import { encodeBurnPositionNft } from "@percolator/sdk";
+import { encodeBurnPositionNft } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";

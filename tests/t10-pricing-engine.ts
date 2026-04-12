@@ -40,7 +40,7 @@ import {
   ACCOUNTS_UPDATE_CONFIG,
   fetchSlab,
   computeEmaMarkPrice,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 
 import { TestHarness, CRANK_NO_CALLER, PROGRAM_ID, type TestContext, type UserContext } from "./harness.js";
 

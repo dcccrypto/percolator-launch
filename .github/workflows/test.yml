@@ -38,15 +38,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Build dependency order: sdk → shared → api/keeper/indexer
-      - name: Build SDK package
-        run: pnpm --filter @percolator/sdk build
-
+      # Build dependency order: shared → api/keeper/indexer
       - name: Build shared package
         run: pnpm --filter @percolator/shared build
-
-      - name: Run unit tests (sdk)
-        run: cd packages/core && pnpm test
 
       - name: Run unit tests (shared)
         run: pnpm --filter @percolator/shared test
@@ -108,9 +102,6 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Build dependency order before running tests
-      - name: Build SDK package
-        run: pnpm --filter @percolator/sdk build
-
       - name: Build shared package
         run: pnpm --filter @percolator/shared build
 
@@ -200,42 +191,6 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  fuzz-tests:
-    name: Fuzz Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Setup pnpm
-        run: npm install -g pnpm@9
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Check for fuzz test script
-        id: fuzz-check
-        run: |
-          cd packages/core
-          if node -e "const p=require('./package.json'); if(!p.scripts?.['test:fuzz']) process.exit(1)" 2>/dev/null; then
-            echo "has_fuzz=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_fuzz=false" >> "$GITHUB_OUTPUT"
-            echo "ℹ️  No test:fuzz script in packages/core — skipping"
-          fi
-
-      - name: Run fuzz tests
-        if: steps.fuzz-check.outputs.has_fuzz == 'true'
-        run: cd packages/core && pnpm test:fuzz
-
   coverage-check:
     name: Coverage Gate
     runs-on: ubuntu-latest
@@ -278,9 +233,6 @@ jobs:
 
       # Fail on high+ severity. Accepted findings are listed in root package.json
       # pnpm.auditConfig (must match SECURITY-DEPS.md).
-      - name: Build SDK package
-        run: pnpm --filter @percolator/sdk build
-
       - name: Build shared package
         run: pnpm --filter @percolator/shared build
 

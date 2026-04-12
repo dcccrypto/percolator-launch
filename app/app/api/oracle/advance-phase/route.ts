@@ -32,7 +32,7 @@ import {
   buildIx,
   buildAccountMetas,
   ACCOUNTS_ADVANCE_ORACLE_PHASE,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { getConfig } from "@/lib/config";
 import {
   checkAdvancePhaseRateLimit,

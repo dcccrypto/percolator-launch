@@ -51,7 +51,7 @@ import {
   parseParams,
   deriveLpPda,
   fetchSlab,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

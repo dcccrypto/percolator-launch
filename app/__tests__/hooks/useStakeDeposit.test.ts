@@ -37,7 +37,7 @@ vi.mock('@/lib/tx', () => ({
   sendTx: vi.fn(),
 }));
 
-vi.mock('@percolator/sdk', () => {
+vi.mock('@percolatorct/sdk', () => {
   const { PublicKey: PK } = require('@solana/web3.js');
   const devnetProgramId = new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k');
   return {
@@ -72,7 +72,7 @@ import { useConnectionCompat, useWalletCompat } from '@/hooks/useWalletCompat';
 import { useSlabState } from '@/components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
 import { sendTx } from '@/lib/tx';
-import { encodeStakeDeposit, depositAccounts } from '@percolator/sdk';
+import { encodeStakeDeposit, depositAccounts } from '@percolatorct/sdk';
 
 // Build a fake pool account buffer (186 bytes)
 function buildPoolAccountData(): Buffer {

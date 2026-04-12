@@ -18,7 +18,7 @@ import {
   getAta,
   parseAllAccounts,
   AccountKind,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 

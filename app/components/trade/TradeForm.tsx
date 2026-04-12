@@ -13,7 +13,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
-import { AccountKind, computePreTradeLiqPrice, computeLiqPrice, computeMarkPnl, computePnlPercent } from "@percolator/sdk";
+import { AccountKind, computePreTradeLiqPrice, computeLiqPrice, computeMarkPnl, computePnlPercent } from "@percolatorct/sdk";
 import { PreTradeSummary } from "@/components/trade/PreTradeSummary";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";

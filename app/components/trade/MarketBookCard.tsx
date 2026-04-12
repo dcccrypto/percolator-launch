@@ -8,7 +8,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatUsd, formatTokenAmount, shortenAddress } from "@/lib/format";
 import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
-import { AccountKind } from "@percolator/sdk";
+import { AccountKind } from "@percolatorct/sdk";
 
 const LP_TABLE_CAP = 5;
 

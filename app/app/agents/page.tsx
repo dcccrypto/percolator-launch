@@ -96,7 +96,7 @@ export default function AgentsPage() {
 Stack:
 ├── app/              Next.js 14 + TypeScript + Tailwind (frontend)
 ├── packages/server/  Hono backend on Railway (API + crank + oracle)
-├── packages/core/    Shared Solana instruction encoding/parsing
+├── @percolatorct/sdk  Shared Solana instruction encoding/parsing (npm)
 ├── program/          Solana BPF program (Rust)
 ├── percolator/       Risk engine crate (Rust)
 └── tests/            On-chain TypeScript tests

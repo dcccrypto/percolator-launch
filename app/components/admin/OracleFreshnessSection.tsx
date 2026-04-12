@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { useAdminActions } from "@/hooks/useAdminActions";
-import type { DiscoveredMarket } from "@percolator/sdk";
+import type { DiscoveredMarket } from "@percolatorct/sdk";
 
 // ─── Style tokens ──────────────────────────────────────────────────────────────
 const card = "rounded-none bg-[var(--panel-bg)] border border-[var(--border)]";

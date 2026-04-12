@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { discoverMarkets, type DiscoveredMarket } from "@percolator/sdk";
+import { discoverMarkets, type DiscoveredMarket } from "@percolatorct/sdk";
 import { getAllProgramIds } from "@/lib/config";
 import { isBlockedSlab } from "@/lib/blocklist";
 

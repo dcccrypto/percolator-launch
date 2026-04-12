@@ -33,7 +33,7 @@ vi.mock('next/navigation', () => ({
   useParams: vi.fn(),
 }));
 
-vi.mock('@percolator/sdk', () => {
+vi.mock('@percolatorct/sdk', () => {
   const { PublicKey: PK } = require('@solana/web3.js');
   const devnetProgramId = new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k');
   return {

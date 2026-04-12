@@ -23,7 +23,7 @@
 
 import { Connection, PublicKey, Keypair, TransactionInstruction, SYSVAR_CLOCK_PUBKEY, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { fetchSlab, parseAllAccounts, parseConfig, parseHeader } from "@percolator/sdk";
+import { fetchSlab, parseAllAccounts, parseConfig, parseHeader } from "@percolatorct/sdk";
 import fs from "fs";
 
 const RPC = "https://mainnet.helius-rpc.com/?api-key=2a089bfd-18ae-48b5-abbe-36b0383ecad3";

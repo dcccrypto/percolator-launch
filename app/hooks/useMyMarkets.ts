@@ -4,7 +4,7 @@ import { useMemo, useEffect, useState, useRef, useCallback } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "./useMarketDiscovery";
-import { parseAllAccounts, AccountKind, type DiscoveredMarket } from "@percolator/sdk";
+import { parseAllAccounts, AccountKind, type DiscoveredMarket } from "@percolatorct/sdk";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
 
 export interface MyMarket extends DiscoveredMarket {

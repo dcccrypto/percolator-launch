@@ -2,7 +2,7 @@
  * Devnet Integration Test Harness for Percolator Launch
  *
  * Adapted from MidTermDev/percolator-sov test harness.
- * Uses @percolator/sdk for all on-chain interactions.
+ * Uses @percolatorct/sdk for all on-chain interactions.
  *
  * Provides:
  * - Fresh market creation per test
@@ -52,7 +52,7 @@ import {
   encodePushOraclePrice,
   encodeSetOracleAuthority,
   type InitMarketArgs,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 
 import {
   buildAccountMetas,
@@ -72,7 +72,7 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_SET_ORACLE_AUTHORITY,
   WELL_KNOWN,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 
 import {
   parseHeader,
@@ -86,7 +86,7 @@ import {
   type EngineState,
   type RiskParams,
   type Account,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 
 // ============================================================================
 // CONSTANTS

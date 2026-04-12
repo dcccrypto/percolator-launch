@@ -12,7 +12,7 @@ import {
   encodeStakeDeposit,
   depositAccounts,
   decodeStakePool,
-} from '@percolator/sdk';
+} from '@percolatorct/sdk';
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,

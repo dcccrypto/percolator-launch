@@ -10,7 +10,7 @@ import {
 } from '@solana/spl-token';
 import {
   deriveInsuranceLpMint,
-} from '@percolator/sdk';
+} from '@percolatorct/sdk';
 import { useSlabState } from '../components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
 

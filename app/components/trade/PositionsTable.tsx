@@ -8,7 +8,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
-import { AccountKind } from "@percolator/sdk";
+import { AccountKind } from "@percolatorct/sdk";
 import {
   formatTokenAmount,
   formatUsd,

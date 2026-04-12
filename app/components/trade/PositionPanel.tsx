@@ -8,7 +8,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
-import { AccountKind } from "@percolator/sdk";
+import { AccountKind } from "@percolatorct/sdk";
 import { formatTokenAmount, formatUsd, formatLiqPrice } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {

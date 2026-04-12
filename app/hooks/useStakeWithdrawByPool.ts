@@ -12,7 +12,7 @@ import {
   encodeStakeWithdraw,
   withdrawAccounts,
   decodeStakePool,
-} from '@percolator/sdk';
+} from '@percolatorct/sdk';
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,

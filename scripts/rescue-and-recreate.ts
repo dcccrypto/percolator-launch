@@ -57,8 +57,8 @@ import {
   encodeDepositCollateral,
   ACCOUNTS_DEPOSIT_COLLATERAL,
   WELL_KNOWN,
-} from "../packages/core/src/index.js";
-import { getProgramId, PROGRAM_IDS } from "../packages/core/src/config/program-ids.js";
+} from "@percolatorct/sdk";
+import { getProgramId, PROGRAM_IDS } from "@percolatorct/sdk";
 import * as fs from "fs";
 
 // ============================================================================

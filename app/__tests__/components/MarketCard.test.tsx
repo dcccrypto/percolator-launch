@@ -25,7 +25,7 @@ import { MarketBrowser } from "@/components/market/MarketBrowser";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { PublicKey } from "@solana/web3.js";
-import type { DiscoveredMarket } from "@percolator/sdk";
+import type { DiscoveredMarket } from "@percolatorct/sdk";
 
 // Mock Next.js
 vi.mock("next/link", () => ({

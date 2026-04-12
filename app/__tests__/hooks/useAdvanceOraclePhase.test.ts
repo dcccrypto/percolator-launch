@@ -13,7 +13,7 @@ vi.mock("@/hooks/useSlab", () => ({
   useSlabState: vi.fn(() => ({ config: mockConfig })),
 }));
 
-vi.mock("@percolator/sdk", () => ({
+vi.mock("@percolatorct/sdk", () => ({
   ORACLE_PHASE_MATURE: 2,
 }));
 

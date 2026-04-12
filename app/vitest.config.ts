@@ -50,7 +50,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './'),
-      '@percolator/sdk': path.resolve(__dirname, '../packages/core/src'),
     },
   },
 });

@@ -10,7 +10,7 @@ import { useAdminActions } from "@/hooks/useAdminActions";
 import { useToast } from "@/hooks/useToast";
 import { getConfig, explorerAccountUrl } from "@/lib/config";
 import { sanitizeAccountCount } from "@/lib/health";
-import { deriveInsuranceLpMint } from "@percolator/sdk";
+import { deriveInsuranceLpMint } from "@percolatorct/sdk";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockMyMarkets } from "@/lib/mock-trade-data";
 

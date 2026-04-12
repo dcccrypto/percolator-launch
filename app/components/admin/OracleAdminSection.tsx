@@ -6,7 +6,7 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { explorerTxUrl } from "@/lib/config";
 import { useAdminActions } from "@/hooks/useAdminActions";
-import type { DiscoveredMarket } from "@percolator/sdk";
+import type { DiscoveredMarket } from "@percolatorct/sdk";
 
 // ─── Style tokens (matches admin/page.tsx) ────────────────────────────────────
 const card =
