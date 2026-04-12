@@ -348,11 +348,16 @@ export async function GET() {
     }
 
     // 2. Parse binary data
-    const parsed: Array<{ pubkey: string; pool: ParsedStakePool }> = [];
+    const allParsed: Array<{ pubkey: string; pool: ParsedStakePool }> = [];
     for (const { pubkey, account } of rawAccounts) {
       const pool = parseStakePool(Buffer.from(account.data));
-      if (pool) parsed.push({ pubkey: pubkey.toBase58(), pool });
+      if (pool) allParsed.push({ pubkey: pubkey.toBase58(), pool });
     }
+
+    // 2b. Filter out orphan pools whose slab no longer exists on-chain
+    const slabKeys = allParsed.map(p => new PublicKey(p.pool.slab));
+    const slabInfos = await connection.getMultipleAccountsInfo(slabKeys);
+    const parsed = allParsed.filter((_, i) => slabInfos[i] !== null);
 
     // 3. Fetch vault token balances (SPL token amount in each vault)
     const vaultAddresses = parsed.map((p) => p.pool.vault);
