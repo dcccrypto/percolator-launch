@@ -2332,14 +2332,18 @@ export function parseParams(data: Uint8Array, layoutHint?: SlabLayout | null): R
     result.hMin = readU64LE(data, base + V12_15_PARAMS_H_MIN_OFF);
     result.hMax = readU64LE(data, base + V12_15_PARAMS_H_MAX_OFF);
     result.insuranceFloor = readU128LE(data, base + V12_15_PARAMS_INSURANCE_FLOOR_OFF);
-    // Extended params that still exist in v12.15 (offsets same relative to new layout):
-    result.riskReductionThreshold = readU128LE(data, base + PARAMS_RISK_THRESHOLD_OFF);
-    result.maintenanceFeePerSlot  = readU128LE(data, base + PARAMS_MAINTENANCE_FEE_OFF);
-    result.maxCrankStalenessSlots = readU64LE(data, base + PARAMS_MAX_CRANK_STALENESS_OFF);
-    result.liquidationFeeBps      = readU64LE(data, base + PARAMS_LIQUIDATION_FEE_BPS_OFF);
-    result.liquidationFeeCap      = readU128LE(data, base + PARAMS_LIQUIDATION_FEE_CAP_OFF);
-    result.liquidationBufferBps   = readU64LE(data, base + PARAMS_LIQUIDATION_BUFFER_OFF);
-    result.minLiquidationAbs      = readU128LE(data, base + PARAMS_MIN_LIQUIDATION_OFF);
+    // v12.15 RiskParams: no riskReductionThreshold, no maintenanceFeePerSlot.
+    // All offsets shift -8 from legacy (warmupPeriodSlots removed from start).
+    result.riskReductionThreshold = 0n; // removed in v12.15
+    result.maintenanceFeePerSlot  = 0n; // removed in v12.15
+    result.maxCrankStalenessSlots = readU64LE(data, base + 48);  // params+48 on SBF/native
+    result.liquidationFeeBps      = readU64LE(data, base + 56);
+    result.liquidationFeeCap      = readU128LE(data, base + 64);
+    result.liquidationBufferBps   = 0n; // removed (wire slot reused as resolve_price_deviation_bps)
+    result.minLiquidationAbs      = readU128LE(data, base + 88);
+    result.minInitialDeposit      = readU128LE(data, base + 104);
+    result.minNonzeroMmReq        = readU128LE(data, base + 120);
+    result.minNonzeroImReq        = readU128LE(data, base + 136);
   } else if (isV12_1Sbf) {
     // V12_1 SBF deployed struct — no riskReductionThreshold/liquidationBufferBps
     result.maintenanceFeePerSlot = readU128LE(data, base + V12_1_PARAMS_MAINT_FEE_OFF);

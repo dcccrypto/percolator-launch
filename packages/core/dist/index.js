@@ -2888,13 +2888,16 @@ function parseParams(data, layoutHint) {
     result.hMin = readU64LE(data, base + V12_15_PARAMS_H_MIN_OFF);
     result.hMax = readU64LE(data, base + V12_15_PARAMS_H_MAX_OFF);
     result.insuranceFloor = readU128LE(data, base + V12_15_PARAMS_INSURANCE_FLOOR_OFF);
-    result.riskReductionThreshold = readU128LE(data, base + PARAMS_RISK_THRESHOLD_OFF);
-    result.maintenanceFeePerSlot = readU128LE(data, base + PARAMS_MAINTENANCE_FEE_OFF);
-    result.maxCrankStalenessSlots = readU64LE(data, base + PARAMS_MAX_CRANK_STALENESS_OFF);
-    result.liquidationFeeBps = readU64LE(data, base + PARAMS_LIQUIDATION_FEE_BPS_OFF);
-    result.liquidationFeeCap = readU128LE(data, base + PARAMS_LIQUIDATION_FEE_CAP_OFF);
-    result.liquidationBufferBps = readU64LE(data, base + PARAMS_LIQUIDATION_BUFFER_OFF);
-    result.minLiquidationAbs = readU128LE(data, base + PARAMS_MIN_LIQUIDATION_OFF);
+    result.riskReductionThreshold = 0n;
+    result.maintenanceFeePerSlot = 0n;
+    result.maxCrankStalenessSlots = readU64LE(data, base + 48);
+    result.liquidationFeeBps = readU64LE(data, base + 56);
+    result.liquidationFeeCap = readU128LE(data, base + 64);
+    result.liquidationBufferBps = 0n;
+    result.minLiquidationAbs = readU128LE(data, base + 88);
+    result.minInitialDeposit = readU128LE(data, base + 104);
+    result.minNonzeroMmReq = readU128LE(data, base + 120);
+    result.minNonzeroImReq = readU128LE(data, base + 136);
   } else if (isV12_1Sbf) {
     result.maintenanceFeePerSlot = readU128LE(data, base + V12_1_PARAMS_MAINT_FEE_OFF);
     result.maxCrankStalenessSlots = readU64LE(data, base + V12_1_PARAMS_MAX_CRANK_OFF);
