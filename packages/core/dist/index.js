@@ -2509,9 +2509,9 @@ function buildLayoutV12_15(maxAccounts, dataLen) {
     engineShortOiOff: -1,
     // not present in v12.15 engine
     engineCTotOff: isSbf ? 320 : V12_15_ENGINE_C_TOT_OFF,
-    // SBF=320 (verified), native=344
+    // SBF=320 (verified on-chain), native=344
     enginePnlPosTotOff: isSbf ? 336 : V12_15_ENGINE_PNL_POS_TOT_OFF,
-    // SBF=336 (est), native=368
+    // SBF=336 (verified), native=368
     engineLiqCursorOff: -1,
     // not yet mapped
     engineGcCursorOff: -1,
@@ -2542,7 +2542,8 @@ function buildLayoutV12_15(maxAccounts, dataLen) {
     // not present in v12.15
     engineLastBreakerSlotOff: -1,
     // not present in v12.15
-    engineBitmapOff: bitmapOff,
+    engineBitmapOff: effectiveBitmapOff,
+    // SBF=640, native=862
     postBitmap,
     acctOwnerOff: V12_15_ACCT_OWNER_OFF,
     // 192
@@ -2894,10 +2895,10 @@ function parseParams(data, layoutHint) {
     result.liquidationFeeBps = readU64LE(data, base + 56);
     result.liquidationFeeCap = readU128LE(data, base + 64);
     result.liquidationBufferBps = 0n;
-    result.minLiquidationAbs = readU128LE(data, base + 88);
-    result.minInitialDeposit = readU128LE(data, base + 104);
-    result.minNonzeroMmReq = readU128LE(data, base + 120);
-    result.minNonzeroImReq = readU128LE(data, base + 136);
+    result.minLiquidationAbs = readU128LE(data, base + 80);
+    result.minInitialDeposit = readU128LE(data, base + 96);
+    result.minNonzeroMmReq = readU128LE(data, base + 112);
+    result.minNonzeroImReq = readU128LE(data, base + 128);
   } else if (isV12_1Sbf) {
     result.maintenanceFeePerSlot = readU128LE(data, base + V12_1_PARAMS_MAINT_FEE_OFF);
     result.maxCrankStalenessSlots = readU64LE(data, base + V12_1_PARAMS_MAX_CRANK_OFF);

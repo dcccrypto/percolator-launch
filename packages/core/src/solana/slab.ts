@@ -1547,8 +1547,8 @@ function buildLayoutV12_15(maxAccounts: number, dataLen?: number): SlabLayout {
     engineTotalOiOff: -1,                      // not present in v12.15 engine
     engineLongOiOff: -1,                       // not present in v12.15 engine
     engineShortOiOff: -1,                      // not present in v12.15 engine
-    engineCTotOff: isSbf ? 320 : V12_15_ENGINE_C_TOT_OFF,    // SBF=320 (verified), native=344
-    enginePnlPosTotOff: isSbf ? 336 : V12_15_ENGINE_PNL_POS_TOT_OFF, // SBF=336 (est), native=368
+    engineCTotOff: isSbf ? 320 : V12_15_ENGINE_C_TOT_OFF,    // SBF=320 (verified on-chain), native=344
+    enginePnlPosTotOff: isSbf ? 336 : V12_15_ENGINE_PNL_POS_TOT_OFF, // SBF=336 (verified), native=368
     engineLiqCursorOff: -1,                    // not yet mapped
     engineGcCursorOff: -1,                     // not yet mapped
     engineLastSweepStartOff: -1,               // not yet mapped
@@ -1564,7 +1564,7 @@ function buildLayoutV12_15(maxAccounts: number, dataLen?: number): SlabLayout {
     engineEmergencyOiModeOff: -1,              // not present in v12.15
     engineEmergencyStartSlotOff: -1,           // not present in v12.15
     engineLastBreakerSlotOff: -1,              // not present in v12.15
-    engineBitmapOff: bitmapOff,
+    engineBitmapOff: effectiveBitmapOff,        // SBF=640, native=862
     postBitmap,
     acctOwnerOff: V12_15_ACCT_OWNER_OFF, // 192
 
@@ -2336,14 +2336,15 @@ export function parseParams(data: Uint8Array, layoutHint?: SlabLayout | null): R
     // All offsets shift -8 from legacy (warmupPeriodSlots removed from start).
     result.riskReductionThreshold = 0n; // removed in v12.15
     result.maintenanceFeePerSlot  = 0n; // removed in v12.15
-    result.maxCrankStalenessSlots = readU64LE(data, base + 48);  // params+48 on SBF/native
+    // v12.15 RiskParams offsets (same on native and SBF — no i128 fields in RiskParams)
+    result.maxCrankStalenessSlots = readU64LE(data, base + 48);
     result.liquidationFeeBps      = readU64LE(data, base + 56);
     result.liquidationFeeCap      = readU128LE(data, base + 64);
     result.liquidationBufferBps   = 0n; // removed (wire slot reused as resolve_price_deviation_bps)
-    result.minLiquidationAbs      = readU128LE(data, base + 88);
-    result.minInitialDeposit      = readU128LE(data, base + 104);
-    result.minNonzeroMmReq        = readU128LE(data, base + 120);
-    result.minNonzeroImReq        = readU128LE(data, base + 136);
+    result.minLiquidationAbs      = readU128LE(data, base + 80);
+    result.minInitialDeposit      = readU128LE(data, base + 96);
+    result.minNonzeroMmReq        = readU128LE(data, base + 112);
+    result.minNonzeroImReq        = readU128LE(data, base + 128);
   } else if (isV12_1Sbf) {
     // V12_1 SBF deployed struct — no riskReductionThreshold/liquidationBufferBps
     result.maintenanceFeePerSlot = readU128LE(data, base + V12_1_PARAMS_MAINT_FEE_OFF);
