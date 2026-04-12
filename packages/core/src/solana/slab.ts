@@ -526,7 +526,7 @@ const V12_1_EP_ACCT_LAST_FEE_SLOT_OFF = 264;
 // All account offsets below match both SBF and native (no alignment divergence for this struct).
 const V12_15_ENGINE_OFF = 624;    // HEADER=72 + CONFIG=544, align_up=624
 const V12_15_ACCOUNT_SIZE = 4400; // sizeof(Account) with 62 cohorts (default)
-const V12_15_ACCOUNT_SIZE_SMALL = 944; // sizeof(Account) with 8 cohorts (--features small)
+const V12_15_ACCOUNT_SIZE_SMALL = 920; // SBF sizeof(Account) with 8 cohorts (--features small, u128 align=8)
 const V12_15_DEFAULT_MAX_ACCOUNTS = 2048; // was 4096, changed in v12.15
 
 // V12_15 account field offsets (relative to account slot start):
@@ -1506,15 +1506,20 @@ function buildLayoutV12_1EP(maxAccounts: number): SlabLayout {
  *
  * @param maxAccounts - Number of account slots (256, 1024, 2048, or 4096)
  */
-function buildLayoutV12_15(maxAccounts: number): SlabLayout {
+function buildLayoutV12_15(maxAccounts: number, dataLen?: number): SlabLayout {
   const engineOff = V12_15_ENGINE_OFF;
   const bitmapOff = V12_15_ENGINE_BITMAP_OFF;
-  const accountSize = V12_15_ACCOUNT_SIZE;
+  // Detect 8-cohort (small) vs 62-cohort (full) account size from slab data length.
+  // SBF small (237512) uses 920-byte accounts; all others use 4400.
+  const isSmall = dataLen === 237512;
+  const accountSize = isSmall ? V12_15_ACCOUNT_SIZE_SMALL : V12_15_ACCOUNT_SIZE;
+  // SBF small has different bitmap/accounts offsets due to u128 align=8
+  const effectiveBitmapOff = isSmall ? 640 : bitmapOff; // SBF bitmap at engine+640
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
   const postBitmap = 18;
   const nextFreeBytes = maxAccounts * 2;
-  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const preAccountsLen = effectiveBitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
   const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
 
   return {
@@ -1585,7 +1590,7 @@ export function detectSlabLayout(dataLen: number, data?: Uint8Array): SlabLayout
   // Check V12_15 sizes first (v12.15 engine+prog sync, ACCOUNT_SIZE=4400).
   // Vastly larger account size — no collision with any earlier layout possible.
   const v1215n = V12_15_SIZES.get(dataLen);
-  if (v1215n !== undefined) return buildLayoutV12_15(v1215n);
+  if (v1215n !== undefined) return buildLayoutV12_15(v1215n, dataLen);
 
   // Check V12_1_EP sizes (entry_price re-added, ACCOUNT_SIZE=288 on SBF).
   // Must be checked before V12_1 (280-byte accounts) to avoid misdetection.

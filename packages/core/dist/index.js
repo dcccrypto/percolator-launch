@@ -1657,7 +1657,7 @@ var V12_1_EP_ACCT_FEE_CREDITS_OFF = 248;
 var V12_1_EP_ACCT_LAST_FEE_SLOT_OFF = 264;
 var V12_15_ENGINE_OFF = 624;
 var V12_15_ACCOUNT_SIZE = 4400;
-var V12_15_ACCOUNT_SIZE_SMALL = 944;
+var V12_15_ACCOUNT_SIZE_SMALL = 920;
 var V12_15_ACCT_ACCOUNT_ID_OFF = 0;
 var V12_15_ACCT_CAPITAL_OFF = 8;
 var V12_15_ACCT_KIND_OFF = 24;
@@ -2455,15 +2455,17 @@ function buildLayoutV12_1EP(maxAccounts) {
     engineInsuranceIsolationBpsOff: -1
   };
 }
-function buildLayoutV12_15(maxAccounts) {
+function buildLayoutV12_15(maxAccounts, dataLen) {
   const engineOff = V12_15_ENGINE_OFF;
   const bitmapOff = V12_15_ENGINE_BITMAP_OFF;
-  const accountSize = V12_15_ACCOUNT_SIZE;
+  const isSmall = dataLen === 237512;
+  const accountSize = isSmall ? V12_15_ACCOUNT_SIZE_SMALL : V12_15_ACCOUNT_SIZE;
+  const effectiveBitmapOff = isSmall ? 640 : bitmapOff;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
   const postBitmap = 18;
   const nextFreeBytes = maxAccounts * 2;
-  const preAccountsLen = bitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
+  const preAccountsLen = effectiveBitmapOff + bitmapBytes + postBitmap + nextFreeBytes;
   const accountsOffRel = Math.ceil(preAccountsLen / 8) * 8;
   return {
     version: 2,
@@ -2550,7 +2552,7 @@ function buildLayoutV12_15(maxAccounts) {
 }
 function detectSlabLayout(dataLen, data) {
   const v1215n = V12_15_SIZES.get(dataLen);
-  if (v1215n !== void 0) return buildLayoutV12_15(v1215n);
+  if (v1215n !== void 0) return buildLayoutV12_15(v1215n, dataLen);
   const v121epn = V12_1_EP_SIZES.get(dataLen);
   if (v121epn !== void 0) return buildLayoutV12_1EP(v121epn);
   const v121n = V12_1_SIZES.get(dataLen);
