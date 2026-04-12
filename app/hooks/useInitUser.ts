@@ -40,9 +40,11 @@ export function useInitUser(slabAddress: string) {
         //   2. fee_payment >= min_initial_deposit (engine.deposit minimum for new accounts)
         // Both checks return Custom:13 (EngineInsufficientBalance).
         // Use the greater of the two as the floor.
+        // feePayment must cover BOTH the one-time account fee AND leave at least
+        // minInitialDeposit as capital. So minimum = accountFee + minInitialDeposit.
         const accountFee = params?.newAccountFee ?? 0n;
         const minDeposit = params?.minInitialDeposit ?? 0n;
-        const minFee = accountFee > minDeposit ? accountFee : minDeposit;
+        const minFee = accountFee + minDeposit;
         const effectiveFee = (feePayment != null && feePayment >= minFee) ? feePayment : minFee;
 
         // PERC-698 / bug bounty: Pre-flight V0/V1 slab version check.
