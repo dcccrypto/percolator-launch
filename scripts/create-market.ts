@@ -92,7 +92,7 @@ const USDC_DEVNET = new PublicKey(
 
 // V12.15 slab sizes: ENGINE_OFF=624, ACCOUNT_SIZE=4400 (reserve cohort queues)
 // Verified via `cargo test --features small -- print_slab_layout`
-const SLAB_SIZE_SMALL  = 243_712; // maxAccounts=256, 8 cohorts (v12.15 --features small), ~1.70 SOL rent
+const SLAB_SIZE_SMALL  = 237_512; // SBF: maxAccounts=256, 8 cohorts (v12.15 --features small), ~1.65 SOL rent
 
 // Matcher context account size (fixed, per matcher program)
 const MATCHER_CTX_SIZE = 320;
@@ -370,7 +370,7 @@ async function main() {
   // internally — this message helps catch SDK version drift when reviewing logs.
   console.log(
     `  encodeInitMarket: ${initMarketData.length} bytes ` +
-      `(expected 360 — v12.15 header + hMin/hMax + RiskParams)`,
+      `(expected 352 — v12.15 header + hMin/hMax + RiskParams)`,
   );
 
   const tx1 = new Transaction();

@@ -750,7 +750,7 @@ for (const n of TIERS) {
 // V12_15 additional tier: MAX_ACCOUNTS=2048 (new default, changed from 4096 in v12.15).
 V12_15_SIZES.set(computeSlabSize(V12_15_ENGINE_OFF, V12_15_ENGINE_BITMAP_OFF, V12_15_ACCOUNT_SIZE, 2048, 18), 2048);
 // V12_15_SMALL: --features small (8 cohorts, 944-byte accounts). Hardcoded sizes verified via cargo test.
-V12_15_SIZES.set(243712, 256);  // small: 256 accounts × 944 bytes, SLAB_LEN=243712
+V12_15_SIZES.set(237512, 256);  // small (SBF): 256 accounts, 8 cohorts, SLAB_LEN=237512 (SBF u128 align=8)
 
 // SBF-specific V12_1 sizes (verified via cargo build-sbf compile-time offset_of! assertions).
 // SBF has ENGINE_OFF=616 (not 648) because HEADER=72 + CONFIG=544 = 616, align_up(616,8)=616.

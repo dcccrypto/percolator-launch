@@ -231,7 +231,7 @@ function encodeFeedId(feedId: string): Uint8Array {
 //   maintFee(16) + maxStale(8) + liqFee(8) + liqCap(16) +
 //   minLiqAbs(16) + minDeposit(16) + minMm(16) + minIm(16) + insFloor(16) + hMax(8)
 // = 1+32+32+32+8+2+1+4+8+16+16+8 + 8+8+8+8+8+16+16+16+8+8+16+8+16+16+16+16+8 = 360
-const INIT_MARKET_DATA_LEN = 360;
+const INIT_MARKET_DATA_LEN = 352; // v12.15: hMax inline (was appended), maintenanceFeePerSlot→hMax+pad
 
 export function encodeInitMarket(args: InitMarketArgs): Uint8Array {
   // Resolve hMin/hMax with fallback to warmupPeriodSlots for backwards compat
@@ -262,16 +262,16 @@ export function encodeInitMarket(args: InitMarketArgs): Uint8Array {
     encU64(args.maxAccounts),
     encU128(args.newAccountFee),
     encU128(args.insuranceFloor ?? 0n),          // wire slot: old riskReductionThreshold → now insurance_floor
-    encU128(args.maintenanceFeePerSlot),
+    encU64(hMax),                                // v12.15: h_max (u64) — was low 8 bytes of maintenanceFeePerSlot (u128)
+    encU64(0n),                                  // padding (u64) — remaining 8 bytes of old u128 slot
     encU64(args.maxCrankStalenessSlots),
     encU64(args.liquidationFeeBps),
     encU128(args.liquidationFeeCap),
-    encU64(args.liquidationBufferBps ?? 0n),     // wire slot: read and discarded by program
+    encU64(args.liquidationBufferBps ?? 0n),     // wire slot: read as resolve_price_deviation_bps by program
     encU128(args.minLiquidationAbs),
     encU128(args.minInitialDeposit),
     encU128(args.minNonzeroMmReq),
     encU128(args.minNonzeroImReq),
-    encU64(hMax),                                // v12.15: hMax appended after minNonzeroImReq
   );
   if (data.length !== INIT_MARKET_DATA_LEN) {
     throw new Error(
