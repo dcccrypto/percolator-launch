@@ -1656,6 +1656,7 @@ var V12_1_EP_ACCT_OWNER_OFF = 216;
 var V12_1_EP_ACCT_FEE_CREDITS_OFF = 248;
 var V12_1_EP_ACCT_LAST_FEE_SLOT_OFF = 264;
 var V12_15_ENGINE_OFF = 624;
+var V12_15_ENGINE_OFF_SBF = 616;
 var V12_15_ACCOUNT_SIZE = 4400;
 var V12_15_ACCOUNT_SIZE_SMALL = 920;
 var V12_15_ACCT_ACCOUNT_ID_OFF = 0;
@@ -2456,11 +2457,11 @@ function buildLayoutV12_1EP(maxAccounts) {
   };
 }
 function buildLayoutV12_15(maxAccounts, dataLen) {
-  const engineOff = V12_15_ENGINE_OFF;
+  const isSbf = dataLen === 237512;
+  const accountSize = isSbf ? V12_15_ACCOUNT_SIZE_SMALL : V12_15_ACCOUNT_SIZE;
+  const engineOff = isSbf ? V12_15_ENGINE_OFF_SBF : V12_15_ENGINE_OFF;
   const bitmapOff = V12_15_ENGINE_BITMAP_OFF;
-  const isSmall = dataLen === 237512;
-  const accountSize = isSmall ? V12_15_ACCOUNT_SIZE_SMALL : V12_15_ACCOUNT_SIZE;
-  const effectiveBitmapOff = isSmall ? 640 : bitmapOff;
+  const effectiveBitmapOff = isSbf ? 640 : bitmapOff;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
   const postBitmap = 18;
@@ -2485,16 +2486,16 @@ function buildLayoutV12_15(maxAccounts, dataLen) {
     engineInsuranceOff: 16,
     engineParamsOff: V12_15_ENGINE_PARAMS_OFF,
     // 32
-    paramsSize: V12_15_PARAMS_SIZE,
-    // 192
-    engineCurrentSlotOff: V12_15_ENGINE_CURRENT_SLOT_OFF,
-    // 224
+    paramsSize: isSbf ? 184 : V12_15_PARAMS_SIZE,
+    // SBF=184 (no trailing pad), native=192
+    engineCurrentSlotOff: isSbf ? 216 : V12_15_ENGINE_CURRENT_SLOT_OFF,
+    // SBF=216, native=224
     engineFundingIndexOff: -1,
     // not present in v12.15 engine struct
     engineLastFundingSlotOff: -1,
     // not present in v12.15 engine struct
-    engineFundingRateBpsOff: V12_15_ENGINE_FUNDING_RATE_E9_OFF,
-    // 240
+    engineFundingRateBpsOff: isSbf ? 224 : V12_15_ENGINE_FUNDING_RATE_E9_OFF,
+    // SBF=224, native=240
     engineMarkPriceOff: -1,
     // not present in v12.15
     engineLastCrankSlotOff: -1,
@@ -2507,10 +2508,10 @@ function buildLayoutV12_15(maxAccounts, dataLen) {
     // not present in v12.15 engine
     engineShortOiOff: -1,
     // not present in v12.15 engine
-    engineCTotOff: V12_15_ENGINE_C_TOT_OFF,
-    // 344
-    enginePnlPosTotOff: V12_15_ENGINE_PNL_POS_TOT_OFF,
-    // 368
+    engineCTotOff: isSbf ? 320 : V12_15_ENGINE_C_TOT_OFF,
+    // SBF=320 (verified), native=344
+    enginePnlPosTotOff: isSbf ? 336 : V12_15_ENGINE_PNL_POS_TOT_OFF,
+    // SBF=336 (est), native=368
     engineLiqCursorOff: -1,
     // not yet mapped
     engineGcCursorOff: -1,
@@ -2859,15 +2860,15 @@ function parseParams(data, layoutHint) {
   if (data.length < base + Math.min(paramsSize, 56)) {
     throw new Error("Slab data too short for RiskParams");
   }
-  const isV12_15Params = paramsSize === V12_15_PARAMS_SIZE;
+  const isV12_15Params = paramsSize === V12_15_PARAMS_SIZE || paramsSize === 184;
   const isV12_1Sbf = !isV12_15Params && layout !== null && layout !== void 0 && layout.engineOff === V12_1_SBF_ENGINE_OFF && paramsSize === 184;
   const result = {
     warmupPeriodSlots: isV12_15Params ? readU64LE(data, base + V12_15_PARAMS_H_MIN_OFF) : readU64LE(data, base + PARAMS_WARMUP_PERIOD_OFF),
-    maintenanceMarginBps: readU64LE(data, base + PARAMS_MAINTENANCE_MARGIN_OFF),
-    initialMarginBps: readU64LE(data, base + PARAMS_INITIAL_MARGIN_OFF),
-    tradingFeeBps: readU64LE(data, base + PARAMS_TRADING_FEE_OFF),
+    maintenanceMarginBps: isV12_15Params ? readU64LE(data, base + 0) : readU64LE(data, base + PARAMS_MAINTENANCE_MARGIN_OFF),
+    initialMarginBps: isV12_15Params ? readU64LE(data, base + 8) : readU64LE(data, base + PARAMS_INITIAL_MARGIN_OFF),
+    tradingFeeBps: isV12_15Params ? readU64LE(data, base + 16) : readU64LE(data, base + PARAMS_TRADING_FEE_OFF),
     maxAccounts: isV12_15Params ? readU64LE(data, base + V12_15_PARAMS_MAX_ACCOUNTS_OFF) : readU64LE(data, base + PARAMS_MAX_ACCOUNTS_OFF),
-    newAccountFee: readU128LE(data, base + PARAMS_NEW_ACCOUNT_FEE_OFF),
+    newAccountFee: isV12_15Params ? readU128LE(data, base + 32) : readU128LE(data, base + PARAMS_NEW_ACCOUNT_FEE_OFF),
     // Extended params: defaults; overwritten below if layout supports them
     riskReductionThreshold: 0n,
     maintenanceFeePerSlot: 0n,
