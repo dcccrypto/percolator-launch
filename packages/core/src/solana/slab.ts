@@ -1514,7 +1514,7 @@ function buildLayoutV12_15(maxAccounts: number, dataLen?: number): SlabLayout {
   const engineOff = isSbf ? V12_15_ENGINE_OFF_SBF : V12_15_ENGINE_OFF;
   const bitmapOff = V12_15_ENGINE_BITMAP_OFF;
   // SBF small has different bitmap/accounts offsets due to u128 align=8
-  const effectiveBitmapOff = isSbf ? 640 : bitmapOff; // SBF bitmap at engine+640
+  const effectiveBitmapOff = isSbf ? 648 : bitmapOff; // SBF bitmap at engine+648 (verified on-chain)
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
   const postBitmap = 18;

@@ -2461,7 +2461,7 @@ function buildLayoutV12_15(maxAccounts, dataLen) {
   const accountSize = isSbf ? V12_15_ACCOUNT_SIZE_SMALL : V12_15_ACCOUNT_SIZE;
   const engineOff = isSbf ? V12_15_ENGINE_OFF_SBF : V12_15_ENGINE_OFF;
   const bitmapOff = V12_15_ENGINE_BITMAP_OFF;
-  const effectiveBitmapOff = isSbf ? 640 : bitmapOff;
+  const effectiveBitmapOff = isSbf ? 648 : bitmapOff;
   const bitmapWords = Math.ceil(maxAccounts / 64);
   const bitmapBytes = bitmapWords * 8;
   const postBitmap = 18;
@@ -4269,7 +4269,7 @@ function deriveStakeVaultAuth(pool, programId) {
 }
 function deriveDepositPda(pool, user, programId) {
   return PublicKey10.findProgramAddressSync(
-    [TEXT.encode("deposit"), pool.toBytes(), user.toBytes()],
+    [TEXT.encode("stake_deposit"), pool.toBytes(), user.toBytes()],
     programId ?? getStakeProgramId()
   );
 }
