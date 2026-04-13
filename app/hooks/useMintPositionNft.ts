@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PublicKey, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemProgram } from "@solana/web3.js";
+import { PublicKey, Keypair, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemProgram } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
@@ -65,9 +65,13 @@ export function useMintPositionNft(slabAddress: string) {
       const userIdx = userAccount.idx;
       const nftProgId = NFT_PROGRAM_ID;
 
-      // Derive PDAs — all use the NFT program
+      // Derive PDA for state, generate fresh keypair for mint
       const [nftPda] = deriveNftPda(nftProgId, slabPk, userIdx);
-      const [nftMint] = deriveNftMint(nftProgId, slabPk, userIdx);
+      // nft_mint is a fresh keypair (not a PDA) — the program creates it via
+      // create_account which requires the mint account to sign the transaction
+      const nftMintKeypair = Keypair.generate();
+      const nftMint = nftMintKeypair.publicKey;
+
       // mint_authority PDA: ["mint_authority"] on NFT program
       const [mintAuth] = PublicKey.findProgramAddressSync(
         [Buffer.from("mint_authority")],
@@ -94,7 +98,7 @@ export function useMintPositionNft(slabAddress: string) {
         keys: [
           { pubkey: walletPubkey, isSigner: true, isWritable: true },     // 0: owner (signer, payer)
           { pubkey: nftPda, isSigner: false, isWritable: true },          // 1: nft_pda
-          { pubkey: nftMint, isSigner: false, isWritable: true },         // 2: nft_mint
+          { pubkey: nftMint, isSigner: true, isWritable: true },          // 2: nft_mint (SIGNER — fresh keypair)
           { pubkey: ownerAta, isSigner: false, isWritable: true },        // 3: owner_ata
           { pubkey: slabPk, isSigner: false, isWritable: false },         // 4: slab (read-only)
           { pubkey: mintAuth, isSigner: false, isWritable: false },       // 5: mint_authority PDA
@@ -111,6 +115,7 @@ export function useMintPositionNft(slabAddress: string) {
         wallet,
         instructions: [ix],
         computeUnits: 400_000,
+        signers: [nftMintKeypair],
       });
 
       toast("Position NFT minted!", "success");
