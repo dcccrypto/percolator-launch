@@ -796,8 +796,8 @@ export default function StakePage() {
               });
             }
             return; // found a position, stop scanning
-          } catch {
-            // skip pool on error
+          } catch (poolErr) {
+            console.error("[StakePage] Pool position check failed:", pool.slabAddress, poolErr);
           }
         }
         // No position found across all pools
