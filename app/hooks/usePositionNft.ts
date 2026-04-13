@@ -10,32 +10,38 @@ import { isMockSlab } from "@/lib/mock-trade-data";
 
 const textEncoder = new TextEncoder();
 
+// NFT program ID — separate from wrapper program
+const NFT_PROGRAM_ID = new PublicKey("FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS");
+
 /**
  * Derive the position_nft PDA for a user account.
  * Seeds: ["position_nft", slab_key, user_idx as u16 LE]
+ * Uses the NFT program ID, not the wrapper program.
  */
 function derivePositionNftPda(
-  programId: PublicKey,
   slab: PublicKey,
   userIdx: number
 ): [PublicKey, number] {
   const idxBuf = new Uint8Array(2);
-  new DataView(idxBuf.buffer).setUint16(0, userIdx, true); // little-endian u16
+  new DataView(idxBuf.buffer).setUint16(0, userIdx, true);
   return PublicKey.findProgramAddressSync(
     [textEncoder.encode("position_nft"), slab.toBytes(), idxBuf],
-    programId
+    NFT_PROGRAM_ID
   );
 }
 
-// PositionNft account layout (108+ bytes):
+// PositionNft account layout (208 bytes):
 //   [0..8]    magic       u64
-//   [8..40]   mint        [u8; 32]
-//   [40..72]  slab        [u8; 32]
-//   [72..104] owner       [u8; 32]
-//   [104..106] user_idx   u16 LE
-//   [106]     pending_settlement  u8
-//   [107]     bump        u8
-const POSITION_NFT_SIZE = 108;
+//   [8]       version     u8
+//   [9]       bump        u8
+//   [10..16]  _pad0       [u8; 6]
+//   [16..48]  slab        [u8; 32]
+//   [48..50]  user_idx    u16 LE
+//   [50..56]  _pad1       [u8; 6]
+//   [56..88]  nft_mint    [u8; 32]
+//   [88..96]  entry_price u64
+//   ...
+const POSITION_NFT_SIZE = 208;
 
 function parsePositionNftAccount(data: Buffer): {
   mint: PublicKey;
@@ -44,8 +50,9 @@ function parsePositionNftAccount(data: Buffer): {
   if (data.length < POSITION_NFT_SIZE) {
     throw new Error(`PositionNft account too small: ${data.length} < ${POSITION_NFT_SIZE}`);
   }
-  const mint = new PublicKey(data.slice(8, 40));
-  const pendingSettlement = data[106] !== 0;
+  const mint = new PublicKey(data.slice(56, 88)); // nft_mint at offset 56
+  // No pending_settlement field in v12.15 layout — default to false
+  const pendingSettlement = false;
   return { mint, pendingSettlement };
 }
 
@@ -100,7 +107,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     (async () => {
       try {
         const slabPk = new PublicKey(slabAddress);
-        const [nftPda] = derivePositionNftPda(slabProgramId, slabPk, userAccount.idx);
+        const [nftPda] = derivePositionNftPda(slabPk, userAccount.idx);
         const pdaStr = nftPda.toBase58();
 
         if (mockMode) {

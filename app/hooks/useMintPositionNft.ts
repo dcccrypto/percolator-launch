@@ -123,7 +123,7 @@ export function useMintPositionNft(slabAddress: string) {
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       tx.add(ix);
 
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = walletPubkey;
 
@@ -143,8 +143,8 @@ export function useMintPositionNft(slabAddress: string) {
         maxRetries: 5,
       });
 
-      // Wait for confirmation
-      await connection.confirmTransaction(sig, "confirmed");
+      // Wait for confirmation with blockhash-based expiry
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
 
       toast("Position NFT minted!", "success");
       return sig;
