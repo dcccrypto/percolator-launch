@@ -326,11 +326,10 @@ export async function GET() {
     // when the stake program hasn't been deployed yet.
     let stakeProgramId: PublicKey;
     try {
-      // Pass network explicitly — the SDK's env detection doesn't work reliably
-      // in bundled Next.js API routes (process.env.STAKE_PROGRAM_ID may be
-      // dead-code-eliminated at build time).
-      const network = getServerNetwork() === "mainnet" ? "mainnet" as const : "devnet" as const;
-      stakeProgramId = getStakeProgramId(network);
+      // Use the mainnet stake program directly. The SDK's env-based detection
+      // and getServerNetwork() both fail in Vercel API routes when
+      // NEXT_PUBLIC_DEFAULT_NETWORK is set to devnet or not inlined at build time.
+      stakeProgramId = new PublicKey("DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F");
     } catch {
       // Stake program not available on this network — return empty pools
       return NextResponse.json({ pools: [] }, {
