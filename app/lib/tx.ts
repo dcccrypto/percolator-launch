@@ -441,7 +441,9 @@ export async function sendTx({
       // The wallet signs and broadcasts atomically — there is no post-sign
       // window for middleware to inject assertion instructions.
       // ================================================================
-      if (wallet.signAndSendTransaction) {
+      if (wallet.signAndSendTransaction && signers.length === 0) {
+        // Only use atomic sign+send when there are no extra signers.
+        // signAndSendTransaction may drop partial signatures from keypair signers.
         try {
           const sigBytes = await wallet.signAndSendTransaction(tx);
           // Privy returns raw signature bytes (64 bytes). Convert to base58.
