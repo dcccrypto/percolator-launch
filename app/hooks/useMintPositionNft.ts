@@ -110,13 +110,41 @@ export function useMintPositionNft(slabAddress: string) {
         data: Buffer.from([0, userIdx & 0xff, (userIdx >> 8) & 0xff]),
       });
 
-      const sig = await sendTx({
-        connection,
-        wallet,
-        instructions: [ix],
-        computeUnits: 400_000,
-        signers: [nftMintKeypair],
+      // Build and sign manually — Privy embedded wallets can't handle extra
+      // keypair signers through the standard sendTx flow. We:
+      // 1. Build the tx with compute budget
+      // 2. Sign with the keypair first (partialSign)
+      // 3. Send to Privy for wallet signature (signTransaction)
+      // 4. Re-add the keypair signature (Privy may strip it)
+      // 5. Send raw transaction ourselves
+      const { ComputeBudgetProgram } = await import("@solana/web3.js");
+      const tx = new (await import("@solana/web3.js")).Transaction();
+      tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
+      tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
+      tx.add(ix);
+
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = walletPubkey;
+
+      // Keypair signs first
+      tx.partialSign(nftMintKeypair);
+
+      // Wallet signs (Privy)
+      if (!wallet.signTransaction) throw new Error("Wallet does not support signTransaction");
+      const signed = await wallet.signTransaction(tx);
+
+      // Privy may have stripped the keypair sig — re-add it
+      signed.partialSign(nftMintKeypair);
+
+      // Send
+      const sig = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: true,
+        maxRetries: 5,
       });
+
+      // Wait for confirmation
+      await connection.confirmTransaction(sig, "confirmed");
 
       toast("Position NFT minted!", "success");
       return sig;
