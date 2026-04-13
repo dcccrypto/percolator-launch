@@ -185,7 +185,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
     );
   }
 
-  if (!insuranceData || !insuranceData.balance || !insuranceData.feeRevenue) {
+  if (!insuranceData || !insuranceData.balance) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center justify-between">
