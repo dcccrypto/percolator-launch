@@ -65,41 +65,44 @@ export function useMintPositionNft(slabAddress: string) {
       const userIdx = userAccount.idx;
       const nftProgId = NFT_PROGRAM_ID;
 
-      // Derive PDAs — NFT PDAs use the NFT program, vault auth uses the wrapper program
+      // Derive PDAs — all use the NFT program
       const [nftPda] = deriveNftPda(nftProgId, slabPk, userIdx);
       const [nftMint] = deriveNftMint(nftProgId, slabPk, userIdx);
-      const [vaultAuth] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), slabPk.toBuffer()],
-        programId!, // wrapper program for vault authority
+      // mint_authority PDA: ["mint_authority"] on NFT program
+      const [mintAuth] = PublicKey.findProgramAddressSync(
+        [Buffer.from("mint_authority")],
+        nftProgId,
+      );
+      // extra-account-metas PDA: ["extra-account-metas", nft_mint] on NFT program
+      const [extraMetas] = PublicKey.findProgramAddressSync(
+        [Buffer.from("extra-account-metas"), nftMint.toBuffer()],
+        nftProgId,
       );
 
       // Owner's Token-2022 ATA for the NFT mint
       const ownerAta = getAssociatedTokenAddressSync(
         nftMint,
         walletPubkey,
-        false, // not a PDA owner
+        false,
         TOKEN_2022_PROGRAM_ID,
       );
 
-      // Build MintPositionNft instruction (tag 64)
-      // 11 accounts: [payer, slab, nft_pda, nft_mint, owner_ata, owner, vault_auth, token22, system, rent, ata_program]
-      // The program creates the ATA internally via CPI (account 10 = Associated Token Program)
+      // MintPositionNft (tag 0 on NFT program)
+      // 10 accounts: owner, nft_pda, nft_mint, owner_ata, slab, mint_auth, token22, ata_program, system, extra_metas
       const ix = new TransactionInstruction({
         programId: nftProgId,
         keys: [
-          { pubkey: walletPubkey, isSigner: true, isWritable: true },    // payer
-          { pubkey: slabPk, isSigner: false, isWritable: true },         // slab
-          { pubkey: nftPda, isSigner: false, isWritable: true },         // nft_pda
-          { pubkey: nftMint, isSigner: false, isWritable: true },        // nft_mint
-          { pubkey: ownerAta, isSigner: false, isWritable: true },       // owner_ata
-          { pubkey: walletPubkey, isSigner: true, isWritable: false },    // owner (signer)
-          { pubkey: vaultAuth, isSigner: false, isWritable: false },     // vault_auth PDA
-          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // token-2022
-          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system
-          { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }, // rent
-          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // ata program
+          { pubkey: walletPubkey, isSigner: true, isWritable: true },     // 0: owner (signer, payer)
+          { pubkey: nftPda, isSigner: false, isWritable: true },          // 1: nft_pda
+          { pubkey: nftMint, isSigner: false, isWritable: true },         // 2: nft_mint
+          { pubkey: ownerAta, isSigner: false, isWritable: true },        // 3: owner_ata
+          { pubkey: slabPk, isSigner: false, isWritable: false },         // 4: slab (read-only)
+          { pubkey: mintAuth, isSigner: false, isWritable: false },       // 5: mint_authority PDA
+          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // 6: token-2022
+          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // 7: ata_program
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // 8: system
+          { pubkey: extraMetas, isSigner: false, isWritable: true },      // 9: extra_account_metas PDA
         ],
-        // NFT program uses tag 0 for MintPositionNft (not SDK's tag 64 which is for the wrapper)
         data: Buffer.from([0, userIdx & 0xff, (userIdx >> 8) & 0xff]),
       });
 
