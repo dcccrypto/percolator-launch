@@ -411,8 +411,11 @@ export async function sendTx({
       // This gives a clear error message instead of a cryptic post-sign failure.
       // Skipped when skipPreflight is true (PERC-8388: wallet middleware injects
       // assertion IXs that fail simulation but aren't in our actual tx).
-      if (!skipPreflight) try {
-        const simResult = await connection.simulateTransaction(tx, signers.length > 0 ? signers : undefined);
+      // Skip pre-sign simulation when extra signers are present — the wallet
+      // hasn't signed yet so simulation will fail with MissingRequiredSignature.
+      // The on-chain preflight will catch errors after the wallet signs.
+      if (!skipPreflight && signers.length === 0) try {
+        const simResult = await connection.simulateTransaction(tx);
         if (simResult.value.err) {
           const logs = simResult.value.logs ?? [];
           // Extract the most useful log line (program error or custom message)
