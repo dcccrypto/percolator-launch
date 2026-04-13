@@ -81,7 +81,8 @@ export function useBurnPositionNft(slabAddress: string) {
           { pubkey: vaultAuth, isSigner: false, isWritable: false },     // vault_auth PDA
           { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // token-2022
         ],
-        data: Buffer.from(encodeBurnPositionNft({ userIdx })),
+        // NFT program uses tag 1 for BurnPositionNft (not SDK's tag which is for the wrapper)
+        data: Buffer.from([1]),
       });
 
       const sig = await sendTx({

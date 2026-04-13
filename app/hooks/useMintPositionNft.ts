@@ -99,7 +99,8 @@ export function useMintPositionNft(slabAddress: string) {
           { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }, // rent
           { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // ata program
         ],
-        data: Buffer.from(encodeMintPositionNft({ userIdx })),
+        // NFT program uses tag 0 for MintPositionNft (not SDK's tag 64 which is for the wrapper)
+        data: Buffer.from([0, userIdx & 0xff, (userIdx >> 8) & 0xff]),
       });
 
       const sig = await sendTx({

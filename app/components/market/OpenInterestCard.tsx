@@ -201,10 +201,10 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     );
   }
 
-  const totalOiUsd = formatUsdAmount(oiData.totalOi, tokenDecimals);
-  const longOiUsd = formatUsdAmount(oiData.longOi, tokenDecimals);
-  const shortOiUsd = formatUsdAmount(oiData.shortOi, tokenDecimals);
-  const lpNetUsd = formatSignedUsdAmount(oiData.netLpPosition, tokenDecimals);
+  const totalOiUsd = formatUsdAmount(oiData.totalOi || "0", tokenDecimals);
+  const longOiUsd = formatUsdAmount(oiData.longOi || "0", tokenDecimals);
+  const shortOiUsd = formatUsdAmount(oiData.shortOi || "0", tokenDecimals);
+  const lpNetUsd = formatSignedUsdAmount(oiData.netLpPosition || "0", tokenDecimals);
   const lpDirection = BigInt(oiData.netLpPosition ?? "0") >= 0n ? "long" : "short";
 
   return (
