@@ -12,6 +12,8 @@ import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
 
+const NFT_PROGRAM_ID = new PublicKey("FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS");
+
 /**
  * Derive the position_nft PDA.
  * Seeds: ["position_nft", slab_key, user_idx as u16 LE]
@@ -50,11 +52,12 @@ export function useBurnPositionNft(slabAddress: string) {
       const slabPk = new PublicKey(slabAddress);
       const userIdx = userAccount.idx;
 
-      // Derive PDAs
-      const [nftPda] = deriveNftPda(programId, slabPk, userIdx);
+      // Derive PDAs — NFT PDA uses NFT program, vault auth uses wrapper program
+      const nftProgId = NFT_PROGRAM_ID;
+      const [nftPda] = deriveNftPda(nftProgId, slabPk, userIdx);
       const [vaultAuth] = PublicKey.findProgramAddressSync(
         [Buffer.from("vault"), slabPk.toBuffer()],
-        programId,
+        programId!,
       );
 
       // Owner's Token-2022 ATA for the NFT mint
@@ -68,7 +71,7 @@ export function useBurnPositionNft(slabAddress: string) {
       // Build BurnPositionNft instruction (tag 66)
       // Accounts: [owner(signer), slab, nft_pda, nft_mint, owner_ata, vault_auth, token22]
       const ix = new TransactionInstruction({
-        programId,
+        programId: nftProgId,
         keys: [
           { pubkey: walletPubkey, isSigner: true, isWritable: true },    // owner
           { pubkey: slabPk, isSigner: false, isWritable: true },         // slab

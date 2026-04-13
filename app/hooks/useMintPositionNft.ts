@@ -6,10 +6,13 @@ import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
-import { encodeMintPositionNft } from "@percolatorct/sdk";
+import { encodeMintPositionNft, getProgramId } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
+
+// NFT program ID — separate from the wrapper program
+const NFT_PROGRAM_ID = new PublicKey("FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS");
 
 /**
  * Derive the position_nft PDA.
@@ -60,13 +63,14 @@ export function useMintPositionNft(slabAddress: string) {
     try {
       const slabPk = new PublicKey(slabAddress);
       const userIdx = userAccount.idx;
+      const nftProgId = NFT_PROGRAM_ID;
 
-      // Derive PDAs
-      const [nftPda] = deriveNftPda(programId, slabPk, userIdx);
-      const [nftMint] = deriveNftMint(programId, slabPk, userIdx);
+      // Derive PDAs — NFT PDAs use the NFT program, vault auth uses the wrapper program
+      const [nftPda] = deriveNftPda(nftProgId, slabPk, userIdx);
+      const [nftMint] = deriveNftMint(nftProgId, slabPk, userIdx);
       const [vaultAuth] = PublicKey.findProgramAddressSync(
         [Buffer.from("vault"), slabPk.toBuffer()],
-        programId,
+        programId!, // wrapper program for vault authority
       );
 
       // Owner's Token-2022 ATA for the NFT mint
@@ -81,7 +85,7 @@ export function useMintPositionNft(slabAddress: string) {
       // 11 accounts: [payer, slab, nft_pda, nft_mint, owner_ata, owner, vault_auth, token22, system, rent, ata_program]
       // The program creates the ATA internally via CPI (account 10 = Associated Token Program)
       const ix = new TransactionInstruction({
-        programId,
+        programId: nftProgId,
         keys: [
           { pubkey: walletPubkey, isSigner: true, isWritable: true },    // payer
           { pubkey: slabPk, isSigner: false, isWritable: true },         // slab
