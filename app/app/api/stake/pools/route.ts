@@ -326,7 +326,11 @@ export async function GET() {
     // when the stake program hasn't been deployed yet.
     let stakeProgramId: PublicKey;
     try {
-      stakeProgramId = getStakeProgramId();
+      // Pass network explicitly — the SDK's env detection doesn't work reliably
+      // in bundled Next.js API routes (process.env.STAKE_PROGRAM_ID may be
+      // dead-code-eliminated at build time).
+      const network = getServerNetwork() === "mainnet" ? "mainnet" as const : "devnet" as const;
+      stakeProgramId = getStakeProgramId(network);
     } catch {
       // Stake program not available on this network — return empty pools
       return NextResponse.json({ pools: [] }, {
