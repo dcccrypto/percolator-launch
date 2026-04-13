@@ -403,17 +403,12 @@ export async function sendTx({
       tx.recentBlockhash = blockhash;
       tx.feePayer = wallet.publicKey;
 
-      if (signers.length > 0) {
-        tx.partialSign(...signers);
-      }
-
       // Pre-sign simulation: catch program errors before the user signs.
       // This gives a clear error message instead of a cryptic post-sign failure.
       // Skipped when skipPreflight is true (PERC-8388: wallet middleware injects
       // assertion IXs that fail simulation but aren't in our actual tx).
       // Skip pre-sign simulation when extra signers are present — the wallet
       // hasn't signed yet so simulation will fail with MissingRequiredSignature.
-      // The on-chain preflight will catch errors after the wallet signs.
       if (!skipPreflight && signers.length === 0) try {
         const simResult = await connection.simulateTransaction(tx);
         if (simResult.value.err) {
@@ -471,6 +466,14 @@ export async function sendTx({
       } else if (wallet.signTransaction) {
         // Fallback: signTransaction + sendRawTransaction (legacy path)
         const signed = await wallet.signTransaction(tx);
+
+        // Add keypair signatures AFTER wallet signs — Privy embedded wallets
+        // may strip unknown signatures during their signing flow.
+        if (signers.length > 0) {
+          for (const signer of signers) {
+            signed.partialSign(signer);
+          }
+        }
 
         // PERC-8388: Detect Lighthouse injection and warn
         const lighthouseIxs = signed.instructions.filter(
