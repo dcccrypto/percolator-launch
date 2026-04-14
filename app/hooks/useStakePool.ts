@@ -4,9 +4,12 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
+  STAKE_POOL_SIZE,
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,
+} from '@percolatorct/sdk';
+  decodeStakePool,
 } from '@percolatorct/sdk';
 import { useSlabState } from '@/components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
@@ -75,59 +78,14 @@ const DEFAULT_STATE: StakePoolState = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// Pool account layout (match Rust StakePool struct)
+// DepositPda account layout helper
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * Parse the on-chain StakePool account.
- * Layout (Rust packed struct):
- *   - is_initialized: u8       (1 byte)
- *   - admin:          [u8; 32] (32 bytes)
- *   - slab:           [u8; 32] (32 bytes)
- *   - lp_mint:        [u8; 32] (32 bytes)
- *   - vault:          [u8; 32] (32 bytes)
- *   - vault_auth:     [u8; 32] (32 bytes)
- *   - vault_auth_bump: u8      (1 byte)
- *   - cooldown_slots: u64      (8 bytes)
- *   - deposit_cap:    u64      (8 bytes)
- *   - total_deposited: u64     (8 bytes)
- * Total: 1 + 32*5 + 1 + 8*3 = 186 bytes
- */
 // Browser-safe u64 reader — DataView instead of Buffer.readBigUInt64LE
 // (Buffer BigInt methods are Node.js-only; the browser polyfill may lack them)
 function readU64LE(data: Uint8Array, off: number): bigint {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   return view.getBigUint64(off, /* littleEndian= */ true);
-}
-
-function parseStakePoolAccount(data: Buffer) {
-  if (data.length < 186) return null;
-  const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  const isInitialized = bytes[0] === 1;
-  if (!isInitialized) return null;
-
-  let offset = 1;
-  const admin = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
-  const slab = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
-  const lpMint = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
-  const vault = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
-  const vaultAuth = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
-  const vaultAuthBump = bytes[offset]; offset += 1;
-  const cooldownSlots = readU64LE(bytes, offset); offset += 8;
-  const depositCap = readU64LE(bytes, offset); offset += 8;
-  const totalDeposited = readU64LE(bytes, offset); offset += 8;
-
-  return {
-    admin,
-    slab,
-    lpMint,
-    vault,
-    vaultAuth,
-    vaultAuthBump,
-    cooldownSlots,
-    depositCap,
-    totalDeposited,
-  };
 }
 
 /**
@@ -208,7 +166,15 @@ export function useStakePool() {
         return;
       }
 
-      const poolData = parseStakePoolAccount(Buffer.from(poolInfo.data));
+      // Decode pool using canonical StakePool layout from SDK (352 bytes).
+      // Avoids manual byte offset arithmetic — offsets are versioned in decodeStakePool.
+      let poolData: ReturnType<typeof decodeStakePool> | null = null;
+      try {
+        poolData = decodeStakePool(Buffer.from(poolInfo.data));
+        if (!poolData.isInitialized) poolData = null;
+      } catch {
+        poolData = null;
+      }
       if (!poolData) {
         setState({ ...DEFAULT_STATE, poolAddress: pdas.poolPda, vaultAuthAddress: pdas.vaultAuthPda });
         return;
