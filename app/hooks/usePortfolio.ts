@@ -220,13 +220,12 @@ export function usePortfolio(): PortfolioData {
                   }
                 }
 
-                // Leverage = notional / capital
+                // Leverage = notional / capital = (contracts * price) / capital
                 const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
                 let leverage = 0;
                 if (account.capital > 0n && oraclePriceE6 > 0n) {
-                  // notional = absPos * price / price (coin-margined) = absPos
-                  // For coin-margined: leverage = absPos / capital
-                  leverage = Number((absPos * 100n) / account.capital) / 100;
+                  // notional_usd = contracts * price; leverage = notional_usd / capital
+                  leverage = Number((absPos * oraclePriceE6 / 1_000_000n) * 100n / account.capital) / 100;
                 }
 
                 // Track liquidation risk
