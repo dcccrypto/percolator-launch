@@ -109,7 +109,7 @@ const CONFIGS = {
   mainnet: {
     get rpcUrl() { return getRpcEndpoint(); },
     programId: "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
-    matcherProgramId: "DHP6DtwXP1yJsz8YzfoeigRFPB979gzmumkmCxDLSkUX",
+    matcherProgramId: "GDK8wx38kpiSVSfGTVNiSdptX3Z5R4kQyqh6Q3QX6wmi",
     crankWallet: "8y7sXswvGo6fWa4daCnxaE3znaFoBs6QJXLTzCLYXotV",  // mainnet keeper crank wallet
     explorerUrl: "https://solscan.io",
   },
