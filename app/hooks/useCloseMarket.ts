@@ -3,13 +3,21 @@
 import { useState, useCallback } from "react";
 import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { parseHeader } from "@percolatorct/sdk";
+import { PublicKey, Transaction } from "@solana/web3.js";
+import {
+  parseHeader,
+  encodeCloseSlab,
+  ACCOUNTS_CLOSE_SLAB,
+  buildAccountMetas,
+  buildIx,
+} from "@percolatorct/sdk";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 
 /**
- * Tag 13 = CloseSlab instruction in percolator-prog.
+ * CloseSlab (IX_TAG.CloseSlab = 13) instruction in percolator-prog.
  * Accounts: [admin(signer, writable), slab(writable)]
- * Data: [13] (1 byte)
+ * Data: encodeCloseSlab() — 1 byte
  *
  * Requirements:
  * - Admin must sign (on-chain guard — mismatch = guaranteed rejection)
@@ -22,7 +30,6 @@ import { useConnectionCompat } from "@/hooks/useWalletCompat";
  * connected wallet is the market admin BEFORE building or sending any tx.
  * Non-admin callers get a clear error with zero fees wasted.
  */
-const TAG_CLOSE_SLAB = 13;
 
 interface CloseResult {
   signature: string;
@@ -98,14 +105,14 @@ export function useCloseMarket() {
           ? new PublicKey(programIdOverride)
           : accountInfo.owner;
 
-        // Build CloseSlab instruction
-        const ix = new TransactionInstruction({
+        // Build CloseSlab instruction via SDK encode helpers
+        const ix = buildIx({
           programId,
-          keys: [
-            { pubkey: walletCompat.publicKey, isSigner: true, isWritable: true },
-            { pubkey: slabPk, isSigner: false, isWritable: true },
-          ],
-          data: Buffer.from([TAG_CLOSE_SLAB]),
+          keys: buildAccountMetas(ACCOUNTS_CLOSE_SLAB, {
+            admin: walletCompat.publicKey,
+            slab: slabPk,
+          }),
+          data: encodeCloseSlab(),
         });
 
         const { blockhash } = await connection.getLatestBlockhash("confirmed");
