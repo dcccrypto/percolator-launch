@@ -86,6 +86,11 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
     ? formatNum((Number(margin) / Math.pow(10, decimals)) * priceUsd)
     : `${formatTokenAmount(margin, decimals)} ${symbol}`;
 
+  // Effective leverage: notional value / margin (both in the same USDC units)
+  const effectiveLeverage = margin > 0n
+    ? Math.round((Number(notionalNative) / Number(margin)) * 10) / 10
+    : 0;
+
   // Liq price warning: if within 15% of entry
   const estEntryNum = Number(estEntry) / 1e6;
   const liqPriceNum = Number(liqPrice) / 1e6;
@@ -106,6 +111,11 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         <SummaryRow
           label="Direction"
           value={`${isLong ? "Long" : "Short"} ${leverage}x`}
+          valueClass={isLong ? "text-[var(--long)]" : "text-[var(--short)]"}
+        />
+        <SummaryRow
+          label="Eff. Leverage"
+          value={`${effectiveLeverage.toFixed(1)}x`}
           valueClass={isLong ? "text-[var(--long)]" : "text-[var(--short)]"}
         />
         <SummaryRow label="Est. Entry Price" value={formatUsd(estEntry)} />
