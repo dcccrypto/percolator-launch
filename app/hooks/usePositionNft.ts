@@ -55,6 +55,11 @@ function parsePositionNftAccount(data: Buffer): {
   const pendingSettlement = false;
   return { mint, pendingSettlement };
 }
+import {
+  deriveNftPda,
+  parsePositionNftAccount,
+  POSITION_NFT_STATE_LEN,
+} from "@/lib/nft-program";
 
 export interface UsePositionNftResult {
   /** Whether the position NFT has been minted (PDA account exists on-chain) */
@@ -108,6 +113,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
       try {
         const slabPk = new PublicKey(slabAddress);
         const [nftPda] = derivePositionNftPda(slabPk, userAccount.idx);
+        const [nftPda] = deriveNftPda(slabPk, userAccount.idx, slabProgramId);
         const pdaStr = nftPda.toBase58();
 
         if (mockMode) {
@@ -129,7 +135,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
 
         if (cancelled) return;
 
-        if (!accountInfo || !accountInfo.data || accountInfo.data.length < POSITION_NFT_SIZE) {
+        if (!accountInfo || !accountInfo.data || accountInfo.data.length < POSITION_NFT_STATE_LEN) {
           setState({
             hasMintedNft: false,
             nftMint: null,
