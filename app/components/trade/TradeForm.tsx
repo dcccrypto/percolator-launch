@@ -714,7 +714,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div className="mb-5 border border-[var(--accent)]/30 bg-[var(--accent)]/[0.04] px-4 py-3 text-[11px] space-y-1">
           <p className="text-[var(--accent)] font-medium">⚡ Mainnet Phase 1 Guards Active</p>
           <p className="text-[var(--text-muted)]">• $10K OI cap per market during beta</p>
-          <p className="text-[var(--text-muted)]">• 2x max leverage enforced on-chain</p>
+          <p className="text-[var(--text-muted)]">• {maxLeverage}x max leverage enforced on-chain</p>
           <p className="text-[var(--text-muted)]">• Guards auto-lift when caps are raised by DAO</p>
         </div>
       )}
@@ -818,6 +818,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Coin-margined info — compact tooltip hint */}
       <div className="mt-3 flex items-center gap-1.5">
         <InfoIcon tooltip={`This market is margined in ${collateralSymbol}, not USD. Position value and liq risk are affected by the collateral token's price. Effective USD leverage ≈ ${leverage > 0 ? `${leverage * 2}x` : "—"} (nominal ${leverage}x × 2 for coin exposure).`} />
+        <InfoIcon tooltip={`This market is margined in ${symbol}, not USD. Position value and liq risk are affected by the collateral token's price. Selected leverage: ${leverage > 0 ? `${leverage}x` : "—"}.`} />
         <span className="text-[9px] text-[var(--text-dim)] uppercase tracking-[0.1em]">Coin-margined market</span>
       </div>
 
