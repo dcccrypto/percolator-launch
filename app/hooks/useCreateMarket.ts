@@ -44,6 +44,8 @@ import {
   deriveVaultAuthority,
   derivePythPushOraclePDA,
 } from "@percolatorct/sdk";
+  parseHeader,
+} from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
@@ -321,12 +323,15 @@ export function useCreateMarket() {
             existingAccount = null; // treat as fresh creation
           }
           if (existingAccount) {
-            // Slab already created — check if market is initialized
-            // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
-            const headerMagic = existingAccount.data.length >= 8
-              ? new DataView(existingAccount.data.buffer, existingAccount.data.byteOffset, existingAccount.data.byteLength).getBigUint64(0, /* littleEndian= */ true)
-              : 0n;
-            const isInitialized = headerMagic === 0x504552434f4c4154n; // "PERCOLAT"
+            // Slab already created — check if market is initialized via SDK parseHeader.
+            // parseHeader throws when magic bytes are absent/wrong (uninitialised slab).
+            let isInitialized: boolean;
+            try {
+              parseHeader(existingAccount.data);
+              isInitialized = true;
+            } catch {
+              isInitialized = false;
+            }
 
             if (isInitialized) {
               // Market already initialized — skip to step 1
