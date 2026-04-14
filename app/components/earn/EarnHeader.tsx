@@ -33,7 +33,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
         </p>
 
         {/* Stats row */}
-        <div className="mt-6 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4">
+        <div className="mt-6 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4" aria-label="Earn statistics">
           <StatCell
             label="Total Value Locked"
             loading={loading}
@@ -48,6 +48,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
           <StatCell
             label="Average APY"
             loading={loading}
+            tooltip="Estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
           >
             <span className="text-lg font-semibold text-[var(--cyan)]">
               <AnimatedNumber
@@ -90,14 +91,21 @@ function StatCell({
   label,
   children,
   loading,
+  tooltip,
 }: {
   label: string;
   children: React.ReactNode;
   loading: boolean;
+  tooltip?: string;
 }) {
   return (
     <div className="bg-[var(--panel-bg)] p-4 sm:p-5">
-      <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)] mb-1">
+      <div
+        className={`text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)] mb-1 ${
+          tooltip ? 'cursor-help underline decoration-dotted decoration-[var(--text-muted)]' : ''
+        }`}
+        title={tooltip}
+      >
         {label}
       </div>
       {loading ? (

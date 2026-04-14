@@ -193,7 +193,10 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
 
           <div className="flex items-center gap-6">
             <div className="text-right">
-              <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
+              <div
+                className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)] cursor-help underline decoration-dotted decoration-[var(--text-muted)]"
+                title="APY is estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
+              >
                 Est. APY
               </div>
               <div className="text-2xl font-bold text-[var(--cyan)] font-mono tabular-nums">
@@ -279,6 +282,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               collateralSymbol={collateralSymbol}
               loading={loading || depositLoading || withdrawLoading}
               cooldownElapsed={poolState.cooldownElapsed}
+              cooldownSlots={poolState.cooldownSlots}
               onDeposit={handleDeposit}
               onWithdraw={handleWithdraw}
             />

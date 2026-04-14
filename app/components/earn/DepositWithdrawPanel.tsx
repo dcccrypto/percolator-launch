@@ -30,6 +30,8 @@ interface DepositWithdrawPanelProps {
   loading: boolean;
   /** Cooldown elapsed (for withdraw) */
   cooldownElapsed: boolean;
+  /** Cooldown duration in slots (0 = no cooldown) */
+  cooldownSlots?: bigint;
   /** Deposit callback */
   onDeposit: (amount: bigint) => Promise<void>;
   /** Withdraw callback */
@@ -45,6 +47,7 @@ export function DepositWithdrawPanel({
   collateralSymbol,
   loading,
   cooldownElapsed,
+  cooldownSlots,
   onDeposit,
   onWithdraw,
 }: DepositWithdrawPanelProps) {
@@ -54,6 +57,8 @@ export function DepositWithdrawPanel({
   const [submitting, setSubmitting] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txSuccess, setTxSuccess] = useState<string | null>(null);
+  // Two-step confirm for withdrawals
+  const [withdrawConfirming, setWithdrawConfirming] = useState(false);
 
   const divisor = 10n ** BigInt(decimals);
 
@@ -108,6 +113,13 @@ export function DepositWithdrawPanel({
 
   const handleSubmit = useCallback(async () => {
     if (rawAmount <= 0n) return;
+
+    // Withdrawals use a two-step confirm flow
+    if (tab === 'withdraw' && !withdrawConfirming) {
+      setWithdrawConfirming(true);
+      return;
+    }
+
     setSubmitting(true);
     setTxError(null);
     setTxSuccess(null);
@@ -119,14 +131,16 @@ export function DepositWithdrawPanel({
       } else {
         await onWithdraw(rawAmount);
         setTxSuccess('Withdrawal successful!');
+        setWithdrawConfirming(false);
       }
       setAmount('');
     } catch (e) {
       setTxError(e instanceof Error ? e.message : 'Transaction failed');
+      setWithdrawConfirming(false);
     } finally {
       setSubmitting(false);
     }
-  }, [rawAmount, tab, onDeposit, onWithdraw]);
+  }, [rawAmount, tab, withdrawConfirming, onDeposit, onWithdraw]);
 
   // Validation
   const isValid = useMemo(() => {
@@ -165,6 +179,7 @@ export function DepositWithdrawPanel({
               setAmount('');
               setTxError(null);
               setTxSuccess(null);
+              setWithdrawConfirming(false);
             }}
             className={`flex-1 py-3 text-[12px] font-medium uppercase tracking-[0.15em] transition-all duration-150 ${
               tab === t
@@ -224,18 +239,16 @@ export function DepositWithdrawPanel({
         </div>
 
         {/* Preview */}
-        {rawAmount > 0n && (
+        {rawAmount > 0n && tab === 'deposit' && (
           <div className="mb-4 p-3 bg-[var(--bg)] border border-[var(--border)] rounded-sm">
             <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)] mb-2">
-              {tab === 'deposit' ? 'You will receive' : 'You will receive'}
+              You will receive
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
-                {tab === 'deposit'
-                  ? `≈ ${formatRaw(previewShares, decimals)} LP tokens`
-                  : `≈ ${formatRaw(previewCollateral, decimals)} ${collateralSymbol}`}
+                ≈ {formatRaw(previewShares, decimals)} LP tokens
               </span>
-              {tab === 'deposit' && lpSupply > 0n && (
+              {lpSupply > 0n && (
                 <span className="text-[10px] text-[var(--text-secondary)]">
                   Share: {((Number(previewShares) / Number(lpSupply + previewShares)) * 100).toFixed(2)}%
                 </span>
@@ -244,11 +257,82 @@ export function DepositWithdrawPanel({
           </div>
         )}
 
-        {/* Cooldown warning */}
-        {tab === 'withdraw' && !cooldownElapsed && (
+        {/* Withdrawal preview */}
+        {rawAmount > 0n && tab === 'withdraw' && (
+          <div className={`mb-4 p-3 border rounded-sm ${
+            withdrawConfirming
+              ? 'bg-[var(--warning)]/5 border-[var(--warning)]/30'
+              : 'bg-[var(--bg)] border-[var(--border)]'
+          }`}>
+            <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)] mb-3">
+              {withdrawConfirming ? 'Confirm Withdrawal' : 'Withdrawal Preview'}
+            </div>
+
+            <div className="space-y-2">
+              {/* LP tokens burned */}
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="text-[var(--text-secondary)]">LP tokens burned</span>
+                <span className="font-mono tabular-nums text-[var(--text)]">
+                  {formatRaw(rawAmount, decimals)} LP
+                </span>
+              </div>
+
+              {/* Estimated collateral out */}
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="text-[var(--text-secondary)]">Estimated {collateralSymbol} received</span>
+                <span className="font-mono tabular-nums text-[var(--cyan)] font-medium">
+                  ≈ {formatRaw(previewCollateral, decimals)} {collateralSymbol}
+                </span>
+              </div>
+
+              {/* Exchange rate */}
+              {lpSupply > 0n && (
+                <div className="flex items-center justify-between text-[12px]">
+                  <span className="text-[var(--text-secondary)]">Rate (1 LP)</span>
+                  <span className="font-mono tabular-nums text-[var(--text)]">
+                    ≈ {lpSupply > 0n
+                        ? formatRaw((vaultBalance * divisor) / lpSupply, decimals)
+                        : '1.0000'
+                      } {collateralSymbol}
+                  </span>
+                </div>
+              )}
+
+              {/* Cooldown status */}
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="text-[var(--text-secondary)]">Cooldown</span>
+                <span className={`font-medium ${cooldownElapsed ? 'text-[var(--cyan)]' : 'text-[var(--warning)]'}`}>
+                  {cooldownElapsed
+                    ? 'Elapsed — ready to withdraw'
+                    : cooldownSlots && cooldownSlots > 0n
+                      ? `~${Math.ceil(Number(cooldownSlots) * 0.4)}s remaining`
+                      : 'Not elapsed'
+                  }
+                </span>
+              </div>
+
+              {/* Protocol fee note */}
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="text-[var(--text-secondary)]">Protocol fee</span>
+                <span className="text-[var(--text)]">None</span>
+              </div>
+            </div>
+
+            {withdrawConfirming && (
+              <div className="mt-3 pt-3 border-t border-[var(--warning)]/20">
+                <p className="text-[11px] text-[var(--warning)]">
+                  LP tokens will be permanently burned. This action cannot be undone.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Cooldown warning — shown when no amount entered yet */}
+        {tab === 'withdraw' && !cooldownElapsed && rawAmount === 0n && (
           <div className="mb-4 p-3 bg-[var(--warning)]/5 border border-[var(--warning)]/20 rounded-sm">
             <p className="text-[11px] text-[var(--warning)]">
-              ⏳ Cooldown period has not elapsed. You cannot withdraw yet.
+              Cooldown period has not elapsed. You cannot withdraw yet.
             </p>
           </div>
         )}
@@ -266,19 +350,31 @@ export function DepositWithdrawPanel({
         )}
 
         {/* Submit */}
-        <GlowButton
-          onClick={handleSubmit}
-          disabled={!isValid || submitting || loading}
-          variant="primary"
-          size="lg"
-          className="w-full"
-        >
-          {submitting
-            ? 'Confirming...'
-            : tab === 'deposit'
-              ? 'Deposit'
-              : 'Withdraw'}
-        </GlowButton>
+        <div className="flex gap-2">
+          {withdrawConfirming && (
+            <button
+              onClick={() => setWithdrawConfirming(false)}
+              className="flex-none px-4 py-2.5 text-[12px] font-medium border border-[var(--border)] rounded-sm text-[var(--text-secondary)] hover:text-[var(--text)] hover:border-[var(--accent)]/30 transition-all"
+            >
+              Cancel
+            </button>
+          )}
+          <GlowButton
+            onClick={handleSubmit}
+            disabled={!isValid || submitting || loading}
+            variant="primary"
+            size="lg"
+            className="flex-1"
+          >
+            {submitting
+              ? 'Confirming...'
+              : tab === 'deposit'
+                ? 'Deposit'
+                : withdrawConfirming
+                  ? 'Confirm Withdrawal'
+                  : 'Withdraw'}
+          </GlowButton>
+        </div>
       </div>
     </div>
   );

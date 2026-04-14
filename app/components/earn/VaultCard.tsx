@@ -44,7 +44,10 @@ export function VaultCard({ vault }: VaultCardProps) {
 
             {/* APY badge */}
             <div className="text-right">
-              <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)] mb-0.5">
+              <div
+                className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)] mb-0.5 cursor-help underline decoration-dotted decoration-[var(--text-muted)]"
+                title="APY is estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
+              >
                 Est. APY
               </div>
               <div className="text-lg font-bold text-[var(--cyan)] font-mono tabular-nums">
