@@ -63,7 +63,7 @@ function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; va
 }
 
 export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, logoUrl, mintAddress }) => {
-  const { priceUsd, change24h } = useLivePrice();
+  const { priceUsd, change24h, high24h, low24h } = useLivePrice();
   const { market } = useMarketInfo(slabAddress);
   const { fundingRate, engine } = useEngineState();
   const { level: oracleLevel } = useOracleFreshness();
@@ -151,6 +151,26 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
           <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Open Interest</span>
           <span className="text-xs font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
             {formatCompact(oi as number)}
+          </span>
+        </div>
+
+        {/* 5.6: 24h High */}
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h High</span>
+          <span className="text-xs font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>
+            {high24h != null
+              ? `$${high24h < 0.01 ? high24h.toFixed(6) : high24h < 1 ? high24h.toFixed(4) : high24h.toFixed(2)}`
+              : "—"}
+          </span>
+        </div>
+
+        {/* 5.6: 24h Low */}
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h Low</span>
+          <span className="text-xs font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
+            {low24h != null
+              ? `$${low24h < 0.01 ? low24h.toFixed(6) : low24h < 1 ? low24h.toFixed(4) : low24h.toFixed(2)}`
+              : "—"}
           </span>
         </div>
 
