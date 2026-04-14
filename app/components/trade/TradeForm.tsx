@@ -126,6 +126,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [contractsInput, setContractsInput] = useState("");
   const [usdcInput, setUsdcInput] = useState("");
   const [leverage, setLeverage] = useState(1);
+  const [leverageText, setLeverageText] = useState("1");
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "confirming">("idle");
   const [humanError, setHumanError] = useState<string | null>(null);
@@ -580,6 +581,14 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       )}
 
+      {/* Order type indicator — market orders only */}
+      <div className="mb-3 flex items-center gap-1.5">
+        <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Order Type</span>
+        <span className="rounded-none border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)]">
+          Market
+        </span>
+      </div>
+
       {/* Direction toggle */}
       <div className="mb-3 flex gap-1">
         <button
@@ -678,7 +687,28 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="mb-5">
         <div className="mb-1 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Leverage<InfoIcon tooltip="Multiplies your position size. 5x leverage means 5x the profit but also 5x the loss. Higher leverage = higher risk of liquidation." /></label>
-          <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{leverage}x</span>
+          <div className="flex items-center gap-1">
+            <input
+              type="text"
+              value={leverageText}
+              onChange={(e) => {
+                const raw = e.target.value.replace(/[^0-9.]/g, "");
+                setLeverageText(raw);
+                const parsed = parseFloat(raw);
+                if (!isNaN(parsed)) {
+                  const clamped = Math.max(1, Math.min(maxLeverage, Math.round(parsed)));
+                  setLeverage(clamped);
+                }
+              }}
+              onBlur={() => {
+                // Normalise display on blur
+                setLeverageText(String(leverage));
+              }}
+              style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
+              className="w-12 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
+            />
+            <span className="text-[11px] font-medium text-[var(--text-dim)]">x</span>
+          </div>
         </div>
         <input
           type="range"
@@ -686,7 +716,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           max={maxLeverage}
           step={1}
           value={leverage}
-          onChange={(e) => setLeverage(Number(e.target.value))}
+          onChange={(e) => {
+            const val = Number(e.target.value);
+            setLeverage(val);
+            setLeverageText(String(val));
+          }}
           style={{
             background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100}%, var(--bg-surface) ${maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100}%, var(--bg-surface) 100%)`,
           }}
@@ -696,7 +730,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           {availableLeverage.map((l) => (
             <button
               key={l}
-              onClick={() => setLeverage(l)}
+              onClick={() => { setLeverage(l); setLeverageText(String(l)); }}
               className={`flex-1 basis-0 min-w-[32px] rounded-none py-1.5 min-h-[36px] text-[9px] font-medium transition-all duration-150 focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 touch-manipulation ${
                 leverage === l
                   ? "bg-[var(--accent)] text-white"
