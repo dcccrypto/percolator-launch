@@ -1,12 +1,17 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Keypair, PublicKey, TransactionInstruction, Transaction, SendTransactionError } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction, SendTransactionError } from "@solana/web3.js";
+import {
+  parseHeader,
+  encodeReclaimSlabRent,
+  ACCOUNTS_RECLAIM_SLAB_RENT,
+  buildAccountMetas,
+  buildIx,
+} from "@percolator/sdk";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getConfig } from "@/lib/config";
 
-/** PERC-511: ReclaimSlabRent instruction tag */
-const TAG_RECLAIM_SLAB_RENT = 52;
 
 export type ReclaimStatus = "idle" | "sending" | "success" | "error";
 
@@ -155,32 +160,28 @@ export function useReclaimSlabRent(): UseReclaimSlabRentResult {
           return;
         }
 
-        // Guard: if magic bytes = MAGIC, the market is initialised — use CloseSlab instead
-        // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
-        const MAGIC = 0x504552434f4c4154n;
-        if (
-          accountInfo.data.length >= 8 &&
-          new DataView(accountInfo.data.buffer, accountInfo.data.byteOffset, accountInfo.data.byteLength).getBigUint64(0, /* littleEndian= */ true) === MAGIC
-        ) {
+        // Guard: if parseHeader succeeds (magic bytes = PERCOLAT), the market is
+        // initialised — use CloseSlab (useCloseMarket) instead of ReclaimSlabRent.
+        try {
+          parseHeader(accountInfo.data);
+          // parseHeader only succeeds when magic is valid — slab is initialised.
           setError(
             "This slab is already initialised (market exists). Use the normal market close flow instead of rent reclaim."
           );
           setStatus("error");
           return;
+        } catch {
+          // Expected: uninitialised slab has wrong/absent magic — proceed with reclaim.
         }
 
-        // Encode: single-byte instruction (tag 52, no additional data)
-        const data = Buffer.from([TAG_RECLAIM_SLAB_RENT]);
-
-        const ix = new TransactionInstruction({
+        // Build ReclaimSlabRent instruction via SDK encode helpers (tag 52)
+        const ix = buildIx({
           programId,
-          keys: [
-            // [0] dest — signer + writable
-            { pubkey: dest, isSigner: true, isWritable: true },
-            // [1] slab — signer + writable (keypair proves ownership)
-            { pubkey: slab, isSigner: true, isWritable: true },
-          ],
-          data,
+          keys: buildAccountMetas(ACCOUNTS_RECLAIM_SLAB_RENT, {
+            dest,
+            slab,
+          }),
+          data: encodeReclaimSlabRent(),
         });
 
         // GH#1488: Fetch a fresh blockhash IMMEDIATELY before building the tx so
