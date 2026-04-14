@@ -5,11 +5,13 @@ import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
   getStakeProgramId,
+  STAKE_POOL_SIZE,
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,
   encodeStakeDeposit,
   depositAccounts,
+  decodeStakePool,
 } from '@percolatorct/sdk';
 import {
   getAssociatedTokenAddress,
@@ -79,7 +81,7 @@ export function useStakeDeposit() {
 
         // Fetch pool account to get lpMint and vault addresses
         const poolInfo = await connection.getAccountInfo(pool);
-        if (!poolInfo || poolInfo.data.length < 186) {
+        if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE) {
           throw new Error('Stake pool not initialized for this market. Contact admin.');
         }
         const stakeProgramId = getStakeProgramId();
@@ -87,10 +89,9 @@ export function useStakeDeposit() {
           throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
         }
 
-        // Parse lpMint and vault from pool account (offsets from struct layout)
-        const poolData = Buffer.from(poolInfo.data);
-        const lpMint = new PublicKey(poolData.subarray(65, 97));   // offset 1+32+32 = 65
-        const vault = new PublicKey(poolData.subarray(97, 129));    // offset 65+32 = 97
+        // Decode pool using canonical StakePool layout from SDK (352 bytes).
+        // Avoids manual byte offset arithmetic — offsets are versioned in decodeStakePool.
+        const { lpMint, vault } = decodeStakePool(Buffer.from(poolInfo.data));
 
         // Get or create user's collateral ATA
         const collateralMint = slabState.config.collateralMint;
