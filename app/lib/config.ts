@@ -124,8 +124,8 @@ const CONFIGS = {
     // small:  256 slots  (~0.44 SOL rent) — --features small
     // medium: 1024 slots (~1.8 SOL rent)  — --features medium
     // large:  4096 slots (~7 SOL rent)    — default build (no features)
+    // v12.17: micro tier removed — only small/medium/large
     programsBySlabTier: {
-      micro:  "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",  // 64 slots — no dedicated micro program yet; reuses small
       small:  "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",  // 256 slots
       medium: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",   // 1024 slots
       large:  "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",  // 4096 slots (confirmed working)

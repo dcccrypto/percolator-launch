@@ -11,7 +11,6 @@ import {
   deriveDepositPda,
   encodeStakeWithdraw,
   withdrawAccounts,
-} from '@percolatorct/sdk';
   decodeStakePool,
 } from '@percolatorct/sdk';
 import {

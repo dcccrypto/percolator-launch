@@ -18,6 +18,7 @@ import {
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { detectOracleMode } from "@/lib/oraclePrice";
 
 export function useTrade(slabAddress: string) {
   const { connection } = useConnectionCompat();
@@ -42,13 +43,11 @@ export function useTrade(slabAddress: string) {
         const slabPk = new PublicKey(slabAddress);
         const [lpPda] = deriveLpPda(programId, slabPk, params.lpIdx);
 
-        // Determine if this is an admin-oracle market:
-        // oracleAuthority != default means an admin has been set (regardless of feedId)
-        const hasAdminOracle = !mktConfig.oracleAuthority.equals(PublicKey.default);
+        // Determine oracle mode using centralised detectOracleMode (oraclePrice.ts).
+        // "pyth-pinned" = Pyth feed; "admin" or "hyperp" = use slab as oracle account.
+        const oracleMode = detectOracleMode(mktConfig);
+        const useAdminOracle = oracleMode !== "pyth-pinned";
         const feedHex = Array.from(mktConfig.indexFeedId.toBytes()).map(b => b.toString(16).padStart(2, "0")).join("");
-        const isZeroFeed = feedHex === "0".repeat(64);
-        // Use slab as oracle account when admin oracle is set OR feed is all zeros
-        const useAdminOracle = hasAdminOracle || isZeroFeed;
         const oracleAccount = useAdminOracle ? slabPk : derivePythPushOraclePDA(feedHex)[0];
 
         const instructions = [];

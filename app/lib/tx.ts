@@ -9,7 +9,7 @@ import { getConfig } from "./config";
  * fail on-chain for programs Blowfish doesn't understand, causing tx reverts even
  * though the actual program logic is correct.
  */
-const LIGHTHOUSE_PROGRAM_ID = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
+export const LIGHTHOUSE_PROGRAM_ID = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
 
 /** Wallet shape compatible with both old wallet-adapter and Privy compat layer */
 export interface WalletLike {

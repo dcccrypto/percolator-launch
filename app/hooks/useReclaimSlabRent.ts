@@ -8,7 +8,7 @@ import {
   ACCOUNTS_RECLAIM_SLAB_RENT,
   buildAccountMetas,
   buildIx,
-} from "@percolator/sdk";
+} from "@percolatorct/sdk";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getConfig } from "@/lib/config";
 

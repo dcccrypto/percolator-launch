@@ -13,10 +13,10 @@
  * is extracted and looked up here to display context-appropriate text to the user.
  */
 // ── Lighthouse/Blowfish detection (PERC-8445) ──────────────────────────────
-// Inlined from @percolatorct/sdk runtime/lighthouse.ts to avoid workspace sync issues.
+import { LIGHTHOUSE_PROGRAM_ID } from "@/lib/tx";
 // Lighthouse v2 (Blowfish wallet guard) injects assertion IXs that fail with 0x1900
 // (Anchor ConstraintAddress). This is NOT a Percolator error.
-const LIGHTHOUSE_PROGRAM_ID_STR = "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95";
+const LIGHTHOUSE_PROGRAM_ID_STR = LIGHTHOUSE_PROGRAM_ID;
 
 const LIGHTHOUSE_USER_MESSAGE =
   "Your wallet's transaction guard (Blowfish/Lighthouse) is blocking this transaction. " +

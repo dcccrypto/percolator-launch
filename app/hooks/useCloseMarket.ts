@@ -2,8 +2,6 @@
 
 import { useState, useCallback } from "react";
 import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { parseHeader } from "@percolatorct/sdk";
-import { PublicKey, Transaction } from "@solana/web3.js";
 import {
   parseHeader,
   encodeCloseSlab,
@@ -11,8 +9,7 @@ import {
   buildAccountMetas,
   buildIx,
 } from "@percolatorct/sdk";
-import { useWalletCompat } from "@/hooks/useWalletCompat";
-import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 
 /**
  * CloseSlab (IX_TAG.CloseSlab = 13) instruction in percolator-prog.

@@ -10,35 +10,7 @@ import { encodeMintPositionNft, getProgramId } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
-
-// NFT program ID — separate from the wrapper program
-const NFT_PROGRAM_ID = new PublicKey("FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS");
-
-/**
- * Derive the position_nft PDA.
- * Seeds: ["position_nft", slab_key, user_idx as u16 LE]
- */
-function deriveNftPda(programId: PublicKey, slab: PublicKey, userIdx: number): [PublicKey, number] {
-  const idxBuf = new Uint8Array(2);
-  new DataView(idxBuf.buffer).setUint16(0, userIdx, true);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("position_nft"), slab.toBytes(), idxBuf],
-    programId,
-  );
-}
-
-/**
- * Derive the position_nft_mint PDA.
- * Seeds: ["position_nft_mint", slab_key, user_idx as u16 LE]
- */
-function deriveNftMint(programId: PublicKey, slab: PublicKey, userIdx: number): [PublicKey, number] {
-  const idxBuf = new Uint8Array(2);
-  new DataView(idxBuf.buffer).setUint16(0, userIdx, true);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("position_nft_mint"), slab.toBytes(), idxBuf],
-    programId,
-  );
-}
+import { PERCOLATOR_NFT_PROGRAM_ID, deriveNftPda } from "@/lib/nft-program";
 
 export function useMintPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
@@ -63,10 +35,10 @@ export function useMintPositionNft(slabAddress: string) {
     try {
       const slabPk = new PublicKey(slabAddress);
       const userIdx = userAccount.idx;
-      const nftProgId = NFT_PROGRAM_ID;
+      const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
 
       // Derive PDA for state, generate fresh keypair for mint
-      const [nftPda] = deriveNftPda(nftProgId, slabPk, userIdx);
+      const [nftPda] = deriveNftPda(slabPk, userIdx);
       // nft_mint is a fresh keypair (not a PDA) — the program creates it via
       // create_account which requires the mint account to sign the transaction
       const nftMintKeypair = Keypair.generate();

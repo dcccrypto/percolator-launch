@@ -47,7 +47,7 @@ interface LaunchConfig {
  * needed to create a market. The frontend executes the transactions
  * since we need the user's wallet to sign.
  *
- * Input: { mint: string, slabTier: "micro"|"small"|"medium"|"large" }
+ * Input: { mint: string, slabTier: "small"|"medium"|"large" }
  * Response: LaunchConfig | { error: string }
  */
 export async function POST(req: NextRequest) {

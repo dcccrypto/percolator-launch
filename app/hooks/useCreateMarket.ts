@@ -43,17 +43,16 @@ import {
   buildIx,
   deriveVaultAuthority,
   derivePythPushOraclePDA,
-} from "@percolatorct/sdk";
   parseHeader,
+  SLAB_TIERS,
+  slabDataSize,
+  deriveLpPda,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
-
-import { SLAB_TIERS, slabDataSize, deriveLpPda } from "@percolatorct/sdk";
 const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
 const ALL_ZEROS_FEED = "0".repeat(64);
-const MATCHER_CTX_SIZE = 320; // Minimum context size for percolator matcher
 
 /**
  * PERC-465: Fetch the current USD price for a token from Jupiter price API.
@@ -700,7 +699,7 @@ export function useCreateMarket() {
           } else {
 
           const matcherCtxKp = Keypair.generate();
-          const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(MATCHER_CTX_SIZE);
+          const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(cfg.matcherCtxSize);
 
           const [lpPda] = deriveLpPda(programId, slabPk, lpIdx);
 
@@ -712,7 +711,7 @@ export function useCreateMarket() {
                 fromPubkey: wallet.publicKey,
                 newAccountPubkey: matcherCtxKp.publicKey,
                 lamports: matcherCtxRent,
-                space: MATCHER_CTX_SIZE,
+                space: cfg.matcherCtxSize,
                 programId: matcherProgramId,
               });
 

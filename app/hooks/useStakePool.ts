@@ -8,7 +8,6 @@ import {
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,
-} from '@percolatorct/sdk';
   decodeStakePool,
 } from '@percolatorct/sdk';
 import { useSlabState } from '@/components/providers/SlabProvider';

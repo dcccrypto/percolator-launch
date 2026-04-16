@@ -19,6 +19,7 @@ import {
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { detectOracleMode } from "@/lib/oraclePrice";
 
 export function useWithdraw(slabAddress: string) {
   const { connection } = useConnectionCompat();
@@ -51,11 +52,11 @@ export function useWithdraw(slabAddress: string) {
         const userAta = await getAta(wallet.publicKey, mktConfig.collateralMint);
         const [vaultPda] = deriveVaultAuthority(programId, slabPk);
 
-        // Determine if admin oracle mode
-        const hasAdminOracle = !mktConfig.oracleAuthority.equals(PublicKey.default);
+        // Determine oracle mode using centralised detectOracleMode (oraclePrice.ts).
+        // "pyth-pinned" = Pyth feed; "admin" or "hyperp" = use slab as oracle account.
+        const oracleMode = detectOracleMode(mktConfig);
+        const useAdminOracle = oracleMode !== "pyth-pinned";
         const feedHex = Array.from(mktConfig.indexFeedId.toBytes()).map(b => b.toString(16).padStart(2, "0")).join("");
-        const isZeroFeed = feedHex === "0".repeat(64);
-        const useAdminOracle = hasAdminOracle || isZeroFeed;
         const oracleAccount = useAdminOracle ? slabPk : derivePythPushOraclePDA(feedHex)[0];
 
         const instructions = [];
