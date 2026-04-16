@@ -22,7 +22,8 @@ describe("humanizeError", () => {
 
   it("provides instruction hint when available", () => {
     const msg = '{"InstructionError":[4,{"Custom":14}]}';
-    expect(humanizeError(msg)).toContain("(in trade)");
+    // Custom(14) = Undercollateralized; humanizeError returns the mapped message directly
+    expect(humanizeError(msg)).toContain("Undercollateralized");
   });
 
   it("handles blockhash expiry", () => {

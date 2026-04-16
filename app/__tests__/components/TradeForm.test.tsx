@@ -214,11 +214,12 @@ describe("TradeForm Component Tests", () => {
       
       const maxButton = screen.getByRole("button", { name: /max/i });
       const input = screen.getByPlaceholderText("0.000000");
-      
+
       await user.click(maxButton);
-      
-      // PERC-8090: Max now populates contracts input (5 contracts at 1x leverage)
-      expect(input).toHaveValue("5.000000");
+
+      // PERC-8090: Max fills margin=100% of balance, then derives contracts.
+      // margin=5 SOL, notional=5*1=5 USD, contracts=5/100=0.05
+      expect(input).toHaveValue("0.050000");
     });
     
     it("should not set value if balance is zero", async () => {
@@ -268,8 +269,9 @@ describe("TradeForm Component Tests", () => {
       const input = screen.getByPlaceholderText("0.000000");
       
       await user.click(maxButton);
-      
-      expect(input).toHaveValue("1.234567");
+
+      // margin=1.234567 SOL, notional=1.234567*1=1.234567 USD, contracts=1.234567/100=0.012346
+      expect(input).toHaveValue("0.012346");
     });
   });
   
@@ -343,21 +345,21 @@ describe("TradeForm Component Tests", () => {
     
     it("should disable submit button when input is invalid", async () => {
       const user = userEvent.setup();
-      
+
       render(<TradeForm slabAddress="test-slab" />);
-      
+
       const input = screen.getByPlaceholderText("0.000000");
       const submitButton = screen.getByRole("button", { name: /Long 1x/i });
-      
+
       // Empty input should disable button
       expect(submitButton).toBeDisabled();
-      
-      // Valid input should enable button
-      await user.type(input, "5");
+
+      // Valid input should enable button (0.05 contracts = $5 margin at 1x, under 10 SOL balance)
+      await user.type(input, "0.05");
       await waitFor(() => {
         expect(submitButton).not.toBeDisabled();
       });
-      
+
       // Clear input should disable again
       await user.clear(input);
       await waitFor(() => {
