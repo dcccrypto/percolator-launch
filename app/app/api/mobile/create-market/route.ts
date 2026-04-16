@@ -362,20 +362,12 @@ export async function POST(req: NextRequest) {
     const updateConfigIx = buildIx({
       programId,
       keys: updateConfigKeys,
+      // v12.17: UpdateConfig only accepts 4 funding params
       data: encodeUpdateConfig({
         fundingHorizonSlots: "3600",
         fundingKBps: "100",
-        fundingInvScaleNotionalE6: "1000000000000",
         fundingMaxPremiumBps: "1000",
         fundingMaxBpsPerSlot: "10",
-        threshFloor: "0",
-        threshRiskBps: "500",
-        threshUpdateIntervalSlots: "100",
-        threshStepBps: "100",
-        threshAlphaBps: "5000",
-        threshMin: "0",
-        threshMax: "1000000000000000000",
-        threshMinStep: "0",
       }),
     });
 
@@ -389,7 +381,7 @@ export async function POST(req: NextRequest) {
     const crankIx1 = buildIx({
       programId,
       keys: crankKeys1,
-      data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
+      data: encodeKeeperCrank({ callerIdx: 65535 }),
     });
 
     const tx1 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });
@@ -480,7 +472,7 @@ export async function POST(req: NextRequest) {
     const crankIx3 = buildIx({
       programId,
       keys: crankKeys3,
-      data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
+      data: encodeKeeperCrank({ callerIdx: 65535 }),
     });
 
     const tx3Instructions = [depositIx, topupIx, pushIx2, crankIx3];

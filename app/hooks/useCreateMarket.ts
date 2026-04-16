@@ -634,20 +634,12 @@ export function useCreateMarket() {
           }
 
           // UpdateConfig — set funding rate parameters (MidTermDev Step 6)
+          // v12.17: UpdateConfig only accepts 4 funding params (threshold/insurance set at InitMarket)
           const updateConfigData = encodeUpdateConfig({
             fundingHorizonSlots: "3600",
             fundingKBps: "100",
-            fundingInvScaleNotionalE6: "1000000000000",
             fundingMaxPremiumBps: "1000",
             fundingMaxBpsPerSlot: "10",
-            threshFloor: "0",
-            threshRiskBps: "500",
-            threshUpdateIntervalSlots: "100",
-            threshStepBps: "100",
-            threshAlphaBps: "5000",
-            threshMin: "0",
-            threshMax: "1000000000000000000",
-            threshMinStep: "0",
           });
           const updateConfigKeys = buildAccountMetas(ACCOUNTS_UPDATE_CONFIG, [
             wallet.publicKey, slabPk,
@@ -673,7 +665,7 @@ export function useCreateMarket() {
             instructions.push(new TransactionInstruction({ programId, keys: hyperpKeys, data: Buffer.from(hyperpData) }));
           } else {
             // KeeperCrank for Pyth and admin modes
-            const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
+            const crankData = encodeKeeperCrank({ callerIdx: 65535 });
             const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
             const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
               wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
@@ -856,7 +848,7 @@ export function useCreateMarket() {
             finalInstructions.push(new TransactionInstruction({ programId, keys: hyperpKeys, data: Buffer.from(hyperpData) }));
           } else {
             const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
-            const crankData = encodeKeeperCrank({ callerIdx: 65535, allowPanic: false });
+            const crankData = encodeKeeperCrank({ callerIdx: 65535 });
             const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
               wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
             ]);

@@ -28,7 +28,7 @@ export function useTrade(slabAddress: string) {
   const inflightRef = useRef(false);
 
   const trade = useCallback(
-    async (params: { lpIdx: number; userIdx: number; size: bigint }) => {
+    async (params: { lpIdx: number; userIdx: number; size: bigint; limitPriceE6?: bigint }) => {
       if (inflightRef.current) throw new Error("Trade already in progress");
       inflightRef.current = true;
       setLoading(true);
@@ -109,7 +109,7 @@ export function useTrade(slabAddress: string) {
         const crankIx = buildIx({
           programId,
           keys: buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount]),
-          data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
+          data: encodeKeeperCrank({ callerIdx: 65535 }),
         });
         instructions.push(crankIx);
 
@@ -125,7 +125,7 @@ export function useTrade(slabAddress: string) {
             lpAccount.account.matcherContext,
             lpPda,
           ]),
-          data: encodeTradeCpi({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString() }),
+          data: encodeTradeCpi({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString(), limitPriceE6: params.limitPriceE6?.toString() ?? "0" }),
         });
         instructions.push(tradeIx);
 

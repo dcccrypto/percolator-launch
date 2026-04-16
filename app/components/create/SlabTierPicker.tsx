@@ -9,14 +9,12 @@ interface SlabTierPickerProps {
 }
 
 const TIER_COSTS: Record<SlabTierKey, string> = {
-  micro:  "~0.12 SOL",
   small:  "~0.45 SOL",
   medium: "~1.8 SOL",
   large:  "~7 SOL",
 };
 
 const TIER_DESCRIPTIONS: Record<SlabTierKey, string> = {
-  micro:  "Minimal (64 slots)",
   small:  "Low liquidity depth",
   medium: "Standard",
   large:  "Deep orderbook",

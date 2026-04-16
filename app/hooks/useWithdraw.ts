@@ -108,7 +108,7 @@ export function useWithdraw(slabAddress: string) {
         instructions.push(buildIx({
           programId,
           keys: buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount]),
-          data: encodeKeeperCrank({ callerIdx: 65535, allowPanic: false }),
+          data: encodeKeeperCrank({ callerIdx: 65535 }),
         }));
 
         instructions.push(buildIx({
