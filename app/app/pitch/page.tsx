@@ -21,7 +21,8 @@ function Slide01Cover({ isCurrent }: SlideProps) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo.png" alt="Percolator" className="pitch-logo" />
         <p className="pitch-hero-sub">
-          Perpetual futures for every token on Solana.
+          Pump.fun for perps.<br />
+          Permissionless perpetuals on Solana.
         </p>
         <div className="pitch-divider" />
         <p className="pitch-url">percolatorlaunch.com</p>
