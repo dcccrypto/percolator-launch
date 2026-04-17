@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 
-const TOTAL_SLIDES = 7;
+const TOTAL_SLIDES = 12;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -31,27 +31,26 @@ function Slide01Cover({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide02Insight({ isCurrent }: SlideProps) {
+function Slide02Gap({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">The Insight</div>
+        <div className="pitch-label">The Gap</div>
         <h2 className="pitch-title">
-          There are 15 million tokens on Solana.<br />
-          Fewer than 50 have perp markets.
+          15 million tokens live on Solana.<br />
+          Fewer than 50 have perpetual markets.
         </h2>
         <div className="pitch-insight-body">
           <p className="pitch-body-text">
-            Every major exchange — Hyperliquid, Jupiter, Drift — gatekeeps which tokens
-            get perpetual futures. You need approval, a Pyth oracle listing, or $25M
-            for an auction slot.
+            Every major perps DEX — Hyperliquid, Jupiter, Drift — decides which tokens
+            you can trade with leverage. Listing requires approval, an oracle feed, or
+            millions in auction fees.
           </p>
           <p className="pitch-body-text" style={{ marginTop: '1.25rem' }}>
-            That means 99.9997% of tokens can never have leveraged markets.
-            Not because of a technical limitation — because of a design choice.
+            The result: 99.9997% of tokens can never have leveraged markets.
           </p>
           <div className="pitch-callout">
-            We chose differently.
+            Not because of technical limits. Because of design choices.
           </div>
         </div>
       </div>
@@ -59,53 +58,307 @@ function Slide02Insight({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide03Problem({ isCurrent }: SlideProps) {
+function Slide03Solution({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">The Problem</div>
-        <h2 className="pitch-title">Perp markets are gated by three bottlenecks</h2>
-        <div className="pitch-problem-grid">
-          <div className="pitch-problem-card">
-            <div className="pitch-problem-stat">$25M</div>
-            <p>To list on Hyperliquid via auction. Jupiter and Drift require team approval.</p>
+        <div className="pitch-label">The Solution</div>
+        <h2 className="pitch-title">One place to trade any token with leverage.</h2>
+        <div className="pitch-solution-three">
+          <div className="pitch-solution-line">
+            <span className="pitch-solution-line-bold">Blue chips</span>
+            <span className="pitch-solution-line-sep">—</span>
+            <span className="pitch-solution-line-text">SOL, BTC, ETH with deep liquidity and Pyth feeds</span>
           </div>
-          <div className="pitch-problem-card">
-            <div className="pitch-problem-stat">Oracle</div>
-            <p>No Pyth feed means no market. New tokens are locked out from day one.</p>
+          <div className="pitch-solution-line">
+            <span className="pitch-solution-line-bold">Memecoins</span>
+            <span className="pitch-solution-line-sep">—</span>
+            <span className="pitch-solution-line-text">WIF, BONK, POPCAT, and anything trading on a DEX</span>
           </div>
-          <div className="pitch-problem-card">
-            <div className="pitch-problem-stat">ADL</div>
-            <p>When markets crash, auto-deleveraging picks winners and losers arbitrarily. No one has fixed this.</p>
+          <div className="pitch-solution-line">
+            <span className="pitch-solution-line-bold">Long-tail tokens</span>
+            <span className="pitch-solution-line-sep">—</span>
+            <span className="pitch-solution-line-text">the next 15 million</span>
           </div>
+        </div>
+        <p className="pitch-solution-sub">
+          One account. One collateral balance. Every perp market.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Slide04Product({ isCurrent }: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner pitch-product-inner">
+        <div className="pitch-label">The Product</div>
+        <h2 className="pitch-title" style={{ marginBottom: '1rem' }}>Live on devnet today.</h2>
+
+        {/* Faux trading UI */}
+        <div className="fui-shell">
+          {/* Top bar */}
+          <div className="fui-topbar">
+            <div className="fui-topbar-left">
+              <span className="fui-pair mono">SOL-PERP</span>
+              <span className="fui-price mono">$142.30</span>
+              <span className="fui-change">+2.4%</span>
+            </div>
+            <div className="fui-topbar-right">
+              <span className="fui-pill mono">24h Vol: $3.2M</span>
+              <span className="fui-pill mono">OI: $810K</span>
+              <span className="fui-pill fui-pill-live">DEVNET</span>
+            </div>
+          </div>
+
+          {/* Body: chart + orderbook */}
+          <div className="fui-body">
+            {/* Chart area */}
+            <div className="fui-chart">
+              <svg
+                width="100%"
+                height="100%"
+                viewBox="0 0 460 140"
+                preserveAspectRatio="none"
+                className="fui-chart-svg"
+              >
+                {/* Gradient fill */}
+                <defs>
+                  <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#9945FF" stopOpacity="0.25" />
+                    <stop offset="100%" stopColor="#9945FF" stopOpacity="0.01" />
+                  </linearGradient>
+                  <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#9945FF" />
+                    <stop offset="100%" stopColor="#22D3EE" />
+                  </linearGradient>
+                </defs>
+                {/* Fill area */}
+                <path
+                  d="M0,120 L30,100 L60,110 L90,75 L120,85 L150,60 L180,72 L210,45 L240,58 L270,38 L300,50 L330,28 L360,42 L390,20 L420,32 L460,15 L460,140 L0,140 Z"
+                  fill="url(#chartGrad)"
+                />
+                {/* Price line */}
+                <path
+                  d="M0,120 L30,100 L60,110 L90,75 L120,85 L150,60 L180,72 L210,45 L240,58 L270,38 L300,50 L330,28 L360,42 L390,20 L420,32 L460,15"
+                  fill="none"
+                  stroke="url(#lineGrad)"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+                {/* Horizontal grid lines */}
+                {[28, 56, 84, 112].map((y) => (
+                  <line key={y} x1="0" y1={y} x2="460" y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+                ))}
+                {/* Current price line */}
+                <line x1="0" y1="15" x2="460" y2="15" stroke="rgba(34,211,238,0.3)" strokeWidth="1" strokeDasharray="4 3" />
+                {/* Price label */}
+                <rect x="390" y="4" width="64" height="16" rx="3" fill="rgba(34,211,238,0.15)" />
+                <text x="422" y="15" textAnchor="middle" fill="#22D3EE" fontSize="8" fontFamily="monospace">$142.30</text>
+              </svg>
+              {/* X-axis labels */}
+              <div className="fui-chart-xaxis">
+                {['09:00','10:00','11:00','12:00','13:00','14:00'].map((t) => (
+                  <span key={t} className="mono">{t}</span>
+                ))}
+              </div>
+            </div>
+
+            {/* Order book */}
+            <div className="fui-orderbook">
+              <div className="fui-ob-header">
+                <span>Price</span>
+                <span>Size</span>
+              </div>
+              <div className="fui-ob-asks">
+                {[
+                  ['143.80','12.4'],
+                  ['143.55','8.1'],
+                  ['143.30','21.7'],
+                  ['143.10','5.3'],
+                  ['142.90','18.0'],
+                ].map(([p, s]) => (
+                  <div key={p} className="fui-ob-row fui-ob-row-ask">
+                    <span className="fui-ob-price fui-ob-ask-price mono">{p}</span>
+                    <span className="fui-ob-size mono">{s}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="fui-ob-spread mono">
+                <span>Spread</span><span>0.20</span>
+              </div>
+              <div className="fui-ob-bids">
+                {[
+                  ['142.70','9.6'],
+                  ['142.45','31.2'],
+                  ['142.20','7.8'],
+                  ['141.95','14.4'],
+                  ['141.70','22.9'],
+                ].map(([p, s]) => (
+                  <div key={p} className="fui-ob-row fui-ob-row-bid">
+                    <span className="fui-ob-price fui-ob-bid-price mono">{p}</span>
+                    <span className="fui-ob-size mono">{s}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Trade form */}
+            <div className="fui-form">
+              <div className="fui-form-toggle">
+                <button className="fui-toggle-long fui-toggle-active">Long</button>
+                <button className="fui-toggle-short">Short</button>
+              </div>
+              <div className="fui-form-field">
+                <div className="fui-form-label mono">Size (USDC)</div>
+                <div className="fui-form-input mono">500.00</div>
+              </div>
+              <div className="fui-form-field">
+                <div className="fui-form-label mono">Leverage</div>
+                <div className="fui-leverage-row">
+                  <div className="fui-slider-track">
+                    <div className="fui-slider-fill" style={{ width: '40%' }} />
+                    <div className="fui-slider-thumb" style={{ left: '40%' }} />
+                  </div>
+                  <span className="fui-leverage-val mono">4x</span>
+                </div>
+              </div>
+              <div className="fui-form-field">
+                <div className="fui-form-label mono">Est. Liq. Price</div>
+                <div className="fui-form-value mono fui-red">$108.40</div>
+              </div>
+              <button className="fui-submit-btn">Open Long</button>
+            </div>
+          </div>
+        </div>
+
+        <p className="pitch-product-caption">
+          Trading interface, order routing, cross-margin account. Everything you&apos;d expect
+          from a modern perp DEX — for any token.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Slide05Create({ isCurrent }: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Permissionless</div>
+        <h2 className="pitch-title">Create a Market in 60 Seconds</h2>
+
+        {/* Bold three-step diagram */}
+        <div className="pflow-wrap">
+          {/* Step 01 */}
+          <div className="pflow-step">
+            <div className="pflow-num-wrap">
+              <div className="pflow-num mono">01</div>
+            </div>
+            <div className="pflow-step-title">Pick a token</div>
+            <div className="pflow-step-desc">Paste any Solana mint address</div>
+            <div className="pflow-example-card">
+              <div className="pflow-example-label mono">mint</div>
+              <div className="pflow-example-value mono">EKpQGAJ...WIF</div>
+            </div>
+          </div>
+
+          {/* Connector */}
+          <div className="pflow-connector" aria-hidden>
+            <svg width="64" height="24" viewBox="0 0 64 24" fill="none" className="pflow-arrow-svg">
+              <defs>
+                <linearGradient id="arrowGrad1" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#9945FF" />
+                  <stop offset="100%" stopColor="#22D3EE" />
+                </linearGradient>
+              </defs>
+              <line x1="0" y1="12" x2="52" y2="12" stroke="url(#arrowGrad1)" strokeWidth="2" />
+              <polyline points="46,6 58,12 46,18" stroke="url(#arrowGrad1)" strokeWidth="2" fill="none" strokeLinejoin="round" />
+            </svg>
+          </div>
+
+          {/* Step 02 */}
+          <div className="pflow-step">
+            <div className="pflow-num-wrap">
+              <div className="pflow-num mono">02</div>
+            </div>
+            <div className="pflow-step-title">Set parameters</div>
+            <div className="pflow-step-desc">Fee rate, leverage cap, oracle mode</div>
+            <div className="pflow-example-card">
+              <div className="pflow-example-label mono">config</div>
+              <div className="pflow-example-value mono">Fee: 3%</div>
+              <div className="pflow-example-value mono">Leverage: 10x</div>
+              <div className="pflow-example-value mono">Oracle: HYPERP</div>
+            </div>
+          </div>
+
+          {/* Connector */}
+          <div className="pflow-connector" aria-hidden>
+            <svg width="64" height="24" viewBox="0 0 64 24" fill="none" className="pflow-arrow-svg">
+              <defs>
+                <linearGradient id="arrowGrad2" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#9945FF" />
+                  <stop offset="100%" stopColor="#22D3EE" />
+                </linearGradient>
+              </defs>
+              <line x1="0" y1="12" x2="52" y2="12" stroke="url(#arrowGrad2)" strokeWidth="2" />
+              <polyline points="46,6 58,12 46,18" stroke="url(#arrowGrad2)" strokeWidth="2" fill="none" strokeLinejoin="round" />
+            </svg>
+          </div>
+
+          {/* Step 03 */}
+          <div className="pflow-step pflow-step-live">
+            <div className="pflow-num-wrap">
+              <div className="pflow-num mono">03</div>
+            </div>
+            <div className="pflow-step-title">Launch</div>
+            <div className="pflow-step-desc">Market live. Trades execute immediately.</div>
+            <div className="pflow-example-card pflow-example-card-live">
+              <div className="pflow-example-label mono">tx confirmed</div>
+              <div className="pflow-example-value mono pflow-live-id">Market 7x3K...live</div>
+              <div className="pflow-live-dot-row">
+                <span className="pflow-live-dot" />
+                <span className="pflow-live-text mono">OPEN</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="pitch-create-footer">
+          $500 USDC. 60 seconds. Earn fees forever.
         </div>
       </div>
     </div>
   );
 }
 
-function Slide04Solution({ isCurrent }: SlideProps) {
+function Slide06HowItWorks({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">How We Solve It</div>
-        <h2 className="pitch-title">Three breakthroughs. Fully on-chain.</h2>
+        <div className="pitch-label">Three Mechanisms</div>
+        <h2 className="pitch-title">What makes every-token perps possible.</h2>
         <div className="pitch-solution-stack">
           <div className="pitch-solution-item">
             <div className="pitch-solution-num purple">1</div>
             <div>
-              <div className="pitch-solution-name">On-chain oracle from DEX pools</div>
+              <div className="pitch-solution-name">On-chain oracle</div>
               <p className="pitch-solution-desc">
-                We read price directly from Raydium and Meteora pool state. If a token trades on a DEX, it gets an oracle. No Pyth. No external dependency. &lt;0.05% deviation on BTC, SOL, ETH.
+                If a token trades on Raydium, Meteora, or pump.fun, we can read its price
+                directly from the pool. No Pyth listing required. &lt;0.05% deviation from
+                centralized feeds on BTC, SOL, ETH.
               </p>
             </div>
           </div>
           <div className="pitch-solution-item">
             <div className="pitch-solution-num cyan">2</div>
             <div>
-              <div className="pitch-solution-name">Mathematically fair liquidation</div>
+              <div className="pitch-solution-name">Mathematically fair risk engine</div>
               <p className="pitch-solution-desc">
-                Built on Anatoly Yakovenko&apos;s H + A/K risk engine. Proportional haircuts replace ADL — everyone gets the same deal. O(1) per account, no queue, no first-mover advantage.
+                Built on open-source research from Anatoly Yakovenko. When a market hits
+                limits, everyone takes a proportional haircut instead of some traders
+                getting force-liquidated. Same deal for everyone.
               </p>
             </div>
           </div>
@@ -114,7 +367,8 @@ function Slide04Solution({ isCurrent }: SlideProps) {
             <div>
               <div className="pitch-solution-name">Permissionless market creation</div>
               <p className="pitch-solution-desc">
-                Deposit $500 USDC, set a fee rate, your market is live. No application. No approval. You earn fees on every trade.
+                $500 USDC and 60 seconds. No application, no approval. Set your fee rate,
+                earn from every trade in your market.
               </p>
             </div>
           </div>
@@ -124,12 +378,12 @@ function Slide04Solution({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide05Proof({ isCurrent }: SlideProps) {
+function Slide07Proof({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Proof</div>
-        <h2 className="pitch-title">Live on devnet. Verified. Growing organically.</h2>
+        <div className="pitch-label">Live on Devnet</div>
+        <h2 className="pitch-title">Built. Verified. Growing.</h2>
         <div className="pitch-proof-row">
           <div className="pitch-proof-block">
             <div className="pitch-traction-grid">
@@ -142,19 +396,19 @@ function Slide05Proof({ isCurrent }: SlideProps) {
                 <div className="pitch-traction-label">Organic X followers</div>
               </div>
               <div className="pitch-traction-card">
-                <div className="pitch-traction-num mono">516</div>
+                <div className="pitch-traction-num mono">471</div>
                 <div className="pitch-traction-label">Formal proofs verified (Kani)</div>
               </div>
               <div className="pitch-traction-card">
                 <div className="pitch-traction-num mono">0</div>
-                <div className="pitch-traction-label">Critical or high findings</div>
+                <div className="pitch-traction-label">Unresolved critical or high findings</div>
               </div>
             </div>
           </div>
           <div className="pitch-proof-extras">
             <div className="pitch-milestone">
               <div className="pitch-milestone-dot cyan" />
-              <span>Position NFTs — transferable perp positions, first on Solana</span>
+              <span>Position NFTs — transferable perp positions on Solana</span>
             </div>
             <div className="pitch-milestone">
               <div className="pitch-milestone-dot cyan" />
@@ -162,7 +416,7 @@ function Slide05Proof({ isCurrent }: SlideProps) {
             </div>
             <div className="pitch-milestone">
               <div className="pitch-milestone-dot purple" />
-              <span>Built on Toly&apos;s risk engine — production-grade implementation of his research</span>
+              <span>Zero paid marketing, zero incentive programs</span>
             </div>
           </div>
         </div>
@@ -171,24 +425,153 @@ function Slide05Proof({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide06Market({ isCurrent }: SlideProps) {
+function Slide08Competition({ isCurrent }: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">The Landscape</div>
+        <h2 className="pitch-title">Only one protocol lists every token.</h2>
+        <div className="pitch-matrix-wrap">
+          <table className="pitch-matrix">
+            <thead>
+              <tr>
+                <th className="pitch-matrix-feature"></th>
+                <th>Hyperliquid</th>
+                <th>Jupiter Perps</th>
+                <th>Drift</th>
+                <th className="pitch-matrix-us">Percolator</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="pitch-matrix-feature">Permissionless markets</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Long-tail tokens</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Cross-margin</td>
+                <td className="pitch-matrix-yes">✓</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes">✓</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">On-chain oracle</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Market creator fees</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="pitch-matrix-sub">
+          Everyone else competes for the same 30–50 tokens. We opened a new category.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Slide09WhyNow({ isCurrent }: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Timing</div>
+        <h2 className="pitch-title">The window is open.</h2>
+        <div className="pitch-whynow-stats">
+          <div className="pitch-whynow-stat">
+            <div className="pitch-whynow-num mono">$2–4B</div>
+            <div className="pitch-whynow-label">Monthly Solana perp volume today</div>
+          </div>
+          <div className="pitch-whynow-stat">
+            <div className="pitch-whynow-num mono">10×</div>
+            <div className="pitch-whynow-label">Growth in Solana DEX volume in 18 months</div>
+          </div>
+          <div className="pitch-whynow-stat">
+            <div className="pitch-whynow-num mono">Every week</div>
+            <div className="pitch-whynow-label">Thousands of new tradable tokens launch with no perp path</div>
+          </div>
+        </div>
+        <div className="pitch-whynow-closing">
+          Perps are the next trillion-dollar DeFi category. The winner is whoever can
+          list the most assets fastest.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Slide10Users({ isCurrent }: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">The Users</div>
+        <h2 className="pitch-title">Three audiences. One protocol.</h2>
+        <div className="pitch-user-cards">
+          <div className="pitch-user-card">
+            <div className="pitch-user-role">The Trader</div>
+            <p className="pitch-user-story">
+              Wants leverage on WIF the moment it trends. Can't get it on Hyperliquid.
+              Opens Percolator, trades instantly.
+            </p>
+          </div>
+          <div className="pitch-user-card">
+            <div className="pitch-user-role">The Creator</div>
+            <p className="pitch-user-story">
+              Launches a token and wants a perp market for it. Deposits $500. Earns
+              fees from every trade for the life of the market.
+            </p>
+          </div>
+          <div className="pitch-user-card">
+            <div className="pitch-user-role">The LP</div>
+            <p className="pitch-user-story">
+              Backs long-tail inventory that didn't exist before. Earns yield
+              uncorrelated to blue-chip perp flow.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Slide11Opportunity({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
         <div className="pitch-label">The Market</div>
-        <h2 className="pitch-title">We don't compete for blue-chip volume. We create new markets.</h2>
+        <h2 className="pitch-title">We're not taking a slice. We're building a new pie.</h2>
         <div className="pitch-market-layout">
           <div className="pitch-market-stat-block">
             <div className="pitch-market-big-num mono">$2–4B</div>
-            <div className="pitch-market-big-label">Monthly Solana perp volume today</div>
+            <div className="pitch-market-big-label">Monthly Solana perp volume</div>
             <div className="pitch-market-sub">~50 tokens. All blue chips.</div>
+            <div className="pitch-market-sub" style={{ marginTop: '0.25rem' }}>Mature, contested, low growth ceiling.</div>
           </div>
           <div className="pitch-market-divider" />
           <div className="pitch-market-opportunity">
             <div className="pitch-market-opp-num mono">15M+</div>
-            <div className="pitch-market-opp-label">Tokens with zero perp access</div>
+            <div className="pitch-market-opp-label">Tokens with zero perp access today</div>
             <p className="pitch-market-opp-desc">
-              Every token launched on pump.fun, every memecoin, every new project — they&apos;re all potential markets on Percolator. We&apos;re not taking a slice of the existing pie. We&apos;re building a new one.
+              Every token on pump.fun, every memecoin, every new launch.
+              The long tail of crypto, finally tradable with leverage.
             </p>
           </div>
         </div>
@@ -197,44 +580,43 @@ function Slide06Market({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide07WhyUs({ isCurrent }: SlideProps) {
+function Slide12Vision({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Why Us. Why Now.</div>
-        <h2 className="pitch-title">We&apos;re building this regardless.</h2>
-        <div className="pitch-why-layout">
-          <div className="pitch-why-block">
-            <p className="pitch-body-text">
-              Toly designed the risk engine. We&apos;re building the product. Percolator
-              is the production-grade implementation of Anatoly Yakovenko&apos;s permissionless
-              perp protocol — extended with an on-chain oracle, formal verification,
-              and a full trading interface.
-            </p>
-            <p className="pitch-body-text" style={{ marginTop: '1.25rem' }}>
-              We&apos;ve been shipping every single day — 516 proofs verified, 168 markets
-              created on devnet, all organic. No paid marketing. No incentive programs.
-              This is what we want to build for the next decade.
-            </p>
+        <div className="pitch-label">Where This Goes</div>
+        <h2 className="pitch-title">Every tradable asset becomes a perp market.</h2>
+        <p className="pitch-body-text" style={{ maxWidth: '680px', marginBottom: '2rem' }}>
+          Today perps are a luxury reserved for the 50 tokens exchanges choose to support.
+          In five years, every token worth trading spot will also be tradable perpetually.
+        </p>
+        <div className="pitch-roadmap">
+          <div className="pitch-roadmap-item">
+            <div className="pitch-roadmap-phase purple">Phase 1</div>
+            <div className="pitch-roadmap-name">Mainnet beta</div>
+            <div className="pitch-roadmap-desc">launching soon</div>
           </div>
-          <div className="pitch-why-signals">
-            <div className="pitch-signal">
-              <div className="pitch-signal-label">Foundation</div>
-              <div className="pitch-signal-value">Built on Toly&apos;s protocol — the Solana co-founder designed the core risk engine</div>
-            </div>
-            <div className="pitch-signal">
-              <div className="pitch-signal-label">Community</div>
-              <div className="pitch-signal-value">3,000+ organic followers, active Telegram with early testers</div>
-            </div>
-            <div className="pitch-signal">
-              <div className="pitch-signal-label">Open Source</div>
-              <div className="pitch-signal-value">8 public repos, Apache 2.0 — anyone can verify our work</div>
-            </div>
-            <div className="pitch-signal">
-              <div className="pitch-signal-label">Next</div>
-              <div className="pitch-signal-value">Mainnet beta launch — April 2026</div>
-            </div>
+          <div className="pitch-roadmap-connector" />
+          <div className="pitch-roadmap-item">
+            <div className="pitch-roadmap-phase cyan">Phase 2</div>
+            <div className="pitch-roadmap-name">Liquidity deepening</div>
+            <div className="pitch-roadmap-desc">market maker programs, LP incentives</div>
           </div>
+          <div className="pitch-roadmap-connector" />
+          <div className="pitch-roadmap-item">
+            <div className="pitch-roadmap-phase purple">Phase 3</div>
+            <div className="pitch-roadmap-name">Advanced primitives</div>
+            <div className="pitch-roadmap-desc">position NFTs, structured products, options</div>
+          </div>
+          <div className="pitch-roadmap-connector" />
+          <div className="pitch-roadmap-item">
+            <div className="pitch-roadmap-phase cyan">Phase 4</div>
+            <div className="pitch-roadmap-name">Cross-chain expansion</div>
+            <div className="pitch-roadmap-desc">every-token perps beyond Solana</div>
+          </div>
+        </div>
+        <div className="pitch-vision-footer">
+          We're building this regardless. If that resonates, let's talk.
         </div>
       </div>
     </div>
@@ -245,12 +627,17 @@ function Slide07WhyUs({ isCurrent }: SlideProps) {
 
 const SLIDES = [
   { id: 1, title: "Cover", component: Slide01Cover },
-  { id: 2, title: "Insight", component: Slide02Insight },
-  { id: 3, title: "Problem", component: Slide03Problem },
-  { id: 4, title: "Solution", component: Slide04Solution },
-  { id: 5, title: "Proof", component: Slide05Proof },
-  { id: 6, title: "Market", component: Slide06Market },
-  { id: 7, title: "Why Us", component: Slide07WhyUs },
+  { id: 2, title: "The Gap", component: Slide02Gap },
+  { id: 3, title: "Solution", component: Slide03Solution },
+  { id: 4, title: "Product", component: Slide04Product },
+  { id: 5, title: "Create a Market", component: Slide05Create },
+  { id: 6, title: "How It Works", component: Slide06HowItWorks },
+  { id: 7, title: "Proof", component: Slide07Proof },
+  { id: 8, title: "Competition", component: Slide08Competition },
+  { id: 9, title: "Why Now", component: Slide09WhyNow },
+  { id: 10, title: "Who Uses It", component: Slide10Users },
+  { id: 11, title: "The Opportunity", component: Slide11Opportunity },
+  { id: 12, title: "Vision + Roadmap", component: Slide12Vision },
 ];
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -461,7 +848,7 @@ export default function PitchPage() {
           color: rgba(255,255,255,0.6);
         }
 
-        /* ── Insight slide ── */
+        /* ── Gap slide (was Insight) ── */
         .pitch-insight-body {
           max-width: 700px;
         }
@@ -475,36 +862,502 @@ export default function PitchPage() {
           letter-spacing: -0.01em;
         }
 
-        /* ── Problem slide ── */
-        .pitch-problem-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 1.5rem;
+        /* ── Solution slide (Slide 3) ── */
+        .pitch-solution-three {
+          display: flex;
+          flex-direction: column;
+          gap: 1.1rem;
+          margin-bottom: 2rem;
         }
 
-        .pitch-problem-card {
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 12px;
-          padding: 1.75rem;
-        }
-
-        .pitch-problem-stat {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: clamp(1.8rem, 3vw, 2.5rem);
-          font-weight: 700;
-          color: #FF3B5C;
-          margin-bottom: 0.75rem;
-        }
-
-        .pitch-problem-card p {
+        .pitch-solution-line {
+          display: flex;
+          align-items: baseline;
+          gap: 0.6rem;
           font-family: 'Inter', sans-serif;
-          font-size: 0.9rem;
-          line-height: 1.6;
+          font-size: clamp(1rem, 1.8vw, 1.2rem);
+          line-height: 1.5;
+        }
+
+        .pitch-solution-line-bold {
+          font-weight: 700;
+          color: #fff;
+          flex-shrink: 0;
+        }
+
+        .pitch-solution-line-sep {
+          color: rgba(153,69,255,0.5);
+          flex-shrink: 0;
+        }
+
+        .pitch-solution-line-text {
           color: rgba(255,255,255,0.55);
         }
 
-        /* ── Solution slide ── */
+        .pitch-solution-sub {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.15rem;
+          font-weight: 700;
+          color: #22D3EE;
+          letter-spacing: -0.01em;
+        }
+
+        /* ── Product slide (Slide 4) ── */
+        .pitch-product-inner {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .pitch-product-caption {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.875rem;
+          color: rgba(255,255,255,0.45);
+          line-height: 1.6;
+          max-width: 680px;
+          margin-top: 0.75rem;
+        }
+
+        /* ── Faux Trading UI (Slide 4) ── */
+        .fui-shell {
+          width: 100%;
+          border-radius: 10px;
+          border: 1px solid rgba(153,69,255,0.25);
+          background: #111116;
+          box-shadow: 0 0 40px rgba(153,69,255,0.08), inset 0 1px 0 rgba(255,255,255,0.05);
+          overflow: hidden;
+          font-size: 0.78rem;
+        }
+
+        /* Top bar */
+        .fui-topbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0.5rem 1rem;
+          background: rgba(255,255,255,0.03);
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        .fui-topbar-left {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .fui-topbar-right {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .fui-pair {
+          font-size: 0.85rem;
+          font-weight: 700;
+          color: #fff;
+          letter-spacing: 0.02em;
+        }
+
+        .fui-price {
+          font-size: 0.95rem;
+          font-weight: 700;
+          color: #22D3EE;
+        }
+
+        .fui-change {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.75rem;
+          color: #22c55e;
+          background: rgba(34,197,94,0.1);
+          border: 1px solid rgba(34,197,94,0.2);
+          border-radius: 4px;
+          padding: 1px 6px;
+        }
+
+        .fui-pill {
+          font-size: 0.68rem;
+          color: rgba(255,255,255,0.35);
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 4px;
+          padding: 2px 7px;
+        }
+
+        .fui-pill-live {
+          color: #22D3EE;
+          border-color: rgba(34,211,238,0.25);
+          background: rgba(34,211,238,0.07);
+        }
+
+        /* Body layout */
+        .fui-body {
+          display: grid;
+          grid-template-columns: 1fr 110px 160px;
+          min-height: 200px;
+        }
+
+        /* Chart */
+        .fui-chart {
+          border-right: 1px solid rgba(255,255,255,0.06);
+          display: flex;
+          flex-direction: column;
+          padding: 0.5rem 0 0 0;
+        }
+
+        .fui-chart-svg {
+          flex: 1;
+          display: block;
+        }
+
+        .fui-chart-xaxis {
+          display: flex;
+          justify-content: space-between;
+          padding: 0.2rem 0.5rem 0.3rem;
+          border-top: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .fui-chart-xaxis span {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.6rem;
+          color: rgba(255,255,255,0.2);
+        }
+
+        /* Order book */
+        .fui-orderbook {
+          border-right: 1px solid rgba(255,255,255,0.06);
+          display: flex;
+          flex-direction: column;
+          font-size: 0.68rem;
+        }
+
+        .fui-ob-header {
+          display: flex;
+          justify-content: space-between;
+          padding: 0.35rem 0.5rem;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.6rem;
+          color: rgba(255,255,255,0.25);
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .fui-ob-asks, .fui-ob-bids {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .fui-ob-row {
+          display: flex;
+          justify-content: space-between;
+          padding: 0.2rem 0.5rem;
+          position: relative;
+        }
+
+        .fui-ob-row-ask::before {
+          content: '';
+          position: absolute;
+          right: 0; top: 0; bottom: 0;
+          background: rgba(239,68,68,0.07);
+          width: 60%;
+        }
+
+        .fui-ob-row-bid::before {
+          content: '';
+          position: absolute;
+          right: 0; top: 0; bottom: 0;
+          background: rgba(34,197,94,0.07);
+          width: 45%;
+        }
+
+        .fui-ob-price, .fui-ob-size {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.66rem;
+          position: relative;
+          z-index: 1;
+        }
+
+        .fui-ob-ask-price { color: #f87171; }
+        .fui-ob-bid-price { color: #4ade80; }
+        .fui-ob-size { color: rgba(255,255,255,0.4); }
+
+        .fui-ob-spread {
+          display: flex;
+          justify-content: space-between;
+          padding: 0.2rem 0.5rem;
+          font-size: 0.62rem;
+          color: rgba(255,255,255,0.25);
+          background: rgba(255,255,255,0.02);
+          border-top: 1px solid rgba(255,255,255,0.04);
+          border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+
+        /* Trade form */
+        .fui-form {
+          display: flex;
+          flex-direction: column;
+          gap: 0.6rem;
+          padding: 0.75rem 0.75rem;
+          background: rgba(0,0,0,0.15);
+        }
+
+        .fui-form-toggle {
+          display: flex;
+          border-radius: 6px;
+          overflow: hidden;
+          border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .fui-toggle-long, .fui-toggle-short {
+          flex: 1;
+          border: none;
+          padding: 0.35rem 0;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.72rem;
+          font-weight: 700;
+          cursor: default;
+          letter-spacing: 0.04em;
+        }
+
+        .fui-toggle-long {
+          background: rgba(34,197,94,0.18);
+          color: #4ade80;
+        }
+
+        .fui-toggle-short {
+          background: rgba(255,255,255,0.04);
+          color: rgba(255,255,255,0.3);
+        }
+
+        .fui-toggle-active {
+          box-shadow: inset 0 0 0 1px rgba(34,197,94,0.3);
+        }
+
+        .fui-form-field {
+          display: flex;
+          flex-direction: column;
+          gap: 0.2rem;
+        }
+
+        .fui-form-label {
+          font-size: 0.6rem;
+          color: rgba(255,255,255,0.3);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
+
+        .fui-form-input {
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 5px;
+          padding: 0.3rem 0.5rem;
+          font-size: 0.75rem;
+          color: #fff;
+        }
+
+        .fui-form-value {
+          font-size: 0.75rem;
+          color: rgba(255,255,255,0.6);
+        }
+
+        .fui-red { color: #f87171; }
+
+        .fui-leverage-row {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .fui-slider-track {
+          flex: 1;
+          height: 4px;
+          background: rgba(255,255,255,0.1);
+          border-radius: 2px;
+          position: relative;
+        }
+
+        .fui-slider-fill {
+          position: absolute;
+          left: 0; top: 0; bottom: 0;
+          background: linear-gradient(90deg, #9945FF, #22D3EE);
+          border-radius: 2px;
+        }
+
+        .fui-slider-thumb {
+          position: absolute;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: #22D3EE;
+          box-shadow: 0 0 6px rgba(34,211,238,0.6);
+          border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .fui-leverage-val {
+          font-size: 0.72rem;
+          font-weight: 700;
+          color: #9945FF;
+          flex-shrink: 0;
+        }
+
+        .fui-submit-btn {
+          margin-top: auto;
+          background: linear-gradient(135deg, #9945FF, #22D3EE);
+          border: none;
+          border-radius: 6px;
+          padding: 0.45rem 0;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.72rem;
+          font-weight: 700;
+          color: #fff;
+          cursor: default;
+          letter-spacing: 0.04em;
+          box-shadow: 0 0 14px rgba(153,69,255,0.3);
+        }
+
+        /* ── Create-market slide (Slide 5) ── */
+        .pitch-create-footer {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.1rem;
+          font-weight: 700;
+          color: #22D3EE;
+          letter-spacing: -0.01em;
+          margin-top: 1.5rem;
+        }
+
+        /* ── Permissionless flow diagram (Slide 5) ── */
+        .pflow-wrap {
+          display: flex;
+          align-items: stretch;
+          gap: 0;
+          margin-bottom: 0.5rem;
+        }
+
+        .pflow-step {
+          flex: 1;
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(153,69,255,0.2);
+          border-radius: 12px;
+          padding: 1.25rem 1.25rem 1rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.35rem;
+          box-shadow: 0 0 24px rgba(153,69,255,0.06);
+          transition: border-color 0.2s;
+          min-width: 0;
+        }
+
+        .pflow-step-live {
+          border-color: rgba(34,211,238,0.3);
+          box-shadow: 0 0 24px rgba(34,211,238,0.08);
+        }
+
+        .pflow-num-wrap {
+          margin-bottom: 0.5rem;
+        }
+
+        .pflow-num {
+          display: inline-block;
+          font-size: 1.7rem;
+          font-weight: 700;
+          line-height: 1;
+          background: linear-gradient(135deg, #9945FF, #22D3EE);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          letter-spacing: -0.02em;
+        }
+
+        .pflow-step-title {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 0.95rem;
+          font-weight: 700;
+          color: #fff;
+        }
+
+        .pflow-step-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.75rem;
+          color: rgba(255,255,255,0.45);
+          line-height: 1.4;
+          margin-bottom: 0.5rem;
+        }
+
+        .pflow-example-card {
+          background: rgba(0,0,0,0.3);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 7px;
+          padding: 0.6rem 0.75rem;
+          margin-top: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 0.18rem;
+        }
+
+        .pflow-example-card-live {
+          border-color: rgba(34,211,238,0.2);
+          background: rgba(34,211,238,0.04);
+        }
+
+        .pflow-example-label {
+          font-size: 0.58rem;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: rgba(255,255,255,0.25);
+          margin-bottom: 0.1rem;
+        }
+
+        .pflow-example-value {
+          font-size: 0.72rem;
+          color: rgba(255,255,255,0.7);
+          letter-spacing: 0.01em;
+        }
+
+        .pflow-live-id {
+          color: #22D3EE;
+        }
+
+        .pflow-live-dot-row {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          margin-top: 0.2rem;
+        }
+
+        .pflow-live-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #22D3EE;
+          box-shadow: 0 0 6px #22D3EE;
+          flex-shrink: 0;
+        }
+
+        .pflow-live-text {
+          font-size: 0.62rem;
+          font-weight: 700;
+          color: #22D3EE;
+          letter-spacing: 0.1em;
+        }
+
+        .pflow-connector {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          width: 64px;
+          align-self: center;
+        }
+
+        .pflow-arrow-svg {
+          display: block;
+        }
+
+        /* ── How It Works slide (Slide 6) ── */
         .pitch-solution-stack {
           display: flex;
           flex-direction: column;
@@ -548,7 +1401,7 @@ export default function PitchPage() {
           color: rgba(255,255,255,0.55);
         }
 
-        /* ── Proof / Traction ── */
+        /* ── Proof / Traction (Slide 7) ── */
         .pitch-proof-row {
           display: flex;
           flex-direction: column;
@@ -608,7 +1461,154 @@ export default function PitchPage() {
         .pitch-milestone-dot.cyan { background: #22D3EE; }
         .pitch-milestone-dot.purple { background: #9945FF; }
 
-        /* ── Market Opportunity ── */
+        /* ── Competition Matrix (Slide 8) ── */
+        .pitch-matrix-wrap {
+          overflow-x: auto;
+          margin-bottom: 1.5rem;
+        }
+
+        .pitch-matrix {
+          width: 100%;
+          border-collapse: collapse;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.875rem;
+        }
+
+        .pitch-matrix thead tr {
+          border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .pitch-matrix th {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-weight: 700;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.55);
+          padding: 0.75rem 1rem;
+          text-align: center;
+        }
+
+        .pitch-matrix th:first-child {
+          text-align: left;
+        }
+
+        .pitch-matrix tbody tr {
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .pitch-matrix tbody tr:last-child {
+          border-bottom: none;
+        }
+
+        .pitch-matrix td {
+          padding: 0.85rem 1rem;
+          text-align: center;
+          color: rgba(255,255,255,0.5);
+        }
+
+        .pitch-matrix-feature {
+          text-align: left !important;
+          color: rgba(255,255,255,0.7) !important;
+          font-weight: 500;
+        }
+
+        .pitch-matrix-us {
+          color: #9945FF !important;
+          font-weight: 700 !important;
+          background: rgba(153,69,255,0.07);
+        }
+
+        .pitch-matrix-yes {
+          color: #22D3EE;
+          font-weight: 700;
+          font-size: 1rem;
+        }
+
+        .pitch-matrix-no {
+          color: rgba(255,255,255,0.2);
+          font-size: 1rem;
+        }
+
+        .pitch-matrix-sub {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.875rem;
+          color: rgba(255,255,255,0.4);
+          font-style: italic;
+        }
+
+        /* ── Why Now (Slide 9) ── */
+        .pitch-whynow-stats {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1.5rem;
+          margin-bottom: 2rem;
+        }
+
+        .pitch-whynow-stat {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 10px;
+          padding: 1.5rem;
+          text-align: center;
+        }
+
+        .pitch-whynow-num {
+          font-size: clamp(1.6rem, 2.8vw, 2.4rem);
+          font-weight: 700;
+          color: #9945FF;
+          margin-bottom: 0.5rem;
+          line-height: 1.1;
+        }
+
+        .pitch-whynow-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.82rem;
+          color: rgba(255,255,255,0.45);
+          line-height: 1.4;
+        }
+
+        .pitch-whynow-closing {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: clamp(1rem, 1.8vw, 1.2rem);
+          font-weight: 600;
+          color: rgba(255,255,255,0.65);
+          line-height: 1.5;
+          max-width: 680px;
+          border-left: 3px solid #22D3EE;
+          padding-left: 1.25rem;
+        }
+
+        /* ── User Stories (Slide 10) ── */
+        .pitch-user-cards {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1.5rem;
+        }
+
+        .pitch-user-card {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 1.75rem;
+        }
+
+        .pitch-user-role {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.75rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: #9945FF;
+          margin-bottom: 0.85rem;
+        }
+
+        .pitch-user-story {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.9rem;
+          line-height: 1.65;
+          color: rgba(255,255,255,0.6);
+        }
+
+        /* ── Market Opportunity (Slide 11) ── */
         .pitch-market-layout {
           display: grid;
           grid-template-columns: 1fr auto 1fr;
@@ -673,40 +1673,68 @@ export default function PitchPage() {
           margin: 0 auto;
         }
 
-        /* ── Why Us ── */
-        .pitch-why-layout {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 2.5rem;
-          align-items: start;
-        }
-
-        .pitch-why-signals {
+        /* ── Vision + Roadmap (Slide 12) ── */
+        .pitch-roadmap {
           display: flex;
-          flex-direction: column;
-          gap: 1.25rem;
+          align-items: flex-start;
+          gap: 0;
+          margin-bottom: 2rem;
+          flex-wrap: wrap;
         }
 
-        .pitch-signal {
-          border-left: 2px solid rgba(153,69,255,0.4);
-          padding-left: 1rem;
+        .pitch-roadmap-item {
+          flex: 1;
+          min-width: 160px;
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 10px;
+          padding: 1.25rem;
+          text-align: center;
         }
 
-        .pitch-signal-label {
+        .pitch-roadmap-connector {
+          width: 32px;
+          flex-shrink: 0;
+          height: 2px;
+          background: linear-gradient(90deg, rgba(153,69,255,0.35), rgba(34,211,238,0.35));
+          align-self: center;
+          margin: 0 4px;
+        }
+
+        .pitch-roadmap-phase {
           font-family: 'JetBrains Mono', monospace;
           font-size: 0.7rem;
           font-weight: 700;
           text-transform: uppercase;
-          letter-spacing: 0.12em;
-          color: rgba(153,69,255,0.7);
-          margin-bottom: 0.25rem;
+          letter-spacing: 0.1em;
+          margin-bottom: 0.5rem;
         }
 
-        .pitch-signal-value {
+        .pitch-roadmap-phase.purple { color: #9945FF; }
+        .pitch-roadmap-phase.cyan { color: #22D3EE; }
+
+        .pitch-roadmap-name {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 0.95rem;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 0.35rem;
+        }
+
+        .pitch-roadmap-desc {
           font-family: 'Inter', sans-serif;
-          font-size: 0.875rem;
+          font-size: 0.75rem;
+          color: rgba(255,255,255,0.4);
+          line-height: 1.4;
+        }
+
+        .pitch-vision-footer {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.1rem;
+          font-weight: 700;
           color: rgba(255,255,255,0.65);
-          line-height: 1.5;
+          border-left: 3px solid #9945FF;
+          padding-left: 1.25rem;
         }
 
         /* ── Controls ── */
@@ -809,13 +1837,8 @@ export default function PitchPage() {
             padding: 1.25rem 1rem;
           }
 
-          .pitch-problem-grid,
           .pitch-traction-grid {
             grid-template-columns: repeat(2, 1fr);
-          }
-
-          .pitch-why-layout {
-            grid-template-columns: 1fr;
           }
 
           .pitch-market-layout {
@@ -827,10 +1850,55 @@ export default function PitchPage() {
             height: 1px;
             margin: 0 auto;
           }
+
+          .pitch-whynow-stats {
+            grid-template-columns: 1fr;
+          }
+
+          .pitch-user-cards {
+            grid-template-columns: 1fr;
+          }
+
+          .pitch-roadmap {
+            flex-direction: column;
+            gap: 0.75rem;
+          }
+
+          .pitch-roadmap-connector {
+            width: 2px;
+            height: 20px;
+            align-self: center;
+          }
+
+          /* Faux UI at mobile */
+          .fui-body {
+            grid-template-columns: 1fr;
+          }
+
+          .fui-orderbook {
+            border-right: none;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            display: none;
+          }
+
+          .fui-form {
+            border-top: 1px solid rgba(255,255,255,0.06);
+          }
+
+          /* Pflow at mobile */
+          .pflow-wrap {
+            flex-direction: column;
+            gap: 0.75rem;
+          }
+
+          .pflow-connector {
+            width: auto;
+            height: 32px;
+            transform: rotate(90deg);
+          }
         }
 
         @media (max-width: 480px) {
-          .pitch-problem-grid,
           .pitch-traction-grid {
             grid-template-columns: 1fr;
           }
