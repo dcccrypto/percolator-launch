@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   parseHeader,
+  parseConfig,
   encodeCloseSlab,
   ACCOUNTS_CLOSE_SLAB,
   buildAccountMetas,
   buildIx,
+  deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 
@@ -102,12 +105,24 @@ export function useCloseMarket() {
           ? new PublicKey(programIdOverride)
           : accountInfo.owner;
 
+        // beta.32: ACCOUNTS_CLOSE_SLAB expanded to 6 accounts:
+        // dest (admin/signer), slab, vault, vaultAuthority, destAta, tokenProgram
+        const slabConfig = parseConfig(accountInfo.data);
+        const vaultPubkey = slabConfig.vaultPubkey;
+        const collateralMint = slabConfig.collateralMint;
+        const [vaultAuthority] = deriveVaultAuthority(programId, slabPk);
+        const destAta = await getAssociatedTokenAddress(collateralMint, walletCompat.publicKey);
+
         // Build CloseSlab instruction via SDK encode helpers
         const ix = buildIx({
           programId,
           keys: buildAccountMetas(ACCOUNTS_CLOSE_SLAB, {
-            admin: walletCompat.publicKey,
+            dest: walletCompat.publicKey,
             slab: slabPk,
+            vault: vaultPubkey,
+            vaultAuthority,
+            destAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
           }),
           data: encodeCloseSlab(),
         });
@@ -131,8 +146,8 @@ export function useCloseMarket() {
 
         setLoading(false);
         return { signature: sig, reclaimedLamports: reclaimableLamports };
-      } catch (err: any) {
-        const msg = err?.message ?? String(err);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
 
         // Parse common CloseSlab failures
         if (msg.includes("0xd") || msg.includes("EngineInsufficientBalance")) {

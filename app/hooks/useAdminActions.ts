@@ -5,8 +5,6 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { PublicKey } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
-  encodeSetOracleAuthority,
-  encodePushOraclePrice,
   encodeSetOraclePriceCap,
   encodeTopUpInsurance,
   encodeRenounceAdmin,
@@ -15,14 +13,21 @@ import {
   encodeUnpauseMarket,
   buildAccountMetas,
   buildIx,
-  ACCOUNTS_SET_ORACLE_AUTHORITY,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_TOPUP_INSURANCE,
   ACCOUNTS_UPDATE_ADMIN,
   ACCOUNTS_SET_RISK_THRESHOLD,
   ACCOUNTS_PAUSE_MARKET,
   ACCOUNTS_UNPAUSE_MARKET,
 } from "@percolatorct/sdk";
+// TODO(oracle-migration): encodeSetOracleAuthority/encodePushOraclePrice and their
+// account lists were removed in beta.29. Admin oracle actions need migration to
+// /api/oracle/advance-phase or equivalent server-side crank flow.
+import {
+  encodeSetOracleAuthority,
+  encodePushOraclePrice,
+  ACCOUNTS_SET_ORACLE_AUTHORITY,
+  ACCOUNTS_PUSH_ORACLE_PRICE,
+} from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
 import type { DiscoveredMarket } from "@percolatorct/sdk";
 

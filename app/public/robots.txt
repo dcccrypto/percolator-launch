@@ -1,3 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /faucet
+Disallow: /devnet-mint
+Disallow: /openclaw
+Disallow: /pitch
 Sitemap: https://percolatorlaunch.com/sitemap.xml

@@ -6,16 +6,20 @@ import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   encodeTradeCpi,
   encodeKeeperCrank,
-  encodePushOraclePrice,
   ACCOUNTS_TRADE_CPI,
   ACCOUNTS_KEEPER_CRANK,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
   buildAccountMetas,
   buildIx,
   deriveLpPda,
   derivePythPushOraclePDA,
   WELL_KNOWN,
 } from "@percolatorct/sdk";
+// TODO(oracle-migration): encodePushOraclePrice/ACCOUNTS_PUSH_ORACLE_PRICE removed in beta.29.
+// The DEX oracle inline push path needs to migrate to /api/oracle/advance-phase.
+import {
+  encodePushOraclePrice,
+  ACCOUNTS_PUSH_ORACLE_PRICE,
+} from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
