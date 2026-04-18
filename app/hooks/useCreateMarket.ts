@@ -22,8 +22,6 @@ import {
   deriveInsuranceLpMint,
   ACCOUNTS_CREATE_INSURANCE_MINT,
   encodeKeeperCrank,
-  encodeSetOracleAuthority,
-  encodePushOraclePrice,
   encodeSetOraclePriceCap,
   encodeUpdateConfig,
   encodeUpdateHyperpMark,
@@ -34,9 +32,7 @@ import {
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_TOPUP_INSURANCE,
   ACCOUNTS_KEEPER_CRANK,
-  ACCOUNTS_SET_ORACLE_AUTHORITY,
   ACCOUNTS_SET_ORACLE_PRICE_CAP,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_UPDATE_CONFIG,
   buildAccountMetas,
   WELL_KNOWN,
@@ -48,6 +44,15 @@ import {
   slabDataSize,
   deriveLpPda,
 } from "@percolatorct/sdk";
+// TODO(oracle-migration): encodeSetOracleAuthority/encodePushOraclePrice and their
+// account lists were removed in beta.29. CreateMarket oracle init/push path needs
+// migration to /api/oracle/advance-phase or equivalent server-side crank flow.
+import {
+  encodeSetOracleAuthority,
+  encodePushOraclePrice,
+  ACCOUNTS_SET_ORACLE_AUTHORITY,
+  ACCOUNTS_PUSH_ORACLE_PRICE,
+} from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
@@ -726,8 +731,9 @@ export function useCreateMarket() {
             matcherContext: matcherCtxKp.publicKey,
             feePayment: "1000000",
           });
+          // beta.32: ACCOUNTS_INIT_LP expanded to 6 accounts — added clock
           const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
-            wallet.publicKey, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram,
+            wallet.publicKey, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram, WELL_KNOWN.clock,
           ]);
           const initLpIx = buildIx({ programId, keys: initLpKeys, data: initLpData });
 

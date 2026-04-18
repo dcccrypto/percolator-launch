@@ -202,7 +202,8 @@ async function fetchTokenPriceUsd(mainnetCa: string): Promise<{ priceUsd: number
 
     // Pick the pair with the most liquidity
     const sorted = [...pairs].sort(
-      (a: any, b: any) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
+      (a: { liquidity?: { usd?: number } }, b: { liquidity?: { usd?: number } }) =>
+        (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
     );
     const price = parseFloat(sorted[0].priceUsd ?? "0");
     if (price <= 0) return null;

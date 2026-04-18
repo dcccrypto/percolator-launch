@@ -85,10 +85,11 @@ export function useMintPositionNft(slabAddress: string) {
       // Build and sign manually — Privy embedded wallets can't handle extra
       // keypair signers through the standard sendTx flow. We:
       // 1. Build the tx with compute budget
-      // 2. Sign with the keypair first (partialSign)
-      // 3. Send to Privy for wallet signature (signTransaction)
-      // 4. Re-add the keypair signature (Privy may strip it)
-      // 5. Send raw transaction ourselves
+      // 2. Simulate (unsigned) to catch program errors before the user signs
+      // 3. Sign with the keypair first (partialSign)
+      // 4. Send to Privy for wallet signature (signTransaction)
+      // 5. Re-add the keypair signature (Privy may strip it)
+      // 6. Send raw transaction ourselves
       const { ComputeBudgetProgram } = await import("@solana/web3.js");
       const tx = new (await import("@solana/web3.js")).Transaction();
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
@@ -98,6 +99,25 @@ export function useMintPositionNft(slabAddress: string) {
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = blockhash;
       tx.feePayer = walletPubkey;
+
+      // LAUNCH-H3: Pre-send simulation — catch program errors before user signs.
+      // We simulate without signatures (sigVerify:false) so both signers being
+      // absent is not an issue. On simulation failure we surface a clear error
+      // rather than a cryptic on-chain rejection.
+      {
+        const simResult = await connection.simulateTransaction(tx, undefined, true);
+        if (simResult.value.err) {
+          const logs = simResult.value.logs ?? [];
+          const errorLog = logs
+            .filter((l) => l.includes("Error") || l.includes("failed") || l.includes("Program log:"))
+            .slice(-3)
+            .join("\n");
+          throw new Error(
+            `NFT mint simulation failed: ${JSON.stringify(simResult.value.err)}` +
+            (errorLog ? `\n${errorLog}` : "")
+          );
+        }
+      }
 
       // Keypair signs first
       tx.partialSign(nftMintKeypair);
@@ -109,7 +129,7 @@ export function useMintPositionNft(slabAddress: string) {
       // Privy may have stripped the keypair sig — re-add it
       signed.partialSign(nftMintKeypair);
 
-      // Send
+      // Send — skipPreflight since we already simulated above
       const sig = await connection.sendRawTransaction(signed.serialize(), {
         skipPreflight: true,
         maxRetries: 5,

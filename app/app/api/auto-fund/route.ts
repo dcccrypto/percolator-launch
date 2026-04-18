@@ -102,9 +102,9 @@ export async function POST(req: NextRequest) {
         }
         results.sol_airdropped = true;
         results.sol_amount = AIRDROP_AMOUNT / LAMPORTS_PER_SOL;
-      } catch (e: any) {
+      } catch (e: unknown) {
         // Airdrop can fail on devnet (rate limits) — non-fatal
-        console.warn(`SOL airdrop failed for ${walletAddress}: ${e.message}`);
+        console.warn(`SOL airdrop failed for ${walletAddress}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 
@@ -170,8 +170,8 @@ export async function POST(req: NextRequest) {
             results.usdc_amount = USDC_MINT_AMOUNT / 1_000_000;
           }
         }
-      } catch (e: any) {
-        console.warn(`USDC mint failed for ${walletAddress}: ${e.message}`);
+      } catch (e: unknown) {
+        console.warn(`USDC mint failed for ${walletAddress}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 

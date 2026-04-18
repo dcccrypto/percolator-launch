@@ -90,7 +90,7 @@ function Slide03Solution({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide05Create({ isCurrent }: SlideProps) {
+function Slide04Create({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
@@ -181,7 +181,7 @@ function Slide05Create({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide06HowItWorks({ isCurrent }: SlideProps) {
+function Slide05HowItWorks({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
@@ -226,7 +226,7 @@ function Slide06HowItWorks({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide07Proof({ isCurrent }: SlideProps) {
+function Slide06Proof({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
@@ -273,7 +273,7 @@ function Slide07Proof({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide08Competition({ isCurrent }: SlideProps) {
+function Slide07Competition({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
@@ -337,7 +337,7 @@ function Slide08Competition({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide09WhyNow({ isCurrent }: SlideProps) {
+function Slide08WhyNow({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
@@ -366,7 +366,7 @@ function Slide09WhyNow({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide10Users({ isCurrent }: SlideProps) {
+function Slide09Users({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
@@ -400,7 +400,7 @@ function Slide10Users({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide11Opportunity({ isCurrent }: SlideProps) {
+function Slide10Opportunity({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
@@ -428,7 +428,7 @@ function Slide11Opportunity({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide12Vision({ isCurrent }: SlideProps) {
+function Slide11Vision({ isCurrent }: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
@@ -477,14 +477,14 @@ const SLIDES = [
   { id: 1, title: "Cover", component: Slide01Cover },
   { id: 2, title: "The Gap", component: Slide02Gap },
   { id: 3, title: "Solution", component: Slide03Solution },
-  { id: 4, title: "Create a Market", component: Slide05Create },
-  { id: 5, title: "How It Works", component: Slide06HowItWorks },
-  { id: 6, title: "Proof", component: Slide07Proof },
-  { id: 7, title: "Competition", component: Slide08Competition },
-  { id: 8, title: "Why Now", component: Slide09WhyNow },
-  { id: 9, title: "Who Uses It", component: Slide10Users },
-  { id: 10, title: "The Opportunity", component: Slide11Opportunity },
-  { id: 11, title: "Vision + Roadmap", component: Slide12Vision },
+  { id: 4, title: "Create a Market", component: Slide04Create },
+  { id: 5, title: "How It Works", component: Slide05HowItWorks },
+  { id: 6, title: "Proof", component: Slide06Proof },
+  { id: 7, title: "Competition", component: Slide07Competition },
+  { id: 8, title: "Why Now", component: Slide08WhyNow },
+  { id: 9, title: "Who Uses It", component: Slide09Users },
+  { id: 10, title: "The Opportunity", component: Slide10Opportunity },
+  { id: 11, title: "Vision + Roadmap", component: Slide11Vision },
 ];
 
 // ─── Main Page ────────────────────────────────────────────────────────────────

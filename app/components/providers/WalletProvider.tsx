@@ -57,6 +57,22 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   const preferredWallet = usePreferredWalletState();
 
+  // LAUNCH-H2: Warn at startup if the WSS key equals the HTTP key.
+  // Actual key rotation is an operator task (Helius dashboard), but this gives
+  // devs a loud signal so it doesn't get missed before mainnet.
+  useEffect(() => {
+    if (
+      typeof window !== 'undefined' &&
+      process.env.NEXT_PUBLIC_HELIUS_API_KEY &&
+      process.env.NEXT_PUBLIC_HELIUS_WS_API_KEY === process.env.NEXT_PUBLIC_HELIUS_API_KEY
+    ) {
+      console.warn(
+        '[percolator-launch] SECURITY: NEXT_PUBLIC_HELIUS_WS_API_KEY equals NEXT_PUBLIC_HELIUS_API_KEY. ' +
+        'Create a WSS-restricted key in the Helius dashboard and use that for WS.'
+      );
+    }
+  }, []);
+
   const readOnlyFallback = (
     <PrivyAvailableContext.Provider value={false}>
       <PreferredWalletContext.Provider value={preferredWallet}>

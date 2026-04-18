@@ -68,8 +68,7 @@ const REFILL_SOL = 2;
  *   { allowed: false, nextClaimAt } — within 24h window; return 429
  */
 async function tryAirdropClaimGate(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
+  supabase: ReturnType<typeof getServiceClient>,
   walletAddress: string,
   marketAddress: string,
 ): Promise<{ allowed: boolean; nextClaimAt: string | null; claimId?: number }> {
@@ -143,8 +142,7 @@ async function tryAirdropClaimGate(
  * Called when the on-chain mint fails so user isn't locked out 24h on transient errors.
  */
 async function releaseAirdropClaim(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
+  supabase: ReturnType<typeof getServiceClient>,
   claimId: number,
 ): Promise<void> {
   const { error } = await supabase.from("airdrop_claims").delete().eq("id", claimId);
@@ -162,8 +160,7 @@ async function releaseAirdropClaim(
  */
 async function resolveServerOwnedMint(
   connection: Connection,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
+  supabase: ReturnType<typeof getServiceClient>,
   marketAddress: string,
   storedMint: string,
   mintAuthPubkey: string,

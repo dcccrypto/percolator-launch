@@ -40,8 +40,6 @@ import {
   encodeDepositCollateral,
   encodeTopUpInsurance,
   encodeKeeperCrank,
-  encodeSetOracleAuthority,
-  encodePushOraclePrice,
   encodeSetOraclePriceCap,
   encodeUpdateConfig,
   ACCOUNTS_INIT_MARKET,
@@ -49,8 +47,6 @@ import {
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_TOPUP_INSURANCE,
   ACCOUNTS_KEEPER_CRANK,
-  ACCOUNTS_SET_ORACLE_AUTHORITY,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
   ACCOUNTS_SET_ORACLE_PRICE_CAP,
   ACCOUNTS_UPDATE_CONFIG,
   buildAccountMetas,
@@ -68,6 +64,15 @@ import {
   CREATE_MARKET_RATE_LIMIT,
 } from "@/lib/create-market-rate-limit";
 import * as Sentry from "@sentry/nextjs";
+// TODO(oracle-migration): encodeSetOracleAuthority/encodePushOraclePrice and their
+// account lists were removed in beta.29. Mobile create-market oracle init/push path
+// needs migration to /api/oracle/advance-phase or equivalent server-side crank flow.
+import {
+  encodeSetOracleAuthority,
+  encodePushOraclePrice,
+  ACCOUNTS_SET_ORACLE_AUTHORITY,
+  ACCOUNTS_PUSH_ORACLE_PRICE,
+} from "@/lib/sdk-compat";
 
 /** Minimum token amount for vault seed transfer (matches on-chain guard). */
 const MIN_INIT_MARKET_SEED = 500_000_000n;
@@ -399,12 +404,14 @@ export async function POST(req: NextRequest) {
       programId: matcherProgramId,
     });
 
+    // beta.32: ACCOUNTS_INIT_LP expanded to 6 accounts — added clock
     const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
       deployerPk,
       slabPk,
       userAta,
       vaultAta,
       WELL_KNOWN.tokenProgram,
+      WELL_KNOWN.clock,
     ]);
     const initLpIx = buildIx({
       programId,

@@ -93,12 +93,15 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
     >
       <div
         ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="trade-confirm-title"
         className="relative w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--bg)] p-6 shadow-2xl"
       style={{ opacity: 0 }}
       >
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-bold uppercase tracking-[0.15em] text-[var(--text)]">
+          <h2 id="trade-confirm-title" className="text-sm font-bold uppercase tracking-[0.15em] text-[var(--text)]">
             Confirm Trade
           </h2>
           <button
