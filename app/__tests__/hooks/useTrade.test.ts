@@ -143,21 +143,22 @@ describe("useTrade", () => {
       expect(txCall.instructions).toHaveLength(2); // crank + trade
     });
 
-    it("should include oracle price push for admin oracle markets", async () => {
+    it("rejects inline oracle pushes for admin markets until the server-side flow is wired in", async () => {
       mockSlabState.config.oracleAuthority = mockWalletPubkey;
       
       const { result } = renderHook(() => useTrade(mockSlabAddress));
 
       await act(async () => {
-        await result.current.trade({
-          lpIdx: 0,
-          userIdx: 1,
-          size: 1000000n,
-        });
+        await expect(
+          result.current.trade({
+            lpIdx: 0,
+            userIdx: 1,
+            size: 1000000n,
+          })
+        ).rejects.toThrow(/server-side oracle publisher/i);
       });
 
-      const txCall = vi.mocked(sendTx).mock.calls[0][0];
-      expect(txCall.instructions).toHaveLength(3); // push price + crank + trade
+      expect(sendTx).not.toHaveBeenCalled();
     });
   });
 
@@ -222,8 +223,8 @@ describe("useTrade", () => {
   });
 
   describe("Oracle Mode Detection", () => {
-    it("should detect admin oracle when authority is set", async () => {
-      mockSlabState.config.oracleAuthority = mockWalletPubkey;
+    it("should detect admin oracle when authority is set but another publisher is responsible", async () => {
+      mockSlabState.config.oracleAuthority = new PublicKey("9n2E7x6u7sGeqXEt3G5UpiRaY1oCbcnZ6FQcmGeXgn6M");
       
       const { result } = renderHook(() => useTrade(mockSlabAddress));
 
@@ -240,7 +241,7 @@ describe("useTrade", () => {
     });
 
     it("should detect admin oracle when feed is all zeros", async () => {
-      mockSlabState.config.indexFeedId.toBytes = () => new Array(32).fill(0);
+      mockSlabState.config.indexFeedId = PublicKey.default;
       
       const { result } = renderHook(() => useTrade(mockSlabAddress));
 
@@ -257,7 +258,7 @@ describe("useTrade", () => {
 
     it("should use Pyth oracle for standard markets", async () => {
       mockSlabState.config.oracleAuthority = PublicKey.default;
-      mockSlabState.config.indexFeedId.toBytes = () => new Array(32).fill(1);
+      mockSlabState.config.indexFeedId = new PublicKey(new Uint8Array(32).fill(1));
       
       const { result } = renderHook(() => useTrade(mockSlabAddress));
 

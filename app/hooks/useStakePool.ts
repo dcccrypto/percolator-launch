@@ -91,19 +91,21 @@ function readU64LE(data: Uint8Array, off: number): bigint {
  * Parse the on-chain DepositPda (per-user) account.
  * Layout:
  *   - is_initialized: u8       (1 byte)
+ *   - bump:           u8       (1 byte)
+ *   - padding:        [u8; 6]  (6 bytes)
  *   - pool:           [u8; 32] (32 bytes)
  *   - user:           [u8; 32] (32 bytes)
  *   - deposit_slot:   u64      (8 bytes)
  *   - amount:         u64      (8 bytes)
- * Total: 1 + 32*2 + 8*2 = 81 bytes
+ * Total: 88 bytes used out of the 152-byte on-chain account.
  */
 function parseDepositPdaAccount(data: Buffer) {
-  if (data.length < 81) return null;
+  if (data.length < 88) return null;
   const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   const isInitialized = bytes[0] === 1;
   if (!isInitialized) return null;
 
-  let offset = 1;
+  let offset = 8; // skip is_initialized, bump, and padding
   const pool = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
   const user = new PublicKey(bytes.subarray(offset, offset + 32)); offset += 32;
   const depositSlot = readU64LE(bytes, offset); offset += 8;

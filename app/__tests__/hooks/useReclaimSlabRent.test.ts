@@ -66,8 +66,10 @@ function makeUninitialisedSlabData(): Buffer {
 
 /** Build an initialised slab account info (magic = PERCOLA T). */
 function makeInitialisedSlabData(): Buffer {
-  const buf = Buffer.alloc(32, 0);
+  const buf = Buffer.alloc(72, 0);
   buf.writeBigUInt64LE(0x504552434f4c4154n, 0);
+  buf.writeUInt32LE(1, 8);
+  buf[12] = 1;
   return buf;
 }
 

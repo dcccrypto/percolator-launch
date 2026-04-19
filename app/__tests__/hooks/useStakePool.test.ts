@@ -38,10 +38,18 @@ vi.mock('@percolatorct/sdk', () => {
   const devnetProgramId = new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k');
   return {
     STAKE_PROGRAM_ID: devnetProgramId,
+    STAKE_POOL_SIZE: 352,
     getStakeProgramId: vi.fn().mockReturnValue(devnetProgramId),
     deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
     deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
     deriveDepositPda: vi.fn().mockReturnValue([mockDepositPda, 253]),
+    decodeStakePool: vi.fn().mockReturnValue({
+      isInitialized: true,
+      lpMint: mockLpMint,
+      vault: mockVault,
+      cooldownSlots: 100n,
+      depositCap: 0n,
+    }),
   };
 });
 
@@ -68,7 +76,7 @@ function buildPoolAccountData(opts?: {
   depositCap?: bigint;
   totalDeposited?: bigint;
 }): Buffer {
-  const buf = Buffer.alloc(186);
+  const buf = Buffer.alloc(352);
   buf[0] = 1;
   mockLpMint.toBuffer().copy(buf, 65);
   mockVault.toBuffer().copy(buf, 97);
@@ -81,12 +89,13 @@ function buildPoolAccountData(opts?: {
 }
 
 function buildDepositPdaData(opts?: { depositSlot?: bigint; amount?: bigint }): Buffer {
-  const buf = Buffer.alloc(81);
+  const buf = Buffer.alloc(152);
   buf[0] = 1;
-  mockPool.toBuffer().copy(buf, 1);
-  mockWalletPubkey.toBuffer().copy(buf, 33);
-  buf.writeBigUInt64LE(opts?.depositSlot ?? 100n, 65);
-  buf.writeBigUInt64LE(opts?.amount ?? 1_000_000n, 73);
+  buf[1] = 253;
+  mockPool.toBuffer().copy(buf, 8);
+  mockWalletPubkey.toBuffer().copy(buf, 40);
+  buf.writeBigUInt64LE(opts?.depositSlot ?? 100n, 72);
+  buf.writeBigUInt64LE(opts?.amount ?? 1_000_000n, 80);
   return buf;
 }
 

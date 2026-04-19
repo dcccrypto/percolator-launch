@@ -26,7 +26,8 @@
     "fleet:keygen": "tsx scripts/generate-keeper-wallets.ts --airdrop",
     "fleet:keygen:dry": "tsx scripts/generate-keeper-wallets.ts",
     "fleet:deploy": "bash scripts/deploy-mm-fleet.sh",
-    "fleet:deploy:dry": "bash scripts/deploy-mm-fleet.sh --dry-run"
+    "fleet:deploy:dry": "bash scripts/deploy-mm-fleet.sh --dry-run",
+    "localnet:test": "npx tsx tests/localnet/test-trade-flow.ts"
   },
   "engines": {
     "node": ">=20"
@@ -41,7 +42,7 @@
     "tsx": "^4.21.0"
   },
   "dependencies": {
-    "@percolatorct/sdk": "^1.0.0-beta.25",
+    "@percolatorct/sdk": "1.0.0-beta.33",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "dotenv": "^17.3.1"

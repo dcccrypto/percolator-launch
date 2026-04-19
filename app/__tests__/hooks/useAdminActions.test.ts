@@ -87,12 +87,12 @@ describe("useAdminActions — PERC-8311 authority pre-flight checks", () => {
       ).rejects.toThrow(/not the oracle authority/i);
     });
 
-    it("succeeds when wallet IS oracle authority", async () => {
+    it("throws a migration error when wallet IS oracle authority", async () => {
       mockWallet(ORACLE_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
         result.current.setOracleAuthority(makeMarket(), ORACLE_PK.toBase58()),
-      ).resolves.not.toThrow();
+      ).rejects.toThrow(/server-side oracle flow/i);
     });
   });
 
@@ -105,12 +105,12 @@ describe("useAdminActions — PERC-8311 authority pre-flight checks", () => {
       ).rejects.toThrow(/not the oracle authority/i);
     });
 
-    it("succeeds when wallet IS oracle authority", async () => {
+    it("throws a migration error when wallet IS oracle authority", async () => {
       mockWallet(ORACLE_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
         result.current.pushPrice(makeMarket(), "50000000000"),
-      ).resolves.not.toThrow();
+      ).rejects.toThrow(/server-side oracle flow/i);
     });
   });
 

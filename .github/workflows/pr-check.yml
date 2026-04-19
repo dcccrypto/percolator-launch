@@ -64,3 +64,5 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:4000
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy
+          # Privy validates appId.length === 25 exactly; placeholder used in CI.
+          NEXT_PUBLIC_PRIVY_APP_ID: cltestappid00000000000000

@@ -89,9 +89,7 @@ describe("useWithdraw", () => {
         collateralMint: mockCollateralMint,
         vaultPubkey: mockVault,
         oracleAuthority: PublicKey.default,
-        indexFeedId: {
-          toBytes: () => new Array(32).fill(1),
-        },
+        indexFeedId: new PublicKey(new Uint8Array(32).fill(1)),
         authorityPriceE6: 1000000n,
       },
       programId: mockProgramId,
@@ -143,20 +141,21 @@ describe("useWithdraw", () => {
       expect(txCall.instructions.length).toBeGreaterThanOrEqual(2); // crank + withdraw
     });
 
-    it("should include oracle price push for admin oracle markets", async () => {
+    it("rejects explicit inline oracle pushes for admin oracle markets until server-side migration lands", async () => {
       mockSlabState.config.oracleAuthority = mockWalletPubkey;
 
       const { result } = renderHook(() => useWithdraw(mockSlabAddress));
 
       await act(async () => {
-        await result.current.withdraw({
-          userIdx: 1,
-          amount: 1000000n,
-        });
+        await expect(
+          result.current.withdraw({
+            userIdx: 1,
+            amount: 1000000n,
+          })
+        ).rejects.toThrow(/server-side oracle publisher/i);
       });
 
-      const txCall = vi.mocked(sendTx).mock.calls[0][0];
-      expect(txCall.instructions).toHaveLength(3); // push price + crank + withdraw
+      expect(sendTx).not.toHaveBeenCalled();
     });
   });
 
@@ -308,23 +307,25 @@ describe("useWithdraw", () => {
   });
 
   describe("Oracle Mode Detection", () => {
-    it("should detect admin oracle when authority is set", async () => {
+    it("rejects inline oracle pushes when the connected wallet is the admin-oracle publisher", async () => {
       mockSlabState.config.oracleAuthority = mockWalletPubkey;
 
       const { result } = renderHook(() => useWithdraw(mockSlabAddress));
 
       await act(async () => {
-        await result.current.withdraw({
-          userIdx: 1,
-          amount: 1000000n,
-        });
+        await expect(
+          result.current.withdraw({
+            userIdx: 1,
+            amount: 1000000n,
+          })
+        ).rejects.toThrow(/server-side oracle publisher/i);
       });
 
-      expect(sendTx).toHaveBeenCalled();
+      expect(sendTx).not.toHaveBeenCalled();
     });
 
     it("should detect admin oracle when feed is all zeros", async () => {
-      mockSlabState.config.indexFeedId.toBytes = () => new Array(32).fill(0);
+      mockSlabState.config.indexFeedId = PublicKey.default;
 
       const { result } = renderHook(() => useWithdraw(mockSlabAddress));
 
@@ -338,28 +339,8 @@ describe("useWithdraw", () => {
       expect(sendTx).toHaveBeenCalled();
     });
 
-    it("should fetch price from backend for admin oracle", async () => {
+    it("does not attempt the removed inline oracle publisher flow", async () => {
       mockSlabState.config.oracleAuthority = mockWalletPubkey;
-
-      const { result } = renderHook(() => useWithdraw(mockSlabAddress));
-
-      await act(async () => {
-        await result.current.withdraw({
-          userIdx: 1,
-          amount: 1000000n,
-        });
-      });
-
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/prices/markets")
-      );
-    });
-
-    it("should abort withdrawal if backend fetch fails (PERC-8328: no hardcoded fallback)", async () => {
-      // PERC-8328 / GH#1966: When price fetch fails, we must NOT fall back to a hardcoded
-      // price (e.g. $1). The withdrawal must abort to prevent catastrophic oracle mispricing.
-      mockSlabState.config.oracleAuthority = mockWalletPubkey;
-      vi.mocked(global.fetch).mockRejectedValue(new Error("Network error"));
 
       const { result } = renderHook(() => useWithdraw(mockSlabAddress));
 
@@ -369,21 +350,14 @@ describe("useWithdraw", () => {
             userIdx: 1,
             amount: 1000000n,
           })
-        ).rejects.toThrow("Cannot push oracle price");
+        ).rejects.toThrow(/server-side oracle publisher/i);
       });
 
-      // sendTx must NOT have been called — tx was aborted before reaching the network
-      expect(sendTx).not.toHaveBeenCalled();
-      expect(result.current.error).toContain("Cannot push oracle price");
+      expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it("should abort withdrawal if backend returns no price for this market (PERC-8328)", async () => {
-      // Backend returned 200 but the specific market has no price entry — must abort.
+    it("surfaces a migration error instead of trying backend price fallback", async () => {
       mockSlabState.config.oracleAuthority = mockWalletPubkey;
-      vi.mocked(global.fetch).mockResolvedValue({
-        ok: true,
-        json: async () => ({}), // Empty — no entry for this slab
-      });
 
       const { result } = renderHook(() => useWithdraw(mockSlabAddress));
 
@@ -393,33 +367,13 @@ describe("useWithdraw", () => {
             userIdx: 1,
             amount: 1000000n,
           })
-        ).rejects.toThrow("Cannot push oracle price");
+        ).rejects.toThrow(/server-side oracle publisher/i);
       });
 
       expect(sendTx).not.toHaveBeenCalled();
+      expect(result.current.error).toMatch(/server-side oracle publisher/i);
     });
 
-    it("should abort withdrawal if price is zero or negative (PERC-8328)", async () => {
-      // Even if backend returns a price, reject zero/negative values.
-      mockSlabState.config.oracleAuthority = mockWalletPubkey;
-      vi.mocked(global.fetch).mockResolvedValue({
-        ok: true,
-        json: async () => ({ [mockSlabAddress]: { priceE6: "0" } }),
-      });
-
-      const { result } = renderHook(() => useWithdraw(mockSlabAddress));
-
-      await act(async () => {
-        await expect(
-          result.current.withdraw({
-            userIdx: 1,
-            amount: 1000000n,
-          })
-        ).rejects.toThrow("Invalid oracle price");
-      });
-
-      expect(sendTx).not.toHaveBeenCalled();
-    });
   });
 
   describe("Error Handling", () => {

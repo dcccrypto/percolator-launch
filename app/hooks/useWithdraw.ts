@@ -25,6 +25,9 @@ import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 
+const INLINE_ORACLE_PUSH_REMOVED_ERROR =
+  "Inline oracle price push was removed on-chain in beta.29. Migrate this flow to /api/oracle/advance-phase or another server-side oracle publisher before withdrawing as the oracle authority.";
+
 export function useWithdraw(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
@@ -71,41 +74,7 @@ export function useWithdraw(slabAddress: string) {
         // fabricated oracle price (e.g. $1) would cause catastrophic mispricing.
         const userIsOracleAuth = useAdminOracle && mktConfig.oracleAuthority.equals(wallet.publicKey);
         if (userIsOracleAuth) {
-          // Fetch the authoritative price from the backend. Fail hard if unavailable.
-          let priceE6: bigint;
-          try {
-            const resp = await fetch(`/api/prices/markets`);
-            if (!resp.ok) throw new Error(`Price fetch failed: HTTP ${resp.status}`);
-            const prices = await resp.json();
-            const entry = prices[slabAddress];
-            if (!entry?.priceE6) throw new Error("No price available for this market from backend");
-            priceE6 = BigInt(entry.priceE6);
-          } catch (fetchErr) {
-            // Do NOT fall back to a hardcoded price — abort to prevent mispricing.
-            throw new Error(
-              `Cannot push oracle price: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}. ` +
-              `Retry when the price service is available.`
-            );
-          }
-          if (priceE6 <= 0n) {
-            throw new Error(`Invalid oracle price: ${priceE6}. Price must be positive. Aborting to prevent mispricing.`);
-          }
-          // Use on-chain slot time instead of client Date.now() to avoid clock drift
-          // between client and validator causing signature verification failures
-          let oracleTimestamp: bigint;
-          try {
-            const slot = await connection.getSlot("confirmed");
-            const blockTime = await connection.getBlockTime(slot);
-            oracleTimestamp = BigInt(blockTime ?? Math.floor(Date.now() / 1000));
-          } catch {
-            oracleTimestamp = BigInt(Math.floor(Date.now() / 1000));
-          }
-
-          instructions.push(buildIx({
-            programId,
-            keys: buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [wallet.publicKey, slabPk]),
-            data: encodePushOraclePrice({ priceE6, timestamp: oracleTimestamp }),
-          }));
+          throw new Error(INLINE_ORACLE_PUSH_REMOVED_ERROR);
         }
 
         // Always prepend permissionless crank before withdraw

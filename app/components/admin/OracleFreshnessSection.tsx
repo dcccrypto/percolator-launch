@@ -270,7 +270,8 @@ export function OracleFreshnessSection() {
     }
     setSingleBusy(m.slab_address);
     try {
-      const sig = await pushPrice(dm, DEFAULT_PRICE_E6);
+      // pushPrice always throws (removed on-chain in beta.29); catch below handles it.
+      const sig = await pushPrice(dm, DEFAULT_PRICE_E6) as string | undefined;
       setBatchResults((r) => [
         ...r,
         { slab: m.slab_address, symbol: m.symbol, status: "ok", detail: sig?.slice(0, 20) + "…" },
@@ -298,7 +299,8 @@ export function OracleFreshnessSection() {
     }
     setSingleBusy(m.slab_address);
     try {
-      const sig = await setOracleAuthority(dm, KEEPER_WALLET);
+      // setOracleAuthority always throws (removed on-chain in beta.29); catch below handles it.
+      const sig = await setOracleAuthority(dm, KEEPER_WALLET) as string | undefined;
       setBatchResults((r) => [
         ...r,
         { slab: m.slab_address, symbol: m.symbol, status: "ok", detail: `→ keeper: ${sig?.slice(0, 20)}…` },
