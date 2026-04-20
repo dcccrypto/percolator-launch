@@ -266,6 +266,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         borderUpColor: chartTheme.upColor,
         wickDownColor: chartTheme.downColor,
         wickUpColor: chartTheme.upColor,
+        // Suppress lightweight-charts' built-in last-price label + horizontal
+        // price line. Those show the DEX pool's last candle close (e.g. 84.20)
+        // which is NOT our mark price (84.33) — users saw two prices on the
+        // chart and couldn't tell which was authoritative. Our explicit
+        // createPriceLine below draws the mark price as the only price label.
+        lastValueVisible: false,
+        priceLineVisible: false,
       });
 
       const formatted = candleData.map((c) => ({
@@ -339,6 +346,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       const series = chart.addLineSeries({
         color: chartTheme.upColor,
         lineWidth: 2,
+        // Same rationale as candle series — only the mark price should show
+        // as a price-axis label. DEX last-close goes away.
+        lastValueVisible: false,
+        priceLineVisible: false,
       });
       const formatted = lineData.map((p) => ({
         time: (Math.floor(p.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
@@ -410,12 +421,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
   return (
     <div className="rounded-none border border-[var(--border)] bg-[var(--bg)] p-3">
-      {/* Header */}
+      {/* Header — shows timeframe % change + data-source badge only.
+          The DEX pool's last-close price used to live here too (e.g. "$84.20 DEX")
+          but that contradicted the mark price shown in the market info bar above,
+          and the only price on the chart should be the mark. */}
       <div className="mb-3 flex flex-wrap items-start justify-between gap-y-2">
         <div className="min-w-0">
-          <div className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", color: isUp ? "var(--long)" : "var(--short)" }}>
-            ${currentPrice.toFixed(currentPrice < 1 ? 4 : 2)}
-          </div>
           <div className="flex items-center gap-2">
             <span className="text-xs" style={{ color: isUp ? "var(--long)" : "var(--short)" }}>
               {isUp ? "+" : ""}{priceChange.toFixed(4)} ({isUp ? "+" : ""}{priceChangePercent.toFixed(2)}%)
