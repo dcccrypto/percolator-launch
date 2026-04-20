@@ -14,6 +14,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useLiqPrice } from "@/hooks/useLiqPrice";
 import { useChartTheme } from "@/hooks/useChartTheme";
 import { ChartEmptyState } from "./ChartEmptyState";
+import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 
@@ -386,28 +387,33 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       series.setData(formatted);
       seriesRef.current = series;
 
-      // Phase 2: Volume histogram — always add series; use sentinel 0.001 when
-      // no real volume data exists so the pane renders (showing the "no data" label
-      // via the overlay div below, not via lwc itself).
-      const volumeSeries = chart.addHistogramSeries({
-        priceFormat: { type: "volume" },
-        priceScaleId: "volume",
-      });
-      chart.priceScale("volume").applyOptions({
-        // Volume pane takes bottom 10% (top margin 0.90). With Pyth's
-        // aggregated daily volume numbers spanning 180+ bars, a wider pane
-        // dominates the price action visually — shrinking it keeps the
-        // candles as the primary focus.
-        scaleMargins: { top: 0.90, bottom: 0 },
-      });
-      const volumeData = candleData.map((c) => ({
-        time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
-        // Phase 2: use a tiny sentinel value so lwc renders the pane even when vol=0
-        value: (c.volume ?? 0) > 0 ? c.volume : 0.001,
-        color: c.close >= c.open ? chartTheme.volUpColor : chartTheme.volDownColor,
-      }));
-      volumeSeries.setData(volumeData);
-      volumeSeriesRef.current = volumeSeries;
+      // Volume histogram — only render when the active data source has real
+      // trade volume. Pyth Benchmarks returns v=0 for every bar (it's a price
+      // feed, not a trade tape); painting a sentinel 0.001 for every bar made
+      // the pane render as a meaningless flat red/green band auto-scaled to
+      // fill the full pane. Hide the series entirely in that case and let the
+      // candles reclaim the bottom 10% of vertical space instead.
+      if (hasVolumeData) {
+        const volumeSeries = chart.addHistogramSeries({
+          priceFormat: { type: "volume" },
+          priceScaleId: "volume",
+        });
+        chart.priceScale("volume").applyOptions({
+          scaleMargins: { top: 0.90, bottom: 0 },
+        });
+        const volumeData = candleData.map((c) => ({
+          time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
+          value: c.volume ?? 0,
+          color: c.close >= c.open ? chartTheme.volUpColor : chartTheme.volDownColor,
+        }));
+        volumeSeries.setData(volumeData);
+        volumeSeriesRef.current = volumeSeries;
+      } else {
+        // No volume pane — reclaim the bottom margin for the candle series.
+        series.priceScale().applyOptions({
+          scaleMargins: { top: 0.08, bottom: 0.04 },
+        });
+      }
 
       // Mark price line
       if (priceUsd != null) {
@@ -519,19 +525,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
   // Header % change is ALWAYS trailing 24 h vs current — the industry
   // convention users expect, independent of what timeframe/zoom they picked.
-  // (Previously this was first-visible-bar to last-visible-bar, so on the
-  // 1d daily-candle view with 180 days of Pyth history the header read
-  // -55% over the 6-month SOL drawdown — true, but deeply misleading.)
+  // Extracted into a pure helper so the daily-bar edge case (cutoff falls
+  // inside the current day's bar, making the delta always 0) can be unit-tested.
   const activeData = lineData.length > 0 ? lineData : oracleFiltered;
   const currentPrice = activeData[activeData.length - 1]?.price ?? priceUsd ?? 0;
-  const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
-  const ref24h =
-    activeData.find((p) => p.timestamp >= cutoff24h)?.price ??
-    activeData[0]?.price ??
-    currentPrice;
-  const priceChange = currentPrice - ref24h;
-  const priceChangePercent = ref24h > 0 ? (priceChange / ref24h) * 100 : 0;
-  const isUp = priceChange >= 0;
+  const ref24h = computeRef24h(activeData, timeframe, currentPrice);
+  const { priceChange, priceChangePercent, isUp } = computePriceChange(currentPrice, ref24h);
 
   // GH#1652: do NOT early-return here — the chart container must always mount
   // so that lightweight-charts can create its canvas. Sparse/empty state is
