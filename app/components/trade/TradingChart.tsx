@@ -6,6 +6,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenChart } from "@/hooks/useTokenChart";
 import { usePythChart } from "@/hooks/usePythChart";
+import { usePercolatorCandles } from "@/hooks/usePercolatorCandles";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
@@ -164,8 +165,30 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     poolAddress,
   } = useTokenChart(mintAddress ?? null, timeframe);
 
-  const hasPythData = pythStatus === "success" && pythCandles.length > 0;
-  const hasExternalData = !hasPythData && externalStatus === "success" && externalCandles.length > 0;
+  // Tier-0: Percolator's own internal-trade candles. Preferred when the slab
+  // has active match-engine volume, because these reflect OUR fills rather
+  // than Pyth's spot tape — and update live via the trades:<slab> WS channel.
+  const {
+    candles: percolatorCandlesRaw,
+    status: percolatorStatus,
+  } = usePercolatorCandles(slabAddress ?? null, timeframe);
+
+  // Convert from {time: unix-seconds} to {timestamp: ms} shape used by the chart.
+  const percolatorCandles = percolatorCandlesRaw.map((c) => ({
+    timestamp: c.time * 1000,
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+    volume: c.volume,
+  }));
+
+  // Only use Percolator as the chart source once the market has enough volume
+  // to form at least 10 bars — otherwise fall back to Pyth to avoid a sparse,
+  // gap-filled chart that looks worse than Pyth's deep history.
+  const hasPercolatorData = percolatorStatus === "success" && percolatorCandles.length >= 10;
+  const hasPythData = !hasPercolatorData && pythStatus === "success" && pythCandles.length > 0;
+  const hasExternalData = !hasPercolatorData && !hasPythData && externalStatus === "success" && externalCandles.length > 0;
 
   // Fetch oracle price history
   useEffect(() => {
@@ -201,17 +224,18 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     return oraclePrices.filter((p) => p.timestamp >= cutoff);
   })();
 
-  // Data source priority: Pyth Benchmarks (canonical spot) → GeckoTerminal
-  // (DEX-pool history for long-tail tokens) → oracle-aggregated fallback
-  // (our keeper observations; sparse, only useful when the above two are
-  // unavailable).
+  // Data source priority: Percolator internal trades (tier-0, when >=10 bars) →
+  // Pyth Benchmarks (canonical spot) → GeckoTerminal (DEX-pool history for
+  // long-tail tokens) → oracle-aggregated fallback (keeper observations).
   const candleData = (() => {
+    if (hasPercolatorData) return percolatorCandles;
     if (hasPythData) return pythCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
     if (hasExternalData) return externalCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
     return aggregateCandles(oracleFiltered, CANDLE_INTERVAL_MS);
   })();
 
   const lineData = (() => {
+    if (hasPercolatorData) return percolatorCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     if (hasPythData) return pythCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     if (hasExternalData) return externalCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     return oracleFiltered;
@@ -526,7 +550,15 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             <span className="text-xs" style={{ color: isUp ? "var(--long)" : "var(--short)" }}>
               {isUp ? "+" : ""}{priceChange.toFixed(4)} ({isUp ? "+" : ""}{priceChangePercent.toFixed(2)}%)
             </span>
-            {hasPythData ? (
+            {hasPercolatorData ? (
+              <span
+                className="text-[9px] font-medium uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm"
+                style={{ background: "var(--accent)/0.1", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
+                title="Source: Percolator match engine (internal trades)"
+              >
+                PERC
+              </span>
+            ) : hasPythData ? (
               <span
                 className="text-[9px] font-medium uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm"
                 style={{ background: "var(--accent)/0.1", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
