@@ -121,7 +121,13 @@ export const SLAB_SIZE = 94_168;
 const MATCHER_CTX_SIZE = 320;
 
 export const CRANK_NO_CALLER = 65535;
-export const DEFAULT_FEE_PAYMENT = "2000000"; // 2 tokens (u64 raw)
+// InitUser fee_payment must satisfy the deposit_not_atomic materialization
+// gate: amount >= min_initial_deposit + new_account_fee. With the InitMarket
+// values below (min_initial_deposit=2_000_000, new_account_fee=1_000_000),
+// the minimum is 3_000_000. Anything smaller trips InsufficientBalance (0xd)
+// at percolator.rs:3024. Real user capital is topped up by a separate
+// DepositCollateral call after materialization.
+export const DEFAULT_FEE_PAYMENT = "3000000"; // 3 tokens (u64 raw) = min_initial_deposit + new_account_fee
 
 // ============================================================================
 // TYPES
