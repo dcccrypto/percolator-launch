@@ -149,6 +149,18 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   // and the user can't stay zoomed in.
   const fitKeyRef = useRef<string>("");
 
+  // Crosshair-hover OHLCV readout. Populated via chart.subscribeCrosshairMove;
+  // rendered as a floating tooltip overlay inside the chart container.
+  const [hoverBar, setHoverBar] = useState<{
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    isCandle: boolean;
+  } | null>(null);
+
   // Prefer Pyth Benchmarks (canonical global spot price; deep history) when
   // the market's underlying asset has a Pyth feed. Same data source Hyperliquid
   // / Drift / Jupiter Perps use — shows real SOL/USD history back days/years,
@@ -505,6 +517,38 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       }
     }
 
+    // Crosshair-hover OHLCV readout. Publishes the bar under the cursor to
+    // hoverBar state so the overlay tooltip can render it. Clears on leave.
+    const crosshairHandler = (param: Parameters<Parameters<IChartApi["subscribeCrosshairMove"]>[0]>[0]) => {
+      if (!param.time || !param.point || !seriesRef.current) {
+        setHoverBar(null);
+        return;
+      }
+      const data = param.seriesData.get(seriesRef.current) as
+        | { open?: number; high?: number; low?: number; close?: number; value?: number }
+        | undefined;
+      if (!data) {
+        setHoverBar(null);
+        return;
+      }
+      let volume = 0;
+      if (volumeSeriesRef.current) {
+        const v = param.seriesData.get(volumeSeriesRef.current) as { value?: number } | undefined;
+        if (v?.value != null) volume = v.value;
+      }
+      const isCandle = data.open != null && data.high != null && data.low != null && data.close != null;
+      setHoverBar({
+        time: Number(param.time),
+        open: data.open ?? data.value ?? 0,
+        high: data.high ?? data.value ?? 0,
+        low: data.low ?? data.value ?? 0,
+        close: data.close ?? data.value ?? 0,
+        volume,
+        isCandle,
+      });
+    };
+    chart.subscribeCrosshairMove(crosshairHandler);
+
     // Only fit the content to viewport on the FIRST render for the current
     // (timeframe, chart type, data source) combo. Subsequent polls just
     // update-in-place so the user's pan/zoom is preserved.
@@ -514,6 +558,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       chart.timeScale().fitContent();
       fitKeyRef.current = fitKey;
     }
+
+    return () => {
+      chart.unsubscribeCrosshairMove(crosshairHandler);
+    };
   }, [chartType, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData]);
 
   // Update mark price line when live price changes
@@ -709,6 +757,32 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             <span className="text-[9px] text-[var(--text-dim)] uppercase tracking-[0.12em]">
               ── Volume (no data) ──
             </span>
+          </div>
+        )}
+
+        {/* OHLCV tooltip — hover the chart to see the bar under the crosshair.
+            Positioned top-left so it never sits under the PositionSummary badge
+            top-right. Hidden entirely when not hovering. */}
+        {hoverBar && !showEmptyOverlay && (
+          <div
+            className="pointer-events-none absolute top-2 left-2 z-10 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 font-mono text-[10px] shadow-sm backdrop-blur-sm"
+            aria-hidden="true"
+          >
+            <div className="flex items-center gap-3 whitespace-nowrap">
+              {hoverBar.isCandle ? (
+                <>
+                  <span className="text-[var(--text-dim)]">O <span className="text-[var(--text)]">{hoverBar.open.toFixed(hoverBar.open < 1 ? 6 : 2)}</span></span>
+                  <span className="text-[var(--text-dim)]">H <span className="text-[var(--text)]">{hoverBar.high.toFixed(hoverBar.high < 1 ? 6 : 2)}</span></span>
+                  <span className="text-[var(--text-dim)]">L <span className="text-[var(--text)]">{hoverBar.low.toFixed(hoverBar.low < 1 ? 6 : 2)}</span></span>
+                  <span className="text-[var(--text-dim)]">C <span className="text-[var(--text)]" style={{ color: hoverBar.close >= hoverBar.open ? "var(--long)" : "var(--short)" }}>{hoverBar.close.toFixed(hoverBar.close < 1 ? 6 : 2)}</span></span>
+                </>
+              ) : (
+                <span className="text-[var(--text-dim)]">Price <span className="text-[var(--text)]">{hoverBar.close.toFixed(hoverBar.close < 1 ? 6 : 2)}</span></span>
+              )}
+              {hoverBar.volume > 0 && (
+                <span className="text-[var(--text-dim)]">V <span className="text-[var(--text)]">{hoverBar.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></span>
+              )}
+            </div>
           </div>
         )}
 
