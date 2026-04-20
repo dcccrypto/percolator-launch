@@ -893,6 +893,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           currentPrice={livePriceE6 ?? 0n}
           capital={openCapital}
           symbol={symbol}
+          collateralSymbol={collateralSymbol}
           decimals={decimals}
           priceUsd={priceUsd}
           isLong={isOpenLong}
