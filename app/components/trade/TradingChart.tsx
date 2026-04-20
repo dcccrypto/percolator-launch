@@ -334,9 +334,11 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         priceScaleId: "volume",
       });
       chart.priceScale("volume").applyOptions({
-        // Phase 2: increase top margin so volume pane is visually taller and
-        // clearly visible even at desktop 1440px. Was 0.85 — now 0.80 (20% height).
-        scaleMargins: { top: 0.80, bottom: 0 },
+        // Volume pane takes bottom 10% (top margin 0.90). With Pyth's
+        // aggregated daily volume numbers spanning 180+ bars, a wider pane
+        // dominates the price action visually — shrinking it keeps the
+        // candles as the primary focus.
+        scaleMargins: { top: 0.90, bottom: 0 },
       });
       const volumeData = candleData.map((c) => ({
         time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
@@ -447,12 +449,20 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     }
   }, [priceUsd]);
 
-  // Compute price stats for header
+  // Header % change is ALWAYS trailing 24 h vs current — the industry
+  // convention users expect, independent of what timeframe/zoom they picked.
+  // (Previously this was first-visible-bar to last-visible-bar, so on the
+  // 1d daily-candle view with 180 days of Pyth history the header read
+  // -55% over the 6-month SOL drawdown — true, but deeply misleading.)
   const activeData = lineData.length > 0 ? lineData : oracleFiltered;
   const currentPrice = activeData[activeData.length - 1]?.price ?? priceUsd ?? 0;
-  const firstPrice = activeData[0]?.price ?? currentPrice;
-  const priceChange = currentPrice - firstPrice;
-  const priceChangePercent = firstPrice > 0 ? (priceChange / firstPrice) * 100 : 0;
+  const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
+  const ref24h =
+    activeData.find((p) => p.timestamp >= cutoff24h)?.price ??
+    activeData[0]?.price ??
+    currentPrice;
+  const priceChange = currentPrice - ref24h;
+  const priceChangePercent = ref24h > 0 ? (priceChange / ref24h) * 100 : 0;
   const isUp = priceChange >= 0;
 
   // GH#1652: do NOT early-return here — the chart container must always mount
