@@ -48,8 +48,18 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     isLoading: false,
   });
 
+  // Stabilise effect deps with primitives. `userAccount` and `connection` object
+  // references are recreated on every slab poll (~2s), which used to re-trigger
+  // the entire fetch and flash isLoading=true — making the Mint/Burn buttons
+  // visibly disappear and reappear every 2–3s. The NFT PDA account only
+  // changes when the user index or program/slab identity changes, so key the
+  // effect on those primitives alone. Refetches after mint/burn can be
+  // wired later via a manual trigger if needed.
+  const userIdx = userAccount?.idx ?? null;
+  const programIdStr = slabProgramId?.toBase58() ?? null;
+
   useEffect(() => {
-    if (!userAccount || !slabProgramId || !slabAddress) {
+    if (userIdx === null || !programIdStr || !slabAddress) {
       setState({
         hasMintedNft: false,
         nftMint: null,
@@ -65,7 +75,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     (async () => {
       try {
         const slabPk = new PublicKey(slabAddress);
-        const [nftPda] = deriveNftPda(slabPk, userAccount.idx, PERCOLATOR_NFT_PROGRAM_ID);
+        const [nftPda] = deriveNftPda(slabPk, userIdx, PERCOLATOR_NFT_PROGRAM_ID);
         const pdaStr = nftPda.toBase58();
 
         if (mockMode) {
@@ -81,7 +91,15 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
           return;
         }
 
-        setState((prev) => ({ ...prev, isLoading: true, nftPdaAddress: pdaStr }));
+        // Only flip isLoading on the FIRST fetch (when we have no data yet).
+        // Subsequent refetches — which shouldn't happen any more thanks to the
+        // stable deps above, but belt-and-braces — keep the cached state
+        // visible so the UI doesn't flash.
+        setState((prev) => ({
+          ...prev,
+          nftPdaAddress: pdaStr,
+          isLoading: prev.nftPdaAddress === null,
+        }));
 
         const accountInfo = await connection.getAccountInfo(nftPda);
 
@@ -126,7 +144,10 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     return () => {
       cancelled = true;
     };
-  }, [userAccount, slabProgramId, slabAddress, mockMode, connection]);
+    // Deliberately excluding `connection` — it's from context and stable in
+    // practice; including the object reference was part of the flicker bug.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userIdx, programIdStr, slabAddress, mockMode]);
 
   return state;
 }

@@ -39,25 +39,19 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
     );
   }
 
-  if (isLoading) {
-    return (
-      <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <div className="flex items-center gap-2 px-3 py-2 border-l-2 border-l-[var(--accent)] bg-[var(--accent)]/[0.06]">
-          <span className="text-[11px] font-semibold text-[var(--accent)]">POSITION NFT</span>
-        </div>
-        <div className="p-3">
-          <p className="text-[10px] text-[var(--text-muted)]">Loading NFT status…</p>
-        </div>
-      </div>
-    );
-  }
-
+  // Don't unmount the buttons while isLoading — doing that caused the Mint/Burn
+  // controls to fully collapse and reappear every time the slab polled (~2s),
+  // looking broken. Instead keep the full panel mounted and show a subtle
+  // inline spinner in the header until the first fetch lands.
   return (
     <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
       {/* Header strip */}
       <div className="flex items-center gap-2 px-3 py-2 border-l-2 border-l-[var(--accent)] bg-[var(--accent)]/[0.06]">
         <span className="text-[13px] leading-none text-[var(--accent)]">◆</span>
         <span className="text-[11px] font-semibold text-[var(--accent)]">POSITION NFT</span>
+        {isLoading && (
+          <span className="ml-1 h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]/60" aria-hidden />
+        )}
         {hasMintedNft && (
           <span className="ml-auto text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--long)] bg-[var(--long)]/10 px-1.5 py-0.5">
             Active
