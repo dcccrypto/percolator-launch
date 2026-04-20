@@ -323,6 +323,32 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     [effectiveBalance, decimals, leverage, priceUsd]
   );
 
+  // Dynamic slider: when the user moves the leverage slider, keep the committed
+  // margin fixed and recompute notional/size so the slider's number equals the
+  // effective leverage on the trade. Without this, the slider only changes the
+  // summary math silently while the size inputs stay stale from the previous
+  // leverage setting.
+  const updateLeverage = useCallback(
+    (newLev: number) => {
+      setLeverage(newLev);
+      setLeverageText(String(newLev));
+      // If user already sized the position via margin, recompute size fields.
+      if (!marginInput) return;
+      const marginNumRaw = parseFloat(marginInput);
+      if (!Number.isFinite(marginNumRaw) || marginNumRaw <= 0) return;
+      const notionalUsd = marginNumRaw * newLev;
+      if (priceUsd && priceUsd > 0) {
+        const contracts = notionalUsd / priceUsd;
+        setContractsInput(contracts.toFixed(6));
+        setUsdcInput(notionalUsd.toFixed(2));
+      } else {
+        setContractsInput("");
+        setUsdcInput(notionalUsd.toFixed(2));
+      }
+    },
+    [marginInput, priceUsd],
+  );
+
   // BUG FIX: Fetch on-chain decimals AND wallet ATA balance from user's token account.
   // Decimals: ensures correct precision for cross-network tokens or missing metadata.
   // Wallet balance (GH#1133): show real wallet balance when no trading account exists yet.
@@ -697,7 +723,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 const parsed = parseFloat(raw);
                 if (!isNaN(parsed)) {
                   const clamped = Math.max(1, Math.min(maxLeverage, Math.round(parsed)));
-                  setLeverage(clamped);
+                  updateLeverage(clamped);
                 }
               }}
               onBlur={() => {
@@ -718,8 +744,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           value={leverage}
           onChange={(e) => {
             const val = Number(e.target.value);
-            setLeverage(val);
-            setLeverageText(String(val));
+            updateLeverage(val);
           }}
           style={{
             background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100}%, var(--bg-surface) ${maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100}%, var(--bg-surface) 100%)`,
@@ -730,7 +755,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           {availableLeverage.map((l) => (
             <button
               key={l}
-              onClick={() => { setLeverage(l); setLeverageText(String(l)); }}
+              onClick={() => updateLeverage(l)}
               className={`flex-1 basis-0 min-w-[32px] rounded-none py-1.5 min-h-[36px] text-[9px] font-medium transition-all duration-150 focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 touch-manipulation ${
                 leverage === l
                   ? "bg-[var(--accent)] text-white"
