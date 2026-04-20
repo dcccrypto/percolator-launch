@@ -140,6 +140,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const priceLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const liqLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const entryLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
+  // Track whether we've done the initial viewport fit for the current
+  // timeframe/chart-type/data-source. Without this, calling fitContent() on
+  // every poll (new bar arrives every ~30s for Pyth / 60s for GeckoTerminal)
+  // wipes out any user pan/zoom — the chart snaps back to "all bars visible"
+  // and the user can't stay zoomed in.
+  const fitKeyRef = useRef<string>("");
 
   // Prefer Pyth Benchmarks (canonical global spot price; deep history) when
   // the market's underlying asset has a Pyth feed. Same data source Hyperliquid
@@ -236,8 +242,38 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         horzLines: { color: chartTheme.gridColor },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: chartTheme.borderColor },
-      timeScale: { borderColor: chartTheme.borderColor, timeVisible: true, secondsVisible: false },
+      rightPriceScale: {
+        borderColor: chartTheme.borderColor,
+        // Leave a sliver of headroom/footroom so price labels don't clip
+        // against the top/bottom edge of the canvas.
+        scaleMargins: { top: 0.08, bottom: 0.12 },
+      },
+      timeScale: {
+        borderColor: chartTheme.borderColor,
+        timeVisible: true,
+        secondsVisible: false,
+        // rightOffset reserves space to the right of the last bar so the
+        // crosshair can hover past the last candle without getting clipped,
+        // matching TradingView/Binance behaviour.
+        rightOffset: 8,
+        barSpacing: 8,
+        // Keep visual consistency; don't let the user drag past the start.
+        fixLeftEdge: false,
+        fixRightEdge: false,
+      },
+      // Scroll + scale handles default to true but make the intent explicit
+      // so any future refactor doesn't silently disable pan/zoom.
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
+        mouseWheel: true,
+        pinch: true,
+      },
     });
 
     chartRef.current = chart;
@@ -439,8 +475,16 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       }
     }
 
-    chart.timeScale().fitContent();
-  }, [chartType, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme]);
+    // Only fit the content to viewport on the FIRST render for the current
+    // (timeframe, chart type, data source) combo. Subsequent polls just
+    // update-in-place so the user's pan/zoom is preserved.
+    const source = hasPythData ? "pyth" : hasExternalData ? "dex" : "oracle";
+    const fitKey = `${chartType}:${timeframe}:${source}`;
+    if (fitKeyRef.current !== fitKey) {
+      chart.timeScale().fitContent();
+      fitKeyRef.current = fitKey;
+    }
+  }, [chartType, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData]);
 
   // Update mark price line when live price changes
   useEffect(() => {
@@ -568,7 +612,9 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         {/* GH#1652: always mount the container so lightweight-charts canvas initialises.
             The chart ref is always created in useEffect; empty-state is overlaid on top
             when candles=[] so the canvas element exists in the DOM on first render. */}
-        <div ref={containerRef} className="w-full h-[40svh] lg:h-[500px]" />
+        {/* Bumped desktop height 500 → 620 so the time axis has room to render
+            below the candles + volume pane without getting visually clipped. */}
+        <div ref={containerRef} className="w-full h-[45svh] lg:h-[620px]" />
 
         {/* GH#1652: empty-state overlay — shown when no data yet, sits above canvas */}
         {showEmptyOverlay && (

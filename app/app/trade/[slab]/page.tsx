@@ -537,11 +537,11 @@ function TradePageInner({ slab }: { slab: string }) {
           {/* Chart — only mount on desktop to prevent dual ChartEmptyState stacking */}
           {isLargeScreen && (
             <ErrorBoundary label="TradingChart">
-              {/* overflow-hidden prevents lightweight-charts toolbar from escaping chart bounds (GH#1647) */}
-              {/* BUG FIX: removed flex-1 — it stretched the chart to fill the column,
-                  creating a visible gap between the chart and the positions table below.
-                  h-[500px] gives a fixed chart height without excess whitespace. */}
-              <div className="h-[500px] overflow-hidden">
+              {/* Chart height bumped 500 → 640 so the time axis + price axis
+                  labels + volume pane can all render without clipping against
+                  the container edges. Component internals (TradingChart.tsx)
+                  also set w-full h-full so autoSize: true fills this wrapper. */}
+              <div className="h-[640px] overflow-hidden">
                 <TradingChart slabAddress={slab} mintAddress={mintAddress || undefined} />
               </div>
             </ErrorBoundary>
