@@ -764,7 +764,9 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           tradingFeeBps={tradingFeeBps}
           maintenanceMarginBps={maintenanceMarginBps}
           symbol={symbol}
+          collateralSymbol={collateralSymbol}
           decimals={decimals}
+          accountEquity={userAccount ? capital : null}
         />
       )}
 

@@ -24,8 +24,17 @@ interface PreTradeSummaryProps {
   leverage: number;
   tradingFeeBps: bigint;
   maintenanceMarginBps: bigint;
+  /** Underlying asset symbol (e.g. "SOL"). Used for notional displayed in underlying units. */
   symbol: string;
+  /** Collateral token symbol (e.g. "USDC"). Used for notional/fee/margin labels. */
+  collateralSymbol?: string;
   decimals: number;
+  /**
+   * Total account equity in collateral units (capital + realised PnL).
+   * When provided, "Eff. Leverage" shows notional/equity (true account leverage).
+   * Falls back to notional/margin (= slider value) when undefined.
+   */
+  accountEquity?: bigint | null;
 }
 
 function SummaryRow({
@@ -54,7 +63,9 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
   tradingFeeBps,
   maintenanceMarginBps,
   symbol,
+  collateralSymbol,
   decimals,
+  accountEquity,
 }) => {
   const { showUsd } = useUsdToggle();
   const { priceUsd } = useLivePrice();
@@ -77,18 +88,30 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
 
   const isLong = direction === "long";
 
-  // Display notional in USDC (derived from contracts × mark price)
-  const notionalDisplay = `${formatTokenAmount(notionalNative, decimals)} ${symbol}`;
+  // Notional, fee, and margin are all denominated in the COLLATERAL token
+  // (USDC on a SOL/USDC market), not in the underlying asset. Use
+  // collateralSymbol for the label; fall back to symbol for backwards compat.
+  const settleSymbol = collateralSymbol ?? symbol;
+  const notionalDisplay = `${formatTokenAmount(notionalNative, decimals)} ${settleSymbol}`;
   const feeDisplay = showUsd && priceUsd != null
     ? formatNum((Number(fee) / Math.pow(10, decimals)) * priceUsd)
-    : `${formatTokenAmount(fee, decimals)} ${symbol}`;
+    : `${formatTokenAmount(fee, decimals)} ${settleSymbol}`;
   const marginDisplay = showUsd && priceUsd != null
     ? formatNum((Number(margin) / Math.pow(10, decimals)) * priceUsd)
-    : `${formatTokenAmount(margin, decimals)} ${symbol}`;
+    : `${formatTokenAmount(margin, decimals)} ${settleSymbol}`;
 
-  // Effective leverage: notional value / margin (both in the same USDC units)
-  const effectiveLeverage = margin > 0n
-    ? Math.round((Number(notionalNative) / Number(margin)) * 10) / 10
+  // Effective leverage.
+  // When accountEquity is provided (preferred): notional / account_equity gives
+  // the true fraction of the user's account capital exposed by this position —
+  // the industry-standard "account leverage". Distinct from the slider value,
+  // which is only notional/margin-for-this-trade.
+  // When accountEquity is null/undefined: fall back to notional/margin
+  // (= slider value) so existing callers keep working.
+  const leverageDenominator = (accountEquity != null && accountEquity > 0n)
+    ? accountEquity
+    : margin;
+  const effectiveLeverage = leverageDenominator > 0n
+    ? Math.round((Number(notionalNative) / Number(leverageDenominator)) * 10) / 10
     : 0;
 
   // Liq price warning: if within 15% of entry
