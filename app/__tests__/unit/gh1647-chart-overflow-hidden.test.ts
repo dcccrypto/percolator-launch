@@ -53,7 +53,12 @@ describe("GH#1647: TradingChart overflow-hidden guard", () => {
   });
 
   it("page.tsx: desktop TradingChart wrapper has overflow-hidden", () => {
-    // The desktop chart wrapper (flex-1 min-h-[500px]) must include overflow-hidden
-    expect(pageSource).toMatch(/flex-1[^"]*overflow-hidden|overflow-hidden[^"]*flex-1/);
+    // The desktop chart wrapper must include overflow-hidden on the div that
+    // immediately wraps <TradingChart .../>. The exact sizing class has
+    // changed over time (flex-1 min-h-[500px] → h-[640px]); match on
+    // `overflow-hidden` adjacent to the TradingChart tag instead.
+    const desktopWrapperRegex =
+      /<div className="[^"]*overflow-hidden[^"]*">\s*<TradingChart/;
+    expect(pageSource).toMatch(desktopWrapperRegex);
   });
 });
