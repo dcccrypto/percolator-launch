@@ -234,11 +234,11 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
                 {formatLiqPrice(liqPriceE6)}
               </td>
 
-              {/* PnL */}
+              {/* PnL — realised in the collateral token (USDC on a SOL/USDC market), not the underlying. */}
               <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {hasValidMark ? (
                   <>
-                    <div>{formatPnl(pnlTokens, decimals)} {symbol}</div>
+                    <div>{formatPnl(pnlTokens, decimals)} {collateralSymbol}</div>
                     {pnlUsd !== null && (
                       <div className="text-[9px]">
                         {pnlUsd >= 0 ? "+" : ""}${Math.abs(pnlUsd).toFixed(2)}

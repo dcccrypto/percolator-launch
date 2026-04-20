@@ -12,7 +12,10 @@ interface TradeConfirmationModalProps {
   leverage: number;
   estimatedLiqPrice: bigint;
   tradingFee: bigint;
+  /** Underlying asset symbol (e.g. SOL). Used to label the position size. */
   symbol: string;
+  /** Collateral token symbol (e.g. USDC). Used to label margin/fee. */
+  collateralSymbol?: string;
   decimals: number;
   onConfirm: () => void;
   onCancel: () => void;
@@ -35,10 +38,13 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   estimatedLiqPrice,
   tradingFee,
   symbol,
+  collateralSymbol,
   decimals,
   onConfirm,
   onCancel,
 }) => {
+  // Fallback to symbol if collateral wasn't provided (backwards compat).
+  const settleSymbol = collateralSymbol ?? symbol;
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
@@ -140,7 +146,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <div className="flex justify-between">
             <span className="text-[var(--text-dim)]">Margin Required:</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatPerc(margin, decimals)} {symbol}
+              {formatPerc(margin, decimals)} {settleSymbol}
             </span>
           </div>
           <div className="flex justify-between">
@@ -150,7 +156,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <div className="flex justify-between">
             <span className="text-[var(--text-dim)]">Trading Fee:</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatPerc(tradingFee, decimals)} {symbol}
+              {formatPerc(tradingFee, decimals)} {settleSymbol}
             </span>
           </div>
           <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">

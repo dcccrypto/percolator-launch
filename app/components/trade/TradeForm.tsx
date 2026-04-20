@@ -898,6 +898,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           estimatedLiqPrice={confirmSnapshot.estimatedLiqPrice}
           tradingFee={confirmSnapshot.tradingFee}
           symbol={symbol}
+          collateralSymbol={collateralSymbol}
           decimals={decimals}
           onConfirm={() => {
             setShowConfirmModal(false);

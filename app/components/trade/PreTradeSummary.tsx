@@ -100,19 +100,20 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
     ? formatNum((Number(margin) / Math.pow(10, decimals)) * priceUsd)
     : `${formatTokenAmount(margin, decimals)} ${settleSymbol}`;
 
-  // Effective leverage.
-  // When accountEquity is provided (preferred): notional / account_equity gives
-  // the true fraction of the user's account capital exposed by this position —
-  // the industry-standard "account leverage". Distinct from the slider value,
-  // which is only notional/margin-for-this-trade.
-  // When accountEquity is null/undefined: fall back to notional/margin
-  // (= slider value) so existing callers keep working.
-  const leverageDenominator = (accountEquity != null && accountEquity > 0n)
-    ? accountEquity
-    : margin;
-  const effectiveLeverage = leverageDenominator > 0n
-    ? Math.round((Number(notionalNative) / Number(leverageDenominator)) * 10) / 10
+  // Effective leverage = notional / margin-used-for-this-trade.
+  // This equals the slider value by definition (slider sets margin = notional/leverage),
+  // so showing them both is somewhat redundant — but consistency matters: user sets
+  // 10x and sees 10x. The account-level exposure goes in its own row below.
+  const effectiveLeverage = margin > 0n
+    ? Math.round((Number(notionalNative) / Number(margin)) * 10) / 10
     : 0;
+
+  // Account usage: how much of the user's total equity this trade consumes as margin.
+  // Tells the user "you're committing X% of your account to this position".
+  // Only meaningful when accountEquity is known (logged-in + has an account).
+  const accountUsagePct = (accountEquity != null && accountEquity > 0n && margin > 0n)
+    ? Math.min(100, (Number(margin) / Number(accountEquity)) * 100)
+    : null;
 
   // Liq price warning: if within 15% of entry
   const estEntryNum = Number(estEntry) / 1e6;
@@ -155,6 +156,19 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
           label="Margin Required"
           value={marginDisplay}
         />
+        {accountUsagePct !== null && (
+          <SummaryRow
+            label="Account Usage"
+            value={`${accountUsagePct.toFixed(1)}%`}
+            valueClass={
+              accountUsagePct >= 90
+                ? "text-[var(--short)]"
+                : accountUsagePct >= 50
+                ? "text-orange-400"
+                : "text-[var(--text)]"
+            }
+          />
+        )}
         <SummaryRow
           label="Est. Liq Price"
           value={`${liqWarning ? "⚠️ " : ""}${formatUsd(liqPrice)}`}
