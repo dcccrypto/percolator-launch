@@ -5,8 +5,10 @@ import { createChart, IChartApi, ISeriesApi, LineStyle, ColorType, CrosshairMode
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenChart } from "@/hooks/useTokenChart";
+import { usePythChart } from "@/hooks/usePythChart";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
+import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useLiqPrice } from "@/hooks/useLiqPrice";
 import { useChartTheme } from "@/hooks/useChartTheme";
@@ -93,6 +95,21 @@ function PositionSummary({ slabAddress }: PositionSummaryProps) {
   );
 }
 
+/**
+ * Map a market's underlying-asset symbol to the Pyth Benchmarks feed symbol.
+ * Pyth feeds follow `Crypto.<ASSET>/USD` naming. Keep the list tight — the
+ * server-side API route has the same allowlist and will reject anything not
+ * on it. Extending the allowlist means updating BOTH here and
+ * `/api/chart/pyth/route.ts`.
+ */
+function pythSymbolForAsset(assetSymbol: string | null | undefined): string | null {
+  if (!assetSymbol) return null;
+  const s = assetSymbol.trim().toUpperCase();
+  if (!s) return null;
+  const supported = new Set(["SOL", "BTC", "ETH", "JUP", "JTO", "WIF", "BONK", "PYTH"]);
+  return supported.has(s) ? `Crypto.${s}/USD` : null;
+}
+
 export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = ({
   slabAddress,
   mintAddress,
@@ -103,6 +120,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const [chartType, setChartType] = useState<ChartType>("candle");
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
+
+  // Resolve the Pyth Benchmarks feed for this market. For SOL/USDC perp the
+  // underlying is SOL → `Crypto.SOL/USD`. Non-mapped assets fall through to
+  // the GeckoTerminal pool-history path and then to oracle aggregation.
+  const marketInfoForSymbol = useMarketInfo(slabAddress);
+  const pythSymbol = pythSymbolForAsset(marketInfoForSymbol.market?.symbol);
 
   // Phase 2: liq price overlay
   const realUserAccount = useUserAccount();
@@ -118,13 +141,25 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const liqLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const entryLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
 
+  // Prefer Pyth Benchmarks (canonical global spot price; deep history) when
+  // the market's underlying asset has a Pyth feed. Same data source Hyperliquid
+  // / Drift / Jupiter Perps use — shows real SOL/USD history back days/years,
+  // not just the last 24 h of our keeper observations.
+  const {
+    candles: pythCandles,
+    status: pythStatus,
+  } = usePythChart(pythSymbol, timeframe);
+
+  // Fallback source: GeckoTerminal via the mint's DEX pool. Used when no Pyth
+  // feed is mapped for this asset (e.g. long-tail tokens).
   const {
     candles: externalCandles,
     status: externalStatus,
     poolAddress,
   } = useTokenChart(mintAddress ?? null, timeframe);
 
-  const hasExternalData = externalStatus === "success" && externalCandles.length > 0;
+  const hasPythData = pythStatus === "success" && pythCandles.length > 0;
+  const hasExternalData = !hasPythData && externalStatus === "success" && externalCandles.length > 0;
 
   // Fetch oracle price history
   useEffect(() => {
@@ -160,12 +195,18 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     return oraclePrices.filter((p) => p.timestamp >= cutoff);
   })();
 
+  // Data source priority: Pyth Benchmarks (canonical spot) → GeckoTerminal
+  // (DEX-pool history for long-tail tokens) → oracle-aggregated fallback
+  // (our keeper observations; sparse, only useful when the above two are
+  // unavailable).
   const candleData = (() => {
+    if (hasPythData) return pythCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
     if (hasExternalData) return externalCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
     return aggregateCandles(oracleFiltered, CANDLE_INTERVAL_MS);
   })();
 
   const lineData = (() => {
+    if (hasPythData) return pythCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     if (hasExternalData) return externalCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     return oracleFiltered;
   })();
@@ -431,7 +472,15 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             <span className="text-xs" style={{ color: isUp ? "var(--long)" : "var(--short)" }}>
               {isUp ? "+" : ""}{priceChange.toFixed(4)} ({isUp ? "+" : ""}{priceChangePercent.toFixed(2)}%)
             </span>
-            {hasExternalData ? (
+            {hasPythData ? (
+              <span
+                className="text-[9px] font-medium uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm"
+                style={{ background: "var(--accent)/0.1", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
+                title={`Source: Pyth Benchmarks · ${pythSymbol}`}
+              >
+                PYTH
+              </span>
+            ) : hasExternalData ? (
               <span
                 className="text-[9px] font-medium uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm"
                 style={{ background: "var(--accent)/0.1", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
