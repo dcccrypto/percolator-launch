@@ -19,6 +19,7 @@ import { TradingChart } from "@/components/trade/TradingChart";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
+import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
 import { TradeHistory } from "@/components/trade/TradeHistory";
 import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
 import { AdlLeaderboard } from "@/components/trade/AdlLeaderboard";
@@ -155,6 +156,7 @@ function TradePageInner({ slab }: { slab: string }) {
   // CSS-only hidden/shown dual-mount caused two ChartEmptyState instances to stack
   // during SSR/hydration before the responsive classes were applied (P0 render bug).
   const isLargeScreen = useIsLargeScreen();
+  const [orderBookVisible, toggleOrderBook] = useOrderBookVisibility();
 
   const { engine, config, header, accounts, loading: slabLoading, error: slabError } = useSlabState();
   useAdvanceOraclePhase(slab);
@@ -483,8 +485,11 @@ function TradePageInner({ slab }: { slab: string }) {
           </Collapsible>
         </ErrorBoundary>
 
-        {/* Bottom tabs: Stats | Trades | Health | Risk | ADL | Book */}
-        <Tabs tabs={["Stats", "Trades", "Health", "Risk", "ADL", "Book"]}>
+        {/* Bottom tabs — "Book" tab only appears when the user has opted-in.
+            Toggle persists via useOrderBookVisibility (localStorage). */}
+        <Tabs tabs={orderBookVisible
+          ? ["Stats", "Trades", "Health", "Risk", "ADL", "Book"]
+          : ["Stats", "Trades", "Health", "Risk", "ADL"]}>
           <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
           <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
           <ErrorBoundary label="EngineHealthCard">
@@ -501,15 +506,32 @@ function TradePageInner({ slab }: { slab: string }) {
           <ErrorBoundary label="AdlLeaderboard">
             <AdlLeaderboard slabAddress={slab} />
           </ErrorBoundary>
-          <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
+          {orderBookVisible && (
+            <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
+          )}
         </Tabs>
+        {!orderBookVisible && (
+          <button
+            type="button"
+            onClick={toggleOrderBook}
+            className="mt-2 w-full rounded-none border border-[var(--border)]/40 bg-[var(--bg)]/40 px-3 py-1.5 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)] hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)]"
+          >
+            ⟨ Show order book
+          </button>
+        )}
       </div>
 
       {/* ════════════════════════════════════════════════════════
           DESKTOP LAYOUT  (≥ lg / 1024px)
-          Two columns: left ~68%, right ~32%
+          Three columns when order book visible, two when collapsed.
+          Middle column (Book) can be toggled off via the × on the book
+          or the "Show order book" button rendered inline.
           ════════════════════════════════════════════════════════ */}
-      <div className="hidden lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,220px)_minmax(0,340px)] gap-4 px-4 lg:px-6 pb-3 pt-2">
+      <div className={`hidden lg:grid gap-4 px-4 lg:px-6 pb-3 pt-2 ${
+        orderBookVisible
+          ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,220px)_minmax(0,340px)]"
+          : "lg:grid-cols-[minmax(0,1fr)_minmax(0,340px)]"
+      }`}>
         {/* ── Left column: Chart + Positions ── */}
         <div className="min-w-0 flex flex-col gap-0">
           {/* Chart — only mount on desktop to prevent dual ChartEmptyState stacking */}
@@ -532,12 +554,14 @@ function TradePageInner({ slab }: { slab: string }) {
           </Tabs>
         </div>
 
-        {/* ── Middle column: Order Book ── */}
-        <div className="min-w-0">
-          <ErrorBoundary label="MarketBookCard">
-            <MarketBookCard />
-          </ErrorBoundary>
-        </div>
+        {/* ── Middle column: Order Book (toggleable) ── */}
+        {orderBookVisible && (
+          <div className="min-w-0">
+            <ErrorBoundary label="MarketBookCard">
+              <MarketBookCard />
+            </ErrorBoundary>
+          </div>
+        )}
 
         {/* ── Right column: Trade Panel ── */}
         <div className="min-w-0 space-y-1.5">
@@ -571,6 +595,15 @@ function TradePageInner({ slab }: { slab: string }) {
               <AdlLeaderboard slabAddress={slab} />
             </ErrorBoundary>
           </Tabs>
+          {!orderBookVisible && (
+            <button
+              type="button"
+              onClick={toggleOrderBook}
+              className="w-full rounded-none border border-[var(--border)]/40 bg-[var(--bg)]/40 px-3 py-1.5 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)] hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)]"
+            >
+              ⟨ Show order book
+            </button>
+          )}
         </div>
       </div>
 

@@ -6,6 +6,7 @@ import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
+import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
 import { formatUsd, formatTokenAmount, shortenAddress } from "@/lib/format";
 import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { AccountKind } from "@percolatorct/sdk";
@@ -20,6 +21,7 @@ export const MarketBookCard: FC = () => {
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
   const decimals = tokenMeta?.decimals ?? 6;
+  const [, toggleBook] = useOrderBookVisibility();
 
   const lps = useMemo(
     () => accounts.filter(({ account }) => account.kind === AccountKind.LP),
@@ -70,6 +72,23 @@ export const MarketBookCard: FC = () => {
 
   return (
     <div className="p-3">
+      {/* Header with hide control — lets the user collapse the order book
+          when they prefer a cleaner trade view. Persists via localStorage. */}
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          Order Book
+        </span>
+        <button
+          type="button"
+          onClick={toggleBook}
+          aria-label="Hide order book"
+          title="Hide order book"
+          className="rounded-none border border-[var(--border)]/40 px-1.5 py-0.5 text-[10px] leading-none text-[var(--text-dim)] hover:border-[var(--accent)]/40 hover:text-[var(--text-secondary)] focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30"
+        >
+          ×
+        </button>
+      </div>
+
       {/* 2.1: Price ladder — bigger fonts */}
       <div className="mb-2 grid grid-cols-3 gap-px border border-[var(--border)]/30">
         {/* Bid */}
