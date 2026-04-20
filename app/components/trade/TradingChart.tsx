@@ -196,10 +196,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     volume: c.volume,
   }));
 
-  // Only use Percolator as the chart source once the market has enough volume
-  // to form at least 10 bars — otherwise fall back to Pyth to avoid a sparse,
-  // gap-filled chart that looks worse than Pyth's deep history.
-  const hasPercolatorData = percolatorStatus === "success" && percolatorCandles.length >= 10;
+  // Use Percolator as the chart source as soon as ANY internal-trade candle
+  // is available. Previously this was gated at >=10 bars to avoid rendering a
+  // sparse chart that looked worse than Pyth's deep history, but that's a bad
+  // default for the "market was just created" case — the chart should
+  // immediately reflect OUR data once it exists, however thin.
+  const hasPercolatorData = percolatorStatus === "success" && percolatorCandles.length > 0;
   const hasPythData = !hasPercolatorData && pythStatus === "success" && pythCandles.length > 0;
   const hasExternalData = !hasPercolatorData && !hasPythData && externalStatus === "success" && externalCandles.length > 0;
 
