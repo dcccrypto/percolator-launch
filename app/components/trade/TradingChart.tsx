@@ -196,12 +196,27 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     volume: c.volume,
   }));
 
-  // Use Percolator as the chart source as soon as ANY internal-trade candle
-  // is available. Previously this was gated at >=10 bars to avoid rendering a
-  // sparse chart that looked worse than Pyth's deep history, but that's a bad
-  // default for the "market was just created" case — the chart should
-  // immediately reflect OUR data once it exists, however thin.
-  const hasPercolatorData = percolatorStatus === "success" && percolatorCandles.length > 0;
+  // Prefer Percolator as the chart source only when it has enough coverage to
+  // form a readable chart. With 1–2 candles against a 24 h window, the tier-0
+  // source produces a mostly-empty chart that looks broken — Pyth's deep spot
+  // history is a better background until real internal volume arrives.
+  //
+  // The user's fill is still visible: the Entry price line renders on top of
+  // whichever source is showing, so a new trader sees their entry against
+  // Pyth's SOL/USD context before Percolator has enough bars to stand alone.
+  //
+  // Two exceptions where Percolator still wins below the threshold: (a) Pyth
+  // returned no data for this asset (long-tail token), or (b) Pyth errored.
+  // In either case "any Percolator data" is strictly better than nothing.
+  const MIN_PERC_BARS = 10;
+  const percHasEnough =
+    percolatorStatus === "success" && percolatorCandles.length >= MIN_PERC_BARS;
+  const pythHasNothing =
+    (pythStatus === "success" && pythCandles.length === 0) || pythStatus === "error";
+  const hasPercolatorData =
+    percolatorStatus === "success" &&
+    percolatorCandles.length > 0 &&
+    (percHasEnough || pythHasNothing);
   const hasPythData = !hasPercolatorData && pythStatus === "success" && pythCandles.length > 0;
   const hasExternalData = !hasPercolatorData && !hasPythData && externalStatus === "success" && externalCandles.length > 0;
 
