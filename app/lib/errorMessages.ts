@@ -86,6 +86,48 @@ const ERROR_CODE_MAP: Record<number, string> = {
 /** Legacy Anchor error map (unused but kept for compatibility) */
 const CUSTOM_ERROR_MAP: Record<number, string> = {};
 
+/**
+ * percolator-nft program error codes (percolator-nft/src/error.rs).
+ * These overlap numerically with percolator-prog's error codes, so we must
+ * route by originating program id before looking up a human message — e.g.
+ * code 10 on percolator-prog is "Missing required signer" but on percolator-nft
+ * it is "Slab layout not recognized".
+ */
+const NFT_ERROR_CODE_MAP: Record<number, string> = {
+  0: "Position is not open (size is zero).",
+  1: "NFT already minted for this position.",
+  2: "NFT PDA does not match expected derivation — frontend/program version mismatch.",
+  3: "Slab account not owned by the Percolator program.",
+  4: "Slab data too short — corrupted or unsupported market.",
+  5: "User index out of range for this slab.",
+  6: "Position has changed since NFT was minted (entry-price mismatch).",
+  7: "Only the NFT holder can burn / settle this position.",
+  8: "Funding settlement overflow.",
+  9: "Invalid mint authority — expected program PDA.",
+  10: "NFT program cannot parse this market's slab layout — the NFT program is out of date relative to the deployed main program. An on-chain NFT program upgrade is required.",
+  11: "Cannot transfer — position is being liquidated.",
+  12: "Funding must be settled before transfer.",
+  13: "Transfer hook: unknown Percolator program.",
+  14: "Position must be fully closed (size and collateral at zero) before burn.",
+  15: "Transfer hook: extra-metas PDA does not match expected derivation.",
+  16: "Transfer hook: source or destination token account invalid.",
+  17: "Transfer hook was invoked directly, not via Token-2022 CPI.",
+  18: "This account is an LP account and cannot be wrapped as an NFT — only trading accounts are eligible.",
+  19: "Account id mismatch — slot was reallocated to a different account.",
+  20: "Slab slot was closed and reassigned to a different owner after this NFT was minted — the NFT no longer represents that position.",
+};
+
+/** Hard-coded NFT program id. Matches app/lib/nft-program.ts. Kept here to
+ *  avoid importing the (client-only) PublicKey wrapper from this module. */
+const NFT_PROGRAM_ID = "FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS";
+
+function isNftProgramError(msg: string): boolean {
+  if (msg.includes(NFT_PROGRAM_ID)) return true;
+  // Our useMintPositionNft handler tags simulation failures with this prefix.
+  if (msg.includes("NFT mint simulation failed")) return true;
+  return false;
+}
+
 function extractErrorCode(msg: string): number | null {
   const m = msg.match(/(?:custom program error|Error Code)[:\s]+0x([0-9a-fA-F]+)/i);
   if (m) return parseInt(m[1], 16);
@@ -155,8 +197,19 @@ export function humanizeError(rawMsg: string): string {
   }
 
   const code = extractErrorCode(rawMsg);
-  if (code !== null && ERROR_CODE_MAP[code]) {
-    return ERROR_CODE_MAP[code];
+  // Route the code to the right per-program table. The NFT program and the
+  // main Percolator program reuse the same small integers for different
+  // errors, so a generic lookup would mislabel NFT errors (e.g. code 10 is
+  // "Missing required signer" in the main program but "Slab layout not
+  // recognized" in the NFT program — a user who sees the former assumes a
+  // wallet/signing bug instead of an on-chain program mismatch).
+  if (code !== null) {
+    if (isNftProgramError(rawMsg) && NFT_ERROR_CODE_MAP[code]) {
+      return NFT_ERROR_CODE_MAP[code];
+    }
+    if (ERROR_CODE_MAP[code]) {
+      return ERROR_CODE_MAP[code];
+    }
   }
   const customIdx = extractCustomIndex(rawMsg);
   if (customIdx !== null && CUSTOM_ERROR_MAP[customIdx]) {
