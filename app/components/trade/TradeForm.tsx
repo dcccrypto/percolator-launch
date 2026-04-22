@@ -806,7 +806,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       ) : needsAccount || needsDeposit ? (
         <button
           onClick={() => {
-            // Scroll to the deposit trigger above the form
+            // Open the DepositTrigger above (it listens for this event and
+            // sets its local `expanded` state). Scrolling alone is a no-op on
+            // desktop where both panels are already visible — the user was
+            // seeing the button do nothing before this.
+            document.dispatchEvent(new CustomEvent('percolator:open-deposit'));
             const deposit = document.querySelector('[data-deposit-trigger]');
             if (deposit) deposit.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }}

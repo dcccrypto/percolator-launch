@@ -29,6 +29,16 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   const [expanded, setExpanded] = useState(false);
   const [hasDeposited, setHasDeposited] = useState(true); // default true to avoid flash
 
+  // Listen for the "open deposit" event dispatched by TradeForm's fallback
+  // button when the user has no account yet. Without this, TradeForm's
+  // "Create Account & Deposit" button just scrolls here (a no-op on desktop
+  // where both panels are already visible) and appears broken.
+  useEffect(() => {
+    const handler = () => setExpanded(true);
+    document.addEventListener("percolator:open-deposit", handler);
+    return () => document.removeEventListener("percolator:open-deposit", handler);
+  }, []);
+
   // Show devnet faucet button for ALL devnet markets (not just mirror markets).
   // Users may not have the collateral token regardless of how the market was created.
   const isDevnet = getNetwork() === "devnet";
