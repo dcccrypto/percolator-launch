@@ -1,10 +1,17 @@
 "use client";
 
-import { FC } from "react";
+import { FC, useState } from "react";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { useMintPositionNft } from "@/hooks/useMintPositionNft";
 import { useBurnPositionNft } from "@/hooks/useBurnPositionNft";
+import { useTransferPositionNft } from "@/hooks/useTransferPositionNft";
 import { useUserAccount } from "@/hooks/useUserAccount";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { useMarketInfo } from "@/hooks/useMarketInfo";
+import { formatTokenAmount } from "@/lib/format";
+import { sanitizeSymbol } from "@/lib/symbol-utils";
+import { SendPositionNftModal } from "@/components/trade/SendPositionNftModal";
 import { explorerAccountUrl } from "@/lib/config";
 
 /**
@@ -23,9 +30,31 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
   const { hasMintedNft, nftMint, pendingSettlement, isLoading } = usePositionNft(slabAddress);
   const { mint: mintNft, loading: mintLoading, error: mintError } = useMintPositionNft(slabAddress);
   const { burn: burnNft, loading: burnLoading, error: burnError } = useBurnPositionNft(slabAddress);
+  const { transfer: transferNft, loading: transferLoading, error: transferError } =
+    useTransferPositionNft(slabAddress);
+
+  const { config: mktConfig } = useSlabState();
+  const collateralMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
+  const decimals = collateralMeta?.decimals ?? 6;
+  const marketInfo = useMarketInfo(slabAddress);
+  const assetSymbol = sanitizeSymbol(marketInfo.market?.symbol) ?? "SIZE";
+
+  const [showSendModal, setShowSendModal] = useState(false);
 
   const hasPosition = userAccount !== null && userAccount.account.positionSize !== 0n;
   const mintAddress = nftMint?.toBase58() ?? null;
+
+  // Summary line for the send modal — e.g. "LONG 0.3507 SOL".
+  // Shown read-only so the user can double-check what they're about to transfer
+  // before pasting an address.
+  const positionSummary = userAccount && userAccount.account.positionSize !== 0n
+    ? (() => {
+        const size = userAccount.account.positionSize;
+        const isLong = size > 0n;
+        const absSize = size < 0n ? -size : size;
+        return `${isLong ? "LONG" : "SHORT"} ${formatTokenAmount(absSize, decimals)} ${assetSymbol}`;
+      })()
+    : "No open position";
 
   // State: no user account at all
   if (!userAccount) {
@@ -119,6 +148,25 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
             {mintLoading ? "Minting…" : "Mint NFT"}
           </button>
 
+          {/* Send NFT — enabled when NFT exists. Token-2022 TransferChecked
+              with our transfer hook attached; the hook atomically updates
+              Account.owner in the slab so the destination wallet controls
+              the position after the tx lands. */}
+          <button
+            onClick={() => setShowSendModal(true)}
+            disabled={!hasMintedNft || transferLoading}
+            title={
+              !hasMintedNft
+                ? "Mint the NFT first"
+                : transferLoading
+                ? "Sending…"
+                : "Transfer position to another wallet"
+            }
+            className="flex-1 rounded-none border border-[var(--accent)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-150 hover:bg-[var(--accent)]/10 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {transferLoading ? "Sending…" : "Send NFT"}
+          </button>
+
           {/* Burn NFT — enabled when NFT exists and position is closed (pendingSettlement) */}
           <button
             onClick={() => burnNft()}
@@ -137,12 +185,26 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
         </div>
 
         {/* Error display */}
-        {(mintError || burnError) && (
+        {(mintError || burnError || transferError) && (
           <div className="rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
-            <p className="text-[10px] text-[var(--short)]">{mintError || burnError}</p>
+            <p className="text-[10px] text-[var(--short)]">{mintError || burnError || transferError}</p>
           </div>
         )}
       </div>
+
+      {showSendModal && hasMintedNft && mintAddress && (
+        <SendPositionNftModal
+          positionSummary={positionSummary}
+          nftMintShort={`${mintAddress.slice(0, 8)}…${mintAddress.slice(-6)}`}
+          loading={transferLoading}
+          error={transferError}
+          onCancel={() => setShowSendModal(false)}
+          onConfirm={async (dest) => {
+            const sig = await transferNft(dest);
+            if (sig) setShowSendModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };
