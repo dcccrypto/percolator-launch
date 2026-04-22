@@ -28,6 +28,7 @@ import { formatTokenAmount, formatUsd } from "@/lib/format";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
+import { useInitUser } from "@/hooks/useInitUser";
 
 const LEVERAGE_SNAP_POINTS = [1, 2, 5, 10, 20];
 const MARGIN_PRESETS = [25, 50, 75, 100];
@@ -141,11 +142,19 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     tradingFee: bigint;
   } | null>(null);
   const [showCloseModal, setShowCloseModal] = useState(false);
-  // Inline deposit/create-account form — rendered right below the CTA button
-  // when the user has no account yet. Replaces the old behavior where the
-  // button scrolled up to a separate DepositTrigger panel, which felt like
-  // "click → modal at top → click again" instead of a direct action.
+  // Inline deposit form. Only rendered as a *fallback* — when the user has
+  // zero collateral tokens in their wallet (and therefore needs the faucet
+  // button inside DepositWithdrawCard), or when they already have an account
+  // but zero capital (rare — requires picking a deposit amount). The common
+  // case (connected wallet + tokens + no account) is handled by a direct
+  // one-click initUser call below, so the button itself opens the wallet.
   const [showInlineDeposit, setShowInlineDeposit] = useState(false);
+
+  // Direct one-click account creation. initUser(0n) auto-bumps feePayment to
+  // (newAccountFee + minInitialDeposit), so the user ends up with a registered
+  // sub-account AND the minimum required capital in a single tx.
+  const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
+  const [initCtaError, setInitCtaError] = useState<string | null>(null);
 
   const longBtnRef = useRef<HTMLButtonElement>(null);
   const shortBtnRef = useRef<HTMLButtonElement>(null);
@@ -822,21 +831,55 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </button>
       ) : needsAccount || needsDeposit ? (
         <>
-          <button
-            onClick={() => setShowInlineDeposit((v) => !v)}
-            aria-expanded={showInlineDeposit}
-            className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
-              direction === "long"
-                ? "bg-green-500 hover:bg-green-400 focus-visible:ring-green-500"
-                : "bg-red-500 hover:bg-red-400 focus-visible:ring-red-500"
-            }`}
-          >
-            {showInlineDeposit
-              ? "Close"
-              : needsAccount
-              ? "Create Account & Deposit"
-              : "Deposit to Trade"}
-          </button>
+          {(() => {
+            // One-click path: user has an unspent collateral balance in their
+            // wallet and just needs to create the sub-account. initUser with a
+            // 0 hint bumps feePayment to the on-chain minimum, so a single tx
+            // registers the slot AND deposits minInitialDeposit as capital.
+            // The user will then see the top "Account" balance bar appear and
+            // can top up further without going through this CTA again.
+            const hasWalletTokens = (walletAtaBalance ?? 0n) > 0n;
+            const canOneClick = needsAccount && hasWalletTokens && !showInlineDeposit;
+            const onClickDirect = async () => {
+              setInitCtaError(null);
+              try {
+                await initUser(0n);
+                // On success, useInitUser refreshes the slab; userAccount will
+                // populate on the next poll and this whole branch unmounts.
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                // User-rejected wallet signatures shouldn't surface as errors.
+                if (!/user rejected|cancelled|denied/i.test(msg)) {
+                  setInitCtaError(msg);
+                }
+              }
+            };
+            return (
+              <button
+                onClick={canOneClick ? onClickDirect : () => setShowInlineDeposit((v) => !v)}
+                disabled={initLoading}
+                aria-expanded={showInlineDeposit}
+                className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
+                  direction === "long"
+                    ? "bg-green-500 hover:bg-green-400 focus-visible:ring-green-500"
+                    : "bg-red-500 hover:bg-red-400 focus-visible:ring-red-500"
+                }`}
+              >
+                {initLoading
+                  ? "Creating account…"
+                  : showInlineDeposit
+                  ? "Close"
+                  : canOneClick
+                  ? "Create Account & Deposit"
+                  : needsAccount
+                  ? "Get Tokens to Trade"
+                  : "Deposit to Trade"}
+              </button>
+            );
+          })()}
+          {(initCtaError || initError) && (
+            <p className="mt-1 text-[10px] text-[var(--short)]">{initCtaError ?? initError}</p>
+          )}
           {showInlineDeposit && (
             <div className="mt-1.5">
               <DepositWithdrawCard slabAddress={slabAddress} />
