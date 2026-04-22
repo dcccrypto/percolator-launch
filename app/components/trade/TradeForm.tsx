@@ -27,6 +27,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsd } from "@/lib/format";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 
 const LEVERAGE_SNAP_POINTS = [1, 2, 5, 10, 20];
 const MARGIN_PRESETS = [25, 50, 75, 100];
@@ -140,6 +141,11 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     tradingFee: bigint;
   } | null>(null);
   const [showCloseModal, setShowCloseModal] = useState(false);
+  // Inline deposit/create-account form — rendered right below the CTA button
+  // when the user has no account yet. Replaces the old behavior where the
+  // button scrolled up to a separate DepositTrigger panel, which felt like
+  // "click → modal at top → click again" instead of a direct action.
+  const [showInlineDeposit, setShowInlineDeposit] = useState(false);
 
   const longBtnRef = useRef<HTMLButtonElement>(null);
   const shortBtnRef = useRef<HTMLButtonElement>(null);
@@ -194,6 +200,17 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const capital = userAccount ? userAccount.account.capital : 0n;
   const existingPosition = userAccount ? userAccount.account.positionSize : 0n;
   const hasPosition = existingPosition !== 0n;
+
+  // Auto-close the inline deposit form the moment a deposit lands on-chain
+  // (capital transitions 0 → >0). Without this, the user has to manually
+  // dismiss the card after seeing the confirmation tx, which feels janky.
+  const prevCapitalRef = useRef<bigint>(capital);
+  useEffect(() => {
+    if (prevCapitalRef.current === 0n && capital > 0n) {
+      setShowInlineDeposit(false);
+    }
+    prevCapitalRef.current = capital;
+  }, [capital]);
 
   // GH#1133: When no trading account exists yet, use wallet ATA balance as the
   // effective balance for validation (exceedsMargin, %-presets, Max button).
@@ -804,24 +821,28 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           Connect Wallet
         </button>
       ) : needsAccount || needsDeposit ? (
-        <button
-          onClick={() => {
-            // Open the DepositTrigger above (it listens for this event and
-            // sets its local `expanded` state). Scrolling alone is a no-op on
-            // desktop where both panels are already visible — the user was
-            // seeing the button do nothing before this.
-            document.dispatchEvent(new CustomEvent('percolator:open-deposit'));
-            const deposit = document.querySelector('[data-deposit-trigger]');
-            if (deposit) deposit.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }}
-          className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
-            direction === "long"
-              ? "bg-green-500 hover:bg-green-400 focus-visible:ring-green-500"
-              : "bg-red-500 hover:bg-red-400 focus-visible:ring-red-500"
-          }`}
-        >
-          {needsAccount ? "Create Account & Deposit" : "Deposit to Trade"}
-        </button>
+        <>
+          <button
+            onClick={() => setShowInlineDeposit((v) => !v)}
+            aria-expanded={showInlineDeposit}
+            className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
+              direction === "long"
+                ? "bg-green-500 hover:bg-green-400 focus-visible:ring-green-500"
+                : "bg-red-500 hover:bg-red-400 focus-visible:ring-red-500"
+            }`}
+          >
+            {showInlineDeposit
+              ? "Close"
+              : needsAccount
+              ? "Create Account & Deposit"
+              : "Deposit to Trade"}
+          </button>
+          {showInlineDeposit && (
+            <div className="mt-1.5">
+              <DepositWithdrawCard slabAddress={slabAddress} />
+            </div>
+          )}
+        </>
       ) : (
         <button
           onClick={() => {

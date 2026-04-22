@@ -9,7 +9,6 @@ import { formatTokenAmount } from "@/lib/format";
 import { DepositWithdrawCard } from "./DepositWithdrawCard";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
-import { getNetwork } from "@/lib/config";
 
 function lsKey(slabAddress: string) {
   return `percolator:deposited:${slabAddress}`;
@@ -28,20 +27,6 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
 
   const [expanded, setExpanded] = useState(false);
   const [hasDeposited, setHasDeposited] = useState(true); // default true to avoid flash
-
-  // Listen for the "open deposit" event dispatched by TradeForm's fallback
-  // button when the user has no account yet. Without this, TradeForm's
-  // "Create Account & Deposit" button just scrolls here (a no-op on desktop
-  // where both panels are already visible) and appears broken.
-  useEffect(() => {
-    const handler = () => setExpanded(true);
-    document.addEventListener("percolator:open-deposit", handler);
-    return () => document.removeEventListener("percolator:open-deposit", handler);
-  }, []);
-
-  // Show devnet faucet button for ALL devnet markets (not just mirror markets).
-  // Users may not have the collateral token regardless of how the market was created.
-  const isDevnet = getNetwork() === "devnet";
 
   const capital = userAccount?.account.capital ?? 0n;
   const prevCapitalRef = useRef(capital);
@@ -62,43 +47,15 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
     prevCapitalRef.current = capital;
   }, [capital, slabAddress]);
 
-  // No wallet connected
-  if (!isConnected) {
-    return (
-      <div data-deposit-trigger className="border border-[var(--border)]/50 bg-[var(--bg)]/80 px-3 py-1.5">
-        <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.1em]">
-          Connect wallet to deposit
-        </p>
-      </div>
-    );
-  }
+  // No wallet connected: TradeForm already has a "Connect Wallet" button in
+  // the same column, so a second prompt here is redundant visual noise.
+  if (!isConnected) return null;
 
-  // PERC-8090: First-time state — inline compact prompt instead of full-width shimmer card
-  if (!hasDeposited && capital === 0n) {
-    return (
-      <div data-deposit-trigger>
-        <div className="flex items-center justify-between border border-[var(--border)]/50 bg-[var(--bg)]/80 px-3 py-1.5">
-          <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-            <span className="text-[10px] text-[var(--text-secondary)]">
-              Deposit {symbol} to start trading
-            </span>
-          </div>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors hover:text-[var(--accent)]/80"
-          >
-            {expanded ? "Close" : "Deposit →"}
-          </button>
-        </div>
-        {expanded && (
-          <div className="mt-1">
-            <DepositWithdrawCard slabAddress={slabAddress} />
-          </div>
-        )}
-      </div>
-    );
-  }
+  // First-time state (wallet connected, no deposit yet): TradeForm now renders
+  // an inline deposit form directly beneath its "Create Account & Deposit"
+  // button, so this duplicate top-of-column CTA is redundant. Returning null
+  // keeps the layout from showing two competing prompts.
+  if (!hasDeposited && capital === 0n) return null;
 
   // Returning state: balance bar
   return (
