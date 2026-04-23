@@ -95,12 +95,34 @@ export function useTransferPositionNft(slabAddress: string) {
           ASSOCIATED_TOKEN_PROGRAM_ID,
         );
 
+        // Pre-flight the mint account fetch ourselves. spl-token's
+        // `createTransferCheckedWithTransferHookInstruction` calls
+        // `getMint(connection, mint, ...)` internally and throws
+        // `TokenAccountNotFoundError` (with a blank `.message`) if the
+        // account isn't on the connection's RPC. Doing the lookup here
+        // turns that into a concrete error with the actual mint pubkey
+        // + RPC endpoint, which is what users (and me) need to debug.
+        stage = "verifying NFT mint exists on RPC";
+        console.info("[useTransferPositionNft] mint:", nftMint.toBase58());
+        const mintInfo = await connection.getAccountInfo(nftMint, "confirmed");
+        if (!mintInfo) {
+          throw new Error(
+            `NFT mint ${nftMint.toBase58()} was not found on the connected RPC. ` +
+              `This usually means the frontend is pointed at the wrong cluster ` +
+              `(devnet vs mainnet) or the RPC is stale. Refresh the page; if it ` +
+              `persists the wallet address may hold an NFT from a different market.`,
+          );
+        }
+        if (!mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+          throw new Error(
+            `NFT mint ${nftMint.toBase58()} is owned by ${mintInfo.owner.toBase58()}, ` +
+              `not Token-2022. This shouldn't happen for a Percolator position NFT.`,
+          );
+        }
+
         // TransferChecked with automatic transfer-hook account resolution.
-        // The helper fetches the mint's TransferHook extension AND the
-        // ExtraAccountMetaList PDA to append the right extras to the ix.
-        // Both reads can throw TokenTransferHookAccountNotFound /
-        // TokenTransferHookInvalidPubkeyData with blank messages — handle
-        // those explicitly below.
+        // The helper fetches the mint + ExtraAccountMetaList PDA and
+        // appends the right extras to the ix.
         stage = "resolving transfer-hook extra accounts (this fetches mint + ExtraAccountMetaList PDA)";
         const transferIx = await createTransferCheckedWithTransferHookInstruction(
           connection,

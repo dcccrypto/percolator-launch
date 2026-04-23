@@ -228,6 +228,20 @@ export function humanizeError(rawMsg: string): string {
   if (rawMsg.includes("User rejected")) {
     return "Transaction cancelled.";
   }
+  // spl-token throws these typed errors without any .message so they bubble
+  // up as the raw class name. Give each one a human sentence.
+  if (rawMsg.includes("TokenAccountNotFoundError")) {
+    return "Token account not found on the RPC this page is connected to. The wallet may hold the NFT from a different network, or the RPC may be out of sync — try refreshing the page.";
+  }
+  if (rawMsg.includes("TokenInvalidAccountOwnerError")) {
+    return "Token account has the wrong on-chain owner. This usually means the frontend is pointed at a cluster where this mint was not created.";
+  }
+  if (rawMsg.includes("TokenInvalidMintError")) {
+    return "Mint account is not a valid SPL Token / Token-2022 mint. Refresh and verify the position NFT panel still shows a valid mint.";
+  }
+  if (rawMsg.includes("TokenTransferHookAccountNotFound")) {
+    return "Transfer-hook metadata account missing. This NFT was minted before a recent hook-fix upgrade; open a support ticket so we can run RepairExtraAccountMetas on it.";
+  }
   if (rawMsg.includes("timeout") || rawMsg.includes("Timeout")) {
     return "Transaction timed out. It may still confirm — check your wallet.";
   }
