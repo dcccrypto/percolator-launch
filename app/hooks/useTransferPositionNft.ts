@@ -64,7 +64,14 @@ export function useTransferPositionNft(slabAddress: string) {
       }
 
       setLoading(true);
+      // Track which step we are in so an empty-message throw still gives
+      // the user something actionable. Privy's wallet adapter and the
+      // spl-token helpers both throw typed errors with blank .message
+      // fields in several edge cases — without this tag, humanizeError
+      // receives "" and falls through to a useless "Transaction failed:".
+      let stage = "initializing";
       try {
+        stage = "deriving ATAs";
         const sourceAta = getAssociatedTokenAddressSync(
           nftMint,
           walletPubkey,
@@ -78,21 +85,23 @@ export function useTransferPositionNft(slabAddress: string) {
           TOKEN_2022_PROGRAM_ID,
         );
 
-        // Idempotent create of the destination ATA (no-op if it already
-        // exists). Sender pays rent. Using idempotent avoids needing to
-        // getAccountInfo first — the runtime short-circuits the ix when the
-        // account is already initialized.
+        stage = "building destination ATA instruction";
         const createDestAtaIx = createAssociatedTokenAccountIdempotentInstruction(
-          walletPubkey,        // payer
-          destAta,             // ata
-          destinationWallet,   // owner
-          nftMint,             // mint
+          walletPubkey,
+          destAta,
+          destinationWallet,
+          nftMint,
           TOKEN_2022_PROGRAM_ID,
           ASSOCIATED_TOKEN_PROGRAM_ID,
         );
 
         // TransferChecked with automatic transfer-hook account resolution.
-        // amount=1n, decimals=0 — position NFTs are always supply=1, decimals=0.
+        // The helper fetches the mint's TransferHook extension AND the
+        // ExtraAccountMetaList PDA to append the right extras to the ix.
+        // Both reads can throw TokenTransferHookAccountNotFound /
+        // TokenTransferHookInvalidPubkeyData with blank messages — handle
+        // those explicitly below.
+        stage = "resolving transfer-hook extra accounts (this fetches mint + ExtraAccountMetaList PDA)";
         const transferIx = await createTransferCheckedWithTransferHookInstruction(
           connection,
           sourceAta,
@@ -101,27 +110,25 @@ export function useTransferPositionNft(slabAddress: string) {
           walletPubkey,
           1n,
           0,
-          [],                   // multiSigners
-          "confirmed",          // commitment for extra-accounts fetch
+          [],
+          "confirmed",
           TOKEN_2022_PROGRAM_ID,
         );
 
+        stage = "assembling transaction";
         const tx = new Transaction();
-        // The transfer hook does several reads + a CPI; 300k CU is comfortable.
         tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
         tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
         tx.add(createDestAtaIx);
         tx.add(transferIx);
 
+        stage = "fetching blockhash";
         const { blockhash, lastValidBlockHeight } =
           await connection.getLatestBlockhash("confirmed");
         tx.recentBlockhash = blockhash;
         tx.feePayer = walletPubkey;
 
-        // Pre-flight simulation. Surfaces transfer-hook rejections
-        // (PositionInLiquidation, FundingOverflow, InvalidPercolatorProgram, ...)
-        // before the user is prompted to sign. humanizeError will pick the
-        // NFT_ERROR_CODE_MAP branch because the NFT program id is in the logs.
+        stage = "pre-flight simulation";
         {
           const sim = await connection.simulateTransaction(tx, undefined, true);
           if (sim.value.err) {
@@ -137,11 +144,16 @@ export function useTransferPositionNft(slabAddress: string) {
           }
         }
 
+        stage = "waiting for wallet signature";
         const signed = await signTransaction(tx);
+
+        stage = "submitting transaction";
         const sig = await connection.sendRawTransaction(signed.serialize(), {
-          skipPreflight: true, // already simulated
+          skipPreflight: true,
           maxRetries: 5,
         });
+
+        stage = "waiting for confirmation";
         await connection.confirmTransaction(
           { signature: sig, blockhash, lastValidBlockHeight },
           "confirmed",
@@ -150,9 +162,30 @@ export function useTransferPositionNft(slabAddress: string) {
         toast(`Position NFT sent to ${destinationWallet.toBase58().slice(0, 8)}…`, "success");
         return sig;
       } catch (e) {
-        const raw = e instanceof Error ? e.message : String(e);
+        // Always log the raw error object so the browser console shows the
+        // actual shape — not just .message, which is often empty for
+        // wallet-adapter / spl-token typed errors.
+        console.error("[useTransferPositionNft] stage:", stage, "error:", e);
+
+        // Build a meaningful raw string even when .message is empty.
+        let raw = "";
+        if (e instanceof Error) {
+          raw = e.message || e.name || e.constructor?.name || "";
+        } else if (e != null) {
+          raw = String(e);
+        }
+        if (!raw.trim()) {
+          raw = `Failed while ${stage}. Check the browser console for the raw error object.`;
+        }
+
+        // User rejected wallet signature — surface a clean UX message and
+        // do not treat it as an error state.
+        if (/user (rejected|cancelled|denied)|rejected the request/i.test(raw)) {
+          setError(null);
+          return null;
+        }
+
         const msg = humanizeError(raw);
-        console.error("[useTransferPositionNft]", raw);
         setError(msg);
         toast(msg, "error");
         return null;
