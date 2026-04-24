@@ -1,5 +1,14 @@
 "use client";
 
+// Defensive: some deployments load this hook's chunk before the root
+// layout's polyfills.ts has executed (Next.js can split chunks in ways
+// that surface the hook before the layout's side-effect import runs).
+// Re-importing polyfills here is cheap — the module's body only runs
+// once and is idempotent. Without this, spl-token's
+// createExecuteInstruction throws "writeBigUInt64LE is not a function"
+// on the transfer-hook path.
+import "@/lib/polyfills";
+
 import { useState, useCallback } from "react";
 import { PublicKey, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
 import {
