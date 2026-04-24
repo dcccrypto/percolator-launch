@@ -116,14 +116,18 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
           return;
         }
 
-        const { mint, pendingSettlement } = parsePositionNftAccount(
+        const { mint, positionSize } = parsePositionNftAccount(
           Buffer.from(accountInfo.data)
         );
 
         setState({
           hasMintedNft: true,
           nftMint: mint,
-          pendingSettlement,
+          // No dedicated `pending_settlement` byte in the 208-byte layout.
+          // Derive it from the snapshot: a PositionNft PDA with zero
+          // position_size is one where the underlying trade has been
+          // closed on-chain — the NFT is waiting to be burned.
+          pendingSettlement: positionSize === 0n,
           nftPdaAddress: pdaStr,
           isLoading: false,
         });
