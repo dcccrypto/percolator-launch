@@ -97,6 +97,24 @@ const nextConfig: NextConfig = {
         path: false,
         os: false,
       };
+      // Force all `require('buffer')` / `import from 'buffer'` to resolve
+      // to the `buffer@6.0.3` npm package instead of Next.js's internal
+      // polyfill, which (verified by inspecting production bundle
+      // module 463021) ships WITHOUT any BigInt read/write methods —
+      // no writeBigUInt64LE, no writeBigInt64LE, no readBigUInt64LE.
+      // spl-token's createExecuteInstruction calls
+      // `data.writeBigUInt64LE(BigInt(amount), 8)` when building the
+      // TransferHook Execute ix, and that throws on every transfer.
+      //
+      // The Turbopack dev config already aliases this correctly — this
+      // mirrors that for webpack prod builds. Must come after fallback
+      // so both old `require('buffer')` (no slash, resolves via
+      // polyfill map) and `require('buffer/')` paths land on the same
+      // up-to-date class.
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        buffer: require.resolve("buffer/"),
+      };
     }
     return config;
   },
