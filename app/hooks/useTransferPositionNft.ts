@@ -1,19 +1,131 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PublicKey, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
+import {
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  AccountMeta,
+  ComputeBudgetProgram,
+} from "@solana/web3.js";
+import { Buffer } from "buffer";
 import {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
-  createTransferCheckedWithTransferHookInstruction,
 } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+
+/**
+ * Build the Token-2022 `TransferChecked` instruction byte-for-byte, using
+ * only DataView (a browser standard) rather than Node's Buffer. Avoids
+ * `Buffer.writeBigUInt64LE`, which Next.js's compiled buffer polyfill
+ * does not ship — calling it crashes the entire Send NFT flow.
+ *
+ * Instruction data layout (SPL Token):
+ *   [0]     = 12 (TransferChecked tag)
+ *   [1..9]  = amount, u64 little-endian
+ *   [9]     = decimals (u8)
+ */
+function buildTransferCheckedIx(
+  source: PublicKey,
+  mint: PublicKey,
+  destination: PublicKey,
+  owner: PublicKey,
+  amount: bigint,
+  decimals: number,
+  programId: PublicKey,
+): TransactionInstruction {
+  const data = new Uint8Array(10);
+  const dv = new DataView(data.buffer);
+  data[0] = 12; // TransferChecked
+  dv.setBigUint64(1, amount, true);
+  data[9] = decimals & 0xff;
+
+  const keys: AccountMeta[] = [
+    { pubkey: source, isSigner: false, isWritable: true },
+    { pubkey: mint, isSigner: false, isWritable: false },
+    { pubkey: destination, isSigner: false, isWritable: true },
+    { pubkey: owner, isSigner: true, isWritable: false },
+  ];
+
+  return new TransactionInstruction({
+    programId,
+    keys,
+    // web3.js's TransactionInstruction types `data` as Buffer. The
+    // bytes themselves came from a Uint8Array with DataView, so we
+    // only pay the cast here — no BigInt methods needed on the Buffer.
+    data: Buffer.from(data),
+  });
+}
+
+/**
+ * Parse an on-chain `ExtraAccountMetaList` account (written by
+ * MintPositionNft / RepairExtraMetas) and return its entries in the same
+ * order as the on-chain layout:
+ *
+ *   [0..8]   discriminator (spl-transfer-hook-interface:execute)
+ *   [8..12]  tlv_value_len  u32 LE
+ *   [12..16] entry_count    u32 LE
+ *   [16..]   entry_count × 35 bytes:
+ *              [0]      discriminator (0 = FixedPubkey)
+ *              [1..33]  pubkey
+ *              [33]     is_signer (u8)
+ *              [34]     is_writable (u8)
+ *
+ * We only emit FixedPubkey entries on-chain, so any other discriminator
+ * here means the PDA was written by a different program or is stale; we
+ * surface that as an error instead of guessing.
+ */
+function parseExtraAccountMetas(raw: Uint8Array): AccountMeta[] {
+  const MIN_LEN = 16;
+  if (raw.length < MIN_LEN) {
+    throw new Error(
+      `ExtraAccountMetaList data too short (${raw.length} bytes). ` +
+        `The NFT mint's metadata PDA is missing or corrupt — run RepairExtraMetas.`,
+    );
+  }
+  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+  const entryCount = dv.getUint32(12, true);
+  const ENTRY_LEN = 35;
+  const expectedLen = MIN_LEN + entryCount * ENTRY_LEN;
+  if (raw.length < expectedLen) {
+    throw new Error(
+      `ExtraAccountMetaList truncated: have ${raw.length} bytes, ` +
+        `need ${expectedLen} for ${entryCount} entries. Run RepairExtraMetas.`,
+    );
+  }
+  const metas: AccountMeta[] = [];
+  for (let i = 0; i < entryCount; i++) {
+    const off = MIN_LEN + i * ENTRY_LEN;
+    const disc = raw[off];
+    if (disc !== 0) {
+      throw new Error(
+        `ExtraAccountMetaList entry ${i} uses unsupported discriminator ${disc}. ` +
+          `Only FixedPubkey (0) entries are expected.`,
+      );
+    }
+    const pubkey = new PublicKey(raw.slice(off + 1, off + 33));
+    const isSigner = raw[off + 33] === 1;
+    const isWritable = raw[off + 34] === 1;
+    metas.push({ pubkey, isSigner, isWritable });
+  }
+  return metas;
+}
+
+function deriveExtraAccountMetasPda(mint: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode("extra-account-metas"), mint.toBytes()],
+    PERCOLATOR_NFT_PROGRAM_ID,
+  );
+  return pda;
+}
 
 /**
  * Transfer a Position NFT to another wallet.
@@ -120,21 +232,65 @@ export function useTransferPositionNft(slabAddress: string) {
           );
         }
 
-        // TransferChecked with automatic transfer-hook account resolution.
-        // The helper fetches the mint + ExtraAccountMetaList PDA and
-        // appends the right extras to the ix.
-        stage = "resolving transfer-hook extra accounts (this fetches mint + ExtraAccountMetaList PDA)";
-        const transferIx = await createTransferCheckedWithTransferHookInstruction(
-          connection,
+        // Build TransferChecked + the transfer-hook extras ourselves
+        // instead of calling spl-token's
+        // createTransferCheckedWithTransferHookInstruction. The helper
+        // uses Buffer.writeBigUInt64LE internally — Next.js's compiled
+        // buffer polyfill omits that method, so the helper crashes
+        // before the ix is even built. Going direct with DataView +
+        // reading the ExtraAccountMetaList PDA we wrote ourselves keeps
+        // this codepath free of Buffer altogether.
+        stage = "building TransferChecked instruction";
+        const transferIx = buildTransferCheckedIx(
           sourceAta,
           nftMint,
           destAta,
           walletPubkey,
           1n,
           0,
-          [],
-          "confirmed",
           TOKEN_2022_PROGRAM_ID,
+        );
+
+        stage = "fetching ExtraAccountMetaList PDA";
+        const extraMetasPda = deriveExtraAccountMetasPda(nftMint);
+        const extraMetasInfo = await connection.getAccountInfo(extraMetasPda, "confirmed");
+        if (!extraMetasInfo) {
+          throw new Error(
+            `ExtraAccountMetaList PDA ${extraMetasPda.toBase58()} not found. ` +
+              `This NFT is missing its transfer-hook metadata — run the on-chain ` +
+              `RepairExtraMetas instruction (tag 6) against mint ${nftMint.toBase58()}.`,
+          );
+        }
+        if (!extraMetasInfo.owner.equals(PERCOLATOR_NFT_PROGRAM_ID)) {
+          throw new Error(
+            `ExtraAccountMetaList PDA owned by ${extraMetasInfo.owner.toBase58()}, ` +
+              `expected ${PERCOLATOR_NFT_PROGRAM_ID.toBase58()}.`,
+          );
+        }
+
+        stage = "appending transfer-hook extra accounts";
+        const extraMetas = parseExtraAccountMetas(
+          new Uint8Array(extraMetasInfo.data),
+        );
+        // Order must match spl-token's addExtraAccountMetasForExecute:
+        //   [...base TransferChecked keys (source,mint,dest,owner)]
+        //   [...extra accounts resolved from ExtraAccountMetaList]
+        //   hook program id
+        //   validate-state PDA
+        // Token-2022 reads these off the tail of TransferChecked's keys
+        // and passes them to Execute on the hook CPI.
+        transferIx.keys.push(
+          ...extraMetas,
+          {
+            pubkey: PERCOLATOR_NFT_PROGRAM_ID,
+            isSigner: false,
+            isWritable: false,
+          },
+          {
+            pubkey: extraMetasPda,
+            isSigner: false,
+            isWritable: false,
+          },
         );
 
         stage = "assembling transaction";

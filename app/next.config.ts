@@ -97,24 +97,16 @@ const nextConfig: NextConfig = {
         path: false,
         os: false,
       };
-      // Force all `require('buffer')` / `import from 'buffer'` to resolve
-      // to the `buffer@6.0.3` npm package instead of Next.js's internal
-      // polyfill, which (verified by inspecting production bundle
-      // module 463021) ships WITHOUT any BigInt read/write methods —
-      // no writeBigUInt64LE, no writeBigInt64LE, no readBigUInt64LE.
-      // spl-token's createExecuteInstruction calls
-      // `data.writeBigUInt64LE(BigInt(amount), 8)` when building the
-      // TransferHook Execute ix, and that throws on every transfer.
-      //
-      // The Turbopack dev config already aliases this correctly — this
-      // mirrors that for webpack prod builds. Must come after fallback
-      // so both old `require('buffer')` (no slash, resolves via
-      // polyfill map) and `require('buffer/')` paths land on the same
-      // up-to-date class.
-      config.resolve.alias = {
-        ...config.resolve.alias,
-        buffer: require.resolve("buffer/"),
-      };
+      // Next.js aliases browser `require('buffer')` to its own compiled
+      // polyfill at node_modules/next/dist/compiled/buffer/index.js,
+      // which is missing Node 12+ BigInt methods (writeBigUInt64LE etc.).
+      // That breaks spl-token's createExecuteInstruction on the transfer-
+      // hook path. We DON'T try to override that alias here anymore —
+      // earlier attempts (plain resolve.alias, NormalModuleReplacement-
+      // Plugin) proved ineffective against Next's internal fallback.
+      // Instead, app/hooks/useTransferPositionNft.ts builds the Execute
+      // ix by hand via DataView, avoiding Buffer.writeBigUInt64LE
+      // altogether. No bundler hack required.
     }
     return config;
   },
