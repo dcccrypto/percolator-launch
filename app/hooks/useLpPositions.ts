@@ -133,10 +133,16 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       // Resolve stake program ID for current network
       const stakeProgramPk = getStakeProgramId();
 
-      // 2a. Batch-fetch LP mint accounts to read per-mint decimals (PERC-8197).
-      // LP tokens are NOT guaranteed to have 6 decimals — hardcoding causes wrong display values.
+      // 2a. Batch-fetch LP + collateral mint accounts to read per-mint decimals (PERC-8197).
+      // Neither LP nor collateral tokens are guaranteed to have 6 decimals — hardcoding
+      // causes wrong display values for non-USDC collaterals (e.g. SOL=9, BONK=5).
       const lpMintKeys = pools.map((p) => new PublicKey(p.lpMint));
-      const lpMintInfos = await connection.getMultipleAccountsInfo(lpMintKeys);
+      const collateralMintStrs = Array.from(new Set(pools.map((p) => p.collateralMint)));
+      const collateralMintKeys = collateralMintStrs.map((m) => new PublicKey(m));
+      const [lpMintInfos, collateralMintInfos] = await Promise.all([
+        connection.getMultipleAccountsInfo(lpMintKeys),
+        connection.getMultipleAccountsInfo(collateralMintKeys),
+      ]);
       const lpDecimalsByMint: Record<string, number> = {};
       for (let i = 0; i < pools.length; i++) {
         const mintInfo = lpMintInfos[i];
@@ -149,6 +155,20 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
           }
         } else {
           lpDecimalsByMint[pools[i].lpMint] = 6; // safe fallback
+        }
+      }
+      const collateralDecimalsByMint: Record<string, number> = {};
+      for (let i = 0; i < collateralMintStrs.length; i++) {
+        const mintInfo = collateralMintInfos[i];
+        if (mintInfo && mintInfo.data.length >= 82) {
+          try {
+            const mint = unpackMint(collateralMintKeys[i], mintInfo);
+            collateralDecimalsByMint[collateralMintStrs[i]] = mint.decimals;
+          } catch {
+            collateralDecimalsByMint[collateralMintStrs[i]] = 6;
+          }
+        } else {
+          collateralDecimalsByMint[collateralMintStrs[i]] = 6;
         }
       }
 
@@ -192,8 +212,9 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
           const redeemableRaw: bigint = totalLpSupply > 0
             ? (lpBalanceRaw * tvlRaw) / BigInt(Math.round(totalLpSupply))
             : 0n;
-          // Redeemable value is in collateral token (e.g. USDC 6 dec) — use collateral decimals (6)
-          const redeemable = Number(redeemableRaw) / Math.pow(10, 6);
+          // Redeemable value is in the pool's collateral token — look up actual decimals.
+          const collateralDecimals = collateralDecimalsByMint[pool.collateralMint] ?? 6;
+          const redeemable = Number(redeemableRaw) / Math.pow(10, collateralDecimals);
           const userSharePct = totalLpSupply > 0
             ? (Number(lpBalanceRaw) / totalLpSupply) * 100
             : 0;

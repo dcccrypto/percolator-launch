@@ -22,6 +22,7 @@ import {
 import { isSentinelValue } from "@/lib/health";
 import { getConfig, getAllProgramIds } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
+import { getEntryPrice } from "@/lib/entry-price";
 
 export interface PortfolioPosition {
   slabAddress: string;
@@ -29,6 +30,12 @@ export interface PortfolioPosition {
   account: Account;
   idx: number;
   market: DiscoveredMarket;
+  /**
+   * Effective entry price in e6 format.
+   * V12_1 removed entry_price from the on-chain struct; falls back to
+   * localStorage (saved at trade time) when account.entryPrice is 0.
+   */
+  effectiveEntryPrice: bigint;
   /** Last effective oracle price in e6 format */
   oraclePriceE6: bigint;
   /** Liquidation price in e6 format */
@@ -185,9 +192,16 @@ export function usePortfolio(): PortfolioData {
 
             for (const { idx, account } of accounts) {
               if (account.kind === AccountKind.User && account.owner.toBase58() === pkStr) {
+                // V12_1: entry_price was removed from on-chain struct. Fall back to
+                // localStorage (saved by TradeForm at trade time) so portfolio PnL
+                // and liq-price compute correctly instead of showing 0/—.
+                const slabAddrStr = market.slabAddress.toBase58();
+                const effectiveEntryPrice =
+                  account.entryPrice > 0n ? account.entryPrice : getEntryPrice(slabAddrStr, idx);
+
                 // Compute liquidation price
                 const liquidationPriceE6 = computeLiqPrice(
-                  account.entryPrice,
+                  effectiveEntryPrice,
                   account.capital,
                   account.positionSize,
                   maintenanceMarginBps,
@@ -197,8 +211,8 @@ export function usePortfolio(): PortfolioData {
                 // GH#1331: account.pnl can be u64::MAX sentinel for uninitialized/flat
                 // positions. Guard it with isSentinelValue to prevent billion-dollar
                 // phantom PnL on the dashboard when oracle price is unavailable.
-                const unrealizedPnl = oraclePriceE6 > 0n && account.entryPrice > 0n
-                  ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePriceE6)
+                const unrealizedPnl = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
+                  ? computeMarkPnl(account.positionSize, effectiveEntryPrice, oraclePriceE6)
                   : (isSentinelValue(account.pnl) ? 0n : account.pnl);
 
                 // PnL percentage
@@ -234,11 +248,12 @@ export function usePortfolio(): PortfolioData {
                 }
 
                 allPositions.push({
-                  slabAddress: market.slabAddress.toBase58(),
+                  slabAddress: slabAddrStr,
                   symbol: null,
                   account,
                   idx,
                   market,
+                  effectiveEntryPrice,
                   oraclePriceE6,
                   liquidationPriceE6,
                   liquidationDistancePct,

@@ -402,6 +402,7 @@ export function getMockPortfolioPositions(): PortfolioPosition[] {
       slabAddress: slabAddr,
       symbol: m.symbol,
       idx: 2,
+      effectiveEntryPrice: entryE6,
       oraclePriceE6: priceE6,
       liquidationPriceE6,
       liquidationDistancePct,

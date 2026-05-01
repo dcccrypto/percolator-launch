@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@percolatorct/sdk": "1.0.0-beta.36",
+    "@percolatorct/sdk": "^2.0.6",
     "@privy-io/react-auth": "^3.14.1",
     "@sentry/nextjs": "^10.39.0",
     "@solana-program/memo": "^0.11.0",

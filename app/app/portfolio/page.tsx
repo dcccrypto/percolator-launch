@@ -185,7 +185,7 @@ export default function PortfolioPage() {
               },
               {
                 label: "LP Value",
-                value: !walletConnected ? "—" : lpPositions.loading ? "\u2026" : lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }),
+                value: !walletConnected ? "—" : lpPositions.loading ? "\u2026" : `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                 color: !walletConnected ? "text-[var(--text-dim)]" : lpPositions.totalRedeemable > 0 ? "text-[var(--cyan)]" : "text-[var(--text-dim)]",
                 sub: walletConnected && lpPositions.positions.length > 0
                   ? `${lpPositions.positions.length} pool${lpPositions.positions.length > 1 ? "s" : ""}`
@@ -256,7 +256,7 @@ export default function PortfolioPage() {
               {activePositions.map((pos, i) => {
                 const posSize = pos.account?.positionSize ?? 0n;
                 const posCapital = pos.account?.capital ?? 0n;
-                const posEntry = pos.account?.entryPrice ?? 0n;
+                const posEntry = pos.effectiveEntryPrice;
                 const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
                 const sizeAbs = posSize < 0n ? -posSize : posSize;
                 const { unrealizedPnl, pnlPercent, oraclePriceE6, liquidationPriceE6, liquidationDistancePct, leverage } = pos;
