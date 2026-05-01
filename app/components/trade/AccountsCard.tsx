@@ -8,6 +8,8 @@ import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatTokenAmount, formatUsd, formatPnl, formatLiqPrice, shortenAddress } from "@/lib/format";
 import { AccountKind, computeMarkPnl, computeLiqPrice } from "@percolatorct/sdk";
 import { LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
+import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
+import { isSentinelValue } from "@/lib/health";
 
 type SortKey = "idx" | "owner" | "direction" | "position" | "entry" | "liqPrice" | "pnl" | "capital" | "margin";
 type SortDir = "asc" | "desc";
@@ -37,7 +39,12 @@ export const AccountsCard: FC = () => {
   const [sortKey, setSortKey] = useState<SortKey>("position");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const oraclePrice = livePriceE6 ?? mktConfig?.lastEffectivePriceE6 ?? 0n;
+  // Apply invert + sanitize on the on-chain fallback so inverted markets
+  // don't display the reciprocal price during WS reconnects.
+  const onChainOracleE6 = mktConfig
+    ? sanitizePriceE6(applyInvert(mktConfig.lastEffectivePriceE6, mktConfig.invert))
+    : 0n;
+  const oraclePrice = livePriceE6 ?? onChainOracleE6;
   const maintBps = params?.maintenanceMarginBps ?? 500n;
 
   const rows: AccountRow[] = useMemo(() => {
@@ -59,9 +66,12 @@ export const AccountsCard: FC = () => {
           liqHealthPct = range > 0 ? Math.max(0, Math.min(100, (dist / range) * 100)) : 0;
         }
       }
+      // Guard account.pnl against u64::MAX sentinel (uninitialized/flat positions
+      // would otherwise display ~$1.84e19 in the leaderboard).
+      const safePnl = account.pnl !== undefined && !isSentinelValue(account.pnl) ? account.pnl : 0n;
       const computedPnl = account.positionSize !== 0n && oraclePrice > 0n && account.entryPrice > 0n
         ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePrice)
-        : (account.pnl ?? 0n);
+        : safePnl;
       const marginPct = liqHealthPct;
       return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize ?? 0n, entryPrice: account.entryPrice ?? 0n, liqPrice, liqHealthPct, pnl: computedPnl, capital: account.capital ?? 0n, marginPct };
     });

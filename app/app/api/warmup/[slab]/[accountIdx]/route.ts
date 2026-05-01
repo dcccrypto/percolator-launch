@@ -44,7 +44,10 @@ export async function GET(
 
     // Warmup only locks POSITIVE PnL, not deposited capital.
     // If the user has no positive PnL, there's nothing to "unlock".
-    const positivePnl = account.pnl > 0n ? account.pnl : 0n;
+    // Guard against u64::MAX sentinel: an uninitialized account would otherwise
+    // report ~$1.84e19 of unlockable PnL.
+    const U64_SENTINEL_THRESHOLD = 18000000000000000000n;
+    const positivePnl = account.pnl > 0n && account.pnl < U64_SENTINEL_THRESHOLD ? account.pnl : 0n;
     if (positivePnl === 0n) {
       return NextResponse.json({ error: "No profits to unlock" }, { status: 404 });
     }

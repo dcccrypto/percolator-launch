@@ -24,6 +24,8 @@ import { WarmupProgress } from "./WarmupProgress";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
+import { isSentinelValue } from "@/lib/health";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
@@ -99,7 +101,11 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
 
   const isLong = account.positionSize > 0n;
   const absPosition = abs(account.positionSize);
-  const onChainPriceE6 = config?.lastEffectivePriceE6 ?? null;
+  // Apply invert + sanitize so inverted markets don't display the reciprocal
+  // during WS reconnects.
+  const onChainPriceE6 = config
+    ? sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert))
+    : null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
   const rawEntryPrice = account.entryPrice;
   // V12_1: entry_price removed from on-chain struct (returns 0). Fall back to
@@ -117,7 +123,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   const pnlTokens = hasValidMark
     ? (resolvedEntryPrice > 0n
         ? computeMarkPnl(account.positionSize, resolvedEntryPrice, currentPriceE6)
-        : account.pnl)
+        : (isSentinelValue(account.pnl) ? 0n : account.pnl))
     : 0n;
   const pnlUsdRaw = priceUsd !== null && hasValidMark
     ? (Number(pnlTokens) / (10 ** decimals)) * priceUsd

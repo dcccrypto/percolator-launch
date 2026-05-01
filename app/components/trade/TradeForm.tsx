@@ -27,6 +27,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsd } from "@/lib/format";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 
@@ -297,7 +298,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const resolvedOpenEntry = openEntryPriceE6 > 0n ? openEntryPriceE6 : 0n;
   const openPnlTokens = hasOpenPosition && livePriceE6 && livePriceE6 > 0n && resolvedOpenEntry > 0n
     ? computeMarkPnl(openPositionSize, resolvedOpenEntry, livePriceE6)
-    : (userAccount?.account.pnl ?? 0n);
+    : (userAccount?.account.pnl !== undefined && !isSentinelValue(userAccount.account.pnl) ? userAccount.account.pnl : 0n);
   const openPnlPercent = hasOpenPosition ? computePnlPercent(openPnlTokens, openCapital) : 0;
   // Liq danger: within 20% of mark
   const openLiqDanger = (() => {
@@ -443,8 +444,13 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const needsDeposit = connected && userAccount && capital === 0n;
   const canTrade = connected && userAccount && capital > 0n && !lpUnderfunded;
 
-  async function handleTrade() {
-    if (!marginInput || !userAccount || positionSize <= 0n || exceedsMargin) return;
+  async function handleTrade(snapshotSize?: bigint) {
+    // Use the snapshotted size from the confirmation modal so the submitted
+    // trade matches what the user reviewed, even if the live price moved
+    // between modal-open and confirm. Fall back to live size if no snapshot
+    // (e.g. mock mode or non-confirm code paths).
+    const effectiveSize = snapshotSize ?? positionSize;
+    if (!marginInput || !userAccount || effectiveSize <= 0n || exceedsMargin) return;
 
     if (mockMode) {
       setTradePhase("submitting");
@@ -452,16 +458,16 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setTimeout(() => setTradePhase("idle"), 2000);
       return;
     }
-    
+
     if (!connected) {
       setHumanError("Wallet disconnected. Please reconnect your wallet.");
       return;
     }
-    
+
     setHumanError(null);
     setTradePhase("submitting");
     try {
-      const size = direction === "short" ? -positionSize : positionSize;
+      const size = direction === "short" ? -effectiveSize : effectiveSize;
       const sig = await withTransientRetry(
         async () => trade({ lpIdx, userIdx: userAccount!.idx, size }),
         { maxRetries: 2, delayMs: 3000 },
@@ -995,9 +1001,10 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           onConfirm={() => {
+            const snapSize = confirmSnapshot.positionSize;
             setShowConfirmModal(false);
             setConfirmSnapshot(null);
-            handleTrade();
+            handleTrade(snapSize);
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}
         />

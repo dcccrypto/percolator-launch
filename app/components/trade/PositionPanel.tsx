@@ -22,9 +22,10 @@ import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { WarmupProgress } from "./WarmupProgress";
 import { ClosePositionModal } from "./ClosePositionModal";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
-import { sanitizeFundingRateBps } from "@/lib/health";
+import { sanitizeFundingRateBps, isSentinelValue } from "@/lib/health";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getBackendUrl } from "@/lib/config";
 import { parseHumanAmount } from "@/lib/parseAmount";
 
@@ -236,7 +237,11 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const hasPosition = account.positionSize !== 0n;
   const isLong = account.positionSize > 0n;
   const absPosition = abs(account.positionSize);
-  const onChainPriceE6 = config?.lastEffectivePriceE6 ?? null;
+  // Apply invert + sanitize on the on-chain fallback so an inverted market
+  // doesn't show the reciprocal price during WS reconnects (~$0.0000067 vs $150).
+  const onChainPriceE6 = config
+    ? sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert))
+    : null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
 
   // V12_1: entry_price removed from on-chain struct. Fall back to saved entry price.
@@ -253,7 +258,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const pnlTokens = hasValidMark
     ? (resolvedEntryPrice > 0n
         ? computeMarkPnl(account.positionSize, resolvedEntryPrice, currentPriceE6)
-        : account.pnl)
+        : (isSentinelValue(account.pnl) ? 0n : account.pnl))
     : 0n;
   const pnlUsdRaw =
     priceUsd !== null && hasValidMark ? (Number(pnlTokens) / 10 ** decimals) * priceUsd : null;

@@ -287,9 +287,11 @@ export function usePortfolio(): PortfolioData {
             const bSev = getLiquidationSeverity(b.liquidationDistancePct);
             const sevOrder = { danger: 0, warning: 1, safe: 2 };
             if (sevOrder[aSev] !== sevOrder[bSev]) return sevOrder[aSev] - sevOrder[bSev];
-            // Then by PnL
-            const pnlDiff = Number(b.unrealizedPnl - a.unrealizedPnl);
-            if (pnlDiff !== 0) return pnlDiff;
+            // Then by PnL — bigint compare to avoid Number() precision loss
+            // (positions with PnL > Number.MAX_SAFE_INTEGER would otherwise
+            // produce a garbage sign and shuffle on each refresh).
+            if (b.unrealizedPnl > a.unrealizedPnl) return 1;
+            if (b.unrealizedPnl < a.unrealizedPnl) return -1;
             // Stable tiebreaker: sort by slab address to prevent random reordering
             return a.slabAddress.localeCompare(b.slabAddress);
           });
