@@ -24,13 +24,18 @@ import { ClosePositionModal } from "./ClosePositionModal";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { sanitizeFundingRateBps, isSentinelValue } from "@/lib/health";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
-import { getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { getEntryPrice, getEntryLeverage, clearEntryPrice } from "@/lib/entry-price";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getBackendUrl } from "@/lib/config";
 import { parseHumanAmount } from "@/lib/parseAmount";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
+}
+
+function formatLeverageValue(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "1";
+  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
 }
 
 // ─── 5.7: ADL rank for this user's position slot ─────────────────────────────
@@ -301,9 +306,14 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // 3.1: Leverage = notional / capital. Notional = contracts × markPrice / 1e6.
   // Old formula used raw contract count which gives ~0 for coin-margined positions.
   const notionalE6 = absPosition * currentPriceE6;
-  const leverage = hasPosition && account.capital > 0n && currentPriceE6 > 0n
-    ? Math.max(1, Math.round(Number(notionalE6 / 1_000_000n) / Number(account.capital)))
+  const accountLeverage = hasPosition && account.capital > 0n && currentPriceE6 > 0n
+    ? Math.max(1, Number(notionalE6 / 1_000_000n) / Number(account.capital))
     : 1;
+  const savedOrderLeverage = getEntryLeverage(slabAddress, userAccount.idx);
+  const displayLeverage = savedOrderLeverage ?? accountLeverage;
+  const leverageTitle = savedOrderLeverage != null
+    ? `Selected order leverage. Account leverage is ${formatLeverageValue(accountLeverage)}x because all deposited collateral counts toward liquidation.`
+    : "Account leverage: position notional divided by total deposited collateral.";
 
   let marginHealthStr = "N/A";
   if (hasPosition && notionalE6 > 0n) {
@@ -423,8 +433,11 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               {symbol}/USD
             </span>
             {/* Leverage badge */}
-            <span className="text-[8px] bg-[var(--accent)]/10 text-[var(--accent)] px-1 py-0.5">
-              {leverage}x
+            <span
+              className="text-[8px] bg-[var(--accent)]/10 text-[var(--accent)] px-1 py-0.5"
+              title={leverageTitle}
+            >
+              {formatLeverageValue(displayLeverage)}x
             </span>
             {/* 5.7: ADL rank indicator */}
             <AdlRankBadge rank={adlRank} adlNeeded={adlNeeded} />
@@ -517,6 +530,12 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Margin Health</span>
                 <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                   {marginHealthStr}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-1.5">
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Account Lev.</span>
+                <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+                  {formatLeverageValue(accountLeverage)}x
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">

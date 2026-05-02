@@ -26,7 +26,7 @@ import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsd } from "@/lib/format";
 import { useClosePosition } from "@/hooks/useClosePosition";
-import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
+import { saveEntryPrice, getEntryPrice, getEntryLeverage, clearEntryPrice } from "@/lib/entry-price";
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
@@ -58,6 +58,11 @@ function parsePercToNative(input: string, decimals = 6): bigint {
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
+}
+
+function formatLeverageValue(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "1";
+  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
 }
 
 export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
@@ -306,9 +311,14 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     const dist = Math.abs(Number(livePriceE6) - Number(openLiqPriceE6)) / Number(livePriceE6);
     return dist < 0.20;
   })();
-  const openLeverage = hasOpenPosition && openCapital > 0n && livePriceE6 && livePriceE6 > 0n
-    ? Math.max(1, Math.round(Number(abs(openPositionSize) * livePriceE6 / 1_000_000n) / Number(openCapital)))
+  const savedOpenLeverage = userAccount ? getEntryLeverage(slabAddress, userAccount.idx) : null;
+  const openAccountLeverage = hasOpenPosition && openCapital > 0n && livePriceE6 && livePriceE6 > 0n
+    ? Math.max(1, Number((abs(openPositionSize) * livePriceE6) / 1_000_000n) / Number(openCapital))
     : 1;
+  const openDisplayLeverage = savedOpenLeverage ?? openAccountLeverage;
+  const openLeverageTitle = savedOpenLeverage != null
+    ? `Selected order leverage. Account leverage is ${formatLeverageValue(openAccountLeverage)}x because all deposited collateral counts toward liquidation.`
+    : "Account leverage: position notional divided by total deposited collateral.";
   const { closePosition, loading: closeLoading } = useClosePosition(slabAddress);
 
   const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
@@ -478,7 +488,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // V12_1: entry_price removed from on-chain struct. Save mark price at
       // trade time so the frontend can compute unrealized PnL.
       if (livePriceE6 && livePriceE6 > 0n && userAccount) {
-        saveEntryPrice(slabAddress, userAccount.idx, livePriceE6);
+        saveEntryPrice(slabAddress, userAccount.idx, livePriceE6, leverage);
       }
       // GH#trading-race: Single delayed refresh — give the on-chain state
       // time to settle before re-polling. Avoids the double-refresh that
@@ -529,7 +539,13 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 {isOpenLong ? "LONG" : "SHORT"}
               </span>
               <span className="text-[10px] text-[var(--text-dim)]">{symbol}/USD</span>
-              <span className="text-[10px] font-bold text-cyan-400" style={{ fontFamily: "var(--font-mono)" }}>{openLeverage}x</span>
+              <span
+                className="text-[10px] font-bold text-cyan-400"
+                style={{ fontFamily: "var(--font-mono)" }}
+                title={openLeverageTitle}
+              >
+                {formatLeverageValue(openDisplayLeverage)}x
+              </span>
             </div>
             <button
               onClick={() => setShowCloseModal(true)}
