@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 
-const TOTAL_SLIDES = 11;
+const TOTAL_SLIDES = 12;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -21,13 +21,168 @@ function Slide01Cover({ isCurrent }: SlideProps) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo.png" alt="Percolator" className="pitch-logo" />
         <p className="pitch-hero-sub">
-          Pump.fun for perps.<br />
-          Permissionless perpetuals on Solana.
+          Percolator is a permissionless perpetuals protocol on Solana that
+          lets anyone launch a leveraged market on any token in 60 seconds
+          for $500 — opening perps to the 15 million tokens that incumbent
+          DEXs refuse to list.
         </p>
         <div className="pitch-divider" />
         <p className="pitch-url">percolatorlaunch.com</p>
       </div>
       <div className="pitch-bg-grid" aria-hidden />
+    </div>
+  );
+}
+
+function Slide02Team({ isCurrent }: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Team</div>
+        <h2 className="pitch-title">Built by a small, ship-obsessed team.</h2>
+        <div className="pitch-team-grid">
+          <div className="pitch-team-card">
+            <div className="pitch-team-name">Khubair</div>
+            <div className="pitch-team-role">Founder · Engineering</div>
+            <p className="pitch-team-bio">
+              {/* TODO: replace with real one-line bio. e.g.
+                  "Built X at Y. Shipped Z. N years in DeFi/Solana." */}
+              Solo-shipped Percolator end-to-end: 8 open-source repos,
+              471 formal proofs, mainnet-ready in under a year.
+            </p>
+          </div>
+          <div className="pitch-team-card">
+            <div className="pitch-team-name">{/* TODO */}—</div>
+            <div className="pitch-team-role">{/* TODO: role */}—</div>
+            <p className="pitch-team-bio">
+              {/* TODO: co-founder / advisor / first hire bio */}
+              —
+            </p>
+          </div>
+          <div className="pitch-team-card">
+            <div className="pitch-team-name">{/* TODO */}—</div>
+            <div className="pitch-team-role">{/* TODO: role */}—</div>
+            <p className="pitch-team-bio">
+              {/* TODO: third team member or notable advisor */}
+              —
+            </p>
+          </div>
+        </div>
+        <p className="pitch-team-footer">
+          {/* TODO: one-line credibility marker — e.g.
+              "Backed by [angels]. Audited by [firm]. Advised by [name]." */}
+          Open-source from day one. Apache 2.0. 8 public repos.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Slide03Traction({ isCurrent }: SlideProps) {
+  /* TODO: replace placeholder weekly markets-created series with real data
+     from the indexer. The values below are illustrative — they sum to 168
+     (matches the headline cumulative count) and grow at ~20% WoW (matches
+     the headline growth rate). Replace with the real series and re-derive
+     the WoW % stat. */
+  const weeklyMarkets = [10, 12, 14, 17, 21, 25, 31, 38];
+  const max = Math.max(...weeklyMarkets);
+  const w = 720;
+  const h = 200;
+  const stepX = w / (weeklyMarkets.length - 1);
+  const points = weeklyMarkets
+    .map((v, i) => `${i * stepX},${h - (v / max) * h}`)
+    .join(" ");
+  const areaPoints = `0,${h} ${points} ${w},${h}`;
+
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Traction</div>
+        <h2 className="pitch-title">
+          168 markets created on devnet and 3,000+ organic X followers in
+          ~8 weeks — averaging 20%+ week-over-week growth with zero paid
+          acquisition.
+        </h2>
+
+        <div className="pitch-traction-chart-wrap">
+          <div className="pitch-traction-chart-header">
+            <div>
+              <div className="pitch-traction-chart-title">Markets created per week</div>
+              <div className="pitch-traction-chart-sub mono">
+                devnet · last 8 weeks
+              </div>
+            </div>
+            <div className="pitch-traction-chart-stat">
+              <div className="pitch-traction-chart-stat-num mono">+20% WoW</div>
+              <div className="pitch-traction-chart-stat-label">8-week average</div>
+            </div>
+          </div>
+          <svg
+            viewBox={`0 0 ${w} ${h}`}
+            className="pitch-traction-chart-svg"
+            preserveAspectRatio="none"
+            aria-hidden
+          >
+            <defs>
+              <linearGradient id="tractionAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#9945FF" stopOpacity="0.45" />
+                <stop offset="100%" stopColor="#9945FF" stopOpacity="0" />
+              </linearGradient>
+              <linearGradient id="tractionLineGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#9945FF" />
+                <stop offset="100%" stopColor="#22D3EE" />
+              </linearGradient>
+            </defs>
+            <polygon points={areaPoints} fill="url(#tractionAreaGrad)" />
+            <polyline
+              points={points}
+              fill="none"
+              stroke="url(#tractionLineGrad)"
+              strokeWidth="3"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            {weeklyMarkets.map((v, i) => (
+              <circle
+                key={i}
+                cx={i * stepX}
+                cy={h - (v / max) * h}
+                r="4"
+                fill="#22D3EE"
+              />
+            ))}
+          </svg>
+          <div className="pitch-traction-chart-axis mono">
+            <span>W1</span>
+            <span>W2</span>
+            <span>W3</span>
+            <span>W4</span>
+            <span>W5</span>
+            <span>W6</span>
+            <span>W7</span>
+            <span>W8</span>
+          </div>
+        </div>
+
+        <div className="pitch-traction-mini-row">
+          <div className="pitch-traction-mini">
+            <div className="pitch-traction-mini-num mono">168</div>
+            <div className="pitch-traction-mini-label">Markets on devnet</div>
+          </div>
+          <div className="pitch-traction-mini">
+            <div className="pitch-traction-mini-num mono">3,000+</div>
+            <div className="pitch-traction-mini-label">Organic X followers</div>
+          </div>
+          <div className="pitch-traction-mini">
+            <div className="pitch-traction-mini-num mono">471</div>
+            <div className="pitch-traction-mini-label">Formal proofs (Kani)</div>
+          </div>
+          <div className="pitch-traction-mini">
+            <div className="pitch-traction-mini-num mono">$0</div>
+            <div className="pitch-traction-mini-label">Paid acquisition spend</div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -475,16 +630,17 @@ function Slide11Vision({ isCurrent }: SlideProps) {
 
 const SLIDES = [
   { id: 1, title: "Cover", component: Slide01Cover },
-  { id: 2, title: "The Gap", component: Slide02Gap },
-  { id: 3, title: "Solution", component: Slide03Solution },
-  { id: 4, title: "Create a Market", component: Slide04Create },
-  { id: 5, title: "How It Works", component: Slide05HowItWorks },
-  { id: 6, title: "Proof", component: Slide06Proof },
-  { id: 7, title: "Competition", component: Slide07Competition },
-  { id: 8, title: "Why Now", component: Slide08WhyNow },
-  { id: 9, title: "Who Uses It", component: Slide09Users },
-  { id: 10, title: "The Opportunity", component: Slide10Opportunity },
-  { id: 11, title: "Vision + Roadmap", component: Slide11Vision },
+  { id: 2, title: "Team", component: Slide02Team },
+  { id: 3, title: "Traction", component: Slide03Traction },
+  { id: 4, title: "The Gap", component: Slide02Gap },
+  { id: 5, title: "Solution", component: Slide03Solution },
+  { id: 6, title: "Create a Market", component: Slide04Create },
+  { id: 7, title: "How It Works", component: Slide05HowItWorks },
+  { id: 8, title: "Competition", component: Slide07Competition },
+  { id: 9, title: "Why Now", component: Slide08WhyNow },
+  { id: 10, title: "Who Uses It", component: Slide09Users },
+  { id: 11, title: "The Opportunity", component: Slide10Opportunity },
+  { id: 12, title: "Vision + Roadmap", component: Slide11Vision },
 ];
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -1416,6 +1572,162 @@ export default function PitchPage() {
         @media (max-width: 480px) {
           .pitch-traction-grid {
             grid-template-columns: 1fr;
+          }
+        }
+
+        /* ── Team slide ── */
+        .pitch-team-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1.25rem;
+          margin-bottom: 1.75rem;
+        }
+
+        .pitch-team-card {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 1.5rem 1.25rem;
+        }
+
+        .pitch-team-name {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.15rem;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 0.25rem;
+        }
+
+        .pitch-team-role {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.7rem;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: #22D3EE;
+          margin-bottom: 0.9rem;
+        }
+
+        .pitch-team-bio {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.875rem;
+          line-height: 1.55;
+          color: rgba(255,255,255,0.6);
+          margin: 0;
+        }
+
+        .pitch-team-footer {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.9rem;
+          color: rgba(255,255,255,0.5);
+          padding-top: 1rem;
+          border-top: 1px solid rgba(255,255,255,0.06);
+          margin: 0;
+        }
+
+        @media (max-width: 768px) {
+          .pitch-team-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        /* ── Traction chart ── */
+        .pitch-traction-chart-wrap {
+          background: rgba(255,255,255,0.02);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 14px;
+          padding: 1.5rem 1.5rem 1.25rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .pitch-traction-chart-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          margin-bottom: 1rem;
+          gap: 1rem;
+        }
+
+        .pitch-traction-chart-title {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1rem;
+          font-weight: 600;
+          color: #fff;
+        }
+
+        .pitch-traction-chart-sub {
+          font-size: 0.7rem;
+          color: rgba(255,255,255,0.4);
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-top: 0.2rem;
+        }
+
+        .pitch-traction-chart-stat {
+          text-align: right;
+        }
+
+        .pitch-traction-chart-stat-num {
+          font-size: 1.4rem;
+          font-weight: 700;
+          background: linear-gradient(90deg, #9945FF, #22D3EE);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+
+        .pitch-traction-chart-stat-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.7rem;
+          color: rgba(255,255,255,0.4);
+          margin-top: 0.15rem;
+        }
+
+        .pitch-traction-chart-svg {
+          width: 100%;
+          height: 200px;
+          display: block;
+        }
+
+        .pitch-traction-chart-axis {
+          display: flex;
+          justify-content: space-between;
+          font-size: 0.65rem;
+          color: rgba(255,255,255,0.3);
+          margin-top: 0.6rem;
+          letter-spacing: 0.05em;
+        }
+
+        .pitch-traction-mini-row {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.75rem;
+        }
+
+        .pitch-traction-mini {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 10px;
+          padding: 0.9rem 1rem;
+          text-align: center;
+        }
+
+        .pitch-traction-mini-num {
+          font-size: 1.3rem;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 0.2rem;
+        }
+
+        .pitch-traction-mini-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.7rem;
+          color: rgba(255,255,255,0.45);
+          line-height: 1.3;
+        }
+
+        @media (max-width: 768px) {
+          .pitch-traction-mini-row {
+            grid-template-columns: repeat(2, 1fr);
           }
         }
       `}</style>
