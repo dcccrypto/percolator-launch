@@ -4,6 +4,7 @@ import { FC, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { formatLeverage, ORDER_LEVERAGE_LABEL, RISK_LEVERAGE_LABEL } from "@/lib/leverage-display";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
@@ -12,6 +13,8 @@ interface TradeConfirmationModalProps {
   leverage: number;
   estimatedLiqPrice: bigint;
   tradingFee: bigint;
+  /** Current slab account equity in collateral units. Used to show risk leverage. */
+  accountEquity?: bigint | null;
   /** Underlying asset symbol (e.g. SOL). Used to label the position size. */
   symbol: string;
   /** Collateral token symbol (e.g. USDC). Used to label margin/fee. */
@@ -37,6 +40,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   leverage,
   estimatedLiqPrice,
   tradingFee,
+  accountEquity,
   symbol,
   collateralSymbol,
   decimals,
@@ -48,6 +52,10 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  const notional = margin * BigInt(leverage);
+  const riskLeverage = accountEquity != null && accountEquity > 0n
+    ? Number(notional) / Number(accountEquity)
+    : null;
 
   // Keep callback refs so the mount effect never re-runs on parent re-renders.
   // Without this, every WS price tick creates a new onCancel reference which
@@ -150,9 +158,15 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--text-dim)]">Leverage:</span>
-            <span className="font-mono font-medium text-[var(--text)]">{leverage}x</span>
+            <span className="text-[var(--text-dim)]">{ORDER_LEVERAGE_LABEL}:</span>
+            <span className="font-mono font-medium text-[var(--text)]">{formatLeverage(leverage)}</span>
           </div>
+          {riskLeverage !== null && (
+            <div className="flex justify-between">
+              <span className="text-[var(--text-dim)]">{RISK_LEVERAGE_LABEL}:</span>
+              <span className="font-mono font-medium text-[var(--text-secondary)]">{formatLeverage(riskLeverage)}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-[var(--text-dim)]">Trading Fee:</span>
             <span className="font-mono font-medium text-[var(--text)]">
@@ -173,7 +187,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             ⚠️ Risk Warning
           </p>
           <p className="mt-1 text-[10px] leading-relaxed text-[var(--warning)]/70">
-            Leveraged trading carries high risk. You may lose your entire margin if the market moves against you.
+            Leveraged trading carries high risk. You may lose margin and additional collateral in this market account if the market moves against you.
             The liquidation price is an estimate and may vary.
           </p>
         </div>

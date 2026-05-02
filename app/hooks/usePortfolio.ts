@@ -46,7 +46,7 @@ export interface PortfolioPosition {
   unrealizedPnl: bigint;
   /** PnL as percentage of capital */
   pnlPercent: number;
-  /** Effective leverage (position notional / capital) */
+  /** Risk leverage (position notional / slab account capital) */
   leverage: number;
   /** Maintenance margin bps for this market */
   maintenanceMarginBps: bigint;
@@ -78,7 +78,7 @@ export interface PortfolioData {
 
 /**
  * Fetches all markets and finds positions for the connected wallet.
- * Enriches each position with liquidation price, PnL %, and leverage.
+ * Enriches each position with liquidation price, PnL %, and risk leverage.
  */
 export function usePortfolio(): PortfolioData {
   const { connection } = useConnectionCompat();
@@ -234,7 +234,7 @@ export function usePortfolio(): PortfolioData {
                   }
                 }
 
-                // Leverage = notional / capital = (contracts * price) / capital
+                // Risk leverage = notional / slab account capital.
                 const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
                 let leverage = 0;
                 if (account.capital > 0n && oraclePriceE6 > 0n) {

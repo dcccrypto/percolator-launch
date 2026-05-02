@@ -30,6 +30,12 @@ import { saveEntryPrice, getEntryPrice, getEntryLeverage, clearEntryPrice } from
 import { isSentinelValue } from "@/lib/health";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
+import {
+  formatLeverage,
+  ORDER_LEVERAGE_TITLE,
+  RISK_LEVERAGE_LABEL,
+  RISK_LEVERAGE_TITLE,
+} from "@/lib/leverage-display";
 
 const LEVERAGE_SNAP_POINTS = [1, 2, 5, 10, 20];
 const MARGIN_PRESETS = [25, 50, 75, 100];
@@ -58,11 +64,6 @@ function parsePercToNative(input: string, decimals = 6): bigint {
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
-}
-
-function formatLeverageValue(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "1";
-  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
 }
 
 export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
@@ -313,12 +314,13 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   })();
   const savedOpenLeverage = userAccount ? getEntryLeverage(slabAddress, userAccount.idx) : null;
   const openAccountLeverage = hasOpenPosition && openCapital > 0n && livePriceE6 && livePriceE6 > 0n
-    ? Math.max(1, Number((abs(openPositionSize) * livePriceE6) / 1_000_000n) / Number(openCapital))
-    : 1;
+    ? Number((abs(openPositionSize) * livePriceE6) / 1_000_000n) / Number(openCapital)
+    : 0;
   const openDisplayLeverage = savedOpenLeverage ?? openAccountLeverage;
+  const openDisplayLeverageLabel = savedOpenLeverage != null ? "Order" : "Risk";
   const openLeverageTitle = savedOpenLeverage != null
-    ? `Selected order leverage. Account leverage is ${formatLeverageValue(openAccountLeverage)}x because all deposited collateral counts toward liquidation.`
-    : "Account leverage: position notional divided by total deposited collateral.";
+    ? `${ORDER_LEVERAGE_TITLE} ${RISK_LEVERAGE_LABEL} is ${formatLeverage(openAccountLeverage)} because all collateral in this slab account backs liquidation.`
+    : RISK_LEVERAGE_TITLE;
   const { closePosition, loading: closeLoading } = useClosePosition(slabAddress);
 
   const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
@@ -544,7 +546,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 style={{ fontFamily: "var(--font-mono)" }}
                 title={openLeverageTitle}
               >
-                {formatLeverageValue(openDisplayLeverage)}x
+                {openDisplayLeverageLabel} {formatLeverage(openDisplayLeverage)}
               </span>
             </div>
             <button
@@ -583,6 +585,14 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 <span className="ml-1 text-[9px]">({openPnlPercent >= 0 ? "+" : ""}{openPnlPercent.toFixed(2)}%)</span>
               </span>
             </div>
+            {savedOpenLeverage != null && (
+              <div title={RISK_LEVERAGE_TITLE}>
+                <span className="text-[var(--text-dim)] uppercase tracking-[0.08em]">{RISK_LEVERAGE_LABEL}</span>
+                <span className="ml-2 font-mono font-medium text-[var(--text)]">
+                  {formatLeverage(openAccountLeverage)}
+                </span>
+              </div>
+            )}
           </div>
           {/* Action buttons */}
           <div className="mt-3 grid grid-cols-2 gap-1.5">
@@ -760,7 +770,10 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Leverage slider + presets */}
       <div className="mb-5">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Leverage<InfoIcon tooltip="Multiplies your position size. 5x leverage means 5x the profit but also 5x the loss. Higher leverage = higher risk of liquidation." /></label>
+          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            Order Leverage
+            <InfoIcon tooltip="The slider value used to size this order. Your displayed risk leverage can be lower when this slab account has extra collateral." />
+          </label>
           <div className="flex items-center gap-1">
             <input
               type="text"
@@ -1013,6 +1026,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           leverage={leverage}
           estimatedLiqPrice={confirmSnapshot.estimatedLiqPrice}
           tradingFee={confirmSnapshot.tradingFee}
+          accountEquity={userAccount ? capital : null}
           symbol={symbol}
           collateralSymbol={collateralSymbol}
           decimals={decimals}

@@ -9,6 +9,13 @@ import {
 import { formatUsd, formatTokenAmount } from "@/lib/format";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
+import {
+  formatLeverage,
+  ORDER_LEVERAGE_LABEL,
+  ORDER_LEVERAGE_TITLE,
+  RISK_LEVERAGE_LABEL,
+  RISK_LEVERAGE_TITLE,
+} from "@/lib/leverage-display";
 
 function formatNum(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -30,9 +37,8 @@ interface PreTradeSummaryProps {
   collateralSymbol?: string;
   decimals: number;
   /**
-   * Total account equity in collateral units (capital + realised PnL).
-   * When provided, "Eff. Leverage" shows notional/equity (true account leverage).
-   * Falls back to notional/margin (= slider value) when undefined.
+   * Total slab account equity in collateral units (capital + realised PnL).
+   * When provided, "Risk Lev." shows notional/equity for this market account.
    */
   accountEquity?: bigint | null;
 }
@@ -100,13 +106,12 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
     ? formatNum((Number(margin) / Math.pow(10, decimals)) * priceUsd)
     : `${formatTokenAmount(margin, decimals)} ${settleSymbol}`;
 
-  // Effective leverage = notional / margin-used-for-this-trade.
-  // This equals the slider value by definition (slider sets margin = notional/leverage),
-  // so showing them both is somewhat redundant — but consistency matters: user sets
-  // 10x and sees 10x. The account-level exposure goes in its own row below.
-  const effectiveLeverage = margin > 0n
-    ? Math.round((Number(notionalNative) / Number(margin)) * 10) / 10
-    : 0;
+  // Risk leverage = notional divided by this slab account's collateral.
+  // It can be lower than the selected order leverage when the account has
+  // extra margin, and this is the number that aligns with liquidation risk.
+  const riskLeverage = (accountEquity != null && accountEquity > 0n)
+    ? Number(notionalNative) / Number(accountEquity)
+    : null;
 
   // Account usage: how much of the user's total equity this trade consumes as margin.
   // Tells the user "you're committing X% of your account to this position".
@@ -134,14 +139,21 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
       <div className="space-y-0.5 divide-y divide-[var(--border)]/50">
         <SummaryRow
           label="Direction"
-          value={`${isLong ? "Long" : "Short"} ${leverage}x`}
+          value={isLong ? "Long" : "Short"}
           valueClass={isLong ? "text-[var(--long)]" : "text-[var(--short)]"}
         />
         <SummaryRow
-          label="Eff. Leverage"
-          value={`${effectiveLeverage.toFixed(1)}x`}
+          label={ORDER_LEVERAGE_LABEL}
+          value={formatLeverage(leverage)}
           valueClass={isLong ? "text-[var(--long)]" : "text-[var(--short)]"}
         />
+        {riskLeverage !== null && (
+          <SummaryRow
+            label={RISK_LEVERAGE_LABEL}
+            value={formatLeverage(riskLeverage)}
+            valueClass="text-[var(--text-secondary)]"
+          />
+        )}
         <SummaryRow label="Est. Entry Price" value={formatUsd(estEntry)} />
         <SummaryRow
           label="Notional Value"
@@ -158,7 +170,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         />
         {accountUsagePct !== null && (
           <SummaryRow
-            label="Account Usage"
+            label="Margin Usage"
             value={`${accountUsagePct.toFixed(1)}%`}
             valueClass={
               accountUsagePct >= 90
@@ -175,6 +187,9 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
           valueClass={liqWarning ? "text-orange-400" : isLong ? "text-[var(--short)]" : "text-[var(--long)]"}
         />
       </div>
+      <p className="mt-2 text-[10px] leading-relaxed text-[var(--text-dim)]">
+        {ORDER_LEVERAGE_TITLE} {RISK_LEVERAGE_TITLE}
+      </p>
     </div>
   );
 };

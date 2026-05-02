@@ -28,14 +28,15 @@ import { getEntryPrice, getEntryLeverage, clearEntryPrice } from "@/lib/entry-pr
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getBackendUrl } from "@/lib/config";
 import { parseHumanAmount } from "@/lib/parseAmount";
+import {
+  formatLeverage,
+  ORDER_LEVERAGE_TITLE,
+  RISK_LEVERAGE_LABEL,
+  RISK_LEVERAGE_TITLE,
+} from "@/lib/leverage-display";
 
 function abs(n: bigint): bigint {
   return n < 0n ? -n : n;
-}
-
-function formatLeverageValue(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "1";
-  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
 }
 
 // ─── 5.7: ADL rank for this user's position slot ─────────────────────────────
@@ -307,13 +308,14 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // Old formula used raw contract count which gives ~0 for coin-margined positions.
   const notionalE6 = absPosition * currentPriceE6;
   const accountLeverage = hasPosition && account.capital > 0n && currentPriceE6 > 0n
-    ? Math.max(1, Number(notionalE6 / 1_000_000n) / Number(account.capital))
-    : 1;
+    ? Number(notionalE6 / 1_000_000n) / Number(account.capital)
+    : 0;
   const savedOrderLeverage = getEntryLeverage(slabAddress, userAccount.idx);
   const displayLeverage = savedOrderLeverage ?? accountLeverage;
+  const displayLeverageKind = savedOrderLeverage != null ? "Order" : "Risk";
   const leverageTitle = savedOrderLeverage != null
-    ? `Selected order leverage. Account leverage is ${formatLeverageValue(accountLeverage)}x because all deposited collateral counts toward liquidation.`
-    : "Account leverage: position notional divided by total deposited collateral.";
+    ? `${ORDER_LEVERAGE_TITLE} ${RISK_LEVERAGE_LABEL} is ${formatLeverage(accountLeverage)} because all collateral in this slab account backs liquidation.`
+    : RISK_LEVERAGE_TITLE;
 
   let marginHealthStr = "N/A";
   if (hasPosition && notionalE6 > 0n) {
@@ -437,7 +439,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               className="text-[8px] bg-[var(--accent)]/10 text-[var(--accent)] px-1 py-0.5"
               title={leverageTitle}
             >
-              {formatLeverageValue(displayLeverage)}x
+              {displayLeverageKind} {formatLeverage(displayLeverage)}
             </span>
             {/* 5.7: ADL rank indicator */}
             <AdlRankBadge rank={adlRank} adlNeeded={adlNeeded} />
@@ -533,11 +535,23 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Account Lev.</span>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]" title={RISK_LEVERAGE_TITLE}>
+                  {RISK_LEVERAGE_LABEL}
+                </span>
                 <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {formatLeverageValue(accountLeverage)}x
+                  {formatLeverage(accountLeverage)}
                 </span>
               </div>
+              {savedOrderLeverage != null && (
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]" title={ORDER_LEVERAGE_TITLE}>
+                    Order Lev.
+                  </span>
+                  <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+                    {formatLeverage(savedOrderLeverage)}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Est. Funding (24h)</span>
                 <span className={`text-[11px] font-medium ${estFundingColor}`} style={{ fontFamily: "var(--font-mono)" }}>

@@ -18,6 +18,7 @@ import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
 import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
 import { TradeStatsPanel } from "@/components/trade/TradeStatsPanel";
 import { useTraderStats } from "@/hooks/useTraderStats";
+import { formatLeverage, RISK_LEVERAGE_LABEL, RISK_LEVERAGE_TITLE } from "@/lib/leverage-display";
 
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
@@ -310,8 +311,11 @@ export default function PortfolioPage() {
                             {side.toUpperCase()}
                           </span>
                           {leverage > 0 && (
-                            <span className="rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)]">
-                              {leverage.toFixed(1)}x
+                            <span
+                              className="rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)]"
+                              title={RISK_LEVERAGE_TITLE}
+                            >
+                              Risk {formatLeverage(leverage)}
                             </span>
                           )}
                         </div>
@@ -331,7 +335,7 @@ export default function PortfolioPage() {
                       </div>
 
                       {/* Row 2: Details grid */}
-                      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-5">
+                      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-6">
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Size</p>
                           <p className="text-[12px] text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
@@ -354,6 +358,14 @@ export default function PortfolioPage() {
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Capital</p>
                           <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {formatTokenAmount(posCapital, getDecimals(pos))}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]" title={RISK_LEVERAGE_TITLE}>
+                            {RISK_LEVERAGE_LABEL}
+                          </p>
+                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                            {leverage > 0 ? formatLeverage(leverage) : "—"}
                           </p>
                         </div>
                         <div>
