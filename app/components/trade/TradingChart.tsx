@@ -16,6 +16,7 @@ import { useChartTheme } from "@/hooks/useChartTheme";
 import { ChartEmptyState } from "./ChartEmptyState";
 import { ChartStyleMenu } from "./ChartStyleMenu";
 import { ChartDisplayMenu } from "./ChartDisplayMenu";
+import { ChartPnlBadge } from "./ChartPnlBadge";
 import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
@@ -832,6 +833,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         )}
 
         {overlayPrefs.position && <PositionSummary slabAddress={slabAddress} />}
+        {overlayPrefs.pnl && <ChartPnlBadge slabAddress={slabAddress} />}
       </div>
     </div>
   );
