@@ -8,6 +8,8 @@
  * the union and the runtime sets at compile time.
  */
 
+import { assertNever } from "./exhaustive";
+
 /** Single source of truth for every chart style TradingChart can render.
  *  The `ChartStyle` union and the `VALID_STYLES` set are both derived
  *  from this tuple — append here to add a variant. */
@@ -55,4 +57,61 @@ export function isChartStyle(v: unknown): v is ChartStyle {
  *  downstream code can branch on candle-only chart options for free. */
 export function isCandleStyle(s: ChartStyle): s is CandleStyle {
   return CANDLE_STYLES.has(s);
+}
+
+/** Subset of lightweight-charts `CandlestickSeriesPartialOptions` we set per
+ *  variant. We avoid importing the library type here to keep this module
+ *  pure (Apache-2.0 friendly + tree-shakeable). The shape is enforced
+ *  structurally by `addCandlestickSeries` at the call site. */
+export interface CandleStyleOptions {
+  upColor: string;
+  downColor: string;
+  borderUpColor: string;
+  borderDownColor: string;
+  wickUpColor: string;
+  wickDownColor: string;
+  borderVisible: boolean;
+}
+
+/** Build the `addCandlestickSeries` option preset for a given candle variant.
+ *
+ *  - `candle-solid`: filled bodies in trend color (the default lightweight-charts look)
+ *  - `candle-hollow`: transparent bodies, colored borders — minimal "outlined" look
+ *  - `candle-hollow-up`: hollow on bullish bars, solid on bearish (TradingView's
+ *    classic style — emphasises selling pressure)
+ *  - `candle-hollow-down`: solid bullish, hollow bearish (less common; some traders
+ *    use it to emphasise buying pressure)
+ *
+ *  Wick colors always follow the trend color so direction stays visible even
+ *  when the body is hollow. `borderVisible` is true for any hollow variant
+ *  so the outline draws. */
+export function candleStyleOptions(
+  style: CandleStyle,
+  upColor: string,
+  downColor: string,
+): CandleStyleOptions {
+  const base: CandleStyleOptions = {
+    upColor,
+    downColor,
+    borderUpColor: upColor,
+    borderDownColor: downColor,
+    wickUpColor: upColor,
+    wickDownColor: downColor,
+    borderVisible: false,
+  };
+  switch (style) {
+    case "candle-solid":
+      return base;
+    case "candle-hollow":
+      return { ...base, upColor: "rgba(0,0,0,0)", downColor: "rgba(0,0,0,0)", borderVisible: true };
+    case "candle-hollow-up":
+      return { ...base, upColor: "rgba(0,0,0,0)", borderVisible: true };
+    case "candle-hollow-down":
+      return { ...base, downColor: "rgba(0,0,0,0)", borderVisible: true };
+    default:
+      // If a new CandleStyle is added to ALL_CANDLE_STYLES without a case
+      // here, TypeScript fails at this call site rather than at the function
+      // signature, pointing at the missing branch.
+      return assertNever(style);
+  }
 }

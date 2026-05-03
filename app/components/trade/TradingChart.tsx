@@ -18,7 +18,7 @@ import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
-import { isCandleStyle } from "@/lib/chart-style";
+import { isCandleStyle, candleStyleOptions } from "@/lib/chart-style";
 
 // Phase 2: added 15m timeframe
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "7d" | "30d";
@@ -392,12 +392,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
     if (isCandleStyle(chartStyle) && candleData.length > 0) {
       const series = chart.addCandlestickSeries({
-        upColor: chartTheme.upColor,
-        downColor: chartTheme.downColor,
-        borderDownColor: chartTheme.downColor,
-        borderUpColor: chartTheme.upColor,
-        wickDownColor: chartTheme.downColor,
-        wickUpColor: chartTheme.upColor,
+        ...candleStyleOptions(chartStyle, chartTheme.upColor, chartTheme.downColor),
         // Suppress lightweight-charts' built-in last-price label + horizontal
         // price line. Those show the DEX pool's last candle close (e.g. 84.20)
         // which is NOT our mark price (84.33) — users saw two prices on the
