@@ -2,6 +2,7 @@
 
 import { FC, useEffect, useState, useRef } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import gsap from "gsap";
@@ -131,19 +132,28 @@ export const Header: FC = () => {
           : "border-b border-transparent bg-transparent",
       ].join(" ")}
     >
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between pl-2 pr-5">
         {/* Left */}
         <div className="flex items-center gap-6">
           <Link
             href="/"
             className="group flex items-center gap-2"
-            aria-label="Percolator home"
+            aria-label="Percolator Trade home"
           >
-            <img
-              src="/images/logo.png"
-              alt="Percolator logo"
-              className="h-4 w-auto"
+            <Image
+              src="/images/logo-icon.png"
+              alt=""
+              width={28}
+              height={28}
+              className="shrink-0"
+              priority
             />
+            <span
+              className="hidden text-[16px] font-extrabold uppercase leading-none tracking-wide text-[var(--text)] sm:inline"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Percolator Trade
+            </span>
           </Link>
 
           {/* Desktop nav — dropdown groups */}

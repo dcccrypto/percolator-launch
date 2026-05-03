@@ -2,6 +2,7 @@
 
 import { FC, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 
 const CA = "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump";
 
@@ -20,12 +21,20 @@ export const Footer: FC = () => {
         {/* Main footer row */}
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
           {/* Left - brand */}
-          <div className="flex items-center gap-3">
-            <img
-              src="/images/logo.png"
-              alt="Percolator"
-              className="h-4 w-auto"
+          <div className="flex items-center gap-2.5">
+            <Image
+              src="/images/logo-icon.png"
+              alt=""
+              width={20}
+              height={20}
+              className="shrink-0"
             />
+            <span
+              className="text-[13px] font-extrabold uppercase leading-none tracking-wide text-[var(--text)]"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Percolator Trade
+            </span>
             <span className="text-[var(--text-muted)]">/</span>
             <span className="text-[11px] text-[var(--text-secondary)]">perpetual futures engine</span>
           </div>
