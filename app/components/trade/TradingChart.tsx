@@ -440,7 +440,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         });
       }
       // Entry price overlay — cyan dashed when position is open
-      if (entryPriceNum != null && entryPriceNum > 0) {
+      if (overlayPrefs.entry && entryPriceNum != null && entryPriceNum > 0) {
         entryLineRef.current = s.createPriceLine({
           price: entryPriceNum,
           color: "#22d3ee",
@@ -627,7 +627,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     return () => {
       chart.unsubscribeCrosshairMove(crosshairHandler);
     };
-  }, [chartStyle, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData]);
+  }, [chartStyle, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData, overlayPrefs.entry]);
 
   // Update mark price line when live price changes
   useEffect(() => {
