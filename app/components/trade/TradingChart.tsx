@@ -15,10 +15,12 @@ import { useLiqPrice } from "@/hooks/useLiqPrice";
 import { useChartTheme } from "@/hooks/useChartTheme";
 import { ChartEmptyState } from "./ChartEmptyState";
 import { ChartStyleMenu } from "./ChartStyleMenu";
+import { ChartDisplayMenu } from "./ChartDisplayMenu";
 import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
+import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -129,6 +131,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const { priceUsd } = useLivePrice();
   const chartTheme = useChartTheme();
   const [chartStyle, setChartStyle] = useChartStylePref();
+  const [overlayPrefs, setOverlayPref] = useChartOverlayPrefs();
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -700,6 +703,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         {/* Controls */}
         <div className="flex flex-wrap items-center gap-2">
           <ChartStyleMenu value={chartStyle} onChange={setChartStyle} />
+          <ChartDisplayMenu prefs={overlayPrefs} onToggle={setOverlayPref} />
 
           {/* PERC-8090: 1m/5m/15m/1h/4h/1d only — 7d/30d collapsed */}
           <div className="flex gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
