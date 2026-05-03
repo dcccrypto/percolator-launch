@@ -523,10 +523,47 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 }
 
 /* ─── Scrollbar ─── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; transition: background 200ms; }
-::-webkit-scrollbar-thumb:hover { background: rgba(153, 69, 255, 0.3); }
+::-webkit-scrollbar { width: 16px; height: 16px; }
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 1px solid var(--border);
+}
+@keyframes scrollbar-shimmer {
+  0%, 100% { background: rgba(153, 69, 255, 0.35); }
+  50%      { background: rgba(153, 69, 255, 0.55); }
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(153, 69, 255, 0.35);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  animation: none;
+  transition: background 350ms ease, box-shadow 350ms ease;
+}
+@media (prefers-reduced-motion: no-preference) {
+  ::-webkit-scrollbar-thumb {
+    animation: scrollbar-shimmer 2.4s ease-in-out infinite;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::-webkit-scrollbar-thumb {
+    transition: none;
+  }
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(153, 69, 255, 0.9) !important;
+  background-clip: padding-box;
+  animation: none;
+  box-shadow: 0 0 8px rgba(153, 69, 255, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+::-webkit-scrollbar-thumb:active {
+  background: rgba(153, 69, 255, 1) !important;
+  background-clip: padding-box;
+  animation: none;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+/* Firefox */
+* { scrollbar-width: auto; scrollbar-color: rgba(153, 69, 255, 0.5) rgba(255, 255, 255, 0.03); }
 
 /* ─── Selection ─── */
 ::selection {
