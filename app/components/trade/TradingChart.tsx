@@ -17,8 +17,9 @@ import { ChartEmptyState } from "./ChartEmptyState";
 import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
+import { useChartStylePref } from "@/hooks/useChartStylePref";
+import { isCandleStyle } from "@/lib/chart-style";
 
-type ChartType = "line" | "candle";
 // Phase 2: added 15m timeframe
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "7d" | "30d";
 
@@ -119,7 +120,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const { config } = useSlabState();
   const { priceUsd } = useLivePrice();
   const chartTheme = useChartTheme();
-  const [chartType, setChartType] = useState<ChartType>("candle");
+  const [chartStyle, setChartStyle] = useChartStylePref();
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -275,8 +276,8 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
   // GH#1625: sparse-data guard
   const effectiveSparse =
-    (chartType === "candle" && candleData.length < 2) ||
-    (chartType === "line" && lineData.length < 2);
+    (isCandleStyle(chartStyle) && candleData.length < 2) ||
+    (chartStyle === "line" && lineData.length < 2);
 
   // Phase 2: volume has data (used to show empty state in volume pane)
   const hasVolumeData = candleData.some((c) => (c.volume ?? 0) > 0);
@@ -371,7 +372,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     return Number(ep) / 1e6;
   })();
 
-  // Update series when data or chartType changes
+  // Update series when data or chartStyle changes
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -389,7 +390,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     liqLineRef.current = null;
     entryLineRef.current = null;
 
-    if (chartType === "candle" && candleData.length > 0) {
+    if (isCandleStyle(chartStyle) && candleData.length > 0) {
       const series = chart.addCandlestickSeries({
         upColor: chartTheme.upColor,
         downColor: chartTheme.downColor,
@@ -480,7 +481,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
           title: "Entry",
         });
       }
-    } else if (chartType === "line" && lineData.length > 0) {
+    } else if (chartStyle === "line" && lineData.length > 0) {
       const series = chart.addLineSeries({
         color: chartTheme.upColor,
         lineWidth: 2,
@@ -567,10 +568,16 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     chart.subscribeCrosshairMove(crosshairHandler);
 
     // Only fit the content to viewport on the FIRST render for the current
-    // (timeframe, chart type, data source) combo. Subsequent polls just
+    // (timeframe, chart kind, data source) combo. Subsequent polls just
     // update-in-place so the user's pan/zoom is preserved.
+    //
+    // Bucket all candle variants under one key so flipping between
+    // candle-solid / candle-hollow / candle-hollow-up / candle-hollow-down
+    // does not reset pan/zoom — the variants share the same OHLC series
+    // and only differ in fill/border styling.
     const source = hasPythData ? "pyth" : hasExternalData ? "dex" : "oracle";
-    const fitKey = `${chartType}:${timeframe}:${source}`;
+    const styleBucket = isCandleStyle(chartStyle) ? "candle" : chartStyle;
+    const fitKey = `${styleBucket}:${timeframe}:${source}`;
     if (fitKeyRef.current !== fitKey) {
       chart.timeScale().fitContent();
       fitKeyRef.current = fitKey;
@@ -579,7 +586,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     return () => {
       chart.unsubscribeCrosshairMove(crosshairHandler);
     };
-  }, [chartType, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData]);
+  }, [chartStyle, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData]);
 
   // Update mark price line when live price changes
   useEffect(() => {
@@ -656,9 +663,9 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
             <button
-              onClick={() => setChartType("line")}
+              onClick={() => setChartStyle("line")}
               className={`rounded-none px-2 py-1 text-xs transition-colors ${
-                chartType === "line"
+                chartStyle === "line"
                   ? "bg-[var(--accent)]/10 text-[var(--accent)]"
                   : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
               }`}
@@ -666,9 +673,9 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
               Line
             </button>
             <button
-              onClick={() => setChartType("candle")}
+              onClick={() => setChartStyle("candle-solid")}
               className={`rounded-none px-2 py-1 text-xs transition-colors ${
-                chartType === "candle"
+                isCandleStyle(chartStyle)
                   ? "bg-[var(--accent)]/10 text-[var(--accent)]"
                   : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
               }`}
@@ -769,7 +776,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         )}
 
         {/* Phase 2: Volume no-data overlay — shown when volume pane exists but all volumes are 0 */}
-        {!showEmptyOverlay && chartType === "candle" && !hasVolumeData && (
+        {!showEmptyOverlay && isCandleStyle(chartStyle) && !hasVolumeData && (
           <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex h-[20%] items-center justify-center border-t border-[var(--border)]/30">
             <span className="text-[9px] text-[var(--text-dim)] uppercase tracking-[0.12em]">
               ── Volume (no data) ──
