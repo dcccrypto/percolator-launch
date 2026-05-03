@@ -14,6 +14,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useLiqPrice } from "@/hooks/useLiqPrice";
 import { useChartTheme } from "@/hooks/useChartTheme";
 import { ChartEmptyState } from "./ChartEmptyState";
+import { ChartStyleMenu } from "./ChartStyleMenu";
 import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
@@ -698,28 +699,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
         {/* Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
-            <button
-              onClick={() => setChartStyle("line")}
-              className={`rounded-none px-2 py-1 text-xs transition-colors ${
-                chartStyle === "line"
-                  ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                  : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
-              }`}
-            >
-              Line
-            </button>
-            <button
-              onClick={() => setChartStyle("candle-solid")}
-              className={`rounded-none px-2 py-1 text-xs transition-colors ${
-                isCandleStyle(chartStyle)
-                  ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                  : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
-              }`}
-            >
-              Candle
-            </button>
-          </div>
+          <ChartStyleMenu value={chartStyle} onChange={setChartStyle} />
 
           {/* PERC-8090: 1m/5m/15m/1h/4h/1d only — 7d/30d collapsed */}
           <div className="flex gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">

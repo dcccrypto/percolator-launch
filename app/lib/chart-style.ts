@@ -47,6 +47,25 @@ export type CandleStyle = (typeof ALL_CANDLE_STYLES)[number];
  *  recovery target when a stored preference fails validation. */
 export const DEFAULT_CHART_STYLE: ChartStyle = "candle-solid";
 
+/** Human-readable labels for the style picker. Kept here (not inline in the
+ *  menu component) so adding a new ChartStyle variant forces the
+ *  `Record<ChartStyle, string>` to grow in lockstep — TypeScript flags any
+ *  new union member that lacks an entry here. */
+export const CHART_STYLE_LABELS: Record<ChartStyle, string> = {
+  "line": "Line",
+  "area": "Area",
+  "candle-solid": "Candle (Solid)",
+  "candle-hollow": "Candle (Hollow)",
+  "candle-hollow-up": "Candle (Hollow Up)",
+  "candle-hollow-down": "Candle (Hollow Down)",
+  "bar": "Bar (OHLC)",
+};
+
+/** Display order for the style picker. Reads top-to-bottom from simplest
+ *  series (line) to richest (bar OHLC). Derived from ALL_STYLES so the menu
+ *  cannot drift from the union — the order is intentional, not alphabetic. */
+export const CHART_STYLE_DISPLAY_ORDER: readonly ChartStyle[] = ALL_STYLES;
+
 const VALID_STYLES: ReadonlySet<ChartStyle> = new Set(ALL_STYLES);
 const CANDLE_STYLES: ReadonlySet<ChartStyle> = new Set(ALL_CANDLE_STYLES);
 

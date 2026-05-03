@@ -6,6 +6,8 @@ import {
   chartDataKind,
   hasRenderableData,
   DEFAULT_CHART_STYLE,
+  CHART_STYLE_LABELS,
+  CHART_STYLE_DISPLAY_ORDER,
   type ChartStyle,
   type ChartSeriesKind,
 } from "../../lib/chart-style";
@@ -204,5 +206,52 @@ describe("ChartSeriesKind", () => {
     // is just to keep vitest happy — the test is the type annotation.
     const kinds: ChartSeriesKind[] = ["Candlestick", "Line", "Area", "Bar"];
     expect(kinds).toHaveLength(4);
+  });
+});
+
+describe("CHART_STYLE_LABELS", () => {
+  it("provides a non-empty label for every ChartStyle", () => {
+    // The Record<ChartStyle, string> type already enforces this at compile
+    // time, but a runtime check guards against an empty-string slipping in
+    // (which would render a blank dropdown trigger and make the menu unusable).
+    for (const style of CHART_STYLE_DISPLAY_ORDER) {
+      expect(CHART_STYLE_LABELS[style]).toBeTruthy();
+      expect(CHART_STYLE_LABELS[style].length).toBeGreaterThan(0);
+    }
+  });
+
+  it("labels are unique — no two styles collide", () => {
+    const seen = new Set<string>();
+    for (const style of CHART_STYLE_DISPLAY_ORDER) {
+      const label = CHART_STYLE_LABELS[style];
+      expect(seen.has(label)).toBe(false);
+      seen.add(label);
+    }
+  });
+});
+
+describe("CHART_STYLE_DISPLAY_ORDER", () => {
+  it("includes every ChartStyle exactly once", () => {
+    const all: ChartStyle[] = [
+      "line",
+      "area",
+      "candle-solid",
+      "candle-hollow",
+      "candle-hollow-up",
+      "candle-hollow-down",
+      "bar",
+    ];
+    expect(CHART_STYLE_DISPLAY_ORDER.length).toBe(all.length);
+    for (const style of all) {
+      expect(CHART_STYLE_DISPLAY_ORDER).toContain(style);
+    }
+  });
+
+  it("orders simplest series first (line/area) then candles then bar", () => {
+    // Validates the intent of the manual ordering — if someone reshuffles
+    // ALL_STYLES they should also rethink whether the menu reads naturally.
+    expect(CHART_STYLE_DISPLAY_ORDER[0]).toBe("line");
+    expect(CHART_STYLE_DISPLAY_ORDER[1]).toBe("area");
+    expect(CHART_STYLE_DISPLAY_ORDER[CHART_STYLE_DISPLAY_ORDER.length - 1]).toBe("bar");
   });
 });
