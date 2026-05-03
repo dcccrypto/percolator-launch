@@ -2,6 +2,7 @@
 
 import { FC, useEffect, useState, useRef } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import gsap from "gsap";
@@ -139,13 +140,16 @@ export const Header: FC = () => {
             className="group flex items-center gap-2"
             aria-label="Percolator Trade home"
           >
-            <img
+            <Image
               src="/images/logo-icon.png"
-              alt="Percolator logo"
-              className="h-7 w-7 shrink-0"
+              alt=""
+              width={28}
+              height={28}
+              className="shrink-0"
+              priority
             />
             <span
-              className="text-[16px] font-extrabold uppercase leading-none tracking-wide text-[var(--text)]"
+              className="hidden text-[16px] font-extrabold uppercase leading-none tracking-wide text-[var(--text)] sm:inline"
               style={{ fontFamily: "var(--font-display)" }}
             >
               Percolator Trade

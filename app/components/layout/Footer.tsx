@@ -2,6 +2,7 @@
 
 import { FC, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 
 const CA = "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump";
 
@@ -21,10 +22,12 @@ export const Footer: FC = () => {
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
           {/* Left - brand */}
           <div className="flex items-center gap-2.5">
-            <img
+            <Image
               src="/images/logo-icon.png"
-              alt="Percolator Trade logo"
-              className="h-5 w-5 shrink-0"
+              alt=""
+              width={20}
+              height={20}
+              className="shrink-0"
             />
             <span
               className="text-[13px] font-extrabold uppercase leading-none tracking-wide text-[var(--text)]"
