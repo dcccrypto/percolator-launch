@@ -131,19 +131,25 @@ export const Header: FC = () => {
           : "border-b border-transparent bg-transparent",
       ].join(" ")}
     >
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between pl-2 pr-5">
         {/* Left */}
         <div className="flex items-center gap-6">
           <Link
             href="/"
             className="group flex items-center gap-2"
-            aria-label="Percolator home"
+            aria-label="Percolator Trade home"
           >
             <img
-              src="/images/logo.png"
+              src="/images/logo-icon.png"
               alt="Percolator logo"
-              className="h-4 w-auto"
+              className="h-7 w-7 shrink-0"
             />
+            <span
+              className="text-[16px] font-extrabold uppercase leading-none tracking-wide text-[var(--text)]"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Percolator Trade
+            </span>
           </Link>
 
           {/* Desktop nav — dropdown groups */}
