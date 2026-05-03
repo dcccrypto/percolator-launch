@@ -18,7 +18,14 @@ import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
-import { isCandleStyle, candleStyleOptions } from "@/lib/chart-style";
+import {
+  isCandleStyle,
+  candleStyleOptions,
+  chartDataKind,
+  hasRenderableData,
+  type ChartSeriesKind,
+} from "@/lib/chart-style";
+import { assertNever } from "@/lib/exhaustive";
 
 // Phase 2: added 15m timeframe
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "7d" | "30d";
@@ -138,7 +145,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick" | "Line"> | null>(null);
+  const seriesRef = useRef<ISeriesApi<ChartSeriesKind> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const priceLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const liqLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
@@ -274,10 +281,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
   const totalDataPoints = candleData.length + lineData.length;
 
-  // GH#1625: sparse-data guard
-  const effectiveSparse =
-    (isCandleStyle(chartStyle) && candleData.length < 2) ||
-    (chartStyle === "line" && lineData.length < 2);
+  // GH#1625: sparse-data guard. Routes through the SoT helper so area and
+  // bar correctly trigger the overlay too — they used to fall through the
+  // ad-hoc candle+line predicate.
+  const { sparse: effectiveSparse } = hasRenderableData(chartStyle, candleData, lineData);
 
   // Phase 2: volume has data (used to show empty state in volume pane)
   const hasVolumeData = candleData.some((c) => (c.volume ?? 0) > 0);
@@ -390,59 +397,24 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     liqLineRef.current = null;
     entryLineRef.current = null;
 
-    if (isCandleStyle(chartStyle) && candleData.length > 0) {
-      const series = chart.addCandlestickSeries({
-        ...candleStyleOptions(chartStyle, chartTheme.upColor, chartTheme.downColor),
-        // Suppress lightweight-charts' built-in last-price label + horizontal
-        // price line. Those show the DEX pool's last candle close (e.g. 84.20)
-        // which is NOT our mark price (84.33) — users saw two prices on the
-        // chart and couldn't tell which was authoritative. Our explicit
-        // createPriceLine below draws the mark price as the only price label.
-        lastValueVisible: false,
-        priceLineVisible: false,
-      });
-
-      const formatted = candleData.map((c) => ({
-        time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }));
-      series.setData(formatted);
-      seriesRef.current = series;
-
-      // Volume histogram — only render when the active data source has real
-      // trade volume. Pyth Benchmarks returns v=0 for every bar (it's a price
-      // feed, not a trade tape); painting a sentinel 0.001 for every bar made
-      // the pane render as a meaningless flat red/green band auto-scaled to
-      // fill the full pane. Hide the series entirely in that case and let the
-      // candles reclaim the bottom 10% of vertical space instead.
-      if (hasVolumeData) {
-        const volumeSeries = chart.addHistogramSeries({
-          priceFormat: { type: "volume" },
-          priceScaleId: "volume",
-        });
-        chart.priceScale("volume").applyOptions({
-          scaleMargins: { top: 0.90, bottom: 0 },
-        });
-        const volumeData = candleData.map((c) => ({
-          time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
-          value: c.volume ?? 0,
-          color: c.close >= c.open ? chartTheme.volUpColor : chartTheme.volDownColor,
-        }));
-        volumeSeries.setData(volumeData);
-        volumeSeriesRef.current = volumeSeries;
-      } else {
-        // No volume pane — reclaim the bottom margin for the candle series.
-        series.priceScale().applyOptions({
-          scaleMargins: { top: 0.08, bottom: 0.04 },
-        });
-      }
-
+    // Series selection.
+    //
+    // The switch is exhaustive over ChartStyle: a future variant added to
+    // ALL_STYLES without a matching case here fails the build at the
+    // assertNever default rather than silently rendering nothing.
+    //
+    // All four candle variants share one fall-through body — they all use
+    // addCandlestickSeries with different colour presets via candleStyleOptions.
+    // Bar series also reads OHLC candleData; line and area both read the
+    // single-value lineData stream.
+    //
+    // Overlay lines (Mark / Liq / Entry) are added per series via the local
+    // addOverlayLines() helper to keep each case body small. They use the
+    // generic ISeriesApi.createPriceLine API which all series types support.
+    const addOverlayLines = (s: ISeriesApi<ChartSeriesKind>) => {
       // Mark price line
       if (priceUsd != null) {
-        priceLineRef.current = series.createPriceLine({
+        priceLineRef.current = s.createPriceLine({
           price: priceUsd,
           color: "rgba(255,255,255,0.6)",
           lineWidth: 1,
@@ -451,11 +423,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
           title: "Mark",
         });
       }
-
-      // Phase 2: Liq price overlay
+      // Liq price overlay
       const liqPriceNum = liqPriceE6 != null && liqPriceE6 > 0n ? Number(liqPriceE6) / 1e6 : null;
       if (liqPriceNum != null && liqPriceNum > 0) {
-        liqLineRef.current = series.createPriceLine({
+        liqLineRef.current = s.createPriceLine({
           price: liqPriceNum,
           color: "#ef4444",
           lineWidth: 2,
@@ -464,10 +435,9 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
           title: "Liq",
         });
       }
-
       // Entry price overlay — cyan dashed when position is open
       if (entryPriceNum != null && entryPriceNum > 0) {
-        entryLineRef.current = series.createPriceLine({
+        entryLineRef.current = s.createPriceLine({
           price: entryPriceNum,
           color: "#22d3ee",
           lineWidth: 1,
@@ -476,58 +446,131 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
           title: "Entry",
         });
       }
-    } else if (chartStyle === "line" && lineData.length > 0) {
-      const series = chart.addLineSeries({
-        color: chartTheme.upColor,
-        lineWidth: 2,
-        // Same rationale as candle series — only the mark price should show
-        // as a price-axis label. DEX last-close goes away.
-        lastValueVisible: false,
-        priceLineVisible: false,
-      });
-      const formatted = lineData.map((p) => ({
-        time: (Math.floor(p.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
-        value: p.price,
-      }));
-      series.setData(formatted);
-      seriesRef.current = series as ISeriesApi<"Candlestick" | "Line">;
+    };
 
-      // Mark price line on line series
-      if (priceUsd != null) {
-        priceLineRef.current = series.createPriceLine({
-          price: priceUsd,
-          color: "rgba(255,255,255,0.6)",
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: "Mark",
+    switch (chartStyle) {
+      case "candle-solid":
+      case "candle-hollow":
+      case "candle-hollow-up":
+      case "candle-hollow-down": {
+        if (!hasRenderableData(chartStyle, candleData, lineData).ready) break;
+        const series = chart.addCandlestickSeries({
+          ...candleStyleOptions(chartStyle, chartTheme.upColor, chartTheme.downColor),
+          // Suppress lightweight-charts' built-in last-price label + horizontal
+          // price line. Those show the DEX pool's last candle close (e.g. 84.20)
+          // which is NOT our mark price (84.33) — users saw two prices on the
+          // chart and couldn't tell which was authoritative. Our explicit
+          // createPriceLine below draws the mark price as the only price label.
+          lastValueVisible: false,
+          priceLineVisible: false,
         });
-      }
 
-      // Liq price on line chart
-      const liqPriceNum = liqPriceE6 != null && liqPriceE6 > 0n ? Number(liqPriceE6) / 1e6 : null;
-      if (liqPriceNum != null && liqPriceNum > 0) {
-        liqLineRef.current = series.createPriceLine({
-          price: liqPriceNum,
-          color: "#ef4444",
+        const formatted = candleData.map((c) => ({
+          time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        }));
+        series.setData(formatted);
+        seriesRef.current = series;
+
+        // Volume histogram — only render when the active data source has real
+        // trade volume. Pyth Benchmarks returns v=0 for every bar (it's a price
+        // feed, not a trade tape); painting a sentinel 0.001 for every bar made
+        // the pane render as a meaningless flat red/green band auto-scaled to
+        // fill the full pane. Hide the series entirely in that case and let the
+        // candles reclaim the bottom 10% of vertical space instead.
+        if (hasVolumeData) {
+          const volumeSeries = chart.addHistogramSeries({
+            priceFormat: { type: "volume" },
+            priceScaleId: "volume",
+          });
+          chart.priceScale("volume").applyOptions({
+            scaleMargins: { top: 0.90, bottom: 0 },
+          });
+          const volumeData = candleData.map((c) => ({
+            time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
+            value: c.volume ?? 0,
+            color: c.close >= c.open ? chartTheme.volUpColor : chartTheme.volDownColor,
+          }));
+          volumeSeries.setData(volumeData);
+          volumeSeriesRef.current = volumeSeries;
+        } else {
+          // No volume pane — reclaim the bottom margin for the candle series.
+          series.priceScale().applyOptions({
+            scaleMargins: { top: 0.08, bottom: 0.04 },
+          });
+        }
+
+        addOverlayLines(series);
+        break;
+      }
+      case "bar": {
+        if (!hasRenderableData(chartStyle, candleData, lineData).ready) break;
+        const series = chart.addBarSeries({
+          upColor: chartTheme.upColor,
+          downColor: chartTheme.downColor,
+          openVisible: true,
+          thinBars: false,
+          lastValueVisible: false,
+          priceLineVisible: false,
+        });
+        const formatted = candleData.map((c) => ({
+          time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        }));
+        series.setData(formatted);
+        seriesRef.current = series;
+        addOverlayLines(series);
+        break;
+      }
+      case "line": {
+        if (!hasRenderableData(chartStyle, candleData, lineData).ready) break;
+        const series = chart.addLineSeries({
+          color: chartTheme.upColor,
           lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          axisLabelVisible: true,
-          title: "Liq",
+          // Same rationale as candle series — only the mark price should show
+          // as a price-axis label. DEX last-close goes away.
+          lastValueVisible: false,
+          priceLineVisible: false,
         });
+        const formatted = lineData.map((p) => ({
+          time: (Math.floor(p.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
+          value: p.price,
+        }));
+        series.setData(formatted);
+        seriesRef.current = series;
+        addOverlayLines(series);
+        break;
       }
-
-      // Entry price on line chart
-      if (entryPriceNum != null && entryPriceNum > 0) {
-        entryLineRef.current = series.createPriceLine({
-          price: entryPriceNum,
-          color: "#22d3ee",
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: "Entry",
+      case "area": {
+        if (!hasRenderableData(chartStyle, candleData, lineData).ready) break;
+        // Brand purple (--accent in globals.css) gives the area mode a distinct
+        // identity vs. the green line series — same data, different feel.
+        const ACCENT = "#9945FF";
+        const series = chart.addAreaSeries({
+          lineColor: ACCENT,
+          topColor: `${ACCENT}66`,    // ~40% alpha at the top
+          bottomColor: `${ACCENT}00`, // fade to transparent at the bottom
+          lineWidth: 2,
+          lastValueVisible: false,
+          priceLineVisible: false,
         });
+        const formatted = lineData.map((p) => ({
+          time: (Math.floor(p.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
+          value: p.price,
+        }));
+        series.setData(formatted);
+        seriesRef.current = series;
+        addOverlayLines(series);
+        break;
       }
+      default:
+        return assertNever(chartStyle);
     }
 
     // Crosshair-hover OHLCV readout. Publishes the bar under the cursor to
@@ -563,16 +606,15 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     chart.subscribeCrosshairMove(crosshairHandler);
 
     // Only fit the content to viewport on the FIRST render for the current
-    // (timeframe, chart kind, data source) combo. Subsequent polls just
+    // (timeframe, data-kind, data source) combo. Subsequent polls just
     // update-in-place so the user's pan/zoom is preserved.
     //
-    // Bucket all candle variants under one key so flipping between
-    // candle-solid / candle-hollow / candle-hollow-up / candle-hollow-down
-    // does not reset pan/zoom — the variants share the same OHLC series
-    // and only differ in fill/border styling.
+    // Bucket by data shape (chartDataKind): candle variants + bar all read
+    // OHLC; line + area both read the single-value lineData stream. Flipping
+    // between styles that share a data source preserves pan/zoom; only
+    // switching kinds (candle ↔ line) refits the viewport.
     const source = hasPythData ? "pyth" : hasExternalData ? "dex" : "oracle";
-    const styleBucket = isCandleStyle(chartStyle) ? "candle" : chartStyle;
-    const fitKey = `${styleBucket}:${timeframe}:${source}`;
+    const fitKey = `${chartDataKind(chartStyle)}:${timeframe}:${source}`;
     if (fitKeyRef.current !== fitKey) {
       chart.timeScale().fitContent();
       fitKeyRef.current = fitKey;

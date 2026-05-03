@@ -15,10 +15,12 @@ import { assertNever } from "./exhaustive";
  *  from this tuple — append here to add a variant. */
 const ALL_STYLES = [
   "line",
+  "area",
   "candle-solid",
   "candle-hollow",
   "candle-hollow-up",
   "candle-hollow-down",
+  "bar",
 ] as const;
 
 /** Subset of `ALL_STYLES` that renders as a candlestick series. The
@@ -71,6 +73,64 @@ export interface CandleStyleOptions {
   wickUpColor: string;
   wickDownColor: string;
   borderVisible: boolean;
+}
+
+/** lightweight-charts series-API discriminator strings TradingChart can hold a
+ *  ref to. Every render branch in TradingChart's series-creation switch maps
+ *  to exactly one of these. Centralised here so the `seriesRef` declaration
+ *  and the `addOverlayLines` parameter cannot drift apart. */
+export type ChartSeriesKind = "Candlestick" | "Line" | "Area" | "Bar";
+
+/** Which raw data shape a chart style consumes:
+ *
+ *  - `"ohlc"`   — needs `{open, high, low, close}` per bar (candle + bar series)
+ *  - `"single"` — needs `{price}` per point (line + area series)
+ *
+ *  Two distinct call sites in TradingChart need this answer (sparse-data
+ *  overlay, fit-key viewport bucket). Centralising it means adding a new
+ *  ChartStyle to ALL_STYLES forces a build error at the assertNever default
+ *  rather than silently mis-classifying. */
+export function chartDataKind(style: ChartStyle): "ohlc" | "single" {
+  switch (style) {
+    case "candle-solid":
+    case "candle-hollow":
+    case "candle-hollow-up":
+    case "candle-hollow-down":
+    case "bar":
+      return "ohlc";
+    case "line":
+    case "area":
+      return "single";
+    default:
+      return assertNever(style);
+  }
+}
+
+/** Minimal structural shapes the renderable-data check needs. Declared here
+ *  (not imported from TradingChart) to keep this module pure and avoid an
+ *  import cycle. Callers can pass their richer types — only `.length` is read. */
+interface OhlcLike { readonly timestamp: number }
+interface PricePointLike { readonly timestamp: number }
+
+/** Render-readiness of the data source the given style will actually consume.
+ *
+ *  - `ready`  — true when the relevant array has >= 1 point. Used by the
+ *               render-switch to bail before calling `addXSeries(...)`.
+ *  - `sparse` — true when the relevant array has < 2 points. A single point
+ *               cannot draw a usable body/line, so the "Price chart building…"
+ *               overlay paints instead.
+ *
+ *  The two thresholds (`>= 1` vs `< 2`) are intentional and live here so they
+ *  cannot drift across call sites — before this helper, the switch used
+ *  `=== 0` and the overlay used `< 2`, and the overlay only checked candle +
+ *  line so area and bar fell through and never showed the sparse banner. */
+export function hasRenderableData(
+  style: ChartStyle,
+  candleData: readonly OhlcLike[],
+  lineData: readonly PricePointLike[],
+): { ready: boolean; sparse: boolean } {
+  const len = chartDataKind(style) === "ohlc" ? candleData.length : lineData.length;
+  return { ready: len >= 1, sparse: len < 2 };
 }
 
 /** Build the `addCandlestickSeries` option preset for a given candle variant.
