@@ -429,7 +429,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       }
       // Liq price overlay
       const liqPriceNum = liqPriceE6 != null && liqPriceE6 > 0n ? Number(liqPriceE6) / 1e6 : null;
-      if (liqPriceNum != null && liqPriceNum > 0) {
+      if (overlayPrefs.liq && liqPriceNum != null && liqPriceNum > 0) {
         liqLineRef.current = s.createPriceLine({
           price: liqPriceNum,
           color: "#ef4444",
@@ -627,7 +627,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     return () => {
       chart.unsubscribeCrosshairMove(crosshairHandler);
     };
-  }, [chartStyle, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData, overlayPrefs.entry]);
+  }, [chartStyle, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData, overlayPrefs.entry, overlayPrefs.liq]);
 
   // Update mark price line when live price changes
   useEffect(() => {
