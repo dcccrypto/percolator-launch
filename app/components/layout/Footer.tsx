@@ -20,12 +20,18 @@ export const Footer: FC = () => {
         {/* Main footer row */}
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
           {/* Left - brand */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <img
-              src="/images/logo.png"
-              alt="Percolator"
-              className="h-4 w-auto"
+              src="/images/logo-icon.png"
+              alt="Percolator Trade logo"
+              className="h-5 w-5 shrink-0"
             />
+            <span
+              className="text-[13px] font-extrabold uppercase leading-none tracking-wide text-[var(--text)]"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Percolator Trade
+            </span>
             <span className="text-[var(--text-muted)]">/</span>
             <span className="text-[11px] text-[var(--text-secondary)]">perpetual futures engine</span>
           </div>
