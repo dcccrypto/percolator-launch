@@ -13,18 +13,21 @@
  */
 
 /** Single source of truth for every overlay the chart can toggle. */
-const ALL_OVERLAYS = ["entry", "liq", "pnl"] as const;
+const ALL_OVERLAYS = ["position", "entry", "liq", "pnl"] as const;
 
 /** Discriminator union for chart-overlay preferences. */
 export type OverlayKey = (typeof ALL_OVERLAYS)[number];
 
-/** Display order in the Display menu. Reads top-to-bottom in priority of
- *  what a trader watches when a position is open: entry → liq → pnl. */
+/** Display order in the Display menu. Reads top-to-bottom in the order a
+ *  trader thinks about an open position: do I have one (Position) → where
+ *  did I get in (Entry) → where do I get liquidated (Liq) → what's it doing
+ *  (PnL). */
 export const OVERLAY_DISPLAY_ORDER: readonly OverlayKey[] = ALL_OVERLAYS;
 
 /** Human-readable labels. Adding a new OverlayKey forces this Record to grow
  *  — TypeScript flags any missing entry. */
 export const OVERLAY_LABELS: Record<OverlayKey, string> = {
+  position: "Position Summary",
   entry: "Avg Entry Price",
   liq: "Liquidation Price",
   pnl: "Live PnL",
@@ -38,6 +41,7 @@ export type OverlayPrefs = Record<OverlayKey, boolean>;
  *  opt in. Future overlays added to ALL_OVERLAYS must declare a default
  *  here or this Record fails to type-check. */
 export const DEFAULT_OVERLAY_PREFS: OverlayPrefs = {
+  position: true,
   entry: true,
   liq: true,
   pnl: true,

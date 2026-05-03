@@ -831,8 +831,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
           </div>
         )}
 
-        {/* Phase 2: Position summary badge overlay */}
-        <PositionSummary slabAddress={slabAddress} />
+        {overlayPrefs.position && <PositionSummary slabAddress={slabAddress} />}
       </div>
     </div>
   );

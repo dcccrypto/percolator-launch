@@ -11,12 +11,12 @@ import {
 
 describe("isOverlayKey", () => {
   it("accepts every member of the OverlayKey union", () => {
-    const all: OverlayKey[] = ["entry", "liq", "pnl"];
+    const all: OverlayKey[] = ["position", "entry", "liq", "pnl"];
     for (const k of all) expect(isOverlayKey(k)).toBe(true);
   });
 
   it("rejects unknown strings, including case-mismatches", () => {
-    for (const v of ["", "Entry", "ENTRY", "mark", "volume", "fee"]) {
+    for (const v of ["", "Entry", "ENTRY", "mark", "volume", "fee", "Position"]) {
       expect(isOverlayKey(v)).toBe(false);
     }
   });
@@ -43,6 +43,7 @@ describe("mergeOverlayPrefs", () => {
 
   it("falls back to defaults for missing keys (older deploy wrote a smaller set)", () => {
     expect(mergeOverlayPrefs({ entry: false })).toEqual({
+      position: true,
       entry: false,
       liq: true,
       pnl: true,
@@ -50,14 +51,14 @@ describe("mergeOverlayPrefs", () => {
   });
 
   it("ignores unknown keys (forward-compat: downgraded build sees a future key)", () => {
-    const result = mergeOverlayPrefs({ entry: false, liq: true, pnl: true, future: true });
-    expect(result).toEqual({ entry: false, liq: true, pnl: true });
+    const result = mergeOverlayPrefs({ position: true, entry: false, liq: true, pnl: true, future: true });
+    expect(result).toEqual({ position: true, entry: false, liq: true, pnl: true });
     expect("future" in result).toBe(false);
   });
 
   it("ignores keys whose values are not boolean", () => {
-    const result = mergeOverlayPrefs({ entry: "no", liq: 0, pnl: true });
-    expect(result).toEqual({ entry: true, liq: true, pnl: true });
+    const result = mergeOverlayPrefs({ position: "yes", entry: "no", liq: 0, pnl: true });
+    expect(result).toEqual({ position: true, entry: true, liq: true, pnl: true });
   });
 });
 
@@ -88,24 +89,25 @@ describe("OVERLAY_LABELS", () => {
 
 describe("OVERLAY_DISPLAY_ORDER", () => {
   it("includes every OverlayKey exactly once", () => {
-    const all: OverlayKey[] = ["entry", "liq", "pnl"];
+    const all: OverlayKey[] = ["position", "entry", "liq", "pnl"];
     expect(OVERLAY_DISPLAY_ORDER.length).toBe(all.length);
     for (const key of all) {
       expect(OVERLAY_DISPLAY_ORDER).toContain(key);
     }
   });
 
-  it("prioritises entry → liq → pnl (what a trader watches with an open position)", () => {
-    expect(OVERLAY_DISPLAY_ORDER[0]).toBe("entry");
-    expect(OVERLAY_DISPLAY_ORDER[1]).toBe("liq");
-    expect(OVERLAY_DISPLAY_ORDER[2]).toBe("pnl");
+  it("orders position → entry → liq → pnl (the order a trader thinks about an open position)", () => {
+    expect(OVERLAY_DISPLAY_ORDER[0]).toBe("position");
+    expect(OVERLAY_DISPLAY_ORDER[1]).toBe("entry");
+    expect(OVERLAY_DISPLAY_ORDER[2]).toBe("liq");
+    expect(OVERLAY_DISPLAY_ORDER[3]).toBe("pnl");
   });
 });
 
 describe("type integrity", () => {
   it("OverlayPrefs accepts every OverlayKey as a key", () => {
     // Compile-time check — body just satisfies the Record contract at runtime.
-    const prefs: OverlayPrefs = { entry: true, liq: false, pnl: true };
+    const prefs: OverlayPrefs = { position: true, entry: true, liq: false, pnl: true };
     expect(Object.keys(prefs).sort()).toEqual([...OVERLAY_DISPLAY_ORDER].sort());
   });
 });
