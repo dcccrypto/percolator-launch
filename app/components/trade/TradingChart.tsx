@@ -39,6 +39,7 @@ import { useChartIndicatorPrefs } from "@/hooks/useChartIndicatorPrefs";
 import { isOverlayKind, isPaneKind } from "@/lib/indicator-registry";
 import { useIndicatorOverlays } from "./useIndicatorOverlays";
 import { useIndicatorOscillatorPane } from "./useIndicatorOscillatorPane";
+import { ChartIndicatorMenu } from "./ChartIndicatorMenu";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -150,7 +151,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const chartTheme = useChartTheme();
   const [chartStyle, setChartStyle] = useChartStylePref();
   const [overlayPrefs, setOverlayPref] = useChartOverlayPrefs();
-  const { indicators } = useChartIndicatorPrefs(slabAddress);
+  const {
+    indicators,
+    addIndicator,
+    removeIndicator,
+    updateIndicator,
+    clearAll: clearAllIndicators,
+  } = useChartIndicatorPrefs(slabAddress);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -760,6 +767,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         <div className="flex flex-wrap items-center gap-2">
           <ChartStyleMenu value={chartStyle} onChange={setChartStyle} />
           <ChartDisplayMenu prefs={overlayPrefs} onToggle={setOverlayPref} />
+          <ChartIndicatorMenu
+            indicators={indicators}
+            addIndicator={addIndicator}
+            removeIndicator={removeIndicator}
+            updateIndicator={updateIndicator}
+            clearAll={clearAllIndicators}
+          />
 
           {/* PERC-8090: 1m/5m/15m/1h/4h/1d only — 7d/30d collapsed */}
           <div className="flex gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
