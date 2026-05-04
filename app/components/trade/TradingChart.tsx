@@ -20,6 +20,7 @@ import { ChartPnlBadge } from "./ChartPnlBadge";
 import { computeRef24h, computePriceChange } from "@/lib/chart-stats";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
+import { getEntryPrice } from "@/lib/entry-price";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
 import {
@@ -380,8 +381,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     const ua = realUserAccount;
     if (!ua) return null;
     const ep = ua.account.entryPrice;
-    if (ep == null || ep === 0n) return null;
-    return Number(ep) / 1e6;
+    const resolvedEntryPrice =
+      ep != null && ep > 0n ? ep : getEntryPrice(slabAddress, ua.idx);
+    if (resolvedEntryPrice <= 0n) return null;
+    return Number(resolvedEntryPrice) / 1e6;
   })();
 
   // Update series when data or chartStyle changes
@@ -618,7 +621,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     // OHLC; line + area both read the single-value lineData stream. Flipping
     // between styles that share a data source preserves pan/zoom; only
     // switching kinds (candle ↔ line) refits the viewport.
-    const source = hasPythData ? "pyth" : hasExternalData ? "dex" : "oracle";
+    const source = hasPercolatorData
+      ? "percolator"
+      : hasPythData
+        ? "pyth"
+        : hasExternalData
+          ? "dex"
+          : "oracle";
     const fitKey = `${chartDataKind(chartStyle)}:${timeframe}:${source}`;
     if (fitKeyRef.current !== fitKey) {
       chart.timeScale().fitContent();
@@ -628,7 +637,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     return () => {
       chart.unsubscribeCrosshairMove(crosshairHandler);
     };
-  }, [chartStyle, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPythData, hasExternalData, overlayPrefs.entry, overlayPrefs.liq]);
+  }, [chartStyle, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPercolatorData, hasPythData, hasExternalData, overlayPrefs.entry, overlayPrefs.liq]);
 
   // Update mark price line when live price changes
   useEffect(() => {

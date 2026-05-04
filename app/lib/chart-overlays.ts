@@ -70,4 +70,3 @@ export function mergeOverlayPrefs(stored: unknown): OverlayPrefs {
   }
   return merged;
 }
-

@@ -43,7 +43,7 @@ describe("ChartDisplayMenu", () => {
   it("aria-pressed reflects the current value of each overlay pref", () => {
     render(
       <ChartDisplayMenu
-        prefs={{ entry: true, liq: false, pnl: true }}
+        prefs={{ ...DEFAULT_OVERLAY_PREFS, entry: true, liq: false, pnl: true }}
         onToggle={() => {}}
       />,
     );
@@ -67,7 +67,7 @@ describe("ChartDisplayMenu", () => {
     const onToggle = vi.fn();
     render(
       <ChartDisplayMenu
-        prefs={{ entry: true, liq: false, pnl: true }}
+        prefs={{ ...DEFAULT_OVERLAY_PREFS, entry: true, liq: false, pnl: true }}
         onToggle={onToggle}
       />,
     );
@@ -116,9 +116,11 @@ describe("ChartDisplayMenu", () => {
 
   it("hides the popup container from assistive tech when closed", () => {
     const { container } = render(<ChartDisplayMenu prefs={allOn} onToggle={() => {}} />);
-    // The popup is the only child div with aria-hidden — find it via that attr.
-    const popup = container.querySelector('[aria-hidden="true"]');
+    const popup = container.querySelector('div[aria-hidden="true"]');
     expect(popup).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Display/i }));
+    expect(container.querySelector('div[aria-hidden="true"]')).toBeNull();
   });
 
   it("flips toggle-row tabIndex between 0 (open) and -1 (closed)", () => {
