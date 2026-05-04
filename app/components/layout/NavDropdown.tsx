@@ -75,7 +75,7 @@ export const NavDropdown: FC<NavDropdownProps> = ({ label, items }) => {
         aria-expanded={open}
         aria-haspopup="true"
         className={[
-          "flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-sm transition-colors duration-200",
+          "flex min-h-10 items-center gap-1 rounded-sm px-3 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]",
           hasActive || open
             ? "text-[var(--text)]"
             : "text-[#9ca3af] hover:text-[var(--text)]",

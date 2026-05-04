@@ -22,7 +22,7 @@ export const ConnectButton: FC = () => {
     return (
       <button
         disabled
-        className="rounded-sm px-4 py-1.5 text-[13px] font-medium text-[var(--text-muted)] border border-[var(--border)] opacity-50"
+        className="min-h-10 rounded-sm border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--text-muted)] opacity-50"
         aria-label="Wallet unavailable"
       >
         Connect
@@ -95,7 +95,7 @@ const ConnectButtonInner: FC = () => {
     return (
       <button
         disabled
-        className="rounded-sm px-4 py-1.5 text-[13px] font-medium text-[var(--text-muted)] border border-[var(--border)] opacity-50"
+        className="min-h-10 rounded-sm border border-[var(--border)] px-4 text-[13px] font-medium text-[var(--text-muted)] opacity-50"
       >
         Loading…
       </button>
@@ -107,7 +107,7 @@ const ConnectButtonInner: FC = () => {
       <button
         onClick={handleClick}
         className={[
-          "rounded-sm px-4 py-1.5 text-[13px] font-medium transition-all duration-200 border",
+          "min-h-10 max-w-[10rem] truncate rounded-sm border px-4 text-[13px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]",
           authenticated
             ? "text-[var(--accent)] border-[var(--accent)]/30 bg-[var(--accent)]/[0.06] hover:bg-[var(--accent)]/[0.12]"
             : "text-[var(--text)] border-[var(--accent)] bg-[var(--accent)]/20 hover:bg-[var(--accent)]/30",

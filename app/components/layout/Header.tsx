@@ -132,12 +132,12 @@ export const Header: FC = () => {
           : "border-b border-transparent bg-transparent",
       ].join(" ")}
     >
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between pl-2 pr-5">
+      <div className="flex h-14 w-full items-center justify-between gap-3 pl-2 pr-2 sm:px-4 lg:px-6">
         {/* Left */}
-        <div className="flex items-center gap-6">
+        <div className="flex min-w-0 flex-1 items-center gap-4 md:gap-6">
           <Link
             href="/"
-            className="group flex items-center gap-2"
+            className="group flex min-h-10 shrink-0 items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]"
             aria-label="Percolator Trade home"
           >
             <Image
@@ -165,7 +165,7 @@ export const Header: FC = () => {
         </div>
 
         {/* Right */}
-        <div className="flex items-center gap-2.5">
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-2.5">
           {/* DEVNET badge — non-interactive pill */}
           {network === "devnet" && (
             <span
@@ -184,7 +184,7 @@ export const Header: FC = () => {
           {/* Mobile menu toggle */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="flex h-8 w-8 items-center justify-center rounded-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--accent)]/[0.04] transition-colors md:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--accent)]/[0.04] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] md:hidden"
             aria-label={mobileOpen ? "Close menu" : "Open menu"}
             aria-expanded={mobileOpen}
           >
