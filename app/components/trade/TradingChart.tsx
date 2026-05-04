@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useState, useRef, useEffect, useCallback } from "react";
+import { FC, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   createChart,
   IChartApi,
@@ -35,6 +35,9 @@ import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { getEntryPrice } from "@/lib/entry-price";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
+import { useChartIndicatorPrefs } from "@/hooks/useChartIndicatorPrefs";
+import { isOverlayKind } from "@/lib/indicator-registry";
+import { useIndicatorOverlays } from "./useIndicatorOverlays";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -146,6 +149,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const chartTheme = useChartTheme();
   const [chartStyle, setChartStyle] = useChartStylePref();
   const [overlayPrefs, setOverlayPref] = useChartOverlayPrefs();
+  const { indicators } = useChartIndicatorPrefs(slabAddress);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -163,6 +167,11 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  // Flips true once the chart-init effect has populated chartRef.current,
+  // back to false on unmount. Provides a reactive trigger for downstream
+  // hooks (useIndicatorOverlays) that need to attach series to the chart
+  // — refs alone can't drive an effect since they don't trigger re-runs.
+  const [chartReady, setChartReady] = useState(false);
   const seriesRef = useRef<ISeriesApi<ChartSeriesKind> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const priceLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
@@ -307,6 +316,16 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   // Phase 2: volume has data (used to show empty state in volume pane)
   const hasVolumeData = candleData.some((c) => (c.volume ?? 0) > 0);
 
+  // Indicator overlays (SMA / EMA / Bollinger). Memo the filtered subset so
+  // the overlay hook's effect only re-runs when the user actually adds /
+  // removes / edits an indicator — not on every WebSocket price tick (which
+  // would churn series remove+recreate at 250ms cadence).
+  const overlayIndicatorConfigs = useMemo(
+    () => indicators.filter((i) => isOverlayKind(i.kind)),
+    [indicators],
+  );
+  useIndicatorOverlays(chartRef, chartReady, candleData, overlayIndicatorConfigs);
+
   // Create/destroy chart
   useEffect(() => {
     if (!containerRef.current) return;
@@ -357,8 +376,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     });
 
     chartRef.current = chart;
+    setChartReady(true);
 
     return () => {
+      setChartReady(false);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
