@@ -14,6 +14,26 @@ import { getNextColor } from "@/lib/indicator-palette";
 
 export type { IndicatorConfig, IndicatorKind } from "@/lib/indicator-registry";
 
+/** Distribute Omit over a discriminated union — built-in Omit collapses
+ *  to common keys via `keyof`, dropping per-variant fields like `period`
+ *  and `stdDev`. The conditional-type trick (`T extends unknown ? ... :
+ *  never`) forces distribution, preserving each variant's full key set
+ *  before the omit is applied. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
+
+/** Patch shape accepted by `updateIndicator`. Excludes `id` (immutable
+ *  identity) and `kind` (the discriminator — changing it without supplying
+ *  the new variant's required fields would corrupt the config). Each
+ *  variant retains its per-kind fields (period for SMA/EMA/RSI;
+ *  period+stdDev for Bollinger; fast/slow/signal for MACD) so a Bollinger
+ *  row can patch `stdDev` and a MACD row can patch `signalPeriod` — but
+ *  no caller can switch a config's kind. */
+export type IndicatorPatch = Partial<
+  DistributiveOmit<IndicatorConfig, "id" | "kind">
+>;
+
 const STORAGE_KEY_PREFIX = "perc:chart:indicators:";
 
 function storageKey(slabAddress: string): string {
@@ -35,7 +55,7 @@ export interface UseChartIndicatorPrefsReturn {
   indicators: IndicatorConfig[];
   addIndicator: (kind: IndicatorKind) => void;
   removeIndicator: (id: string) => void;
-  updateIndicator: (id: string, patch: Partial<IndicatorConfig>) => void;
+  updateIndicator: (id: string, patch: IndicatorPatch) => void;
   clearAll: () => void;
 }
 
@@ -129,8 +149,13 @@ export function useChartIndicatorPrefs(slabAddress: string): UseChartIndicatorPr
   );
 
   const updateIndicator = useCallback(
-    (id: string, patch: Partial<IndicatorConfig>) => {
+    (id: string, patch: IndicatorPatch) => {
       setIndicators((current) => {
+        // Spread is sound now that IndicatorPatch excludes `kind`: i.kind
+        // wins, so the discriminator can't be flipped to a variant whose
+        // required fields are missing. Per-kind fields not native to this
+        // variant (e.g. stdDev landing on an SMA) are extra-property noise
+        // — read sites switch on kind and ignore them.
         const list = current.map((i) =>
           i.id === id ? ({ ...i, ...patch } as IndicatorConfig) : i,
         );

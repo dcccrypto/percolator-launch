@@ -7,13 +7,14 @@ import {
   type IndicatorConfig,
   type IndicatorKind,
 } from "@/lib/indicator-registry";
+import type { IndicatorPatch } from "@/hooks/useChartIndicatorPrefs";
 import { assertNever } from "@/lib/exhaustive";
 
 interface ChartIndicatorMenuProps {
   indicators: IndicatorConfig[];
   addIndicator: (kind: IndicatorKind) => void;
   removeIndicator: (id: string) => void;
-  updateIndicator: (id: string, patch: Partial<IndicatorConfig>) => void;
+  updateIndicator: (id: string, patch: IndicatorPatch) => void;
   clearAll: () => void;
 }
 
@@ -178,7 +179,7 @@ interface ChartIndicatorRowProps {
   config: IndicatorConfig | null;
   onAdd: () => void;
   onRemove: () => void;
-  onUpdate: (patch: Partial<IndicatorConfig>) => void;
+  onUpdate: (patch: IndicatorPatch) => void;
 }
 
 const ChartIndicatorRow: FC<ChartIndicatorRowProps> = ({
@@ -232,7 +233,7 @@ const ChartIndicatorRow: FC<ChartIndicatorRowProps> = ({
 
 interface ConfigInputsProps {
   config: IndicatorConfig;
-  onUpdate: (patch: Partial<IndicatorConfig>) => void;
+  onUpdate: (patch: IndicatorPatch) => void;
 }
 
 const ConfigInputs: FC<ConfigInputsProps> = ({ config, onUpdate }) => {
