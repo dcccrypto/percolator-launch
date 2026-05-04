@@ -227,10 +227,14 @@ function renderOscillatorConfig(
         data.map((p) => ({ time: msToUtc(p.time), value: p.value })),
       );
       // Overbought (70) and oversold (30) reference lines — universal
-      // RSI convention. Dashed, in the theme's grid colour for subtlety.
+      // RSI convention. Dashed, derived from the theme's text colour at
+      // ~25% alpha so they read as secondary structure rather than noise.
+      // theme.gridColor (~4-5% alpha) was effectively invisible on real
+      // charts.
+      const referenceColor = withAlpha(theme.textColor, 0.25);
       const overbought = series.createPriceLine({
         price: 70,
-        color: theme.gridColor,
+        color: referenceColor,
         lineStyle: LineStyle.Dashed,
         lineWidth: 1,
         axisLabelVisible: true,
@@ -238,7 +242,7 @@ function renderOscillatorConfig(
       });
       const oversold = series.createPriceLine({
         price: 30,
-        color: theme.gridColor,
+        color: referenceColor,
         lineStyle: LineStyle.Dashed,
         lineWidth: 1,
         axisLabelVisible: true,
@@ -291,13 +295,15 @@ function renderOscillatorConfig(
       macdLine.setData(
         data.map((p) => ({ time: msToUtc(p.time), value: p.macd })),
       );
-      // Signal line in the theme text colour for contrast against the
-      // palette-coloured MACD line. Both share the same scale so a
-      // crossover at the same y-coordinate IS a true crossover.
+      // Signal line in the theme text colour, ramped to ~75% alpha so it
+      // reads as a peer line to the palette-coloured MACD line rather
+      // than as background noise (the default theme.textColor is ~45%
+      // alpha — too faint at 1px line width). Both share the same scale
+      // so a crossover at the same y-coordinate IS a true crossover.
       const signalLine = chart.addSeries(
         LineSeries,
         {
-          color: theme.textColor,
+          color: withAlpha(theme.textColor, 0.75),
           lineWidth: 1,
           priceLineVisible: false,
           lastValueVisible: false,
@@ -327,4 +333,18 @@ function renderOscillatorConfig(
  *  conversion site knows about lightweight-charts' seconds convention. */
 function msToUtc(timeMs: number): UTCTimestamp {
   return Math.floor(timeMs / 1000) as UTCTimestamp;
+}
+
+/** Override the alpha channel of an `rgba(...)` string. The chart theme
+ *  exposes `textColor` as `rgba(R,G,B,A)` for both dark and light themes;
+ *  this helper lets us derive higher-contrast variants for the RSI
+ *  reference lines (~25%) and MACD signal line (~75%) without hardcoding
+ *  light/dark colors at the use site. */
+function withAlpha(rgbaColor: string, alpha: number): string {
+  const match = rgbaColor.match(/^rgba?\(([^)]+)\)$/);
+  if (!match) return rgbaColor;
+  const parts = match[1].split(",").map((p) => p.trim());
+  if (parts.length < 3) return rgbaColor;
+  const [r, g, b] = parts;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }

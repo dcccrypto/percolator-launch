@@ -800,7 +800,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
-                className={`rounded-none px-2 py-1 text-xs transition-colors ${
+                className={`rounded-none px-1.5 sm:px-2 py-1 text-xs transition-colors ${
                   timeframe === tf
                     ? "bg-[var(--accent)]/10 text-[var(--accent)]"
                     : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"

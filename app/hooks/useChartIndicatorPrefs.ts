@@ -36,6 +36,17 @@ export type IndicatorPatch = Partial<
 
 const STORAGE_KEY_PREFIX = "perc:chart:indicators:";
 
+/** Solana base58 pubkey: 32–44 chars from the base58 alphabet (no 0OIl).
+ *  Validating before forming the storage key prevents an empty / crafted
+ *  slab address from poisoning a shared bucket (e.g. `slabAddress = ""`
+ *  would otherwise write to `perc:chart:indicators:` — a single key
+ *  visible to every page that mounts the hook with a falsy slab). */
+const SOLANA_PUBKEY_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+function isValidSlabAddress(slabAddress: string): boolean {
+  return SOLANA_PUBKEY_RE.test(slabAddress);
+}
+
 function storageKey(slabAddress: string): string {
   return STORAGE_KEY_PREFIX + slabAddress;
 }
@@ -88,6 +99,14 @@ export function useChartIndicatorPrefs(slabAddress: string): UseChartIndicatorPr
   useEffect(() => {
     slabRef.current = slabAddress;
     if (typeof window === "undefined") return;
+    // Treat an invalid/empty slab as "no persistence" — start with an
+    // empty list and don't read from localStorage. Without this guard,
+    // hooks mounted before the route param resolves would read from the
+    // shared `perc:chart:indicators:` bucket.
+    if (!isValidSlabAddress(slabAddress)) {
+      setIndicators([]);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(storageKey(slabAddress));
       if (raw == null) {
@@ -104,9 +123,11 @@ export function useChartIndicatorPrefs(slabAddress: string): UseChartIndicatorPr
 
   /** Persist the current list to localStorage. Best-effort — quota errors,
    *  privacy mode, etc. are swallowed. Wraps the list in the versioned
-   *  envelope. */
+   *  envelope. Skips the write entirely for invalid slab addresses to
+   *  avoid poisoning a shared bucket. */
   const persist = useCallback((slab: string, list: IndicatorConfig[]) => {
     if (typeof window === "undefined") return;
+    if (!isValidSlabAddress(slab)) return;
     try {
       const envelope: IndicatorsStorage = {
         version: INDICATORS_STORAGE_VERSION,

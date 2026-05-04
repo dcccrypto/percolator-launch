@@ -96,7 +96,7 @@ export const ChartIndicatorMenu: FC<ChartIndicatorMenuProps> = ({
         aria-label="Indicators"
         title="Indicators"
         className={[
-          "flex items-center gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-xs transition-colors",
+          "flex items-center gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-1.5 sm:px-2 py-1 text-xs transition-colors",
           open
             ? "text-[var(--accent)]"
             : "text-[var(--text-secondary)] hover:text-[var(--text)]",
