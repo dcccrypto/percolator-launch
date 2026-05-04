@@ -1,16 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { exponentialMovingAverage } from "@/lib/indicators/ema";
-import type { Candle } from "@/lib/indicators/types";
-
-function candlesFromCloses(closes: readonly number[]): Candle[] {
-  return closes.map((close, i) => ({
-    timestamp: i * 60_000,
-    open: close,
-    high: close,
-    low: close,
-    close,
-  }));
-}
+import { candlesFromCloses } from "./helpers";
 
 describe("exponentialMovingAverage", () => {
   it("seeds with SMA of first `period` closes (TradingView convention)", () => {

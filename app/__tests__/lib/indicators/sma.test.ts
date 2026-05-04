@@ -1,20 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { simpleMovingAverage } from "@/lib/indicators/sma";
-import type { Candle } from "@/lib/indicators/types";
-
-/** Build a minimal Candle array from an array of close prices. The other
- *  OHLC fields are unused by SMA but required by the type — fill with the
- *  close so the structure is realistic (open=high=low=close). Timestamps
- *  are 60s apart starting at epoch 0 for deterministic output. */
-function candlesFromCloses(closes: readonly number[]): Candle[] {
-  return closes.map((close, i) => ({
-    timestamp: i * 60_000,
-    open: close,
-    high: close,
-    low: close,
-    close,
-  }));
-}
+import { candlesFromCloses } from "./helpers";
 
 describe("simpleMovingAverage", () => {
   it("computes the canonical reference vector: [1,2,3,4,5] period 3 → [2,3,4]", () => {
