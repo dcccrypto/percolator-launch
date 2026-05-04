@@ -36,8 +36,9 @@ import { getEntryPrice } from "@/lib/entry-price";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
 import { useChartIndicatorPrefs } from "@/hooks/useChartIndicatorPrefs";
-import { isOverlayKind } from "@/lib/indicator-registry";
+import { isOverlayKind, isPaneKind } from "@/lib/indicator-registry";
 import { useIndicatorOverlays } from "./useIndicatorOverlays";
+import { useIndicatorOscillatorPane } from "./useIndicatorOscillatorPane";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -325,6 +326,15 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     [indicators],
   );
   useIndicatorOverlays(chartRef, chartReady, candleData, overlayIndicatorConfigs);
+
+  // Oscillator-pane indicators (RSI / MACD). Same memo discipline. The pane
+  // is allocated lazily inside the hook — empty pane configs collapses the
+  // pane and the chart fills the reclaimed vertical space.
+  const paneIndicatorConfigs = useMemo(
+    () => indicators.filter((i) => isPaneKind(i.kind)),
+    [indicators],
+  );
+  useIndicatorOscillatorPane(chartRef, chartReady, candleData, paneIndicatorConfigs, chartTheme);
 
   // Create/destroy chart
   useEffect(() => {
