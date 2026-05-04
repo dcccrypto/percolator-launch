@@ -133,14 +133,18 @@ export const ChartIndicatorMenu: FC<ChartIndicatorMenuProps> = ({
         // @ts-expect-error - inert is a valid HTML attribute, React types lag
         inert={!open ? "" : undefined}
         className={[
-          "absolute left-0 top-full z-20 mt-1 min-w-[280px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)] transition-opacity duration-[120ms] ease-out",
+          // z-[60] so the mobile bottom-sheet variant sits ABOVE the global
+          // MobileBottomNav (z-50) — at z-20 the nav was painting over the
+          // sheet's "Clear all" footer, leaving it unreachable on phones.
+          "absolute left-0 top-full z-[60] mt-1 min-w-[280px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)] transition-opacity duration-[120ms] ease-out",
           open
             ? "opacity-100 pointer-events-auto"
             : "opacity-0 pointer-events-none",
           // Mobile: bottom sheet. max-h + overflow keeps "Clear all" reachable
-          // when all five rows are expanded with their per-kind inputs (the
-          // unconstrained sheet would clip the footer below the viewport).
-          "max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:top-auto max-md:max-h-[80vh] max-md:overflow-y-auto max-md:rounded-t-lg max-md:border-t",
+          // when all five rows are expanded with their per-kind inputs.
+          // pb-[env(safe-area-inset-bottom)] adds iOS home-indicator clearance
+          // so the footer button isn't covered by the home bar.
+          "max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:top-auto max-md:max-h-[80vh] max-md:overflow-y-auto max-md:rounded-t-lg max-md:border-t max-md:pb-[env(safe-area-inset-bottom)]",
         ].join(" ")}
       >
         <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-dim)] border-b border-[var(--border)]">

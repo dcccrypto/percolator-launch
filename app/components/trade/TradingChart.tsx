@@ -230,14 +230,21 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   } = usePercolatorCandles(slabAddress ?? null, timeframe);
 
   // Convert from {time: unix-seconds} to {timestamp: ms} shape used by the chart.
-  const percolatorCandles = percolatorCandlesRaw.map((c) => ({
-    timestamp: c.time * 1000,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-    volume: c.volume,
-  }));
+  // Memoed so identity is stable between renders that don't change the source
+  // array — without this, every parent render (live-price tick, crosshair
+  // hover, etc.) produces a fresh array, which cascades into candleData →
+  // indicator hooks → full series remove+recreate at WS cadence.
+  const percolatorCandles = useMemo(
+    () => percolatorCandlesRaw.map((c) => ({
+      timestamp: c.time * 1000,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume,
+    })),
+    [percolatorCandlesRaw],
+  );
 
   // Prefer Percolator as the chart source only when it has enough coverage to
   // form a readable chart. With 1–2 candles against a 24 h window, the tier-0
@@ -291,11 +298,17 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     });
   }, [config, priceUsd]);
 
-  // Derive data
-  const oracleFiltered = (() => {
-    const cutoff = Date.now() - TIMEFRAME_MS[timeframe];
-    return oraclePrices.filter((p) => p.timestamp >= cutoff);
-  })();
+  // Derive data. Memoed because oraclePrices only changes on the 5s-gated
+  // live-price effect (line ~287), so the filtered slice is reference-stable
+  // between most renders. Same WS-tick churn argument as percolatorCandles
+  // above — without this, candleData's memo invalidates on every tick.
+  const oracleFiltered = useMemo(
+    () => {
+      const cutoff = Date.now() - TIMEFRAME_MS[timeframe];
+      return oraclePrices.filter((p) => p.timestamp >= cutoff);
+    },
+    [oraclePrices, timeframe],
+  );
 
   // Data source priority: Percolator internal trades (tier-0, when >=10 bars) →
   // Pyth Benchmarks (canonical spot) → GeckoTerminal (DEX-pool history for

@@ -50,6 +50,16 @@ export function useIndicatorOverlays(
 ): void {
   const seriesMapRef = useRef<Map<string, IndicatorSeries[]>>(new Map());
 
+  // When the chart is destroyed (unmount, Strict Mode double-mount, hot-
+  // reload), chartReady flips false. Our refs still point at series on
+  // the dead chart — clear them so the next mount diffs against an empty
+  // map and attaches fresh series to the new chart instance.
+  useEffect(() => {
+    if (!chartReady) {
+      seriesMapRef.current.clear();
+    }
+  }, [chartReady]);
+
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !chartReady) return;
@@ -94,22 +104,13 @@ export function useIndicatorOverlays(
       }
     }
 
-    return () => {
-      // Remove every attached series before the chart is destroyed (or
-      // before this effect re-runs to attach to a new chart instance).
-      const c = chartRef.current;
-      const map = seriesMapRef.current;
-      for (const seriesList of map.values()) {
-        for (const s of seriesList) {
-          try {
-            if (c) c.removeSeries(s);
-          } catch {
-            /* chart already destroyed; refs are already dangling */
-          }
-        }
-      }
-      map.clear();
-    };
+    // No cleanup. Teardown is driven by:
+    //   - the activeIds diff above (user removed a specific indicator)
+    //   - the chartReady-reset effect above (chart instance destroyed)
+    //   - the chart-init effect's `chart.remove()` (full unmount cascade)
+    // A cleanup here would fire on every dep change (data tick, config
+    // edit), removing every series only to re-add them in the next run —
+    // exactly the WS-tick churn we want to avoid.
   }, [chartRef, chartReady, candleData, configs]);
 }
 

@@ -62,6 +62,18 @@ export function useIndicatorOscillatorPane(
   const seriesMapRef = useRef<Map<string, OscillatorSeries[]>>(new Map());
   const priceLineMapRef = useRef<Map<string, OscillatorPriceLine[]>>(new Map());
 
+  // When the chart is destroyed (unmount, Strict Mode double-mount, hot-
+  // reload), chartReady flips false. Our refs still point at the dead
+  // chart's pane index and series — clear them so the next mount allocates
+  // fresh state against the new chart instance.
+  useEffect(() => {
+    if (!chartReady) {
+      paneIndexRef.current = null;
+      seriesMapRef.current.clear();
+      priceLineMapRef.current.clear();
+    }
+  }, [chartReady]);
+
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !chartReady) return;
@@ -135,10 +147,13 @@ export function useIndicatorOscillatorPane(
       }
     }
 
-    return () => {
-      const c = chartRef.current;
-      if (c) tearDownPane(c);
-    };
+    // No cleanup. Teardown is driven by:
+    //   - `configs.length === 0` branch above (user disabled all oscillators)
+    //   - the chartReady-reset effect above (chart instance destroyed)
+    //   - the chart-init effect's `chart.remove()` (full unmount cascade)
+    // A cleanup here would fire on every dep change (data tick, theme
+    // toggle), tearing down + reallocating the pane on every WS tick —
+    // exactly what the body's diff is trying to avoid.
   }, [chartRef, chartReady, candleData, configs, theme]);
 
   function tearDownPane(chart: IChartApi) {
@@ -203,6 +218,11 @@ function renderOscillatorConfig(
         },
         paneIndex,
       );
+      // Force the per-instance scale visible — overlay scales (created by
+      // assigning a non-default priceScaleId) hide their axis by default
+      // in v5, which would suppress both the 0-100 axis labels AND the
+      // 30 / 70 reference-line labels below.
+      chart.priceScale(config.id, paneIndex).applyOptions({ visible: true });
       series.setData(
         data.map((p) => ({ time: msToUtc(p.time), value: p.value })),
       );
@@ -243,6 +263,9 @@ function renderOscillatorConfig(
         },
         paneIndex,
       );
+      // Make the per-instance MACD scale visible (same reasoning as RSI
+      // above — overlay scales suppress axis labels by default in v5).
+      chart.priceScale(config.id, paneIndex).applyOptions({ visible: true });
       histogram.setData(
         data.map((p) => ({
           time: msToUtc(p.time),
