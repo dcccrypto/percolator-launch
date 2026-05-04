@@ -300,19 +300,25 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   // Data source priority: Percolator internal trades (tier-0, when >=10 bars) →
   // Pyth Benchmarks (canonical spot) → GeckoTerminal (DEX-pool history for
   // long-tail tokens) → oracle-aggregated fallback (keeper observations).
-  const candleData = (() => {
+  //
+  // Memoed so the reference is stable between renders that don't change the
+  // underlying source arrays. Without this, every parent render (e.g. on
+  // unrelated state like timeframe-pill hover) creates a new array, which
+  // re-fires the indicator hooks' effects and tears down + reallocates the
+  // oscillator pane on every WebSocket tick.
+  const candleData = useMemo(() => {
     if (hasPercolatorData) return percolatorCandles;
     if (hasPythData) return pythCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
     if (hasExternalData) return externalCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
     return aggregateCandles(oracleFiltered, CANDLE_INTERVAL_MS);
-  })();
+  }, [hasPercolatorData, hasPythData, hasExternalData, percolatorCandles, pythCandles, externalCandles, oracleFiltered]);
 
-  const lineData = (() => {
+  const lineData = useMemo(() => {
     if (hasPercolatorData) return percolatorCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     if (hasPythData) return pythCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     if (hasExternalData) return externalCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     return oracleFiltered;
-  })();
+  }, [hasPercolatorData, hasPythData, hasExternalData, percolatorCandles, pythCandles, externalCandles, oracleFiltered]);
 
   const totalDataPoints = candleData.length + lineData.length;
 

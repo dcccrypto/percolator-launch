@@ -7,6 +7,7 @@ import {
   type IndicatorConfig,
   type IndicatorKind,
 } from "@/lib/indicator-registry";
+import { assertNever } from "@/lib/exhaustive";
 
 interface ChartIndicatorMenuProps {
   indicators: IndicatorConfig[];
@@ -92,6 +93,7 @@ export const ChartIndicatorMenu: FC<ChartIndicatorMenuProps> = ({
         aria-expanded={open}
         aria-haspopup="true"
         aria-label="Indicators"
+        title="Indicators"
         className={[
           "flex items-center gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-xs transition-colors",
           open
@@ -123,13 +125,21 @@ export const ChartIndicatorMenu: FC<ChartIndicatorMenuProps> = ({
 
       <div
         aria-hidden={!open || undefined}
+        // `inert` removes the panel from sequential focus and click target
+        // when closed. Without this, Tab walks through every toggle and
+        // input even though the panel is invisible (opacity:0 alone keeps
+        // children in the focus tree).
+        // @ts-expect-error - inert is a valid HTML attribute, React types lag
+        inert={!open ? "" : undefined}
         className={[
           "absolute left-0 top-full z-20 mt-1 min-w-[280px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)] transition-opacity duration-[120ms] ease-out",
           open
             ? "opacity-100 pointer-events-auto"
             : "opacity-0 pointer-events-none",
-          // Mobile: bottom sheet
-          "max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:top-auto max-md:rounded-t-lg max-md:border-t",
+          // Mobile: bottom sheet. max-h + overflow keeps "Clear all" reachable
+          // when all five rows are expanded with their per-kind inputs (the
+          // unconstrained sheet would clip the footer below the viewport).
+          "max-md:fixed max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:top-auto max-md:max-h-[80vh] max-md:overflow-y-auto max-md:rounded-t-lg max-md:border-t",
         ].join(" ")}
       >
         <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-dim)] border-b border-[var(--border)]">
@@ -198,10 +208,14 @@ const ChartIndicatorRow: FC<ChartIndicatorRowProps> = ({
           </span>
         </button>
         {config && (
+          // The swatch is decorative — the colour itself isn't actionable
+          // from this menu, and a hex code is noise to a screen reader.
+          // The toggle's aria-pressed already conveys enabled state.
           <span
+            data-testid={`indicator-swatch-${kind}`}
             className="inline-block h-3 w-3 rounded-sm border border-[var(--border)]"
             style={{ backgroundColor: config.color }}
-            aria-label={`Indicator colour ${config.color}`}
+            aria-hidden="true"
           />
         )}
       </div>
@@ -282,9 +296,9 @@ const ConfigInputs: FC<ConfigInputsProps> = ({ config, onUpdate }) => {
         </>
       );
     default:
-      // Exhaustive for the IndicatorConfig union; if a future kind is
-      // added without a case the type checker will flag this branch.
-      return null;
+      // Exhaustive for the IndicatorConfig union — assertNever fails
+      // compilation if a future kind is added without a case here.
+      return assertNever(config);
   }
 };
 

@@ -84,15 +84,13 @@ describe("ChartIndicatorMenu", () => {
     };
     render(<ChartIndicatorMenu {...noopProps} indicators={[sma]} />);
     fireEvent.click(screen.getByRole("button", { name: /Indicators/i }));
-    expect(
-      screen.getByLabelText(/Indicator colour #9945FF/i),
-    ).toBeInTheDocument();
+    const smaSwatch = screen.getByTestId("indicator-swatch-sma");
+    expect(smaSwatch).toBeInTheDocument();
+    expect(smaSwatch).toHaveStyle({ backgroundColor: "#9945FF" });
+    // Swatch is decorative — aria-hidden so screen readers ignore the hex.
+    expect(smaSwatch).toHaveAttribute("aria-hidden", "true");
     // EMA is OFF in this test — no swatch for it.
-    const emaRow = screen.getByText("Exponential Moving Average").parentElement!
-      .parentElement!;
-    expect(
-      emaRow.querySelector('[aria-label*="Indicator colour"]'),
-    ).toBeNull();
+    expect(screen.queryByTestId("indicator-swatch-ema")).toBeNull();
   });
 
   it("Bollinger row shows period AND stdDev inputs when enabled", () => {
@@ -288,5 +286,144 @@ describe("ChartIndicatorMenu", () => {
 
     fireEvent.mouseDown(document.body);
     expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  // Toggle-ON path is structurally identical across all 5 kinds (one map
+  // over ALL_INDICATOR_KINDS). Each label only resolves to its own kind
+  // if the closure captures `kind` correctly inside the .map — a bug that
+  // hardcoded "sma" would slip past the SMA-only test above.
+  it.each([
+    ["Exponential Moving Average", "ema"],
+    ["Bollinger Bands", "bollinger"],
+    ["Relative Strength Index", "rsi"],
+    ["MACD", "macd"],
+  ])("toggling an OFF row for %s adds the matching kind", (label, kind) => {
+    const addIndicator = vi.fn();
+    render(
+      <ChartIndicatorMenu {...noopProps} addIndicator={addIndicator} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Indicators/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: new RegExp(label, "i"), pressed: false }),
+    );
+    expect(addIndicator).toHaveBeenCalledWith(kind);
+  });
+
+  it("Bollinger StdDev input commits with the stdDev key (not period)", () => {
+    const updateIndicator = vi.fn();
+    const bb: IndicatorConfig = {
+      id: "abc",
+      kind: "bollinger",
+      period: 20,
+      stdDev: 2,
+      color: "#22D3EE",
+    };
+    render(
+      <ChartIndicatorMenu
+        {...noopProps}
+        indicators={[bb]}
+        updateIndicator={updateIndicator}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Indicators/i }));
+    const stdDevInput = screen.getByLabelText("StdDev");
+    fireEvent.change(stdDevInput, { target: { value: "2.5" } });
+    fireEvent.blur(stdDevInput);
+    expect(updateIndicator).toHaveBeenCalledWith("abc", { stdDev: 2.5 });
+  });
+
+  it("MACD slow / signal inputs commit with their own keys", () => {
+    const updateIndicator = vi.fn();
+    const m: IndicatorConfig = {
+      id: "abc",
+      kind: "macd",
+      fastPeriod: 12,
+      slowPeriod: 26,
+      signalPeriod: 9,
+      color: "#F59E0B",
+    };
+    render(
+      <ChartIndicatorMenu
+        {...noopProps}
+        indicators={[m]}
+        updateIndicator={updateIndicator}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Indicators/i }));
+
+    const slow = screen.getByLabelText("Slow");
+    fireEvent.change(slow, { target: { value: "30" } });
+    fireEvent.blur(slow);
+    expect(updateIndicator).toHaveBeenCalledWith("abc", { slowPeriod: 30 });
+
+    const signal = screen.getByLabelText("Signal");
+    fireEvent.change(signal, { target: { value: "12" } });
+    fireEvent.blur(signal);
+    expect(updateIndicator).toHaveBeenCalledWith("abc", { signalPeriod: 12 });
+  });
+
+  it("clamps below-min input up to min on commit", () => {
+    const updateIndicator = vi.fn();
+    const sma: IndicatorConfig = {
+      id: "abc",
+      kind: "sma",
+      period: 20,
+      color: "#9945FF",
+    };
+    render(
+      <ChartIndicatorMenu
+        {...noopProps}
+        indicators={[sma]}
+        updateIndicator={updateIndicator}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Indicators/i }));
+    const input = screen.getByLabelText("Period");
+
+    // SMA period min is 2.
+    fireEvent.change(input, { target: { value: "1" } });
+    fireEvent.blur(input);
+    expect(updateIndicator).toHaveBeenCalledWith("abc", { period: 2 });
+    expect(input).toHaveValue(2);
+  });
+
+  it("treats an empty input as no-change (does not call onChange with 0/min)", () => {
+    const updateIndicator = vi.fn();
+    const sma: IndicatorConfig = {
+      id: "abc",
+      kind: "sma",
+      period: 20,
+      color: "#9945FF",
+    };
+    render(
+      <ChartIndicatorMenu
+        {...noopProps}
+        indicators={[sma]}
+        updateIndicator={updateIndicator}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Indicators/i }));
+    const input = screen.getByLabelText("Period");
+
+    // Cleared field — Number("") is 0 which would clamp to min=2 if the
+    // empty-string guard were removed.
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    expect(updateIndicator).not.toHaveBeenCalled();
+    expect(input).toHaveValue(20);
+  });
+
+  it("Clear all keeps the menu open so the user can immediately re-add", () => {
+    const sma: IndicatorConfig = {
+      id: "abc",
+      kind: "sma",
+      period: 20,
+      color: "#9945FF",
+    };
+    render(<ChartIndicatorMenu {...noopProps} indicators={[sma]} clearAll={() => {}} />);
+    const trigger = screen.getByRole("button", { name: /Indicators/i });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: /Clear all/i }));
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 });
