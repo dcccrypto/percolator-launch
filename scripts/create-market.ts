@@ -1,8 +1,8 @@
 /**
  * Production Market Creation Script — Percolator
  *
- * Executes five transactions in sequence to bootstrap a new SOL/USDC perp market:
- *   TX1: InitMarket — allocate slab + initialize market with RiskParams (312 bytes)
+ * Executes six transactions in sequence to bootstrap a new SOL/USDC perp market:
+ *   TX1: InitMarket — allocate slab + initialize market with RiskParams (370 bytes)
  *   TX2: SetDexPool — pin the Raydium/PumpSwap DEX pool for the Hyperp oracle
  *   TX3: InitLP     — initialize LP slot 0 with seed deposit
  *   TX4: InitMatcherCtx — CPI-initialize the matcher context for LP 0
@@ -45,14 +45,15 @@ import * as fs from "fs";
 import * as path from "path";
 
 // SDK encoders — these are the canonical source of truth for instruction layout.
-// encodeInitMarket produces exactly 312 bytes (incl. 3 new fields: minInitialDeposit,
-// minNonzeroMmReq, minNonzeroImReq) which were added after v5.
+// encodeInitMarket produces the deployed v12.19 wire format: 304-byte base +
+// mandatory 66-byte extended tail.
 import {
   encodeInitMarket,
   encodeSetDexPool,
   encodeInitLP,
   encodeInitMatcherCtx,
   encodeTopUpInsurance,
+  SLAB_TIERS_V12_19,
 } from "@percolatorct/sdk";
 import {
   buildAccountMetas,
@@ -73,7 +74,7 @@ const PROGRAM_ID_DEVNET = new PublicKey(
   "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
 );
 const MATCHER_PROG_ID = new PublicKey(
-  "DHP6DtwXP1yJsz8YzfoeigRFPB979gzmumkmCxDLSkUX",
+  "GDK8wx38kpiSVSfGTVNiSdptX3Z5R4kQyqh6Q3QX6wmi",
 );
 const STAKE_PROG_ID = new PublicKey(
   "DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F",
@@ -90,9 +91,9 @@ const USDC_DEVNET = new PublicKey(
 // Slab constants
 // ============================================================================
 
-// V12.15 slab sizes: ENGINE_OFF=624, ACCOUNT_SIZE=4400 (reserve cohort queues)
-// Verified via `cargo test --features small -- print_slab_layout`
-const SLAB_SIZE_SMALL  = 237_512; // SBF: maxAccounts=256, 8 cohorts (v12.15 --features small), ~1.65 SOL rent
+// v12.19 small-tier slab size — use the SDK's probe-confirmed deployed
+// mainnet shape to avoid drifting from the wrapper's slab_shape_guard.
+const SLAB_SIZE_SMALL = SLAB_TIERS_V12_19.small.dataSize;
 
 // Matcher context account size (fixed, per matcher program)
 const MATCHER_CTX_SIZE = 320;
@@ -109,11 +110,12 @@ const DEFAULT_RISK_PARAMS = {
   tradingFeeBps:          10n,             // 0.1%
   maxAccounts:            256n,            // small tier (v12.15: was 1024)
   newAccountFee:          1_000_000n,      // 1 USDC (u128)
+  maintenanceFeePerSlot:  0n,              // v12.19 encoder type requires this; wrapper ignores the old wire slot
   maxCrankStalenessSlots: 300n,            // 5 minutes
   liquidationFeeBps:      50n,             // 0.5%
   liquidationFeeCap:      100_000_000n,    // 100 USDC (u128)
   minLiquidationAbs:      100n,            // lowered from 1_000_000 (u128)
-  minInitialDeposit:      10_000_000n,     // 10 USDC (u128)
+  minInitialDeposit:      2_000_000n,      // 2 USDC (u128) — lowered to be inclusive on launch
   minNonzeroMmReq:        100_000n,        // 0.1 USDC — must be > 0 (u128)
   minNonzeroImReq:        500_000n,        // 0.5 USDC — must be > mmReq, <= minInitialDeposit (u128)
   insuranceFloor:         0n,              // no floor (u128)
@@ -238,9 +240,25 @@ function parseArgs(): MarketConfig {
 // Helpers
 // ============================================================================
 
+function redactRpcUrl(rpcUrl: string): string {
+  return rpcUrl.replace(/([?&]api-key=)[^&]+/i, "$1<redacted>");
+}
+
 function loadKeypair(p: string): Keypair {
   const raw = fs.readFileSync(p, "utf8");
   return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+}
+
+/**
+ * Persist a freshly-generated keypair to disk before any tx fires that
+ * depends on it. Even though the keypairs become moot once the matching
+ * createAccount lands (atomic within tx), saving them gives us an audit
+ * trail and a recovery handle if the runtime crashes mid-flow.
+ */
+function saveKeypairBackup(name: string, kp: Keypair, dir: string): void {
+  const filePath = path.join(dir, `${name}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(Array.from(kp.secretKey)), { mode: 0o600 });
+  console.log(`  saved keypair: ${filePath} (pubkey ${kp.publicKey.toBase58()})`);
 }
 
 async function sendTx(
@@ -253,6 +271,14 @@ async function sendTx(
     await conn.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
   tx.feePayer = signers[0].publicKey;
+
+  const sim = await conn.simulateTransaction(tx, signers);
+  console.log(`  ${label} simulation CU: ${sim.value.unitsConsumed ?? "unknown"}`);
+  if (sim.value.err) {
+    console.error(`  ${label} simulation failed:`, JSON.stringify(sim.value.err));
+    for (const log of sim.value.logs ?? []) console.error(`    ${log}`);
+    throw new Error(`${label} simulation failed`);
+  }
 
   const sig = await sendAndConfirmTransaction(conn, tx, signers, {
     commitment: "confirmed",
@@ -272,7 +298,7 @@ async function main() {
 
   console.log("========== Percolator Market Creation ==========");
   console.log(`Network:         ${cfg.network}`);
-  console.log(`RPC:             ${cfg.rpcUrl}`);
+  console.log(`RPC:             ${redactRpcUrl(cfg.rpcUrl)}`);
   console.log(`Admin keypair:   ${cfg.keypairPath}`);
   console.log(`Program:         ${cfg.programId.toBase58()}`);
   console.log(`Collateral mint: ${cfg.collateralMint.toBase58()}`);
@@ -311,8 +337,8 @@ async function main() {
     const poolInfo = await conn.getAccountInfo(cfg.dexPoolAddress);
     if (!poolInfo) throw new Error("DEX pool not found on-chain");
     // Raydium CLMM: sqrt_price_x64 (u128) at offset 253
-    const sqrtLo = poolInfo.data.readBigUInt64LE(253);
-    const sqrtHi = poolInfo.data.readBigUInt64LE(261);
+    const sqrtLo = poolInfo.data.readBigUInt64LE(253) as bigint;
+    const sqrtHi = poolInfo.data.readBigUInt64LE(261) as bigint;
     const sqrtPriceX64 = sqrtLo + (sqrtHi << 64n);
     const sqrtFloat = Number(sqrtPriceX64) / 2 ** 64;
     const rawPrice = sqrtFloat * sqrtFloat;
@@ -323,9 +349,23 @@ async function main() {
     console.log(`  Live SOL price: $${priceUsd.toFixed(2)} (${markPriceE6} e6)`);
   }
 
+  // Pre-tx backup directory: stash all generated keypairs here before any
+  // tx fires. Survives mid-flow crashes; recoverable by close-orphan-slab.ts.
+  const backupDir = path.join(
+    process.env.HOME!,
+    ".percolator-mainnet",
+    "markets",
+    `${cfg.network}-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+  );
+  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  console.log(`Keypair backup dir: ${backupDir}\n`);
+
   // Generate fresh keypairs for slab and matcher context
   const slab = Keypair.generate();
   const matcherCtx = Keypair.generate();
+
+  saveKeypairBackup("slab", slab, backupDir);
+  saveKeypairBackup("matcher-ctx", matcherCtx, backupDir);
 
   // Derive vault PDA
   const [vaultPda] = PublicKey.findProgramAddressSync(
@@ -363,7 +403,7 @@ async function main() {
   // TX1: InitMarket
   //   - SystemProgram.createAccount (slab, SLAB_SIZE bytes, rent-exempt)
   //   - Create vault ATA if needed
-  //   - InitMarket instruction (312 bytes, all 25 RiskParams fields)
+  //   - InitMarket instruction (370 bytes — v12.19 base 304 + 66-byte tail)
   // ──────────────────────────────────────────────────────────────────────────
   console.log("TX1: InitMarket (create slab + init market with RiskParams)...");
 
@@ -389,7 +429,7 @@ async function main() {
   // internally — this message helps catch SDK version drift when reviewing logs.
   console.log(
     `  encodeInitMarket: ${initMarketData.length} bytes ` +
-      `(expected 352 — v12.15 header + hMin/hMax + RiskParams)`,
+      `(expected 370 — v12.19 base 304 + 66-byte mandatory extended tail)`,
   );
 
   const tx1 = new Transaction();
@@ -593,6 +633,7 @@ async function main() {
           userAta: adminAta,
           vault: vaultAta,
           tokenProgram: TOKEN_PROGRAM_ID,
+          clock: SYSVAR_CLOCK_PUBKEY,
         }),
         data: Buffer.from(
           encodeTopUpInsurance({ amount: cfg.insuranceAmount }),
@@ -626,6 +667,9 @@ async function main() {
 
   const stakeLpMint = Keypair.generate();
   const stakeVault = Keypair.generate();
+
+  saveKeypairBackup("stake-lp-mint", stakeLpMint, backupDir);
+  saveKeypairBackup("stake-vault", stakeVault, backupDir);
 
   const [stakePool] = PublicKey.findProgramAddressSync(
     [Buffer.from("stake_pool"), slab.publicKey.toBuffer()],
@@ -696,7 +740,7 @@ async function main() {
 
   let sig6: string | null = null;
   try {
-    sig6 = await sendTx(conn, tx6, [admin, stakeLpMint, stakeVault], "TX7");
+    sig6 = await sendTx(conn, tx6, [admin, stakeLpMint, stakeVault], "TX6");
   } catch (e) {
     console.warn("TX6 WARNING (InitStakePool):", e instanceof Error ? e.message : e);
     console.warn("Market is live but has no stake pool. Run create-stake-pool.ts separately.");
@@ -720,13 +764,10 @@ async function main() {
     stakeProgramId: STAKE_PROG_ID.toBase58(),
     network: cfg.network,
     createdAt: new Date().toISOString(),
-    transactions: { sig1, sig2, sig3, sig4, sig5, sig6, sig6 },
+    transactions: { sig1, sig2, sig3, sig4, sig5, sig6 },
   };
 
-  const outFile = path.join(
-    process.cwd(),
-    `market-${cfg.network}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
-  );
+  const outFile = path.join(backupDir, "market.json");
   fs.writeFileSync(outFile, JSON.stringify(marketJson, null, 2));
   console.log(`\nMarket config saved to: ${outFile}`);
 
