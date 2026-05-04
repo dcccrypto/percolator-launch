@@ -3,13 +3,67 @@
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { discoverMarkets, type DiscoveredMarket } from "@percolatorct/sdk";
-import { getAllProgramIds } from "@/lib/config";
+import {
+  discoverMarkets,
+  discoverMarketsViaApi,
+  discoverMarketsViaStaticBundle,
+  type DiscoveredMarket,
+} from "@percolatorct/sdk";
+import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { isBlockedSlab } from "@/lib/blocklist";
+
+const MAINNET_STATIC_MARKETS = [
+  {
+    slabAddress: "AiVcTXxKfKmcpUBG3unxCdEHHtXvAq8zYpbtS6oPrV6J",
+    symbol: "SOL-PERP",
+    name: "SOL/USD Perpetual",
+  },
+];
 
 /** Get all unique program PublicKeys to scan */
 function getProgramPublicKeys(): PublicKey[] {
   return getAllProgramIds().map((id) => new PublicKey(id));
+}
+
+function getApiBaseUrl(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  return new URL("/api", window.location.origin).toString();
+}
+
+async function discoverForProgram(
+  connection: ReturnType<typeof useConnectionCompat>["connection"],
+  programId: PublicKey,
+): Promise<DiscoveredMarket[]> {
+  const network = getNetwork();
+  const apiBaseUrl = getApiBaseUrl();
+
+  // In-browser getProgramAccounts tier scans are expensive and can trigger
+  // RPC batch drops. Prefer the app API as an address directory, then fetch
+  // the returned slabs with getMultipleAccounts through the normal connection.
+  if (apiBaseUrl) {
+    const viaApi = await discoverMarketsViaApi(connection, programId, apiBaseUrl, {
+      timeoutMs: 8_000,
+    }).catch(() => [] as DiscoveredMarket[]);
+    if (viaApi.length > 0) return viaApi;
+  }
+
+  if (network === "mainnet") {
+    const viaStatic = await discoverMarketsViaStaticBundle(
+      connection,
+      programId,
+      MAINNET_STATIC_MARKETS,
+    ).catch(() => [] as DiscoveredMarket[]);
+    if (viaStatic.length > 0) return viaStatic;
+  }
+
+  // Last resort: keep the SDK scanner, but run it sequentially so a fallback
+  // discovery attempt cannot burst multiple getProgramAccounts calls at once.
+  return discoverMarkets(connection, programId, {
+    sequential: true,
+    maxParallelTiers: 1,
+    apiBaseUrl,
+    network,
+  }).catch(() => [] as DiscoveredMarket[]);
 }
 
 /**
@@ -34,7 +88,7 @@ export function useMarketDiscovery() {
     async function load() {
       try {
         const results = await Promise.all(
-          programIds.map((pid) => discoverMarkets(connection, pid).catch(() => [] as DiscoveredMarket[]))
+          programIds.map((pid) => discoverForProgram(connection, pid))
         );
         if (!cancelled) {
           // GH#1115: deduplicate across program-ID scans — same slab can appear from
