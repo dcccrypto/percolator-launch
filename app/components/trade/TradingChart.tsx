@@ -1,7 +1,19 @@
 "use client";
 
 import { FC, useState, useRef, useEffect, useCallback } from "react";
-import { createChart, IChartApi, ISeriesApi, LineStyle, ColorType, CrosshairMode } from "lightweight-charts";
+import {
+  createChart,
+  IChartApi,
+  ISeriesApi,
+  LineStyle,
+  ColorType,
+  CrosshairMode,
+  CandlestickSeries,
+  HistogramSeries,
+  BarSeries,
+  LineSeries,
+  AreaSeries,
+} from "lightweight-charts";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenChart } from "@/hooks/useTokenChart";
@@ -462,7 +474,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       case "candle-hollow-up":
       case "candle-hollow-down": {
         if (!hasRenderableData(chartStyle, candleData, lineData).ready) break;
-        const series = chart.addCandlestickSeries({
+        const series = chart.addSeries(CandlestickSeries, {
           ...candleStyleOptions(chartStyle, chartTheme.upColor, chartTheme.downColor),
           // Suppress lightweight-charts' built-in last-price label + horizontal
           // price line. Those show the DEX pool's last candle close (e.g. 84.20)
@@ -490,7 +502,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         // fill the full pane. Hide the series entirely in that case and let the
         // candles reclaim the bottom 10% of vertical space instead.
         if (hasVolumeData) {
-          const volumeSeries = chart.addHistogramSeries({
+          const volumeSeries = chart.addSeries(HistogramSeries, {
             priceFormat: { type: "volume" },
             priceScaleId: "volume",
           });
@@ -516,10 +528,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       }
       case "bar": {
         if (!hasRenderableData(chartStyle, candleData, lineData).ready) break;
-        const series = chart.addBarSeries({
+        const series = chart.addSeries(BarSeries, {
           upColor: chartTheme.upColor,
           downColor: chartTheme.downColor,
           openVisible: true,
+          // Keep proportional bar widths (matches v4 behaviour). v5 still
+          // accepts this option but flipped the default to `true`, which
+          // would render visibly thinner bars without this explicit override.
           thinBars: false,
           lastValueVisible: false,
           priceLineVisible: false,
@@ -538,7 +553,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       }
       case "line": {
         if (!hasRenderableData(chartStyle, candleData, lineData).ready) break;
-        const series = chart.addLineSeries({
+        const series = chart.addSeries(LineSeries, {
           color: chartTheme.upColor,
           lineWidth: 2,
           // Same rationale as candle series — only the mark price should show
@@ -560,7 +575,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         // Brand purple (--accent in globals.css) gives the area mode a distinct
         // identity vs. the green line series — same data, different feel.
         const ACCENT = "#9945FF";
-        const series = chart.addAreaSeries({
+        const series = chart.addSeries(AreaSeries, {
           lineColor: ACCENT,
           topColor: `${ACCENT}66`,    // ~40% alpha at the top
           bottomColor: `${ACCENT}00`, // fade to transparent at the bottom
