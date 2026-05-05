@@ -123,16 +123,22 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
    *  paints the preview line directly. */
   const previewP2Ref = useRef<PricePoint | null>(null);
 
-  // Reset overlay-local state on slab change OR tool change. Combined
-  // into one effect because both triggers want the same reset (clear
-  // selection AND any in-flight creation): a slab switch makes the
-  // previous selection irrelevant, and a tool switch invalidates a
-  // half-drawn anchor that the new tool can't act on.
+  // Reset overlay-local state on slab change, tool change, OR chart
+  // re-init. Combined because all three triggers want the same reset:
+  // - slab switch makes the previous selection irrelevant.
+  // - tool switch invalidates a half-drawn anchor.
+  // - chartReady false→true (Strict Mode double-mount, hot-reload,
+  //   any future code path that rebuilds the chart) invalidates
+  //   pendingP1's pixel projection — its time/price coords were
+  //   recorded against the OLD chart's coordinate system, and the
+  //   new chart may have a different visible range / bar density.
+  //   Committing a rectangle on the new chart with stale coords
+  //   produces a geometrically wrong drawing.
   useEffect(() => {
     setSelectedId(null);
     setPendingP1(null);
     previewP2Ref.current = null;
-  }, [slabAddress, tool]);
+  }, [slabAddress, tool, chartReady]);
 
   // If the selected drawing was removed (Delete / Backspace, slab
   // change clearing storage, etc.), drop the dangling id.
@@ -463,16 +469,35 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
   // commit, Escape, tool change, or chart unmount all flow through
   // here. Also wires the document-level mousemove/mouseup that drive
   // the live preview and the commit.
+  //
+  // Note: handleScroll suppresses BOTH chart pan AND wheel zoom for
+  // the duration of the drag; handleScale suppresses pinch and
+  // axis-drag zoom. Users finish the drag before they can wheel-
+  // zoom — acceptable trade-off vs fighting the drag gesture.
   useEffect(() => {
     if (!chartReady || tool !== "rectangle" || pendingP1 === null) return;
     const chart = chartRef.current;
     if (!chart) return;
     const el = chart.chartElement();
 
-    chart.applyOptions({
-      handleScroll: false,
-      handleScale: false,
-    });
+    // Snapshot the current scroll/scale options before disabling so
+    // the cleanup restores whatever shape the parent configured —
+    // not coarse `true` booleans. The chart-init in TradingChart
+    // uses object form (`handleScroll: { mouseWheel, ... }`); writing
+    // boolean `true` on cleanup widens any sub-flag the parent
+    // disabled to enabled, silently regressing pan/zoom config.
+    const previousScroll = chart.options().handleScroll;
+    const previousScale = chart.options().handleScale;
+    try {
+      chart.applyOptions({
+        handleScroll: false,
+        handleScale: false,
+      });
+    } catch {
+      // Chart torn down between effect setup and applyOptions call.
+      // The cleanup's matching try/catch will swallow any restore
+      // attempt symmetrically.
+    }
 
     const onMouseMove = (e: MouseEvent): void => {
       const series = seriesRef.current;
@@ -513,14 +538,21 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       // to click instead of drag) and cancel without committing a
       // tiny, unselectable rectangle.
       const p1Px = pricePointToPixel(series, ts, pendingP1);
-      if (p1Px !== null) {
-        const dx = Math.abs(x - p1Px.x);
-        const dy = Math.abs(y - p1Px.y);
-        if (dx < 10 && dy < 10) {
-          setPendingP1(null);
-          previewP2Ref.current = null;
-          return;
-        }
+      if (p1Px === null) {
+        // Original anchor is no longer projectable (it scrolled off-
+        // scale during the drag). We can't validate jitter without
+        // p1 in pixel space — commit would produce a rectangle we
+        // can't size-check. Cancel rather than guess.
+        setPendingP1(null);
+        previewP2Ref.current = null;
+        return;
+      }
+      const dx = Math.abs(x - p1Px.x);
+      const dy = Math.abs(y - p1Px.y);
+      if (dx < 10 && dy < 10) {
+        setPendingP1(null);
+        previewP2Ref.current = null;
+        return;
       }
       addDrawingRef.current({
         kind: "rectangle",
@@ -538,12 +570,15 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
     return () => {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
-      // Restore native pan/zoom regardless of how the drag ended
-      // (commit, cancel, Escape, slab change, tool change, unmount).
+      // Restore the SNAPSHOTTED scroll/scale options regardless of
+      // how the drag ended (commit, cancel, Escape, slab change,
+      // tool change, chart unmount). Writing the snapshot back
+      // preserves whatever shape the parent configured — coarse
+      // boolean OR granular object form.
       try {
         chart.applyOptions({
-          handleScroll: true,
-          handleScale: true,
+          handleScroll: previousScroll,
+          handleScale: previousScale,
         });
       } catch {
         // Chart was destroyed in a parallel cleanup; nothing to

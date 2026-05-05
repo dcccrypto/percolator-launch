@@ -22,6 +22,25 @@ function fakeChart() {
   const subscribeCrosshair = vi.fn();
   const unsubscribeCrosshair = vi.fn();
   const applyOptions = vi.fn();
+  // Granular object-form scroll/scale to match what TradingChart's
+  // chart-init configures. The pan-suppression effect's snapshot/
+  // restore reads these via chart.options(); a coarse boolean here
+  // would let a buggy restore (booleans-only) silently pass tests.
+  const initialScroll = {
+    mouseWheel: true,
+    pressedMouseMove: true,
+    horzTouchDrag: true,
+    vertTouchDrag: true,
+  };
+  const initialScale = {
+    axisPressedMouseMove: true,
+    mouseWheel: true,
+    pinch: true,
+  };
+  const options = vi.fn(() => ({
+    handleScroll: initialScroll,
+    handleScale: initialScale,
+  }));
   // Identity-ish time scale: time-in-seconds maps to x-pixel directly.
   const timeScale = () => ({
     subscribeVisibleLogicalRangeChange: subscribeRange,
@@ -57,11 +76,15 @@ function fakeChart() {
     unsubscribeCrosshairMove: unsubscribeCrosshair,
     chartElement: () => chartElement,
     applyOptions,
+    options,
   } as unknown as IChartApi;
   return {
     chart,
     chartElement,
     applyOptions,
+    options,
+    initialScroll,
+    initialScale,
     subscribeRange,
     unsubscribeRange,
     subscribeSize,
@@ -1050,41 +1073,43 @@ describe("ChartDrawingOverlay", () => {
       expect(addDrawing).not.toHaveBeenCalled();
     });
 
-    it("suppresses chart pan/zoom during drag and restores on commit", () => {
+    it("suppresses chart pan/zoom during drag and restores the SNAPSHOT on commit", () => {
+      // Restore must use the snapshot (object form from chart.options())
+      // — NOT coarse boolean true. The fake chart's options() returns
+      // granular objects (handleScroll: { mouseWheel, ... }); the
+      // restore should write those exact objects back so any sub-flag
+      // a parent disabled isn't silently re-enabled.
       stubCanvasContext();
       const ch = fakeChart();
       render(
         <Harness chart={ch.chart} ready={true} tool="rectangle" />,
       );
-      // Before any drag, applyOptions has not been called from the
-      // overlay (the pan-suppress effect requires pendingP1).
       const beforeMouseDown = ch.applyOptions.mock.calls.length;
       fireEvent.mouseDown(ch.chartElement, {
         clientX: 10,
         clientY: 100,
         button: 0,
       });
-      // After mouseDown, the suppress effect ran and disabled pan/zoom.
+      // Disable: writes coarse false (drag suppress is all-off).
       expect(ch.applyOptions.mock.calls.length).toBeGreaterThan(
         beforeMouseDown,
       );
-      // The most recent applyOptions call should disable both.
-      const lastCall = ch.applyOptions.mock.calls.at(-1);
-      expect(lastCall?.[0]).toMatchObject({
+      const disableCall = ch.applyOptions.mock.calls.at(-1);
+      expect(disableCall?.[0]).toMatchObject({
         handleScroll: false,
         handleScale: false,
       });
-      // Commit the drag.
+      // Commit triggers cleanup → restore.
       fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
-      // After commit, applyOptions called again to RESTORE pan/zoom.
       const restoreCall = ch.applyOptions.mock.calls.at(-1);
-      expect(restoreCall?.[0]).toMatchObject({
-        handleScroll: true,
-        handleScale: true,
+      // Restore writes the OBJECT-FORM snapshot, not boolean true.
+      expect(restoreCall?.[0]).toEqual({
+        handleScroll: ch.initialScroll,
+        handleScale: ch.initialScale,
       });
     });
 
-    it("suppresses chart pan/zoom during drag and restores on Escape cancel", () => {
+    it("restores the SNAPSHOT on Escape cancel (preserves granular config)", () => {
       stubCanvasContext();
       const ch = fakeChart();
       render(
@@ -1096,11 +1121,10 @@ describe("ChartDrawingOverlay", () => {
         button: 0,
       });
       fireEvent.keyDown(document, { key: "Escape" });
-      // Cleanup ran — last applyOptions should be the RESTORE call.
-      const lastCall = ch.applyOptions.mock.calls.at(-1);
-      expect(lastCall?.[0]).toMatchObject({
-        handleScroll: true,
-        handleScale: true,
+      const restoreCall = ch.applyOptions.mock.calls.at(-1);
+      expect(restoreCall?.[0]).toEqual({
+        handleScroll: ch.initialScroll,
+        handleScale: ch.initialScale,
       });
     });
 
@@ -1163,6 +1187,168 @@ describe("ChartDrawingOverlay", () => {
       } finally {
         window.matchMedia = originalMatchMedia;
       }
+    });
+
+    it("mousemove during drag triggers a redraw (preview path is wired)", () => {
+      // The drag's mousemove handler updates previewP2Ref AND calls
+      // redrawRef.current() imperatively. Without this assertion, a
+      // refactor that dropped the redraw call would leave the user
+      // with no live preview during drag, but commit would still
+      // work — current tests would all pass.
+      const { clearRect } = stubCanvasContext();
+      const ch = fakeChart();
+      render(
+        <Harness chart={ch.chart} ready={true} tool="rectangle" />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      const afterDown = clearRect.mock.calls.length;
+      fireEvent.mouseMove(document, { clientX: 50, clientY: 200 });
+      expect(clearRect.mock.calls.length).toBeGreaterThan(afterDown);
+    });
+
+    it("mouseup that projects null (off-scale) cancels rather than committing", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      // Series whose projections start working but flip to null
+      // for the mouseup. We toggle the flip via a closure flag.
+      let projectsNull = false;
+      const series: PriceConverter = {
+        priceToCoordinate: (p) => (projectsNull ? null : p),
+        coordinateToPrice: (c) => (projectsNull ? null : c),
+      };
+      const { rerender } = render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+          series={series}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // Flip projection to null AND re-render so seriesRef refreshes.
+      projectsNull = true;
+      rerender(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+          series={series}
+        />,
+      );
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("mouseup with a null seriesRef cancels rather than committing", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const { rerender } = render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // Drop the series mid-drag (chart re-init / slab swap could
+      // produce this).
+      rerender(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+          series={null}
+        />,
+      );
+      expect(() =>
+        fireEvent.mouseUp(document, { clientX: 50, clientY: 200 }),
+      ).not.toThrow();
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("tool change mid-drag cancels the pending anchor without committing", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const { rerender } = render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // User switches to pointer mid-drag (toolbar click somewhere).
+      rerender(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="pointer"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      expect(addDrawing).not.toHaveBeenCalled();
+      // And pan was restored (cleanup ran).
+      const lastCall = ch.applyOptions.mock.calls.at(-1);
+      expect(lastCall?.[0]).toEqual({
+        handleScroll: ch.initialScroll,
+        handleScale: ch.initialScale,
+      });
+    });
+
+    it("slab change mid-drag cancels the pending anchor without committing", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const { rerender } = render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+          slabAddress={SLAB_A}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      rerender(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+          slabAddress={SLAB_B}
+        />,
+      );
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      expect(addDrawing).not.toHaveBeenCalled();
     });
 
     it("does NOT attach mousedown listener when tool is not rectangle", () => {
