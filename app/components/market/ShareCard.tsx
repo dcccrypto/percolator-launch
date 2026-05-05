@@ -3,7 +3,7 @@
 import { FC, useState, useRef, useEffect } from "react";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { formatUsd } from "@/lib/format";
+import { formatUsdPriceE6 } from "@/lib/format";
 
 interface ShareCardProps {
   slabAddress: string;
@@ -31,7 +31,7 @@ function buildXShareText(marketName: string, fmtPrice: string, changeStr: string
 export const ShareCard: FC<ShareCardProps> = ({ slabAddress, marketName, price, change24h }) => {
   const [copied, setCopied] = useState(false);
 
-  const fmtPrice = formatUsd(price).slice(1);
+  const fmtPrice = formatUsdPriceE6(price).slice(1);
   const changeStr = change24h != null ? `${change24h >= 0 ? "+" : ""}${change24h.toFixed(2)}%` : "";
   const tradeUrl = buildTradeUrl(slabAddress);
 

@@ -12,6 +12,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { explorerTxUrl } from "@/lib/config";
+import { formatUsdFromNumber } from "@/lib/format";
 import type { TraderTradeEntry } from "@/app/api/trader/[wallet]/trades/route";
 
 type TradeType = "all" | "long" | "short";
@@ -233,7 +234,7 @@ export function TradeHistory() {
                     className="px-3 py-2.5 text-right text-[var(--text-secondary)]"
                     style={{ fontFamily: "var(--font-jetbrains-mono)" }}
                   >
-                    {formatUsd(trade.price)}
+                    {formatUsdFromNumber(trade.price)}
                   </td>
                   <td
                     className="px-3 py-2.5 text-right text-[var(--text-muted)]"
