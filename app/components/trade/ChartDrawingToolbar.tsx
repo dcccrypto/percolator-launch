@@ -6,6 +6,18 @@ import type { DrawingTool } from "@/lib/chart-drawings";
 interface ChartDrawingToolbarProps {
   tool: DrawingTool;
   setTool: (next: DrawingTool) => void;
+  /** Number of drawings on the active slab. Drives the clear-all
+   *  button's enabled state and the count shown in the confirm
+   *  dialog. Pass `drawings.length`, not the array itself — the
+   *  toolbar only needs the count, and a primitive prop avoids a
+   *  re-render on every drawings-array identity change. */
+  drawingCount: number;
+  /** Wipe the active slab's drawings. Wired from the persistence
+   *  hook's clearAll. The toolbar prompts via window.confirm before
+   *  invoking, and resets the active tool to pointer afterwards
+   *  (the user shouldn't keep drawing in the same mode after a wipe;
+   *  pointer is the safe default for what comes next). */
+  clearAll: () => void;
 }
 
 /** Inline SVGs for each tool. Kept as small components so the TOOLS
@@ -71,6 +83,26 @@ const RectangleIcon = (): ReactNode => (
   </svg>
 );
 
+const TrashIcon = (): ReactNode => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 14 14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M2 4h10" />
+    <path d="M5 4V2.5h4V4" />
+    <path d="M3.5 4l.5 8h6l.5-8" />
+    <path d="M5.5 6.5v3" />
+    <path d="M8.5 6.5v3" />
+  </svg>
+);
+
 interface ToolEntry {
   kind: DrawingTool;
   label: string;
@@ -118,7 +150,29 @@ const TOOLS: ReadonlyArray<ToolEntry> = [
 export const ChartDrawingToolbar: FC<ChartDrawingToolbarProps> = ({
   tool,
   setTool,
+  drawingCount,
+  clearAll,
 }) => {
+  const onClearAll = (): void => {
+    // Defensive: the button is `disabled` when count is 0, but a
+    // programmatic click would still bypass that. Skip the confirm
+    // dialog for an empty list — there's nothing to clear.
+    if (drawingCount === 0) return;
+    // window.confirm is blocking but free — no custom modal infra.
+    // Singular / plural to keep the prompt natural at count === 1.
+    const noun = drawingCount === 1 ? "drawing" : "drawings";
+    const confirmed = window.confirm(
+      `Clear all ${drawingCount} ${noun} on this market?`,
+    );
+    if (!confirmed) return;
+    clearAll();
+    // Drop back to pointer after a wipe. The user just signalled
+    // "I'm done with everything I drew"; staying in (say) trend mode
+    // would invite an immediate accidental new drawing on the next
+    // chart click. Pointer is the safe default for whatever's next.
+    setTool("pointer");
+  };
+
   return (
     <div
       aria-label="Drawing tools"
@@ -159,6 +213,37 @@ export const ChartDrawingToolbar: FC<ChartDrawingToolbarProps> = ({
           </button>
         );
       })}
+      {/* Separator — divides creation tools from the destructive
+          clear-all action so the user doesn't reach for it
+          accidentally while scanning for a tool. */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        className="my-0.5 h-px w-full bg-[var(--border)]"
+      />
+      <button
+        type="button"
+        aria-label="Clear all drawings"
+        title="Clear all drawings"
+        disabled={drawingCount === 0}
+        onClick={onClearAll}
+        className={[
+          "flex h-7 w-7 items-center justify-center rounded-none transition-colors",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] focus-visible:outline-offset-1",
+          // Hover hint in red for the destructive action — same
+          // accent-foreground discipline as the active tools, but
+          // semantically different (this is a destructive op, not a
+          // selectable mode).
+          "text-[var(--text-secondary)] enabled:hover:bg-[var(--bg-surface)] enabled:hover:text-red-400",
+          // Disabled state: drop the cursor affordance and dim the
+          // icon further. The button still focuses (we don't add
+          // tabIndex=-1) so keyboard users can find it and learn
+          // it exists for when they DO have drawings.
+          "disabled:cursor-not-allowed disabled:opacity-40",
+        ].join(" ")}
+      >
+        <TrashIcon />
+      </button>
     </div>
   );
 };

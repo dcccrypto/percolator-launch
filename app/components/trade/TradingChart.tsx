@@ -164,7 +164,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     clearAll: clearAllIndicators,
   } = useChartIndicatorPrefs(slabAddress);
   const { tool: drawingTool, setTool: setDrawingTool } = useChartDrawingTool();
-  const { drawings, addDrawing, deleteDrawing } = useChartDrawings(slabAddress);
+  const {
+    drawings,
+    addDrawing,
+    deleteDrawing,
+    clearAll: clearAllDrawings,
+  } = useChartDrawings(slabAddress);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -876,6 +881,8 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
           <ChartDrawingToolbar
             tool={drawingTool}
             setTool={setDrawingTool}
+            drawingCount={drawings.length}
+            clearAll={clearAllDrawings}
           />
         )}
 
