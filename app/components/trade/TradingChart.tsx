@@ -413,6 +413,18 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     });
 
     chartRef.current = chart;
+    // Preserve the default price pane when momentarily empty. The
+    // price-series effect below remove-and-re-adds the price series on
+    // every dep change (priceUsd tick, theme switch, etc.), and v5
+    // auto-destroys empty panes whenever any other panes exist. With
+    // RSI / MACD oscillator panes active, the brief empty window
+    // between removeSeries(price) and addSeries(price) was triggering
+    // v5 to compact pane 0 out of existence — the pane indices then
+    // shifted (the first oscillator pane became pane 0), and the next
+    // addSeries(price) defaulted into the oscillator pane, dumping the
+    // price line on top of the indicator. Setting preserveEmptyPane
+    // keeps pane 0 alive across the empty window.
+    chart.panes()[0]?.setPreserveEmptyPane(true);
     setChartReady(true);
 
     return () => {
