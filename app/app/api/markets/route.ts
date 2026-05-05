@@ -40,6 +40,7 @@ const MINT_TO_KNOWN_SYMBOL: Map<string, string> = new Map(
 const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   {
     slab_address: "AiVcTXxKfKmcpUBG3unxCdEHHtXvAq8zYpbtS6oPrV6J",
+    program_id: "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
     mint_address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     symbol: "SOL-PERP",
     name: "SOL/USD Perpetual",
@@ -79,6 +80,7 @@ const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
 const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   {
     slab_address: "FCusfsg4uzcLSdRbj9Ez5okcrS1MwvKHvDbmcwrnSWvL",
+    program_id: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
     mint_address: null,
     symbol: "DEVNET-SMALL-1",
     name: "Devnet Small Market",
@@ -91,6 +93,7 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
   {
     slab_address: "4r4bxZ2LxNCu4EWdkXThoVaBHBsYQcWkizdkmWciprJC",
+    program_id: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
     mint_address: null,
     symbol: "DEVNET-SMALL-2",
     name: "Devnet Small Market",
@@ -103,6 +106,7 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
   {
     slab_address: "7G3SsnevWwUWjWAwGGmr2N11x8KAGn1abzjV3bBbZkAM",
+    program_id: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
     mint_address: null,
     symbol: "DEVNET-SMALL-3",
     name: "Devnet Small Market",
@@ -115,6 +119,7 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
   {
     slab_address: "GfRak5ben9rvZiaEWW6FmmkeqjXFz9SBLhDwiPWhoapS",
+    program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
     mint_address: null,
     symbol: "DEVNET-MEDIUM-1",
     name: "Devnet Medium Market",
@@ -126,7 +131,8 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
     is_zombie: false,
   },
   {
-    slab_address: "2t389M7NwJ1FbwKuv1yf8TSGk84FR1itGgxMBkjh5fDs",
+    slab_address: "9Av38ug3FE1goNB4JanwjqdHVvF5JeQbHV6jUVEvvocB",
+    program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
     mint_address: null,
     symbol: "DEVNET-MEDIUM-2",
     name: "Devnet Medium Market",
@@ -139,6 +145,7 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
   {
     slab_address: "A3XJVaQxKsM4bbikoSTvKczQLVQQ19GbrxY9S9ShK119",
+    program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
     mint_address: null,
     symbol: "DEVNET-MEDIUM-3",
     name: "Devnet Medium Market",
@@ -151,6 +158,7 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
   {
     slab_address: "HrdveBrbepjvwAn2qmCPU9eRSFG6Munpkw7gXCHvLpBN",
+    program_id: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
     mint_address: null,
     symbol: "DEVNET-LARGE-1",
     name: "Devnet Large Market",
@@ -163,6 +171,7 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
   {
     slab_address: "JBS3qeCoiAvyPRm4DsUfunA7YcL6UnRmbk6TyRBHTz2X",
+    program_id: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
     mint_address: null,
     symbol: "DEVNET-LARGE-2",
     name: "Devnet Large Market",
@@ -175,6 +184,7 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
   {
     slab_address: "5JUTyfARLVAWTMPxPnGq5jyYq7aNuq5c1M2tvDqaFQJL",
+    program_id: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
     mint_address: null,
     symbol: "DEVNET-LARGE-3",
     name: "Devnet Large Market",
@@ -234,6 +244,7 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
   const rows = network === "mainnet"
     ? MAINNET_MARKET_DIRECTORY_FALLBACK
     : DEVNET_MARKET_DIRECTORY_FALLBACK;
+  const programIdParam = request?.nextUrl?.searchParams?.get("program_id") ?? null;
   const searchParam =
     request?.nextUrl?.searchParams?.get("search") ??
     request?.nextUrl?.searchParams?.get("q") ??
@@ -244,6 +255,7 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
 
   const filtered = rows
     .filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string))
+    .filter((m) => !programIdParam || m.program_id === programIdParam)
     .filter((m) => {
       if (!searchTrimmed) return true;
       const symbol = String(m.symbol ?? "").toLowerCase();

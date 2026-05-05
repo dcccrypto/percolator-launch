@@ -8,6 +8,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const captureMessage = vi.fn();
 const captureException = vi.fn();
+const mockConfig = vi.hoisted(() => ({
+  value: {
+    rpcUrl: "https://api.mainnet-beta.solana.com",
+    network: "mainnet",
+    programId: "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
+    programsBySlabTier: undefined as Record<string, string> | undefined,
+  },
+}));
 
 vi.mock("@sentry/nextjs", () => ({
   captureException,
@@ -15,15 +23,11 @@ vi.mock("@sentry/nextjs", () => ({
 }));
 
 vi.mock("@/lib/config", () => ({
-  getConfig: () => ({
-    rpcUrl: "https://api.mainnet-beta.solana.com",
-    network: "mainnet",
-    programId: "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
-  }),
+  getConfig: () => mockConfig.value,
 }));
 
 vi.mock("@/lib/supabase", () => ({
-  getServerNetwork: () => "mainnet",
+  getServerNetwork: () => mockConfig.value.network,
   getServiceClient: () => {
     const chain: Record<string, unknown> = {};
     chain.select = () => chain;
@@ -48,6 +52,12 @@ describe("GET /api/markets — Supabase outage fallback", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mockConfig.value = {
+      rpcUrl: "https://api.mainnet-beta.solana.com",
+      network: "mainnet",
+      programId: "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv",
+      programsBySlabTier: undefined,
+    };
   });
 
   it("returns the static mainnet market directory instead of 500", async () => {
@@ -77,5 +87,32 @@ describe("GET /api/markets — Supabase outage fallback", () => {
     expect(res.status).toBe(200);
     expect(body.total).toBe(0);
     expect(body.markets).toHaveLength(0);
+  });
+
+  it("filters the static devnet directory by program_id", async () => {
+    mockConfig.value = {
+      rpcUrl: "https://api.devnet.solana.com",
+      network: "devnet",
+      programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
+      programsBySlabTier: {
+        small: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
+        medium: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
+        large: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
+      },
+    };
+
+    const { GET } = await import("@/app/api/markets/route");
+    const res = await GET(makeRequest({ program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.total).toBe(3);
+    expect(body.markets).toHaveLength(3);
+    expect(body.markets.every((m: Record<string, unknown>) => (
+      m.program_id === "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in"
+    ))).toBe(true);
+    expect(body.markets.map((m: Record<string, unknown>) => m.slab_address)).not.toContain(
+      "2t389M7NwJ1FbwKuv1yf8TSGk84FR1itGgxMBkjh5fDs",
+    );
   });
 });

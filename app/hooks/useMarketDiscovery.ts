@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
-  discoverMarketsViaApi,
   discoverMarketsViaStaticBundle,
   type DiscoveredMarket,
 } from "@percolatorct/sdk";
 import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { isBlockedSlab } from "@/lib/blocklist";
+import { discoverMarketsViaProgramDirectory } from "@/lib/market-directory-discovery";
 
 const MAINNET_STATIC_MARKETS = [
   {
@@ -40,7 +40,7 @@ async function discoverForProgram(
   // RPC batch drops. Prefer the app API as an address directory, then fetch
   // the returned slabs with getMultipleAccounts through the normal connection.
   if (apiBaseUrl) {
-    const viaApi = await discoverMarketsViaApi(connection, programId, apiBaseUrl, {
+    const viaApi = await discoverMarketsViaProgramDirectory(connection, programId, apiBaseUrl, {
       timeoutMs: 8_000,
     }).catch(() => [] as DiscoveredMarket[]);
     if (viaApi.length > 0) return viaApi;
