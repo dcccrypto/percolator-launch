@@ -20,36 +20,45 @@ import { assertNever } from "@/lib/exhaustive";
  *  RSI; a histogram + two lines for MACD. */
 type OscillatorSeries = ISeriesApi<"Line" | "Histogram">;
 type OscillatorPriceLine = ReturnType<ISeriesApi<"Line">["createPriceLine"]>;
+/** IPaneApi as returned by IChartApi.addPane(). Stored by-reference (not by
+ *  index) so that pane.paneIndex() always reads the current live index even
+ *  after sibling panes are added or removed and the indices shift. */
+type Pane = ReturnType<IChartApi["addPane"]>;
 
 /**
- * Wires oscillator-kind indicator configs (RSI, MACD) into a native pane
+ * Wires oscillator-kind indicator configs (RSI, MACD) into native panes
  * below the main price pane via lightweight-charts v5's `chart.addPane()`.
  * Overlay-kind configs (SMA, EMA, Bollinger) are filtered out by the
  * caller and rendered separately by useIndicatorOverlays.
  *
- * The v5 native pane API gives us, for free, what the v4 plan would have
- * required ~120 lines of manual plumbing for: shared time scale across
- * panes, shared crosshair, theme propagation, and viewport sync. The
- * pane lives inside the same chart instance — no second `<canvas>`, no
- * `subscribeVisibleTimeRangeChange` mirror, no separate teardown path.
+ * Pane allocation: each oscillator config gets its OWN dedicated pane,
+ * matching TradingView convention. Toggling RSI on opens one pane below
+ * the price chart; toggling MACD on opens a second pane below that;
+ * toggling either off collapses just that one pane and lets the
+ * remaining panes (price + the surviving oscillator) reflow. This avoids
+ * the cluttered dual-scale axis you get from packing multiple
+ * oscillators into a single shared pane.
  *
- * The pane is allocated lazily — only when at least one oscillator config
- * is active. Removing the last oscillator tears the pane down (collapsing
- * the chart back to its original height). Adding the next oscillator
- * reallocates a fresh pane.
+ * Pane preservation: addPane() is called with `preserveEmptyPane: true`
+ * because the diff loop below removes each existing series before
+ * re-adding it on every effect run, and v5 auto-destroys panes the
+ * instant their last series is removed unless this flag is set. Without
+ * preservation, the pane vanishes during the brief empty window and the
+ * next addSeries(..., paneIndex) call falls back to pane 0, dropping the
+ * oscillator series into the price pane.
  *
- * Multiple oscillators in one pane share the canvas. Their value scales
- * differ (RSI is 0–100; MACD is unbounded around zero) but lightweight-
- * charts auto-scales each series independently when they have distinct
- * `priceScaleId` values. We assign each indicator instance a unique
- * priceScaleId derived from its id so the scales don't fight each other.
+ * Pane references vs indices: the map stores `IPaneApi` references
+ * rather than integer indices because v5 compacts pane indices when a
+ * pane is removed (removing pane at index 1 shifts the pane at index 2
+ * down to 1). Calling `pane.paneIndex()` returns the current live index
+ * regardless of removals, so addSeries always targets the correct pane.
  *
- * RSI gets a horizontal reference line at 70 (overbought) and 30
+ * RSI gets horizontal reference lines at 70 (overbought) and 30
  * (oversold) via `series.createPriceLine`. MACD's histogram bars are
  * coloured per-bar (green for positive, red for negative) by setting
  * `color` on each data point — TradingView's universal convention. The
  * MACD line uses the indicator's chosen palette colour; the signal line
- * uses the theme's text colour for contrast.
+ * uses the theme's text colour at higher alpha for contrast.
  */
 export function useIndicatorOscillatorPane(
   chartRef: RefObject<IChartApi | null>,
@@ -58,17 +67,17 @@ export function useIndicatorOscillatorPane(
   configs: readonly IndicatorConfig[],
   theme: ChartTheme,
 ): void {
-  const paneIndexRef = useRef<number | null>(null);
+  const paneMapRef = useRef<Map<string, Pane>>(new Map());
   const seriesMapRef = useRef<Map<string, OscillatorSeries[]>>(new Map());
   const priceLineMapRef = useRef<Map<string, OscillatorPriceLine[]>>(new Map());
 
   // When the chart is destroyed (unmount, Strict Mode double-mount, hot-
-  // reload), chartReady flips false. Our refs still point at the dead
-  // chart's pane index and series — clear them so the next mount allocates
+  // reload), chartReady flips false. Our refs still point at panes and
+  // series on the dead chart — clear them so the next mount allocates
   // fresh state against the new chart instance.
   useEffect(() => {
     if (!chartReady) {
-      paneIndexRef.current = null;
+      paneMapRef.current.clear();
       seriesMapRef.current.clear();
       priceLineMapRef.current.clear();
     }
@@ -78,62 +87,55 @@ export function useIndicatorOscillatorPane(
     const chart = chartRef.current;
     if (!chart || !chartReady) return;
 
+    const paneMap = paneMapRef.current;
     const seriesMap = seriesMapRef.current;
     const priceLineMap = priceLineMapRef.current;
 
-    // No oscillators active — tear down the pane if it exists. The pane
-    // collapses; the main chart fills the reclaimed vertical space.
-    if (configs.length === 0) {
-      tearDownPane(chart);
-      return;
-    }
-
-    // Lazily allocate the oscillator pane on first use. v5 returns an
-    // IPaneApi from addPane(); we keep just the index so subsequent
-    // addSeries calls can target it via the third argument.
-    //
-    // `preserveEmptyPane: true` is critical: the diff loop below removes
-    // each existing series before re-adding it. Without preservation, v5
-    // auto-destroys the pane the instant its last series is removed —
-    // and the very next addSeries(..., paneIndex=1) call falls back to
-    // pane 0 because pane 1 no longer exists. The visual symptom is
-    // every oscillator series migrating into the price pane after the
-    // first re-render. With preservation the pane survives the brief
-    // empty window between remove and re-add.
-    if (paneIndexRef.current === null) {
-      const newPane = chart.addPane(true);
-      newPane.setHeight(120);
-      paneIndexRef.current = newPane.paneIndex();
-    } else {
-      // Defensive: re-assert preservation in case anything else cleared it.
-      const existingPane = chart.panes()[paneIndexRef.current];
-      if (existingPane) existingPane.setPreserveEmptyPane(true);
-    }
-    const paneIndex = paneIndexRef.current;
-
     const activeIds = new Set(configs.map((c) => c.id));
 
-    // Remove series for configs no longer present. Price lines attached
-    // to a removed series go with it automatically — we just clear our
-    // tracking Map entry.
-    for (const [id, seriesList] of seriesMap) {
+    // Remove panes (and their series) for configs no longer present.
+    // Spread the keys so we can mutate the map while iterating.
+    for (const id of [...paneMap.keys()]) {
       if (!activeIds.has(id)) {
-        for (const s of seriesList) {
-          try {
-            chart.removeSeries(s);
-          } catch {
-            /* chart was destroyed in a parallel cleanup */
+        const seriesList = seriesMap.get(id);
+        if (seriesList) {
+          for (const s of seriesList) {
+            try {
+              chart.removeSeries(s);
+            } catch {
+              /* chart was destroyed in a parallel cleanup */
+            }
           }
+          seriesMap.delete(id);
         }
-        seriesMap.delete(id);
         priceLineMap.delete(id);
+        const pane = paneMap.get(id);
+        if (pane) {
+          try {
+            chart.removePane(pane.paneIndex());
+          } catch {
+            /* destroyed in parallel */
+          }
+          paneMap.delete(id);
+        }
       }
     }
 
-    // Add or update each active config. Same remove-and-recreate strategy
-    // as the overlay hook: simpler than per-property diff, trivial cost
-    // at our data sizes.
+    // Add or update each active config. One pane per config — allocated
+    // lazily on first appearance, kept across re-renders.
     for (const config of configs) {
+      let pane = paneMap.get(config.id);
+      if (!pane) {
+        pane = chart.addPane(true);
+        pane.setHeight(120);
+        paneMap.set(config.id, pane);
+      }
+      const paneIndex = pane.paneIndex();
+
+      // Remove existing series for this config — we always remove-and-
+      // recreate on update (period change, theme change). Trivial cost
+      // at our data sizes; pane preservation above keeps this safe even
+      // when the pane briefly has zero series between remove and add.
       const existing = seriesMap.get(config.id);
       if (existing) {
         for (const s of existing) {
@@ -161,40 +163,12 @@ export function useIndicatorOscillatorPane(
     }
 
     // No cleanup. Teardown is driven by:
-    //   - `configs.length === 0` branch above (user disabled all oscillators)
+    //   - the diff loop above (config removed by user)
     //   - the chartReady-reset effect above (chart instance destroyed)
     //   - the chart-init effect's `chart.remove()` (full unmount cascade)
     // A cleanup here would fire on every dep change (data tick, theme
-    // toggle), tearing down + reallocating the pane on every WS tick —
-    // exactly what the body's diff is trying to avoid.
+    // toggle), tearing down + reallocating panes on every WS tick.
   }, [chartRef, chartReady, candleData, configs, theme]);
-
-  function tearDownPane(chart: IChartApi) {
-    const seriesMap = seriesMapRef.current;
-    // Remove tracked series. removePane below would also drop them, but
-    // explicitly removing first means our refs and the chart's internal
-    // state stay in sync even if removePane fails for any reason.
-    for (const seriesList of seriesMap.values()) {
-      for (const s of seriesList) {
-        try {
-          chart.removeSeries(s);
-        } catch {
-          /* destroyed in parallel */
-        }
-      }
-    }
-    seriesMap.clear();
-    priceLineMapRef.current.clear();
-
-    if (paneIndexRef.current !== null) {
-      try {
-        chart.removePane(paneIndexRef.current);
-      } catch {
-        /* destroyed in parallel */
-      }
-      paneIndexRef.current = null;
-    }
-  }
 }
 
 /** Build the series + reference lines for a single oscillator config. */
@@ -215,8 +189,9 @@ function renderOscillatorConfig(
           lineWidth: 1,
           priceLineVisible: false,
           lastValueVisible: false,
-          // Per-instance scale so multiple oscillators in the same pane
-          // don't fight over a shared right-side scale.
+          // Per-instance scale id keeps the autoscaleInfoProvider's
+          // pinned 0–100 range scoped to THIS series (not shared with
+          // any other series that might land in the same pane).
           priceScaleId: config.id,
           // Pin the visible range to [0, 100] so the 30 / 70 reference
           // lines below render at fixed positions regardless of where
@@ -231,19 +206,19 @@ function renderOscillatorConfig(
         },
         paneIndex,
       );
-      // Force the per-instance scale visible — overlay scales (created by
-      // assigning a non-default priceScaleId) hide their axis by default
-      // in v5, which would suppress both the 0-100 axis labels AND the
-      // 30 / 70 reference-line labels below.
+      // Force the per-instance scale visible — overlay scales (created
+      // by assigning a non-default priceScaleId) hide their axis by
+      // default in v5, which would suppress both the 0-100 axis labels
+      // AND the 30 / 70 reference-line labels below.
       chart.priceScale(config.id, paneIndex).applyOptions({ visible: true });
       series.setData(
         data.map((p) => ({ time: msToUtc(p.time), value: p.value })),
       );
       // Overbought (70) and oversold (30) reference lines — universal
       // RSI convention. Dashed, derived from the theme's text colour at
-      // ~25% alpha so they read as secondary structure rather than noise.
-      // theme.gridColor (~4-5% alpha) was effectively invisible on real
-      // charts.
+      // ~25% alpha so they read as secondary structure rather than
+      // noise. theme.gridColor (~4-5% alpha) was effectively invisible
+      // on real charts.
       const referenceColor = withAlpha(theme.textColor, 0.25);
       const overbought = series.createPriceLine({
         price: 70,
