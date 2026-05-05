@@ -119,7 +119,7 @@ function numericOrNull(v: unknown): number | null {
 }
 
 function fallbackMarketsResponse(request: NextRequest, reason: string): NextResponse {
-  const network = getServerNetwork();
+  const network = getConfig().network;
   const rows = network === "mainnet" ? MAINNET_MARKET_DIRECTORY_FALLBACK : [];
   const searchParam =
     request?.nextUrl?.searchParams?.get("search") ??
