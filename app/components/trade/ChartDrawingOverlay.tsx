@@ -65,15 +65,26 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    // Cache the logical (CSS-pixel) dimensions used for the LAST resize.
+    // `redraw`'s clearRect uses these instead of recomputing from
+    // `canvas.width / window.devicePixelRatio` — that recompute reads a
+    // FRESH dpr on every redraw, but `canvas.width` was set with the
+    // dpr that was current at the last resize. If those disagree (user
+    // dragged the window between monitors of identical logical size,
+    // so DPR changed but the container didn't, so ResizeObserver
+    // didn't fire) the recompute under-clears and leaves ghost trails.
+    // The full fix for monitor-swap blur requires a matchMedia
+    // listener — deferred to v2 — but caching here at least keeps the
+    // clear correct for the canvas's current backing size.
+    let logicalW = 0;
+    let logicalH = 0;
+
     /** Clear the canvas. Future commits will iterate the active
      *  drawings list here and call per-kind render branches; for now
      *  the redraw exists only to prove the trigger plumbing fires on
      *  resize / pan / zoom / chart-rebuild. */
     const redraw = (): void => {
-      const dpr = window.devicePixelRatio ?? 1;
-      const w = canvas.width / dpr;
-      const h = canvas.height / dpr;
-      ctx.clearRect(0, 0, w, h);
+      ctx.clearRect(0, 0, logicalW, logicalH);
     };
 
     /** Re-size the canvas to the container's current dimensions (DPR-
@@ -81,9 +92,9 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
      *  ResizeObserver tick. */
     const resize = (): void => {
       const dpr = window.devicePixelRatio ?? 1;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      sizeCanvasForDpr(canvas, ctx, w, h, dpr);
+      logicalW = container.clientWidth;
+      logicalH = container.clientHeight;
+      sizeCanvasForDpr(canvas, ctx, logicalW, logicalH, dpr);
       redraw();
     };
 
@@ -93,12 +104,23 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
     ro.observe(container);
 
     const ts = chart.timeScale();
-    ts.subscribeVisibleTimeRangeChange(redraw);
+    // subscribeVisibleLogicalRangeChange (NOT visibleTimeRangeChange):
+    // the time-range variant clamps to bar coverage and can stay
+    // frozen at the right-edge "future padding" zone during pan. The
+    // logical-range variant is the canonical "chart needs to redraw"
+    // hook and fires for every pan / zoom regardless of bar coverage.
+    ts.subscribeVisibleLogicalRangeChange(redraw);
+    // subscribeSizeChange catches internal chart reflows that DON'T
+    // change the container size — most commonly when the price-scale
+    // gutter widens because a price label grew a digit ($99 → $100,
+    // $9999 → $10000). ResizeObserver doesn't see those.
+    ts.subscribeSizeChange(redraw);
 
     return () => {
       ro.disconnect();
       try {
-        ts.unsubscribeVisibleTimeRangeChange(redraw);
+        ts.unsubscribeVisibleLogicalRangeChange(redraw);
+        ts.unsubscribeSizeChange(redraw);
       } catch {
         // Chart was destroyed in a parallel cleanup (Strict Mode
         // double-unmount, parent unmount). Refs are already dangling;
