@@ -65,7 +65,7 @@ export const Footer: FC = () => {
               </svg>
             </a>
             <a
-              href="https://x.com/Percolator_ct"
+              href="https://x.com/PercolatorTrade"
               target="_blank"
               rel="noopener noreferrer"
               className="flex h-7 w-7 items-center justify-center rounded-sm border border-[var(--border)] text-[var(--text-muted)] transition-all hover:border-[var(--border-hover)] hover:text-[var(--text)] hover:bg-[var(--bg-elevated)]"
