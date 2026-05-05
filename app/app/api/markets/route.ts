@@ -76,6 +76,117 @@ const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
 ];
 
+const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
+  {
+    slab_address: "FCusfsg4uzcLSdRbj9Ez5okcrS1MwvKHvDbmcwrnSWvL",
+    mint_address: null,
+    symbol: "DEVNET-SMALL-1",
+    name: "Devnet Small Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+  {
+    slab_address: "4r4bxZ2LxNCu4EWdkXThoVaBHBsYQcWkizdkmWciprJC",
+    mint_address: null,
+    symbol: "DEVNET-SMALL-2",
+    name: "Devnet Small Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+  {
+    slab_address: "7G3SsnevWwUWjWAwGGmr2N11x8KAGn1abzjV3bBbZkAM",
+    mint_address: null,
+    symbol: "DEVNET-SMALL-3",
+    name: "Devnet Small Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+  {
+    slab_address: "GfRak5ben9rvZiaEWW6FmmkeqjXFz9SBLhDwiPWhoapS",
+    mint_address: null,
+    symbol: "DEVNET-MEDIUM-1",
+    name: "Devnet Medium Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+  {
+    slab_address: "2t389M7NwJ1FbwKuv1yf8TSGk84FR1itGgxMBkjh5fDs",
+    mint_address: null,
+    symbol: "DEVNET-MEDIUM-2",
+    name: "Devnet Medium Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+  {
+    slab_address: "A3XJVaQxKsM4bbikoSTvKczQLVQQ19GbrxY9S9ShK119",
+    mint_address: null,
+    symbol: "DEVNET-MEDIUM-3",
+    name: "Devnet Medium Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+  {
+    slab_address: "HrdveBrbepjvwAn2qmCPU9eRSFG6Munpkw7gXCHvLpBN",
+    mint_address: null,
+    symbol: "DEVNET-LARGE-1",
+    name: "Devnet Large Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+  {
+    slab_address: "JBS3qeCoiAvyPRm4DsUfunA7YcL6UnRmbk6TyRBHTz2X",
+    mint_address: null,
+    symbol: "DEVNET-LARGE-2",
+    name: "Devnet Large Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+  {
+    slab_address: "5JUTyfARLVAWTMPxPnGq5jyYq7aNuq5c1M2tvDqaFQJL",
+    mint_address: null,
+    symbol: "DEVNET-LARGE-3",
+    name: "Devnet Large Market",
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    created_at: null,
+    is_zombie: false,
+  },
+];
+
 /**
  * Maximum valid funding rate in bps/slot (matches on-chain guard).
  * Raw DB values outside [-MAX, MAX] are garbage from uninitialized slabs.
@@ -120,7 +231,9 @@ function numericOrNull(v: unknown): number | null {
 
 function fallbackMarketsResponse(request: NextRequest, reason: string): NextResponse {
   const network = getConfig().network;
-  const rows = network === "mainnet" ? MAINNET_MARKET_DIRECTORY_FALLBACK : [];
+  const rows = network === "mainnet"
+    ? MAINNET_MARKET_DIRECTORY_FALLBACK
+    : DEVNET_MARKET_DIRECTORY_FALLBACK;
   const searchParam =
     request?.nextUrl?.searchParams?.get("search") ??
     request?.nextUrl?.searchParams?.get("q") ??
