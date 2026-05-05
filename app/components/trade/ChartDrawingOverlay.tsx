@@ -123,22 +123,43 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
    *  paints the preview line directly. */
   const previewP2Ref = useRef<PricePoint | null>(null);
 
-  // Reset overlay-local state on slab change, tool change, OR chart
-  // re-init. Combined because all three triggers want the same reset:
-  // - slab switch makes the previous selection irrelevant.
-  // - tool switch invalidates a half-drawn anchor.
-  // - chartReady false→true (Strict Mode double-mount, hot-reload,
-  //   any future code path that rebuilds the chart) invalidates
-  //   pendingP1's pixel projection — its time/price coords were
-  //   recorded against the OLD chart's coordinate system, and the
-  //   new chart may have a different visible range / bar density.
-  //   Committing a rectangle on the new chart with stale coords
-  //   produces a geometrically wrong drawing.
+  // setTool is routed through a ref so the slab/chart-init reset
+  // effect below doesn't re-fire on every rerender just because the
+  // parent passes a new function reference each render. Same pattern
+  // as addDrawingRef — keeps the effect's deps minimal so it only
+  // fires on the events it actually cares about (slab change,
+  // chart re-init).
+  const setToolRef = useRef(setTool);
+  setToolRef.current = setTool;
+
+  // Slab change OR chart re-init: clear in-flight creation/selection
+  // AND drop the active tool back to pointer. Tool selection is
+  // global to the React tree (one toolbar, one chart) so without
+  // this reset, a user mid-trend on BTC who navigates to SOL would
+  // arrive on the new chart still in trend mode — the next click
+  // silently drops a creation anchor with no signal that a tool's
+  // still active. Pointer is the safe default for arriving at a
+  // new chart. chartReady's false→true edge (Strict Mode
+  // double-mount, hot-reload, any future code path that rebuilds
+  // the chart) also invalidates pendingP1's pixel projection
+  // because the new chart may have a different visible range.
   useEffect(() => {
     setSelectedId(null);
     setPendingP1(null);
     previewP2Ref.current = null;
-  }, [slabAddress, tool, chartReady]);
+    setToolRef.current("pointer");
+  }, [slabAddress, chartReady]);
+
+  // Tool change (user picked a different tool from the toolbar):
+  // clear in-flight creation/selection but DON'T touch the tool —
+  // the user just selected it. Separate from the slab/chartReady
+  // effect above so resetting the tool there doesn't bounce-fire
+  // its own deps in a feedback loop.
+  useEffect(() => {
+    setSelectedId(null);
+    setPendingP1(null);
+    previewP2Ref.current = null;
+  }, [tool]);
 
   // If the selected drawing was removed (Delete / Backspace, slab
   // change clearing storage, etc.), drop the dangling id.
@@ -191,6 +212,23 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       if (!series) return;
       const timeScaleApi = chart.timeScale() as unknown as TimeConverter;
       const { drawings, selectedId, pendingP1 } = stateRef.current;
+      // Resolve fill once per frame so a theme switch repaints with
+      // the right alpha at the next redraw without an explicit
+      // subscription. Stroke uses pure accent regardless of theme.
+      const fillStyle = isLightTheme() ? ACCENT_FILL_LIGHT : ACCENT_FILL_DARK;
+      // Clip to the price pane's candle area. The drawing canvas
+      // covers the whole container including the volume sub-region
+      // and any oscillator panes (RSI/MACD via addPane), but the
+      // price-pane series' coord conversion is only valid within
+      // this band. Without clipping, drawings can paint into pane
+      // regions where they don't belong.
+      const bounds = getPriceAreaBounds(chart);
+      ctx.save();
+      if (bounds !== null) {
+        ctx.beginPath();
+        ctx.rect(0, bounds.top, logicalW, bounds.bottom - bounds.top);
+        ctx.clip();
+      }
       for (const drawing of drawings) {
         renderDrawing(
           ctx,
@@ -199,6 +237,7 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
           drawing.id === selectedId,
           series,
           timeScaleApi,
+          fillStyle,
         );
       }
       // In-flight creation preview, dispatched by tool:
@@ -223,9 +262,11 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
             previewP2Ref.current,
             series,
             timeScaleApi,
+            fillStyle,
           );
         }
       }
+      ctx.restore();
     };
     redrawRef.current = redraw;
 
@@ -267,21 +308,37 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       if (!param.point) return;
       const series = seriesRef.current;
       if (!series) return;
-      // Mobile guard: creation tools require the toolbar (which is
-      // hidden below md), the keyboard (no Escape on most mobile
-      // soft-keyboards), or both — none reliably available on phones.
-      // A desktop session can leave a creation tool persisted
-      // globally (`perc:chart:drawing-tool`); without this guard, a
-      // mobile user lands on the chart and every tap drops a
-      // horizontal / commits a trend with no escape route.
-      // Pointer mode stays available on every viewport (passive
-      // hit-test). matchMedia is undefined in some non-browser
-      // environments — defensive default is "treat as desktop."
+      // Mobile guard: every tool short-circuits on touch viewports.
+      // - Creation tools (trend/horizontal/rectangle) need the toolbar
+      //   (hidden below md) and Escape (unreliable on soft keyboards),
+      //   neither of which is available on phones.
+      // - Pointer mode is also gated because mobile users have no
+      //   way to delete a selected drawing (Backspace/Delete don't
+      //   reach the document on most mobile soft keyboards). Letting
+      //   them select but not delete is a worse trap than not
+      //   selecting at all — drawings stay visible as static art on
+      //   touch viewports until the user returns to a desktop.
+      // matchMedia is undefined in some non-browser environments;
+      // defensive default is "treat as desktop."
       if (
-        tool !== "pointer" &&
         typeof window !== "undefined" &&
         typeof window.matchMedia === "function" &&
         window.matchMedia("(max-width: 767px)").matches
+      ) {
+        return;
+      }
+      // Pane bleed-through guard: reject clicks outside the price-
+      // pane's candle area (volume sub-region or any oscillator pane).
+      // The price-pane series' coordinateToPrice extrapolates rather
+      // than returning null for y values past the scale margins, so
+      // without this a click in the RSI pane would create a phantom
+      // horizontal at an extrapolated price the user can't see. The
+      // canvas itself is already clipped to this band on render;
+      // rejecting clicks too keeps creation symmetric with rendering.
+      const bounds = getPriceAreaBounds(chart);
+      if (
+        bounds !== null &&
+        (param.point.y < bounds.top || param.point.y > bounds.bottom)
       ) {
         return;
       }
@@ -454,6 +511,14 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       const rect = el.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
+      // Pane bleed-through guard: same y-bounds check as the click
+      // path. A mousedown in the volume sub-region or an oscillator
+      // pane would otherwise anchor a rectangle drag at an
+      // extrapolated price.
+      const bounds = getPriceAreaBounds(chart);
+      if (bounds !== null && (y < bounds.top || y > bounds.bottom)) {
+        return;
+      }
       const ts = chart.timeScale() as unknown as TimeConverter;
       const point = pixelToPricePoint(series, ts, x, y);
       if (point === null) return;
@@ -684,15 +749,67 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
 // Render layer
 // =====================================================================
 
-/** Brand accent (--accent in the theme). Hardcoded as RGB so the
- *  fill / stroke variants can derive different alphas without parsing
- *  CSS variables on every frame. */
+/** Brand accent (--accent in the theme, same hue in dark and light).
+ *  Hardcoded as RGB so the fill / stroke variants can derive different
+ *  alphas without parsing CSS variables on every frame. */
 const ACCENT_RGB = "153, 69, 255";
 const ACCENT_STROKE = `rgb(${ACCENT_RGB})`;
-const ACCENT_FILL = `rgba(${ACCENT_RGB}, 0.15)`;
+/** Fill alpha is theme-dependent: a 15% accent over near-white
+ *  (#FAFAFD light bg) reads as a pale lavender wash that's barely
+ *  visible — the rectangle's body IS its affordance, so we bump
+ *  alpha to 22% in light mode to keep the area legible. Stroke
+ *  contrast against light bg is ~5.5:1 unchanged, which clears the
+ *  WCAG AA 3:1 graphics threshold. */
+const ACCENT_FILL_DARK = `rgba(${ACCENT_RGB}, 0.15)`;
+const ACCENT_FILL_LIGHT = `rgba(${ACCENT_RGB}, 0.22)`;
 const SELECTED_LINE_WIDTH = 2.5;
 const DEFAULT_LINE_WIDTH = 1.5;
 const ANCHOR_RADIUS = 4;
+
+/** Read the document-level theme attribute set by the theme switcher
+ *  (mirrors useChartTheme's getThemeFromDOM). Called per-frame inside
+ *  the redraw closure so a theme switch picks up at the next paint
+ *  without an explicit subscribe. SSR-safe — defaults to dark when
+ *  document is undefined. */
+function isLightTheme(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.documentElement.getAttribute("data-theme") === "light";
+}
+
+/** Y-bounds of the price pane's candle area (top scale margin to
+ *  bottom scale margin), in chart-canvas pixel coordinates. The
+ *  drawing canvas spans the whole container, but the price-pane
+ *  series' coordinateToPrice / priceToCoordinate map is only valid
+ *  within this band — outside (volume sub-region, RSI/MACD oscillator
+ *  panes) the conversion extrapolates and creates phantom drawings
+ *  at prices the user can't see. The redraw clips to this band, and
+ *  click dispatch rejects clicks outside it.
+ *
+ *  Returns null when the chart can't report panes/scale (early init,
+ *  test stub without these methods, chart torn down) — caller falls
+ *  back to no-clip / no-reject behaviour. */
+function getPriceAreaBounds(
+  chart: IChartApi,
+): { top: number; bottom: number } | null {
+  try {
+    const panes = chart.panes();
+    if (!Array.isArray(panes) || panes.length === 0) return null;
+    const pricePane = panes[0];
+    if (!pricePane || typeof pricePane.getHeight !== "function") return null;
+    const paneHeight = pricePane.getHeight();
+    if (!Number.isFinite(paneHeight) || paneHeight <= 0) return null;
+    const scale = chart.priceScale("right");
+    const margins = scale.options().scaleMargins;
+    const topMargin = margins?.top ?? 0;
+    const bottomMargin = margins?.bottom ?? 0;
+    return {
+      top: paneHeight * topMargin,
+      bottom: paneHeight * (1 - bottomMargin),
+    };
+  } catch {
+    return null;
+  }
+}
 
 function renderDrawing(
   ctx: CanvasRenderingContext2D,
@@ -701,6 +818,7 @@ function renderDrawing(
   selected: boolean,
   series: PriceConverter,
   timeScale: TimeConverter,
+  fillStyle: string,
 ): void {
   ctx.strokeStyle = ACCENT_STROKE;
   ctx.lineWidth = selected ? SELECTED_LINE_WIDTH : DEFAULT_LINE_WIDTH;
@@ -742,7 +860,7 @@ function renderDrawing(
       const y2 = Math.max(p1.y, p2.y);
       const w = x2 - x;
       const h = y2 - y;
-      ctx.fillStyle = ACCENT_FILL;
+      ctx.fillStyle = fillStyle;
       ctx.fillRect(x, y, w, h);
       ctx.strokeRect(x, y, w, h);
       if (selected) {
@@ -828,6 +946,7 @@ function renderRectanglePreview(
   previewP2: PricePoint | null,
   series: PriceConverter,
   timeScale: TimeConverter,
+  fillStyle: string,
 ): void {
   if (previewP2 === null) return;
   const p1 = pricePointToPixel(series, timeScale, pendingP1);
@@ -838,7 +957,7 @@ function renderRectanglePreview(
   const w = Math.abs(p2.x - p1.x);
   const h = Math.abs(p2.y - p1.y);
   ctx.save();
-  ctx.fillStyle = ACCENT_FILL;
+  ctx.fillStyle = fillStyle;
   ctx.strokeStyle = ACCENT_STROKE;
   ctx.globalAlpha = 0.6;
   ctx.setLineDash([5, 5]);

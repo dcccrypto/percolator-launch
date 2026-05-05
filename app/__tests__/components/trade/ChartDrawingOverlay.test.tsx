@@ -544,6 +544,12 @@ describe("ChartDrawingOverlay", () => {
           setTool={setTool}
         />,
       );
+      // Mount fires the slab/chart-init effect once which seeds tool
+      // back to "pointer" — clear the mock so the assertion reflects
+      // post-mount behaviour only. (The mount call is a separate
+      // contract verified elsewhere; here we test that committing a
+      // horizontal does NOT change tools.)
+      setTool.mockClear();
       fireClick(ch, 50, 150);
       // Tool should NOT have been reset — user keeps drawing
       // horizontals until they explicitly switch tools.
@@ -611,6 +617,9 @@ describe("ChartDrawingOverlay", () => {
           setTool={setTool}
         />,
       );
+      // Clear the mount-time setTool("pointer") seed; we're testing
+      // post-mount behaviour.
+      setTool.mockClear();
       fireClick(ch, 10, 100); // p1 of trend 1
       fireClick(ch, 20, 200); // p2 of trend 1 → commit
       expect(setTool).not.toHaveBeenCalled();
@@ -640,6 +649,7 @@ describe("ChartDrawingOverlay", () => {
           setTool={setTool}
         />,
       );
+      setTool.mockClear(); // drop the mount-time seed call
       fireClick(ch, 10, 100); // p1 set
       fireEvent.keyDown(document, { key: "Escape" });
       // Tool stays in trend (Escape cancelled the pending anchor,
@@ -1059,6 +1069,7 @@ describe("ChartDrawingOverlay", () => {
           setTool={setTool}
         />,
       );
+      setTool.mockClear(); // drop mount-time seed call
       fireEvent.mouseDown(ch.chartElement, {
         clientX: 10,
         clientY: 100,
@@ -1142,6 +1153,7 @@ describe("ChartDrawingOverlay", () => {
           setTool={setTool}
         />,
       );
+      setTool.mockClear(); // drop mount-time seed
       fireEvent.mouseDown(ch.chartElement, {
         clientX: 10,
         clientY: 100,
@@ -1568,6 +1580,7 @@ describe("ChartDrawingOverlay", () => {
           tool="pointer"
         />,
       );
+      setTool.mockClear(); // drop mount-time seed
       // Select first.
       selectVia(ch, 50, 100);
       // Escape should clear selection (verify tool was NOT changed).
@@ -1605,6 +1618,7 @@ describe("ChartDrawingOverlay", () => {
           deleteDrawing={deleteDrawing}
         />,
       );
+      setTool.mockClear(); // drop mount-time seed
       fireEvent.keyDown(document, { key: "Escape" });
       expect(setTool).not.toHaveBeenCalled();
       expect(deleteDrawing).not.toHaveBeenCalled();
@@ -1627,6 +1641,7 @@ describe("ChartDrawingOverlay", () => {
       );
       const input = screen.getByTestId("form-input") as HTMLInputElement;
       input.focus();
+      setTool.mockClear(); // drop mount-time seed
       fireEvent.keyDown(document, { key: "Escape" });
       expect(setTool).not.toHaveBeenCalled();
     });
@@ -1645,6 +1660,7 @@ describe("ChartDrawingOverlay", () => {
           deleteDrawing={deleteDrawing}
         />,
       );
+      setTool.mockClear(); // drop mount-time seed
       fireEvent.keyDown(document, { key: "Enter" });
       fireEvent.keyDown(document, { key: " " });
       fireEvent.keyDown(document, { key: "p" });
@@ -1664,6 +1680,9 @@ describe("ChartDrawingOverlay", () => {
           setTool={setTool}
         />,
       );
+      // Mount fired the slab/chart-init seed; clear so the post-
+      // unmount Escape assertion only tests listener removal.
+      setTool.mockClear();
       unmount();
       fireEvent.keyDown(document, { key: "Escape" });
       expect(setTool).not.toHaveBeenCalled();
@@ -1698,8 +1717,11 @@ describe("ChartDrawingOverlay", () => {
           slabAddress={SLAB_B}
         />,
       );
-      // Now Escape should be a no-op (selection was cleared by slab change),
-      // and setTool stays untouched because tool is already pointer.
+      // Slab change re-fires the reset effect → setTool("pointer")
+      // gets called again as part of the seed contract. Clear those
+      // expected calls before asserting that the subsequent Escape
+      // is a no-op for setTool.
+      setTool.mockClear();
       fireEvent.keyDown(document, { key: "Escape" });
       expect(setTool).not.toHaveBeenCalled();
     });

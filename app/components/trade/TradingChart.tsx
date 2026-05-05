@@ -858,19 +858,29 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             order (no explicit z) but below the empty-state / hover-tooltip
             / position-summary badges (which sit at z-10). pointer-events
             stay disabled — drawing-tool clicks route through
-            chart.subscribeClick so native pan/zoom keep working. */}
-        <ChartDrawingOverlay
-          chartRef={chartRef}
-          seriesRef={seriesRef}
-          containerRef={containerRef}
-          chartReady={chartReady}
-          drawings={drawings}
-          addDrawing={addDrawing}
-          deleteDrawing={deleteDrawing}
-          tool={drawingTool}
-          setTool={setDrawingTool}
-          slabAddress={slabAddress}
-        />
+            chart.subscribeClick so native pan/zoom keep working.
+
+            Gated on !showEmptyOverlay alongside the toolbar: the
+            empty-state's 91%-alpha backdrop would otherwise ghost
+            persisted drawings through the wash with no toolbar to
+            clear them — a UX dead-end on sparse markets. Unmounting
+            the overlay drops the canvas entirely; drawings re-appear
+            (still per-slab in localStorage) the moment data populates
+            and the empty-state lifts. */}
+        {!showEmptyOverlay && (
+          <ChartDrawingOverlay
+            chartRef={chartRef}
+            seriesRef={seriesRef}
+            containerRef={containerRef}
+            chartReady={chartReady}
+            drawings={drawings}
+            addDrawing={addDrawing}
+            deleteDrawing={deleteDrawing}
+            tool={drawingTool}
+            setTool={setDrawingTool}
+            slabAddress={slabAddress}
+          />
+        )}
 
         {/* Drawing tools toolbar — vertical bar at the chart's left edge.
             Hidden below the md breakpoint (touch interaction patterns
