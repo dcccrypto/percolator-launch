@@ -41,6 +41,8 @@ import { useIndicatorOverlays } from "./useIndicatorOverlays";
 import { useIndicatorOscillatorPane } from "./useIndicatorOscillatorPane";
 import { ChartIndicatorMenu } from "./ChartIndicatorMenu";
 import { ChartDrawingOverlay } from "./ChartDrawingOverlay";
+import { ChartDrawingToolbar } from "./ChartDrawingToolbar";
+import { useChartDrawingTool } from "@/hooks/useChartDrawingTool";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -160,6 +162,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     updateIndicator,
     clearAll: clearAllIndicators,
   } = useChartIndicatorPrefs(slabAddress);
+  const { tool: drawingTool, setTool: setDrawingTool } = useChartDrawingTool();
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -855,6 +858,14 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
           chartReady={chartReady}
         />
 
+        {/* Drawing tools toolbar — vertical bar at the chart's left edge.
+            Hidden below the md breakpoint (touch interaction patterns
+            for drawing tools are out of scope for v1). */}
+        <ChartDrawingToolbar
+          tool={drawingTool}
+          setTool={setDrawingTool}
+        />
+
         {/* GH#1652: empty-state overlay — shown when no data yet, sits above canvas */}
         {showEmptyOverlay && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center backdrop-blur-[1px]" style={{ background: `${chartTheme.bg}e8` }}>
@@ -921,11 +932,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         )}
 
         {/* OHLCV tooltip — hover the chart to see the bar under the crosshair.
-            Positioned top-left so it never sits under the PositionSummary badge
-            top-right. Hidden entirely when not hovering. */}
+            Positioned top-left on mobile (where the drawing toolbar is hidden);
+            shifted right on md+ to clear the drawing toolbar that occupies
+            the top-left corner there. Hidden entirely when not hovering. */}
         {hoverBar && !showEmptyOverlay && (
           <div
-            className="pointer-events-none absolute top-2 left-2 z-10 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 font-mono text-[10px] shadow-sm backdrop-blur-sm"
+            className="pointer-events-none absolute top-2 left-2 md:left-12 z-10 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 font-mono text-[10px] shadow-sm backdrop-blur-sm"
             aria-hidden="true"
           >
             <div className="flex items-center gap-3 whitespace-nowrap">
