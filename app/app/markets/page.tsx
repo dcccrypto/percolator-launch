@@ -8,7 +8,6 @@ import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount } from "@/lib/format";
-import { getSupabase } from "@/lib/supabase";
 import { isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";

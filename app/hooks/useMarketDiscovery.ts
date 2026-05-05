@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
-  discoverMarkets,
   discoverMarketsViaApi,
   discoverMarketsViaStaticBundle,
   type DiscoveredMarket,
@@ -56,14 +55,10 @@ async function discoverForProgram(
     if (viaStatic.length > 0) return viaStatic;
   }
 
-  // Last resort: keep the SDK scanner, but run it sequentially so a fallback
-  // discovery attempt cannot burst multiple getProgramAccounts calls at once.
-  return discoverMarkets(connection, programId, {
-    sequential: true,
-    maxParallelTiers: 1,
-    apiBaseUrl,
-    network,
-  }).catch(() => [] as DiscoveredMarket[]);
+  // Do not run getProgramAccounts tier scans from the browser. They are too
+  // expensive for public RPCs and can trigger repeated batch failures when the
+  // API/static directory is unavailable.
+  return [];
 }
 
 /**

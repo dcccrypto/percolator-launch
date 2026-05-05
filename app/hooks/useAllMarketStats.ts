@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSupabase } from "@/lib/supabase";
 import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
+type MarketsApiResponse = {
+  markets?: MarketWithStats[];
+  error?: string;
+};
 
 /**
- * Hook to fetch all markets with their latest stats from Supabase.
+ * Hook to fetch all markets with their latest stats through the app API.
  * Returns a map of slab_address -> stats for easy lookup.
  */
 export function useAllMarketStats() {
@@ -19,79 +22,45 @@ export function useAllMarketStats() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    let supabase: ReturnType<typeof getSupabase>;
-    try {
-      supabase = getSupabase();
-    } catch {
-      // Supabase client creation can fail if env vars missing
-      setError("Database unavailable");
-      setLoading(false);
-      return;
-    }
+    const controller = new AbortController();
 
     async function load() {
       try {
-        let { data, error: dbError } = await supabase
-          .from("markets_with_stats")
-          .select("*")
-          .neq("indexer_excluded", true);
-
-        // PERC-8387/GH#2080: indexer_excluded column may not exist — retry without filter
-        if (dbError && dbError.message?.includes("indexer_excluded")) {
-          console.warn("[useAllMarketStats] indexer_excluded column missing — retrying without filter");
-          const retry = await supabase.from("markets_with_stats").select("*");
-          data = retry.data;
-          dbError = retry.error;
+        const res = await fetch("/api/markets?include_zombie=true&limit=500", {
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          throw new Error(`Markets API returned ${res.status}`);
+        }
+        const body = (await res.json()) as MarketsApiResponse;
+        if (!Array.isArray(body.markets)) {
+          throw new Error(body.error ?? "Markets API returned no markets array");
         }
 
-        if (dbError) {
-          setError(dbError.message);
-        } else {
-          const map = new Map<string, MarketWithStats>();
-          data?.forEach((market) => {
-            // Skip blocked/stale markets — they are excluded from /api/markets but
-            // still visible to the Supabase anon client via markets_with_stats.
-            if (market.slab_address && !isBlockedSlab(market.slab_address)) {
-              map.set(market.slab_address, market);
-            }
-          });
-          setStatsMap(map);
-          setError(null);
-        }
+        const map = new Map<string, MarketWithStats>();
+        body.markets.forEach((market) => {
+          if (market.slab_address && !isBlockedSlab(market.slab_address)) {
+            map.set(market.slab_address, market);
+          }
+        });
+        setStatsMap(map);
+        setError(null);
       } catch (e) {
+        if (controller.signal.aborted) return;
         setError(e instanceof Error ? e.message : "Failed to load market stats");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
 
     load();
 
-    // Subscribe to market_stats updates (WebSocket)
-    // Wrapped in try/catch — Safari/iOS blocks insecure WebSocket on HTTPS pages
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    try {
-      channel = supabase
-        .channel("all-market-stats")
-        .on("postgres_changes", {
-          event: "*",
-          schema: "public",
-          table: "market_stats",
-        }, () => {
-          load();
-        })
-        .subscribe();
-    } catch {
-      // WebSocket unavailable — fall back to polling
-      console.warn("[useAllMarketStats] Realtime unavailable, falling back to 30s polling");
-    }
-
-    // Polling fallback (also acts as backup if realtime subscription fails)
     const pollInterval = setInterval(load, 30_000);
 
     return () => {
+      controller.abort();
       clearInterval(pollInterval);
-      if (channel) supabase.removeChannel(channel);
     };
   }, []);
 

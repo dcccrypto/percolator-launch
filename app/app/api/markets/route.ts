@@ -37,6 +37,45 @@ const MINT_TO_KNOWN_SYMBOL: Map<string, string> = new Map(
   Object.entries(SLUG_ALIASES).map(([symbol, mint]) => [mint, symbol]),
 );
 
+const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
+  {
+    slab_address: "AiVcTXxKfKmcpUBG3unxCdEHHtXvAq8zYpbtS6oPrV6J",
+    mint_address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    symbol: "SOL-PERP",
+    name: "SOL/USD Perpetual",
+    decimals: 6,
+    deployer: "7JVQvrAfzj3aasLxCkoLYX5KQcrb5nEZhUe5Qa8PvV5G",
+    logo_url: null,
+    max_leverage: 10,
+    trading_fee_bps: 10,
+    last_price: null,
+    mark_price: null,
+    index_price: null,
+    volume_24h: 0,
+    trade_count_24h: 0,
+    open_interest_long: 0,
+    open_interest_short: 0,
+    total_open_interest: 0,
+    total_open_interest_usd: 0,
+    insurance_fund: 20_000_001,
+    insurance_balance: 20_000_001,
+    total_accounts: 0,
+    funding_rate: null,
+    net_lp_pos: 0,
+    lp_sum_abs: 0,
+    c_tot: 0,
+    volume_24h_usd: 0,
+    vault_balance: 70_000_000,
+    created_at: "2026-05-04T00:32:02.380Z",
+    stats_updated_at: null,
+    oracle_mode: "admin",
+    dex_pool_address: "3ucNos4NbumPLZNWztqGHNFFgkHeRMBQAVemeeomsUxv",
+    mainnet_ca: "So11111111111111111111111111111111111111112",
+    oracle_authority: "7JVQvrAfzj3aasLxCkoLYX5KQcrb5nEZhUe5Qa8PvV5G",
+    is_zombie: false,
+  },
+];
+
 /**
  * Maximum valid funding rate in bps/slot (matches on-chain guard).
  * Raw DB values outside [-MAX, MAX] are garbage from uninitialized slabs.
@@ -77,6 +116,75 @@ function numericOrNull(v: unknown): number | null {
   if (v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function fallbackMarketsResponse(request: NextRequest, reason: string): NextResponse {
+  const network = getServerNetwork();
+  const rows = network === "mainnet" ? MAINNET_MARKET_DIRECTORY_FALLBACK : [];
+  const searchParam =
+    request?.nextUrl?.searchParams?.get("search") ??
+    request?.nextUrl?.searchParams?.get("q") ??
+    null;
+  const searchTrimmed = searchParam?.trim().toLowerCase() ?? null;
+  const oracleModeParam = request?.nextUrl?.searchParams?.get("oracle_mode") ?? null;
+  const dbOracleMode = oracleModeParam ? ORACLE_MODE_FRONTEND_TO_DB[oracleModeParam] ?? oracleModeParam : null;
+
+  const filtered = rows
+    .filter((m) => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string))
+    .filter((m) => {
+      if (!searchTrimmed) return true;
+      const symbol = String(m.symbol ?? "").toLowerCase();
+      const name = String(m.name ?? "").toLowerCase();
+      const slab = String(m.slab_address ?? "").toLowerCase();
+      const mint = String(m.mint_address ?? "").toLowerCase();
+      return symbol.includes(searchTrimmed) ||
+        name.includes(searchTrimmed) ||
+        slab.includes(searchTrimmed) ||
+        mint.includes(searchTrimmed);
+    })
+    .filter((m) => !dbOracleMode || m.oracle_mode === dbOracleMode);
+
+  const activeTotal = filtered.filter((m) => isActiveMarket(m as Parameters<typeof isActiveMarket>[0])).length;
+  const marketsWithPrice = filtered.filter((m) => isSaneMarketValue(numericOrNull(m.last_price))).length;
+
+  const MAX_LIMIT = 500;
+  const MIN_LIMIT = 1;
+  const DEFAULT_LIMIT = MAX_LIMIT;
+  const limitParam = request?.nextUrl?.searchParams?.get("limit") ?? null;
+  let limitNum = 0;
+  if (limitParam !== null) {
+    const parsed = parseInt(limitParam, 10);
+    limitNum = Number.isNaN(parsed)
+      ? DEFAULT_LIMIT
+      : Math.min(Math.max(parsed, MIN_LIMIT), MAX_LIMIT);
+  }
+
+  const offsetParam = request?.nextUrl?.searchParams?.get("offset") ?? null;
+  let offsetNum = 0;
+  if (offsetParam !== null) {
+    const offsetValidation = validateNumericParam(offsetParam, { min: 0 });
+    if (!offsetValidation.valid) return offsetValidation.response;
+    offsetNum = offsetValidation.value;
+  }
+
+  const paged = offsetNum > 0 ? filtered.slice(offsetNum) : filtered;
+  const limited = limitNum > 0 ? paged.slice(0, limitNum) : paged;
+
+  Sentry.captureMessage(`PERC-8450: /api/markets using static directory fallback (${reason})`, {
+    level: "warning",
+    tags: { endpoint: "/api/markets", method: "GET", degraded: "true", network },
+    fingerprint: ["perc-8450-markets-static-directory-fallback"],
+  });
+
+  return NextResponse.json(
+    { total: filtered.length, activeTotal, marketsWithPrice, zombieCount: 0, markets: limited },
+    {
+      headers: {
+        "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+        "X-Percolator-Data-Source": "static-directory-fallback",
+      },
+    },
+  );
 }
 
 /**
@@ -254,7 +362,7 @@ export async function GET(request: NextRequest) {
       Sentry.captureException(error, {
         tags: { endpoint: "/api/markets", method: "GET" },
       });
-      return NextResponse.json({ error: "Failed to load markets. Please try again later." }, { status: 500 });
+      return fallbackMarketsResponse(request, "supabase-query-error");
     }
 
     // Sanitize funding_rate: raw DB values from uninitialized slabs can be
@@ -667,10 +775,7 @@ export async function GET(request: NextRequest) {
     Sentry.captureException(error, {
       tags: { endpoint: "/api/markets", method: "GET" },
     });
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return fallbackMarketsResponse(request, "unhandled-get-error");
   }
 }
 

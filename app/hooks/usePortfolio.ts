@@ -5,24 +5,61 @@ import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import {
-  discoverMarkets,
-  fetchSlab,
+  discoverMarketsViaApi,
+  discoverMarketsViaStaticBundle,
   parseAllAccounts,
   parseConfig,
   parseParams,
-  parseEngine,
   AccountKind,
   computeLiqPrice,
   computeMarkPnl,
   computePnlPercent,
   type DiscoveredMarket,
   type Account,
-  type RiskParams,
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
-import { getConfig, getAllProgramIds } from "@/lib/config";
+import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
+
+const MAINNET_STATIC_MARKETS = [
+  {
+    slabAddress: "AiVcTXxKfKmcpUBG3unxCdEHHtXvAq8zYpbtS6oPrV6J",
+    symbol: "SOL-PERP",
+    name: "SOL/USD Perpetual",
+  },
+];
+
+function getApiBaseUrl(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  return new URL("/api", window.location.origin).toString();
+}
+
+async function discoverPortfolioMarkets(
+  connection: ReturnType<typeof useConnectionCompat>["connection"],
+  programId: PublicKey,
+): Promise<DiscoveredMarket[]> {
+  const network = getNetwork();
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (apiBaseUrl) {
+    const viaApi = await discoverMarketsViaApi(connection, programId, apiBaseUrl, {
+      timeoutMs: 8_000,
+    }).catch(() => [] as DiscoveredMarket[]);
+    if (viaApi.length > 0) return viaApi;
+  }
+
+  if (network === "mainnet") {
+    const viaStatic = await discoverMarketsViaStaticBundle(
+      connection,
+      programId,
+      MAINNET_STATIC_MARKETS,
+    ).catch(() => [] as DiscoveredMarket[]);
+    if (viaStatic.length > 0) return viaStatic;
+  }
+
+  return [];
+}
 
 export interface PortfolioPosition {
   slabAddress: string;
@@ -120,7 +157,6 @@ export function usePortfolio(): PortfolioData {
     }
 
     let cancelled = false;
-    const cfg = getConfig();
     const programIds = getAllProgramIds();
     const pkStr = publicKey.toBase58();
 
@@ -132,7 +168,7 @@ export function usePortfolio(): PortfolioData {
           setLoading(true);
         }
         const marketArrays = await Promise.all(
-          programIds.map((id) => discoverMarkets(connection, new PublicKey(id)).catch(() => []))
+          programIds.map((id) => discoverPortfolioMarkets(connection, new PublicKey(id)))
         );
         const markets = marketArrays.flat();
         const allPositions: PortfolioPosition[] = [];
