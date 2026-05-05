@@ -21,6 +21,7 @@ function fakeChart() {
   const unsubscribeClick = vi.fn();
   const subscribeCrosshair = vi.fn();
   const unsubscribeCrosshair = vi.fn();
+  const applyOptions = vi.fn();
   // Identity-ish time scale: time-in-seconds maps to x-pixel directly.
   const timeScale = () => ({
     subscribeVisibleLogicalRangeChange: subscribeRange,
@@ -30,15 +31,37 @@ function fakeChart() {
     timeToCoordinate: (t: number) => t,
     coordinateToTime: (c: number) => c as Time,
   });
+  // Real DOM element so the rectangle drag's mousedown listener can
+  // attach via chart.chartElement(). 800×600 bounding rect anchors
+  // the click → chart-canvas-coord conversion in the drag handlers.
+  const chartElement = document.createElement("div");
+  chartElement.getBoundingClientRect = () =>
+    ({
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 600,
+      width: 800,
+      height: 600,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return this;
+      },
+    }) as DOMRect;
   const chart = {
     timeScale,
     subscribeClick,
     unsubscribeClick,
     subscribeCrosshairMove: subscribeCrosshair,
     unsubscribeCrosshairMove: unsubscribeCrosshair,
+    chartElement: () => chartElement,
+    applyOptions,
   } as unknown as IChartApi;
   return {
     chart,
+    chartElement,
+    applyOptions,
     subscribeRange,
     unsubscribeRange,
     subscribeSize,
@@ -883,8 +906,8 @@ describe("ChartDrawingOverlay", () => {
     });
   });
 
-  describe("rectangle tool — click is intentionally NOT the trigger", () => {
-    it("a single click in rectangle mode does NOT add a drawing (drag-driven creation lands separately)", () => {
+  describe("rectangle tool — drag-driven creation", () => {
+    it("a chart.subscribeClick click does NOT add a drawing (rectangle uses raw mouse events)", () => {
       stubCanvasContext();
       const ch = fakeChart();
       const addDrawing = vi.fn();
@@ -898,6 +921,270 @@ describe("ChartDrawingOverlay", () => {
       );
       fireClick(ch, 10, 100);
       fireClick(ch, 20, 200);
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("a drag (mousedown → mousemove → mouseup with size ≥ 10×10) commits a rectangle", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      // Mouse-down at (10, 100) — locks pendingP1.
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // Mouse-move during drag (just to update preview, not strictly
+      // required for commit).
+      fireEvent.mouseMove(document, { clientX: 50, clientY: 200 });
+      // Mouse-up at (50, 200) — drag is 40×100 px, well over the
+      // 10×10 minimum.
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      expect(addDrawing).toHaveBeenCalledTimes(1);
+      expect(addDrawing).toHaveBeenCalledWith({
+        kind: "rectangle",
+        p1: { time: 10000, price: 100 },
+        p2: { time: 50000, price: 200 },
+      });
+    });
+
+    it("a tiny drag (< 10×10 in BOTH dimensions) is rejected as click jitter", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // Drag of 5px × 5px — under both thresholds. Reject.
+      fireEvent.mouseUp(document, { clientX: 15, clientY: 105 });
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("a drag that's wide but very short (only x dim ≥ 10) commits", () => {
+      // Plan threshold: dx < 10 AND dy < 10 → reject. EITHER ≥ 10 → commit.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // 50px wide, 2px tall — wider than the threshold so commits.
+      fireEvent.mouseUp(document, { clientX: 60, clientY: 102 });
+      expect(addDrawing).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores right-click (button !== 0)", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 2, // right-click
+      });
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("Escape mid-drag cancels the pending anchor without committing", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const setTool = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+          setTool={setTool}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // Escape — priority chain: pendingP1 is set, so cancel it.
+      // Tool stays in rectangle mode (not reset to pointer).
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(setTool).not.toHaveBeenCalled();
+      // Subsequent mouseup must NOT commit (pendingP1 was cleared).
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("suppresses chart pan/zoom during drag and restores on commit", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      render(
+        <Harness chart={ch.chart} ready={true} tool="rectangle" />,
+      );
+      // Before any drag, applyOptions has not been called from the
+      // overlay (the pan-suppress effect requires pendingP1).
+      const beforeMouseDown = ch.applyOptions.mock.calls.length;
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // After mouseDown, the suppress effect ran and disabled pan/zoom.
+      expect(ch.applyOptions.mock.calls.length).toBeGreaterThan(
+        beforeMouseDown,
+      );
+      // The most recent applyOptions call should disable both.
+      const lastCall = ch.applyOptions.mock.calls.at(-1);
+      expect(lastCall?.[0]).toMatchObject({
+        handleScroll: false,
+        handleScale: false,
+      });
+      // Commit the drag.
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      // After commit, applyOptions called again to RESTORE pan/zoom.
+      const restoreCall = ch.applyOptions.mock.calls.at(-1);
+      expect(restoreCall?.[0]).toMatchObject({
+        handleScroll: true,
+        handleScale: true,
+      });
+    });
+
+    it("suppresses chart pan/zoom during drag and restores on Escape cancel", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      render(
+        <Harness chart={ch.chart} ready={true} tool="rectangle" />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      fireEvent.keyDown(document, { key: "Escape" });
+      // Cleanup ran — last applyOptions should be the RESTORE call.
+      const lastCall = ch.applyOptions.mock.calls.at(-1);
+      expect(lastCall?.[0]).toMatchObject({
+        handleScroll: true,
+        handleScale: true,
+      });
+    });
+
+    it("stays in rectangle mode after committing — second drag works the same", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const setTool = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+          setTool={setTool}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 100,
+        clientY: 300,
+        button: 0,
+      });
+      fireEvent.mouseUp(document, { clientX: 200, clientY: 400 });
+      expect(addDrawing).toHaveBeenCalledTimes(2);
+      expect(setTool).not.toHaveBeenCalled();
+    });
+
+    it("mousedown is suppressed on mobile viewport (matchMedia)", () => {
+      const originalMatchMedia = window.matchMedia;
+      window.matchMedia = vi.fn().mockReturnValue({
+        matches: true,
+      } as MediaQueryList);
+      try {
+        stubCanvasContext();
+        const ch = fakeChart();
+        const addDrawing = vi.fn();
+        render(
+          <Harness
+            chart={ch.chart}
+            ready={true}
+            tool="rectangle"
+            addDrawing={addDrawing}
+          />,
+        );
+        fireEvent.mouseDown(ch.chartElement, {
+          clientX: 10,
+          clientY: 100,
+          button: 0,
+        });
+        fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+        // Mobile guard short-circuited before pendingP1 was set;
+        // mouseUp had no pending state to commit.
+        expect(addDrawing).not.toHaveBeenCalled();
+      } finally {
+        window.matchMedia = originalMatchMedia;
+      }
+    });
+
+    it("does NOT attach mousedown listener when tool is not rectangle", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="pointer"
+          addDrawing={addDrawing}
+        />,
+      );
+      // Mousedown on the chart element when pointer mode is active —
+      // no drag handler should fire, no pendingP1 set.
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
       expect(addDrawing).not.toHaveBeenCalled();
     });
   });

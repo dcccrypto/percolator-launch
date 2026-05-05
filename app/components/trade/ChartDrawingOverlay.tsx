@@ -195,18 +195,30 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
           timeScaleApi,
         );
       }
-      // In-flight creation preview: the trend tool draws a faded
-      // dashed line from the locked-in p1 to wherever the cursor
-      // currently is, so the user can see what they're about to
-      // commit on the second click.
+      // In-flight creation preview, dispatched by tool:
+      // - trend: faded dashed line from pendingP1 to cursor + dot at p1
+      // - rectangle: faded dashed rect from pendingP1 to cursor (no dots)
+      // pointer / horizontal don't have multi-step creation; pendingP1
+      // shouldn't be set in those modes.
       if (pendingP1 !== null) {
-        renderTrendPreview(
-          ctx,
-          pendingP1,
-          previewP2Ref.current,
-          series,
-          timeScaleApi,
-        );
+        const { tool } = stateRef.current;
+        if (tool === "trend") {
+          renderTrendPreview(
+            ctx,
+            pendingP1,
+            previewP2Ref.current,
+            series,
+            timeScaleApi,
+          );
+        } else if (tool === "rectangle") {
+          renderRectanglePreview(
+            ctx,
+            pendingP1,
+            previewP2Ref.current,
+            series,
+            timeScaleApi,
+          );
+        }
       }
     };
     redrawRef.current = redraw;
@@ -401,6 +413,144 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
   useEffect(() => {
     redrawRef.current();
   }, [drawings, selectedId, pendingP1]);
+
+  // Rectangle creation: drag-driven (mouse-down inside the chart sets
+  // p1, mouse-move tracks the opposite corner, mouse-up commits).
+  // chart.subscribeClick can't power this — clicks fire on
+  // mouse-down + up at the same place, which is exactly what we
+  // DON'T want for a drag. Instead we attach a native mousedown to
+  // chart.chartElement() (the chart's own DOM container, the only
+  // surface above the canvas with pointer-events). The follow-on
+  // move and up listeners attach to document so the user can drag
+  // out past the chart edges and release without the gesture
+  // breaking.
+  useEffect(() => {
+    if (!chartReady || tool !== "rectangle") return;
+    const chart = chartRef.current;
+    if (!chart) return;
+    const el = chart.chartElement();
+
+    const onMouseDown = (e: MouseEvent): void => {
+      // Left button only; ignore right-click / middle-click.
+      if (e.button !== 0) return;
+      // Mobile guard: drag-create on touch devices is its own UX
+      // problem (gesture conflicts with chart pan, no clear cancel
+      // affordance). Bail before pendingP1 is set.
+      if (
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 767px)").matches
+      ) {
+        return;
+      }
+      const series = seriesRef.current;
+      if (!series) return;
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const ts = chart.timeScale() as unknown as TimeConverter;
+      const point = pixelToPricePoint(series, ts, x, y);
+      if (point === null) return;
+      setPendingP1(point);
+    };
+    el.addEventListener("mousedown", onMouseDown);
+    return () => el.removeEventListener("mousedown", onMouseDown);
+  }, [chartReady, tool, chartRef, seriesRef]);
+
+  // While a rectangle drag is in flight (pendingP1 set in rectangle
+  // mode), suppress the chart's built-in pan/zoom so the drag
+  // gesture doesn't double as a chart pan. Restored on cleanup —
+  // commit, Escape, tool change, or chart unmount all flow through
+  // here. Also wires the document-level mousemove/mouseup that drive
+  // the live preview and the commit.
+  useEffect(() => {
+    if (!chartReady || tool !== "rectangle" || pendingP1 === null) return;
+    const chart = chartRef.current;
+    if (!chart) return;
+    const el = chart.chartElement();
+
+    chart.applyOptions({
+      handleScroll: false,
+      handleScale: false,
+    });
+
+    const onMouseMove = (e: MouseEvent): void => {
+      const series = seriesRef.current;
+      if (!series) {
+        previewP2Ref.current = null;
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const ts = chart.timeScale() as unknown as TimeConverter;
+      const point = pixelToPricePoint(series, ts, x, y);
+      previewP2Ref.current = point;
+      redrawRef.current();
+    };
+
+    const onMouseUp = (e: MouseEvent): void => {
+      const series = seriesRef.current;
+      if (!series) {
+        setPendingP1(null);
+        previewP2Ref.current = null;
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const ts = chart.timeScale() as unknown as TimeConverter;
+      const p2 = pixelToPricePoint(series, ts, x, y);
+      // Drag ended off-scale (price or time can't project) — cancel
+      // rather than commit a partially-defined rectangle.
+      if (p2 === null) {
+        setPendingP1(null);
+        previewP2Ref.current = null;
+        return;
+      }
+      // Min-size guard: if the drag covered fewer than 10 CSS pixels
+      // in BOTH dimensions, treat it as click jitter (a user trying
+      // to click instead of drag) and cancel without committing a
+      // tiny, unselectable rectangle.
+      const p1Px = pricePointToPixel(series, ts, pendingP1);
+      if (p1Px !== null) {
+        const dx = Math.abs(x - p1Px.x);
+        const dy = Math.abs(y - p1Px.y);
+        if (dx < 10 && dy < 10) {
+          setPendingP1(null);
+          previewP2Ref.current = null;
+          return;
+        }
+      }
+      addDrawingRef.current({
+        kind: "rectangle",
+        p1: pendingP1,
+        p2,
+      });
+      setPendingP1(null);
+      previewP2Ref.current = null;
+      // Tool stays in rectangle mode — TradingView convention.
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      // Restore native pan/zoom regardless of how the drag ended
+      // (commit, cancel, Escape, slab change, tool change, unmount).
+      try {
+        chart.applyOptions({
+          handleScroll: true,
+          handleScale: true,
+        });
+      } catch {
+        // Chart was destroyed in a parallel cleanup; nothing to
+        // restore.
+      }
+    };
+  }, [chartReady, tool, pendingP1, chartRef, seriesRef]);
 
   // Keyboard: Escape priority chain + Delete / Backspace removes the
   // selected drawing. Both guarded against firing while focus is in
@@ -602,5 +752,39 @@ function renderTrendPreview(
       ctx.stroke();
     }
   }
+  ctx.restore();
+}
+
+/** Live preview for an in-flight rectangle drag: faded dashed
+ *  outline + filled translucent body from the locked-in mouse-down
+ *  corner to the current cursor position. No anchor dots — the rect
+ *  shape itself communicates the drag in progress, and committed
+ *  rectangles only get corner dots when SELECTED (not during
+ *  creation). Returns silently if either endpoint projects off-scale
+ *  or before the cursor has moved (previewP2 === null — drag just
+ *  started, no opposite corner yet). */
+function renderRectanglePreview(
+  ctx: CanvasRenderingContext2D,
+  pendingP1: PricePoint,
+  previewP2: PricePoint | null,
+  series: PriceConverter,
+  timeScale: TimeConverter,
+): void {
+  if (previewP2 === null) return;
+  const p1 = pricePointToPixel(series, timeScale, pendingP1);
+  const p2 = pricePointToPixel(series, timeScale, previewP2);
+  if (p1 === null || p2 === null) return;
+  const x = Math.min(p1.x, p2.x);
+  const y = Math.min(p1.y, p2.y);
+  const w = Math.abs(p2.x - p1.x);
+  const h = Math.abs(p2.y - p1.y);
+  ctx.save();
+  ctx.fillStyle = ACCENT_FILL;
+  ctx.strokeStyle = ACCENT_STROKE;
+  ctx.globalAlpha = 0.6;
+  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = DEFAULT_LINE_WIDTH;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeRect(x, y, w, h);
   ctx.restore();
 }
