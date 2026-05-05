@@ -114,12 +114,84 @@ describe("pricePointToPixel", () => {
   it.each([
     ["NaN time", { time: NaN, price: 100 }],
     ["Infinity time", { time: Infinity, price: 100 }],
+    ["-Infinity time", { time: -Infinity, price: 100 }],
     ["NaN price", { time: 1_700_000_000_000, price: NaN }],
     ["Infinity price", { time: 1_700_000_000_000, price: Infinity }],
+    ["-Infinity price", { time: 1_700_000_000_000, price: -Infinity }],
   ])("returns null for non-finite input (%s)", (_label, point) => {
     const series = priceConverter();
     const ts = timeConverter();
     expect(pricePointToPixel(series, ts, point)).toBeNull();
+  });
+
+  it("converts negative ms to seconds via Math.trunc, not Math.floor", () => {
+    // Math.floor(-1.5) === -2 → would shift pre-epoch ms by a full
+    // second per conversion. Math.trunc(-1.5) === -1 truncates toward
+    // zero, which is the correct unit-conversion semantic. This pin
+    // catches a future "optimization" to `(timeMs / 1000) | 0` (also
+    // toward-zero) or back to floor.
+    const series = priceConverter();
+    const spy = vi.fn().mockReturnValue(0);
+    const ts: TimeConverter = {
+      timeToCoordinate: spy,
+      coordinateToTime: () => null,
+    };
+    pricePointToPixel(series, ts, { time: -1500, price: 100 });
+    // -1500 ms → trunc(-1.5) = -1 second (NOT -2 from floor).
+    expect(spy).toHaveBeenCalledWith(-1);
+  });
+
+  it("preserves fractional pixel coordinates (subpixel rendering)", () => {
+    // lightweight-charts can return subpixel coords at high zoom.
+    // pricePointToPixel must not round — a future Math.round
+    // "cleanup" would silently introduce drawing jitter.
+    const series: PriceConverter = {
+      priceToCoordinate: () => 100.25,
+      coordinateToPrice: () => 0,
+    };
+    const ts: TimeConverter = {
+      timeToCoordinate: () => 320.5,
+      coordinateToTime: () => null,
+    };
+    const result = pricePointToPixel(series, ts, {
+      time: 1_700_000_000_000,
+      price: 100,
+    });
+    expect(result).toEqual({ x: 320.5, y: 100.25 });
+  });
+
+  it("returns an object with exactly { x, y } keys (no extras)", () => {
+    const series = priceConverter();
+    const ts = timeConverter();
+    const result = pricePointToPixel(series, ts, {
+      time: 1_700_000_000_000,
+      price: 100,
+    });
+    expect(result).not.toBeNull();
+    expect(Object.keys(result!).sort()).toEqual(["x", "y"]);
+  });
+
+  it("calls timeScale.timeToCoordinate before series.priceToCoordinate", () => {
+    // Pin the call order. If it ever flips and a converter has a side
+    // effect (logging, chart-state mutation in commit 5+), behaviour
+    // would change silently.
+    const timeFn = vi.fn().mockReturnValue(10);
+    const priceFn = vi.fn().mockReturnValue(20);
+    const series: PriceConverter = {
+      priceToCoordinate: priceFn,
+      coordinateToPrice: () => 0,
+    };
+    const ts: TimeConverter = {
+      timeToCoordinate: timeFn,
+      coordinateToTime: () => null,
+    };
+    pricePointToPixel(series, ts, {
+      time: 1_700_000_000_000,
+      price: 100,
+    });
+    expect(timeFn.mock.invocationCallOrder[0]).toBeLessThan(
+      priceFn.mock.invocationCallOrder[0],
+    );
   });
 });
 
@@ -177,10 +249,37 @@ describe("pixelToPricePoint", () => {
     ["NaN y", 50, NaN],
     ["Infinity x", Infinity, 50],
     ["Infinity y", 50, Infinity],
+    ["-Infinity x", -Infinity, 50],
+    ["-Infinity y", 50, -Infinity],
   ])("returns null for non-finite pixel input (%s)", (_label, x, y) => {
     const series = priceConverter();
     const ts = timeConverter();
     expect(pixelToPricePoint(series, ts, x, y)).toBeNull();
+  });
+
+  it("returns an object with exactly { time, price } keys (no extras)", () => {
+    const series = priceConverter();
+    const ts = timeConverter();
+    const result = pixelToPricePoint(series, ts, 0, 0);
+    expect(result).not.toBeNull();
+    expect(Object.keys(result!).sort()).toEqual(["price", "time"]);
+  });
+
+  it("calls timeScale.coordinateToTime before series.coordinateToPrice", () => {
+    const timeFn = vi.fn().mockReturnValue(1_700_000_000 as Time);
+    const priceFn = vi.fn().mockReturnValue(100);
+    const series: PriceConverter = {
+      priceToCoordinate: () => 0,
+      coordinateToPrice: priceFn,
+    };
+    const ts: TimeConverter = {
+      timeToCoordinate: () => null,
+      coordinateToTime: timeFn,
+    };
+    pixelToPricePoint(series, ts, 50, 50);
+    expect(timeFn.mock.invocationCallOrder[0]).toBeLessThan(
+      priceFn.mock.invocationCallOrder[0],
+    );
   });
 });
 
@@ -198,11 +297,30 @@ describe("round-trip", () => {
   it("price → pixel → price drops sub-second precision", () => {
     const series = priceConverter(0.1, 100);
     const ts = timeConverter(2, 1_700_000_000);
-    // Sub-second input gets floored on the way to seconds; round-trip
+    // Sub-second input gets truncated on the way to seconds; round-trip
     // returns the second-aligned value.
     const original = { time: 1_700_000_010_999, price: 105 };
     const pixel = pricePointToPixel(series, ts, original);
     const back = pixelToPricePoint(series, ts, pixel!.x, pixel!.y);
     expect(back).toEqual({ time: 1_700_000_010_000, price: 105 });
+  });
+
+  it("is idempotent at second-aligned inputs (multiple round-trips don't drift)", () => {
+    // In production, anchors are always second-aligned because
+    // subscribeClick gives us seconds and we multiply by 1000. Pin
+    // that idempotency: a second-aligned PricePoint round-tripped N
+    // times equals itself, with no floating-point drift.
+    const series = priceConverter(0.1, 100);
+    const ts = timeConverter(2, 1_700_000_000);
+    let current: { time: number; price: number } = {
+      time: 1_700_000_010_000,
+      price: 105,
+    };
+    for (let i = 0; i < 10; i++) {
+      const pixel = pricePointToPixel(series, ts, current);
+      const back = pixelToPricePoint(series, ts, pixel!.x, pixel!.y);
+      expect(back).toEqual({ time: 1_700_000_010_000, price: 105 });
+      current = back!;
+    }
   });
 });

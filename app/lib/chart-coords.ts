@@ -21,20 +21,35 @@ import type { PricePoint } from "@/lib/chart-drawings";
 
 /** Subset of `ISeriesApi` we need: convert between price (in quote
  *  units) and pixel y-coordinate. Both methods return `null` when the
- *  input maps off-screen or before the chart has finished sizing. */
+ *  input maps off-screen or before the chart has finished sizing.
+ *
+ *  IMPORTANT: pass the PRICE-PANE candle/line series here, not an
+ *  oscillator-pane series. lightweight-charts v5's native panes give
+ *  each series its own price scale — feeding an RSI series (whose
+ *  scale is pinned 0–100) would silently map a $84 chart click
+ *  through the RSI scale and place the drawing at the wrong y. */
 export interface PriceConverter {
   priceToCoordinate(price: number): number | null;
   coordinateToPrice(coord: number): number | null;
 }
 
-/** Subset of `ITimeScaleApi` we need: convert between time (in
- *  lightweight-charts' UTCTimestamp seconds) and pixel x-coordinate.
+/** Subset of `ITimeScaleApi` we need: convert between time and pixel
+ *  x-coordinate.
+ *
+ *  `timeToCoordinate` accepts the full `Time` union (UTCTimestamp |
+ *  BusinessDay | string) — NOT just UTCTimestamp — so the real
+ *  `ITimeScaleApi` is structurally assignable to this interface
+ *  under `strictFunctionTypes`. (Function parameters are
+ *  contravariant: narrowing the param here would mean a wider real
+ *  signature can't fit, blocking direct production wiring of
+ *  `chart.timeScale()` into `pricePointToPixel`.)
+ *
  *  `coordinateToTime` returns `Time | null` — for our trade-page chart
  *  Time is always UTCTimestamp (a number). The defensive `typeof`
  *  check below collapses BusinessDay / string returns to `null` so
  *  callers don't have to. */
 export interface TimeConverter {
-  timeToCoordinate(time: UTCTimestamp): number | null;
+  timeToCoordinate(time: Time): number | null;
   coordinateToTime(coord: number): Time | null;
 }
 
@@ -44,10 +59,12 @@ export interface TimeConverter {
  *  laid out its price scale yet on first paint). Callers should
  *  treat `null` as "skip this drawing for this frame".
  *
- *  Time conversion: ms → seconds via `Math.floor(timeMs / 1000)`. The
+ *  Time conversion: ms → seconds via `Math.trunc(timeMs / 1000)`. The
  *  truncation costs sub-second precision which lightweight-charts
  *  doesn't render anyway — bars are second-aligned at finer than
- *  pixel resolution on any realistic candle interval. */
+ *  pixel resolution on any realistic candle interval. trunc (toward
+ *  zero) rather than floor (toward -∞) so negative ms inputs don't
+ *  shift by a full second. */
 export function pricePointToPixel(
   series: PriceConverter,
   timeScale: TimeConverter,
@@ -56,7 +73,11 @@ export function pricePointToPixel(
   if (!Number.isFinite(point.time) || !Number.isFinite(point.price)) {
     return null;
   }
-  const timeS = Math.floor(point.time / 1000) as UTCTimestamp;
+  // Math.trunc (NOT Math.floor) so negative ms convert to seconds via
+  // truncation toward zero. Math.floor(-1.5) === -2, which would shift
+  // pre-epoch timestamps by a full second on each conversion. trunc is
+  // the correct unit-conversion semantic.
+  const timeS = Math.trunc(point.time / 1000) as UTCTimestamp;
   const x = timeScale.timeToCoordinate(timeS);
   const y = series.priceToCoordinate(point.price);
   if (x === null || y === null) return null;
