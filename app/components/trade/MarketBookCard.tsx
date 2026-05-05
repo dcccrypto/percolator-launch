@@ -7,7 +7,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
-import { formatUsd, formatTokenAmount, shortenAddress } from "@/lib/format";
+import { formatUsdPriceE6, formatTokenAmount, shortenAddress } from "@/lib/format";
 import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { AccountKind } from "@percolatorct/sdk";
 
@@ -94,7 +94,7 @@ export const MarketBookCard: FC = () => {
         {/* Bid */}
         <div className="bg-[var(--bg)] p-2 text-center">
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Bid</p>
-          <p className="text-[11px] font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsd(bestBidE6)}</p>
+          <p className="text-[11px] font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestBidE6)}</p>
         </div>
         {/* Oracle — subtle accent border + bg */}
         <div className="p-2 text-center border-x border-[var(--accent)]/20 bg-[var(--accent)]/[0.03]">
@@ -103,13 +103,13 @@ export const MarketBookCard: FC = () => {
             className="text-[13px] font-medium text-[var(--text)]"
             style={{ fontFamily: "var(--font-mono)" }}
           >
-            {formatUsd(oraclePrice)}
+            {formatUsdPriceE6(oraclePrice)}
           </p>
         </div>
         {/* Ask */}
         <div className="bg-[var(--bg)] p-2 text-center">
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Ask</p>
-          <p className="text-[11px] font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsd(bestAskE6)}</p>
+          <p className="text-[11px] font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestAskE6)}</p>
         </div>
       </div>
 

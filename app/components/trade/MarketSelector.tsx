@@ -5,19 +5,12 @@ import { useRouter } from "next/navigation";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { MarketLogo } from "@/components/market/MarketLogo";
+import { formatUsdPriceE6, formatUsdFromNumber } from "@/lib/format";
 
 interface MarketSelectorProps {
   currentSlabAddress: string;
   symbol: string;
   logoUrl: string | null;
-}
-
-function formatPrice(priceE6: number | null): string {
-  if (priceE6 == null) return "—";
-  const p = priceE6 / 1e6;
-  if (p < 0.01) return `$${p.toFixed(6)}`;
-  if (p < 1) return `$${p.toFixed(4)}`;
-  return `$${p.toFixed(2)}`;
 }
 
 function formatVolume(vol: number | null): string {
@@ -114,9 +107,9 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
 
   // Format live price for trigger display
   const livePriceDisplay = livePriceE6 != null && livePriceE6 > 0n
-    ? formatPrice(Number(livePriceE6))
+    ? formatUsdPriceE6(livePriceE6)
     : currentMarket?.last_price != null
-      ? formatPrice(currentMarket.last_price)
+      ? formatUsdFromNumber(currentMarket.last_price)
       : null;
 
   return (
@@ -221,7 +214,7 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
                   className="w-24 text-right text-[10px] text-[var(--text-secondary)]"
                   style={{ fontFamily: "var(--font-mono)" }}
                 >
-                  {livePriceDisplay ?? formatPrice(currentMarket.last_price)}
+                  {livePriceDisplay ?? formatUsdFromNumber(currentMarket.last_price)}
                 </span>
                 <span
                   className={`w-16 text-right text-[10px] ${changeColor(change24hPct)}`}
@@ -326,7 +319,7 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
                         className="w-24 text-right text-[10px] text-[var(--text-secondary)]"
                         style={{ fontFamily: "var(--font-mono)" }}
                       >
-                        {formatPrice(m.last_price)}
+                        {formatUsdFromNumber(m.last_price)}
                       </span>
                     )}
 

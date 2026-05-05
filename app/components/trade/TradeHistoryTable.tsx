@@ -1,7 +1,7 @@
 "use client";
 
 import { useTradeHistory } from "@/hooks/useTradeHistory";
-import { formatTokenAmount } from "@/lib/format";
+import { formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useEffect, useState } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
@@ -15,9 +15,7 @@ interface TradeHistoryTableProps {
 
 function formatPrice(priceNum: number): string {
   if (!priceNum) return "—";
-  if (priceNum >= 1000) return `$${priceNum.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-  if (priceNum >= 1) return `$${priceNum.toFixed(4)}`;
-  return `$${priceNum.toPrecision(4)}`;
+  return formatUsdFromNumber(priceNum);
 }
 
 function formatFee(feeNum: number, decimals = 6): string {

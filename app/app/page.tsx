@@ -15,6 +15,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { OnboardingIcon } from "@/components/icons/OnboardingIcons";
 import { HeroSection } from "@/components/marketing/HeroSection";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+import { formatUsdFromNumber } from "@/lib/format";
 
 /**
  * GH#1666: Validate a symbol is a real ticker (1-10 uppercase alpha chars).
@@ -512,9 +513,7 @@ export default function Home() {
                       {isValidSymbol(m.symbol) ? `${m.symbol}/USD` : `${m.slab_address.slice(0, 6)}...`}
                     </div>
                     <div className="text-right text-[12px] text-[var(--text-secondary)]">
-                      {m.last_price != null
-                        ? `$${m.last_price < 0.01 ? m.last_price.toFixed(6) : m.last_price < 1 ? m.last_price.toFixed(4) : m.last_price.toFixed(2)}`
-                        : "\u2014"}
+                      {formatUsdFromNumber(m.last_price)}
                     </div>
                     <div className="text-right text-[12px] text-[var(--text-secondary)]">
                       {m.volume_24h > 0 ? formatCompact(m.volume_24h) : "—"}

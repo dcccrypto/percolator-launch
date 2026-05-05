@@ -4,7 +4,7 @@ import { FC, useEffect, useRef, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { formatTokenAmount, formatUsd } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { computeMarkPnl } from "@/lib/trading";
 
 interface ClosePositionModalProps {
@@ -170,7 +170,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           </p>
           <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
             <span style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(absPosition, decimals)}</span> {symbol} at{" "}
-            <span style={{ fontFamily: "var(--font-mono)" }}>{formatUsd(entryPrice)}</span> entry
+            <span style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(entryPrice)}</span> entry
           </p>
         </div>
 

@@ -11,7 +11,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { AccountKind } from "@percolatorct/sdk";
 import {
   formatTokenAmount,
-  formatUsd,
+  formatUsdPriceE6,
   formatLiqPrice,
   formatPnl,
   formatPercent,
@@ -227,12 +227,12 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
 
               {/* Entry */}
               <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {formatUsd(entryPriceE6)}
+                {formatUsdPriceE6(entryPriceE6)}
               </td>
 
               {/* Mark */}
               <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {hasValidMark ? formatUsd(currentPriceE6) : <span className="text-[var(--text-dim)]">--</span>}
+                {hasValidMark ? formatUsdPriceE6(currentPriceE6) : <span className="text-[var(--text-dim)]">--</span>}
               </td>
 
               {/* Liq. Price */}

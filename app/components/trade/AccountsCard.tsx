@@ -5,7 +5,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
-import { formatTokenAmount, formatUsd, formatPnl, formatLiqPrice, shortenAddress } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6, formatPnl, formatLiqPrice, shortenAddress } from "@/lib/format";
 import { AccountKind, computeMarkPnl, computeLiqPrice } from "@percolatorct/sdk";
 import { LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
@@ -188,7 +188,7 @@ export const AccountsCard: FC = () => {
                         {row.positionSize !== 0n ? formatTokenAmount(absPos, decimals) : "-"}
                       </td>
                     )}
-                    {isOpenLike && <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{row.entryPrice > 0n ? formatUsd(row.entryPrice) : "-"}</td>}
+                    {isOpenLike && <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{row.entryPrice > 0n ? formatUsdPriceE6(row.entryPrice) : "-"}</td>}
                     {isOpenLike && (
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">
                         {row.positionSize !== 0n ? (

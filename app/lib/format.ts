@@ -101,6 +101,22 @@ export function formatUsd(priceE6: bigint | null | undefined): string {
   return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
 }
 
+export function formatUsdPriceE6(priceE6: bigint | null | undefined, fallback = "—"): string {
+  if (priceE6 == null || priceE6 <= 0n || priceE6 > 1_000_000_000_000_000n) return fallback;
+  const val = Number(priceE6) / 1_000_000;
+  return `$${val.toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 })}`;
+}
+
+/**
+ * Format a USD float while preserving Percolator's E6 price precision.
+ * Use this for API/WebSocket prices that are already in USD units.
+ */
+export function formatUsdFromNumber(priceUsd: number | null | undefined, fallback = "—"): string {
+  if (priceUsd == null || !Number.isFinite(priceUsd)) return fallback;
+  const priceE6 = BigInt(Math.round(priceUsd * 1_000_000));
+  return formatUsdPriceE6(priceE6, fallback);
+}
+
 /**
  * Format a liquidation price in e6 format.
  * Returns "∞" when the position is unliquidatable (liqPrice === max u64),

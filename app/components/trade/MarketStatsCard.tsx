@@ -6,7 +6,7 @@ import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
-import { formatTokenAmount, formatCompactTokenAmount, formatUsd, formatBps } from "@/lib/format";
+import { formatTokenAmount, formatCompactTokenAmount, formatUsd, formatUsdPriceE6, formatBps } from "@/lib/format";
 import { sanitizeOnChainValue, sanitizeAccountCount, sanitizeBps, sanitizeFundingRateBps } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { resolveMarketPriceE6, sanitizePriceE6, detectOracleMode } from "@/lib/oraclePrice";
@@ -27,14 +27,6 @@ function formatNum(n: number): string {
 // When exceeded, fall back to live WebSocket price (#1131).
 const MAX_SANE_MARK_PRICE_USD = 1_000_000; // $1M
 const MAX_SANE_MARK_E6 = BigInt(MAX_SANE_MARK_PRICE_USD) * 1_000_000n;
-
-/** Format a price in E6 format as a USD string with appropriate precision. */
-function formatPriceE6(priceE6: bigint): string {
-  const price = Number(priceE6) / 1_000_000;
-  if (price >= 1_000) return `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (price >= 1) return `$${price.toFixed(4)}`;
-  return `$${price.toFixed(6)}`;
-}
 
 /**
  * Convert fundingRateBpsPerSlotLast (i64) to 8-hour percentage.
@@ -145,8 +137,7 @@ export const MarketStatsCard: FC = () => {
     if (!showSpread || spreadAbs === null || spreadBps === null) return "—";
     const absSpread = spreadAbs < 0n ? -spreadAbs : spreadAbs;
     const sign = spreadAbs >= 0n ? "+" : "−";
-    // formatPriceE6 returns "$X.XX" — replace the $ with sign+$
-    const dollarPart = formatPriceE6(absSpread).replace("$", `${sign}$`);
+    const dollarPart = formatUsd(absSpread).replace("$", `${sign}$`);
     const pctPart = `${sign}${Math.abs(spreadBps / 100).toFixed(2)}%`;
     return `${dollarPart} (${pctPart})`;
   })();
@@ -183,12 +174,12 @@ export const MarketStatsCard: FC = () => {
     // Row 1 — Pricing signals
     {
       label: "Mark",
-      value: markPriceE6 !== null ? formatPriceE6(markPriceE6) : formatUsd(livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n)),
+      value: markPriceE6 !== null ? formatUsdPriceE6(markPriceE6) : formatUsdPriceE6(livePriceE6 ?? (mktConfig ? resolveMarketPriceE6(mktConfig) : 0n)),
       tooltip: "EMA mark price used for liquidations and PnL",
     },
     {
       label: "Index",
-      value: indexPriceE6 !== null ? formatPriceE6(indexPriceE6) : "—",
+      value: indexPriceE6 !== null ? formatUsdPriceE6(indexPriceE6) : "—",
       tooltip: "On-chain oracle index price",
     },
     {

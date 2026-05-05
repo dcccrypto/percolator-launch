@@ -6,6 +6,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { MarketLogo } from "@/components/market/MarketLogo";
+import { formatUsdFromNumber } from "@/lib/format";
 
 interface MarketInfoBarProps {
   slabAddress: string;
@@ -68,9 +69,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   const { fundingRate, engine } = useEngineState();
   const { level: oracleLevel } = useOracleFreshness();
 
-  const priceDisplay = priceUsd != null
-    ? `$${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}`
-    : "—";
+  const priceDisplay = formatUsdFromNumber(priceUsd);
 
   const change24hDisplay = change24h ?? 0;
   const isUp = change24hDisplay >= 0;
@@ -158,9 +157,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h High</span>
           <span className="text-xs font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {high24h != null
-              ? `$${high24h < 0.01 ? high24h.toFixed(6) : high24h < 1 ? high24h.toFixed(4) : high24h.toFixed(2)}`
-              : "—"}
+            {formatUsdFromNumber(high24h)}
           </span>
         </div>
 
@@ -168,9 +165,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h Low</span>
           <span className="text-xs font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {low24h != null
-              ? `$${low24h < 0.01 ? low24h.toFixed(6) : low24h < 1 ? low24h.toFixed(4) : low24h.toFixed(2)}`
-              : "—"}
+            {formatUsdFromNumber(low24h)}
           </span>
         </div>
 

@@ -10,7 +10,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { AccountKind } from "@percolatorct/sdk";
-import { formatTokenAmount, formatUsd, formatLiqPrice } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6, formatLiqPrice } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {
   computeMarkPnl,
@@ -499,7 +499,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Entry Price</span>
                 <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {formatUsd(entryPriceE6)}
+                  {formatUsdPriceE6(entryPriceE6)}
                 </span>
               </div>
               {/* 3.4: Funding/8h inline — replaces the entry price row area */}
@@ -519,7 +519,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Market Price</span>
                 <span className={`text-[11px] ${hasValidMark ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
-                  {hasValidMark ? formatUsd(currentPriceE6) : "--"}
+                  {hasValidMark ? formatUsdPriceE6(currentPriceE6) : "--"}
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">

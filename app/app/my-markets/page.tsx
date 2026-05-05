@@ -10,6 +10,7 @@ import { useAdminActions } from "@/hooks/useAdminActions";
 import { useToast } from "@/hooks/useToast";
 import { getConfig, explorerAccountUrl } from "@/lib/config";
 import { sanitizeAccountCount } from "@/lib/health";
+import { formatUsdPriceE6 } from "@/lib/format";
 import { deriveInsuranceLpMint } from "@percolatorct/sdk";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockMyMarkets } from "@/lib/mock-trade-data";
@@ -18,11 +19,6 @@ import { getMockMyMarkets } from "@/lib/mock-trade-data";
 function fmt(v: bigint, decimals = 6): string {
   const n = Number(v) / 10 ** decimals;
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
-
-function fmtPrice(v: bigint): string {
-  const n = Number(v) / 1e6;
-  return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
 function shortAddr(addr: string): string {
@@ -198,7 +194,7 @@ const MarketCard: FC<{
         {/* Stats Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4">
           {[
-            { label: "oracle price", value: oraclePrice > 0n ? fmtPrice(oraclePrice) : "—" },
+            { label: "oracle price", value: oraclePrice > 0n ? formatUsdPriceE6(oraclePrice) : "—" },
             { label: "open interest", value: fmt(oi) },
             { label: "vault balance", value: fmt(vault) },
             { label: "insurance", value: fmt(insurance) },

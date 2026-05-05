@@ -5,6 +5,7 @@ import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { detectOracleMode } from "@/lib/oraclePrice";
+import { formatUsdFromNumber } from "@/lib/format";
 import { OracleBadge } from "./OracleBadge";
 import { useOraclePublishers, type PublisherInfo } from "@/hooks/useOraclePublishers";
 
@@ -64,9 +65,7 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
     [handleClose]
   );
 
-  const priceText = priceUsd != null
-    ? `$${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : "—";
+  const priceText = formatUsdFromNumber(priceUsd);
 
   const elapsedText =
     elapsedSecs < 60

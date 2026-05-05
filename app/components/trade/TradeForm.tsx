@@ -24,7 +24,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
-import { formatTokenAmount, formatUsd } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { saveEntryPrice, getEntryPrice, getEntryLeverage, clearEntryPrice } from "@/lib/entry-price";
 import { isSentinelValue } from "@/lib/health";
@@ -561,7 +561,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div>
               <span className="text-[var(--text-dim)] uppercase tracking-[0.08em]">Entry</span>
               <span className="ml-2 font-mono font-medium text-[var(--text)]">
-                {openEntryPriceE6 > 0n ? formatUsd(openEntryPriceE6) : "—"}
+                {openEntryPriceE6 > 0n ? formatUsdPriceE6(openEntryPriceE6) : "—"}
               </span>
             </div>
             <div>
@@ -569,7 +569,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 Liq {openLiqDanger ? "⚠" : ""}
               </span>
               <span className={`ml-2 font-mono font-medium ${openLiqDanger ? "text-orange-400" : "text-[var(--text)]"}`}>
-                {openLiqPriceE6 > 0n ? formatUsd(openLiqPriceE6) : "—"}
+                {openLiqPriceE6 > 0n ? formatUsdPriceE6(openLiqPriceE6) : "—"}
               </span>
             </div>
             <div>
