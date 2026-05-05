@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePortfolio, getLiquidationSeverity, type PortfolioPosition } from "@/hooks/usePortfolio";
-import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 
 import { GlowButton } from "@/components/ui/GlowButton";
@@ -111,13 +111,13 @@ function PositionCard({ pos, symbol, decimals = 6 }: { pos: PortfolioPosition; s
           <div>
             <span className="text-[var(--text-dim)]">Entry: </span>
             <span className="text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-              {pos.account?.entryPrice != null ? formatPriceE6(pos.account.entryPrice) : "—"}
+              {pos.account?.entryPrice != null ? formatUsdPriceE6(pos.account.entryPrice) : "—"}
             </span>
           </div>
           <div>
             <span className="text-[var(--text-dim)]">Mark: </span>
             <span className="text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-              {pos.oraclePriceE6 > 0n ? formatPriceE6(pos.oraclePriceE6) : "—"}
+              {pos.oraclePriceE6 > 0n ? formatUsdPriceE6(pos.oraclePriceE6) : "—"}
             </span>
           </div>
           <div>
@@ -128,7 +128,7 @@ function PositionCard({ pos, symbol, decimals = 6 }: { pos: PortfolioPosition; s
               }`}
               style={{ fontFamily: "var(--font-jetbrains-mono)" }}
             >
-              {hasPosition && pos.liquidationPriceE6 > 0n ? formatPriceE6(pos.liquidationPriceE6) : "—"}
+              {hasPosition && pos.liquidationPriceE6 > 0n ? formatUsdPriceE6(pos.liquidationPriceE6) : "—"}
             </span>
           </div>
         </div>

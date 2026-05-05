@@ -6,7 +6,7 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio, getLiquidationSeverity, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useLpPositions } from "@/hooks/useLpPositions";
 import { LpPositionsPanel } from "@/components/portfolio/LpPositionsPanel";
-import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
@@ -345,13 +345,13 @@ export default function PortfolioPage() {
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Entry</p>
                           <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {formatPriceE6(posEntry)}
+                            {formatUsdPriceE6(posEntry)}
                           </p>
                         </div>
                         <div>
                           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Mark Price</p>
                           <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {oraclePriceE6 > 0n ? formatPriceE6(oraclePriceE6) : "—"}
+                            {oraclePriceE6 > 0n ? formatUsdPriceE6(oraclePriceE6) : "—"}
                           </p>
                         </div>
                         <div>
@@ -394,7 +394,7 @@ export default function PortfolioPage() {
                               style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                             >
                               {hasPosition && liquidationPriceE6 > 0n
-                                ? formatPriceE6(liquidationPriceE6)
+                                ? formatUsdPriceE6(liquidationPriceE6)
                                 : "—"}
                             </p>
                           </div>

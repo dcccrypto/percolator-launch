@@ -1,7 +1,7 @@
 "use client";
 
 import { FC, useEffect, useState, useCallback } from "react";
-import { formatTokenAmount, formatPriceE6 } from "@/lib/format";
+import { formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
 import { explorerTxUrl } from "@/lib/config";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockTrades } from "@/lib/mock-trade-data";
@@ -128,7 +128,7 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   {trade.size != null ? formatTokenAmount(toBigInt(Math.abs(typeof trade.size === "number" ? trade.size : parseFloat(trade.size))), decimals) : "—"}
                 </div>
                 <div className="text-right text-[var(--text-muted)]" style={{ fontFamily: "var(--font-mono)" }}>
-                  {trade.price != null ? formatPriceE6(BigInt(Math.round(Number(trade.price) * 1e6))) : "—"}
+                  {trade.price != null ? formatUsdFromNumber(Number(trade.price)) : "—"}
                 </div>
               </a>
             ))}
