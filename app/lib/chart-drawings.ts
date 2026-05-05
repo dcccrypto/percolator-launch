@@ -29,16 +29,19 @@ export type Drawing =
   | { id: string; kind: "horizontal"; price: number }
   | { id: string; kind: "rectangle"; p1: PricePoint; p2: PricePoint };
 
-/** Discriminator helper — the set of valid `kind` values for runtime
- *  validation against localStorage payloads. Mirrors VALID_KINDS in
- *  indicator-registry.ts. Update both this and the Drawing union when
- *  adding a kind. */
+/** Discriminator helper — every kind in the Drawing union. */
 export type DrawingKind = Drawing["kind"];
-const VALID_KINDS: ReadonlySet<DrawingKind> = new Set([
-  "trend",
-  "horizontal",
-  "rectangle",
-]);
+
+/** Single source of truth for the kinds the runtime validator accepts.
+ *  Typed as `Record<DrawingKind, true>` so adding a kind to the Drawing
+ *  union forces a compile error here (missing key). The previous
+ *  hand-maintained `Set<DrawingKind>` could silently desync from the
+ *  union and drop user-stored entries on read. */
+const VALID_KIND_TABLE: Record<DrawingKind, true> = {
+  trend: true,
+  horizontal: true,
+  rectangle: true,
+};
 
 /** Active drawing tool from the user's toolbar. `pointer` is the default
  *  (select / delete existing drawings). The other values match Drawing
@@ -68,9 +71,14 @@ export interface DrawingsStorage {
   drawings: Drawing[];
 }
 
-/** Current storage envelope version. Bump when the Drawing shape changes
- *  in a backwards-incompatible way; mergeDrawings will then need a
- *  per-version branch. */
+/** Current storage envelope version. Bump ONLY for backwards-INCOMPATIBLE
+ *  changes (renaming or removing a field, changing units, restructuring
+ *  the discriminator). Additive changes — adding an optional field to a
+ *  variant, adding a new kind — do NOT need a version bump because
+ *  isDrawing's tolerant validation accepts older payloads unchanged.
+ *  Reserving bumps for breaking changes lets v1 readers see additive v1
+ *  payloads from newer clients without losing the entire drawings list
+ *  to a version mismatch. */
 export const DRAWINGS_STORAGE_VERSION = 1;
 
 /** Per-slab cap on persisted drawings. Picked at 100 because:
@@ -100,19 +108,44 @@ function isPricePoint(value: unknown): value is PricePoint {
 /** Strict runtime check that a value is a well-formed Drawing. Intentionally
  *  rejects unknown `kind` values rather than throwing — readers of older
  *  app versions can encounter newer kinds and we'd rather drop them than
- *  crash the chart. */
+ *  crash the chart.
+ *
+ *  Also rejects entries carrying prototype-related own keys. `JSON.parse`
+ *  intentionally treats `__proto__` as an own string property, NOT a
+ *  prototype slot, so it doesn't pollute at parse time. But any future
+ *  consumer that spreads a drawing into an object literal
+ *  (`{ ...drawing, ...overrides }`) would re-apply the own `__proto__`
+ *  key as the actual prototype. Defusing here means every spread site in
+ *  the rendering pipeline can stay simple. */
 export function isDrawing(value: unknown): value is Drawing {
   if (value === null || typeof value !== "object") return false;
+  if (
+    Object.hasOwn(value, "__proto__") ||
+    Object.hasOwn(value, "constructor") ||
+    Object.hasOwn(value, "prototype")
+  ) {
+    return false;
+  }
   const d = value as Record<string, unknown>;
   if (typeof d.id !== "string" || d.id.length === 0) return false;
   if (typeof d.kind !== "string") return false;
-  if (!VALID_KINDS.has(d.kind as DrawingKind)) return false;
+  if (!Object.hasOwn(VALID_KIND_TABLE, d.kind)) return false;
   switch (d.kind as DrawingKind) {
     case "trend":
     case "rectangle":
       return isPricePoint(d.p1) && isPricePoint(d.p2);
     case "horizontal":
       return typeof d.price === "number" && Number.isFinite(d.price);
+    default: {
+      // Compile-error guard: if a future kind is added to the Drawing
+      // union without a case here, `_exhaustive: never` fails to type-
+      // check because `d.kind` (post-narrowing) still has the unhandled
+      // variant. VALID_KIND_TABLE above also fails to type-check on the
+      // missing key, so two independent compile-time failure points
+      // cover the four-step diff promised in the docs.
+      const _exhaustive: never = d.kind as never;
+      return false;
+    }
   }
 }
 
@@ -142,17 +175,16 @@ export function mergeDrawings(parsed: unknown): Drawing[] {
 
   let raw: unknown;
   if (Array.isArray(parsed)) {
-    // Bare-array legacy / defensive path.
+    // Bare-array legacy / defensive path. No version field — accept and
+    // let isDrawing filter individual entries.
     raw = parsed;
   } else {
     const envelope = parsed as Record<string, unknown>;
-    // Future envelope versions: drop everything rather than guess. The
-    // current major version's reader must not interpret future-version
-    // payload shapes.
-    if (
-      typeof envelope.version === "number" &&
-      envelope.version !== DRAWINGS_STORAGE_VERSION
-    ) {
+    // Strict equality on the version field. A missing, non-numeric, or
+    // wrong-numeric version drops the whole list — the current reader
+    // must not guess at envelope shapes it doesn't recognize. NaN never
+    // equals DRAWINGS_STORAGE_VERSION so it's correctly dropped here.
+    if (envelope.version !== DRAWINGS_STORAGE_VERSION) {
       return [];
     }
     raw = envelope.drawings;

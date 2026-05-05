@@ -105,6 +105,21 @@ describe("mergeDrawings", () => {
     ).toEqual([]);
   });
 
+  it.each([
+    ["missing version field", { drawings: [] }],
+    ["string-typed version", { version: "1", drawings: [] }],
+    ["NaN version", { version: NaN, drawings: [] }],
+    ["zero version", { version: 0, drawings: [] }],
+    ["negative version", { version: -1, drawings: [] }],
+    ["null version", { version: null, drawings: [] }],
+  ])("returns [] for envelope with %s", (_label, envelope) => {
+    // Strict equality on the version field means anything that isn't
+    // exactly DRAWINGS_STORAGE_VERSION (a number) drops the whole list.
+    // Pins each edge case so a future relaxation of the check fails a
+    // specific test rather than silently accepting weird payloads.
+    expect(mergeDrawings(envelope)).toEqual([]);
+  });
+
   it("returns [] for an envelope where drawings is not an array", () => {
     expect(
       mergeDrawings({
@@ -112,6 +127,45 @@ describe("mergeDrawings", () => {
         drawings: "not an array",
       }),
     ).toEqual([]);
+  });
+
+  it.each([
+    ["object", { version: DRAWINGS_STORAGE_VERSION, drawings: {} }],
+    ["null", { version: DRAWINGS_STORAGE_VERSION, drawings: null }],
+    ["undefined", { version: DRAWINGS_STORAGE_VERSION }],
+    ["number", { version: DRAWINGS_STORAGE_VERSION, drawings: 42 }],
+    ["boolean", { version: DRAWINGS_STORAGE_VERSION, drawings: true }],
+  ])(
+    "returns [] when envelope.drawings is non-array (%s)",
+    (_label, envelope) => {
+      expect(mergeDrawings(envelope)).toEqual([]);
+    },
+  );
+
+  it("rejects entries carrying __proto__ as an own key (prototype-pollution defuse)", () => {
+    // JSON.parse intentionally treats __proto__ as a string-key own
+    // property, NOT a prototype slot. isDrawing rejects entries with
+    // any prototype-related own key so future spread sites in the
+    // rendering pipeline can't re-apply the pollution.
+    const polluted = JSON.parse(
+      `{"version":${DRAWINGS_STORAGE_VERSION},"drawings":[{"id":"x","kind":"horizontal","price":100,"__proto__":{"polluted":true}}]}`,
+    );
+    expect(mergeDrawings(polluted)).toEqual([]);
+  });
+
+  it("rejects entries carrying constructor or prototype as own keys", () => {
+    expect(
+      isDrawing({
+        ...validHorizontal,
+        constructor: { polluted: true },
+      }),
+    ).toBe(false);
+    expect(
+      isDrawing({
+        ...validHorizontal,
+        prototype: { polluted: true },
+      }),
+    ).toBe(false);
   });
 
   it("accepts a well-formed envelope and returns the drawings", () => {

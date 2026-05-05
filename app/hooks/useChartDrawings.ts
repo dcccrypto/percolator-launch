@@ -38,9 +38,13 @@ function generateId(): string {
 /** Return shape of `useChartDrawings`. Object form (not tuple) so consumers
  *  can destructure only what they need — the overlay's pointer-tool branch
  *  reads `drawings` and `deleteDrawing` only; the toolbar's clear-all reads
- *  `drawings.length` and `clearAll`; the creation tools call `addDrawing`. */
+ *  `drawings.length` and `clearAll`; the creation tools call `addDrawing`.
+ *
+ *  `drawings` is `readonly` so consumers can't accidentally mutate React
+ *  state in place (`.push()`, `.sort()`) — those mutations would skip
+ *  the re-render and persistence path. */
 export interface UseChartDrawingsReturn {
-  drawings: Drawing[];
+  drawings: readonly Drawing[];
   addDrawing: (input: DrawingInput) => void;
   deleteDrawing: (id: string) => void;
   clearAll: () => void;
@@ -66,14 +70,23 @@ export interface UseChartDrawingsReturn {
  *  or empty slab address no-ops the read and write so the shared
  *  `perc:chart:drawings:` bucket isn't poisoned by hooks mounted before
  *  the route param resolves. */
+/** Single hook instance per slab is the supported usage. Two parallel
+ *  `useChartDrawings(SAME_SLAB)` calls each maintain independent useState —
+ *  writes from one don't propagate to the other without a remount or a
+ *  `storage` event listener (this hook has neither, by design — cross-tab
+ *  sync isn't a v1 concern). For the trade-page chart only one instance
+ *  ever mounts at a time so this is a non-issue in practice. */
 export function useChartDrawings(slabAddress: string): UseChartDrawingsReturn {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
-  // Track the slab the in-memory state corresponds to, so setters write
-  // to the correct key even when called from stale closures.
+  // Track the slab the in-memory state corresponds to so setters write to
+  // the correct key. Updated synchronously DURING RENDER — not inside the
+  // hydration effect — so a setter fired in the brief window between a
+  // prop change and the effect commit can't write to the OLD slab's
+  // bucket. React's "latest value ref" pattern.
   const slabRef = useRef<string>(slabAddress);
+  slabRef.current = slabAddress;
 
   useEffect(() => {
-    slabRef.current = slabAddress;
     if (typeof window === "undefined") return;
     if (!isValidSlabAddress(slabAddress)) {
       setDrawings([]);
@@ -113,12 +126,21 @@ export function useChartDrawings(slabAddress: string): UseChartDrawingsReturn {
 
   const addDrawing = useCallback(
     (input: DrawingInput) => {
+      // Generate the id OUTSIDE the state updater. React 18's Strict Mode
+      // (and concurrent rendering's discard-and-retry path) intentionally
+      // double-invokes updater functions to surface impurity — calling
+      // generateId inside would produce two different uuids per logical
+      // add, persist both, and leave a brief window where in-memory
+      // state and disk disagree on which uuid won. The persist call
+      // below is also a side effect, but it's idempotent on identical
+      // inputs so the double-invoke is wasted work, not a correctness
+      // bug.
+      const id = generateId();
+      // Spread + cast preserves the discriminated union: `input.kind` is
+      // narrowed at the call site, and adding a string `id` doesn't
+      // change the variant shape.
+      const next = { ...input, id } as Drawing;
       setDrawings((current) => {
-        const id = generateId();
-        // Spread + cast preserves the discriminated union: `input.kind` is
-        // narrowed at the call site, and adding a string `id` doesn't
-        // change the variant shape.
-        const next = { ...input, id } as Drawing;
         // Cap at MAX_DRAWINGS_PER_SLAB — drop oldest (FIFO) on insertion
         // past the cap. Matches the read-side behaviour in mergeDrawings
         // so an over-cap localStorage payload converges on the same set

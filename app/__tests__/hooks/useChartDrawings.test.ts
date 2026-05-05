@@ -241,4 +241,68 @@ describe("useChartDrawings", () => {
     const { result } = renderHook(() => useChartDrawings(SLAB_A));
     expect(result.current.drawings).toEqual([]);
   });
+
+  it("does not crash when localStorage.getItem throws (Safari Private Mode)", () => {
+    // Safari throws on getItem in some private-mode configurations.
+    // The effect's try/catch must cover the read path AND the parse
+    // path — narrowing it to JSON.parse only would crash render here.
+    vi.spyOn(window.localStorage.__proto__, "getItem").mockImplementation(
+      () => {
+        throw new Error("QuotaExceededError");
+      },
+    );
+    const { result } = renderHook(() => useChartDrawings(SLAB_A));
+    expect(result.current.drawings).toEqual([]);
+  });
+
+  it("addDrawing writes to the NEW slab when called immediately after a slab change", () => {
+    // Race: slabAddress prop changes from A to B. The hydration effect
+    // for B will fire after commit, but a setter fired between the
+    // commit and that effect must persist to the NEW slab. The fix is
+    // to assign slabRef.current synchronously during render — this
+    // test pins that contract.
+    window.localStorage.setItem(STORAGE_KEY_A, envelope([]));
+    const { result, rerender } = renderHook(
+      ({ slab }: { slab: string }) => useChartDrawings(slab),
+      { initialProps: { slab: SLAB_A } },
+    );
+    rerender({ slab: SLAB_B });
+    // Capture addDrawing AFTER the rerender (post-render-time ref
+    // assignment) and call it immediately.
+    const add = result.current.addDrawing;
+    act(() => {
+      add({ kind: "horizontal", price: 100 });
+    });
+    // Write must land under SLAB_B's key.
+    const persistedB = window.localStorage.getItem(STORAGE_KEY_B);
+    expect(persistedB).toBeTruthy();
+    const parsedB = JSON.parse(persistedB ?? "{}");
+    expect(parsedB.drawings).toHaveLength(1);
+    // SLAB_A's key must NOT have received the new drawing.
+    const persistedA = window.localStorage.getItem(STORAGE_KEY_A);
+    const parsedA = JSON.parse(persistedA ?? "{}");
+    expect(parsedA.drawings ?? []).toEqual([]);
+  });
+
+  it("generateId runs outside the state updater (single uuid per logical add)", () => {
+    // React 18 may invoke state updater functions twice (Strict Mode in
+    // dev, discarded renders in concurrent mode). generateId must run
+    // OUTSIDE the updater so a single addDrawing call produces exactly
+    // one uuid. If it were inside, double-invocation would produce two
+    // different uuids and the disk persisted under each, leaving a
+    // brief window where in-memory state and disk disagree.
+    let uuidCallCount = 0;
+    const realRandomUUID = crypto.randomUUID.bind(crypto);
+    vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+      uuidCallCount++;
+      return realRandomUUID();
+    });
+
+    const { result } = renderHook(() => useChartDrawings(SLAB_A));
+    act(() => {
+      result.current.addDrawing({ kind: "horizontal", price: 100 });
+    });
+    expect(uuidCallCount).toBe(1);
+    expect(result.current.drawings).toHaveLength(1);
+  });
 });
