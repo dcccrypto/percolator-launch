@@ -43,6 +43,7 @@ import { ChartIndicatorMenu } from "./ChartIndicatorMenu";
 import { ChartDrawingOverlay } from "./ChartDrawingOverlay";
 import { ChartDrawingToolbar } from "./ChartDrawingToolbar";
 import { useChartDrawingTool } from "@/hooks/useChartDrawingTool";
+import { useChartDrawings } from "@/hooks/useChartDrawings";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -163,6 +164,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     clearAll: clearAllIndicators,
   } = useChartIndicatorPrefs(slabAddress);
   const { tool: drawingTool, setTool: setDrawingTool } = useChartDrawingTool();
+  const { drawings, deleteDrawing } = useChartDrawings(slabAddress);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -854,8 +856,14 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             chart.subscribeClick so native pan/zoom keep working. */}
         <ChartDrawingOverlay
           chartRef={chartRef}
+          seriesRef={seriesRef}
           containerRef={containerRef}
           chartReady={chartReady}
+          drawings={drawings}
+          deleteDrawing={deleteDrawing}
+          tool={drawingTool}
+          setTool={setDrawingTool}
+          slabAddress={slabAddress}
         />
 
         {/* Drawing tools toolbar — vertical bar at the chart's left edge.

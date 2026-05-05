@@ -66,95 +66,13 @@ describe("ChartDrawingToolbar", () => {
     expect(setTool).toHaveBeenCalledWith("pointer");
   });
 
-  it.each(["trend", "horizontal", "rectangle"] as const)(
-    "Escape returns to pointer from %s",
-    (active) => {
-      const setTool = vi.fn();
-      render(<ChartDrawingToolbar tool={active} setTool={setTool} />);
-      fireEvent.keyDown(document, { key: "Escape" });
-      expect(setTool).toHaveBeenCalledWith("pointer");
-    },
-  );
-
-  it("Escape is a no-op when the tool is already pointer", () => {
-    const setTool = vi.fn();
-    render(<ChartDrawingToolbar tool="pointer" setTool={setTool} />);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(setTool).not.toHaveBeenCalled();
-  });
-
-  it("Escape with focus inside an INPUT is suppressed (input-focus guard)", () => {
-    const setTool = vi.fn();
-    render(
-      <>
-        <input data-testid="form-input" />
-        <ChartDrawingToolbar tool="trend" setTool={setTool} />
-      </>,
-    );
-    const input = screen.getByTestId("form-input") as HTMLInputElement;
-    input.focus();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(setTool).not.toHaveBeenCalled();
-  });
-
-  it("Escape with focus inside a TEXTAREA is suppressed", () => {
-    const setTool = vi.fn();
-    render(
-      <>
-        <textarea data-testid="form-textarea" />
-        <ChartDrawingToolbar tool="trend" setTool={setTool} />
-      </>,
-    );
-    const ta = screen.getByTestId("form-textarea") as HTMLTextAreaElement;
-    ta.focus();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(setTool).not.toHaveBeenCalled();
-  });
-
-  it("Escape with focus inside a contenteditable is suppressed", () => {
-    const setTool = vi.fn();
-    render(
-      <>
-        {/* tabIndex=0 makes the contenteditable focusable in jsdom.
-            jsdom doesn't compute isContentEditable from the
-            attribute, so we patch the property on the element after
-            it mounts so the input-focus guard's runtime check runs
-            against a representative DOM shape. */}
-        <div
-          data-testid="ce"
-          contentEditable
-          tabIndex={0}
-          suppressContentEditableWarning
-        />
-        <ChartDrawingToolbar tool="trend" setTool={setTool} />
-      </>,
-    );
-    const ce = screen.getByTestId("ce") as HTMLDivElement;
-    Object.defineProperty(ce, "isContentEditable", {
-      value: true,
-      configurable: true,
-    });
-    ce.focus();
-    expect(document.activeElement).toBe(ce);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(setTool).not.toHaveBeenCalled();
-  });
-
-  it("non-Escape keys do not call setTool", () => {
+  it("does NOT register a keydown listener (Escape is owned by the overlay)", () => {
+    // The Escape priority chain (cancel-pending → deselect → reset-tool)
+    // lives in ChartDrawingOverlay so a single handler can sequence
+    // those states. The toolbar must not race a second handler for
+    // the same key.
     const setTool = vi.fn();
     render(<ChartDrawingToolbar tool="trend" setTool={setTool} />);
-    fireEvent.keyDown(document, { key: "Enter" });
-    fireEvent.keyDown(document, { key: " " });
-    fireEvent.keyDown(document, { key: "p" });
-    expect(setTool).not.toHaveBeenCalled();
-  });
-
-  it("removes the keydown listener on unmount", () => {
-    const setTool = vi.fn();
-    const { unmount } = render(
-      <ChartDrawingToolbar tool="trend" setTool={setTool} />,
-    );
-    unmount();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(setTool).not.toHaveBeenCalled();
   });

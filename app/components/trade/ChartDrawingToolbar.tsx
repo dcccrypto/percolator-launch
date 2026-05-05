@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type FC, type ReactNode } from "react";
+import { type FC, type ReactNode } from "react";
 import type { DrawingTool } from "@/lib/chart-drawings";
 
 interface ChartDrawingToolbarProps {
@@ -109,36 +109,16 @@ const TOOLS: ReadonlyArray<ToolEntry> = [
  * each button with its label; users get accurate semantics without
  * an unfulfilled contract.
  *
- * Keyboard: Escape returns to the pointer tool from any other tool.
- * Input-focus guarded: Escape inside an order-form INPUT or TEXTAREA
- * is ignored so it can do what the input expects (close a select,
- * cancel autocomplete, etc.) without hijacking the user's keystroke.
+ * Keyboard: handled by ChartDrawingOverlay. Escape there runs a
+ * priority chain (cancel-pending > deselect > reset-tool > no-op)
+ * so a half-drawn anchor cancels first, then a second Escape reaches
+ * the tool reset. Owning Escape there avoids two competing handlers
+ * racing on the same keystroke.
  */
 export const ChartDrawingToolbar: FC<ChartDrawingToolbarProps> = ({
   tool,
   setTool,
 }) => {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape") return;
-      // Input-focus guard: don't hijack Escape from form inputs.
-      const active = document.activeElement;
-      if (
-        active != null &&
-        (active.tagName === "INPUT" ||
-          active.tagName === "TEXTAREA" ||
-          (active as HTMLElement).isContentEditable)
-      ) {
-        return;
-      }
-      // Already pointer — no state change needed (avoids spurious renders).
-      if (tool === "pointer") return;
-      setTool("pointer");
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [tool, setTool]);
-
   return (
     <div
       aria-label="Drawing tools"
