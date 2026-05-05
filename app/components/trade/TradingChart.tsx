@@ -40,6 +40,7 @@ import { isOverlayKind, isPaneKind } from "@/lib/indicator-registry";
 import { useIndicatorOverlays } from "./useIndicatorOverlays";
 import { useIndicatorOscillatorPane } from "./useIndicatorOscillatorPane";
 import { ChartIndicatorMenu } from "./ChartIndicatorMenu";
+import { ChartDrawingOverlay } from "./ChartDrawingOverlay";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -841,6 +842,18 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         {/* Bumped desktop height 500 → 620 so the time axis has room to render
             below the candles + volume pane without getting visually clipped. */}
         <div ref={containerRef} className="w-full h-[45svh] lg:h-[620px]" />
+
+        {/* User-drawing overlay: transparent canvas tracking the chart
+            container's dimensions, layered above the chart canvas via DOM
+            order (no explicit z) but below the empty-state / hover-tooltip
+            / position-summary badges (which sit at z-10). pointer-events
+            stay disabled — drawing-tool clicks route through
+            chart.subscribeClick so native pan/zoom keep working. */}
+        <ChartDrawingOverlay
+          chartRef={chartRef}
+          containerRef={containerRef}
+          chartReady={chartReady}
+        />
 
         {/* GH#1652: empty-state overlay — shown when no data yet, sits above canvas */}
         {showEmptyOverlay && (
