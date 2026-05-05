@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useState, useRef, useEffect, useCallback } from "react";
+import { FC, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   createChart,
   IChartApi,
@@ -35,6 +35,11 @@ import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { getEntryPrice } from "@/lib/entry-price";
 import { useChartStylePref } from "@/hooks/useChartStylePref";
 import { useChartOverlayPrefs } from "@/hooks/useChartOverlayPrefs";
+import { useChartIndicatorPrefs } from "@/hooks/useChartIndicatorPrefs";
+import { isOverlayKind, isPaneKind } from "@/lib/indicator-registry";
+import { useIndicatorOverlays } from "./useIndicatorOverlays";
+import { useIndicatorOscillatorPane } from "./useIndicatorOscillatorPane";
+import { ChartIndicatorMenu } from "./ChartIndicatorMenu";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -146,6 +151,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const chartTheme = useChartTheme();
   const [chartStyle, setChartStyle] = useChartStylePref();
   const [overlayPrefs, setOverlayPref] = useChartOverlayPrefs();
+  const {
+    indicators,
+    addIndicator,
+    removeIndicator,
+    updateIndicator,
+    clearAll: clearAllIndicators,
+  } = useChartIndicatorPrefs(slabAddress);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -163,6 +175,11 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  // Flips true once the chart-init effect has populated chartRef.current,
+  // back to false on unmount. Provides a reactive trigger for downstream
+  // hooks (useIndicatorOverlays) that need to attach series to the chart
+  // — refs alone can't drive an effect since they don't trigger re-runs.
+  const [chartReady, setChartReady] = useState(false);
   const seriesRef = useRef<ISeriesApi<ChartSeriesKind> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const priceLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
@@ -213,14 +230,21 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   } = usePercolatorCandles(slabAddress ?? null, timeframe);
 
   // Convert from {time: unix-seconds} to {timestamp: ms} shape used by the chart.
-  const percolatorCandles = percolatorCandlesRaw.map((c) => ({
-    timestamp: c.time * 1000,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-    volume: c.volume,
-  }));
+  // Memoed so identity is stable between renders that don't change the source
+  // array — without this, every parent render (live-price tick, crosshair
+  // hover, etc.) produces a fresh array, which cascades into candleData →
+  // indicator hooks → full series remove+recreate at WS cadence.
+  const percolatorCandles = useMemo(
+    () => percolatorCandlesRaw.map((c) => ({
+      timestamp: c.time * 1000,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume,
+    })),
+    [percolatorCandlesRaw],
+  );
 
   // Prefer Percolator as the chart source only when it has enough coverage to
   // form a readable chart. With 1–2 candles against a 24 h window, the tier-0
@@ -274,28 +298,40 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     });
   }, [config, priceUsd]);
 
-  // Derive data
-  const oracleFiltered = (() => {
-    const cutoff = Date.now() - TIMEFRAME_MS[timeframe];
-    return oraclePrices.filter((p) => p.timestamp >= cutoff);
-  })();
+  // Derive data. Memoed because oraclePrices only changes on the 5s-gated
+  // live-price effect (line ~287), so the filtered slice is reference-stable
+  // between most renders. Same WS-tick churn argument as percolatorCandles
+  // above — without this, candleData's memo invalidates on every tick.
+  const oracleFiltered = useMemo(
+    () => {
+      const cutoff = Date.now() - TIMEFRAME_MS[timeframe];
+      return oraclePrices.filter((p) => p.timestamp >= cutoff);
+    },
+    [oraclePrices, timeframe],
+  );
 
   // Data source priority: Percolator internal trades (tier-0, when >=10 bars) →
   // Pyth Benchmarks (canonical spot) → GeckoTerminal (DEX-pool history for
   // long-tail tokens) → oracle-aggregated fallback (keeper observations).
-  const candleData = (() => {
+  //
+  // Memoed so the reference is stable between renders that don't change the
+  // underlying source arrays. Without this, every parent render (e.g. on
+  // unrelated state like timeframe-pill hover) creates a new array, which
+  // re-fires the indicator hooks' effects and tears down + reallocates the
+  // oscillator pane on every WebSocket tick.
+  const candleData = useMemo(() => {
     if (hasPercolatorData) return percolatorCandles;
     if (hasPythData) return pythCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
     if (hasExternalData) return externalCandles as { timestamp: number; open: number; high: number; low: number; close: number; volume: number }[];
     return aggregateCandles(oracleFiltered, CANDLE_INTERVAL_MS);
-  })();
+  }, [hasPercolatorData, hasPythData, hasExternalData, percolatorCandles, pythCandles, externalCandles, oracleFiltered]);
 
-  const lineData = (() => {
+  const lineData = useMemo(() => {
     if (hasPercolatorData) return percolatorCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     if (hasPythData) return pythCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     if (hasExternalData) return externalCandles.map((c) => ({ timestamp: c.timestamp, price: c.close }));
     return oracleFiltered;
-  })();
+  }, [hasPercolatorData, hasPythData, hasExternalData, percolatorCandles, pythCandles, externalCandles, oracleFiltered]);
 
   const totalDataPoints = candleData.length + lineData.length;
 
@@ -306,6 +342,25 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
 
   // Phase 2: volume has data (used to show empty state in volume pane)
   const hasVolumeData = candleData.some((c) => (c.volume ?? 0) > 0);
+
+  // Indicator overlays (SMA / EMA / Bollinger). Memo the filtered subset so
+  // the overlay hook's effect only re-runs when the user actually adds /
+  // removes / edits an indicator — not on every WebSocket price tick (which
+  // would churn series remove+recreate at 250ms cadence).
+  const overlayIndicatorConfigs = useMemo(
+    () => indicators.filter((i) => isOverlayKind(i.kind)),
+    [indicators],
+  );
+  useIndicatorOverlays(chartRef, chartReady, candleData, overlayIndicatorConfigs);
+
+  // Oscillator-pane indicators (RSI / MACD). Same memo discipline. The pane
+  // is allocated lazily inside the hook — empty pane configs collapses the
+  // pane and the chart fills the reclaimed vertical space.
+  const paneIndicatorConfigs = useMemo(
+    () => indicators.filter((i) => isPaneKind(i.kind)),
+    [indicators],
+  );
+  useIndicatorOscillatorPane(chartRef, chartReady, candleData, paneIndicatorConfigs, chartTheme);
 
   // Create/destroy chart
   useEffect(() => {
@@ -357,8 +412,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     });
 
     chartRef.current = chart;
+    setChartReady(true);
 
     return () => {
+      setChartReady(false);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -729,6 +786,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         <div className="flex flex-wrap items-center gap-2">
           <ChartStyleMenu value={chartStyle} onChange={setChartStyle} />
           <ChartDisplayMenu prefs={overlayPrefs} onToggle={setOverlayPref} />
+          <ChartIndicatorMenu
+            indicators={indicators}
+            addIndicator={addIndicator}
+            removeIndicator={removeIndicator}
+            updateIndicator={updateIndicator}
+            clearAll={clearAllIndicators}
+          />
 
           {/* PERC-8090: 1m/5m/15m/1h/4h/1d only — 7d/30d collapsed */}
           <div className="flex gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
@@ -736,7 +800,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
-                className={`rounded-none px-2 py-1 text-xs transition-colors ${
+                className={`rounded-none px-1.5 sm:px-2 py-1 text-xs transition-colors ${
                   timeframe === tf
                     ? "bg-[var(--accent)]/10 text-[var(--accent)]"
                     : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
