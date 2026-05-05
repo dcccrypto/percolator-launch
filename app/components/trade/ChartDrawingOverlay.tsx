@@ -9,12 +9,15 @@ import type {
 import { sizeCanvasForDpr } from "@/lib/chart-canvas";
 import {
   pricePointToPixel,
+  pixelToPricePoint,
   type PriceConverter,
   type TimeConverter,
 } from "@/lib/chart-coords";
 import {
   type Drawing,
+  type DrawingInput,
   type DrawingTool,
+  type PricePoint,
 } from "@/lib/chart-drawings";
 import { findHitDrawingId } from "@/lib/chart-hit-test";
 import { assertNever } from "@/lib/exhaustive";
@@ -42,11 +45,14 @@ interface ChartDrawingOverlayProps {
   /** Persisted drawings for the active slab. Rendered every frame;
    *  hit-tested on click for selection. */
   drawings: readonly Drawing[];
+  /** Setter for adding a new drawing (creation flows: trend, horizontal,
+   *  rectangle). The hook generates the id + persists. */
+  addDrawing: (input: DrawingInput) => void;
   /** Setter for removing a drawing by id (Delete / Backspace path). */
   deleteDrawing: (id: string) => void;
-  /** Active drawing tool. Pointer is the only branch wired in this
-   *  commit; future commits add creation flows for trend / horizontal
-   *  / rectangle. */
+  /** Active drawing tool. Pointer hit-tests; trend uses two-click
+   *  creation; horizontal commits on a single click; rectangle uses
+   *  drag (separate commit). */
   tool: DrawingTool;
   /** Setter for the active tool. Used by the keyboard handler's
    *  Escape priority chain to fall back to pointer when nothing
@@ -92,6 +98,7 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
   containerRef,
   chartReady,
   drawings,
+  addDrawing,
   deleteDrawing,
   tool,
   setTool,
@@ -102,20 +109,30 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
    *  intentionally NOT persisted (a fresh page should start with
    *  nothing selected, and selection doesn't survive market switches). */
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** First click of a multi-click creation flow — locked-in anchor
+   *  waiting for the second click to commit (trend tool). State, not
+   *  ref, because the keyboard handler's Escape priority chain reads
+   *  it to decide whether to cancel the pending creation or fall
+   *  through to deselect / tool-reset. */
+  const [pendingP1, setPendingP1] = useState<PricePoint | null>(null);
+  /** Live preview anchor — where the second click WOULD commit if
+   *  the user clicked right now. Updated on every crosshair move
+   *  while pendingP1 is set. Ref (not state) because it changes at
+   *  ~60 fps during hover and re-rendering React on every move
+   *  would be wasteful — the redraw call after each ref update
+   *  paints the preview line directly. */
+  const previewP2Ref = useRef<PricePoint | null>(null);
 
-  // Reset selection when the active slab changes — the user switched
-  // markets, the previous selection no longer applies.
+  // Reset overlay-local state on slab change OR tool change. Combined
+  // into one effect because both triggers want the same reset (clear
+  // selection AND any in-flight creation): a slab switch makes the
+  // previous selection irrelevant, and a tool switch invalidates a
+  // half-drawn anchor that the new tool can't act on.
   useEffect(() => {
     setSelectedId(null);
-  }, [slabAddress]);
-
-  // Reset selection when the active tool changes. Switching to a
-  // creation tool while a drawing is selected would leave a stray
-  // highlight that the new tool can't act on; clearing here keeps
-  // overlay-local state consistent with what the user just chose.
-  useEffect(() => {
-    setSelectedId(null);
-  }, [tool]);
+    setPendingP1(null);
+    previewP2Ref.current = null;
+  }, [slabAddress, tool]);
 
   // If the selected drawing was removed (Delete / Backspace, slab
   // change clearing storage, etc.), drop the dangling id.
@@ -129,8 +146,8 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
   // putting these in the effect's deps array (which would tear down
   // and re-attach all subscriptions on every state change — defeats
   // the whole point of the overlay).
-  const stateRef = useRef({ drawings, selectedId, tool });
-  stateRef.current = { drawings, selectedId, tool };
+  const stateRef = useRef({ drawings, selectedId, tool, pendingP1 });
+  stateRef.current = { drawings, selectedId, tool, pendingP1 };
 
   // Imperative redraw seam: the main effect populates this with a
   // closure that captures the canvas / ctx / converters; the
@@ -156,13 +173,26 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       const series = seriesRef.current;
       if (!series) return;
       const timeScaleApi = chart.timeScale() as unknown as TimeConverter;
-      const { drawings, selectedId } = stateRef.current;
+      const { drawings, selectedId, pendingP1 } = stateRef.current;
       for (const drawing of drawings) {
         renderDrawing(
           ctx,
           logicalW,
           drawing,
           drawing.id === selectedId,
+          series,
+          timeScaleApi,
+        );
+      }
+      // In-flight creation preview: the trend tool draws a faded
+      // dashed line from the locked-in p1 to wherever the cursor
+      // currently is, so the user can see what they're about to
+      // commit on the second click.
+      if (pendingP1 !== null) {
+        renderTrendPreview(
+          ctx,
+          pendingP1,
+          previewP2Ref.current,
           series,
           timeScaleApi,
         );
@@ -189,33 +219,109 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
 
     // Click dispatch via chart.subscribeClick. Routes through the
     // chart's own canvas (which has pointer-events) so lightweight-
-    // charts' pan / zoom keeps working. Future commits add branches
-    // for trend / horizontal / rectangle creation flows; for now,
-    // pointer is the only one wired.
+    // charts' pan / zoom keeps working. Per-tool branches:
+    // - pointer: hit-test against drawings, set / clear selection
+    // - horizontal: single-click commits a horizontal at the click's
+    //   price level
+    // - trend: two-click flow — click 1 sets pendingP1, click 2
+    //   commits {p1, p2} as a trend drawing and resets pendingP1
+    // - rectangle: separate commit (drag-driven, not click-driven)
     //
     // Mobile note: the toolbar is `hidden md:flex` so a phone user
     // can't change the tool, but a desktop session may have left
     // a creation tool persisted. Pointer mode is safe everywhere
-    // (passive read); creation tools will need their own mobile
-    // guards when they land.
+    // (passive read); creation tools also fire here on mobile but
+    // a phone user has no way to back out — see the mobile guard
+    // todo for the rectangle commit.
     const onClick = (param: MouseEventParams<Time>): void => {
-      const { tool, drawings } = stateRef.current;
-      if (tool !== "pointer") return;
+      const { tool, drawings, pendingP1 } = stateRef.current;
       if (!param.point) return;
       const series = seriesRef.current;
       if (!series) return;
       const timeScaleApi = chart.timeScale() as unknown as TimeConverter;
-      const hitId = findHitDrawingId(
-        drawings,
-        param.point.x,
-        param.point.y,
-        series,
-        timeScaleApi,
-      );
-      // setSelectedId always — even if hitId is null (deselect).
-      setSelectedId(hitId);
+
+      switch (tool) {
+        case "pointer": {
+          const hitId = findHitDrawingId(
+            drawings,
+            param.point.x,
+            param.point.y,
+            series,
+            timeScaleApi,
+          );
+          // setSelectedId always — even if hitId is null (deselect).
+          setSelectedId(hitId);
+          return;
+        }
+        case "horizontal": {
+          const price = series.coordinateToPrice(param.point.y);
+          if (price === null) return;
+          addDrawing({ kind: "horizontal", price });
+          // Tool stays in horizontal mode — TradingView convention.
+          // User explicitly switches via toolbar or Escape to leave.
+          return;
+        }
+        case "trend": {
+          const point = pixelToPricePoint(
+            series,
+            timeScaleApi,
+            param.point.x,
+            param.point.y,
+          );
+          if (point === null) return;
+          if (pendingP1 === null) {
+            // First click — lock in the start point. The second
+            // click will commit {pendingP1, point}.
+            setPendingP1(point);
+          } else {
+            // Second click — commit, then reset for the next trend.
+            // Tool stays in trend mode; the user can keep drawing
+            // until they explicitly change tools.
+            addDrawing({ kind: "trend", p1: pendingP1, p2: point });
+            setPendingP1(null);
+            previewP2Ref.current = null;
+          }
+          return;
+        }
+        case "rectangle":
+          // Drag-driven creation lands in a separate commit. Click
+          // is not the trigger — left intentionally unhandled so
+          // an accidental click in rectangle mode doesn't drop a
+          // zero-size rect.
+          return;
+      }
     };
     chart.subscribeClick(onClick);
+
+    // Crosshair-move drives the live preview during multi-click
+    // creation (trend tool only in this commit). Updates a ref —
+    // not React state — and triggers a redraw imperatively, so we
+    // don't burn a render cycle per mouse-move (~60 fps).
+    const onCrosshairMove = (param: MouseEventParams<Time>): void => {
+      const { tool, pendingP1 } = stateRef.current;
+      if (tool !== "trend" || pendingP1 === null) return;
+      const series = seriesRef.current;
+      if (!series) {
+        previewP2Ref.current = null;
+        return;
+      }
+      if (!param.point) {
+        // Cursor left the chart — drop the preview.
+        previewP2Ref.current = null;
+        redraw();
+        return;
+      }
+      const timeScaleApi = chart.timeScale() as unknown as TimeConverter;
+      const point = pixelToPricePoint(
+        series,
+        timeScaleApi,
+        param.point.x,
+        param.point.y,
+      );
+      previewP2Ref.current = point;
+      redraw();
+    };
+    chart.subscribeCrosshairMove(onCrosshairMove);
 
     return () => {
       ro.disconnect();
@@ -223,22 +329,27 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
         ts.unsubscribeVisibleLogicalRangeChange(redraw);
         ts.unsubscribeSizeChange(redraw);
         chart.unsubscribeClick(onClick);
+        chart.unsubscribeCrosshairMove(onCrosshairMove);
       } catch {
         // Chart was destroyed in a parallel cleanup. Refs already
         // dangling; the swallow keeps cleanup pure and silent.
       }
       redrawRef.current = () => {};
     };
-  }, [chartRef, containerRef, seriesRef, chartReady]);
+  }, [chartRef, containerRef, seriesRef, chartReady, addDrawing]);
 
-  // Drive redraw when drawings or selection state change without
-  // tearing down + re-subscribing the main effect. The redrawRef is
-  // populated inside the main effect; if the main effect hasn't run
-  // yet (chartReady=false on initial mount), the no-op default kicks
-  // in and this is a cheap miss.
+  // Drive redraw when drawings, selection, or pending-creation state
+  // change without tearing down + re-subscribing the main effect. The
+  // redrawRef is populated inside the main effect; if the main effect
+  // hasn't run yet (chartReady=false on initial mount), the no-op
+  // default kicks in and this is a cheap miss.
+  //
+  // pendingP1 in the deps so the preview anchor dot appears the
+  // moment the first trend click lands (without waiting for the next
+  // crosshair move to repaint).
   useEffect(() => {
     redrawRef.current();
-  }, [drawings, selectedId]);
+  }, [drawings, selectedId, pendingP1]);
 
   // Keyboard: Escape priority chain + Delete / Backspace removes the
   // selected drawing. Both guarded against firing while focus is in
@@ -256,11 +367,20 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
         return;
       }
       if (e.key === "Escape") {
-        // Priority chain. Future tools (commit 6+) will insert a
-        // pending-anchor cancel BEFORE the selectedId clear so a
-        // half-drawn trend line cancels first, then a second
-        // Escape returns to pointer.
-        const { selectedId, tool } = stateRef.current;
+        // Priority chain (highest first):
+        // 1. Cancel pending creation (locked-in trend p1) — keep tool
+        // 2. Clear selection
+        // 3. Reset tool to pointer
+        // 4. No-op
+        // The order matches user expectation: a half-drawn anchor
+        // is the most recent action and the most "in flight," so
+        // it gets the first Escape.
+        const { pendingP1, selectedId, tool } = stateRef.current;
+        if (pendingP1 !== null) {
+          setPendingP1(null);
+          previewP2Ref.current = null;
+          return;
+        }
         if (selectedId !== null) {
           setSelectedId(null);
           return;
@@ -392,4 +512,44 @@ function drawAnchor(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.beginPath();
   ctx.arc(x, y, ANCHOR_RADIUS, 0, Math.PI * 2);
   ctx.fill();
+}
+
+/** Live preview for an in-flight trend creation: faded dashed line
+ *  from the locked-in p1 to wherever the cursor currently is, with
+ *  a solid anchor dot at p1 to show the start point is committed.
+ *  No dot at p2 — that anchor isn't locked in yet (the next click
+ *  commits it). Returns silently if either endpoint projects off-
+ *  scale or if the cursor hasn't moved into the chart yet
+ *  (previewP2 === null). */
+function renderTrendPreview(
+  ctx: CanvasRenderingContext2D,
+  pendingP1: PricePoint,
+  previewP2: PricePoint | null,
+  series: PriceConverter,
+  timeScale: TimeConverter,
+): void {
+  const p1 = pricePointToPixel(series, timeScale, pendingP1);
+  if (p1 === null) return;
+  // Always paint the anchor dot (so the user knows their first
+  // click was registered) even if the cursor is off-chart.
+  ctx.save();
+  ctx.fillStyle = ACCENT_STROKE;
+  ctx.beginPath();
+  ctx.arc(p1.x, p1.y, ANCHOR_RADIUS, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (previewP2 !== null) {
+    const p2 = pricePointToPixel(series, timeScale, previewP2);
+    if (p2 !== null) {
+      ctx.strokeStyle = ACCENT_STROKE;
+      ctx.globalAlpha = 0.6;
+      ctx.setLineDash([5, 5]);
+      ctx.lineWidth = DEFAULT_LINE_WIDTH;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }

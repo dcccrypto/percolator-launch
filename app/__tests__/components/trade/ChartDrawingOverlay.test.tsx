@@ -19,6 +19,8 @@ function fakeChart() {
   const unsubscribeSize = vi.fn();
   const subscribeClick = vi.fn();
   const unsubscribeClick = vi.fn();
+  const subscribeCrosshair = vi.fn();
+  const unsubscribeCrosshair = vi.fn();
   // Identity-ish time scale: time-in-seconds maps to x-pixel directly.
   const timeScale = () => ({
     subscribeVisibleLogicalRangeChange: subscribeRange,
@@ -32,6 +34,8 @@ function fakeChart() {
     timeScale,
     subscribeClick,
     unsubscribeClick,
+    subscribeCrosshairMove: subscribeCrosshair,
+    unsubscribeCrosshairMove: unsubscribeCrosshair,
   } as unknown as IChartApi;
   return {
     chart,
@@ -41,6 +45,8 @@ function fakeChart() {
     unsubscribeSize,
     subscribeClick,
     unsubscribeClick,
+    subscribeCrosshair,
+    unsubscribeCrosshair,
   };
 }
 
@@ -79,6 +85,9 @@ function stubCanvasContext() {
   const fillRect = vi.fn();
   const strokeRect = vi.fn();
   const arc = vi.fn();
+  const save = vi.fn();
+  const restore = vi.fn();
+  const setLineDash = vi.fn();
   const ctxStub = {
     setTransform,
     clearRect,
@@ -90,14 +99,18 @@ function stubCanvasContext() {
     fillRect,
     strokeRect,
     arc,
+    save,
+    restore,
+    setLineDash,
     set strokeStyle(_v: string) {},
     set fillStyle(_v: string) {},
     set lineWidth(_v: number) {},
+    set globalAlpha(_v: number) {},
   } as unknown as CanvasRenderingContext2D;
   HTMLCanvasElement.prototype.getContext = vi
     .fn()
     .mockReturnValue(ctxStub) as unknown as typeof HTMLCanvasElement.prototype.getContext;
-  return { setTransform, clearRect, beginPath, moveTo, lineTo, stroke, fillRect, strokeRect, arc };
+  return { setTransform, clearRect, beginPath, moveTo, lineTo, stroke, fillRect, strokeRect, arc, save, restore };
 }
 
 function stubNullCanvasContext() {
@@ -120,6 +133,7 @@ interface HarnessProps {
   chart: IChartApi | null;
   ready: boolean;
   drawings?: readonly Drawing[];
+  addDrawing?: (input: import("@/lib/chart-drawings").DrawingInput) => void;
   deleteDrawing?: (id: string) => void;
   tool?: DrawingTool;
   setTool?: (next: DrawingTool) => void;
@@ -131,6 +145,7 @@ const Harness: FC<HarnessProps> = ({
   chart,
   ready,
   drawings = [],
+  addDrawing = () => {},
   deleteDrawing = () => {},
   tool = "pointer",
   setTool = () => {},
@@ -150,6 +165,7 @@ const Harness: FC<HarnessProps> = ({
         containerRef={containerRef}
         chartReady={ready}
         drawings={drawings}
+        addDrawing={addDrawing}
         deleteDrawing={deleteDrawing}
         tool={tool}
         setTool={setTool}
@@ -166,11 +182,15 @@ const horiz = (id: string, price: number): Drawing => ({
 });
 
 /** Helper: dispatch a click through the captured chart.subscribeClick
- *  handler, wrapped in act() so React flushes the setSelectedId state
- *  update before the next assertion / keyDown. The handler is invoked
- *  outside React's synthetic-event system (via the lightweight-charts
- *  subscription), so manual act() is required. */
-function selectVia(
+ *  handler, wrapped in act() so React flushes the setSelectedId /
+ *  setPendingP1 state update before the next assertion / keyDown.
+ *  The handler is invoked outside React's synthetic-event system (via
+ *  the lightweight-charts subscription), so manual act() is required.
+ *
+ *  Two name aliases for readability: selectVia reads cleaner for
+ *  pointer-mode selection tests; fireClick reads cleaner for
+ *  creation-flow tests. Same implementation. */
+function fireClick(
   ch: ReturnType<typeof fakeChart>,
   x: number,
   y: number,
@@ -182,6 +202,7 @@ function selectVia(
     onClick({ point: { x, y } } as unknown as MouseEventParams<Time>);
   });
 }
+const selectVia = fireClick;
 
 describe("ChartDrawingOverlay", () => {
   describe("rendering", () => {
@@ -209,24 +230,26 @@ describe("ChartDrawingOverlay", () => {
   describe("subscription lifecycle", () => {
     it("does NOT subscribe when chartReady is false", () => {
       stubCanvasContext();
-      const { chart, subscribeRange, subscribeSize, subscribeClick } = fakeChart();
-      render(<Harness chart={chart} ready={false} />);
-      expect(subscribeRange).not.toHaveBeenCalled();
-      expect(subscribeSize).not.toHaveBeenCalled();
-      expect(subscribeClick).not.toHaveBeenCalled();
+      const ch = fakeChart();
+      render(<Harness chart={ch.chart} ready={false} />);
+      expect(ch.subscribeRange).not.toHaveBeenCalled();
+      expect(ch.subscribeSize).not.toHaveBeenCalled();
+      expect(ch.subscribeClick).not.toHaveBeenCalled();
+      expect(ch.subscribeCrosshair).not.toHaveBeenCalled();
     });
 
-    it("subscribes to range, size, and click when chartReady flips true", () => {
+    it("subscribes to range, size, click, and crosshair when chartReady flips true", () => {
       stubCanvasContext();
-      const { chart, subscribeRange, subscribeSize, subscribeClick } = fakeChart();
-      const { rerender } = render(<Harness chart={chart} ready={false} />);
-      rerender(<Harness chart={chart} ready={true} />);
-      expect(subscribeRange).toHaveBeenCalledTimes(1);
-      expect(subscribeSize).toHaveBeenCalledTimes(1);
-      expect(subscribeClick).toHaveBeenCalledTimes(1);
+      const ch = fakeChart();
+      const { rerender } = render(<Harness chart={ch.chart} ready={false} />);
+      rerender(<Harness chart={ch.chart} ready={true} />);
+      expect(ch.subscribeRange).toHaveBeenCalledTimes(1);
+      expect(ch.subscribeSize).toHaveBeenCalledTimes(1);
+      expect(ch.subscribeClick).toHaveBeenCalledTimes(1);
+      expect(ch.subscribeCrosshair).toHaveBeenCalledTimes(1);
     });
 
-    it("unsubscribes all three channels on unmount with matching handlers", () => {
+    it("unsubscribes all four channels on unmount with matching handlers", () => {
       stubCanvasContext();
       const ch = fakeChart();
       const { unmount } = render(<Harness chart={ch.chart} ready={true} />);
@@ -234,11 +257,15 @@ describe("ChartDrawingOverlay", () => {
       expect(ch.unsubscribeRange).toHaveBeenCalledTimes(1);
       expect(ch.unsubscribeSize).toHaveBeenCalledTimes(1);
       expect(ch.unsubscribeClick).toHaveBeenCalledTimes(1);
+      expect(ch.unsubscribeCrosshair).toHaveBeenCalledTimes(1);
       expect(ch.unsubscribeRange).toHaveBeenCalledWith(
         ch.subscribeRange.mock.calls[0][0],
       );
       expect(ch.unsubscribeClick).toHaveBeenCalledWith(
         ch.subscribeClick.mock.calls[0][0],
+      );
+      expect(ch.unsubscribeCrosshair).toHaveBeenCalledWith(
+        ch.subscribeCrosshair.mock.calls[0][0],
       );
     });
 
@@ -293,22 +320,8 @@ describe("ChartDrawingOverlay", () => {
   });
 
   describe("click dispatch — pointer mode hit-testing", () => {
-    function fireClick(
-      ch: ReturnType<typeof fakeChart>,
-      x: number,
-      y: number,
-    ): void {
-      const onClick = ch.subscribeClick.mock.calls[0][0] as (
-        p: MouseEventParams<Time>,
-      ) => void;
-      // act() so React flushes the setSelectedId state update before
-      // the next keyDown / assertion. The handler is invoked directly
-      // (not through React's synthetic event system), so we need to
-      // tell React to commit pending updates manually.
-      act(() => {
-        onClick({ point: { x, y } } as unknown as MouseEventParams<Time>);
-      });
-    }
+    // fireClick is hoisted to top level so the trend / horizontal
+    // describe blocks below can use it too.
 
     it("ignores clicks when chartReady=false (no subscription registered)", () => {
       stubCanvasContext();
@@ -317,26 +330,28 @@ describe("ChartDrawingOverlay", () => {
       expect(ch.subscribeClick).not.toHaveBeenCalled();
     });
 
-    it("ignores clicks when tool !== pointer (no creation flow yet)", () => {
-      // With a non-pointer tool, the click handler runs but immediately
-      // returns. Selection state does NOT change.
+    it("non-pointer tool clicks do NOT change selection (clicks dispatch to creation flow)", () => {
+      // With a creation tool active, clicking does NOT hit-test —
+      // the click is consumed by the creation dispatch. A drawing
+      // already in the list shouldn't be selectable until the user
+      // switches back to pointer.
       stubCanvasContext();
       const ch = fakeChart();
-      const drawings: Drawing[] = [horiz("h1", 100)];
+      const deleteDrawing = vi.fn();
       render(
         <Harness
           chart={ch.chart}
           ready={true}
-          drawings={drawings}
+          drawings={[horiz("h1", 100)]}
+          deleteDrawing={deleteDrawing}
           tool="trend"
         />,
       );
-      // Click directly on the horizontal line (price=100, y=100).
+      // Click directly on the line in trend mode — should NOT select.
       fireClick(ch, 50, 100);
-      // No way to externally observe selectedId changing — we'd see it
-      // via a re-render that re-clears the canvas. Verify by not throwing
-      // and not crashing the harness; selection effects don't fire.
-      expect(true).toBe(true); // smoke-only — main assertion in pointer-mode tests
+      // Backspace must NOT delete since nothing was selected.
+      fireEvent.keyDown(document, { key: "Backspace" });
+      expect(deleteDrawing).not.toHaveBeenCalled();
     });
 
     it("ignores clicks with no point info (off-canvas)", () => {
@@ -423,6 +438,274 @@ describe("ChartDrawingOverlay", () => {
       fireEvent.keyDown(document, { key: "Delete" });
       expect(deleteDrawing).toHaveBeenCalledWith("h2");
       expect(deleteDrawing).not.toHaveBeenCalledWith("h1");
+    });
+  });
+
+  describe("horizontal tool — single-click creation", () => {
+    it("commits a horizontal-line drawing at the clicked price", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="horizontal"
+          addDrawing={addDrawing}
+        />,
+      );
+      // Click at y=150 — with the identity converter, price=150.
+      fireClick(ch, 50, 150);
+      expect(addDrawing).toHaveBeenCalledTimes(1);
+      expect(addDrawing).toHaveBeenCalledWith({
+        kind: "horizontal",
+        price: 150,
+      });
+    });
+
+    it("ignores a click when coordinateToPrice returns null (off-scale)", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const nullSeries: PriceConverter = {
+        priceToCoordinate: () => null,
+        coordinateToPrice: () => null,
+      };
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="horizontal"
+          addDrawing={addDrawing}
+          series={nullSeries}
+        />,
+      );
+      fireClick(ch, 50, 150);
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("stays in horizontal mode after committing (TradingView convention)", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const setTool = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="horizontal"
+          addDrawing={addDrawing}
+          setTool={setTool}
+        />,
+      );
+      fireClick(ch, 50, 150);
+      // Tool should NOT have been reset — user keeps drawing
+      // horizontals until they explicitly switch tools.
+      expect(setTool).not.toHaveBeenCalled();
+      // A second click commits another horizontal.
+      fireClick(ch, 50, 200);
+      expect(addDrawing).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("trend tool — two-click creation", () => {
+    it("first click locks in p1 without committing yet", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireClick(ch, 50, 100);
+      // Click 1 alone must NOT commit a drawing.
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("second click commits a trend with p1 from click 1 and p2 from click 2", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+        />,
+      );
+      // Click 1 at (10s, price=100). Identity time-scale: x=10 → time=10s.
+      // pixelToPricePoint converts: time=10 sec → 10000 ms; price=100.
+      fireClick(ch, 10, 100);
+      // Click 2 at (20s, price=200).
+      fireClick(ch, 20, 200);
+      expect(addDrawing).toHaveBeenCalledTimes(1);
+      expect(addDrawing).toHaveBeenCalledWith({
+        kind: "trend",
+        p1: { time: 10000, price: 100 },
+        p2: { time: 20000, price: 200 },
+      });
+    });
+
+    it("stays in trend mode after committing — third click starts a new trend", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const setTool = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+          setTool={setTool}
+        />,
+      );
+      fireClick(ch, 10, 100); // p1 of trend 1
+      fireClick(ch, 20, 200); // p2 of trend 1 → commit
+      expect(setTool).not.toHaveBeenCalled();
+      fireClick(ch, 30, 300); // p1 of trend 2 (NOT a third anchor of trend 1)
+      // Still only one commit — trend 2 isn't done yet.
+      expect(addDrawing).toHaveBeenCalledTimes(1);
+      fireClick(ch, 40, 400); // p2 of trend 2
+      expect(addDrawing).toHaveBeenCalledTimes(2);
+      expect(addDrawing).toHaveBeenLastCalledWith({
+        kind: "trend",
+        p1: { time: 30000, price: 300 },
+        p2: { time: 40000, price: 400 },
+      });
+    });
+
+    it("Escape cancels a pending trend (p1 set, no p2 yet) without changing tool", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const setTool = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+          setTool={setTool}
+        />,
+      );
+      fireClick(ch, 10, 100); // p1 set
+      fireEvent.keyDown(document, { key: "Escape" });
+      // Tool stays in trend (Escape cancelled the pending anchor,
+      // not the tool selection).
+      expect(setTool).not.toHaveBeenCalled();
+      // A subsequent click is treated as p1 of a NEW trend, not p2
+      // of the cancelled one.
+      fireClick(ch, 20, 200);
+      expect(addDrawing).not.toHaveBeenCalled();
+      fireClick(ch, 30, 300);
+      expect(addDrawing).toHaveBeenCalledTimes(1);
+      expect(addDrawing).toHaveBeenCalledWith({
+        kind: "trend",
+        p1: { time: 20000, price: 200 },
+        p2: { time: 30000, price: 300 },
+      });
+    });
+
+    it("Escape with no pending trend AND no selection resets tool to pointer", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const setTool = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          setTool={setTool}
+        />,
+      );
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(setTool).toHaveBeenCalledWith("pointer");
+    });
+
+    it("changing tool mid-trend cancels the pending anchor", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const { rerender } = render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireClick(ch, 10, 100); // p1 set
+      // User switches to horizontal mid-trend.
+      rerender(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="horizontal"
+          addDrawing={addDrawing}
+        />,
+      );
+      // Click in horizontal mode — should commit a HORIZONTAL, not
+      // close out the cancelled trend.
+      fireClick(ch, 20, 200);
+      expect(addDrawing).toHaveBeenCalledTimes(1);
+      expect(addDrawing).toHaveBeenCalledWith({
+        kind: "horizontal",
+        price: 200,
+      });
+    });
+
+    it("changing slab mid-trend cancels the pending anchor", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      const { rerender } = render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+          slabAddress={SLAB_A}
+        />,
+      );
+      fireClick(ch, 10, 100); // p1 set on slab A
+      rerender(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+          slabAddress={SLAB_B}
+        />,
+      );
+      // First click on slab B is a fresh p1, not p2 of the cancelled
+      // slab-A trend. So it shouldn't commit.
+      fireClick(ch, 20, 200);
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("rectangle tool — click is intentionally NOT the trigger", () => {
+    it("a single click in rectangle mode does NOT add a drawing (drag-driven creation lands separately)", () => {
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireClick(ch, 10, 100);
+      fireClick(ch, 20, 200);
+      expect(addDrawing).not.toHaveBeenCalled();
     });
   });
 
