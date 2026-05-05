@@ -33,6 +33,7 @@ import { MarketLogo } from "@/components/market/MarketLogo";
 import { MarketSelector } from "@/components/trade/MarketSelector";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { computeMarketHealth } from "@/lib/health";
+import { formatUsdFromNumber } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
@@ -223,7 +224,7 @@ function TradePageInner({ slab }: { slab: string }) {
     // Update meta description
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
-      const priceText = priceUsd != null ? `Current price: $${priceUsd.toFixed(2)}` : "";
+      const priceText = priceUsd != null ? `Current price: ${formatUsdFromNumber(priceUsd)}` : "";
       metaDesc.setAttribute("content", `Trade ${symbol} perpetual futures on Percolator. ${priceText}`);
     }
 
@@ -233,15 +234,11 @@ function TradePageInner({ slab }: { slab: string }) {
     
     const ogDesc = document.querySelector('meta[property="og:description"]');
     if (ogDesc) {
-      const priceText = priceUsd != null ? `Current price: $${priceUsd.toFixed(2)}` : "";
+      const priceText = priceUsd != null ? `Current price: ${formatUsdFromNumber(priceUsd)}` : "";
       ogDesc.setAttribute("content", `Trade ${symbol} perpetual futures on Percolator. ${priceText}`);
     }
     
   }, [symbol, priceUsd]);
-
-  const priceDisplay = priceUsd != null
-    ? `$${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd < 1 ? priceUsd.toFixed(4) : priceUsd.toFixed(2)}`
-    : null;
 
   // Track whether the fade-in animation has already been applied
   const animatedRef = useRef(false);

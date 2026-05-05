@@ -1,6 +1,7 @@
 "use client";
 
 import { FC } from "react";
+import { formatUsdFromNumber } from "@/lib/format";
 
 interface ChartEmptyStateProps {
   /** Optional current price to display alongside the empty state */
@@ -41,7 +42,7 @@ export const ChartEmptyState: FC<ChartEmptyStateProps> = ({
               className="text-2xl font-bold text-[var(--text)] drop-shadow-sm"
               style={{ fontFamily: "var(--font-mono)" }}
             >
-              ${currentPrice < 0.01 ? currentPrice.toFixed(6) : currentPrice.toFixed(2)}
+              {formatUsdFromNumber(currentPrice)}
             </div>
             <div className="mt-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
               Price chart building…

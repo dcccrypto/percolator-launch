@@ -6,6 +6,8 @@ import {
   formatBps,
   LIQ_PRICE_UNLIQUIDATABLE,
   formatUsd,
+  formatUsdPriceE6,
+  formatUsdFromNumber,
   formatLiqPrice,
   shortenAddress,
   formatSlotAge,
@@ -145,6 +147,37 @@ describe("formatUsd", () => {
     const result = formatUsd(1_000_000_000_000_000n);
     expect(result).not.toBe("$—");
     expect(result).toContain("1,000,000,000");
+  });
+});
+
+describe("formatUsdFromNumber", () => {
+  it("preserves E6 precision for USD floats", () => {
+    expect(formatUsdFromNumber(84.428453)).toBe("$84.428453");
+  });
+
+  it("keeps all six E6 decimal places", () => {
+    expect(formatUsdFromNumber(84.4)).toBe("$84.400000");
+    expect(formatUsdFromNumber(0.03)).toBe("$0.030000");
+    expect(formatUsdFromNumber(1)).toBe("$1.000000");
+  });
+
+  it("returns fallback for missing or invalid prices", () => {
+    expect(formatUsdFromNumber(null)).toBe("—");
+    expect(formatUsdFromNumber(Number.NaN, "N/A")).toBe("N/A");
+    expect(formatUsdFromNumber(0)).toBe("—");
+  });
+});
+
+describe("formatUsdPriceE6", () => {
+  it("renders fixed E6 precision for price values", () => {
+    expect(formatUsdPriceE6(84_400_000n)).toBe("$84.400000");
+    expect(formatUsdPriceE6(30_000n)).toBe("$0.030000");
+    expect(formatUsdPriceE6(1_000_000n)).toBe("$1.000000");
+  });
+
+  it("returns fallback for unavailable E6 price values", () => {
+    expect(formatUsdPriceE6(0n)).toBe("—");
+    expect(formatUsdPriceE6(-1n, "N/A")).toBe("N/A");
   });
 });
 

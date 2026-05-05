@@ -6,7 +6,7 @@ import {
   computeTradingFee,
   computePreTradeLiqPrice,
 } from "@/lib/trading";
-import { formatUsd, formatTokenAmount } from "@/lib/format";
+import { formatUsdPriceE6, formatTokenAmount } from "@/lib/format";
 import { useUsdToggle } from "@/components/providers/UsdToggleProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {
@@ -154,7 +154,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
             valueClass="text-[var(--text-secondary)]"
           />
         )}
-        <SummaryRow label="Est. Entry Price" value={formatUsd(estEntry)} />
+        <SummaryRow label="Est. Entry Price" value={formatUsdPriceE6(estEntry)} />
         <SummaryRow
           label="Notional Value"
           value={notionalDisplay}
@@ -183,7 +183,7 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
         )}
         <SummaryRow
           label="Est. Liq Price"
-          value={`${liqWarning ? "⚠️ " : ""}${formatUsd(liqPrice)}`}
+          value={`${liqWarning ? "⚠️ " : ""}${formatUsdPriceE6(liqPrice)}`}
           valueClass={liqWarning ? "text-orange-400" : isLong ? "text-[var(--short)]" : "text-[var(--long)]"}
         />
       </div>

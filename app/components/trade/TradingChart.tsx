@@ -48,6 +48,7 @@ import {
   type ChartSeriesKind,
 } from "@/lib/chart-style";
 import { assertNever } from "@/lib/exhaustive";
+import { formatUsdFromNumber } from "@/lib/format";
 
 // Phase 2: added 15m timeframe
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "7d" | "30d";
@@ -838,7 +839,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
                   className="text-2xl font-bold text-[var(--text)] drop-shadow-sm"
                   style={{ fontFamily: "var(--font-mono)" }}
                 >
-                  ${priceUsd < 0.01 ? priceUsd.toFixed(6) : priceUsd.toFixed(2)}
+                  {formatUsdFromNumber(priceUsd)}
                 </div>
                 <div className="mt-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
                   Price chart building…
@@ -905,13 +906,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             <div className="flex items-center gap-3 whitespace-nowrap">
               {hoverBar.isCandle ? (
                 <>
-                  <span className="text-[var(--text-dim)]">O <span className="text-[var(--text)]">{hoverBar.open.toFixed(hoverBar.open < 1 ? 6 : 2)}</span></span>
-                  <span className="text-[var(--text-dim)]">H <span className="text-[var(--text)]">{hoverBar.high.toFixed(hoverBar.high < 1 ? 6 : 2)}</span></span>
-                  <span className="text-[var(--text-dim)]">L <span className="text-[var(--text)]">{hoverBar.low.toFixed(hoverBar.low < 1 ? 6 : 2)}</span></span>
-                  <span className="text-[var(--text-dim)]">C <span className="text-[var(--text)]" style={{ color: hoverBar.close >= hoverBar.open ? "var(--long)" : "var(--short)" }}>{hoverBar.close.toFixed(hoverBar.close < 1 ? 6 : 2)}</span></span>
+                  <span className="text-[var(--text-dim)]">O <span className="text-[var(--text)]">{formatUsdFromNumber(hoverBar.open).slice(1)}</span></span>
+                  <span className="text-[var(--text-dim)]">H <span className="text-[var(--text)]">{formatUsdFromNumber(hoverBar.high).slice(1)}</span></span>
+                  <span className="text-[var(--text-dim)]">L <span className="text-[var(--text)]">{formatUsdFromNumber(hoverBar.low).slice(1)}</span></span>
+                  <span className="text-[var(--text-dim)]">C <span className="text-[var(--text)]" style={{ color: hoverBar.close >= hoverBar.open ? "var(--long)" : "var(--short)" }}>{formatUsdFromNumber(hoverBar.close).slice(1)}</span></span>
                 </>
               ) : (
-                <span className="text-[var(--text-dim)]">Price <span className="text-[var(--text)]">{hoverBar.close.toFixed(hoverBar.close < 1 ? 6 : 2)}</span></span>
+                <span className="text-[var(--text-dim)]">Price <span className="text-[var(--text)]">{formatUsdFromNumber(hoverBar.close).slice(1)}</span></span>
               )}
               {hoverBar.volume > 0 && (
                 <span className="text-[var(--text-dim)]">V <span className="text-[var(--text)]">{hoverBar.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></span>

@@ -68,6 +68,7 @@ async function livePriceJsonFetcher<T>(url: string): Promise<T> {
 
 const SWR_REST_OPTS = {
   dedupingInterval: 10_000,
+  refreshInterval: 10_000,
   revalidateOnFocus: false,
   shouldRetryOnError: false,
 } as const;

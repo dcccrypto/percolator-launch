@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
-import { formatTokenAmount } from "@/lib/format";
+import { formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
 import { isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
@@ -1009,9 +1009,7 @@ function MarketsPageInner() {
                       </div>
                       <div className="text-right truncate">
                         <span className="text-sm text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                          {lastPrice != null
-                            ? `$${lastPrice < 0.01 ? lastPrice.toFixed(6) : lastPrice < 1 ? lastPrice.toFixed(4) : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : "\u2014"}
+                          {formatUsdFromNumber(lastPrice)}
                         </span>
                       </div>
                       <div className="hidden sm:block text-right text-sm text-[var(--text-secondary)] truncate tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>{oiDisplay}</div>
