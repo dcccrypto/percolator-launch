@@ -10,10 +10,15 @@ const noopProps = {
 };
 
 describe("ChartDrawingToolbar", () => {
-  it("renders a toolbar with role + vertical orientation", () => {
+  it("renders a labelled container without overstating ARIA contract", () => {
+    // Deliberately not role="toolbar" — the APG toolbar pattern
+    // requires roving tabindex + arrow-key focus management which we
+    // don't implement. A plain labelled div is honest semantics.
     render(<ChartDrawingToolbar {...noopProps} />);
-    const tb = screen.getByRole("toolbar", { name: /Drawing tools/i });
-    expect(tb).toHaveAttribute("aria-orientation", "vertical");
+    const tb = screen.getByLabelText(/Drawing tools/i);
+    expect(tb).toBeInTheDocument();
+    expect(tb).not.toHaveAttribute("role", "toolbar");
+    expect(tb).not.toHaveAttribute("aria-orientation");
   });
 
   it("renders one button per drawing tool (pointer + 3 creation tools)", () => {
@@ -159,8 +164,41 @@ describe("ChartDrawingToolbar", () => {
     // only appears on tablets+. Pinned via class assertion since
     // jsdom doesn't run media queries.
     render(<ChartDrawingToolbar {...noopProps} />);
-    const tb = screen.getByRole("toolbar", { name: /Drawing tools/i });
+    const tb = screen.getByLabelText(/Drawing tools/i);
     expect(tb.className).toContain("hidden");
     expect(tb.className).toContain("md:flex");
+  });
+
+  it("each tool button exposes a hover-tooltip via title attribute", () => {
+    // title gives sighted mouse users the tool name on hover
+    // (icons alone are abstract). Pinned so a refactor that drops
+    // title doesn't silently break discoverability — aria-pressed +
+    // aria-label tests would still pass.
+    render(<ChartDrawingToolbar {...noopProps} />);
+    expect(
+      screen.getByRole("button", { name: /Pointer/i }),
+    ).toHaveAttribute("title", "Pointer (select)");
+    expect(
+      screen.getByRole("button", { name: /Trend line/i }),
+    ).toHaveAttribute("title", "Trend line");
+    expect(
+      screen.getByRole("button", { name: /Horizontal line/i }),
+    ).toHaveAttribute("title", "Horizontal line");
+    expect(
+      screen.getByRole("button", { name: /Rectangle/i }),
+    ).toHaveAttribute("title", "Rectangle");
+  });
+
+  it("active tool carries the accent-tint background class (visual feedback)", () => {
+    // aria-pressed alone doesn't render a visible difference. Pin the
+    // accent-tint background class so a refactor that drops the
+    // active branch of the className ternary still fails a test.
+    render(<ChartDrawingToolbar {...noopProps} tool="trend" />);
+    const trend = screen.getByRole("button", { name: /Trend line/i });
+    expect(trend.className).toContain("bg-[var(--accent)]/10");
+    expect(trend.className).toContain("text-[var(--accent)]");
+    // And the inactive button does NOT carry the active classes.
+    const pointer = screen.getByRole("button", { name: /Pointer/i });
+    expect(pointer.className).not.toContain("bg-[var(--accent)]/10");
   });
 });

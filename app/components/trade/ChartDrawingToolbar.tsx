@@ -99,13 +99,15 @@ const TOOLS: ReadonlyArray<ToolEntry> = [
  * vs. tap, anchor-drag handles, gesture conflicts with chart pan) are
  * a separate body of work and out of scope.
  *
- * ARIA: `role="toolbar"` + `aria-orientation="vertical"` on the bar so
- * screen readers announce it as a toolbar (one shot for all the
- * buttons rather than four unrelated buttons), and each tool is a
- * `<button aria-pressed>` for the toggle pattern (matches the
- * indicator menu). The buttons aren't grouped under a roving-tabindex
- * APG-toolbar contract because we don't implement arrow-key focus
- * management; Tab + Enter is the keyboard contract.
+ * ARIA: a labelled `<div aria-label="Drawing tools">` wrapping
+ * `<button aria-pressed>` toggle buttons (matches the indicator menu's
+ * toggle pattern). Deliberately NOT `role="toolbar"` — the APG
+ * toolbar contract requires roving tabindex + arrow-key focus
+ * management between toolbar items, which we don't implement. Tab +
+ * Enter is the full keyboard contract here, so promising the
+ * "toolbar" role would be misleading. Screen readers still announce
+ * each button with its label; users get accurate semantics without
+ * an unfulfilled contract.
  *
  * Keyboard: Escape returns to the pointer tool from any other tool.
  * Input-focus guarded: Escape inside an order-form INPUT or TEXTAREA
@@ -139,9 +141,7 @@ export const ChartDrawingToolbar: FC<ChartDrawingToolbarProps> = ({
 
   return (
     <div
-      role="toolbar"
       aria-label="Drawing tools"
-      aria-orientation="vertical"
       className="absolute left-2 top-2 z-10 hidden flex-col gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)]/95 p-1 backdrop-blur-sm md:flex"
     >
       {TOOLS.map(({ kind, label, icon: Icon }) => {
@@ -161,10 +161,18 @@ export const ChartDrawingToolbar: FC<ChartDrawingToolbarProps> = ({
             title={label}
             onClick={onClick}
             className={[
+              // Inactive uses --text-secondary (not --text-dim) so the
+              // icon meets WCAG AA non-text contrast (3:1) against
+              // --bg-elevated in both themes — text-dim is reserved
+              // for true placeholders and renders ~1.4:1 / 2.0:1.
+              // focus-visible:outline restores a visible focus ring
+              // for sighted keyboard users (Tailwind's preflight
+              // strips the UA outline).
               "flex h-7 w-7 items-center justify-center rounded-none transition-colors",
+              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] focus-visible:outline-offset-1",
               isActive
                 ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                : "text-[var(--text-dim)] hover:bg-[var(--bg-surface)] hover:text-[var(--text)]",
+                : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text)]",
             ].join(" ")}
           >
             <Icon />
