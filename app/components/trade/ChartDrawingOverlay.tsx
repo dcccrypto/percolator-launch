@@ -149,6 +149,17 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
   const stateRef = useRef({ drawings, selectedId, tool, pendingP1 });
   stateRef.current = { drawings, selectedId, tool, pendingP1 };
 
+  // addDrawing is also routed through a ref rather than being in the
+  // main effect's deps. The hook returns a useCallback-stable
+  // reference today, but parking it in deps would make the entire
+  // chart-subscription stack load-bearing on a hook two layers up —
+  // any future refactor that breaks that memoization would silently
+  // tear down + re-attach all four chart subscriptions on every
+  // render. The ref keeps the architecture's "subscribe once" contract
+  // intact regardless of upstream callback identity.
+  const addDrawingRef = useRef(addDrawing);
+  addDrawingRef.current = addDrawing;
+
   // Imperative redraw seam: the main effect populates this with a
   // closure that captures the canvas / ctx / converters; the
   // data-change effect below calls it without re-running the main
@@ -238,6 +249,24 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       if (!param.point) return;
       const series = seriesRef.current;
       if (!series) return;
+      // Mobile guard: creation tools require the toolbar (which is
+      // hidden below md), the keyboard (no Escape on most mobile
+      // soft-keyboards), or both — none reliably available on phones.
+      // A desktop session can leave a creation tool persisted
+      // globally (`perc:chart:drawing-tool`); without this guard, a
+      // mobile user lands on the chart and every tap drops a
+      // horizontal / commits a trend with no escape route.
+      // Pointer mode stays available on every viewport (passive
+      // hit-test). matchMedia is undefined in some non-browser
+      // environments — defensive default is "treat as desktop."
+      if (
+        tool !== "pointer" &&
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 767px)").matches
+      ) {
+        return;
+      }
       const timeScaleApi = chart.timeScale() as unknown as TimeConverter;
 
       switch (tool) {
@@ -256,7 +285,7 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
         case "horizontal": {
           const price = series.coordinateToPrice(param.point.y);
           if (price === null) return;
-          addDrawing({ kind: "horizontal", price });
+          addDrawingRef.current({ kind: "horizontal", price });
           // Tool stays in horizontal mode — TradingView convention.
           // User explicitly switches via toolbar or Escape to leave.
           return;
@@ -274,10 +303,27 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
             // click will commit {pendingP1, point}.
             setPendingP1(point);
           } else {
+            // Reject a zero-length trend: a double-click at the same
+            // pixel commits a trend with p1 === p2 that hit-tests as
+            // a single dot — visually broken and clutters persisted
+            // drawings. Keep pendingP1 set so the user can move and
+            // try again. Same-bar same-price equality is exact since
+            // pixelToPricePoint trunc'd both inputs through the same
+            // Math.trunc(ms/1000) boundary.
+            if (
+              point.time === pendingP1.time &&
+              point.price === pendingP1.price
+            ) {
+              return;
+            }
             // Second click — commit, then reset for the next trend.
             // Tool stays in trend mode; the user can keep drawing
             // until they explicitly change tools.
-            addDrawing({ kind: "trend", p1: pendingP1, p2: point });
+            addDrawingRef.current({
+              kind: "trend",
+              p1: pendingP1,
+              p2: point,
+            });
             setPendingP1(null);
             previewP2Ref.current = null;
           }
@@ -289,6 +335,11 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
           // an accidental click in rectangle mode doesn't drop a
           // zero-size rect.
           return;
+        default:
+          // Compile-error guard: a future DrawingTool kind added
+          // to the union without a case here will fail to type-
+          // check rather than silently no-op the click.
+          return assertNever(tool);
       }
     };
     chart.subscribeClick(onClick);
@@ -336,7 +387,7 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       }
       redrawRef.current = () => {};
     };
-  }, [chartRef, containerRef, seriesRef, chartReady, addDrawing]);
+  }, [chartRef, containerRef, seriesRef, chartReady]);
 
   // Drive redraw when drawings, selection, or pending-creation state
   // change without tearing down + re-subscribing the main effect. The

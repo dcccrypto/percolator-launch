@@ -690,6 +690,199 @@ describe("ChartDrawingOverlay", () => {
     });
   });
 
+  describe("trend tool — Escape, off-scale, and missing-point preserve pendingP1", () => {
+    it("a click with no point info during pendingP1 does not commit and keeps pendingP1", () => {
+      // The shared `if (!param.point) return` early-return at the top
+      // of the click handler is critical: an axis-gutter click (which
+      // lightweight-charts emits with point=undefined) must not
+      // commit the trend AND must not clear pendingP1 — the user's
+      // first anchor is preserved so they can complete with another
+      // valid click. A refactor that moved the early-return inside
+      // the pointer case would break this for trend.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireClick(ch, 10, 100); // p1 set
+      // Fire a click with no point (axis gutter / off-canvas).
+      const onClick = ch.subscribeClick.mock.calls[0][0] as (
+        p: MouseEventParams<Time>,
+      ) => void;
+      act(() => {
+        onClick({} as unknown as MouseEventParams<Time>);
+      });
+      // Must not have committed a trend.
+      expect(addDrawing).not.toHaveBeenCalled();
+      // pendingP1 still set: a follow-up valid click commits the trend
+      // with p1 == the original first click, NOT a fresh p1.
+      fireClick(ch, 20, 200);
+      expect(addDrawing).toHaveBeenCalledWith({
+        kind: "trend",
+        p1: { time: 10000, price: 100 },
+        p2: { time: 20000, price: 200 },
+      });
+    });
+
+    it("an off-scale click 2 (null projection) does not commit and keeps pendingP1", () => {
+      // Symmetrical to the horizontal off-scale test. If the user's
+      // second click projects null, we must not commit garbage AND
+      // we must not clear pendingP1 — the user can pan the chart
+      // back into a valid range and complete the trend.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      // First click goes through normally with the identity series.
+      // Then we swap the series to one whose coordinateToPrice
+      // returns null (off-scale) BEFORE click 2.
+      let projectsNull = false;
+      const series: PriceConverter = {
+        priceToCoordinate: (p) => p,
+        coordinateToPrice: (c) => (projectsNull ? null : c),
+      };
+      const { rerender } = render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+          series={series}
+        />,
+      );
+      fireClick(ch, 10, 100); // p1 set (series projects fine)
+      // Now make subsequent projections fail.
+      projectsNull = true;
+      // Force a re-render so the seriesRef.current refresh is observed
+      // (in production, the parent would do this on chart pan/zoom).
+      rerender(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+          series={series}
+        />,
+      );
+      fireClick(ch, 20, 200); // off-scale — should NOT commit
+      expect(addDrawing).not.toHaveBeenCalled();
+      // Restore projection and complete with a valid click.
+      projectsNull = false;
+      rerender(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+          series={series}
+        />,
+      );
+      fireClick(ch, 30, 300);
+      expect(addDrawing).toHaveBeenCalledWith({
+        kind: "trend",
+        p1: { time: 10000, price: 100 },
+        p2: { time: 30000, price: 300 },
+      });
+    });
+
+    it("a zero-length trend (click 2 at exact same coords as click 1) is rejected", () => {
+      // A double-click at the same pixel would produce p1 === p2,
+      // which renders as a degenerate dot (hit-tested via the
+      // distance-to-point fallback) and pollutes persisted drawings.
+      // The handler rejects the commit; pendingP1 stays set so the
+      // user can move the cursor and click somewhere else.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="trend"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireClick(ch, 10, 100); // p1
+      fireClick(ch, 10, 100); // same coords — must NOT commit
+      expect(addDrawing).not.toHaveBeenCalled();
+      // pendingP1 still set — a follow-up at different coords commits
+      // with the original p1, proving rejection didn't clear state.
+      fireClick(ch, 20, 200);
+      expect(addDrawing).toHaveBeenCalledWith({
+        kind: "trend",
+        p1: { time: 10000, price: 100 },
+        p2: { time: 20000, price: 200 },
+      });
+    });
+  });
+
+  describe("crosshair handler — preview path", () => {
+    function fireCrosshair(
+      ch: ReturnType<typeof fakeChart>,
+      pointOrUndefined: { x: number; y: number } | undefined,
+    ): void {
+      const handler = ch.subscribeCrosshair.mock.calls[0][0] as (
+        p: MouseEventParams<Time>,
+      ) => void;
+      act(() => {
+        handler({
+          point: pointOrUndefined,
+        } as unknown as MouseEventParams<Time>);
+      });
+    }
+
+    it("does NOT redraw when tool is not trend", () => {
+      const { clearRect } = stubCanvasContext();
+      const ch = fakeChart();
+      render(<Harness chart={ch.chart} ready={true} tool="pointer" />);
+      const initial = clearRect.mock.calls.length;
+      fireCrosshair(ch, { x: 50, y: 50 });
+      // Pointer mode → handler short-circuits, no redraw fires.
+      expect(clearRect.mock.calls.length).toBe(initial);
+    });
+
+    it("does NOT redraw in trend mode when pendingP1 is null (no preview to update)", () => {
+      const { clearRect } = stubCanvasContext();
+      const ch = fakeChart();
+      render(<Harness chart={ch.chart} ready={true} tool="trend" />);
+      const initial = clearRect.mock.calls.length;
+      fireCrosshair(ch, { x: 50, y: 50 });
+      expect(clearRect.mock.calls.length).toBe(initial);
+    });
+
+    it("redraws on crosshair move when tool=trend AND pendingP1 is set (live preview)", () => {
+      const { clearRect } = stubCanvasContext();
+      const ch = fakeChart();
+      render(<Harness chart={ch.chart} ready={true} tool="trend" />);
+      // Click 1 sets pendingP1 + triggers a redraw via the data-change
+      // effect. Capture clearRect count AFTER the click settles.
+      fireClick(ch, 10, 100);
+      const afterClick = clearRect.mock.calls.length;
+      // Now simulate a cursor move — should trigger another redraw
+      // (the imperative redrawRef.current() call).
+      fireCrosshair(ch, { x: 30, y: 200 });
+      expect(clearRect.mock.calls.length).toBeGreaterThan(afterClick);
+    });
+
+    it("clears the preview ref and redraws when the cursor leaves the chart", () => {
+      const { clearRect } = stubCanvasContext();
+      const ch = fakeChart();
+      render(<Harness chart={ch.chart} ready={true} tool="trend" />);
+      fireClick(ch, 10, 100);
+      // Move into the chart — preview is set.
+      fireCrosshair(ch, { x: 30, y: 200 });
+      const beforeLeave = clearRect.mock.calls.length;
+      // Cursor leaves — handler clears previewP2Ref AND calls redraw.
+      fireCrosshair(ch, undefined);
+      expect(clearRect.mock.calls.length).toBeGreaterThan(beforeLeave);
+    });
+  });
+
   describe("rectangle tool — click is intentionally NOT the trigger", () => {
     it("a single click in rectangle mode does NOT add a drawing (drag-driven creation lands separately)", () => {
       stubCanvasContext();
