@@ -91,10 +91,23 @@ export function useIndicatorOscillatorPane(
     // Lazily allocate the oscillator pane on first use. v5 returns an
     // IPaneApi from addPane(); we keep just the index so subsequent
     // addSeries calls can target it via the third argument.
+    //
+    // `preserveEmptyPane: true` is critical: the diff loop below removes
+    // each existing series before re-adding it. Without preservation, v5
+    // auto-destroys the pane the instant its last series is removed —
+    // and the very next addSeries(..., paneIndex=1) call falls back to
+    // pane 0 because pane 1 no longer exists. The visual symptom is
+    // every oscillator series migrating into the price pane after the
+    // first re-render. With preservation the pane survives the brief
+    // empty window between remove and re-add.
     if (paneIndexRef.current === null) {
-      const newPane = chart.addPane();
+      const newPane = chart.addPane(true);
       newPane.setHeight(120);
       paneIndexRef.current = newPane.paneIndex();
+    } else {
+      // Defensive: re-assert preservation in case anything else cleared it.
+      const existingPane = chart.panes()[paneIndexRef.current];
+      if (existingPane) existingPane.setPreserveEmptyPane(true);
     }
     const paneIndex = paneIndexRef.current;
 
