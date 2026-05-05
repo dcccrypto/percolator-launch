@@ -373,6 +373,57 @@ describe("ChartDrawingOverlay", () => {
       );
       expect(() => fireClick(ch, 50, 100)).not.toThrow();
     });
+
+    it("clicking empty space DESELECTS a previously-selected drawing", () => {
+      // Pin the deselect contract: setSelectedId(hitId) is called
+      // even when hitId is null. A refactor like
+      // `if (hitId) setSelectedId(hitId)` would skip the null-set
+      // and leave the previous selection stuck — Backspace would
+      // then keep deleting whatever was selected long after the
+      // user clicked away.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const deleteDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          drawings={[horiz("h1", 100)]}
+          deleteDrawing={deleteDrawing}
+          tool="pointer"
+        />,
+      );
+      // Select via click on the line.
+      selectVia(ch, 50, 100);
+      // Click well off the line (empty space).
+      selectVia(ch, 50, 500);
+      // Backspace must NOT delete — selection was cleared.
+      fireEvent.keyDown(document, { key: "Backspace" });
+      expect(deleteDrawing).not.toHaveBeenCalled();
+    });
+
+    it("clicking a different drawing SWITCHES the selection", () => {
+      // Two horizontals at different prices. Click first → select.
+      // Click second → should switch selection to the second.
+      // Backspace should remove the SECOND, proving switch.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const deleteDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          drawings={[horiz("h1", 100), horiz("h2", 200)]}
+          deleteDrawing={deleteDrawing}
+          tool="pointer"
+        />,
+      );
+      selectVia(ch, 50, 100); // hits h1
+      selectVia(ch, 50, 200); // hits h2 — switch
+      fireEvent.keyDown(document, { key: "Delete" });
+      expect(deleteDrawing).toHaveBeenCalledWith("h2");
+      expect(deleteDrawing).not.toHaveBeenCalledWith("h1");
+    });
   });
 
   describe("keyboard handler", () => {
@@ -428,6 +479,33 @@ describe("ChartDrawingOverlay", () => {
         />,
       );
       fireEvent.keyDown(document, { key: "Delete" });
+      expect(deleteDrawing).not.toHaveBeenCalled();
+    });
+
+    it("Backspace is suppressed when focus is in a TEXTAREA", () => {
+      // Mirrors the INPUT guard test below. The order form / notes UI
+      // commonly uses textareas for memos; a refactor that dropped
+      // TEXTAREA from the predicate would silently delete drawings
+      // while users edit text. Pin the contract.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const deleteDrawing = vi.fn();
+      render(
+        <>
+          <textarea data-testid="form-textarea" />
+          <Harness
+            chart={ch.chart}
+            ready={true}
+            drawings={[horiz("h1", 100)]}
+            deleteDrawing={deleteDrawing}
+            tool="pointer"
+          />
+        </>,
+      );
+      selectVia(ch, 50, 100);
+      const ta = screen.getByTestId("form-textarea") as HTMLTextAreaElement;
+      ta.focus();
+      fireEvent.keyDown(document, { key: "Backspace" });
       expect(deleteDrawing).not.toHaveBeenCalled();
     });
 

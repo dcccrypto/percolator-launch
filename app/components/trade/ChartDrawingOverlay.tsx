@@ -273,11 +273,17 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       if (e.key === "Delete" || e.key === "Backspace") {
         const { selectedId } = stateRef.current;
         if (selectedId !== null) {
+          // preventDefault on BOTH keys: Backspace is the obvious
+          // back-nav trigger, but Firefox configurations (and some
+          // screen-reader virtual cursors) bind Delete to navigation
+          // or "delete element" actions too. Symmetric prevention
+          // costs nothing and keeps the user's keystroke from
+          // escaping into the browser when a drawing was just
+          // removed.
+          e.preventDefault();
           deleteDrawing(selectedId);
           // selectedId resets via the "selected was removed" effect
-          // when drawings updates. preventDefault stops Backspace
-          // from triggering the browser's history-back nav.
-          e.preventDefault();
+          // when drawings updates.
         }
       }
     };
@@ -352,14 +358,23 @@ function renderDrawing(
       if (p1 === null || p2 === null) return;
       const x = Math.min(p1.x, p2.x);
       const y = Math.min(p1.y, p2.y);
-      const w = Math.abs(p2.x - p1.x);
-      const h = Math.abs(p2.y - p1.y);
+      const x2 = Math.max(p1.x, p2.x);
+      const y2 = Math.max(p1.y, p2.y);
+      const w = x2 - x;
+      const h = y2 - y;
       ctx.fillStyle = ACCENT_FILL;
       ctx.fillRect(x, y, w, h);
       ctx.strokeRect(x, y, w, h);
       if (selected) {
-        drawAnchor(ctx, p1.x, p1.y);
-        drawAnchor(ctx, p2.x, p2.y);
+        // All four corners get an anchor dot, not just the original
+        // p1 / p2. Hit-testing treats every edge as grabbable so the
+        // visual cue should match — two corners would imply only
+        // those two are interactive (they're not; v1 has no
+        // drag-edit, the dots are pure selection feedback).
+        drawAnchor(ctx, x, y);
+        drawAnchor(ctx, x2, y);
+        drawAnchor(ctx, x, y2);
+        drawAnchor(ctx, x2, y2);
       }
       return;
     }
