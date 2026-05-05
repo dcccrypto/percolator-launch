@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useChartDrawings } from "@/hooks/useChartDrawings";
 import {
@@ -19,10 +19,27 @@ function envelope(drawings: Drawing[]): string {
   return JSON.stringify({ version: DRAWINGS_STORAGE_VERSION, drawings });
 }
 
+/** Persistence is debounced by 250 ms. Most tests assert localStorage
+ *  state right after a mutation, so the trailing timer needs to fire
+ *  inline. Wrap in act() so any synchronous React-state side effects
+ *  from the timer's callback flush within React's batch. */
+function flushPersist(): void {
+  act(() => {
+    vi.runAllTimers();
+  });
+}
+
 describe("useChartDrawings", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
+    // Fake only timer-related globals; leave Date / performance.now
+    // alone so other code that timestamps doesn't get warped.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("returns an empty list on first mount with no stored data", () => {
@@ -49,6 +66,8 @@ describe("useChartDrawings", () => {
     expect(result.current.drawings).toHaveLength(1);
     expect(result.current.drawings[0].kind).toBe("horizontal");
     expect(result.current.drawings[0].id).toMatch(/^[0-9a-f-]{36}$/i);
+    // Flush the 250 ms persist debounce before reading localStorage.
+    flushPersist();
     // Persisted under the slab key.
     const persisted = JSON.parse(
       window.localStorage.getItem(STORAGE_KEY_A) ?? "{}",
@@ -91,6 +110,7 @@ describe("useChartDrawings", () => {
     });
     expect(result.current.drawings).toHaveLength(1);
     expect(result.current.drawings[0].id).not.toBe(targetId);
+    flushPersist();
     const persisted = JSON.parse(
       window.localStorage.getItem(STORAGE_KEY_A) ?? "{}",
     );
@@ -107,6 +127,7 @@ describe("useChartDrawings", () => {
       result.current.clearAll();
     });
     expect(result.current.drawings).toEqual([]);
+    flushPersist();
     const persisted = JSON.parse(
       window.localStorage.getItem(STORAGE_KEY_A) ?? "{}",
     );
@@ -185,6 +206,10 @@ describe("useChartDrawings", () => {
     act(() => {
       result.current.addDrawing({ kind: "horizontal", price: 100 });
     });
+    // Flush in case any timer is pending (it shouldn't be; the
+    // invalid-slab guard rejects the schedule entirely, but assert
+    // post-flush so the test fails closed if that guard ever moves).
+    flushPersist();
     // Write was not attempted for the invalid slab — bucket can't be poisoned.
     expect(
       writeSpy.mock.calls.some((call) =>
@@ -201,6 +226,7 @@ describe("useChartDrawings", () => {
     act(() => {
       result.current.addDrawing({ kind: "horizontal", price: 100 });
     });
+    flushPersist();
     expect(result.current.drawings).toHaveLength(1); // in-memory still works
     expect(
       writeSpy.mock.calls.some((call) =>
@@ -220,6 +246,7 @@ describe("useChartDrawings", () => {
     act(() => {
       result.current.addDrawing({ kind: "horizontal", price: 100 });
     });
+    flushPersist();
     expect(result.current.drawings).toHaveLength(1);
     expect(setItemSpy).toHaveBeenCalled();
   });
@@ -273,6 +300,7 @@ describe("useChartDrawings", () => {
     act(() => {
       add({ kind: "horizontal", price: 100 });
     });
+    flushPersist();
     // Write must land under SLAB_B's key.
     const persistedB = window.localStorage.getItem(STORAGE_KEY_B);
     expect(persistedB).toBeTruthy();
@@ -282,6 +310,51 @@ describe("useChartDrawings", () => {
     const persistedA = window.localStorage.getItem(STORAGE_KEY_A);
     const parsedA = JSON.parse(persistedA ?? "{}");
     expect(parsedA.drawings ?? []).toEqual([]);
+  });
+
+  it("coalesces a burst of mutations within the debounce window into one setItem", () => {
+    // The audit's perf concern: 30 mutations in 30 seconds = 30
+    // blocking setItem calls without debouncing. With a 250 ms
+    // trailing window, a tight burst should flush exactly once.
+    const setItemSpy = vi.spyOn(window.localStorage.__proto__, "setItem");
+    const { result } = renderHook(() => useChartDrawings(SLAB_A));
+    act(() => {
+      result.current.addDrawing({ kind: "horizontal", price: 100 });
+      result.current.addDrawing({ kind: "horizontal", price: 200 });
+      result.current.addDrawing({ kind: "horizontal", price: 300 });
+    });
+    // Mid-burst (timer still pending): no write has landed yet.
+    const drawingsKeyWritesMidBurst = setItemSpy.mock.calls.filter((c) =>
+      String(c[0]).startsWith("perc:chart:drawings:"),
+    );
+    expect(drawingsKeyWritesMidBurst).toHaveLength(0);
+    // Trailing fire flushes once with the final state.
+    flushPersist();
+    const drawingsKeyWritesAfter = setItemSpy.mock.calls.filter((c) =>
+      String(c[0]).startsWith("perc:chart:drawings:"),
+    );
+    expect(drawingsKeyWritesAfter).toHaveLength(1);
+    const finalEnvelope = JSON.parse(drawingsKeyWritesAfter[0][1] as string);
+    expect(finalEnvelope.drawings).toHaveLength(3);
+  });
+
+  it("pagehide flushes a pending write immediately", () => {
+    // Mobile users closing the tab inside the 250 ms window would
+    // otherwise lose the last drawing. The pagehide handler flushes
+    // the pending write before the tab dies. Note: beforeunload is
+    // unreliable on iOS Safari for mobile tabs; pagehide is the
+    // documented choice.
+    const setItemSpy = vi.spyOn(window.localStorage.__proto__, "setItem");
+    const { result } = renderHook(() => useChartDrawings(SLAB_A));
+    act(() => {
+      result.current.addDrawing({ kind: "horizontal", price: 100 });
+    });
+    // Fire pagehide before the trailing timer would have expired.
+    window.dispatchEvent(new Event("pagehide"));
+    const drawingsKeyWrites = setItemSpy.mock.calls.filter((c) =>
+      String(c[0]).startsWith("perc:chart:drawings:"),
+    );
+    expect(drawingsKeyWrites).toHaveLength(1);
   });
 
   it("generateId runs outside the state updater (single uuid per logical add)", () => {

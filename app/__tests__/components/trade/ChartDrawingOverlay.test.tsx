@@ -169,10 +169,20 @@ beforeEach(() => {
   lastResizeObserver = null;
   // @ts-expect-error: stubbing the global for tests.
   globalThis.ResizeObserver = FakeResizeObserver;
+  // Synchronous rAF for tests so the rAF-coalesced crosshair preview
+  // and rectangle drag mousemove redraws fire inline. Production runs
+  // the real rAF (one redraw per vsync); tests assert against the
+  // post-coalesce frame state, not against the schedule mechanism.
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    cb(performance.now());
+    return 1;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 interface HarnessProps {

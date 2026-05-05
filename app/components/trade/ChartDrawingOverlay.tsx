@@ -420,9 +420,43 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
     chart.subscribeClick(onClick);
 
     // Crosshair-move drives the live preview during multi-click
-    // creation (trend tool only in this commit). Updates a ref —
-    // not React state — and triggers a redraw imperatively, so we
-    // don't burn a render cycle per mouse-move (~60 fps).
+    // creation (trend tool). lightweight-charts fires this on every
+    // pixel of cursor motion (~60 Hz on standard mice, higher on
+    // high-poll-rate gaming mice / 240 Hz trackpads). Coalesce to one
+    // redraw per frame via rAF — without this, a half-drawn trend
+    // hover at 100 drawings × ~4 canvas ops each saturates the main
+    // thread on lower-end laptops + battery.
+    //
+    // Scheduling uses a separate boolean flag from the rAF id: a
+    // synchronous rAF (used in tests) runs the callback inline and
+    // returns the id afterwards, which would otherwise leave a stale
+    // id stored under an "id == 0 means free" convention. Splitting
+    // the flag from the id keeps the scheduler correct for both
+    // sync and async rAF semantics.
+    let crosshairScheduled = false;
+    let crosshairRafId = 0;
+    let crosshairPending: { point: PricePoint | null; cursorLeft: boolean } | null = null;
+    const flushCrosshairPreview = (): void => {
+      crosshairScheduled = false;
+      crosshairRafId = 0;
+      if (crosshairPending === null) return;
+      const { tool, pendingP1 } = stateRef.current;
+      if (tool !== "trend" || pendingP1 === null) {
+        crosshairPending = null;
+        return;
+      }
+      const series = seriesRef.current;
+      if (!series) {
+        previewP2Ref.current = null;
+        crosshairPending = null;
+        return;
+      }
+      previewP2Ref.current = crosshairPending.cursorLeft
+        ? null
+        : crosshairPending.point;
+      crosshairPending = null;
+      redraw();
+    };
     const onCrosshairMove = (param: MouseEventParams<Time>): void => {
       const { tool, pendingP1 } = stateRef.current;
       if (tool !== "trend" || pendingP1 === null) return;
@@ -432,25 +466,34 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
         return;
       }
       if (!param.point) {
-        // Cursor left the chart — drop the preview.
-        previewP2Ref.current = null;
-        redraw();
-        return;
+        // Cursor left the chart — drop the preview on the next frame.
+        crosshairPending = { point: null, cursorLeft: true };
+      } else {
+        const timeScaleApi = chart.timeScale() as unknown as TimeConverter;
+        const point = pixelToPricePoint(
+          series,
+          timeScaleApi,
+          param.point.x,
+          param.point.y,
+        );
+        crosshairPending = { point, cursorLeft: false };
       }
-      const timeScaleApi = chart.timeScale() as unknown as TimeConverter;
-      const point = pixelToPricePoint(
-        series,
-        timeScaleApi,
-        param.point.x,
-        param.point.y,
-      );
-      previewP2Ref.current = point;
-      redraw();
+      if (!crosshairScheduled) {
+        crosshairScheduled = true;
+        crosshairRafId = window.requestAnimationFrame(flushCrosshairPreview);
+      }
     };
     chart.subscribeCrosshairMove(onCrosshairMove);
 
     return () => {
       ro.disconnect();
+      // Cancel any pending preview frame so a teardown mid-hover
+      // doesn't race a stale callback against a destroyed chart.
+      if (crosshairScheduled) {
+        window.cancelAnimationFrame(crosshairRafId);
+        crosshairScheduled = false;
+        crosshairRafId = 0;
+      }
       try {
         ts.unsubscribeVisibleLogicalRangeChange(redraw);
         ts.unsubscribeSizeChange(redraw);
@@ -564,19 +607,42 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       // attempt symmetrically.
     }
 
-    const onMouseMove = (e: MouseEvent): void => {
+    // Rectangle drag mousemove: same rAF coalesce as the crosshair
+    // path. Browsers fire mousemove faster than vsync on high-poll
+    // mice (1000 Hz gaming mice, 240 Hz trackpads) — without
+    // coalescing, every event runs getBoundingClientRect +
+    // pixelToPricePoint + a full redraw. Store the latest client
+    // coords; defer projection + redraw to the next frame. The
+    // scheduled-flag-vs-id split is the same as the crosshair path
+    // and works under sync rAF too.
+    let dragScheduled = false;
+    let dragRafId = 0;
+    let dragPendingClient: { clientX: number; clientY: number } | null = null;
+    const flushDragPreview = (): void => {
+      dragScheduled = false;
+      dragRafId = 0;
+      const pending = dragPendingClient;
+      if (pending === null) return;
+      dragPendingClient = null;
       const series = seriesRef.current;
       if (!series) {
         previewP2Ref.current = null;
         return;
       }
       const rect = el.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const x = pending.clientX - rect.left;
+      const y = pending.clientY - rect.top;
       const ts = chart.timeScale() as unknown as TimeConverter;
       const point = pixelToPricePoint(series, ts, x, y);
       previewP2Ref.current = point;
       redrawRef.current();
+    };
+    const onMouseMove = (e: MouseEvent): void => {
+      dragPendingClient = { clientX: e.clientX, clientY: e.clientY };
+      if (!dragScheduled) {
+        dragScheduled = true;
+        dragRafId = window.requestAnimationFrame(flushDragPreview);
+      }
     };
 
     const onMouseUp = (e: MouseEvent): void => {
@@ -659,6 +725,14 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       document.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("blur", onWindowBlur);
+      // Cancel any pending drag-preview frame so a teardown mid-drag
+      // doesn't race a stale callback that would write to
+      // previewP2Ref after the drag context is gone.
+      if (dragScheduled) {
+        window.cancelAnimationFrame(dragRafId);
+        dragScheduled = false;
+        dragRafId = 0;
+      }
       // Restore the SNAPSHOTTED scroll/scale options regardless of
       // how the drag ended (commit, cancel, Escape, slab change,
       // tool change, chart unmount). Writing the snapshot back

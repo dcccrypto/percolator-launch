@@ -13,6 +13,15 @@ import {
 export type { Drawing, DrawingInput } from "@/lib/chart-drawings";
 
 const STORAGE_KEY_PREFIX = "perc:chart:drawings:";
+/** Debounce window for localStorage writes. A burst of mutations
+ *  (e.g. user redrawing a few rectangles in quick succession) coalesces
+ *  to one setItem instead of N — important because setItem can block
+ *  5–50 ms on contended storage backends, and a 30-rectangle burst
+ *  would otherwise stack 30 main-thread hitches inside a 30-second
+ *  window. Each mutation resets the timer; the trailing fire writes
+ *  the final state. Flushes on pagehide / unmount / slab change so
+ *  no in-flight write is lost. */
+const PERSIST_DEBOUNCE_MS = 250;
 
 /** Solana base58 pubkey: 32–44 chars from the base58 alphabet (no 0OIl).
  *  Validating before forming the storage key prevents an empty / crafted
@@ -54,7 +63,9 @@ export interface UseChartDrawingsReturn {
  *
  *  SSR-safe: returns [] on the server and during the first client render,
  *  then hydrates from localStorage in an effect. Setters write through
- *  to localStorage synchronously inside the React state updater.
+ *  to localStorage on a 250 ms trailing debounce; the timer is flushed
+ *  on pagehide, unmount, and slab change so no in-flight mutation is
+ *  lost.
  *
  *  Usage:
  *
@@ -86,31 +97,10 @@ export function useChartDrawings(slabAddress: string): UseChartDrawingsReturn {
   const slabRef = useRef<string>(slabAddress);
   slabRef.current = slabAddress;
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!isValidSlabAddress(slabAddress)) {
-      setDrawings([]);
-      return;
-    }
-    try {
-      const raw = window.localStorage.getItem(storageKey(slabAddress));
-      if (raw == null) {
-        setDrawings([]);
-        return;
-      }
-      const parsed = JSON.parse(raw);
-      setDrawings(mergeDrawings(parsed));
-    } catch {
-      // localStorage unavailable, JSON parse failed, etc — start empty.
-      setDrawings([]);
-    }
-  }, [slabAddress]);
-
-  /** Persist the current list to localStorage. Best-effort — quota errors
-   *  and privacy-mode failures are swallowed. Wraps the list in the
-   *  versioned envelope. Skips the write entirely for invalid slab
-   *  addresses to avoid poisoning a shared bucket. */
-  const persist = useCallback((slab: string, list: Drawing[]) => {
+  /** Write the envelope synchronously. Best-effort — quota errors and
+   *  privacy-mode failures are swallowed. Skips invalid slab addresses
+   *  to avoid poisoning a shared bucket. */
+  const persistImmediate = useCallback((slab: string, list: Drawing[]) => {
     if (typeof window === "undefined") return;
     if (!isValidSlabAddress(slab)) return;
     try {
@@ -122,6 +112,103 @@ export function useChartDrawings(slabAddress: string): UseChartDrawingsReturn {
     } catch {
       // Best-effort; ignore quota / privacy errors.
     }
+  }, []);
+
+  // Debounced-persist machinery. The pending write captures the slab it
+  // was scheduled for so a slab change DOESN'T cause the trailing fire
+  // to write the new slab's list under the old key (or vice versa) —
+  // each scheduled write knows where it goes.
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPersistRef = useRef<{ slab: string; list: Drawing[] } | null>(
+    null,
+  );
+  /** Persist the most recent pending write immediately and clear the
+   *  trailing timer. Called on pagehide, unmount, and slab change. Safe
+   *  to call when nothing is pending. */
+  const flushPersist = useCallback(() => {
+    if (persistTimerRef.current !== null) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    const pending = pendingPersistRef.current;
+    if (pending !== null) {
+      pendingPersistRef.current = null;
+      persistImmediate(pending.slab, pending.list);
+    }
+  }, [persistImmediate]);
+
+  /** Replace any in-flight pending write and (re)start the 250 ms timer.
+   *  Each mutation resets the timer — burst of N mutations within
+   *  250 ms collapses to one trailing setItem at the end. */
+  const schedulePersist = useCallback(
+    (slab: string, list: Drawing[]) => {
+      pendingPersistRef.current = { slab, list };
+      if (persistTimerRef.current !== null) {
+        clearTimeout(persistTimerRef.current);
+      }
+      persistTimerRef.current = setTimeout(() => {
+        persistTimerRef.current = null;
+        const pending = pendingPersistRef.current;
+        if (pending !== null) {
+          pendingPersistRef.current = null;
+          persistImmediate(pending.slab, pending.list);
+        }
+      }, PERSIST_DEBOUNCE_MS);
+    },
+    [persistImmediate],
+  );
+
+  // flushPersist routed through a ref so the hydration effect's cleanup
+  // can call it without listing flushPersist in deps (which would cause
+  // the effect to re-fire on every callback identity change).
+  const flushPersistRef = useRef(flushPersist);
+  flushPersistRef.current = flushPersist;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isValidSlabAddress(slabAddress)) {
+      try {
+        const raw = window.localStorage.getItem(storageKey(slabAddress));
+        if (raw == null) {
+          setDrawings([]);
+        } else {
+          const parsed = JSON.parse(raw);
+          setDrawings(mergeDrawings(parsed));
+        }
+      } catch {
+        // localStorage unavailable, JSON parse failed, etc — start empty.
+        setDrawings([]);
+      }
+    } else {
+      setDrawings([]);
+    }
+    // Cleanup is registered unconditionally (regardless of which
+    // hydration branch ran above) so the slabAddress change about to
+    // happen — or unmount — flushes any pending write. Without this,
+    // an early-return inside the try block would skip cleanup
+    // registration; a pending write scheduled before the slab change
+    // would then never land under the correct bucket.
+    return () => {
+      flushPersistRef.current();
+    };
+  }, [slabAddress]);
+
+  // Pagehide flush so the user closing the tab inside the 250 ms
+  // window doesn't lose their last drawing. pagehide fires reliably on
+  // tab close + bfcache transitions across modern browsers (including
+  // iOS Safari, where beforeunload is unreliable on mobile).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPageHide = (): void => {
+      flushPersistRef.current();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      // Final flush on hook unmount — covers SPA navigation away from
+      // the trade page where pagehide doesn't fire.
+      flushPersistRef.current();
+    };
   }, []);
 
   const addDrawing = useCallback(
@@ -149,30 +236,30 @@ export function useChartDrawings(slabAddress: string): UseChartDrawingsReturn {
           current.length >= MAX_DRAWINGS_PER_SLAB
             ? [...current.slice(1), next]
             : [...current, next];
-        persist(slabRef.current, list);
+        schedulePersist(slabRef.current, list);
         return list;
       });
     },
-    [persist],
+    [schedulePersist],
   );
 
   const deleteDrawing = useCallback(
     (id: string) => {
       setDrawings((current) => {
         const list = current.filter((d) => d.id !== id);
-        persist(slabRef.current, list);
+        schedulePersist(slabRef.current, list);
         return list;
       });
     },
-    [persist],
+    [schedulePersist],
   );
 
   const clearAll = useCallback(() => {
     setDrawings(() => {
-      persist(slabRef.current, []);
+      schedulePersist(slabRef.current, []);
       return [];
     });
-  }, [persist]);
+  }, [schedulePersist]);
 
   return { drawings, addDrawing, deleteDrawing, clearAll };
 }
