@@ -1351,6 +1351,78 @@ describe("ChartDrawingOverlay", () => {
       expect(addDrawing).not.toHaveBeenCalled();
     });
 
+    it("right-click (contextmenu) during drag cancels the pending anchor", () => {
+      // Right-click opens the OS context menu; Firefox skips the
+      // mouseup that would normally end the drag. Without an
+      // explicit contextmenu cancel, pendingP1 sticks and the
+      // chart's pan stays suppressed indefinitely.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // contextmenu fires before mouseup in real browsers when the
+      // user right-clicks during a drag.
+      fireEvent.contextMenu(document);
+      // Pan should be RESTORED (cleanup ran).
+      const lastCall = ch.applyOptions.mock.calls.at(-1);
+      expect(lastCall?.[0]).toEqual({
+        handleScroll: ch.initialScroll,
+        handleScale: ch.initialScale,
+      });
+      // A subsequent mouseup must NOT commit — pendingP1 was cleared.
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
+    it("window blur during drag cancels the pending anchor", () => {
+      // alt-tab / OS focus theft / drag into another window all
+      // produce a window blur. The mouseup never reaches our
+      // document listener; we'd be left with stuck state.
+      stubCanvasContext();
+      const ch = fakeChart();
+      const addDrawing = vi.fn();
+      render(
+        <Harness
+          chart={ch.chart}
+          ready={true}
+          tool="rectangle"
+          addDrawing={addDrawing}
+        />,
+      );
+      fireEvent.mouseDown(ch.chartElement, {
+        clientX: 10,
+        clientY: 100,
+        button: 0,
+      });
+      // jsdom dispatches blur on window directly. Wrap in act() so
+      // the setPendingP1(null) state update flushes before we assert
+      // (window events aren't auto-wrapped by RTL's fireEvent).
+      act(() => {
+        window.dispatchEvent(new Event("blur"));
+      });
+      // Pan restored.
+      const lastCall = ch.applyOptions.mock.calls.at(-1);
+      expect(lastCall?.[0]).toEqual({
+        handleScroll: ch.initialScroll,
+        handleScale: ch.initialScale,
+      });
+      // Subsequent mouseup must not commit.
+      fireEvent.mouseUp(document, { clientX: 50, clientY: 200 });
+      expect(addDrawing).not.toHaveBeenCalled();
+    });
+
     it("does NOT attach mousedown listener when tool is not rectangle", () => {
       stubCanvasContext();
       const ch = fakeChart();

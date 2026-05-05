@@ -564,12 +564,36 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
       // Tool stays in rectangle mode — TradingView convention.
     };
 
+    // Stuck-state recovery: a few ways the drag can end without a
+    // proper mouseup reaching us. All three call the same cancel
+    // path — drop pendingP1 + previewP2Ref so the cleanup-on-deps-
+    // change re-enables pan and removes the document listeners.
+    const cancel = (): void => {
+      setPendingP1(null);
+      previewP2Ref.current = null;
+    };
+    // 1. Right-click during drag opens the OS context menu. Firefox
+    //    skips the synthesizing mouseup entirely; Chrome may or may
+    //    not fire it. Either way, the user expects "cancel my drag"
+    //    semantics — stuck pendingP1 with the dashed preview frozen
+    //    is a UX trap.
+    const onContextMenu = (): void => cancel();
+    document.addEventListener("contextmenu", onContextMenu);
+    // 2. Window/tab blur (alt-tab, OS notification steals focus,
+    //    user dragged into another window). The mouseup will fire
+    //    on a different document we can't observe; cancelling here
+    //    keeps the chart's pan suppression from latching on.
+    const onWindowBlur = (): void => cancel();
+    window.addEventListener("blur", onWindowBlur);
+
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
 
     return () => {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("blur", onWindowBlur);
       // Restore the SNAPSHOTTED scroll/scale options regardless of
       // how the drag ended (commit, cancel, Escape, slab change,
       // tool change, chart unmount). Writing the snapshot back
