@@ -40,6 +40,10 @@ import { isOverlayKind, isPaneKind } from "@/lib/indicator-registry";
 import { useIndicatorOverlays } from "./useIndicatorOverlays";
 import { useIndicatorOscillatorPane } from "./useIndicatorOscillatorPane";
 import { ChartIndicatorMenu } from "./ChartIndicatorMenu";
+import { ChartDrawingOverlay } from "./ChartDrawingOverlay";
+import { ChartDrawingToolbar } from "./ChartDrawingToolbar";
+import { useChartDrawingTool } from "@/hooks/useChartDrawingTool";
+import { useChartDrawings } from "@/hooks/useChartDrawings";
 import {
   isCandleStyle,
   candleStyleOptions,
@@ -159,6 +163,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     updateIndicator,
     clearAll: clearAllIndicators,
   } = useChartIndicatorPrefs(slabAddress);
+  const { tool: drawingTool, setTool: setDrawingTool } = useChartDrawingTool();
+  const {
+    drawings,
+    addDrawing,
+    deleteDrawing,
+    clearAll: clearAllDrawings,
+  } = useChartDrawings(slabAddress);
   const [timeframe, setTimeframe] = useState<Timeframe>("1d");
   const [oraclePrices, setOraclePrices] = useState<PricePoint[]>([]);
 
@@ -842,6 +853,49 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             below the candles + volume pane without getting visually clipped. */}
         <div ref={containerRef} className="w-full h-[45svh] lg:h-[620px]" />
 
+        {/* User-drawing overlay: transparent canvas tracking the chart
+            container's dimensions, layered above the chart canvas via DOM
+            order (no explicit z) but below the empty-state / hover-tooltip
+            / position-summary badges (which sit at z-10). pointer-events
+            stay disabled — drawing-tool clicks route through
+            chart.subscribeClick so native pan/zoom keep working.
+
+            Gated on !showEmptyOverlay alongside the toolbar: the
+            empty-state's 91%-alpha backdrop would otherwise ghost
+            persisted drawings through the wash with no toolbar to
+            clear them — a UX dead-end on sparse markets. Unmounting
+            the overlay drops the canvas entirely; drawings re-appear
+            (still per-slab in localStorage) the moment data populates
+            and the empty-state lifts. */}
+        {!showEmptyOverlay && (
+          <ChartDrawingOverlay
+            chartRef={chartRef}
+            seriesRef={seriesRef}
+            containerRef={containerRef}
+            chartReady={chartReady}
+            drawings={drawings}
+            addDrawing={addDrawing}
+            deleteDrawing={deleteDrawing}
+            tool={drawingTool}
+            setTool={setDrawingTool}
+            slabAddress={slabAddress}
+          />
+        )}
+
+        {/* Drawing tools toolbar — vertical bar at the chart's left edge.
+            Hidden below the md breakpoint (touch interaction patterns
+            for drawing tools are out of scope for v1) AND hidden when
+            the empty-state overlay is shown (no chart to draw on, so
+            the toolbar would be a dead interaction). */}
+        {!showEmptyOverlay && (
+          <ChartDrawingToolbar
+            tool={drawingTool}
+            setTool={setDrawingTool}
+            drawingCount={drawings.length}
+            clearAll={clearAllDrawings}
+          />
+        )}
+
         {/* GH#1652: empty-state overlay — shown when no data yet, sits above canvas */}
         {showEmptyOverlay && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center backdrop-blur-[1px]" style={{ background: `${chartTheme.bg}e8` }}>
@@ -908,11 +962,15 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         )}
 
         {/* OHLCV tooltip — hover the chart to see the bar under the crosshair.
-            Positioned top-left so it never sits under the PositionSummary badge
-            top-right. Hidden entirely when not hovering. */}
+            Positioned top-left on mobile (where the drawing toolbar is hidden);
+            shifted right on md+ to clear the drawing toolbar that occupies
+            the top-left corner there. left-14 (56px) gives ~10px of
+            breathing room past the toolbar's outer edge (8px left + 38px
+            wide = 46px right edge; left-12 = 48px would have been only
+            2px of clearance). Hidden entirely when not hovering. */}
         {hoverBar && !showEmptyOverlay && (
           <div
-            className="pointer-events-none absolute top-2 left-2 z-10 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 font-mono text-[10px] shadow-sm backdrop-blur-sm"
+            className="pointer-events-none absolute top-2 left-2 md:left-14 z-10 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 font-mono text-[10px] shadow-sm backdrop-blur-sm"
             aria-hidden="true"
           >
             <div className="flex items-center gap-3 whitespace-nowrap">
