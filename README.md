@@ -206,7 +206,7 @@ percolator-launch/
 │   └── simulation/               # @percolator/simulation — price simulation for testing
 │
 ├── program/                      # Solana BPF program (Rust)
-│   ├── src/lib.rs                # All instruction handlers (Tags 0-28)
+│   ├── src/lib.rs                # Instruction handlers — see percolator-prog/src/tags.rs for current tag inventory
 │   └── Cargo.toml                # Feature flags: small, medium, large (default)
 │
 ├── percolator/                   # Risk engine (Rust crate, from aeyakovenko/percolator)
@@ -218,7 +218,9 @@ percolator-launch/
 │   ├── t4-liquidation.ts
 │   ├── t6-risk-gate.ts
 │   ├── t7-market-pause.ts
-│   └── t8-trading-fee-update.ts
+│   ├── t8-trading-fee-update.ts
+│   ├── t10-pricing-engine.ts
+│   └── t10-pricing-edge-cases.ts
 │
 ├── docs/                         # Architecture and planning docs
 ├── supabase/                     # Database migrations
@@ -343,29 +345,34 @@ Bitmap (variable)         — used account slots
 Accounts (N × slot_size) — per-user: kind, owner, position, capital, pnl
 ```
 
-### Key Instructions
+### Pricing Modes
 
-| Tag | Instruction | Who |
-|-----|------------|-----|
-| 0 | `InitSlab` | Creator |
-| 1 | `InitMarket` | Creator |
-| 2 | `InitLP` | Creator |
-| 3 | `InitUser` | Anyone |
-| 4 | `DepositCollateral` | Trader |
-| 5 | `WithdrawCollateral` | Trader |
-| 6 | `TradeNoCpi` | Trader |
-| 7 | `LiquidateAtOracle` | Anyone |
-| 8 | `KeeperCrank` | Anyone |
-| 9 | `PushOraclePrice` | Oracle Auth |
-| 10 | `TradeCpi` | Trader (vAMM) |
-| 14 | `AdminForceClose` | Admin |
-| 15 | `SetRiskThreshold` | Admin |
-| 23 | `RenounceAdmin` | Admin |
-| 24 | `CreateInsuranceMint` | Admin |
-| 25 | `DepositInsuranceLP` | Anyone |
-| 26 | `WithdrawInsuranceLP` | LP holder |
-| 27 | `PauseMarket` | Admin |
-| 28 | `UnpauseMarket` | Admin |
+a market chooses one of two pricing modes at creation:
+
+- **oracle mode** — mark and index prices follow an external oracle (Pyth feed, or admin-pushed price for the special `feed_id = all zeros` case). funding accrues from the spread between oracle and a per-market funding rate.
+- **hyperp mode** — mark and index are computed internally from trade prints (EMA-based), with no external oracle dependency. funding accrues from the premium `(mark - index)`. trades must use `TradeCpi` (the no-CPI path is disabled in hyperp mode). index updates are rate-limited per slot to prevent same-slot price manipulation.
+
+see [`tests/t3-hyperp-lifecycle.ts`](./tests/t3-hyperp-lifecycle.ts) for an end-to-end hyperp lifecycle, [`tests/t10-pricing-engine.ts`](./tests/t10-pricing-engine.ts) for EMA warm-up tests, and [`percolator-prog/README.md`](https://github.com/dcccrypto/percolator-prog) for the protocol-level pricing spec.
+
+### Instruction Tags
+
+the program defines 80 instruction tags. source of truth: [`percolator-prog/src/tags.rs`](https://github.com/dcccrypto/percolator-prog/blob/main/src/tags.rs).
+
+grouped by use case:
+
+| Group | Examples | Caller |
+|---|---|---|
+| Market lifecycle | `InitMarket`, `ResolveMarket`, `PauseMarket`, `UnpauseMarket` | Creator / Admin |
+| User lifecycle | `InitUser`, `DepositCollateral`, `WithdrawCollateral`, `CloseAccount` | Trader |
+| Trading | `TradeNoCpi`, `TradeCpi`, `TradeCpiV2` | Trader |
+| Risk + liquidation | `LiquidateAtOracle`, `ExecuteAdl`, `KeeperCrank` | Permissionless |
+| Oracle | `PushOraclePrice`, `SetPythOracle`, `UpdateMarkPrice`, `UpdateHyperpMark`, `SetOraclePriceCap` | Oracle Auth |
+| LP vault | `CreateLpVault`, `LpVaultDeposit`, `LpVaultWithdraw`, `LpVaultCrankFees` | LP |
+| Insurance | `TopUpInsurance`, `WithdrawInsuranceLimited`, `SetInsuranceWithdrawPolicy`, `FundMarketInsurance` | Admin / LP |
+| Position NFT | `MintPositionNft`, `TransferPositionOwnership`, `BurnPositionNft` | Trader |
+| Admin governance | `UpdateAdmin`, `AcceptAdmin`, `UpdateAuthority`, `UpdateConfig` | Admin |
+
+for the canonical numeric tag (needed when constructing instructions), see [`tags.rs`](https://github.com/dcccrypto/percolator-prog/blob/main/src/tags.rs).
 
 ### Deployed Programs
 
@@ -380,8 +387,13 @@ Accounts (N × slot_size) — per-user: kind, owner, position, capital, pnl
 **Matcher (vAMM):** `4HcGCsyjAqnFua5ccuXyt8KRRQzKFbGTJkVChpS7Yfzy`
 
 **Mainnet:**
-- Program: `GM8zjJ8LTBMv9xEsverh6H6wLyevgMHEJXcEzyY3rY24`
-- Matcher: `DHP6DtwXP1yJsz8YzfoeigRFPB979gzmumkmCxDLSkUX`
+
+| Program | Address |
+|---------|---------|
+| Percolator (small tier only) | `ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv` |
+| Matcher | `DHP6DtwXP1yJsz8YzfoeigRFPB979gzmumkmCxDLSkUX` |
+| Stake | `DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F` |
+| NFT | `FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS` |
 
 ---
 
@@ -407,6 +419,8 @@ npx tsx tests/t4-liquidation.ts
 npx tsx tests/t6-risk-gate.ts
 npx tsx tests/t7-market-pause.ts
 npx tsx tests/t8-trading-fee-update.ts
+npx tsx tests/t10-pricing-engine.ts
+npx tsx tests/t10-pricing-edge-cases.ts
 
 # E2E
 pnpm test:e2e
