@@ -141,8 +141,8 @@ export function TradeHistoryTable({
   if (!loading && trades.length === 0) {
     return (
       <div className="border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/50 p-8 text-center">
-        <p className="text-[13px] text-[var(--text-dim)]">No trades yet</p>
-        <p className="mt-1 text-[10px] text-[var(--text-dim)]/60">
+        <p className="text-[13px] text-[var(--text)]">No trades yet</p>
+        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
           Your executed trades will appear here once the trade indexer has processed them.
         </p>
         {(process.env.NEXT_PUBLIC_DEFAULT_NETWORK ?? process.env.NEXT_PUBLIC_SOLANA_NETWORK) === "devnet" && (
@@ -161,7 +161,7 @@ export function TradeHistoryTable({
         {["Market", "Side", "Size", "Price", "Fee", "Time", "Tx"].map((h) => (
           <p
             key={h}
-            className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]"
+            className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text)]"
           >
             {h}
           </p>
@@ -240,7 +240,7 @@ export function TradeHistoryTable({
               {/* Time */}
               <div>
                 <p
-                  className="text-[10px] text-[var(--text-dim)]"
+                  className="text-[10px] text-[var(--text-secondary)]"
                   title={new Date(trade.created_at).toLocaleString()}
                 >
                   {timeAgo(trade.created_at)}
@@ -271,7 +271,7 @@ export function TradeHistoryTable({
 
       {/* Footer: total count + load more */}
       <div className="mt-3 flex items-center justify-between">
-        <p className="text-[10px] text-[var(--text-dim)]">
+        <p className="text-[10px] text-[var(--text-secondary)]">
           Showing {trades.length} of {total} trades
         </p>
         {hasMore && (
