@@ -107,10 +107,14 @@ export const ChartDisplayMenu: FC<ChartDisplayMenuProps> = ({ prefs, onToggle })
               tabIndex={open ? 0 : -1}
               onClick={() => handleToggle(key)}
               className={[
-                "flex w-full items-center justify-between px-3 py-1.5 text-xs transition-colors",
+                // Row hover bg matches the ChartStyleMenu (Line) options
+                // so every dropdown in the chart toolbar uses the same
+                // hover affordance — text brightens AND the row gets a
+                // subtle surface highlight.
+                "flex w-full items-center justify-between px-3 py-1.5 text-xs transition-colors hover:bg-[var(--bg-surface)]",
                 enabled
                   ? "text-[var(--text)]"
-                  : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
+                  : "text-[var(--text-secondary)] hover:text-[var(--text)]",
               ].join(" ")}
             >
               <span>{OVERLAY_LABELS[key]}</span>
