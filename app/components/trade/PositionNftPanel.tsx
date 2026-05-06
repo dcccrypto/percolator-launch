@@ -61,7 +61,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex flex-col items-center py-4 text-center">
-          <p className="text-[11px] font-medium text-[var(--text-muted)]">Position NFT</p>
+          <p className="text-[11px] font-medium text-[var(--text)]">Position NFT</p>
           <p className="mt-1 text-[10px] text-[var(--text-dim)]">Connect wallet to view NFT status.</p>
         </div>
       </div>
@@ -91,7 +91,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
       <div className="p-3 space-y-2">
         {/* Status row */}
         <div className="flex items-center justify-between py-1">
-          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Status</span>
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Status</span>
           <span
             className={`text-[11px] font-semibold ${
               hasMintedNft ? "text-[var(--long)]" : "text-[var(--text-muted)]"
@@ -105,7 +105,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
         {/* Mint address — shown when NFT exists */}
         {hasMintedNft && mintAddress && (
           <div className="flex items-center justify-between py-1 border-t border-[var(--border)]/30">
-            <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Mint</span>
+            <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Mint</span>
             <a
               href={explorerAccountUrl(mintAddress)}
               target="_blank"

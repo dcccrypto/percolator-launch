@@ -540,7 +540,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <span className={`text-[10px] font-bold uppercase tracking-[0.1em] ${isOpenLong ? "text-green-400" : "text-red-400"}`}>
                 {isOpenLong ? "LONG" : "SHORT"}
               </span>
-              <span className="text-[10px] text-[var(--text-dim)]">{symbol}/USD</span>
+              <span className="text-[10px] text-[var(--text)]">{symbol}/USD</span>
               <span
                 className="text-[10px] font-bold text-cyan-400"
                 style={{ fontFamily: "var(--font-mono)" }}
@@ -559,13 +559,13 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           {/* Stats grid */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[10px]">
             <div>
-              <span className="text-[var(--text-dim)] uppercase tracking-[0.08em]">Entry</span>
+              <span className="text-[var(--text)] uppercase tracking-[0.08em]">Entry</span>
               <span className="ml-2 font-mono font-medium text-[var(--text)]">
                 {openEntryPriceE6 > 0n ? formatUsdPriceE6(openEntryPriceE6) : "—"}
               </span>
             </div>
             <div>
-              <span className={`uppercase tracking-[0.08em] ${openLiqDanger ? "text-orange-400" : "text-[var(--text-dim)]"}`}>
+              <span className={`uppercase tracking-[0.08em] ${openLiqDanger ? "text-orange-400" : "text-[var(--text)]"}`}>
                 Liq {openLiqDanger ? "⚠" : ""}
               </span>
               <span className={`ml-2 font-mono font-medium ${openLiqDanger ? "text-orange-400" : "text-[var(--text)]"}`}>
@@ -573,13 +573,13 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </span>
             </div>
             <div>
-              <span className="text-[var(--text-dim)] uppercase tracking-[0.08em]">Size</span>
+              <span className="text-[var(--text)] uppercase tracking-[0.08em]">Size</span>
               <span className="ml-2 font-mono font-medium text-[var(--text)]">
                 {formatTokenAmount(abs(openPositionSize), decimals)} {symbol}
               </span>
             </div>
             <div>
-              <span className="text-[var(--text-dim)] uppercase tracking-[0.08em]">PnL</span>
+              <span className="text-[var(--text)] uppercase tracking-[0.08em]">PnL</span>
               <span className={`ml-2 font-mono font-medium ${openPnlTokens > 0n ? "text-green-400" : openPnlTokens < 0n ? "text-red-400" : "text-[var(--text-muted)]"}`}>
                 {openPnlTokens >= 0n ? "+" : ""}{formatTokenAmount(openPnlTokens, decimals)}
                 <span className="ml-1 text-[9px]">({openPnlPercent >= 0 ? "+" : ""}{openPnlPercent.toFixed(2)}%)</span>
@@ -587,7 +587,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </div>
             {savedOpenLeverage != null && (
               <div title={RISK_LEVERAGE_TITLE}>
-                <span className="text-[var(--text-dim)] uppercase tracking-[0.08em]">{RISK_LEVERAGE_LABEL}</span>
+                <span className="text-[var(--text)] uppercase tracking-[0.08em]">{RISK_LEVERAGE_LABEL}</span>
                 <span className="ml-2 font-mono font-medium text-[var(--text)]">
                   {formatLeverage(openAccountLeverage)}
                 </span>
@@ -667,7 +667,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
       {/* Order type indicator — market orders only */}
       <div className="mb-3 flex items-center gap-1.5">
-        <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Order Type</span>
+        <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Order Type</span>
         <span className="rounded-none border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)]">
           Market
         </span>
@@ -681,7 +681,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-all duration-150 ${
             direction === "long"
               ? "bg-green-500 border border-green-500 text-black"
-              : "border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-dim)]"
+              : "border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)]"
           }`}
         >
           Long
@@ -702,8 +702,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* ── Dual size input (contracts ↔ USDC) ── */}
       <div className="mb-2">
         <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Size<InfoIcon tooltip="Position size — enter in contracts (tokens) or USD. Both fields sync automatically." /></label>
-          <span className="text-[10px] text-[var(--text-dim)] whitespace-nowrap min-w-0 shrink-0" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Size<InfoIcon tooltip="Position size — enter in contracts (tokens) or USD. Both fields sync automatically." /></label>
+          <span className="text-[10px] text-[var(--text)] whitespace-nowrap min-w-0 shrink-0" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
             Bal: {userAccount ? formatPerc(capital, decimals) : (walletAtaBalance !== null ? formatPerc(walletAtaBalance, decimals) : "—")} {collateralSymbol}
           </span>
         </div>
@@ -725,7 +725,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 } ${exceedsMargin ? "border-[var(--short)]/50 bg-[var(--short)]/5" : ""}`}
               />
             </div>
-            <span className="mt-0.5 block text-center text-[10px] text-[var(--text-dim)] uppercase tracking-[0.1em]">{symbol}</span>
+            <span className="mt-0.5 block text-center text-[10px] text-[var(--text)] uppercase tracking-[0.1em]">{symbol}</span>
           </div>
           {/* USDC input */}
           <div>
@@ -744,7 +744,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 }`}
               />
             </div>
-            <span className="mt-0.5 block text-center text-[10px] text-[var(--text-dim)] uppercase tracking-[0.1em]">USD</span>
+            <span className="mt-0.5 block text-center text-[10px] text-[var(--text)] uppercase tracking-[0.1em]">USD</span>
           </div>
         </div>
         {exceedsMargin && (
@@ -760,7 +760,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <button
             key={pct}
             onClick={() => setMarginPercent(pct)}
-            className="flex-1 rounded-none border border-[var(--border)]/30 py-1 text-[10px] font-medium text-[var(--text-muted)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)] focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30"
+            className="flex-1 rounded-none border border-[var(--border)]/30 py-1 text-[10px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--text)] focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30"
           >
             {pct === 100 ? "MAX" : `${pct}%`}
           </button>
@@ -770,7 +770,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Leverage slider + presets */}
       <div className="mb-5">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
             Order Leverage
             <InfoIcon tooltip="The slider value used to size this order. Your displayed risk leverage can be lower when this slab account has extra collateral." />
           </label>
@@ -794,7 +794,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
               className="w-12 rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-1.5 py-0.5 text-right text-[11px] text-[var(--text)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
             />
-            <span className="text-[11px] font-medium text-[var(--text-dim)]">x</span>
+            <span className="text-[11px] font-medium text-[var(--text)]">x</span>
           </div>
         </div>
         <input
@@ -820,7 +820,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               className={`flex-1 basis-0 min-w-[32px] rounded-none py-1.5 min-h-[36px] text-[9px] font-medium transition-all duration-150 focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 touch-manipulation ${
                 leverage === l
                   ? "bg-[var(--accent)] text-white"
-                  : "border border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/50 hover:text-[var(--text-secondary)]"
+                  : "border border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
               }`}
             >
               {l}x
@@ -833,9 +833,9 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {getNetwork() === "mainnet" && (
         <div className="mb-5 border border-[var(--accent)]/30 bg-[var(--accent)]/[0.04] px-4 py-3 text-[11px] space-y-1">
           <p className="text-[var(--accent)] font-medium">⚡ Mainnet Phase 1 Guards Active</p>
-          <p className="text-[var(--text-muted)]">• $10K OI cap per market during beta</p>
-          <p className="text-[var(--text-muted)]">• {maxLeverage}x max leverage enforced on-chain</p>
-          <p className="text-[var(--text-muted)]">• Guards auto-lift when caps are raised by DAO</p>
+          <p className="text-[var(--text)]">• $10K OI cap per market during beta</p>
+          <p className="text-[var(--text)]">• {maxLeverage}x max leverage enforced on-chain</p>
+          <p className="text-[var(--text)]">• Guards auto-lift when caps are raised by DAO</p>
         </div>
       )}
 
@@ -966,7 +966,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       )}
 
       {lastSig && (
-        <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+        <p className="mt-2 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
           Tx:{" "}
           <a
             href={`${explorerTxUrl(lastSig)}`}
@@ -983,7 +983,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="mt-3 flex items-center gap-1.5">
         <InfoIcon tooltip={`This market is margined in ${collateralSymbol}, not USD. Position value and liq risk are affected by the collateral token's price. Effective USD leverage ≈ ${leverage > 0 ? `${leverage * 2}x` : "—"} (nominal ${leverage}x × 2 for coin exposure).`} />
         <InfoIcon tooltip={`This market is margined in ${symbol}, not USD. Position value and liq risk are affected by the collateral token's price. Selected leverage: ${leverage > 0 ? `${leverage}x` : "—"}.`} />
-        <span className="text-[9px] text-[var(--text-dim)] uppercase tracking-[0.1em]">Coin-margined market</span>
+        <span className="text-[9px] text-[var(--text)] uppercase tracking-[0.1em]">Coin-margined market</span>
       </div>
 
       {/* Close position modal */}
