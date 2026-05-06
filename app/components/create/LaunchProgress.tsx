@@ -68,7 +68,7 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
                   </span>
                 )}
                 {status === "pending" && (
-                  <span className="flex h-6 w-6 items-center justify-center border border-[var(--border)] bg-[var(--bg-surface)] text-[10px] text-[var(--text-dim)]">
+                  <span className="flex h-6 w-6 items-center justify-center border border-[var(--border)] bg-[var(--bg-surface)] text-[10px] text-[var(--text-secondary)]">
                     {i + 1}
                   </span>
                 )}
@@ -84,7 +84,7 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
                         ? "font-medium text-[var(--text)]"
                         : status === "error"
                           ? "text-[var(--short)]"
-                          : "text-[var(--text-dim)]"
+                          : "text-[var(--text-secondary)]"
                   }`}
                 >
                   {label}
@@ -114,7 +114,7 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
                       href={`https://explorer.solana.com/tx/${state.txSigs[i]}?cluster=devnet`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="font-mono text-[10px] text-[var(--text-dim)] hover:text-[var(--accent)] transition-colors"
+                      className="font-mono text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors"
                     >
                       tx: {state.txSigs[i].slice(0, 8)}...
                     </a>

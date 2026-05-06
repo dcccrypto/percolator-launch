@@ -34,7 +34,7 @@ export const FeeSlider: FC<FeeSliderProps> = ({
     <div>
       <div className="flex items-center justify-between mb-2">
         <label
-          className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+          className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)]"
           htmlFor={`slider-${label.replace(/\s+/g, "-").toLowerCase()}`}
         >
           {label}
@@ -44,7 +44,7 @@ export const FeeSlider: FC<FeeSliderProps> = ({
             {value} bps
           </span>
           {showPercent && (
-            <span className="text-[10px] text-[var(--text-dim)]">
+            <span className="text-[10px] text-[var(--text-secondary)]">
               = {percent}% per trade
             </span>
           )}
@@ -69,8 +69,8 @@ export const FeeSlider: FC<FeeSliderProps> = ({
         />
       </div>
       <div className="flex items-center justify-between mt-1">
-        <span className="text-[9px] text-[var(--text-dim)]">{min} bps</span>
-        <span className="text-[9px] text-[var(--text-dim)]">{max} bps</span>
+        <span className="text-[9px] text-[var(--text-secondary)]">{min} bps</span>
+        <span className="text-[9px] text-[var(--text-secondary)]">{max} bps</span>
       </div>
     </div>
   );
