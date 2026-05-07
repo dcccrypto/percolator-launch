@@ -106,7 +106,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
         <MarketLogo logoUrl={logoUrl} mintAddress={mintAddress} symbol={symbol} size="sm" />
         <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
           {symbol}/USD
-          <span className="ml-1.5 text-[9px] font-normal uppercase tracking-[0.12em] text-[var(--text-dim)]">PERP</span>
+          <span className="ml-1.5 text-[9px] font-normal uppercase tracking-[0.12em] text-[var(--text)]">PERP</span>
         </span>
       </div>
 
@@ -139,7 +139,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
       <div className="flex flex-1 items-center gap-4 min-w-0">
         {/* Volume 24h */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Vol 24h</span>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">Vol 24h</span>
           <span className="text-xs font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
             {formatCompact(volume as number)}
           </span>
@@ -147,7 +147,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* OI */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Open Interest</span>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">Open Interest</span>
           <span className="text-xs font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
             {formatCompact(oi as number)}
           </span>
@@ -155,7 +155,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* 5.6: 24h High */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h High</span>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">24h High</span>
           <span className="text-xs font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>
             {formatUsdFromNumber(high24h)}
           </span>
@@ -163,7 +163,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* 5.6: 24h Low */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h Low</span>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">24h Low</span>
           <span className="text-xs font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
             {formatUsdFromNumber(low24h)}
           </span>
@@ -172,7 +172,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
         {/* Funding Rate — P3-6: pr-2 padding prevents right-edge clipping */}
         {funding8h != null && (
           <div className="flex flex-col shrink-0 pr-2">
-            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Funding / 8h</span>
+            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">Funding / 8h</span>
             <span className={`text-xs font-semibold ${fundingColor}`} style={{ fontFamily: "var(--font-mono)" }}>
               {funding8h >= 0 ? "+" : ""}{funding8h.toFixed(4)}%
             </span>
