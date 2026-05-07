@@ -16,8 +16,17 @@ export interface ChartTheme {
 const DARK_THEME: ChartTheme = {
   bg: "#0D0D0F",
   textColor: "rgba(255,255,255,0.45)",
-  gridColor: "rgba(255,255,255,0.04)",
-  borderColor: "rgba(255,255,255,0.06)",
+  // Grid bumped from 0.04 → 0.07 and border from 0.06 → 0.10 — the
+  // earlier alphas sat at the very floor of what professional trading
+  // UIs use (Bloomberg / TradingView / Binance run grids around 0.06–
+  // 0.10) and made the chart blend into the page bg. The new values
+  // give the panel a defined edge without competing with the data.
+  // Indicator reference lines (RSI 30/70, MACD signal) derive from
+  // textColor at ~25% / 75% alpha, which after multiplying through
+  // textColor's own 0.45 lands at ~0.11 / ~0.34 effective — still
+  // clearly above this 0.07 grid, so the hierarchy holds.
+  gridColor: "rgba(255,255,255,0.07)",
+  borderColor: "rgba(255,255,255,0.10)",
   upColor: "#22c55e",
   downColor: "#ef4444",
   volUpColor: "rgba(34,197,94,0.6)",
