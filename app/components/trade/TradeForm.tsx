@@ -704,7 +704,14 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div className="mb-1.5 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Size<InfoIcon tooltip="Position size — enter in contracts (tokens) or USD. Both fields sync automatically." /></label>
           <span className="text-[10px] text-[var(--text-dim)] whitespace-nowrap min-w-0 shrink-0" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-            Bal: {userAccount ? formatPerc(capital, decimals) : (walletAtaBalance !== null ? formatPerc(walletAtaBalance, decimals) : "—")} {collateralSymbol}
+            {/* "Account Bal" rather than "Bal" so users can't confuse this
+                with the wallet balance shown at the top of the trade
+                panel. This row is the in-market account capital — what
+                you have available to TRADE on this slab — not the
+                Phantom wallet's USDC balance. Pre-account users see
+                "0" because they haven't deposited yet; the wallet
+                balance row above tells them what they could deposit. */}
+            Account Bal: {userAccount ? formatPerc(capital, decimals) : "0"} {collateralSymbol}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
