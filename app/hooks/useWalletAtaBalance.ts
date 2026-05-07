@@ -15,12 +15,19 @@ export interface WalletAtaBalance {
 
 /** Fetches the user's associated token account balance for a given mint.
  *  Returns `{ balance: null }` when the wallet is disconnected, the mint
- *  is null, or the ATA doesn't exist yet. One-shot fetch on mount /
- *  dependency change — does NOT poll, so callers that want live
- *  updates after a deposit/withdraw should rebuild on the changing
- *  market state (slab capital change, etc.). */
+ *  is null, or the ATA doesn't exist yet.
+ *
+ *  Re-fetch trigger: pass any value as `refreshTrigger` whose identity
+ *  changes when an external event invalidates the cached balance.
+ *  The canonical use is the in-market `capital` value — a deposit
+ *  decreases the wallet ATA balance and increases capital; passing
+ *  capital as the trigger forces a re-read of the ATA so the bar
+ *  reflects the post-deposit state instead of the stale pre-deposit
+ *  number. Without this, only publicKey/mint/connection changes would
+ *  trigger a re-read, none of which fire after a deposit/withdraw. */
 export function useWalletAtaBalance(
   mint: PublicKey | null | undefined,
+  refreshTrigger?: unknown,
 ): WalletAtaBalance {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -40,14 +47,20 @@ export function useWalletAtaBalance(
         const ata = getAssociatedTokenAddressSync(mint, publicKey);
         const info = await connection.getTokenAccountBalance(ata);
         if (cancelled) return;
+        // RPC returns amount as a string. The happy-path zero balance
+        // is "0" (truthy in JS). The else branch only fires for the
+        // unusual empty-string / falsy case from a malformed response;
+        // even then we want to preserve any decimals the RPC did
+        // hand back rather than silently drop them.
+        const onChainDecimals =
+          info.value.decimals !== undefined ? info.value.decimals : null;
         if (info.value.amount) {
           setState({
             balance: BigInt(info.value.amount),
-            decimals:
-              info.value.decimals !== undefined ? info.value.decimals : null,
+            decimals: onChainDecimals,
           });
         } else {
-          setState({ balance: null, decimals: null });
+          setState({ balance: null, decimals: onChainDecimals });
         }
       } catch {
         // ATA may not exist yet (user hasn't received this token), keep null.
@@ -57,7 +70,7 @@ export function useWalletAtaBalance(
     return () => {
       cancelled = true;
     };
-  }, [publicKey, mint, connection]);
+  }, [publicKey, mint, connection, refreshTrigger]);
 
   return state;
 }

@@ -37,8 +37,14 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
   // deposit — NOT what's already deposited into this market. Account
   // balance (capital) is shown alongside the order-form Size row as
   // "Account Bal:" instead.
+  //
+  // Pass `capital` as the refresh trigger so a deposit (which decreases
+  // wallet ATA balance and increases capital) re-fetches the wallet
+  // balance. Without this the bar would keep showing the pre-deposit
+  // number until the user reloaded the page.
   const { balance: walletBalance, decimals: walletDecimals } = useWalletAtaBalance(
     config?.collateralMint ?? null,
+    capital,
   );
   const displayBalance = walletBalance ?? 0n;
   const displayDecimals = walletDecimals ?? decimals;
