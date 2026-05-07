@@ -79,7 +79,7 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, symb
 
   return (
     <div className="mt-4 border border-[var(--border)] bg-[var(--panel-bg)] p-4">
-      <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-muted)]">
+      <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">
         Token Logo
       </p>
 
@@ -102,7 +102,7 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, symb
               <p className="text-[11px] text-[var(--accent)]">Logo uploaded</p>
               <button
                 onClick={() => { setLogoUrl(null); setError(null); }}
-                className="mt-1 text-[10px] text-[var(--text-dim)] underline hover:text-[var(--text-muted)]"
+                className="mt-1 text-[10px] text-[var(--text-secondary)] underline hover:text-[var(--text)]"
               >
                 Replace
               </button>
@@ -123,7 +123,7 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, symb
               >
                 {uploading ? "Uploading..." : "Upload Logo"}
               </button>
-              <p className="mt-1 text-[10px] text-[var(--text-dim)]">
+              <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
                 PNG, JPEG, WebP, or GIF. Max 2MB.
               </p>
             </>

@@ -134,7 +134,7 @@ export const StepReview: FC<StepReviewProps> = ({
 
       {/* Market Preview Card */}
       <div>
-        <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+        <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">
           Market Preview
         </p>
         <div className="border border-[var(--accent)]/20 bg-[var(--accent)]/[0.02] backdrop-blur">
@@ -150,20 +150,20 @@ export const StepReview: FC<StepReviewProps> = ({
                 >
                   {tokenSymbol}-PERP
                 </h3>
-                <p className="text-[10px] text-[var(--text-dim)]">
+                <p className="text-[10px] text-[var(--text-secondary)]">
                   Oracle: {oracleTypeLabel} · {oracleLabel}
                 </p>
-                <p className="text-[9px] text-[var(--text-dim)] font-mono mt-0.5">
+                <p className="text-[9px] text-[var(--text-secondary)] font-mono mt-0.5">
                   Mint: {mintAddress.slice(0, 8)}...{mintAddress.slice(-6)}
                 </p>
               </div>
             </div>
             <div className="text-right">
               <div className="flex items-center gap-1.5 justify-end">
-                <span className="border border-[var(--border)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--text-muted)]">
+                <span className="border border-[var(--border)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--text-secondary)]">
                   {tradingFeeBps} bps
                 </span>
-                <span className="border border-[var(--border)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--text-muted)]">
+                <span className="border border-[var(--border)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--text-secondary)]">
                   {maxLeverage}x
                 </span>
                 <span className="border border-[var(--accent)]/20 bg-[var(--accent)]/[0.06] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--accent)]">
@@ -191,7 +191,7 @@ export const StepReview: FC<StepReviewProps> = ({
           {hasSufficientBalance ? (
             <>
               <span className="text-[var(--long)]">✓</span>
-              <span className="text-[var(--text-muted)]">
+              <span className="text-[var(--text-secondary)]">
                 Your balance: {walletBalanceSol.toFixed(4)} SOL
               </span>
             </>
@@ -213,7 +213,7 @@ export const StepReview: FC<StepReviewProps> = ({
             <span className="text-[var(--long)] font-medium">✓ Devnet mode.</span>{" "}
             Your wallet will receive devnet {tokenSymbol} tokens automatically after the market is created.
           </p>
-          <p className="text-[9px] text-[var(--text-dim)]">
+          <p className="text-[9px] text-[var(--text-secondary)]">
             No tokens needed upfront — tokens are airdropped post-launch for testing.
           </p>
         </div>
@@ -224,7 +224,7 @@ export const StepReview: FC<StepReviewProps> = ({
             <span className="text-[var(--accent)] font-medium">ℹ Custom token.</span>{" "}
             You are the mint authority — tokens will not be auto-airdropped.
           </p>
-          <p className="text-[9px] text-[var(--text-dim)]">
+          <p className="text-[9px] text-[var(--text-secondary)]">
             After launch, mint tokens from your wallet and deposit them into the vault to enable trading.
           </p>
         </div>
@@ -232,23 +232,23 @@ export const StepReview: FC<StepReviewProps> = ({
 
       {/* Transaction Steps */}
       <div>
-        <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+        <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">
           Transaction Steps
         </p>
         <div className="border border-[var(--border)] bg-[var(--bg)] px-4 py-3 space-y-2">
           {TX_STEPS.map((step, i) => (
             <div key={i} className="flex items-start gap-2 text-[12px]">
-              <span className="text-[10px] font-mono text-[var(--text-dim)] mt-0.5 flex-shrink-0">{i + 1}.</span>
+              <span className="text-[10px] font-mono text-[var(--text-secondary)] mt-0.5 flex-shrink-0">{i + 1}.</span>
               <div className="min-w-0">
-                <span className="text-[var(--text-dim)]">{step.label}</span>
-                <span className="hidden sm:inline text-[10px] text-[var(--text-dim)]/60 ml-2">
+                <span className="text-[var(--text)]">{step.label}</span>
+                <span className="hidden sm:inline text-[10px] text-[var(--text-secondary)] ml-2">
                   — {step.detail}
                 </span>
               </div>
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[10px] text-[var(--text-dim)]">
+        <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
           {TX_STEPS.length} transactions — each requires a wallet signature.
           {" "}Step 1 is atomic: if it fails, no SOL is lost.
         </p>

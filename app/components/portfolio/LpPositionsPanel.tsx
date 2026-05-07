@@ -102,7 +102,7 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
               <p className="text-sm font-semibold text-[var(--text)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                 {displaySymbol}-PERP
               </p>
-              <p className="text-[10px] text-[var(--text-dim)] truncate">
+              <p className="text-[10px] text-[var(--text-secondary)] truncate">
                 {pos.poolMode === 0 ? "Insurance LP" : "Trading LP"}
               </p>
             </div>
@@ -119,7 +119,7 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
             >
               {formatUsd(pos.redeemable)}
             </p>
-            <p className="text-[10px] text-[var(--text-dim)]">
+            <p className="text-[10px] text-[var(--text-secondary)]">
               redeemable
             </p>
           </div>
@@ -128,7 +128,7 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
         {/* Details grid */}
         <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-4">
           <div>
-            <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">LP Balance</p>
+            <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">LP Balance</p>
             <p
               className="text-[12px] text-[var(--text-secondary)]"
               style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
@@ -138,7 +138,7 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
           </div>
 
           <div>
-            <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Pool Share</p>
+            <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Pool Share</p>
             <p
               className="text-[12px] text-[var(--text-secondary)]"
               style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
@@ -148,7 +148,7 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
           </div>
 
           <div>
-            <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Pool TVL</p>
+            <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Pool TVL</p>
             <p
               className="text-[12px] text-[var(--text-secondary)]"
               style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
@@ -158,7 +158,7 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
           </div>
 
           <div>
-            <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Withdraw</p>
+            <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Withdraw</p>
             {pos.cooldownElapsed ? (
               <p className="text-[12px] font-semibold text-[var(--long)]">
                 ✓ Ready
@@ -240,7 +240,7 @@ export function LpPositionsPanel({
           <span className="text-xl leading-none">⚠️</span>
           <div>
             <p className="text-[12px] font-semibold text-[var(--text-secondary)]">Unable to load LP positions</p>
-            <p className="mt-0.5 text-[11px] text-[var(--text-dim)]">Please try refreshing</p>
+            <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">Please try refreshing</p>
           </div>
           {onRetry && (
             <button
@@ -254,8 +254,8 @@ export function LpPositionsPanel({
       ) : positions.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-6 flex items-center justify-between gap-4">
           <div>
-            <p className="text-[12px] font-medium text-[var(--text-secondary)]">No LP positions</p>
-            <p className="mt-0.5 text-[11px] text-[var(--text-dim)]">
+            <p className="text-[12px] font-medium text-[var(--text)]">No LP positions</p>
+            <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
               Deposit into insurance pools to earn yield while backing the fund.
             </p>
           </div>

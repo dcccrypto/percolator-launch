@@ -75,7 +75,7 @@ export const MarketBookCard: FC = () => {
       {/* Header with hide control — lets the user collapse the order book
           when they prefer a cleaner trade view. Persists via localStorage. */}
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+        <span className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[var(--text)]">
           Order Book
         </span>
         <button
@@ -83,7 +83,7 @@ export const MarketBookCard: FC = () => {
           onClick={toggleBook}
           aria-label="Hide order book"
           title="Hide order book"
-          className="rounded-none border border-[var(--border)]/40 px-1.5 py-0.5 text-[10px] leading-none text-[var(--text-dim)] hover:border-[var(--accent)]/40 hover:text-[var(--text-secondary)] focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30"
+          className="rounded-none border border-[var(--border)]/40 px-1.5 py-0.5 text-[10px] leading-none text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30"
         >
           ×
         </button>
@@ -93,12 +93,12 @@ export const MarketBookCard: FC = () => {
       <div className="mb-2 grid grid-cols-3 gap-px border border-[var(--border)]/30">
         {/* Bid */}
         <div className="bg-[var(--bg)] p-2 text-center">
-          <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Bid</p>
+          <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">Bid</p>
           <p className="text-[11px] font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestBidE6)}</p>
         </div>
         {/* Oracle — subtle accent border + bg */}
         <div className="p-2 text-center border-x border-[var(--accent)]/20 bg-[var(--accent)]/[0.03]">
-          <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Oracle</p>
+          <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">Oracle</p>
           <p
             className="text-[13px] font-medium text-[var(--text)]"
             style={{ fontFamily: "var(--font-mono)" }}
@@ -108,7 +108,7 @@ export const MarketBookCard: FC = () => {
         </div>
         {/* Ask */}
         <div className="bg-[var(--bg)] p-2 text-center">
-          <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Ask</p>
+          <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">Ask</p>
           <p className="text-[11px] font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestAskE6)}</p>
         </div>
       </div>
@@ -116,10 +116,10 @@ export const MarketBookCard: FC = () => {
       {/* 2.2: Spread row */}
       {oraclePrice > 0n && (
         <div className="mb-3 flex items-center justify-between px-0.5">
-          <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--text-dim)] font-mono">Spread</span>
-          <span className="text-[9px] text-[var(--text-dim)] font-mono">
+          <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--text)] font-mono">Spread</span>
+          <span className="text-[9px] text-[var(--text)] font-mono">
             ${spreadUsd.toFixed(spreadUsd < 0.001 ? 6 : 4)}{" "}
-            <span className="text-[var(--text-dim)]/60">({spreadPct.toFixed(3)}%)</span>
+            <span className="text-[var(--text-secondary)]">({spreadPct.toFixed(3)}%)</span>
           </span>
         </div>
       )}
@@ -164,7 +164,7 @@ export const MarketBookCard: FC = () => {
       {lps.length > 0 && (
         <div>
           {/* Header */}
-          <div className="mb-1 flex gap-1 text-[8px] uppercase tracking-[0.1em] text-[var(--text-muted)] font-medium">
+          <div className="mb-1 flex gap-1 text-[8px] uppercase tracking-[0.1em] text-[var(--text)] font-medium">
             <span className="w-5">#</span>
             <span className="flex-1">L.P.</span>
             <span className="w-20 text-right">Capital</span>
@@ -204,7 +204,7 @@ export const MarketBookCard: FC = () => {
             {/* +N more row */}
             {hiddenLpCount > 0 && (
               <div className="py-1 text-center">
-                <span className="text-[9px] text-[var(--text-dim)]">+{hiddenLpCount} more</span>
+                <span className="text-[9px] text-[var(--text-secondary)]">+{hiddenLpCount} more</span>
               </div>
             )}
           </div>

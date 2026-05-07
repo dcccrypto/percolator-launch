@@ -114,7 +114,7 @@ export default function PortfolioPage() {
             // portfolio
           </div>
           <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
-            <span className="font-normal text-[var(--text-muted)]">Your </span>Positions
+            <span className="font-normal text-[var(--text)]">Your </span>Positions
           </h1>
           <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">View all your positions across markets</p>
           <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
@@ -140,7 +140,7 @@ export default function PortfolioPage() {
                 // portfolio
               </div>
               <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
-                <span className="font-normal text-[var(--text-muted)]">Your </span>Positions
+                <span className="font-normal text-[var(--text)]">Your </span>Positions
               </h1>
               <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
                 All positions across Percolator markets
@@ -176,7 +176,7 @@ export default function PortfolioPage() {
               {
                 label: "Total Deposited",
                 value: !walletConnected ? "—" : (loading || tokenMetasLoading) ? "\u2026" : `$${usdTotals.depositedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text-secondary)]",
+                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
               },
               {
                 label: "Unrealized PnL",
@@ -187,7 +187,7 @@ export default function PortfolioPage() {
               {
                 label: "LP Value",
                 value: !walletConnected ? "—" : lpPositions.loading ? "\u2026" : `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: !walletConnected ? "text-[var(--text-dim)]" : lpPositions.totalRedeemable > 0 ? "text-[var(--cyan)]" : "text-[var(--text-dim)]",
+                color: !walletConnected ? "text-[var(--text-dim)]" : lpPositions.totalRedeemable > 0 ? "text-[var(--cyan)]" : "text-[var(--text-secondary)]",
                 sub: walletConnected && lpPositions.positions.length > 0
                   ? `${lpPositions.positions.length} pool${lpPositions.positions.length > 1 ? "s" : ""}`
                   : undefined,
@@ -201,7 +201,7 @@ export default function PortfolioPage() {
               },
             ].map((stat, idx, arr) => (
               <div key={stat.label} className={`bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]${idx === arr.length - 1 && arr.length % 2 !== 0 ? " col-span-2 sm:col-span-1" : ""}`}>
-                <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">{stat.label}</p>
+                <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">{stat.label}</p>
                 <p className={`text-xl font-bold tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                   {stat.value}
                 </p>
@@ -337,31 +337,31 @@ export default function PortfolioPage() {
                       {/* Row 2: Details grid */}
                       <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-6">
                         <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Size</p>
+                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Size</p>
                           <p className="text-[12px] text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {formatTokenAmount(sizeAbs, getDecimals(pos))}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Entry</p>
+                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Entry</p>
                           <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {formatUsdPriceE6(posEntry)}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Mark Price</p>
+                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Mark Price</p>
                           <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {oraclePriceE6 > 0n ? formatUsdPriceE6(oraclePriceE6) : "—"}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Capital</p>
+                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Capital</p>
                           <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                             {formatTokenAmount(posCapital, getDecimals(pos))}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]" title={RISK_LEVERAGE_TITLE}>
+                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]" title={RISK_LEVERAGE_TITLE}>
                             {RISK_LEVERAGE_LABEL}
                           </p>
                           <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
@@ -369,7 +369,7 @@ export default function PortfolioPage() {
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">Liq. Price</p>
+                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Liq. Price</p>
                           <div className="flex items-center gap-1.5">
                             {/* Liquidation severity dot */}
                             {hasPosition && (
@@ -404,14 +404,14 @@ export default function PortfolioPage() {
                       {/* Liquidation distance bar */}
                       {hasPosition && liquidationDistancePct < 100 && (
                         <div className="mt-3">
-                          <div className="flex items-center justify-between text-[9px] text-[var(--text-dim)]">
+                          <div className="flex items-center justify-between text-[9px] text-[var(--text)]">
                             <span>Liquidation Distance</span>
                             <span className={
                               severity === "danger"
                                 ? "font-bold text-[var(--short)]"
                                 : severity === "warning"
                                 ? "font-bold text-[var(--warning)]"
-                                : "text-[var(--text-muted)]"
+                                : "text-[var(--text-secondary)]"
                             }>
                               {liquidationDistancePct.toFixed(1)}%
                             </span>

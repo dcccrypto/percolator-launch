@@ -77,7 +77,7 @@ export const CostEstimate: FC<CostEstimateProps> = ({
   return (
     <div className={`border border-[var(--border)] bg-[var(--bg)] ${className}`}>
       <div className="px-4 py-3 border-b border-[var(--border)]">
-        <h4 className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+        <h4 className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text)]">
           Cost Estimate
         </h4>
       </div>
@@ -85,17 +85,17 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       {/* SOL Costs */}
       <div className="px-4 py-3 space-y-2 border-b border-[var(--border)]">
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text-muted)]">
+          <span className="text-[var(--text-secondary)]">
             Slab account rent ({estimate.tierLabel}, {estimate.tierSlots} slots)
           </span>
           <span className="font-mono text-[var(--text)]">{estimate.slabRentSol} SOL</span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text-muted)]">Token accounts & mints</span>
+          <span className="text-[var(--text-secondary)]">Token accounts & mints</span>
           <span className="font-mono text-[var(--text)]">{estimate.tokenAccountRentSol} SOL</span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text-muted)]">Transaction fees (5 txs)</span>
+          <span className="text-[var(--text-secondary)]">Transaction fees (5 txs)</span>
           <span className="font-mono text-[var(--text)]">{estimate.txFeeSol} SOL</span>
         </div>
         <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
@@ -109,19 +109,19 @@ export const CostEstimate: FC<CostEstimateProps> = ({
       {/* Token Costs */}
       <div className="px-4 py-3 space-y-2">
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text-muted)]">Vault Seed (required)</span>
+          <span className="text-[var(--text-secondary)]">Vault Seed (required)</span>
           <span className="font-mono text-[var(--text)]">
             {estimate.seedTokens.toLocaleString()} {tokenSymbol}
           </span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text-muted)]">LP Collateral</span>
+          <span className="text-[var(--text-secondary)]">LP Collateral</span>
           <span className="font-mono text-[var(--text)]">
             {estimate.lpTokens > 0 ? estimate.lpTokens.toLocaleString() : "—"} {tokenSymbol}
           </span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text-muted)]">Insurance Fund</span>
+          <span className="text-[var(--text-secondary)]">Insurance Fund</span>
           <span className="font-mono text-[var(--text)]">
             {estimate.insTokens > 0 ? estimate.insTokens.toLocaleString() : "—"} {tokenSymbol}
           </span>
@@ -133,7 +133,7 @@ export const CostEstimate: FC<CostEstimateProps> = ({
               {estimate.totalTokens > 0 ? estimate.totalTokens.toLocaleString() : "—"} {tokenSymbol}
             </span>
             {estimate.tokenUsdValue !== null && estimate.tokenUsdValue > 0 && (
-              <p className="text-[10px] text-[var(--text-dim)]">
+              <p className="text-[10px] text-[var(--text-secondary)]">
                 ≈ ${estimate.tokenUsdValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
               </p>
             )}

@@ -370,7 +370,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
       <div>
         <label
           htmlFor="token-mint"
-          className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] mb-2"
+          className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-2"
         >
           Token Mint Address
         </label>
@@ -445,7 +445,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
                   {effectiveMeta.name}
                 </span>
               </p>
-              <p className="text-[10px] font-mono text-[var(--text-dim)] truncate">
+              <p className="text-[10px] font-mono text-[var(--text-secondary)] truncate">
                 {debounced.slice(0, 6)}...{debounced.slice(-4)}
               </p>
               {mirrorMeta && !isNativeDevnetMint && (
@@ -472,7 +472,7 @@ export const StepTokenSelect: FC<StepTokenSelectProps> = ({
 
       {/* Balance */}
       {mintValid && !balanceLoading && balance !== null && effectiveMeta && (
-        <div className="text-[11px] font-mono text-[var(--text-dim)]">
+        <div className="text-[11px] font-mono text-[var(--text-secondary)]">
           Wallet balance:{" "}
           <span className={balance > 0n ? "text-[var(--text)]" : "text-[var(--short)]"}>
             {formatHumanAmount(balance, effectiveMeta.decimals)} {effectiveMeta.symbol}

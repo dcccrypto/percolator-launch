@@ -72,7 +72,7 @@ export const WizardProgress: FC<WizardProgressProps> = ({
                       ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.15] text-[var(--accent)]"
                       : isActive
                         ? "border-2 border-[var(--accent)] bg-[var(--accent)]/[0.1] text-[var(--accent)] ring-2 ring-[var(--accent)]/20"
-                        : "border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-dim)]"
+                        : "border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)]"
                   }`}
                 >
                   {isCompleted ? "✓" : stepNum}
@@ -84,7 +84,7 @@ export const WizardProgress: FC<WizardProgressProps> = ({
                       ? "text-[var(--accent)] group-hover:text-[var(--accent)]"
                       : isActive
                         ? "text-[var(--text)]"
-                        : "text-[var(--text-dim)]"
+                        : "text-[var(--text-secondary)]"
                   }`}
                 >
                   {label}

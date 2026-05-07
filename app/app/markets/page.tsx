@@ -580,7 +580,7 @@ function MarketsPageInner() {
                 // browse
               </div>
               <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
-                <span className="font-normal text-[var(--text)]/50">All </span>Markets
+                <span className="font-normal text-[var(--text)]">All </span>Markets
               </h1>
               <p className="mt-2 text-[13px] text-[var(--text-secondary)]">perpetual futures, pick your poison.</p>
             </div>
@@ -609,7 +609,7 @@ function MarketsPageInner() {
               {hasSearch && (
                 <button
                   onClick={clearSearch}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)] hover:text-[var(--text-secondary)] p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
                   title="Clear search"
                   aria-label="Clear search"
                 >
@@ -635,7 +635,7 @@ function MarketsPageInner() {
                       "rounded-sm px-3 py-2 sm:py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[40px]",
                       sortBy === opt.key
                         ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                        : "text-[var(--text-muted)] hover:text-[var(--text)]",
+                        : "text-[var(--text-secondary)] hover:text-[var(--text)]",
                     ].join(" ")}
                     aria-pressed={sortBy === opt.key}
                     aria-label={`Sort by ${opt.label}`}
@@ -661,7 +661,7 @@ function MarketsPageInner() {
 
           {/* Row 2: Filter pills — single scrollable row on mobile */}
           <div className="mb-6 flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <span className="hidden sm:inline-block text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text-muted)] shrink-0">FILTER:</span>
+            <span className="hidden sm:inline-block text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text)] shrink-0">FILTER:</span>
 
             {/* USD/Token toggle */}
             <div className="flex gap-1 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5 shrink-0" role="group" aria-label="Display currency">
@@ -671,7 +671,7 @@ function MarketsPageInner() {
                   "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
                   !showUsd
                     ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]",
+                    : "text-[var(--text-secondary)] hover:text-[var(--text)]",
                 ].join(" ")}
                 aria-pressed={!showUsd}
                 aria-label="Display in tokens"
@@ -684,7 +684,7 @@ function MarketsPageInner() {
                   "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
                   showUsd
                     ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]",
+                    : "text-[var(--text-secondary)] hover:text-[var(--text)]",
                 ].join(" ")}
                 aria-pressed={showUsd}
                 aria-label="Display in USD"
@@ -712,7 +712,7 @@ function MarketsPageInner() {
                     "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
                     leverageFilter === opt.key
                       ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text)]",
+                      : "text-[var(--text-secondary)] hover:text-[var(--text)]",
                   ].join(" ")}
                   aria-pressed={leverageFilter === opt.key}
                   aria-label={`Filter leverage ${opt.label}`}
@@ -740,7 +740,7 @@ function MarketsPageInner() {
                     "rounded-sm px-2.5 py-1.5 sm:py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition-all duration-200 min-h-[36px] sm:min-h-[32px]",
                     oracleFilter === opt.key
                       ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                      : "text-[var(--text-muted)] hover:text-[var(--text)]",
+                      : "text-[var(--text-secondary)] hover:text-[var(--text)]",
                   ].join(" ")}
                   aria-pressed={oracleFilter === opt.key}
                   aria-label={`Filter oracle ${opt.label}`}
@@ -835,7 +835,7 @@ function MarketsPageInner() {
                 {/* GH#1775: sticky inside overflow-x-auto is broken by CSS spec (overflow clips stacking context).
                     Removed sticky top-0 z-10 — header scrolls with content on mobile.
                     Desktop (sm+) is unaffected since the table fits in viewport width. */}
-                <div className="grid w-full min-w-[500px] sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(50px,0.6fr)_minmax(75px,0.8fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 border-b border-[var(--border)] bg-[var(--bg-surface)] px-3 sm:px-5 py-2.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+                <div className="grid w-full min-w-[500px] sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(50px,0.6fr)_minmax(75px,0.8fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 border-b border-[var(--border)] bg-[var(--bg-surface)] px-3 sm:px-5 py-2.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text)]">
                   <div>token</div>
                   <div className="text-right">price</div>
                   <div className="hidden sm:block text-right">OI</div>
@@ -990,7 +990,7 @@ function MarketsPageInner() {
                             {displaySymbol ? `${displaySymbol}/USD` : shortenAddress(m.slabAddress)}
                           </span>
                           {m.isAdminOracle && (
-                            <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-dim)]">manual</span>
+                            <span className="border border-[var(--text-dim)]/30 bg-[var(--text-dim)]/[0.08] px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">manual</span>
                           )}
                           {/* GH#1233: warn when admin-oracle market has no price — users cannot open positions */}
                           {m.isAdminOracle && lastPrice === null && (
@@ -1003,7 +1003,7 @@ function MarketsPageInner() {
                             </span>
                           )}
                         </div>
-                        <div className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+                        <div className="text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                           {displayName ? `${displayName} · ${shortenAddress(subtitleAddress)}` : shortenAddress(subtitleAddress)}
                         </div>
                       </div>
@@ -1033,7 +1033,7 @@ function MarketsPageInner() {
                 </div>
               ) : filtered.length > 20 ? (
                 <div className="flex items-center justify-center gap-3 py-4">
-                  <span className="text-[11px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+                  <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                     all {filtered.length} market{filtered.length !== 1 ? "s" : ""} loaded
                   </span>
                   <button

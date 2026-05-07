@@ -110,7 +110,7 @@ function Tabs({ tabs, children, defaultTab }: { tabs: string[]; children: React.
               className={`shrink-0 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.15em] transition-colors border-b-2 ${
                 active === i
                   ? "border-[var(--accent)] text-[var(--accent)]"
-                  : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border)]"
+                  : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)] hover:border-[var(--border)]"
               }`}
             >
               {label}
