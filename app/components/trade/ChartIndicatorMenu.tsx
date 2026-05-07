@@ -167,7 +167,7 @@ export const ChartIndicatorMenu: FC<ChartIndicatorMenuProps> = ({
           type="button"
           onClick={handleClearAll}
           disabled={indicators.length === 0}
-          className="w-full px-3 py-2 text-xs text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[var(--bg-surface)] border-t border-[var(--border)] disabled:cursor-not-allowed disabled:opacity-40"
+          className="w-full px-3 py-2 text-xs text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--bg-surface)] border-t border-[var(--border)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           Clear all
         </button>
@@ -195,7 +195,7 @@ const ChartIndicatorRow: FC<ChartIndicatorRowProps> = ({
 }) => {
   const enabled = config !== null;
   return (
-    <div className="px-3 py-2 border-b border-[var(--border)]/50 last:border-b-0">
+    <div className="group px-3 py-2 border-b border-[var(--border)]/50 last:border-b-0 transition-colors hover:bg-[var(--bg-surface)]">
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
@@ -205,9 +205,12 @@ const ChartIndicatorRow: FC<ChartIndicatorRowProps> = ({
         >
           <ToggleSwitch on={enabled} />
           <span
-            className={
-              enabled ? "text-[var(--text)]" : "text-[var(--text-dim)]"
-            }
+            className={[
+              "transition-colors",
+              enabled
+                ? "text-[var(--text)]"
+                : "text-[var(--text-secondary)] group-hover:text-[var(--text)]",
+            ].join(" ")}
           >
             {INDICATOR_LABELS[kind]}
           </span>

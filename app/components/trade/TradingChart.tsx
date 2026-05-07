@@ -827,7 +827,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
                 className={`rounded-none px-1.5 sm:px-2 py-1 text-xs transition-colors ${
                   timeframe === tf
                     ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                    : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text)]"
                 }`}
               >
                 {tf}
