@@ -294,8 +294,8 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
           168 markets created on devnet in 2 weeks, all green. Mainnet is
-          deployed but private — no public trading until the external
-          audit clears.
+          deployed but private — no public trading until an external audit
+          (not yet started) clears.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -331,8 +331,8 @@ function Slide03Traction(_: SlideProps) {
             </div>
             <div className="pitch-traction-network-meta mono">
               Live testing on Solana devnet. Mainnet program is deployed
-              and audit-pending — closed to public trading until Q3 audit
-              completion.
+              but audit-pending (audit not yet started) — closed to public
+              trading until it clears.
             </div>
           </div>
         </div>
@@ -389,7 +389,8 @@ function Slide04Sprint(_: SlideProps) {
               <p className="pitch-solution-desc">
                 Four programs upgraded and deployed. SOL/USDC Hyperp market
                 created against a pinned Raydium CLMM pool, running today
-                in lab mode, gated until external audit completes in Q3.
+                in lab mode, gated until an external audit (not yet
+                started) clears.
               </p>
             </div>
           </div>
@@ -445,7 +446,8 @@ function Slide05Product(_: SlideProps) {
         <h2 className="pitch-title">
           Closed beta on Solana mainnet today: connect wallet, deposit
           USDC, open a leveraged long, close at PnL, fees split four
-          ways on-chain. Public access opens after the external audit.
+          ways on-chain. Public access opens once the external audit
+          (planned post-funding) clears.
         </h2>
 
         <div className="pflow-wrap">
@@ -922,10 +924,11 @@ function Slide09WhyNow(_: SlideProps) {
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          GTM: closed beta on mainnet now → external audit through Q3
-          → permissionless public launch with the first 10 creator-led
-          markets seeded by revenue-share rebates → Jupiter / Birdeye /
-          pump.fun routing once on-chain volume validates the model.
+          GTM: 168-market devnet sprint complete → audit funding +
+          kickoff (firm engaged once funded) → audit clears → public
+          mainnet launch with first 10 creator-led markets seeded by
+          revenue-share rebates → Jupiter / Birdeye / pump.fun routing
+          once on-chain volume validates.
         </div>
       </div>
     </div>
@@ -946,8 +949,8 @@ function Slide10Roadmap(_: SlideProps) {
         <div className="pitch-roadmap">
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q2 2026</div>
-            <div className="pitch-roadmap-name">Closed beta · audit kickoff</div>
-            <div className="pitch-roadmap-desc">Mainnet program v12.17 live to closed beta, external audit started, mobile beta</div>
+            <div className="pitch-roadmap-name">Devnet · audit prep</div>
+            <div className="pitch-roadmap-desc">168-market devnet sprint shipped, mainnet program deployed, audit firm shortlisted (not yet engaged)</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
@@ -1003,8 +1006,8 @@ function Slide11Risks(_: SlideProps) {
           <div className="pitch-risks-card">
             <div className="pitch-risks-name">Audit timing</div>
             <p className="pitch-risks-desc">
-              Public mainnet trading is gated on the Q3 external audit;
-              any slip pushes launch.
+              Public mainnet trading is gated on a not-yet-started
+              external audit; timing depends on funding + firm engagement.
             </p>
             <div className="pitch-risks-mitigation-label mono">Mitigation</div>
             <p className="pitch-risks-mitigation">
