@@ -139,6 +139,10 @@ function Slide01OneLiner(_: SlideProps) {
             <span className="pitch-hero-bullet-num mono">15M+</span>
             <span className="pitch-hero-bullet-text">tokens incumbents refuse to list</span>
           </li>
+          <li>
+            <span className="pitch-hero-bullet-num mono">Apache 2.0</span>
+            <span className="pitch-hero-bullet-text">fully open source · 8 public repos · fork it tomorrow</span>
+          </li>
         </ul>
         <div className="pitch-divider" />
         <p className="pitch-url">percolator.trade</p>
@@ -501,9 +505,9 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          On devnet today: connect wallet, deposit USDC, open a leveraged
-          long, close at PnL, fees split four ways on-chain in a single
-          transaction.
+          Closed beta on Solana mainnet today: connect wallet, deposit
+          USDC, open a leveraged long, close at PnL, fees split four
+          ways on-chain. Public access opens after the external audit.
         </h2>
 
         <div className="pflow-wrap">
@@ -598,7 +602,7 @@ function Slide05Product(_: SlideProps) {
 
         <div className="pitch-create-footer">
           Position is a Token-2022 NFT. First transferable perp
-          position on Solana. Live demo: percolator.trade (devnet).
+          position on Solana. Closed beta on mainnet at percolator.trade.
         </div>
       </div>
     </div>
@@ -980,10 +984,10 @@ function Slide09WhyNow(_: SlideProps) {
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          GTM: devnet now → audit through Q3 → permissionless mainnet
-          launch with the first 10 creator-launched markets seeded by
-          revenue-share rebates → Jupiter / Birdeye / pump.fun routing
-          once on-chain volume validates the model.
+          GTM: closed beta on mainnet now → external audit through Q3
+          → permissionless public launch with the first 10 creator-led
+          markets seeded by revenue-share rebates → Jupiter / Birdeye /
+          pump.fun routing once on-chain volume validates the model.
         </div>
       </div>
     </div>
@@ -1004,8 +1008,8 @@ function Slide10Roadmap(_: SlideProps) {
         <div className="pitch-roadmap">
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q2 2026</div>
-            <div className="pitch-roadmap-name">Devnet live · audit kickoff</div>
-            <div className="pitch-roadmap-desc">SOL/USDC live, mobile beta, external audit started</div>
+            <div className="pitch-roadmap-name">Closed beta · audit kickoff</div>
+            <div className="pitch-roadmap-desc">Mainnet program v12.17 live to closed beta, external audit started, mobile beta</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
@@ -1162,15 +1166,16 @@ function Slide13Contact(_: SlideProps) {
       <div className="pitch-slide-inner pitch-center">
         <div className="pitch-label">Contact</div>
         <h2 className="pitch-title">
-          The code is open, the market is live on devnet, and the door is
-          open at percolator.trade.
+          The code is fully open source under Apache 2.0, the market is
+          in closed beta on mainnet, and the door is open at
+          percolator.trade.
         </h2>
         <p
           className="pitch-body-text"
           style={{ maxWidth: "640px", marginBottom: "2rem" }}
         >
-          Try the live market on devnet, fork the code under Apache 2.0,
-          or DM us on X. We answer.
+          The closed beta is small and pre-audit. Fork the code under
+          Apache 2.0 across all 8 public repos, or DM us on X. We answer.
         </p>
         <div className="pitch-contact-grid">
           <div className="pitch-contact-card">
@@ -1199,23 +1204,31 @@ function SlideTolyStory(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Toly Signal</div>
+        <div className="pitch-label">Origin · Toly Signal</div>
         <h2 className="pitch-title">
-          Anatoly Yakovenko (Solana co-founder) authored the H + A/K
-          risk-engine math. Percolator is the team that ships it on
-          Solana mainnet, and both co-founders have each won one of his
-          public bounties along the way.
+          Solana co-founder Anatoly Yakovenko founded Percolator and
+          maintains the reference program publicly. We&apos;re the team
+          taking it from spec to production on Solana mainnet.
         </h2>
 
         <div className="pitch-toly-grid">
           <div className="pitch-toly-card">
-            <div className="pitch-toly-card-label mono">Authored</div>
-            <div className="pitch-toly-card-name">H + A/K math</div>
+            <div className="pitch-toly-card-label mono">Founded</div>
+            <div className="pitch-toly-card-name">
+              <a
+                className="pitch-toly-card-link"
+                href="https://github.com/aeyakovenko/percolator-prog"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                aeyakovenko/percolator-prog
+              </a>
+            </div>
             <p className="pitch-toly-card-desc">
-              Toly&apos;s open research on haircut + lazy-overhang
-              settlement for stressed perp vaults. Percolator took it
-              from spec to production, with 457 Kani formal proofs
-              verifying the implementation.
+              Toly&apos;s reference implementation of the Percolator risk
+              engine, actively maintained on his own GitHub with security
+              audits and 113 Kani proofs. We took his repo and built the
+              production system on Solana mainnet around it.
             </p>
           </div>
           <div className="pitch-toly-card pitch-toly-card-bounty">
@@ -1238,9 +1251,9 @@ function SlideTolyStory(_: SlideProps) {
         </div>
 
         <p className="pitch-toly-footer">
-          We don&apos;t claim endorsement. We cite this because the
-          bounties are the strongest external read we could get on
-          whether our implementation of his math is correct.
+          We don&apos;t claim endorsement. We cite the founder + bounties
+          because they&apos;re the strongest external read on whether
+          our implementation of his protocol is correct.
         </p>
       </div>
     </div>
@@ -2505,6 +2518,18 @@ export default function PitchPage() {
           font-weight: 700;
           color: #fff;
           margin-bottom: 0.6rem;
+        }
+
+        .pitch-toly-card-link {
+          color: inherit;
+          text-decoration: none;
+          border-bottom: 1px dotted rgba(34, 211, 238, 0.5);
+          transition: color 200ms ease, border-color 200ms ease;
+        }
+
+        .pitch-toly-card-link:hover {
+          color: #22D3EE;
+          border-bottom-color: rgba(34, 211, 238, 0.9);
         }
 
         .pitch-toly-card-desc {
