@@ -17,7 +17,7 @@ export const OracleBadge: FC<OracleBadgeProps> = ({ type, label, feedId }) => {
     return (
       <div className="flex items-center gap-2 border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5">
         <span className="h-3.5 w-3.5 animate-spin border border-[var(--border)] border-t-[var(--accent)]" />
-        <span className="text-[11px] text-[var(--text-muted)]">Detecting oracle source...</span>
+        <span className="text-[11px] text-[var(--text-secondary)]">Detecting oracle source...</span>
       </div>
     );
   }
@@ -65,7 +65,7 @@ export const OracleBadge: FC<OracleBadgeProps> = ({ type, label, feedId }) => {
           {config.prefix} {label || "Unknown"}
         </span>
         {feedId && (
-          <p className="text-[10px] text-[var(--text-dim)] font-mono truncate mt-0.5">
+          <p className="text-[10px] text-[var(--text-secondary)] font-mono truncate mt-0.5">
             {feedId.length > 20 ? `${feedId.slice(0, 10)}...${feedId.slice(-6)}` : feedId}
           </p>
         )}

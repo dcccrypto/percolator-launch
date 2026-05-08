@@ -61,7 +61,7 @@ export const StepParameters: FC<StepParametersProps> = ({
     <div className="space-y-6">
       {/* Slab Tier */}
       <div>
-        <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] mb-3">
+        <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-3">
           Slab Tier
         </label>
         <SlabTierPicker value={slabTier} onChange={onSlabTierChange} />
@@ -80,14 +80,14 @@ export const StepParameters: FC<StepParametersProps> = ({
       {/* Leverage (derived, read-only) */}
       <div className="border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]">
+          <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)]">
             Max Leverage
           </span>
           <span className="text-[14px] font-bold text-[var(--text)]">
             {maxLeverage}x
           </span>
         </div>
-        <p className="text-[10px] text-[var(--text-dim)] mt-1">
+        <p className="text-[10px] text-[var(--text-secondary)] mt-1">
           Auto from margin: {initialMarginBps} bps ({(initialMarginBps / 100).toFixed(0)}%)
         </p>
       </div>
@@ -108,9 +108,9 @@ export const StepParameters: FC<StepParametersProps> = ({
       {isMainnet && (
         <div className="border border-[var(--accent)]/30 bg-[var(--accent)]/[0.04] px-4 py-3 text-[11px] space-y-1">
           <p className="text-[var(--accent)] font-medium">⚡ Mainnet Phase 1 Guards Active</p>
-          <p className="text-[var(--text-muted)]">• $10K OI cap per market during beta</p>
-          <p className="text-[var(--text-muted)]">• 2x max leverage enforced on-chain</p>
-          <p className="text-[var(--text-muted)]">• Guards auto-lift when caps are raised by DAO</p>
+          <p className="text-[var(--text)]">• $10K OI cap per market during beta</p>
+          <p className="text-[var(--text)]">• 2x max leverage enforced on-chain</p>
+          <p className="text-[var(--text)]">• Guards auto-lift when caps are raised by DAO</p>
         </div>
       )}
 
@@ -125,7 +125,7 @@ export const StepParameters: FC<StepParametersProps> = ({
         <div>
           <label
             htmlFor="admin-price"
-            className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] mb-2"
+            className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-2"
           >
             Initial Price (admin oracle)
           </label>
@@ -137,7 +137,7 @@ export const StepParameters: FC<StepParametersProps> = ({
             placeholder="1.000000"
             className="w-full border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[12px] font-mono text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)]/40 focus:outline-none"
           />
-          <p className="mt-1 text-[10px] text-[var(--text-dim)]">
+          <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
             This sets the starting mark price. Update via your crank.
           </p>
         </div>
@@ -147,11 +147,11 @@ export const StepParameters: FC<StepParametersProps> = ({
       <div>
         <label
           htmlFor="lp-collateral"
-          className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] mb-2"
+          className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-2"
         >
           Seed Deposit (LP collateral){" "}
           {tokenSymbol && (
-            <span className="normal-case tracking-normal text-[var(--text-dim)]">
+            <span className="normal-case tracking-normal text-[var(--text-secondary)]">
               in {tokenSymbol}
             </span>
           )}
@@ -165,7 +165,7 @@ export const StepParameters: FC<StepParametersProps> = ({
           className="w-full border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[12px] text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)]/40 focus:outline-none"
         />
         {walletBalance && (
-          <p className="mt-1 text-[10px] font-mono text-[var(--text-dim)]">
+          <p className="mt-1 text-[10px] font-mono text-[var(--text-secondary)]">
             Wallet balance: {walletBalance} {tokenSymbol}
           </p>
         )}
@@ -175,11 +175,11 @@ export const StepParameters: FC<StepParametersProps> = ({
       <div>
         <label
           htmlFor="insurance-amount"
-          className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] mb-2"
+          className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-2"
         >
           Insurance Fund Seed{" "}
           {tokenSymbol && (
-            <span className="normal-case tracking-normal text-[var(--text-dim)]">
+            <span className="normal-case tracking-normal text-[var(--text-secondary)]">
               in {tokenSymbol}
             </span>
           )}
@@ -192,7 +192,7 @@ export const StepParameters: FC<StepParametersProps> = ({
           placeholder="100"
           className="w-full border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[12px] text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)]/40 focus:outline-none"
         />
-        <p className="mt-1 text-[10px] text-[var(--text-dim)]">
+        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
           Minimum: 100 tokens
         </p>
       </div>

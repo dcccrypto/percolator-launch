@@ -62,7 +62,7 @@ export const SlabTierPicker: FC<SlabTierPickerProps> = ({ value, onChange }) => 
                 >
                   {tier.label}
                 </span>
-                <p className="text-[10px] text-[var(--text-dim)] mt-0.5">
+                <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">
                   {TIER_DESCRIPTIONS[key]} · {tier.maxAccounts} slots
                 </p>
               </div>

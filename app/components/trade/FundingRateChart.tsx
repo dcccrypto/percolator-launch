@@ -250,7 +250,7 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
   return (
     <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+        <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text)]">
           Funding Rate (24h)
         </h3>
         <div className={`text-right transition-opacity duration-100 ${hoveredPoint ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
@@ -258,7 +258,7 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
             {(hoveredPoint?.hourlyRatePercent ?? 0) >= 0 ? "+" : ""}
             {(hoveredPoint?.hourlyRatePercent ?? 0).toFixed(4)}%/h
           </div>
-          <div className="text-[10px] text-[var(--text-dim)]">
+          <div className="text-[10px] text-[var(--text-secondary)]">
             {hoveredPoint ? new Date(hoveredPoint.timestamp).toLocaleString() : "\u00A0"}
           </div>
         </div>

@@ -123,18 +123,18 @@ const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol,
           <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-[var(--text)]">Add Margin</span>
           <button
             onClick={onClose}
-            className="text-[var(--text-dim)] hover:text-[var(--text)] transition-colors"
+            className="text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
           >
             ×
           </button>
         </div>
 
-        <p className="mb-3 text-[10px] text-[var(--text-dim)] leading-relaxed">
+        <p className="mb-3 text-[10px] text-[var(--text-secondary)] leading-relaxed">
           Deposit additional collateral to increase your margin and reduce liquidation risk.
         </p>
 
         <div className="mb-2 flex flex-col gap-1">
-          <label className="text-[9px] uppercase tracking-[0.12em] text-[var(--text-dim)]">
+          <label className="text-[9px] uppercase tracking-[0.12em] text-[var(--text)]">
             Amount ({symbol})
           </label>
           <input
@@ -162,7 +162,7 @@ const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol,
           <p className="mt-2 text-[10px] text-[var(--short)]">{error}</p>
         )}
         {lastSig && (
-          <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+          <p className="mt-2 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
             Tx: {lastSig.slice(0, 16)}…
           </p>
         )}
@@ -223,8 +223,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex flex-col items-center py-6 text-center">
-          <p className="text-[11px] font-medium text-[var(--text-muted)]">No open position</p>
-          <p className="mt-1.5 text-[10px] text-[var(--text-dim)] leading-relaxed max-w-[240px]">
+          <p className="text-[11px] font-medium text-[var(--text)]">No open position</p>
+          <p className="mt-1.5 text-[10px] text-[var(--text-secondary)] leading-relaxed max-w-[240px]">
             Connect wallet and trade to get started.
           </p>
           {/* 3.5: CTA for no-wallet state */}
@@ -395,8 +395,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {!hasPosition ? (
         /* 3.5: Improved empty state */
         <div className="p-3 flex flex-col items-center py-6 text-center">
-          <p className="text-[11px] font-medium text-[var(--text-muted)]">No open position</p>
-          <p className="mt-1.5 text-[10px] text-[var(--text-dim)] leading-relaxed max-w-[240px]">
+          <p className="text-[11px] font-medium text-[var(--text)]">No open position</p>
+          <p className="mt-1.5 text-[10px] text-[var(--text-secondary)] leading-relaxed max-w-[240px]">
             {account.capital > 0n
               ? "Open a position using the trade form."
               : "Connect wallet and trade to get started."}
@@ -484,58 +484,58 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div className="divide-y divide-[var(--border)]/30">
               {/* 5.8: Dual contract+USD size */}
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Size</span>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Size</span>
                 <div className="flex flex-col items-end gap-0.5">
                   <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
                     {formatTokenAmount(absPosition, decimals)} {symbol}
                   </span>
                   {priceUsd != null && priceUsd > 0 && (
-                    <span className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+                    <span className="text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                       ${(Number(absPosition) / 10 ** decimals * priceUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   )}
                 </div>
               </div>
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Entry Price</span>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Entry Price</span>
                 <span className="text-[11px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
                   {formatUsdPriceE6(entryPriceE6)}
                 </span>
               </div>
               {/* 3.4: Funding/8h inline — replaces the entry price row area */}
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Funding/8h</span>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Funding/8h</span>
                 <div className="flex items-center gap-2">
                   <span className={`text-[11px] font-medium ${fundingRateColor}`} style={{ fontFamily: "var(--font-mono)" }}>
                     {fundingRate8hDisplay}
                   </span>
                   {fundingCountdown && (
-                    <span className="text-[9px] text-[var(--text-dim)]">
+                    <span className="text-[9px] text-[var(--text-secondary)]">
                       ({fundingCountdown})
                     </span>
                   )}
                 </div>
               </div>
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Market Price</span>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Market Price</span>
                 <span className={`text-[11px] ${hasValidMark ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
                   {hasValidMark ? formatUsdPriceE6(currentPriceE6) : "--"}
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Liq. Price</span>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Liq. Price</span>
                 <span className={`text-[11px] font-medium ${liqPriceColor}`} style={{ fontFamily: "var(--font-mono)" }}>
                   {formatLiqPrice(liqPriceE6)}
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Margin Health</span>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Margin Health</span>
                 <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                   {marginHealthStr}
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]" title={RISK_LEVERAGE_TITLE}>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]" title={RISK_LEVERAGE_TITLE}>
                   {RISK_LEVERAGE_LABEL}
                 </span>
                 <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
@@ -544,7 +544,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </div>
               {savedOrderLeverage != null && (
                 <div className="flex items-center justify-between py-1.5">
-                  <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]" title={ORDER_LEVERAGE_TITLE}>
+                  <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]" title={ORDER_LEVERAGE_TITLE}>
                     Order Lev.
                   </span>
                   <span className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
@@ -553,7 +553,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 </div>
               )}
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Est. Funding (24h)</span>
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Est. Funding (24h)</span>
                 <span className={`text-[11px] font-medium ${estFundingColor}`} style={{ fontFamily: "var(--font-mono)" }}>
                   {estFunding24hDisplay}
                 </span>
@@ -734,7 +734,7 @@ const PnlSection: FC<PnlSectionProps> = ({
       } ${flashClass}`}
     >
       <div className="flex items-start justify-between">
-        <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Unrealized PnL</span>
+        <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Unrealized PnL</span>
         <div className="text-right">
           {hasValidMark ? (
             <div className="flex items-baseline gap-1.5">
@@ -786,7 +786,7 @@ const PnlSection: FC<PnlSectionProps> = ({
           />
         </div>
       ) : (
-        <div className="mt-1.5 text-[9px] text-[var(--text-dim)]">
+        <div className="mt-1.5 text-[9px] text-[var(--text-secondary)]">
           Waiting for price data…
         </div>
       )}

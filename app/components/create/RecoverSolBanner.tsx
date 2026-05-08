@@ -54,11 +54,11 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[11px] font-medium text-[var(--text-muted)]">
+              <span className="text-[11px] font-medium text-[var(--text)]">
                 ℹ Previous attempt detected
               </span>
             </div>
-            <p className="text-[11px] text-[var(--text-dim)]">
+            <p className="text-[11px] text-[var(--text-secondary)]">
               A previous market creation attempt was found but the transaction was
               rolled back. No SOL was lost. You can safely start a new market.
             </p>
@@ -69,7 +69,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
               clearStuck();
               setDismissed(true);
             }}
-            className="flex-shrink-0 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)] transition-colors px-2 py-1"
+            className="flex-shrink-0 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors px-2 py-1"
             aria-label="Dismiss"
           >
             ✕
@@ -111,7 +111,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
                 {stuckSlab.publicKey.toBase58().slice(-4)}
               </code>
             </p>
-            <p className="text-[10px] text-[var(--text-dim)]">
+            <p className="text-[10px] text-[var(--text-secondary)]">
               The slab account is initialized ({rentSol} SOL in rent).
               Resume to complete setup (oracle, LP, insurance).
             </p>
@@ -119,7 +119,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
           <button
             type="button"
             onClick={() => setDismissed(true)}
-            className="flex-shrink-0 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)] transition-colors px-2 py-1"
+            className="flex-shrink-0 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors px-2 py-1"
             aria-label="Dismiss"
           >
             ✕
@@ -268,7 +268,7 @@ const UninitialisedSlabBanner: FC<{
             </code>{" "}
             but market initialisation didn&apos;t complete.
           </p>
-          <p className="text-[10px] text-[var(--text-dim)]">
+          <p className="text-[10px] text-[var(--text-secondary)]">
             <strong className="text-[var(--warning)]">{rentSol} SOL</strong> is
             locked as rent. You can reclaim it now, retry initialisation, or start fresh.
           </p>
@@ -281,7 +281,7 @@ const UninitialisedSlabBanner: FC<{
         <button
           type="button"
           onClick={() => setDismissed(true)}
-          className="flex-shrink-0 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)] transition-colors px-2 py-1"
+          className="flex-shrink-0 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors px-2 py-1"
           aria-label="Dismiss"
         >
           ✕
@@ -326,7 +326,7 @@ const UninitialisedSlabBanner: FC<{
           href={`https://explorer.solana.com/address/${stuckSlab.publicKey.toBase58()}?cluster=devnet`}
           target="_blank"
           rel="noopener noreferrer"
-          className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-dim)] hover:text-[var(--text)] transition-colors"
+          className="border border-[var(--border)] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
         >
           VIEW ON EXPLORER ↗
         </a>

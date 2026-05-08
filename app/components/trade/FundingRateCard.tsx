@@ -239,7 +239,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Funding Rate</span>
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Funding Rate</span>
           <div className="h-4 w-16 animate-pulse rounded-none bg-[var(--border)]" />
         </div>
       </div>
@@ -266,7 +266,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
         {/* Header row: label + rate + APR */}
         <div className="mb-1 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text)]">
               Funding Rate
             </span>
             <InfoIcon tooltip="Funding rates balance long/short positions. Percolator uses inventory-based funding to protect LPs." />
@@ -284,7 +284,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
             >
               {rateDisplay}
             </span>
-            <span className="text-[9px] text-[var(--text-dim)]">/8h</span>
+            <span className="text-[9px] text-[var(--text)]">/8h</span>
           </div>
         </div>
 
@@ -293,7 +293,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
           <div className="rounded-none border-l-2 border-l-[var(--border)] bg-[var(--bg-elevated)] px-1.5 py-0.5">
             <span className="text-[10px] text-[var(--text-secondary)]">{directionText}</span>
             {countdown > 0 && (
-              <span className="ml-1.5 text-[9px] text-[var(--text-dim)]">· next {formatCountdown(countdown)}</span>
+              <span className="ml-1.5 text-[9px] text-[var(--text-secondary)]">· next {formatCountdown(countdown)}</span>
             )}
           </div>
           <span className="text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
@@ -304,7 +304,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
         {/* P3-4: Mini bar chart — last 4 periods */}
         {miniChartRates.length > 0 && (
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[9px] text-[var(--text-dim)] uppercase tracking-[0.1em]">Last {miniChartRates.length} periods</span>
+            <span className="text-[9px] text-[var(--text)] uppercase tracking-[0.1em]">Last {miniChartRates.length} periods</span>
             <FundingMiniChart rates={miniChartRates} />
           </div>
         )}
@@ -313,7 +313,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
         {positionDirection && estimatedFunding24h !== null && (
           <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg)] px-1.5 py-1">
             <div className="flex items-center justify-between">
-              <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
+              <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">
                 Est. 24h ({positionDirection})
               </span>
               <span className={`text-[11px] font-bold ${fundingColor}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>

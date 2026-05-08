@@ -56,7 +56,7 @@ export const ModeSelector: FC<ModeSelectorProps> = ({ mode, onModeChange }) => {
               </span>
               <span
                 className={`text-[12px] font-semibold uppercase tracking-[0.1em] ${
-                  active ? "text-[var(--text)]" : "text-[var(--text-secondary)]"
+                  active ? "text-[var(--text)]" : "text-[var(--text)]"
                 }`}
               >
                 {tab.label}
@@ -64,21 +64,21 @@ export const ModeSelector: FC<ModeSelectorProps> = ({ mode, onModeChange }) => {
             </div>
             <p
               className={`text-[11px] ${
-                active ? "text-[var(--text-secondary)]" : "text-[var(--text-dim)]"
+                active ? "text-[var(--text-secondary)]" : "text-[var(--text-secondary)]"
               }`}
             >
               {tab.desc}
             </p>
             <p
               className={`text-[10px] ${
-                active ? "text-[var(--text-dim)]" : "text-[var(--text-dim)]"
+                active ? "text-[var(--text-secondary)]" : "text-[var(--text-secondary)]"
               }`}
             >
               {tab.detail}
             </p>
             <span
               className={`mt-2 inline-block text-[9px] font-medium uppercase tracking-[0.1em] ${
-                active ? "text-[var(--accent)]" : "text-[var(--text-dim)]"
+                active ? "text-[var(--accent)]" : "text-[var(--text-secondary)]"
               }`}
             >
               {tab.badge}

@@ -165,10 +165,10 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
               <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
                 {opt.desc}
               </p>
-              <p className="mt-1 text-[10px] text-[var(--text-dim)]">{opt.detail}</p>
+              <p className="mt-1 text-[10px] text-[var(--text-secondary)]">{opt.detail}</p>
               <p
                 className={`mt-2 text-[9px] ${
-                  selected ? "text-[var(--accent)]" : "text-[var(--text-dim)]"
+                  selected ? "text-[var(--accent)]" : "text-[var(--text-secondary)]"
                 }`}
               >
                 {opt.note}
@@ -199,7 +199,7 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
         <div className="space-y-2">
           <label
             htmlFor="pyth-feed"
-            className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+            className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)]"
           >
             Pyth Feed ID
           </label>
@@ -217,7 +217,7 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
                   className="flex w-full items-center justify-between border border-[var(--border)] px-3 py-2 text-left text-[12px] hover:border-[var(--accent)]/30 hover:bg-[var(--accent)]/[0.04] transition-colors"
                 >
                   <span className="font-medium text-[var(--text)]">{f.displayName}</span>
-                  <span className="font-mono text-[10px] text-[var(--text-dim)]">
+                  <span className="font-mono text-[10px] text-[var(--text-secondary)]">
                     {f.id.slice(0, 12)}...
                   </span>
                 </button>
@@ -268,7 +268,7 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
         <div className="space-y-2">
           <label
             htmlFor="dex-pool"
-            className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+            className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)]"
           >
             DEX Pool Address
           </label>
@@ -288,11 +288,11 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
                 >
                   <div>
                     <span className="font-medium text-[var(--text)]">{pool.pairLabel}</span>
-                    <span className="ml-2 text-[10px] text-[var(--text-dim)] capitalize">
+                    <span className="ml-2 text-[10px] text-[var(--text-secondary)] capitalize">
                       {pool.dexId}
                     </span>
                   </div>
-                  <span className="text-[10px] text-[var(--text-muted)]">
+                  <span className="text-[10px] text-[var(--text-secondary)]">
                     ${pool.liquidityUsd.toLocaleString()} liq
                   </span>
                 </button>
@@ -325,7 +325,7 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
           {isMainnet && selectedDexPool && selectedDexPool.liquidityUsd < MIN_MAINNET_POOL_DEPTH_USD && (
             <div className="border border-[var(--short)]/40 bg-[var(--short)]/[0.06] px-4 py-3 text-[11px]">
               <p className="text-[var(--short)] font-medium">✗ Insufficient pool depth for mainnet</p>
-              <p className="text-[var(--text-muted)] mt-1">
+              <p className="text-[var(--text-secondary)] mt-1">
                 Pool has ${(selectedDexPool.liquidityUsd / 1000).toFixed(0)}K liquidity. Mainnet requires $2M+ DEX pool depth to prevent oracle manipulation.
               </p>
             </div>

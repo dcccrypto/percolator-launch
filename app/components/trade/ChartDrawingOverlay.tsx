@@ -813,7 +813,18 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
   return (
     <canvas
       ref={canvasRef}
-      className="pointer-events-none absolute inset-0"
+      // z-[1] forces the drawing canvas above lightweight-charts'
+      // own canvases (which paint at z-index auto / 0). The earlier
+      // implementation relied on DOM order alone — that worked in
+      // local dev but in production lightweight-charts' chart
+      // container wins the stacking-order tie-break and paints on
+      // top of the drawing canvas, so committed drawings save
+      // correctly to localStorage and update state but never become
+      // visible. z-[1] sits below the z-10 UI badges (empty-state,
+      // hover-tooltip, position-summary) and above the chart's
+      // canvases. pointer-events stays disabled so chart pan/zoom
+      // still works through this layer.
+      className="pointer-events-none absolute inset-0 z-[1]"
       aria-hidden="true"
     />
   );

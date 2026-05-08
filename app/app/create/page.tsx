@@ -43,7 +43,7 @@ function CreatePageInner() {
         <div className="mb-4">
           <Link
             href="/markets"
-            className="inline-flex items-center gap-1.5 text-[11px] font-mono text-[var(--text-muted)] transition-colors hover:text-[var(--text)] uppercase tracking-[0.1em]"
+            className="inline-flex items-center gap-1.5 text-[11px] font-mono text-[var(--text-secondary)] transition-colors hover:text-[var(--text)] uppercase tracking-[0.1em]"
           >
             ← Markets
           </Link>
@@ -59,13 +59,13 @@ function CreatePageInner() {
               className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl"
               style={{ fontFamily: "var(--font-heading)" }}
             >
-              <span className="font-normal text-[var(--text-muted)]">Launch a </span>Market
+              <span className="font-normal text-[var(--text)]">Launch a </span>Market
             </h1>
             <p className="mt-2 text-[13px] text-[var(--text-secondary)]">
               Deploy a perpetual futures market in ~60 seconds.
             </p>
             <div
-              className="mt-2 text-[11px] text-[var(--text-dim)]"
+              className="mt-2 text-[11px] text-[var(--text-secondary)]"
               style={{ fontFamily: "var(--font-mono)" }}
             >
               small: ~0.45 SOL &middot; medium: ~1.8 SOL &middot; large: ~7 SOL

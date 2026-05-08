@@ -753,7 +753,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
               setResumeFromStep(null);
               resetCreate();
             }}
-            className="flex-shrink-0 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)] transition-colors px-2 py-1 border border-[var(--border)]"
+            className="flex-shrink-0 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors px-2 py-1 border border-[var(--border)]"
           >
             CANCEL
           </button>
@@ -783,7 +783,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         {/* GH#1615: Use display step/total/label so Quick Launch shows "STEP 2 / 3 — Slab Tier"
             instead of the confusing "STEP 2 / 4 — Oracle ✓" while rendering slab content. */}
         <div className="mb-5 pb-4 border-b border-[var(--border)]">
-          <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">
             STEP {headerStepNum} / {headerStepTotal} — {headerStepLabel}
           </p>
         </div>
@@ -809,7 +809,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
               <p className="text-[11px] text-[var(--text-secondary)] mb-4">
                 Choose your market size. Larger slabs support more concurrent traders but cost more SOL to deploy.
               </p>
-              <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] mb-3">
+              <label className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)] mb-3">
                 Slab Tier
               </label>
               <SlabTierPicker value={wizard.slabTier} onChange={setSlabTier} />
@@ -826,7 +826,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
                 ✓ DEX pool detected — permissionless on-chain pricing (no keeper needed)
               </p>
             ) : (
-              <p className="text-[10px] text-[var(--text-dim)]">
+              <p className="text-[10px] text-[var(--text-secondary)]">
                 ℹ Admin oracle — you&apos;ll control pricing (devnet token)
               </p>
             )}

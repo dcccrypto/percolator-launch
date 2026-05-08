@@ -69,8 +69,8 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
             </svg>
           </div>
-          <p className="text-[11px] font-medium text-[var(--text-muted)]">No open positions</p>
-          <p className="mt-1 text-[10px] text-[var(--text-dim)] max-w-[220px] mx-auto leading-relaxed">
+          <p className="text-[11px] font-medium text-[var(--text)]">No open positions</p>
+          <p className="mt-1 text-[10px] text-[var(--text-secondary)] max-w-[220px] mx-auto leading-relaxed">
             Connect your wallet and deposit collateral to start trading.
           </p>
         </div>
@@ -90,8 +90,8 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
             </svg>
           </div>
-          <p className="text-[11px] font-medium text-[var(--text-muted)]">No open positions</p>
-          <p className="mt-1 text-[10px] text-[var(--text-dim)] max-w-[220px] mx-auto leading-relaxed">
+          <p className="text-[11px] font-medium text-[var(--text)]">No open positions</p>
+          <p className="mt-1 text-[10px] text-[var(--text-secondary)] max-w-[220px] mx-auto leading-relaxed">
             Use the trade form to open a position.
           </p>
         </div>
@@ -189,7 +189,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
       <div className="overflow-x-auto">
         <table className="min-w-full text-[10px]">
           <thead>
-            <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Market</th>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Side</th>
               <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Size</th>
@@ -222,7 +222,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
               {/* Size */}
               <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 <span className="text-[var(--text)]">{formatTokenAmount(absPosition, decimals)}</span>
-                <span className="ml-1 text-[var(--text-dim)]">{symbol}</span>
+                <span className="ml-1 text-[var(--text-secondary)]">{symbol}</span>
               </td>
 
               {/* Entry */}

@@ -241,7 +241,7 @@ export const MarketStatsCard: FC = () => {
               className="min-w-0 overflow-hidden"
             >
               <p
-                className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-medium leading-tight mb-0.5"
+                className="text-[10px] uppercase tracking-widest text-[var(--text)] font-medium leading-tight mb-0.5"
                 style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
                 title={s.label}
               >
@@ -271,10 +271,10 @@ export const MarketStatsCard: FC = () => {
           <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
             <button
               onClick={() => setShowFundingChart(!showFundingChart)}
-              className="flex w-full items-center justify-between px-2 py-1 text-left text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)] transition-colors hover:text-[var(--text-secondary)]"
+              className="flex w-full items-center justify-between px-2 py-1 text-left text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
             >
               <span>Funding History</span>
-              <span className={`text-[9px] text-[var(--text-dim)] transition-transform duration-200 ${showFundingChart ? "rotate-180" : ""}`}>▾</span>
+              <span className={`text-[9px] text-[var(--text-secondary)] transition-transform duration-200 ${showFundingChart ? "rotate-180" : ""}`}>▾</span>
             </button>
             {showFundingChart && (
               <div className="px-2 pb-2">

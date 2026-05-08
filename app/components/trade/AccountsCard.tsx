@@ -121,7 +121,7 @@ export const AccountsCard: FC = () => {
   const isOpenLike = tab === "open" || tab === "leaderboard";
 
   const SortHeader: FC<{ label: string; sKey: SortKey; align?: "left" | "right"; className?: string }> = ({ label, sKey, align = "right", className = "" }) => (
-    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none whitespace-nowrap px-2 py-1.5 font-medium ${align === "left" ? "text-left" : "text-right"} hover:text-[var(--text-secondary)] ${className}`}>
+    <th onClick={() => toggleSort(sKey)} className={`cursor-pointer select-none whitespace-nowrap px-2 py-1.5 font-medium transition-colors ${align === "left" ? "text-left" : "text-right"} hover:text-[var(--accent)] ${className}`}>
       {label}
       {sortKey === sKey ? <span className="ml-0.5 text-[var(--long)]">{sortDir === "asc" ? "^" : "v"}</span> : ""}
     </th>
@@ -139,23 +139,23 @@ export const AccountsCard: FC = () => {
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`rounded-none px-2 py-1 text-[9px] font-medium uppercase tracking-[0.15em] transition-all ${
-              tab === t.key ? "border-b border-[var(--accent)] text-[var(--accent)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+              tab === t.key ? "border-b border-[var(--accent)] text-[var(--accent)]" : "text-[var(--text-secondary)] hover:text-[var(--text)]"
             }`}>
             {t.label} ({t.count})
           </button>
         ))}
-        <span className="ml-auto text-[9px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{accounts.length} total</span>
+        <span className="ml-auto text-[9px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{accounts.length} total</span>
       </div>
 
       {sortedRows.length === 0 ? (
-        <p className="py-4 text-center text-[10px] text-[var(--text-muted)]">
+        <p className="py-4 text-center text-[10px] text-[var(--text)]">
           {tab === "open" ? "No open positions" : tab === "idle" ? "No idle accounts" : "No data"}
         </p>
       ) : (
         <div className="max-h-[420px] overflow-y-auto overflow-x-auto">
           <table className="min-w-full text-[10px]">
             <thead className="sticky top-0 z-10 bg-[var(--bg)]/95">
-              <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+              <tr className="border-b border-[var(--border)]/30 text-[8px] uppercase tracking-[0.15em] text-[var(--text)]">
                 <SortHeader label="#" sKey="idx" align="left" />
                 <SortHeader label="Owner" sKey="owner" align="left" />
                 {isOpenLike && <SortHeader label="Side" sKey="direction" align="left" />}

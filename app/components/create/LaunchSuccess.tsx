@@ -122,7 +122,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         <button
           type="button"
           onClick={handleCopy}
-          className="border border-[var(--border)] px-2 py-1.5 text-[9px] font-medium text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors"
+          className="border border-[var(--border)] px-2 py-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors"
           title="Copy address"
         >
           {copied ? "✓" : "copy"}
@@ -131,7 +131,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           href={`https://explorer.solana.com/address/${marketAddress}?cluster=devnet`}
           target="_blank"
           rel="noopener noreferrer"
-          className="border border-[var(--border)] px-2 py-1.5 text-[9px] font-medium text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors"
+          className="border border-[var(--border)] px-2 py-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors"
           title="View on Solscan"
         >
           Explorer ↗
@@ -147,11 +147,11 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           <div>
             <p className="text-[13px] font-bold text-[var(--text)]">{tokenSymbol}-PERP</p>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[9px] text-[var(--text-dim)]">Fee: {tradingFeeBps} bps</span>
-              <span className="text-[9px] text-[var(--text-dim)]">·</span>
-              <span className="text-[9px] text-[var(--text-dim)]">Leverage: {maxLeverage}x</span>
-              <span className="text-[9px] text-[var(--text-dim)]">·</span>
-              <span className="text-[9px] text-[var(--text-dim)]">Slab: {slabLabel}</span>
+              <span className="text-[9px] text-[var(--text-secondary)]">Fee: {tradingFeeBps} bps</span>
+              <span className="text-[9px] text-[var(--text-secondary)]">·</span>
+              <span className="text-[9px] text-[var(--text-secondary)]">Leverage: {maxLeverage}x</span>
+              <span className="text-[9px] text-[var(--text-secondary)]">·</span>
+              <span className="text-[9px] text-[var(--text-secondary)]">Slab: {slabLabel}</span>
             </div>
           </div>
         </div>
@@ -166,7 +166,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
             Your market is <strong className="text-[var(--text)]">live and tradeable</strong>. The Insurance LP Mint transaction timed out on devnet — this is non-blocking.
           </p>
-          <p className="text-[11px] text-[var(--text-dim)] mt-1.5 leading-relaxed">
+          <p className="text-[11px] text-[var(--text-secondary)] mt-1.5 leading-relaxed">
             Insurance LP deposits will be unavailable until the mint is created. You can retry from the market settings page later.
           </p>
         </div>
@@ -184,20 +184,20 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
               <span className="text-[var(--long)]">✓</span>
               <span className="text-[var(--text)]">
                 Airdropped <strong>{devnetAirdropAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {devnetAirdropSymbol}</strong>{" "}
-                <span className="text-[var(--text-dim)]">(~$500 worth)</span>
+                <span className="text-[var(--text-secondary)]">(~$500 worth)</span>
               </span>
             </div>
           )}
 
           {devnetMint && (
             <div className="space-y-1">
-              <p className="text-[10px] text-[var(--text-muted)]">
+              <p className="text-[10px] text-[var(--text-secondary)]">
                 ⚠️ Devnet uses a <strong>different mint address</strong> than mainnet:
               </p>
               {mainnetCA && (
                 <div className="flex items-center gap-2 text-[10px]">
-                  <span className="text-[var(--text-dim)] w-16 flex-shrink-0">Mainnet:</span>
-                  <code className="font-mono text-[9px] text-[var(--text-dim)] truncate">{mainnetCA}</code>
+                  <span className="text-[var(--text-secondary)] w-16 flex-shrink-0">Mainnet:</span>
+                  <code className="font-mono text-[9px] text-[var(--text-secondary)] truncate">{mainnetCA}</code>
                 </div>
               )}
               <div className="flex items-center gap-2 text-[10px]">
@@ -212,12 +212,12 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
                       setTimeout(() => setCopiedDevnet(false), 2000);
                     } catch {}
                   }}
-                  className="border border-[var(--border)] px-1.5 py-0.5 text-[8px] font-medium text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors flex-shrink-0"
+                  className="border border-[var(--border)] px-1.5 py-0.5 text-[8px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors flex-shrink-0"
                 >
                   {copiedDevnet ? "✓" : "copy"}
                 </button>
               </div>
-              <p className="text-[9px] text-[var(--text-dim)] mt-1">
+              <p className="text-[9px] text-[var(--text-secondary)] mt-1">
                 Use the devnet mint address when adding tokens to your wallet or trading.
               </p>
             </div>
@@ -245,7 +245,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
 
       {/* Devnet mint error — show inline error (minting is automatic, no manual faucet link) */}
       {isDevnet && devnetMintError && !devnetMint && !devnetAirdropAmount && (
-        <div className="mb-6 text-[11px] text-[var(--text-dim)]">
+        <div className="mb-6 text-[11px] text-[var(--text-secondary)]">
           Auto-mint failed ({devnetMintError}). Click &ldquo;Trade This Market&rdquo; and use the airdrop button to get devnet tokens.
         </div>
       )}
@@ -294,7 +294,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
       {/* Transaction signatures */}
       {txSigs.length > 0 && (
         <div className="mt-5 border-t border-[var(--border)] pt-4">
-          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)] mb-2">
+          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)] mb-2">
             Transactions
           </p>
           <div className="flex flex-wrap justify-center gap-2">
@@ -304,7 +304,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
                 href={`https://explorer.solana.com/tx/${sig}?cluster=devnet`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-mono text-[10px] text-[var(--text-dim)] hover:text-[var(--accent)] transition-colors"
+                className="font-mono text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors"
               >
                 Step {i + 1}: {sig.slice(0, 8)}... ↗
               </a>
