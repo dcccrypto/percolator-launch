@@ -413,16 +413,16 @@ function Slide04Sprint(_: SlideProps) {
             <div className="pitch-solution-num purple">3</div>
             <div>
               <div className="pitch-solution-name">
-                Pre-audit hardening + deep self-audit
+                Pre-audit hardening — ongoing, every day
               </div>
               <p className="pitch-solution-desc">
-                Five-phase sprint rewrote the proof suite (422 Kani
-                proofs replacing the prior 349) and closed every
-                hardening-pass CRITICAL/HIGH. A subsequent line-by-line
-                deep audit against upstream produced a port queue of
-                additional findings — applied ahead of the external
-                firm. Customers said audit posture was the #1 blocker
-                for putting real capital on a long-tail market.
+                Continuous self-audit. The proof suite has grown to 422
+                Kani proofs (replacing the prior 349). Ongoing
+                line-by-line deep audit against upstream produces a port
+                queue of findings, applied as they surface — ahead of
+                external firm engagement. Customers said audit posture
+                was the #1 blocker for putting real capital on a
+                long-tail market.
               </p>
             </div>
           </div>
@@ -1040,10 +1040,10 @@ function Slide11Risks(_: SlideProps) {
             </p>
             <div className="pitch-risks-mitigation-label mono">Mitigation</div>
             <p className="pitch-risks-mitigation">
-              Pre-audit hardening sprint closed every hardening-pass
-              CRITICAL/HIGH; deep self-audit against upstream produced
-              a port queue we are working through ahead of the external
-              firm. 422 Kani proofs verify risk-engine invariants
+              Pre-audit hardening is ongoing every day — continuous
+              deep self-audit against upstream produces a port queue
+              we apply as findings surface, ahead of external firm
+              engagement. 422 Kani proofs verify risk-engine invariants
               before any auditor starts.
             </p>
           </div>
