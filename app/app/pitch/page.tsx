@@ -673,8 +673,8 @@ function Slide06Money(_: SlideProps) {
             <div className="pitch-money-econ-label">Gross margin per trade after Solana RPC + compute</div>
           </div>
           <div className="pitch-money-econ-stat">
-            <div className="pitch-money-econ-num mono">&lt;$0.001</div>
-            <div className="pitch-money-econ-label">Compute cost per trade</div>
+            <div className="pitch-money-econ-num mono">~$0.002</div>
+            <div className="pitch-money-econ-label">Solana fee per trade (base + priority)</div>
           </div>
           <div className="pitch-money-econ-stat">
             <div className="pitch-money-econ-num mono">$0</div>
@@ -777,7 +777,7 @@ function Slide08Competitors(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Competitors</div>
         <h2 className="pitch-title">
-          No major Solana perp DEX opens long-tail markets permissionlessly. Hyperliquid does — but only via a $19-25M dutch auction. We are the long-tail-native option on Solana.
+          No major Solana perp DEX opens long-tail markets permissionlessly. Hyperliquid does — but only via a HIP-1 dutch auction (historically up to $19M+ per market). We are the long-tail-native option on Solana.
         </h2>
         <div className="pitch-matrix-wrap">
           <table className="pitch-matrix">
@@ -800,7 +800,7 @@ function Slide08Competitors(_: SlideProps) {
               </tr>
               <tr>
                 <td className="pitch-matrix-feature">Permissionless markets</td>
-                <td className="pitch-matrix-no">auction-gated ($19-25M)</td>
+                <td className="pitch-matrix-no">HIP-1 auction-gated</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
@@ -946,8 +946,8 @@ function Slide09WhyNow(_: SlideProps) {
             <div className="pitch-whynow-num mono">$793M</div>
             <div className="pitch-whynow-label">
               Hyperliquid OI in 3 months proved demand for permissionless
-              perps. They priced creators out at $19-25M. Long-tail supply
-              is empty.
+              perps. HIP-1 prices most creators out (auction has cleared
+              up to $19M+ per market). Long-tail supply on Solana is empty.
             </div>
           </div>
         </div>
@@ -1160,8 +1160,12 @@ function Slide13Contact(_: SlideProps) {
             <div className="pitch-contact-value">github.com/dcccrypto</div>
           </div>
           <div className="pitch-contact-card">
-            <div className="pitch-contact-label mono">Talk</div>
-            <div className="pitch-contact-value">@PercolatorLaunch</div>
+            <div className="pitch-contact-label mono">X</div>
+            <div className="pitch-contact-value">@percolatortrade</div>
+          </div>
+          <div className="pitch-contact-card">
+            <div className="pitch-contact-label mono">Email</div>
+            <div className="pitch-contact-value">dark@percolator.trade</div>
           </div>
         </div>
         <div className="pitch-divider" />
