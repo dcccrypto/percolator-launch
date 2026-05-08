@@ -16,7 +16,7 @@ function DripLine() {
   );
 }
 
-// ─── NumberCounter — ticks 0 → target on slide-active ────────────────────────
+// ─── NumberCounter · ticks 0 → target on slide-active ────────────────────────
 
 interface NumberCounterProps {
   target: number;
@@ -115,7 +115,7 @@ interface SlideProps {
   isCurrent: boolean;
 }
 
-// ─── Slide 1 — One-Liner ─────────────────────────────────────────────────────
+// ─── Slide 1 · One-Liner ─────────────────────────────────────────────────────
 
 function Slide01OneLiner(_: SlideProps) {
   return (
@@ -126,18 +126,18 @@ function Slide01OneLiner(_: SlideProps) {
         <p className="pitch-hero-sub">
           Percolator is a permissionless perpetual-futures protocol on
           Solana that lets anyone launch a leveraged market on any token
-          in 60 seconds for $500 — opening perps to the 15 million
+          in 60 seconds for $500. Opening perps to the 15 million
           tokens incumbent DEXs refuse to list.
         </p>
         <div className="pitch-divider" />
-        <p className="pitch-url">percolatorlaunch.com</p>
+        <p className="pitch-url">percolator.trade</p>
       </div>
       <div className="pitch-bg-grid" aria-hidden />
     </div>
   );
 }
 
-// ─── Slide 2 — Team ──────────────────────────────────────────────────────────
+// ─── Slide 2 · Team ──────────────────────────────────────────────────────────
 
 function Slide02Team(_: SlideProps) {
   return (
@@ -183,8 +183,26 @@ function Slide02Team(_: SlideProps) {
             <p className="pitch-team-bio">
               Owns community strategy, project management, and some of
               the daily &ldquo;vibe code&rdquo; that helps benefit
-              Percolator. Shipping everything from contributor
-              onboarding flows to Solana native engagement programs.
+              Percolator. Built{" "}
+              <a
+                className="pitch-team-bio-link"
+                href="https://github.com/0x-SquidSol/percolator-buyback"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                percolator-buyback
+              </a>
+              {" "}and{" "}
+              <a
+                className="pitch-team-bio-link"
+                href="https://github.com/0x-SquidSol/percolator-locker"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                percolator-locker
+              </a>
+              . Shipping everything from contributor onboarding flows to
+              Solana native engagement programs.
             </p>
             <p className="pitch-team-bio" style={{ marginTop: "0.5rem" }}>
               3 years in the Solana ecosystem (trader → CTO lead →
@@ -200,19 +218,11 @@ function Slide02Team(_: SlideProps) {
               </a>
               {" · "}
               <a
-                href="https://github.com/0x-SquidSol/percolator-buyback"
+                href="https://github.com/0x-SquidSol"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                gh/percolator-buyback
-              </a>
-              {" · "}
-              <a
-                href="https://github.com/0x-SquidSol/percolator-locker"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                gh/percolator-locker
+                github.com/0x-SquidSol
               </a>
             </p>
           </div>
@@ -229,8 +239,8 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-team-name">Claude</div>
             <div className="pitch-team-role">Lead engineering · AI pair-programmer</div>
             <p className="pitch-team-bio">
-              Owns most of the production code the co-founders direct
-              — Rust programs, TypeScript SDK and frontend, tests, and
+              Owns most of the production code the co-founders direct:
+              Rust programs, TypeScript SDK and frontend, tests, and
               Kani proof drafts. Shipping everything from the v12.17
               mainnet upgrade to the 457-proof verification suite.
               Reviews PRs. Doesn&apos;t sleep.
@@ -247,7 +257,7 @@ function Slide02Team(_: SlideProps) {
         <p className="pitch-team-footer">
           Founder-market fit: the H + A/K risk-engine math is Anatoly
           Yakovenko&apos;s open research. Percolator is the team that
-          took it from spec to production — Khubair and Squid have
+          took it from spec to production. Khubair and Squid have
           each won one of Toly&apos;s public bounties along the way.
         </p>
       </div>
@@ -255,7 +265,7 @@ function Slide02Team(_: SlideProps) {
   );
 }
 
-// ─── Slide 3 — Traction ──────────────────────────────────────────────────────
+// ─── Slide 3 · Traction ──────────────────────────────────────────────────────
 //
 // The traction series is illustrative compound growth (~20% WoW) ending at
 // the verified 2,700+ X follower count. Replace with the real weekly export
@@ -281,14 +291,14 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-label">Traction</div>
         <h2 className="pitch-title">
           Organic X followers grew from ~600 to 2,700+ over the last 8
-          weeks — averaging 20% week-over-week with zero paid acquisition
+          weeks, averaging 20% week-over-week with zero paid acquisition
           spend.
         </h2>
 
         <div className="pitch-traction-chart-wrap">
           <div className="pitch-traction-chart-header">
             <div>
-              <div className="pitch-traction-chart-title">Organic X followers — weekly</div>
+              <div className="pitch-traction-chart-title">Organic X followers · weekly</div>
               <div className="pitch-traction-chart-sub mono">
                 last 8 weeks · zero paid spend
                 <span className="pitch-traction-illus"> · illustrative shape, real export pre-submission</span>
@@ -385,7 +395,7 @@ function Slide03Traction(_: SlideProps) {
   );
 }
 
-// ─── Slide 4 — Hackathon Engineering Sprint ──────────────────────────────────
+// ─── Slide 4 · Hackathon Engineering Sprint ──────────────────────────────────
 
 function Slide04Sprint(_: SlideProps) {
   return (
@@ -394,7 +404,7 @@ function Slide04Sprint(_: SlideProps) {
         <div className="pitch-label">Hackathon Engineering Sprint</div>
         <h2 className="pitch-title">
           Across the 5-week Frontier window we shipped three changes that
-          unblock long-tail perp markets — each tied to direct customer
+          unblock long-tail perp markets, each tied to direct customer
           signal.
         </h2>
 
@@ -407,7 +417,7 @@ function Slide04Sprint(_: SlideProps) {
               </div>
               <p className="pitch-solution-desc">
                 Four programs upgraded and deployed. SOL/USDC Hyperp market
-                created against a pinned Raydium CLMM pool — running today
+                created against a pinned Raydium CLMM pool, running today
                 in lab mode, gated until external audit completes in Q3.
               </p>
             </div>
@@ -420,7 +430,7 @@ function Slide04Sprint(_: SlideProps) {
               </div>
               <p className="pitch-solution-desc">
                 Customers asked for transferable positions. We shipped them
-                as Token-2022 NFTs — first transferable perp positions
+                as Token-2022 NFTs. First transferable perp positions
                 ever shipped on Solana.
               </p>
             </div>
@@ -429,7 +439,7 @@ function Slide04Sprint(_: SlideProps) {
             <div className="pitch-solution-num purple">3</div>
             <div>
               <div className="pitch-solution-name">
-                Pre-audit hardening — 0 CRITICAL, 0 HIGH internal findings
+                Pre-audit hardening: 0 CRITICAL, 0 HIGH internal findings
               </div>
               <p className="pitch-solution-desc">
                 Five-phase sprint that rewrote the proof suite (457 Kani
@@ -454,7 +464,7 @@ function Slide04Sprint(_: SlideProps) {
   );
 }
 
-// ─── Slide 5 — Demo Product ──────────────────────────────────────────────────
+// ─── Slide 5 · Demo Product ──────────────────────────────────────────────────
 
 function Slide05Product(_: SlideProps) {
   return (
@@ -463,7 +473,7 @@ function Slide05Product(_: SlideProps) {
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
           On devnet today: connect wallet, deposit USDC, open a leveraged
-          long, close at PnL — fees split four ways on-chain in a single
+          long, close at PnL, fees split four ways on-chain in a single
           transaction.
         </h2>
 
@@ -558,15 +568,15 @@ function Slide05Product(_: SlideProps) {
         </div>
 
         <div className="pitch-create-footer">
-          Position is a Token-2022 NFT — first transferable perp
-          position on Solana. Live demo: percolatorlaunch.com (devnet).
+          Position is a Token-2022 NFT. First transferable perp
+          position on Solana. Live demo: percolator.trade (devnet).
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Slide 6 — Business Model + Unit Economics ───────────────────────────────
+// ─── Slide 6 · Business Model + Unit Economics ───────────────────────────────
 
 function Slide06Money(_: SlideProps) {
   return (
@@ -575,12 +585,12 @@ function Slide06Money(_: SlideProps) {
         <div className="pitch-label">Business Model</div>
         <h2 className="pitch-title">
           We charge 0.1–1% per trade across every market, splitting fees
-          four ways on-chain — gross margin &gt;95% after Solana compute.
+          four ways on-chain. Gross margin &gt;95% after Solana compute.
         </h2>
 
         <div className="pitch-money-flow">
           <div className="pitch-money-flow-title">
-            Fee flow on every fill — automatic, on-chain, no claim transactions
+            Fee flow on every fill: automatic, on-chain, no claim transactions
           </div>
 
           <div className="pitch-fee-stage">
@@ -693,7 +703,7 @@ function Slide06Money(_: SlideProps) {
         </div>
 
         <div className="pitch-money-scale-wrap">
-          <div className="pitch-money-scale-title">Scale path — protocol fees only</div>
+          <div className="pitch-money-scale-title">Scale path · protocol fees only · projected scenarios</div>
           <table className="pitch-money-scale">
             <thead>
               <tr>
@@ -730,7 +740,7 @@ function Slide06Money(_: SlideProps) {
   );
 }
 
-// ─── Slide 7 — Opportunity ───────────────────────────────────────────────────
+// ─── Slide 7 · Opportunity ───────────────────────────────────────────────────
 
 function Slide07Opportunity(_: SlideProps) {
   return (
@@ -779,7 +789,7 @@ function Slide07Opportunity(_: SlideProps) {
   );
 }
 
-// ─── Slide 8 — Competitors ───────────────────────────────────────────────────
+// ─── Slide 8 · Competitors ───────────────────────────────────────────────────
 
 function Slide08Competitors(_: SlideProps) {
   return (
@@ -787,8 +797,7 @@ function Slide08Competitors(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Competitors</div>
         <h2 className="pitch-title">
-          No major Solana perp DEX lists tokens permissionlessly — we are
-          the only protocol that does.
+          No major Solana perp DEX lists tokens permissionlessly. We are the only protocol that does.
         </h2>
         <div className="pitch-matrix-wrap">
           <table className="pitch-matrix">
@@ -855,7 +864,7 @@ function Slide08Competitors(_: SlideProps) {
   );
 }
 
-// ─── Slide 9 — GTM & Why Now ─────────────────────────────────────────────────
+// ─── Slide 9 · GTM & Why Now ─────────────────────────────────────────────────
 
 function Slide09WhyNow(_: SlideProps) {
   return (
@@ -863,7 +872,7 @@ function Slide09WhyNow(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">GTM & Why Now</div>
         <h2 className="pitch-title">
-          SIMD-0266 and Token-2022 both landed in 2026 — making per-trade
+          SIMD-0266 and Token-2022 both landed in 2026, making per-trade
           economics work for long-tail tokens for the first time.
         </h2>
         <div className="pitch-whynow-stats">
@@ -889,7 +898,7 @@ function Slide09WhyNow(_: SlideProps) {
             </svg>
             <div className="pitch-whynow-num mono">SIMD-0266</div>
             <div className="pitch-whynow-label">
-              Activated April 2026 — pinocchio-token instructions are 18×
+              Activated April 2026. Pinocchio-token instructions are 18×
               cheaper. Long-tail per-trade economics only work after this
               change.
             </div>
@@ -910,7 +919,7 @@ function Slide09WhyNow(_: SlideProps) {
             </svg>
             <div className="pitch-whynow-num mono">Token-2022</div>
             <div className="pitch-whynow-label">
-              Mature now — transferable perp positions as NFTs are
+              Mature now. Transferable perp positions as NFTs are
               possible. We&apos;re the first to ship.
             </div>
           </div>
@@ -952,7 +961,7 @@ function Slide09WhyNow(_: SlideProps) {
   );
 }
 
-// ─── Slide 10 — Roadmap ──────────────────────────────────────────────────────
+// ─── Slide 10 · Roadmap ──────────────────────────────────────────────────────
 
 function Slide10Roadmap(_: SlideProps) {
   return (
@@ -993,7 +1002,7 @@ function Slide10Roadmap(_: SlideProps) {
   );
 }
 
-// ─── Slide 11 — Risks ────────────────────────────────────────────────────────
+// ─── Slide 11 · Risks ────────────────────────────────────────────────────────
 
 function Slide11Risks(_: SlideProps) {
   return (
@@ -1001,7 +1010,7 @@ function Slide11Risks(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Risks</div>
         <h2 className="pitch-title">
-          Three real risks we&apos;re solving — each with a concrete
+          Three real risks we&apos;re solving, each with a concrete
           mitigation already in flight.
         </h2>
 
@@ -1042,7 +1051,7 @@ function Slide11Risks(_: SlideProps) {
             </p>
             <div className="pitch-risks-mitigation-label mono">Mitigation</div>
             <p className="pitch-risks-mitigation">
-              Protocol is permissionless by design — no gatekeeping
+              Protocol is permissionless by design. No gatekeeping
               action, no team in the loop on listing decisions, no party
               to regulate.
             </p>
@@ -1053,7 +1062,7 @@ function Slide11Risks(_: SlideProps) {
   );
 }
 
-// ─── Slide 12 — Next Steps (Ask + Exit) ──────────────────────────────────────
+// ─── Slide 12 · Next Steps (Ask + Exit) ──────────────────────────────────────
 
 function Slide12NextSteps(_: SlideProps) {
   return (
@@ -1061,7 +1070,7 @@ function Slide12NextSteps(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Next Steps</div>
         <h2 className="pitch-title">
-          We&apos;re shipping with or without capital — but the right
+          We&apos;re shipping with or without capital. The right
           partner shortcuts the audit, market-maker bootstrap, and
           creator acquisition.
         </h2>
@@ -1116,7 +1125,7 @@ function Slide12NextSteps(_: SlideProps) {
   );
 }
 
-// ─── Slide 13 — Contact ──────────────────────────────────────────────────────
+// ─── Slide 13 · Contact ──────────────────────────────────────────────────────
 
 function Slide13Contact(_: SlideProps) {
   return (
@@ -1125,7 +1134,7 @@ function Slide13Contact(_: SlideProps) {
         <div className="pitch-label">Contact</div>
         <h2 className="pitch-title">
           The code is open, the market is live on devnet, and the door is
-          open at percolatorlaunch.com.
+          open at percolator.trade.
         </h2>
         <p
           className="pitch-body-text"
@@ -1137,7 +1146,7 @@ function Slide13Contact(_: SlideProps) {
         <div className="pitch-contact-grid">
           <div className="pitch-contact-card">
             <div className="pitch-contact-label mono">Try it</div>
-            <div className="pitch-contact-value">percolatorlaunch.com</div>
+            <div className="pitch-contact-value">percolator.trade</div>
           </div>
           <div className="pitch-contact-card">
             <div className="pitch-contact-label mono">Code</div>
@@ -1149,7 +1158,7 @@ function Slide13Contact(_: SlideProps) {
           </div>
         </div>
         <div className="pitch-divider" />
-        <p className="pitch-url">percolatorlaunch.com</p>
+        <p className="pitch-url">percolator.trade</p>
       </div>
     </div>
   );
@@ -1260,7 +1269,7 @@ export default function PitchPage() {
 
       <style>{`
         /* ─────────────────────────────────────────────────────────────
-           LIQUID DRIP — visual identity layer
+           LIQUID DRIP · visual identity layer
            Subtle by default. Pauses on prefers-reduced-motion.
            ───────────────────────────────────────────────────────────── */
 
@@ -2200,6 +2209,18 @@ export default function PitchPage() {
           text-decoration: underline;
         }
 
+        .pitch-team-bio-link {
+          color: rgba(34, 211, 238, 0.9);
+          text-decoration: none;
+          border-bottom: 1px dotted rgba(34, 211, 238, 0.45);
+          transition: color 200ms ease, border-color 200ms ease;
+        }
+
+        .pitch-team-bio-link:hover {
+          color: #22D3EE;
+          border-bottom-color: rgba(34, 211, 238, 0.85);
+        }
+
         .pitch-team-footer {
           font-family: 'Inter', sans-serif;
           font-size: 0.85rem;
@@ -2324,7 +2345,7 @@ export default function PitchPage() {
         }
 
         .pitch-ask-list li::before {
-          content: "—";
+          content: "·";
           position: absolute;
           left: 0;
           color: rgba(34,211,238,0.6);
@@ -2480,7 +2501,7 @@ export default function PitchPage() {
         }
 
         /* ─────────────────────────────────────────────────────────────
-           Card hover states — subtle lift + cyan border glow
+           Card hover states · subtle lift + cyan border glow
            Shared across every card family in the deck.
            ───────────────────────────────────────────────────────────── */
 
@@ -2535,7 +2556,7 @@ export default function PitchPage() {
         }
 
         /* ─────────────────────────────────────────────────────────────
-           Slide 3 — Traction chart line-draw + dot fade-in
+           Slide 3 · Traction chart line-draw + dot fade-in
            ───────────────────────────────────────────────────────────── */
 
         .pitch-traction-line {
@@ -2556,7 +2577,7 @@ export default function PitchPage() {
         }
 
         /* ─────────────────────────────────────────────────────────────
-           Slide 6 — Animated fee flow (the brand moment)
+           Slide 6 · Animated fee flow (the brand moment)
            Drips from "Trader" through three channels into LP / Creator / Protocol.
            ───────────────────────────────────────────────────────────── */
 
@@ -2618,7 +2639,7 @@ export default function PitchPage() {
         }
 
         /* ─────────────────────────────────────────────────────────────
-           Slide 7 — Opportunity disparity bars
+           Slide 7 · Opportunity disparity bars
            ───────────────────────────────────────────────────────────── */
 
         .pitch-opp-compare {
@@ -2727,7 +2748,7 @@ export default function PitchPage() {
         }
 
         /* ─────────────────────────────────────────────────────────────
-           Slide 8 — Matrix cell entrance, column-by-column stagger
+           Slide 8 · Matrix cell entrance, column-by-column stagger
            ───────────────────────────────────────────────────────────── */
 
         .pitch-matrix tbody td {
@@ -2753,7 +2774,7 @@ export default function PitchPage() {
         }
 
         /* ─────────────────────────────────────────────────────────────
-           Slide 9 — Catalyst card icons
+           Slide 9 · Catalyst card icons
            ───────────────────────────────────────────────────────────── */
 
         .pitch-catalyst-icon {

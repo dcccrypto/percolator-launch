@@ -261,6 +261,38 @@ function saveKeypairBackup(name: string, kp: Keypair, dir: string): void {
   console.log(`  saved keypair: ${filePath} (pubkey ${kp.publicKey.toBase58()})`);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForAccountOwner(
+  conn: Connection,
+  address: PublicKey,
+  owner: PublicKey,
+  label: string,
+  expectedLength?: number,
+): Promise<void> {
+  const deadline = Date.now() + 90_000;
+  let lastState = "missing";
+
+  while (Date.now() < deadline) {
+    const info = await conn.getAccountInfo(address, "finalized");
+    if (info) {
+      lastState = `owner=${info.owner.toBase58()} len=${info.data.length}`;
+      const ownerOk = info.owner.equals(owner);
+      const lengthOk = expectedLength === undefined || info.data.length === expectedLength;
+      if (ownerOk && lengthOk) {
+        console.log(`  ${label} finalized: ${address.toBase58()} (${lastState})`);
+        return;
+      }
+    }
+
+    await sleep(1_500);
+  }
+
+  throw new Error(`${label} did not finalize with expected owner/size (${lastState})`);
+}
+
 async function sendTx(
   conn: Connection,
   tx: Transaction,
@@ -478,6 +510,14 @@ async function main() {
   let sig1: string;
   try {
     sig1 = await sendTx(conn, tx1, [admin, slab], "TX1");
+    await waitForAccountOwner(
+      conn,
+      slab.publicKey,
+      cfg.programId,
+      "TX1 slab account",
+      cfg.slabSize,
+    );
+    await waitForAccountOwner(conn, vaultAta, TOKEN_PROGRAM_ID, "TX1 vault ATA");
   } catch (e) {
     console.error("TX1 FAILED (InitMarket):", e instanceof Error ? e.message : e);
     console.error("Nothing was created on-chain — safe to retry.");
@@ -507,10 +547,17 @@ async function main() {
   let sig2: string;
   try {
     sig2 = await sendTx(conn, tx2, [admin], "TX2");
+    await waitForAccountOwner(
+      conn,
+      slab.publicKey,
+      cfg.programId,
+      "TX2 slab account",
+      cfg.slabSize,
+    );
   } catch (e) {
     console.error("TX2 FAILED (SetDexPool):", e instanceof Error ? e.message : e);
     console.error(
-      `Slab created: ${slab.publicKey.toBase58()} — use close-orphan-slab.ts to reclaim rent.`,
+      `Slab created: ${slab.publicKey.toBase58()} — run scripts/close-market-reclaim-all.ts to reclaim rent.`,
     );
     process.exit(1);
   }
@@ -564,6 +611,20 @@ async function main() {
   let sig3: string;
   try {
     sig3 = await sendTx(conn, tx3, [admin, matcherCtx], "TX3");
+    await waitForAccountOwner(
+      conn,
+      matcherCtx.publicKey,
+      MATCHER_PROG_ID,
+      "TX3 matcher context account",
+      MATCHER_CTX_SIZE,
+    );
+    await waitForAccountOwner(
+      conn,
+      slab.publicKey,
+      cfg.programId,
+      "TX3 slab account",
+      cfg.slabSize,
+    );
   } catch (e) {
     console.error("TX3 FAILED (InitLP):", e instanceof Error ? e.message : e);
     console.error(
@@ -598,6 +659,13 @@ async function main() {
   let sig4: string;
   try {
     sig4 = await sendTx(conn, tx4, [admin], "TX4");
+    await waitForAccountOwner(
+      conn,
+      matcherCtx.publicKey,
+      MATCHER_PROG_ID,
+      "TX4 matcher context account",
+      MATCHER_CTX_SIZE,
+    );
   } catch (e) {
     console.error(
       "TX4 FAILED (InitMatcherCtx):",
@@ -741,6 +809,9 @@ async function main() {
   let sig6: string | null = null;
   try {
     sig6 = await sendTx(conn, tx6, [admin, stakeLpMint, stakeVault], "TX6");
+    await waitForAccountOwner(conn, stakePool, STAKE_PROG_ID, "TX6 stake pool");
+    await waitForAccountOwner(conn, stakeLpMint.publicKey, TOKEN_PROGRAM_ID, "TX6 stake LP mint");
+    await waitForAccountOwner(conn, stakeVault.publicKey, TOKEN_PROGRAM_ID, "TX6 stake vault");
   } catch (e) {
     console.warn("TX6 WARNING (InitStakePool):", e instanceof Error ? e.message : e);
     console.warn("Market is live but has no stake pool. Run create-stake-pool.ts separately.");
