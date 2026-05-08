@@ -235,13 +235,30 @@ const REDIRECT_HOSTS = new Set([
   "percolatorlaunch.com",
   "www.percolatorlaunch.com",
 ]);
-// Paths that ARE allowed on the waitlist host. Anything else → redirect to /waitlist.
+// Paths that ARE allowed on the waitlist host (percolator.trade). Anything else
+// → redirect to /waitlist. Trading-product surfaces (markets, dashboard,
+// portfolio, wallet, trade, create, stake, devnet-mint, faucet) stay blocked
+// here — they continue to live on mainnet.percolatorlaunch.com.
+const WAITLIST_HOST_ALLOWED_PREFIXES = [
+  "/waitlist",
+  "/pitch",        // investor-facing deck (still accessible, just not linked from nav)
+  "/guide",        // developer guide
+  "/developers",
+  "/join",         // community/applications
+  "/report-bug",
+  "/bugs",         // community-submitted bug list
+  "/agents",
+  "/leaderboard",
+  "/openclaw",
+];
 function isAllowedOnWaitlistHost(pathname: string): boolean {
-  if (pathname === "/" || pathname === "/waitlist" || pathname.startsWith("/waitlist/")) return true;
-  if (pathname === "/pitch" || pathname.startsWith("/pitch/")) return true;
+  if (pathname === "/") return true;
   if (pathname.startsWith("/api/")) return true;
   if (pathname.startsWith("/_next/")) return true;
   if (/\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff2?|ttf|map)$/i.test(pathname)) return true;
+  for (const p of WAITLIST_HOST_ALLOWED_PREFIXES) {
+    if (pathname === p || pathname.startsWith(p + "/")) return true;
+  }
   return false;
 }
 

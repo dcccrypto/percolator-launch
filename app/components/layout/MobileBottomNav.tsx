@@ -1,6 +1,6 @@
 "use client";
 
-import { FC } from "react";
+import { FC, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -63,6 +63,17 @@ const tabs: NavTab[] = [
 
 export const MobileBottomNav: FC = () => {
   const pathname = usePathname();
+  const [isWaitlistHost, setIsWaitlistHost] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const host = window.location.host.split(":")[0].toLowerCase();
+    setIsWaitlistHost(host === "percolator.trade" || host === "www.percolator.trade");
+  }, []);
+
+  // Hide on waitlist host — every existing tab points to a trading-product
+  // route that's blocked by middleware on percolator.trade.
+  if (isWaitlistHost) return null;
 
   const isActive = (tab: NavTab): boolean => {
     if (tab.matchPrefix) {

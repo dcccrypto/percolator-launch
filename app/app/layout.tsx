@@ -84,13 +84,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <ChromeGate>
               <TickerBanner />
               <MainnetBetaBanner />
-              <Header />
             </ChromeGate>
+            <Header />
             <main className="flex-1 pb-[60px] md:pb-0">{children}</main>
-            <ChromeGate>
-              <Footer />
-              <MobileBottomNav />
-            </ChromeGate>
+            <Footer />
+            <MobileBottomNav />
           </div>
           <ChromeGate>
             <MusicPlayer />

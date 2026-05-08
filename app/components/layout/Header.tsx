@@ -30,6 +30,20 @@ function filterForNetwork(items: NavItem[], network: string): NavItem[] {
   return items.filter((item) => !MAINNET_HIDDEN_PATHS.has(item.href));
 }
 
+/**
+ * Waitlist-host nav filter.  When the page is served from
+ * percolator.trade, hide trading-product surfaces (Trade group entirely;
+ * /create, /devnet-mint, /stake from Build) and keep only the
+ * dev/community-facing routes.  Trading lives at mainnet.percolatorlaunch.com.
+ */
+const WAITLIST_HOST_BUILD_KEEP = new Set(["/developers", "/guide"]);
+function filterForWaitlistHost(items: NavItem[], group: "trade" | "build" | "community", isWaitlistHost: boolean): NavItem[] {
+  if (!isWaitlistHost) return items;
+  if (group === "trade") return [];
+  if (group === "build") return items.filter((item) => WAITLIST_HOST_BUILD_KEEP.has(item.href));
+  return items; // community: keep everything
+}
+
 const tradeLinks: NavItem[] = [
   { href: "/markets", label: "Markets" },
   { href: "/dashboard", label: "Dashboard" },
@@ -65,6 +79,7 @@ export const Header: FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
+  const [isWaitlistHost, setIsWaitlistHost] = useState(false);
   const pathname = usePathname();
   const prefersReduced = usePrefersReducedMotion();
   const headerRef = useRef<HTMLElement>(null);
@@ -72,6 +87,15 @@ export const Header: FC = () => {
   const badgeRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => { setNet(getConfig().network); }, []);
+
+  // Detect waitlist host on mount; SSR can't see hostname so we hide the
+  // Trade group only after hydration. This avoids a flash of trading nav
+  // briefly visible to crawlers but acceptable for the waitlist UX.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const host = window.location.host.split(":")[0].toLowerCase();
+    setIsWaitlistHost(host === "percolator.trade" || host === "www.percolator.trade");
+  }, []);
 
   // Scroll detection
   useEffect(() => {
@@ -158,9 +182,11 @@ export const Header: FC = () => {
 
           {/* Desktop nav — dropdown groups */}
           <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main navigation">
-            <NavDropdown label="Trade" items={filterForNetwork(tradeLinks, network)} />
-            <NavDropdown label="Build" items={filterForNetwork(buildLinks, network)} />
-            <NavDropdown label="Community" items={filterForNetwork(communityLinks, network)} />
+            {!isWaitlistHost && (
+              <NavDropdown label="Trade" items={filterForWaitlistHost(filterForNetwork(tradeLinks, network), "trade", isWaitlistHost)} />
+            )}
+            <NavDropdown label="Build" items={filterForWaitlistHost(filterForNetwork(buildLinks, network), "build", isWaitlistHost)} />
+            <NavDropdown label="Community" items={filterForWaitlistHost(filterForNetwork(communityLinks, network), "community", isWaitlistHost)} />
           </nav>
         </div>
 
@@ -207,7 +233,10 @@ export const Header: FC = () => {
         aria-label="Mobile navigation"
       >
         <div className="flex flex-col gap-0.5 p-3">
-          {mobileGroupsAll.map((g) => ({ ...g, items: filterForNetwork(g.items, network) })).filter((g) => g.items.length > 0).map((group) => (
+          {mobileGroupsAll.map((g) => {
+            const groupKey = g.label.toLowerCase() as "trade" | "build" | "community";
+            return { ...g, items: filterForWaitlistHost(filterForNetwork(g.items, network), groupKey, isWaitlistHost) };
+          }).filter((g) => g.items.length > 0).map((group) => (
             <div key={group.label}>
               {/* Group header — accordion trigger */}
               <button
