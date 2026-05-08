@@ -88,12 +88,14 @@ function NumberCounter({
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 //
-// 13 slides, ordered per Cap (Superteam UK) feedback 2026-04-30:
+// 15 slides, ordered per Cap (Superteam UK) feedback 2026-04-30 plus
+// Toly Signal + Formal Verification expansion slides:
 //   "i recommend doing one-liner / team / traction as your first 3 slides"
 //   "don't have taglines - have a proper sentence which is the tldr of your
 //    traction with a time frame"
 //
-// Structure follows Cap's 13-slide framework exactly:
+// Structure follows Cap's 13-slide framework, with two expansion slides
+// (Toly Signal at #3, Formal Verification at #6):
 //   1  One-Liner
 //   2  Team
 //   3  Traction (TL;DR sentence + growth chart)
@@ -157,7 +159,7 @@ function Slide02Team(_: SlideProps) {
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
           Two co-founders and an AI pair-programmer shipped Percolator
-          from zero to mainnet-ready with 457 formal proofs and zero
+          from zero to mainnet-ready with 422 formal proofs and zero
           outside capital.
         </h2>
 
@@ -278,7 +280,9 @@ function Slide02Team(_: SlideProps) {
 // ─── Slide 3 · Traction ──────────────────────────────────────────────────────
 //
 // Programs verified on-chain at the time of writing:
-//   - Devnet (testing, March 2026):  g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in
+//   - Devnet (canonical, current):   FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD
+//   - Devnet (legacy, kept indexed):  g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in
+//                                     FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn
 //   - Mainnet (closed beta, May):     ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv
 // Stats below are pulled from getSignaturesForAddress + market slab tracking.
 // Followers are organic, no paid spend.
@@ -338,7 +342,7 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-traction-mini-row">
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={457} />
+              <NumberCounter target={422} />
             </div>
             <div className="pitch-traction-mini-label">Kani formal proofs (all green)</div>
           </div>
@@ -409,14 +413,16 @@ function Slide04Sprint(_: SlideProps) {
             <div className="pitch-solution-num purple">3</div>
             <div>
               <div className="pitch-solution-name">
-                Pre-audit hardening: 0 CRITICAL, 0 HIGH internal findings
+                Pre-audit hardening + deep self-audit
               </div>
               <p className="pitch-solution-desc">
-                Five-phase sprint that rewrote the proof suite (457 Kani
-                proofs replacing the prior 349) and closed every internal
-                CRITICAL and HIGH finding. Customers said audit posture was
-                the #1 blocker for putting real capital on a long-tail
-                market.
+                Five-phase sprint rewrote the proof suite (422 Kani
+                proofs replacing the prior 349) and closed every
+                hardening-pass CRITICAL/HIGH. A subsequent line-by-line
+                deep audit against upstream produced a port queue of
+                additional findings — applied ahead of the external
+                firm. Customers said audit posture was the #1 blocker
+                for putting real capital on a long-tail market.
               </p>
             </div>
           </div>
@@ -442,11 +448,12 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          Closed beta on Solana mainnet today, restricted to a small
-          group of open-source contributors: connect wallet, deposit
-          USDC, open a leveraged long, close at PnL, fees split four
-          ways on-chain. Public access opens once the external audit
-          (quotes received, not yet engaged) clears.
+          Devnet open today at percolator.trade — connect wallet, deposit
+          USDC (faucet), open a leveraged long, close at PnL, fees split
+          four ways on-chain. Mainnet program is in OSS-contributor
+          closed beta running the first SOL/USDC Hyperp; public mainnet
+          opens once the external audit (quotes received, not yet
+          engaged) clears.
         </h2>
 
         <div className="pflow-wrap">
@@ -568,7 +575,7 @@ function Slide06Money(_: SlideProps) {
           <div className="pitch-fee-stage">
             <div className="pitch-fee-source">
               <div className="pitch-money-pill pitch-money-pill-purple">
-                Trader pays<br /><span className="mono">1–10%</span>
+                Trader pays<br /><span className="mono">0.1–1%</span>
               </div>
             </div>
 
@@ -1033,9 +1040,11 @@ function Slide11Risks(_: SlideProps) {
             </p>
             <div className="pitch-risks-mitigation-label mono">Mitigation</div>
             <p className="pitch-risks-mitigation">
-              Pre-audit hardening sprint already closed every internal
-              CRITICAL/HIGH; 457 Kani proofs verify the risk-engine
-              invariants before the audit firm even starts.
+              Pre-audit hardening sprint closed every hardening-pass
+              CRITICAL/HIGH; deep self-audit against upstream produced
+              a port queue we are working through ahead of the external
+              firm. 422 Kani proofs verify risk-engine invariants
+              before any auditor starts.
             </p>
           </div>
 
@@ -1188,9 +1197,9 @@ function SlideTolyStory(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Origin · Toly Signal</div>
         <h2 className="pitch-title">
-          Solana co-founder Anatoly Yakovenko founded Percolator and
-          publicly engages with our team&apos;s work. He authored the
-          protocol math; we built the product around it.
+          Solana co-founder Anatoly Yakovenko originated Percolator&apos;s
+          protocol math and reference program, and publicly engages
+          with our team&apos;s work. We built the product around it.
         </h2>
 
         <div className="pitch-toly-photo-grid">
@@ -1284,12 +1293,12 @@ function SlideKaniProofs(_: SlideProps) {
         <div className="pitch-label">Formal Verification</div>
         <h2 className="pitch-title">
           Kani proves protocol invariants hold across every possible
-          input. 457 proofs, all green, before any auditor starts.
+          input. 422 proofs, all green, before any auditor starts.
         </h2>
 
         <div className="pitch-kani-callout">
           <div className="pitch-kani-callout-num mono">
-            <NumberCounter target={457} />
+            <NumberCounter target={422} />
           </div>
           <div className="pitch-kani-callout-label">
             formal proofs · all green · same model-checking technology
@@ -1342,7 +1351,7 @@ function SlideKaniProofs(_: SlideProps) {
               <div className="pitch-kani-vs-cell-label">Jupiter Perps</div>
             </div>
             <div className="pitch-kani-vs-cell pitch-kani-vs-cell-us">
-              <div className="pitch-kani-vs-cell-num mono">457</div>
+              <div className="pitch-kani-vs-cell-num mono">422</div>
               <div className="pitch-kani-vs-cell-label">Percolator</div>
             </div>
           </div>
