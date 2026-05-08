@@ -141,20 +141,20 @@ function Hero() {
       </h1>
 
       <p className="mt-6 max-w-[640px] text-[16px] leading-[1.6] text-[var(--text-secondary)] sm:text-[17px]">
-        A creator launches a leveraged market on any SPL token in 60 seconds — no team approval, no auction. Built on{" "}
-        <span className="text-[var(--text)]">Anatoly Yakovenko&apos;s</span> open research, extended into a production protocol with LP vault, transferable Token-2022 NFT positions, dispute resolution, and audit-crank invariants.
+        A creator launches a leveraged market on any SPL token in 60 seconds — no team approval, no auction. Forked from{" "}
+        <span className="text-[var(--text)]">Anatoly Yakovenko&apos;s</span> open-source reference program and extended on chain with LP vault, transferable Token-2022 NFT positions, dispute resolution, and audit-crank invariants.
       </p>
 
-      {/* Specifics row — looks like a code line, not a "trust badge" */}
-      <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11.5px] text-[var(--text-muted)]">
-        <SpecPill k="program" v="ESa89R5E…D4edv" />
-        <SpecPill k="proofs" v="422 / 422 ✓" highlight="cyan" />
-        <SpecPill k="repos" v="17 · Apache 2.0" />
-        <SpecPill k="markets" v="220 on devnet" />
+      {/* Specs row — looks like a struct field block, not a trust-badge row */}
+      <div className="mt-9 grid max-w-[640px] grid-cols-2 gap-x-6 gap-y-2.5 sm:grid-cols-4">
+        <SpecField k="program" v="ESa89R5E…D4edv" />
+        <SpecField k="proofs" v="422 / 422 ✓" highlight="cyan" />
+        <SpecField k="repos" v="17 · Apache 2.0" />
+        <SpecField k="markets" v="220 on devnet" />
       </div>
 
       {/* Soft CTA pointing to the signup section below */}
-      <div className="mt-10 flex items-center gap-4">
+      <div className="mt-10 flex flex-wrap items-center gap-4">
         <a
           href="#reserve"
           className="group inline-flex items-center gap-2 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/[0.08] px-5 py-2.5 text-[13px] font-semibold uppercase tracking-[0.1em] text-[var(--text)] transition-all hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.14]"
@@ -170,7 +170,7 @@ function Hero() {
   );
 }
 
-function SpecPill({
+function SpecField({
   k,
   v,
   highlight,
@@ -186,11 +186,14 @@ function SpecPill({
         ? "text-[var(--accent)]"
         : "text-[var(--text)]";
   return (
-    <span className="flex items-center gap-1.5">
-      <span className="text-[var(--text-dim)]">{k}</span>
-      <span className="text-[var(--text-dim)]">=</span>
-      <span className={color}>{v}</span>
-    </span>
+    <div className="flex flex-col gap-0.5 border-l border-[var(--border)] pl-3">
+      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+        {k}
+      </span>
+      <span className={`font-mono text-[12.5px] ${color}`} style={{ fontVariantNumeric: "tabular-nums" }}>
+        {v}
+      </span>
+    </div>
   );
 }
 
@@ -714,15 +717,20 @@ function ArchRow({
 }) {
   const tagColor = accent === "cyan" ? "text-[var(--cyan)]" : "text-[var(--accent)]";
   return (
-    <div className="group grid grid-cols-[110px_1fr] items-baseline gap-5 border-b border-[var(--border)] py-3 transition-colors last:border-b-0 hover:border-[var(--border-hover)]">
-      <span className={`font-mono text-[11px] uppercase tracking-[0.05em] ${tagColor}`}>
+    <div className="group relative grid grid-cols-[120px_1fr] items-baseline gap-5 border-b border-[var(--border)] py-4 transition-all last:border-b-0 hover:border-[var(--border-hover)]">
+      {/* Hover left-edge indicator — subtle bar on the left when hovered */}
+      <span
+        aria-hidden
+        className="absolute -left-2 top-4 bottom-4 w-px scale-y-0 bg-[var(--accent)] transition-transform duration-200 group-hover:scale-y-100"
+      />
+      <span className={`font-mono text-[11px] uppercase tracking-[0.08em] ${tagColor}`}>
         {tag}
       </span>
       <div>
-        <div className="text-[14px] font-semibold leading-tight text-[var(--text)]">
+        <div className="text-[14.5px] font-semibold leading-tight tracking-[-0.005em] text-[var(--text)] transition-colors group-hover:text-[var(--text)]">
           {t}
         </div>
-        <p className="mt-1 max-w-[600px] text-[13px] leading-[1.55] text-[var(--text-secondary)]">
+        <p className="mt-1.5 max-w-[600px] text-[13px] leading-[1.6] text-[var(--text-secondary)]">
           {d}
         </p>
       </div>
@@ -742,12 +750,12 @@ function OriginSection() {
           className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
           style={{ fontFamily: "var(--font-heading)" }}
         >
-          Built on Toly&apos;s research.
+          Toly&apos;s math.
           <br />
-          Shipped by us.
+          Forked &amp; extended.
         </h2>
-        <p className="mt-3 max-w-[280px] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
-          Anatoly Yakovenko authored the H + A/K risk-engine math and a reference program. We took it from a research artifact to a production system on Solana mainnet.
+        <p className="mt-3 max-w-[300px] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
+          Anatoly Yakovenko authored the H + A/K risk-engine math and an open-source reference program. We forked the program and extended it on chain — without the work below it&apos;d still be a reference, not a product.
         </p>
       </div>
       <div>
@@ -770,7 +778,7 @@ function OriginSection() {
           </div>
 
           <p className="mt-5 text-[13px] leading-[1.6] text-[var(--text-secondary)]">
-            On the wrapper alone we shipped LP vault, dispute resolution, transferable Token-2022 NFT positions, a withdrawal queue, audit-crank invariant checks, two-step admin handover, and DEX-pool oracle pinning — none of which exist in the reference program. Plus the SDK, indexer, keeper fleet, and frontend.{" "}
+            Net new in the fork: LP vault, dispute resolution, transferable Token-2022 NFT positions, a withdrawal queue, audit-crank invariant checks, two-step admin handover, DEX-pool oracle pinning — none of which exist in Toly&apos;s reference. Plus the SDK, indexer, keeper fleet, and frontend that wrap the program. Mainnet is deployed in lab mode; public trading opens after the external audit.{" "}
             <span className="text-[var(--text)]">
               Both co-founders won one of his public bounties.
             </span>
