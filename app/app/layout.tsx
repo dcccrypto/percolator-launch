@@ -12,6 +12,7 @@ import { TickerBanner } from "@/components/layout/TickerBanner";
 import { CursorGlow } from "@/components/ui/CursorGlow";
 import { MusicPlayer } from "@/components/ui/MusicPlayer";
 import { MainnetBetaBanner } from "@/components/layout/MainnetBetaBanner";
+import { ChromeGate } from "@/components/layout/ChromeGate";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"], display: "swap" });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"], display: "swap" });
@@ -80,14 +81,20 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Providers>
           <CursorGlow />
           <div className="relative z-[1] flex min-h-screen flex-col">
-            <TickerBanner />
-            <MainnetBetaBanner />
-            <Header />
+            <ChromeGate>
+              <TickerBanner />
+              <MainnetBetaBanner />
+              <Header />
+            </ChromeGate>
             <main className="flex-1 pb-[60px] md:pb-0">{children}</main>
-            <Footer />
-            <MobileBottomNav />
+            <ChromeGate>
+              <Footer />
+              <MobileBottomNav />
+            </ChromeGate>
           </div>
-          <MusicPlayer />
+          <ChromeGate>
+            <MusicPlayer />
+          </ChromeGate>
         </Providers>
       </body>
     </html>
