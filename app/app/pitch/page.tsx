@@ -293,9 +293,10 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          168 markets created on devnet in 2 weeks, all green. Mainnet is
-          deployed but private — no public trading until an external audit
-          (not yet started) clears.
+          168 markets created on devnet in a 2-week sprint earlier this
+          year, all green. Reactivating soon ahead of audit. Mainnet is
+          deployed but private until an external audit (quotes received,
+          not yet engaged) clears.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -330,9 +331,10 @@ function Slide03Traction(_: SlideProps) {
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
-              Live testing on Solana devnet. Mainnet program is deployed
-              but audit-pending (audit not yet started) — closed to public
-              trading until it clears.
+              Devnet sprint complete and ready to reactivate. Mainnet
+              program is deployed but private — open only to a small
+              group of open-source contributors until the external
+              audit (quotes received, not yet engaged) clears.
             </div>
           </div>
         </div>
@@ -444,10 +446,11 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          Closed beta on Solana mainnet today: connect wallet, deposit
+          Closed beta on Solana mainnet today, restricted to a small
+          group of open-source contributors: connect wallet, deposit
           USDC, open a leveraged long, close at PnL, fees split four
           ways on-chain. Public access opens once the external audit
-          (planned post-funding) clears.
+          (quotes received, not yet engaged) clears.
         </h2>
 
         <div className="pflow-wrap">
@@ -924,9 +927,10 @@ function Slide09WhyNow(_: SlideProps) {
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          GTM: 168-market devnet sprint complete → audit funding +
-          kickoff (firm engaged once funded) → audit clears → public
-          mainnet launch with first 10 creator-led markets seeded by
+          GTM: 168-market devnet sprint complete · OSS contributor
+          closed beta on mainnet · audit quotes received → reactivate
+          devnet + engage audit firm → audit clears → public mainnet
+          launch with first 10 creator-led markets seeded by
           revenue-share rebates → Jupiter / Birdeye / pump.fun routing
           once on-chain volume validates.
         </div>
@@ -950,7 +954,7 @@ function Slide10Roadmap(_: SlideProps) {
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q2 2026</div>
             <div className="pitch-roadmap-name">Devnet · audit prep</div>
-            <div className="pitch-roadmap-desc">168-market devnet sprint shipped, mainnet program deployed, audit firm shortlisted (not yet engaged)</div>
+            <div className="pitch-roadmap-desc">168-market devnet sprint shipped, mainnet program deployed to OSS-contributor closed beta, audit quotes received</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
@@ -1115,8 +1119,9 @@ function Slide13Contact(_: SlideProps) {
           className="pitch-body-text"
           style={{ maxWidth: "640px", marginBottom: "2rem" }}
         >
-          The closed beta is small and pre-audit. Fork the code under
-          Apache 2.0 across all 8 public repos, or DM us on X. We answer.
+          Closed beta is restricted to a small group of open-source
+          contributors, pre-audit. Fork the code under Apache 2.0 across
+          all 8 public repos, or DM us on X. We answer.
         </p>
         <div className="pitch-contact-grid">
           <div className="pitch-contact-card">
@@ -1134,6 +1139,24 @@ function Slide13Contact(_: SlideProps) {
         </div>
         <div className="pitch-divider" />
         <p className="pitch-url">percolator.trade</p>
+        <p className="pitch-onchain-footer mono">
+          Verifiable on-chain · mainnet program{" "}
+          <a
+            href="https://explorer.solana.com/address/ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            ESa89R5E…D4edv
+          </a>
+          {" · "}devnet program{" "}
+          <a
+            href="https://explorer.solana.com/address/g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in?cluster=devnet"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            g9msRSV3…dm9in
+          </a>
+        </p>
       </div>
     </div>
   );
@@ -3079,6 +3102,25 @@ export default function PitchPage() {
           font-size: 0.95rem;
           font-weight: 700;
           color: #fff;
+        }
+
+        .pitch-onchain-footer {
+          font-size: 0.7rem;
+          color: rgba(255, 255, 255, 0.4);
+          letter-spacing: 0.04em;
+          margin: 1rem 0 0;
+          text-align: center;
+        }
+
+        .pitch-onchain-footer a {
+          color: rgba(34, 211, 238, 0.7);
+          text-decoration: none;
+          transition: color 200ms ease;
+        }
+
+        .pitch-onchain-footer a:hover {
+          color: #22D3EE;
+          text-decoration: underline;
         }
 
         /* ── Controls ── */
