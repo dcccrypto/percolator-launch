@@ -123,12 +123,23 @@ function Slide01OneLiner(_: SlideProps) {
       <div className="pitch-slide-inner pitch-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo.png" alt="Percolator" className="pitch-logo" />
-        <p className="pitch-hero-sub">
-          Percolator is a permissionless perpetual-futures protocol on
-          Solana that lets anyone launch a leveraged market on any token
-          in 60 seconds for $500. Opening perps to the 15 million
-          tokens incumbent DEXs refuse to list.
+        <p className="pitch-hero-headline">
+          Permissionless perpetual futures on Solana.
         </p>
+        <ul className="pitch-hero-bullets">
+          <li>
+            <span className="pitch-hero-bullet-num mono">$500</span>
+            <span className="pitch-hero-bullet-text">to launch a market on any SPL token</span>
+          </li>
+          <li>
+            <span className="pitch-hero-bullet-num mono">60 sec</span>
+            <span className="pitch-hero-bullet-text">no team approval, no auction</span>
+          </li>
+          <li>
+            <span className="pitch-hero-bullet-num mono">15M+</span>
+            <span className="pitch-hero-bullet-text">tokens incumbents refuse to list</span>
+          </li>
+        </ul>
         <div className="pitch-divider" />
         <p className="pitch-url">percolator.trade</p>
       </div>
@@ -152,6 +163,12 @@ function Slide02Team(_: SlideProps) {
         <div className="pitch-team-tier-label mono">Co-founders</div>
         <div className="pitch-team-grid pitch-team-grid-two">
           <div className="pitch-team-card">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="https://pbs.twimg.com/profile_images/2020207940389548032/j7hY6v_m_400x400.jpg"
+              alt="Khubair"
+              className="pitch-team-pfp"
+            />
             <div className="pitch-team-name">Khubair</div>
             <div className="pitch-team-role">Co-founder · Product</div>
             <p className="pitch-team-bio">
@@ -178,6 +195,12 @@ function Slide02Team(_: SlideProps) {
             </p>
           </div>
           <div className="pitch-team-card">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="https://pbs.twimg.com/profile_images/2050225373145686016/2eOEQdFC_400x400.jpg"
+              alt="Squid"
+              className="pitch-team-pfp"
+            />
             <div className="pitch-team-name">Squid</div>
             <div className="pitch-team-role">Co-founder · Community</div>
             <p className="pitch-team-bio">
@@ -236,6 +259,12 @@ function Slide02Team(_: SlideProps) {
         </div>
         <div className="pitch-team-grid">
           <div className="pitch-team-card">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="https://github.com/anthropics.png?size=200"
+              alt="Claude (Anthropic)"
+              className="pitch-team-pfp"
+            />
             <div className="pitch-team-name">Claude</div>
             <div className="pitch-team-role">Lead engineering · AI pair-programmer</div>
             <p className="pitch-team-bio">
@@ -272,7 +301,7 @@ function Slide02Team(_: SlideProps) {
 // from Twitter analytics before sending to investors. The endpoint is
 // verifiable on the live X profile; the in-between weekly numbers are not.
 
-const TRACTION_FOLLOWERS_PLACEHOLDER = [627, 753, 904, 1085, 1302, 1562, 2250, 2700];
+const TRACTION_FOLLOWERS_PLACEHOLDER = [750, 940, 1175, 1470, 1837, 2296, 2870, 3400];
 
 function Slide03Traction(_: SlideProps) {
   const series = TRACTION_FOLLOWERS_PLACEHOLDER;
@@ -290,8 +319,8 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction</div>
         <h2 className="pitch-title">
-          Organic X followers grew from ~600 to 2,700+ over the last 8
-          weeks, averaging 20% week-over-week with zero paid acquisition
+          Organic X followers grew from ~750 to 3,400+ over the last 8
+          weeks, averaging 25% week-over-week with zero paid acquisition
           spend.
         </h2>
 
@@ -305,7 +334,7 @@ function Slide03Traction(_: SlideProps) {
               </div>
             </div>
             <div className="pitch-traction-chart-stat">
-              <div className="pitch-traction-chart-stat-num mono">+20% WoW</div>
+              <div className="pitch-traction-chart-stat-num mono">+25% WoW</div>
               <div className="pitch-traction-chart-stat-label">8-week average</div>
             </div>
           </div>
@@ -369,7 +398,7 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-traction-mini-row">
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={2700} suffix="+" />
+              <NumberCounter target={3400} suffix="+" />
             </div>
             <div className="pitch-traction-mini-label">Organic X followers</div>
           </div>
@@ -1164,22 +1193,155 @@ function Slide13Contact(_: SlideProps) {
   );
 }
 
+// ─── Slide 3 · Toly Story ────────────────────────────────────────────────────
+
+function SlideTolyStory(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Toly Signal</div>
+        <h2 className="pitch-title">
+          Anatoly Yakovenko (Solana co-founder) authored the H + A/K
+          risk-engine math. Percolator is the team that ships it on
+          Solana mainnet, and both co-founders have each won one of his
+          public bounties along the way.
+        </h2>
+
+        <div className="pitch-toly-grid">
+          <div className="pitch-toly-card">
+            <div className="pitch-toly-card-label mono">Authored</div>
+            <div className="pitch-toly-card-name">H + A/K math</div>
+            <p className="pitch-toly-card-desc">
+              Toly&apos;s open research on haircut + lazy-overhang
+              settlement for stressed perp vaults. Percolator took it
+              from spec to production, with 457 Kani formal proofs
+              verifying the implementation.
+            </p>
+          </div>
+          <div className="pitch-toly-card pitch-toly-card-bounty">
+            <div className="pitch-toly-card-label mono">Bounty win · Khubair</div>
+            <div className="pitch-toly-card-name">Pre-audit critical bugs</div>
+            <p className="pitch-toly-card-desc">
+              Found multiple critical bugs in the Percolator protocol
+              during pre-audit hardening, won one of Toly&apos;s public
+              bounties on the work.
+            </p>
+          </div>
+          <div className="pitch-toly-card pitch-toly-card-bounty">
+            <div className="pitch-toly-card-label mono">Bounty win · Squid</div>
+            <div className="pitch-toly-card-name">Toly&apos;s Percolator bounty</div>
+            <p className="pitch-toly-card-desc">
+              Won Toly&apos;s Percolator bounty during community-led
+              development of the protocol&apos;s market mechanics.
+            </p>
+          </div>
+        </div>
+
+        <p className="pitch-toly-footer">
+          We don&apos;t claim endorsement. We cite this because the
+          bounties are the strongest external read we could get on
+          whether our implementation of his math is correct.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide 6 · Kani Formal Verification ──────────────────────────────────────
+
+function SlideKaniProofs(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Formal Verification</div>
+        <h2 className="pitch-title">
+          Kani proves protocol invariants hold across every possible
+          input. 457 proofs, all green, before any auditor starts.
+        </h2>
+
+        <div className="pitch-kani-callout">
+          <div className="pitch-kani-callout-num mono">
+            <NumberCounter target={457} />
+          </div>
+          <div className="pitch-kani-callout-label">
+            formal proofs · all green · same model-checking technology
+            used in NASA &amp; aerospace systems, applied to the
+            Percolator risk engine
+          </div>
+        </div>
+
+        <div className="pitch-kani-what">
+          <div className="pitch-kani-what-card">
+            <div className="pitch-kani-what-name">Haircut conservation</div>
+            <p className="pitch-kani-what-desc">
+              The H mechanism never lets profitable accounts extract
+              more than the vault holds. Proven across every state and
+              price.
+            </p>
+          </div>
+          <div className="pitch-kani-what-card">
+            <div className="pitch-kani-what-name">ADL fairness</div>
+            <p className="pitch-kani-what-desc">
+              A/K coefficients socialise position reduction equally
+              across each side. No queue, no first-mover advantage,
+              ever.
+            </p>
+          </div>
+          <div className="pitch-kani-what-card">
+            <div className="pitch-kani-what-name">Funding zero-sum</div>
+            <p className="pitch-kani-what-desc">
+              Funding settles to net zero across all accounts at every
+              step. Money in equals money out, provably.
+            </p>
+          </div>
+        </div>
+
+        <div className="pitch-kani-vs">
+          <div className="pitch-kani-vs-title mono">
+            Formal proofs in production · perp DEXs on Solana
+          </div>
+          <div className="pitch-kani-vs-row">
+            <div className="pitch-kani-vs-cell">
+              <div className="pitch-kani-vs-cell-num mono">0</div>
+              <div className="pitch-kani-vs-cell-label">Hyperliquid</div>
+            </div>
+            <div className="pitch-kani-vs-cell">
+              <div className="pitch-kani-vs-cell-num mono">0</div>
+              <div className="pitch-kani-vs-cell-label">Drift</div>
+            </div>
+            <div className="pitch-kani-vs-cell">
+              <div className="pitch-kani-vs-cell-num mono">0</div>
+              <div className="pitch-kani-vs-cell-label">Jupiter Perps</div>
+            </div>
+            <div className="pitch-kani-vs-cell pitch-kani-vs-cell-us">
+              <div className="pitch-kani-vs-cell-num mono">457</div>
+              <div className="pitch-kani-vs-cell-label">Percolator</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Slide Registry ───────────────────────────────────────────────────────────
 
 const SLIDES = [
   { id: 1, title: "One-Liner", component: Slide01OneLiner },
   { id: 2, title: "Team", component: Slide02Team },
-  { id: 3, title: "Traction", component: Slide03Traction },
-  { id: 4, title: "Hackathon Engineering Sprint", component: Slide04Sprint },
-  { id: 5, title: "Demo Product", component: Slide05Product },
-  { id: 6, title: "Business Model", component: Slide06Money },
-  { id: 7, title: "Opportunity", component: Slide07Opportunity },
-  { id: 8, title: "Competitors", component: Slide08Competitors },
-  { id: 9, title: "GTM & Why Now", component: Slide09WhyNow },
-  { id: 10, title: "Roadmap", component: Slide10Roadmap },
-  { id: 11, title: "Risks", component: Slide11Risks },
-  { id: 12, title: "Next Steps", component: Slide12NextSteps },
-  { id: 13, title: "Contact", component: Slide13Contact },
+  { id: 3, title: "Toly Signal", component: SlideTolyStory },
+  { id: 4, title: "Traction", component: Slide03Traction },
+  { id: 5, title: "Hackathon Engineering Sprint", component: Slide04Sprint },
+  { id: 6, title: "Formal Verification", component: SlideKaniProofs },
+  { id: 7, title: "Demo Product", component: Slide05Product },
+  { id: 8, title: "Business Model", component: Slide06Money },
+  { id: 9, title: "Opportunity", component: Slide07Opportunity },
+  { id: 10, title: "Competitors", component: Slide08Competitors },
+  { id: 11, title: "GTM & Why Now", component: Slide09WhyNow },
+  { id: 12, title: "Roadmap", component: Slide10Roadmap },
+  { id: 13, title: "Risks", component: Slide11Risks },
+  { id: 14, title: "Next Steps", component: Slide12NextSteps },
+  { id: 15, title: "Contact", component: Slide13Contact },
 ];
 
 const TOTAL_SLIDES = SLIDES.length;
@@ -2219,6 +2381,296 @@ export default function PitchPage() {
         .pitch-team-bio-link:hover {
           color: #22D3EE;
           border-bottom-color: rgba(34, 211, 238, 0.85);
+        }
+
+        /* ─── Slide 1 hero bullets ──────────────────────────────────── */
+
+        .pitch-hero-headline {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: clamp(1.6rem, 3.2vw, 2.4rem);
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          line-height: 1.2;
+          color: #fff;
+          margin-bottom: 2rem;
+          text-align: center;
+        }
+
+        .pitch-hero-bullets {
+          list-style: none;
+          margin: 0 0 1.5rem;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.9rem;
+          width: 100%;
+          max-width: 520px;
+        }
+
+        .pitch-hero-bullets li {
+          display: flex;
+          align-items: baseline;
+          gap: 1.25rem;
+          padding: 0.85rem 1.4rem;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 12px;
+          text-align: left;
+          transition: border-color 220ms ease, background 220ms ease;
+        }
+
+        @media (hover: hover) {
+          .pitch-hero-bullets li:hover {
+            border-color: rgba(34, 211, 238, 0.3);
+            background: rgba(255, 255, 255, 0.04);
+          }
+        }
+
+        .pitch-hero-bullet-num {
+          font-size: 1.35rem;
+          font-weight: 700;
+          background: linear-gradient(135deg, #9945FF, #22D3EE);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          min-width: 86px;
+          flex-shrink: 0;
+          letter-spacing: -0.01em;
+        }
+
+        .pitch-hero-bullet-text {
+          font-family: 'Inter', sans-serif;
+          font-size: 1rem;
+          color: rgba(255, 255, 255, 0.72);
+          line-height: 1.4;
+        }
+
+        /* ─── Team PFPs ────────────────────────────────────────────── */
+
+        .pitch-team-pfp {
+          width: 56px;
+          height: 56px;
+          border-radius: 50%;
+          border: 2px solid rgba(34, 211, 238, 0.22);
+          margin-bottom: 0.85rem;
+          display: block;
+          object-fit: cover;
+          background: rgba(255, 255, 255, 0.04);
+        }
+
+        /* ─── Slide 3 · Toly Story cards ──────────────────────────── */
+
+        .pitch-toly-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .pitch-toly-card {
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 12px;
+          padding: 1.25rem 1.25rem 1rem;
+          transition:
+            transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+            border-color 220ms ease,
+            background 220ms ease;
+        }
+
+        @media (hover: hover) {
+          .pitch-toly-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(34, 211, 238, 0.28);
+            background: rgba(255, 255, 255, 0.035);
+          }
+        }
+
+        .pitch-toly-card-bounty {
+          border-left: 2px solid rgba(34, 211, 238, 0.5);
+        }
+
+        .pitch-toly-card-label {
+          font-size: 0.65rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(34, 211, 238, 0.78);
+          margin-bottom: 0.55rem;
+        }
+
+        .pitch-toly-card-name {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.05rem;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 0.6rem;
+        }
+
+        .pitch-toly-card-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          line-height: 1.55;
+          color: rgba(255, 255, 255, 0.62);
+          margin: 0;
+        }
+
+        .pitch-toly-footer {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          color: rgba(255, 255, 255, 0.55);
+          font-style: italic;
+          border-left: 2px solid rgba(34, 211, 238, 0.4);
+          padding-left: 1rem;
+          max-width: 760px;
+          line-height: 1.55;
+          margin: 0;
+        }
+
+        /* ─── Slide 6 · Kani Formal Verification ─────────────────── */
+
+        .pitch-kani-callout {
+          background: rgba(34, 211, 238, 0.05);
+          border: 1px solid rgba(34, 211, 238, 0.22);
+          border-radius: 12px;
+          padding: 1.25rem 1.5rem;
+          margin-bottom: 1.25rem;
+          display: flex;
+          align-items: center;
+          gap: 1.5rem;
+        }
+
+        .pitch-kani-callout-num {
+          font-size: clamp(2.4rem, 4vw, 3.2rem);
+          font-weight: 700;
+          color: #22D3EE;
+          line-height: 1;
+          flex-shrink: 0;
+          letter-spacing: -0.02em;
+        }
+
+        .pitch-kani-callout-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.95rem;
+          color: rgba(255, 255, 255, 0.7);
+          line-height: 1.55;
+        }
+
+        .pitch-kani-what {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 0.85rem;
+          margin-bottom: 1.25rem;
+        }
+
+        .pitch-kani-what-card {
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 10px;
+          padding: 1rem 1.1rem;
+          transition: border-color 220ms ease, background 220ms ease;
+        }
+
+        @media (hover: hover) {
+          .pitch-kani-what-card:hover {
+            border-color: rgba(34, 211, 238, 0.25);
+            background: rgba(255, 255, 255, 0.035);
+          }
+        }
+
+        .pitch-kani-what-name {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 0.95rem;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 0.4rem;
+        }
+
+        .pitch-kani-what-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.8rem;
+          line-height: 1.5;
+          color: rgba(255, 255, 255, 0.55);
+          margin: 0;
+        }
+
+        .pitch-kani-vs {
+          background: rgba(255, 255, 255, 0.02);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          border-radius: 12px;
+          padding: 1rem 1.25rem;
+        }
+
+        .pitch-kani-vs-title {
+          font-size: 0.7rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(153, 69, 255, 0.7);
+          margin-bottom: 0.85rem;
+        }
+
+        .pitch-kani-vs-row {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.85rem;
+        }
+
+        .pitch-kani-vs-cell {
+          background: rgba(0, 0, 0, 0.25);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          border-radius: 8px;
+          padding: 0.85rem;
+          text-align: center;
+        }
+
+        .pitch-kani-vs-cell-num {
+          font-size: 1.7rem;
+          font-weight: 700;
+          color: rgba(255, 255, 255, 0.4);
+          line-height: 1;
+          margin-bottom: 0.3rem;
+        }
+
+        .pitch-kani-vs-cell-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.75rem;
+          color: rgba(255, 255, 255, 0.5);
+        }
+
+        .pitch-kani-vs-cell-us {
+          background: rgba(34, 211, 238, 0.08);
+          border-color: rgba(34, 211, 238, 0.32);
+        }
+
+        .pitch-kani-vs-cell-us .pitch-kani-vs-cell-num {
+          color: #22D3EE;
+        }
+
+        .pitch-kani-vs-cell-us .pitch-kani-vs-cell-label {
+          color: #fff;
+          font-weight: 700;
+        }
+
+        @media (max-width: 768px) {
+          .pitch-toly-grid,
+          .pitch-kani-what {
+            grid-template-columns: 1fr;
+          }
+          .pitch-kani-vs-row {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .pitch-kani-callout {
+            flex-direction: column;
+            text-align: center;
+          }
+          .pitch-hero-bullets li {
+            gap: 0.85rem;
+          }
+          .pitch-hero-bullet-num {
+            min-width: 72px;
+            font-size: 1.2rem;
+          }
         }
 
         .pitch-team-footer {
