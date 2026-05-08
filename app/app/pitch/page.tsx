@@ -189,6 +189,14 @@ function Slide02Team(_: SlideProps) {
               >
                 x.com/dcc_crypto
               </a>
+              {" · "}
+              <a
+                href="https://github.com/dcccrypto"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                github.com/dcccrypto
+              </a>
             </p>
           </div>
           <div className="pitch-team-card">
@@ -285,15 +293,15 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          The protocol is live and busy. Devnet ran 1,000+ transactions
-          at 100% success during testing. Mainnet closed beta is live
-          with 14 markets created and active trades at 99.2% success.
+          Devnet program is live and busy: 8 markets created, 1,000+
+          transactions, 100% success rate. Mainnet is deployed but
+          private — no public trading until the external audit clears.
         </h2>
 
-        <div className="pitch-traction-network-grid">
-          <div className="pitch-traction-network-card">
+        <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
+          <div className="pitch-traction-network-card pitch-traction-network-card-wide">
             <div className="pitch-traction-network-header">
-              <div className="pitch-traction-network-tag mono">Devnet · testing window</div>
+              <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">Devnet · live program</div>
               <a
                 className="pitch-traction-network-link mono"
                 href="https://explorer.solana.com/address/g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in?cluster=devnet"
@@ -303,7 +311,13 @@ function Slide03Traction(_: SlideProps) {
                 g9msRSV3…dm9in ↗
               </a>
             </div>
-            <div className="pitch-traction-network-stats">
+            <div className="pitch-traction-network-stats pitch-traction-network-stats-three">
+              <div className="pitch-traction-network-stat">
+                <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">
+                  <NumberCounter target={8} />
+                </div>
+                <div className="pitch-traction-network-label">markets created</div>
+              </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
                   <NumberCounter target={1000} suffix="+" />
@@ -316,36 +330,9 @@ function Slide03Traction(_: SlideProps) {
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
-              March 2026 testing burst · zero failures across 1,000+ signatures
-            </div>
-          </div>
-
-          <div className="pitch-traction-network-card">
-            <div className="pitch-traction-network-header">
-              <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">Mainnet · closed beta</div>
-              <a
-                className="pitch-traction-network-link mono"
-                href="https://explorer.solana.com/address/ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                ESa89R5E…D4edv ↗
-              </a>
-            </div>
-            <div className="pitch-traction-network-stats">
-              <div className="pitch-traction-network-stat">
-                <div className="pitch-traction-network-num mono">
-                  <NumberCounter target={14} />
-                </div>
-                <div className="pitch-traction-network-label">markets created</div>
-              </div>
-              <div className="pitch-traction-network-stat">
-                <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">99.2%</div>
-                <div className="pitch-traction-network-label">success rate</div>
-              </div>
-            </div>
-            <div className="pitch-traction-network-meta mono">
-              v12.17 deployed · 1,000+ tx in last 5 hours · public access post-audit Q3
+              Live testing on Solana devnet. Mainnet program is deployed
+              and audit-pending — closed to public trading until Q3 audit
+              completion.
             </div>
           </div>
         </div>
@@ -1158,56 +1145,86 @@ function SlideTolyStory(_: SlideProps) {
         <div className="pitch-label">Origin · Toly Signal</div>
         <h2 className="pitch-title">
           Solana co-founder Anatoly Yakovenko founded Percolator and
-          maintains the reference program publicly. We&apos;re the team
-          taking it from spec to production on Solana mainnet.
+          publicly engages with our team&apos;s work. He authored the
+          protocol math; we built the product around it.
         </h2>
 
-        <div className="pitch-toly-grid">
-          <div className="pitch-toly-card">
-            <div className="pitch-toly-card-label mono">Toly · Founded</div>
-            <div className="pitch-toly-card-name">
-              <a
-                className="pitch-toly-card-link"
-                href="https://github.com/aeyakovenko/percolator-prog"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                aeyakovenko/percolator-prog
-              </a>
+        <div className="pitch-toly-photo-grid">
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Squid bug fix, April 29"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo1.jpg"
+              alt="Toly tweet quote-RTing Squid's GitHub issue: 'big brain bug'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Apr 29</span>
+              <span>Squid&apos;s KeeperCrank fix</span>
             </div>
-            <p className="pitch-toly-card-desc">
-              Toly&apos;s reference implementation of the Percolator risk
-              engine, actively maintained on his own GitHub with security
-              audits and 113 Kani proofs. The protocol math + program
-              are his.
-            </p>
-          </div>
-          <div className="pitch-toly-card pitch-toly-card-built">
-            <div className="pitch-toly-card-label mono">We · Built the product</div>
-            <div className="pitch-toly-card-name">Frontend, SDK, indexer, infra</div>
-            <p className="pitch-toly-card-desc">
-              Took Toly&apos;s reference repo from spec to live mainnet
-              product: trading frontend, TypeScript SDK, indexer + API,
-              keeper bot fleet, NFT positions, mainnet deploy ops, and
-              the closed-beta itself.
-            </p>
-          </div>
-          <div className="pitch-toly-card pitch-toly-card-bounty">
-            <div className="pitch-toly-card-label mono">Bounties · Won 2</div>
-            <div className="pitch-toly-card-name">Khubair + Squid each won one</div>
-            <p className="pitch-toly-card-desc">
-              Khubair won Toly&apos;s pre-audit critical-bug bounty;
-              Squid won Toly&apos;s Percolator bounty during community-led
-              development. Two of Toly&apos;s public bounties paid out to
-              this team.
-            </p>
-          </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Khubair bounty 3 critical, May 7"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo2.jpg"
+              alt="Toly tweet with brain emojis on Khubair's bounty 3 critical issue"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · May 7</span>
+              <span>Khubair&apos;s bounty 3 critical</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — percolator-stake repo signal, Feb 19"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo3.jpg"
+              alt="Toly tweet RTing dcccrypto/percolator-stake: 'Look, a contribution! Don't trust, verify!'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Feb 19</span>
+              <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Percolator is a job creator, Feb 13"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo4.jpg"
+              alt="Toly tweet: 'Percolator is a job creator'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Feb 13</span>
+              <span>&ldquo;Percolator is a job creator&rdquo;</span>
+            </div>
+          </a>
         </div>
 
         <p className="pitch-toly-footer">
-          We don&apos;t claim endorsement. We cite the founder + bounties
-          because they&apos;re the strongest external read on whether
-          our build of his protocol is correct.
+          Toly authored the protocol math and the reference program
+          (github.com/aeyakovenko/percolator-prog). We built the
+          frontend, SDK, indexer, keeper fleet, and infra around it.
+          Both co-founders have each won one of his public bounties.
         </p>
       </div>
     </div>
@@ -2259,6 +2276,21 @@ export default function PitchPage() {
           margin-bottom: 0.85rem;
         }
 
+        .pitch-traction-network-stats-three {
+          grid-template-columns: repeat(3, 1fr);
+        }
+
+        .pitch-traction-network-grid-single {
+          grid-template-columns: 1fr;
+          max-width: 760px;
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        .pitch-traction-network-card-wide {
+          padding: 1.5rem 1.75rem;
+        }
+
         .pitch-traction-network-stat {
           background: rgba(0, 0, 0, 0.25);
           border: 1px solid rgba(255, 255, 255, 0.06);
@@ -2597,6 +2629,81 @@ export default function PitchPage() {
         .pitch-toly-card-link:hover {
           color: #22D3EE;
           border-bottom-color: rgba(34, 211, 238, 0.9);
+        }
+
+        /* ─── Toly tweet-screenshot 2x2 grid ────────────────────── */
+
+        .pitch-toly-photo-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 0.85rem;
+          margin-bottom: 1.25rem;
+        }
+
+        .pitch-toly-photo {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 10px;
+          padding: 0.6rem;
+          text-decoration: none;
+          color: inherit;
+          transition:
+            transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+            border-color 220ms ease,
+            box-shadow 220ms ease;
+        }
+
+        @media (hover: hover) {
+          .pitch-toly-photo:hover {
+            transform: translateY(-2px);
+            border-color: rgba(34, 211, 238, 0.32);
+            box-shadow: 0 8px 24px rgba(34, 211, 238, 0.06);
+          }
+        }
+
+        .pitch-toly-photo img {
+          width: 100%;
+          height: 110px;
+          object-fit: cover;
+          object-position: top;
+          border-radius: 6px;
+          display: block;
+        }
+
+        .pitch-toly-photo-cap {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.65rem;
+          color: rgba(255, 255, 255, 0.55);
+          letter-spacing: 0.04em;
+          padding: 0 0.2rem;
+        }
+
+        .pitch-toly-photo-cap span:first-child {
+          color: rgba(34, 211, 238, 0.75);
+          flex-shrink: 0;
+        }
+
+        .pitch-toly-photo-cap span:last-child {
+          color: rgba(255, 255, 255, 0.7);
+          text-align: right;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        @media (max-width: 768px) {
+          .pitch-toly-photo-grid {
+            grid-template-columns: 1fr;
+          }
+          .pitch-toly-photo img {
+            height: 160px;
+          }
         }
 
         .pitch-toly-card-desc {
