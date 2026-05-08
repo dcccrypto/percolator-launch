@@ -1,30 +1,133 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+
+// ─── Liquid Drip identity components ─────────────────────────────────────────
+
+function AuroraBackground() {
+  return <div className="pitch-aurora" aria-hidden />;
+}
+
+function DripLine() {
+  return (
+    <div className="pitch-drip-line" aria-hidden>
+      <div className="pitch-drip-dot" />
+    </div>
+  );
+}
+
+// ─── NumberCounter — ticks 0 → target on slide-active ────────────────────────
+
+interface NumberCounterProps {
+  target: number;
+  duration?: number;
+  prefix?: string;
+  suffix?: string;
+  format?: (n: number) => string;
+  className?: string;
+  isActive?: boolean;
+}
+
+function NumberCounter({
+  target,
+  duration = 800,
+  prefix = "",
+  suffix = "",
+  format,
+  className,
+  isActive = true,
+}: NumberCounterProps) {
+  const [value, setValue] = useState(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isActive) {
+      setValue(0);
+      return;
+    }
+
+    // Respect reduced-motion: jump to target instantly
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setValue(target);
+      return;
+    }
+
+    const start = performance.now();
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / duration);
+      // easeOutCubic
+      const eased = 1 - Math.pow(1 - t, 3);
+      setValue(Math.round(target * eased));
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [target, duration, isActive]);
+
+  const display = format
+    ? format(value)
+    : value.toLocaleString();
+
+  return (
+    <span className={className}>
+      {prefix}
+      {display}
+      {suffix}
+    </span>
+  );
+}
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
-
-const TOTAL_SLIDES = 12;
-
-// ─── Types ───────────────────────────────────────────────────────────────────
+//
+// 13 slides, ordered per Cap (Superteam UK) feedback 2026-04-30:
+//   "i recommend doing one-liner / team / traction as your first 3 slides"
+//   "don't have taglines - have a proper sentence which is the tldr of your
+//    traction with a time frame"
+//
+// Structure follows Cap's 13-slide framework exactly:
+//   1  One-Liner
+//   2  Team
+//   3  Traction (TL;DR sentence + growth chart)
+//   4  Hackathon Engineering Sprint
+//   5  Demo Product
+//   6  Business Model + Unit Economics
+//   7  Opportunity
+//   8  Competitors
+//   9  GTM & Why Now
+//  10  Roadmap
+//  11  Risks
+//  12  Next Steps (Ask + Exit Path)
+//  13  Contact
+//
+// Source of truth: percolator-ops/content/pitch-deck-copy.md (v6)
+// ──────────────────────────────────────────────────────────────────────────
 
 interface SlideProps {
   isCurrent: boolean;
 }
 
-// ─── Individual Slides ───────────────────────────────────────────────────────
+// ─── Slide 1 — One-Liner ─────────────────────────────────────────────────────
 
-function Slide01Cover({ isCurrent }: SlideProps) {
+function Slide01OneLiner(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner pitch-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo.png" alt="Percolator" className="pitch-logo" />
         <p className="pitch-hero-sub">
-          Percolator is a permissionless perpetuals protocol on Solana that
-          lets anyone launch a leveraged market on any token in 60 seconds
-          for $500 — opening perps to the 15 million tokens that incumbent
-          DEXs refuse to list.
+          Percolator is a permissionless perpetual-futures protocol on
+          Solana that lets anyone launch a leveraged market on any token
+          in 60 seconds for $500 — opening perps to the 15 million
+          tokens incumbent DEXs refuse to list.
         </p>
         <div className="pitch-divider" />
         <p className="pitch-url">percolatorlaunch.com</p>
@@ -34,62 +137,140 @@ function Slide01Cover({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide02Team({ isCurrent }: SlideProps) {
+// ─── Slide 2 — Team ──────────────────────────────────────────────────────────
+
+function Slide02Team(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
-        <h2 className="pitch-title">Built by a small, ship-obsessed team.</h2>
-        <div className="pitch-team-grid">
+        <h2 className="pitch-title">
+          Two co-founders shipped Percolator from zero to mainnet-ready
+          with 457 formal proofs and zero outside capital.
+        </h2>
+
+        <div className="pitch-team-tier-label mono">Co-founders</div>
+        <div className="pitch-team-grid pitch-team-grid-two">
           <div className="pitch-team-card">
             <div className="pitch-team-name">Khubair</div>
-            <div className="pitch-team-role">Founder · Engineering</div>
+            <div className="pitch-team-role">Co-founder · Product</div>
             <p className="pitch-team-bio">
-              {/* TODO: replace with real one-line bio. e.g.
-                  "Built X at Y. Shipped Z. N years in DeFi/Solana." */}
-              Solo-shipped Percolator end-to-end: 8 open-source repos,
-              471 formal proofs, mainnet-ready in under a year.
+              Owns product direction, security review, vibe coding the
+              codebase with Claude, and external positioning. Shipping
+              everything from critical-bug reviews that hardened the
+              protocol pre-audit to the audit-prep plan, mainnet
+              rollout, and Frontier submission.
+            </p>
+            <p className="pitch-team-bio" style={{ marginTop: "0.5rem" }}>
+              Web2 startup background → Solana product co-founder;
+              winner of one of Toly&apos;s public bounties; found
+              multiple critical bugs in the Percolator protocol
+              pre-audit. Member of Superteam UK.
+            </p>
+            <p className="pitch-team-links mono">
+              <a
+                href="https://x.com/dcc_crypto"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                x.com/dcc_crypto
+              </a>
             </p>
           </div>
           <div className="pitch-team-card">
-            <div className="pitch-team-name">{/* TODO */}—</div>
-            <div className="pitch-team-role">{/* TODO: role */}—</div>
+            <div className="pitch-team-name">Squid</div>
+            <div className="pitch-team-role">Co-founder · Community</div>
             <p className="pitch-team-bio">
-              {/* TODO: co-founder / advisor / first hire bio */}
-              —
+              Owns community strategy, project management, and some of
+              the daily &ldquo;vibe code&rdquo; that helps benefit
+              Percolator. Shipping everything from contributor
+              onboarding flows to Solana native engagement programs.
             </p>
-          </div>
-          <div className="pitch-team-card">
-            <div className="pitch-team-name">{/* TODO */}—</div>
-            <div className="pitch-team-role">{/* TODO: role */}—</div>
-            <p className="pitch-team-bio">
-              {/* TODO: third team member or notable advisor */}
-              —
+            <p className="pitch-team-bio" style={{ marginTop: "0.5rem" }}>
+              3 years in the Solana ecosystem (trader → CTO lead →
+              builder); winner of Toly&apos;s Percolator bounty.
+            </p>
+            <p className="pitch-team-links mono">
+              <a
+                href="https://x.com/0xSquid_Sol"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                x.com/0xSquid_Sol
+              </a>
+              {" · "}
+              <a
+                href="https://github.com/0x-SquidSol/percolator-buyback"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                gh/percolator-buyback
+              </a>
+              {" · "}
+              <a
+                href="https://github.com/0x-SquidSol/percolator-locker"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                gh/percolator-locker
+              </a>
             </p>
           </div>
         </div>
+
+        <div
+          className="pitch-team-tier-label mono"
+          style={{ marginTop: "1.5rem" }}
+        >
+          Team
+        </div>
+        <div className="pitch-team-grid">
+          <div className="pitch-team-card">
+            <div className="pitch-team-name">Claude</div>
+            <div className="pitch-team-role">Lead engineering · AI pair-programmer</div>
+            <p className="pitch-team-bio">
+              Owns most of the production code the co-founders direct
+              — Rust programs, TypeScript SDK and frontend, tests, and
+              Kani proof drafts. Shipping everything from the v12.17
+              mainnet upgrade to the 457-proof verification suite.
+              Reviews PRs. Doesn&apos;t sleep.
+            </p>
+            <p className="pitch-team-bio" style={{ marginTop: "0.5rem" }}>
+              Anthropic&apos;s Claude (Opus 4.7, 1M context) running in
+              Claude Code; funded by pump.fun creator rewards on the
+              PERC market. Percolator is one of the first Solana teams
+              openly crediting an AI as a core contributor.
+            </p>
+          </div>
+        </div>
+
         <p className="pitch-team-footer">
-          {/* TODO: one-line credibility marker — e.g.
-              "Backed by [angels]. Audited by [firm]. Advised by [name]." */}
-          Open-source from day one. Apache 2.0. 8 public repos.
+          Founder-market fit: the H + A/K risk-engine math is Anatoly
+          Yakovenko&apos;s open research. Percolator is the team that
+          took it from spec to production — Khubair and Squid have
+          each won one of Toly&apos;s public bounties along the way.
         </p>
       </div>
     </div>
   );
 }
 
-function Slide03Traction({ isCurrent }: SlideProps) {
-  /* TODO: replace placeholder weekly markets-created series with real data
-     from the indexer. The values below are illustrative — they sum to 168
-     (matches the headline cumulative count) and grow at ~20% WoW (matches
-     the headline growth rate). Replace with the real series and re-derive
-     the WoW % stat. */
-  const weeklyMarkets = [10, 12, 14, 17, 21, 25, 31, 38];
-  const max = Math.max(...weeklyMarkets);
-  const w = 720;
+// ─── Slide 3 — Traction ──────────────────────────────────────────────────────
+//
+// The traction series is illustrative compound growth (~20% WoW) ending at
+// the verified 2,700+ X follower count. Replace with the real weekly export
+// from Twitter analytics before sending to investors. The endpoint is
+// verifiable on the live X profile; the in-between weekly numbers are not.
+
+const TRACTION_FOLLOWERS_PLACEHOLDER = [627, 753, 904, 1085, 1302, 1562, 2250, 2700];
+
+function Slide03Traction(_: SlideProps) {
+  const series = TRACTION_FOLLOWERS_PLACEHOLDER;
+  const max = Math.max(...series);
+  const w = 760;
   const h = 200;
-  const stepX = w / (weeklyMarkets.length - 1);
-  const points = weeklyMarkets
+  const stepX = w / (series.length - 1);
+  const points = series
     .map((v, i) => `${i * stepX},${h - (v / max) * h}`)
     .join(" ");
   const areaPoints = `0,${h} ${points} ${w},${h}`;
@@ -99,17 +280,18 @@ function Slide03Traction({ isCurrent }: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction</div>
         <h2 className="pitch-title">
-          168 markets created on devnet and 3,000+ organic X followers in
-          ~8 weeks — averaging 20%+ week-over-week growth with zero paid
-          acquisition.
+          Organic X followers grew from ~600 to 2,700+ over the last 8
+          weeks — averaging 20% week-over-week with zero paid acquisition
+          spend.
         </h2>
 
         <div className="pitch-traction-chart-wrap">
           <div className="pitch-traction-chart-header">
             <div>
-              <div className="pitch-traction-chart-title">Markets created per week</div>
+              <div className="pitch-traction-chart-title">Organic X followers — weekly</div>
               <div className="pitch-traction-chart-sub mono">
-                devnet · last 8 weeks
+                last 8 weeks · zero paid spend
+                <span className="pitch-traction-illus"> · illustrative shape, real export pre-submission</span>
               </div>
             </div>
             <div className="pitch-traction-chart-stat">
@@ -133,22 +315,32 @@ function Slide03Traction({ isCurrent }: SlideProps) {
                 <stop offset="100%" stopColor="#22D3EE" />
               </linearGradient>
             </defs>
-            <polygon points={areaPoints} fill="url(#tractionAreaGrad)" />
+            <polygon
+              className="pitch-traction-area"
+              points={areaPoints}
+              fill="url(#tractionAreaGrad)"
+            />
             <polyline
+              className="pitch-traction-line"
               points={points}
               fill="none"
               stroke="url(#tractionLineGrad)"
               strokeWidth="3"
               strokeLinejoin="round"
               strokeLinecap="round"
+              pathLength={100}
+              strokeDasharray="100"
+              strokeDashoffset="100"
             />
-            {weeklyMarkets.map((v, i) => (
+            {series.map((v, i) => (
               <circle
                 key={i}
+                className="pitch-traction-dot"
                 cx={i * stepX}
                 cy={h - (v / max) * h}
                 r="4"
                 fill="#22D3EE"
+                style={{ animationDelay: `${600 + i * 90}ms` }}
               />
             ))}
           </svg>
@@ -166,20 +358,26 @@ function Slide03Traction({ isCurrent }: SlideProps) {
 
         <div className="pitch-traction-mini-row">
           <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">168</div>
-            <div className="pitch-traction-mini-label">Markets on devnet</div>
-          </div>
-          <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">3,000+</div>
+            <div className="pitch-traction-mini-num mono">
+              <NumberCounter target={2700} suffix="+" />
+            </div>
             <div className="pitch-traction-mini-label">Organic X followers</div>
           </div>
           <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">471</div>
-            <div className="pitch-traction-mini-label">Formal proofs (Kani)</div>
+            <div className="pitch-traction-mini-num mono">
+              <NumberCounter target={457} />
+            </div>
+            <div className="pitch-traction-mini-label">Kani formal proofs (all green)</div>
+          </div>
+          <div className="pitch-traction-mini">
+            <div className="pitch-traction-mini-num mono">
+              <NumberCounter target={8} />
+            </div>
+            <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">$0</div>
-            <div className="pitch-traction-mini-label">Paid acquisition spend</div>
+            <div className="pitch-traction-mini-label">Paid acquisition · outside capital</div>
           </div>
         </div>
       </div>
@@ -187,240 +385,393 @@ function Slide03Traction({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide02Gap({ isCurrent }: SlideProps) {
+// ─── Slide 4 — Hackathon Engineering Sprint ──────────────────────────────────
+
+function Slide04Sprint(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">The Gap</div>
+        <div className="pitch-label">Hackathon Engineering Sprint</div>
         <h2 className="pitch-title">
-          15 million tokens live on Solana.<br />
-          Fewer than 50 have perpetual markets.
+          Across the 5-week Frontier window we shipped three changes that
+          unblock long-tail perp markets — each tied to direct customer
+          signal.
         </h2>
-        <div className="pitch-insight-body">
-          <p className="pitch-body-text">
-            Every major perps DEX — Hyperliquid, Jupiter, Drift — decides which tokens
-            you can trade with leverage. Listing requires approval, an oracle feed, or
-            millions in auction fees.
-          </p>
-          <p className="pitch-body-text" style={{ marginTop: '1.25rem' }}>
-            The result: 99.9997% of tokens can never have leveraged markets.
-          </p>
-          <div className="pitch-callout">
-            Not because of technical limits. Because of design choices.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function Slide03Solution({ isCurrent }: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">The Solution</div>
-        <h2 className="pitch-title">One place to trade any token with leverage.</h2>
-        <div className="pitch-solution-three">
-          <div className="pitch-solution-line">
-            <span className="pitch-solution-line-bold">Blue chips</span>
-            <span className="pitch-solution-line-sep">—</span>
-            <span className="pitch-solution-line-text">SOL, BTC, ETH with deep liquidity and Pyth feeds</span>
-          </div>
-          <div className="pitch-solution-line">
-            <span className="pitch-solution-line-bold">Memecoins</span>
-            <span className="pitch-solution-line-sep">—</span>
-            <span className="pitch-solution-line-text">WIF, BONK, POPCAT, and anything trading on a DEX</span>
-          </div>
-          <div className="pitch-solution-line">
-            <span className="pitch-solution-line-bold">Long-tail tokens</span>
-            <span className="pitch-solution-line-sep">—</span>
-            <span className="pitch-solution-line-text">the next 15 million</span>
-          </div>
-        </div>
-        <p className="pitch-solution-sub">
-          One account. One collateral balance. Every perp market.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function Slide04Create({ isCurrent }: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Permissionless</div>
-        <h2 className="pitch-title">Create a Market in 60 Seconds</h2>
-
-        {/* Bold three-step diagram */}
-        <div className="pflow-wrap">
-          {/* Step 01 */}
-          <div className="pflow-step">
-            <div className="pflow-num-wrap">
-              <div className="pflow-num mono">01</div>
-            </div>
-            <div className="pflow-step-title">Pick a token</div>
-            <div className="pflow-step-desc">Paste any Solana mint address</div>
-            <div className="pflow-example-card">
-              <div className="pflow-example-label mono">mint</div>
-              <div className="pflow-example-value mono">EKpQGAJ...WIF</div>
-            </div>
-          </div>
-
-          {/* Connector */}
-          <div className="pflow-connector" aria-hidden>
-            <svg width="64" height="24" viewBox="0 0 64 24" fill="none" className="pflow-arrow-svg">
-              <defs>
-                <linearGradient id="arrowGrad1" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#9945FF" />
-                  <stop offset="100%" stopColor="#22D3EE" />
-                </linearGradient>
-              </defs>
-              <line x1="0" y1="12" x2="52" y2="12" stroke="url(#arrowGrad1)" strokeWidth="2" />
-              <polyline points="46,6 58,12 46,18" stroke="url(#arrowGrad1)" strokeWidth="2" fill="none" strokeLinejoin="round" />
-            </svg>
-          </div>
-
-          {/* Step 02 */}
-          <div className="pflow-step">
-            <div className="pflow-num-wrap">
-              <div className="pflow-num mono">02</div>
-            </div>
-            <div className="pflow-step-title">Set parameters</div>
-            <div className="pflow-step-desc">Fee rate, leverage cap, oracle mode</div>
-            <div className="pflow-example-card">
-              <div className="pflow-example-label mono">config</div>
-              <div className="pflow-example-value mono">Fee: 3%</div>
-              <div className="pflow-example-value mono">Leverage: 10x</div>
-              <div className="pflow-example-value mono">Oracle: HYPERP</div>
-            </div>
-          </div>
-
-          {/* Connector */}
-          <div className="pflow-connector" aria-hidden>
-            <svg width="64" height="24" viewBox="0 0 64 24" fill="none" className="pflow-arrow-svg">
-              <defs>
-                <linearGradient id="arrowGrad2" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#9945FF" />
-                  <stop offset="100%" stopColor="#22D3EE" />
-                </linearGradient>
-              </defs>
-              <line x1="0" y1="12" x2="52" y2="12" stroke="url(#arrowGrad2)" strokeWidth="2" />
-              <polyline points="46,6 58,12 46,18" stroke="url(#arrowGrad2)" strokeWidth="2" fill="none" strokeLinejoin="round" />
-            </svg>
-          </div>
-
-          {/* Step 03 */}
-          <div className="pflow-step pflow-step-live">
-            <div className="pflow-num-wrap">
-              <div className="pflow-num mono">03</div>
-            </div>
-            <div className="pflow-step-title">Launch</div>
-            <div className="pflow-step-desc">Market live. Trades execute immediately.</div>
-            <div className="pflow-example-card pflow-example-card-live">
-              <div className="pflow-example-label mono">tx confirmed</div>
-              <div className="pflow-example-value mono pflow-live-id">Market 7x3K...live</div>
-              <div className="pflow-live-dot-row">
-                <span className="pflow-live-dot" />
-                <span className="pflow-live-text mono">OPEN</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="pitch-create-footer">
-          $500 USDC. 60 seconds. Earn fees forever.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Slide05HowItWorks({ isCurrent }: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Three Mechanisms</div>
-        <h2 className="pitch-title">What makes every-token perps possible.</h2>
         <div className="pitch-solution-stack">
           <div className="pitch-solution-item">
             <div className="pitch-solution-num purple">1</div>
             <div>
-              <div className="pitch-solution-name">On-chain oracle</div>
+              <div className="pitch-solution-name">
+                v12.17 mainnet upgrade + first SOL/USDC market on mainnet
+              </div>
               <p className="pitch-solution-desc">
-                If a token trades on Raydium, Meteora, or pump.fun, we can read its price
-                directly from the pool. No Pyth listing required. &lt;0.05% deviation from
-                centralized feeds on BTC, SOL, ETH.
+                Four programs upgraded and deployed. SOL/USDC Hyperp market
+                created against a pinned Raydium CLMM pool — running today
+                in lab mode, gated until external audit completes in Q3.
               </p>
             </div>
           </div>
           <div className="pitch-solution-item">
             <div className="pitch-solution-num cyan">2</div>
             <div>
-              <div className="pitch-solution-name">Mathematically fair risk engine</div>
+              <div className="pitch-solution-name">
+                Token-2022 transferable position NFTs
+              </div>
               <p className="pitch-solution-desc">
-                Built on open-source research from Anatoly Yakovenko. When a market hits
-                limits, everyone takes a proportional haircut instead of some traders
-                getting force-liquidated. Same deal for everyone.
+                Customers asked for transferable positions. We shipped them
+                as Token-2022 NFTs — first transferable perp positions
+                ever shipped on Solana.
               </p>
             </div>
           </div>
           <div className="pitch-solution-item">
             <div className="pitch-solution-num purple">3</div>
             <div>
-              <div className="pitch-solution-name">Permissionless market creation</div>
+              <div className="pitch-solution-name">
+                Pre-audit hardening — 0 CRITICAL, 0 HIGH internal findings
+              </div>
               <p className="pitch-solution-desc">
-                $500 USDC and 60 seconds. No application, no approval. Set your fee rate,
-                earn from every trade in your market.
+                Five-phase sprint that rewrote the proof suite (457 Kani
+                proofs replacing the prior 349) and closed every internal
+                CRITICAL and HIGH finding. Customers said audit posture was
+                the #1 blocker for putting real capital on a long-tail
+                market.
               </p>
             </div>
           </div>
         </div>
+
+        <p
+          className="pitch-solution-sub"
+          style={{ marginTop: "1.5rem" }}
+        >
+          What we did NOT build: a token launchpad, governance,
+          cross-margining. Out-of-scope, on the roadmap.
+        </p>
       </div>
     </div>
   );
 }
 
-function Slide06Proof({ isCurrent }: SlideProps) {
+// ─── Slide 5 — Demo Product ──────────────────────────────────────────────────
+
+function Slide05Product(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Live on Devnet</div>
-        <h2 className="pitch-title">Built. Verified. Growing.</h2>
-        <div className="pitch-proof-row">
-          <div className="pitch-proof-block">
-            <div className="pitch-traction-grid">
-              <div className="pitch-traction-card">
-                <div className="pitch-traction-num mono">168</div>
-                <div className="pitch-traction-label">Markets created on devnet</div>
+        <div className="pitch-label">Demo Product</div>
+        <h2 className="pitch-title">
+          On devnet today: connect wallet, deposit USDC, open a leveraged
+          long, close at PnL — fees split four ways on-chain in a single
+          transaction.
+        </h2>
+
+        <div className="pflow-wrap">
+          <div className="pflow-step">
+            <div className="pflow-num-wrap">
+              <div className="pflow-num mono">01</div>
+            </div>
+            <div className="pflow-step-title">Connect & deposit</div>
+            <div className="pflow-step-desc">
+              Any Solana wallet. USDC into the vault.
+            </div>
+            <div className="pflow-example-card">
+              <div className="pflow-example-label mono">deposit</div>
+              <div className="pflow-example-value mono">25.00 USDC</div>
+              <div className="pflow-example-value mono">tx confirmed</div>
+            </div>
+          </div>
+
+          <div className="pflow-connector" aria-hidden>
+            <svg
+              width="64"
+              height="24"
+              viewBox="0 0 64 24"
+              fill="none"
+              className="pflow-arrow-svg"
+            >
+              <defs>
+                <linearGradient id="arrowGradLP1" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#9945FF" />
+                  <stop offset="100%" stopColor="#22D3EE" />
+                </linearGradient>
+              </defs>
+              <line x1="0" y1="12" x2="52" y2="12" stroke="url(#arrowGradLP1)" strokeWidth="2" />
+              <polyline points="46,6 58,12 46,18" stroke="url(#arrowGradLP1)" strokeWidth="2" fill="none" strokeLinejoin="round" />
+            </svg>
+          </div>
+
+          <div className="pflow-step">
+            <div className="pflow-num-wrap">
+              <div className="pflow-num mono">02</div>
+            </div>
+            <div className="pflow-step-title">Open leveraged position</div>
+            <div className="pflow-step-desc">
+              Long or short. Up to 10×. Mark price from HYPERP.
+            </div>
+            <div className="pflow-example-card">
+              <div className="pflow-example-label mono">long</div>
+              <div className="pflow-example-value mono">SOL · 5×</div>
+              <div className="pflow-example-value mono">NFT minted</div>
+            </div>
+          </div>
+
+          <div className="pflow-connector" aria-hidden>
+            <svg
+              width="64"
+              height="24"
+              viewBox="0 0 64 24"
+              fill="none"
+              className="pflow-arrow-svg"
+            >
+              <defs>
+                <linearGradient id="arrowGradLP2" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#9945FF" />
+                  <stop offset="100%" stopColor="#22D3EE" />
+                </linearGradient>
+              </defs>
+              <line x1="0" y1="12" x2="52" y2="12" stroke="url(#arrowGradLP2)" strokeWidth="2" />
+              <polyline points="46,6 58,12 46,18" stroke="url(#arrowGradLP2)" strokeWidth="2" fill="none" strokeLinejoin="round" />
+            </svg>
+          </div>
+
+          <div className="pflow-step pflow-step-live">
+            <div className="pflow-num-wrap">
+              <div className="pflow-num mono">03</div>
+            </div>
+            <div className="pflow-step-title">Close & settle</div>
+            <div className="pflow-step-desc">
+              Fees split four ways automatically, on-chain.
+            </div>
+            <div className="pflow-example-card pflow-example-card-live">
+              <div className="pflow-example-label mono">fee split</div>
+              <div className="pflow-example-value mono pflow-live-id">
+                vault · creator · protocol
               </div>
-              <div className="pitch-traction-card">
-                <div className="pitch-traction-num mono">3,000+</div>
-                <div className="pitch-traction-label">Organic X followers</div>
-              </div>
-              <div className="pitch-traction-card">
-                <div className="pitch-traction-num mono">471</div>
-                <div className="pitch-traction-label">Formal proofs verified (Kani)</div>
-              </div>
-              <div className="pitch-traction-card">
-                <div className="pitch-traction-num mono">0</div>
-                <div className="pitch-traction-label">Unresolved critical or high findings</div>
+              <div className="pflow-live-dot-row">
+                <span className="pflow-live-dot" />
+                <span className="pflow-live-text mono">SETTLED</span>
               </div>
             </div>
           </div>
-          <div className="pitch-proof-extras">
-            <div className="pitch-milestone">
-              <div className="pitch-milestone-dot cyan" />
-              <span>Position NFTs — transferable perp positions on Solana</span>
+        </div>
+
+        <div className="pitch-create-footer">
+          Position is a Token-2022 NFT — first transferable perp
+          position on Solana. Live demo: percolatorlaunch.com (devnet).
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide 6 — Business Model + Unit Economics ───────────────────────────────
+
+function Slide06Money(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Business Model</div>
+        <h2 className="pitch-title">
+          We charge 0.1–1% per trade across every market, splitting fees
+          four ways on-chain — gross margin &gt;95% after Solana compute.
+        </h2>
+
+        <div className="pitch-money-flow">
+          <div className="pitch-money-flow-title">
+            Fee flow on every fill — automatic, on-chain, no claim transactions
+          </div>
+
+          <div className="pitch-fee-stage">
+            <div className="pitch-fee-source">
+              <div className="pitch-money-pill pitch-money-pill-purple">
+                Trader pays<br /><span className="mono">1–10%</span>
+              </div>
             </div>
-            <div className="pitch-milestone">
-              <div className="pitch-milestone-dot cyan" />
-              <span>Apache 2.0 — fully open source, 8 public repos</span>
+
+            <div className="pitch-fee-channel" aria-hidden>
+              <svg
+                viewBox="0 0 480 140"
+                preserveAspectRatio="xMidYMid meet"
+                className="pitch-fee-svg"
+              >
+                <defs>
+                  <linearGradient id="feeFlowGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#9945FF" stopOpacity="0.45" />
+                    <stop offset="100%" stopColor="#22D3EE" stopOpacity="0.45" />
+                  </linearGradient>
+                </defs>
+                <path
+                  id="feePathLeft"
+                  d="M 240 10 C 240 70, 60 70, 60 130"
+                  stroke="url(#feeFlowGrad)"
+                  fill="none"
+                  strokeWidth="1.5"
+                />
+                <path
+                  id="feePathCenter"
+                  d="M 240 10 L 240 130"
+                  stroke="url(#feeFlowGrad)"
+                  fill="none"
+                  strokeWidth="1.5"
+                />
+                <path
+                  id="feePathRight"
+                  d="M 240 10 C 240 70, 420 70, 420 130"
+                  stroke="url(#feeFlowGrad)"
+                  fill="none"
+                  strokeWidth="1.5"
+                />
+
+                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
+                  <animateMotion dur="3.2s" repeatCount="indefinite">
+                    <mpath href="#feePathLeft" />
+                  </animateMotion>
+                  <animate
+                    attributeName="opacity"
+                    values="0;1;1;0"
+                    keyTimes="0;0.1;0.9;1"
+                    dur="3.2s"
+                    repeatCount="indefinite"
+                  />
+                </circle>
+
+                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
+                  <animateMotion dur="3.2s" begin="1.05s" repeatCount="indefinite">
+                    <mpath href="#feePathCenter" />
+                  </animateMotion>
+                  <animate
+                    attributeName="opacity"
+                    values="0;1;1;0"
+                    keyTimes="0;0.1;0.9;1"
+                    dur="3.2s"
+                    begin="1.05s"
+                    repeatCount="indefinite"
+                  />
+                </circle>
+
+                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
+                  <animateMotion dur="3.2s" begin="2.1s" repeatCount="indefinite">
+                    <mpath href="#feePathRight" />
+                  </animateMotion>
+                  <animate
+                    attributeName="opacity"
+                    values="0;1;1;0"
+                    keyTimes="0;0.1;0.9;1"
+                    dur="3.2s"
+                    begin="2.1s"
+                    repeatCount="indefinite"
+                  />
+                </circle>
+              </svg>
             </div>
-            <div className="pitch-milestone">
-              <div className="pitch-milestone-dot purple" />
-              <span>Zero paid marketing, zero incentive programs</span>
+
+            <div className="pitch-fee-buckets">
+              <div className="pitch-money-pill">LP vault</div>
+              <div className="pitch-money-pill">Creator</div>
+              <div className="pitch-money-pill pitch-money-pill-cyan">
+                Protocol → PERC stakers
+              </div>
             </div>
+          </div>
+        </div>
+
+        <div className="pitch-money-econ">
+          <div className="pitch-money-econ-stat">
+            <div className="pitch-money-econ-num mono">&gt;95%</div>
+            <div className="pitch-money-econ-label">Gross margin per trade after Solana RPC + compute</div>
+          </div>
+          <div className="pitch-money-econ-stat">
+            <div className="pitch-money-econ-num mono">&lt;$0.001</div>
+            <div className="pitch-money-econ-label">Compute cost per trade</div>
+          </div>
+          <div className="pitch-money-econ-stat">
+            <div className="pitch-money-econ-num mono">$0</div>
+            <div className="pitch-money-econ-label">Outside capital required to keep shipping today</div>
+          </div>
+        </div>
+
+        <div className="pitch-money-scale-wrap">
+          <div className="pitch-money-scale-title">Scale path — protocol fees only</div>
+          <table className="pitch-money-scale">
+            <thead>
+              <tr>
+                <th>Markets</th>
+                <th>Avg daily vol / market</th>
+                <th>Protocol fee (0.1%)</th>
+                <th>Daily protocol fees</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="mono">100</td>
+                <td className="mono">$500K</td>
+                <td className="mono">0.1%</td>
+                <td className="mono pitch-money-scale-result">$50K</td>
+              </tr>
+              <tr>
+                <td className="mono">1,000</td>
+                <td className="mono">$500K</td>
+                <td className="mono">0.1%</td>
+                <td className="mono pitch-money-scale-result">$500K</td>
+              </tr>
+              <tr>
+                <td className="mono">1,000</td>
+                <td className="mono">$1M</td>
+                <td className="mono">0.1%</td>
+                <td className="mono pitch-money-scale-result">$1M</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide 7 — Opportunity ───────────────────────────────────────────────────
+
+function Slide07Opportunity(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Opportunity</div>
+        <h2 className="pitch-title">
+          Solana perp volume runs $2–4B per month across ~50 blue-chip
+          tokens; 15 million tokens have zero perp access today.
+        </h2>
+
+        <div className="pitch-opp-compare">
+          <div className="pitch-opp-row">
+            <div className="pitch-opp-row-header">
+              <span className="pitch-opp-tag">Today</span>
+              <span className="pitch-opp-row-stat mono">$2–4B / month</span>
+              <span className="pitch-opp-row-detail">
+                ~50 tokens · all blue chips · contested
+              </span>
+            </div>
+            <div className="pitch-opp-bar-wrap">
+              <div className="pitch-opp-bar pitch-opp-bar-today" />
+            </div>
+          </div>
+
+          <div className="pitch-opp-row">
+            <div className="pitch-opp-row-header">
+              <span className="pitch-opp-tag pitch-opp-tag-cyan">Opportunity</span>
+              <span className="pitch-opp-row-stat mono">15,000,000+ tokens</span>
+              <span className="pitch-opp-row-detail">
+                Every token with a live DEX pool · untouched · empty market
+              </span>
+            </div>
+            <div className="pitch-opp-bar-wrap">
+              <div className="pitch-opp-bar pitch-opp-bar-opportunity" />
+            </div>
+          </div>
+
+          <div className="pitch-opp-callout">
+            Same axis. The &ldquo;today&rdquo; bar is barely visible. The
+            full-width bar is the gap we open.
           </div>
         </div>
       </div>
@@ -428,12 +779,17 @@ function Slide06Proof({ isCurrent }: SlideProps) {
   );
 }
 
-function Slide07Competition({ isCurrent }: SlideProps) {
+// ─── Slide 8 — Competitors ───────────────────────────────────────────────────
+
+function Slide08Competitors(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">The Landscape</div>
-        <h2 className="pitch-title">Only one protocol lists every token.</h2>
+        <div className="pitch-label">Competitors</div>
+        <h2 className="pitch-title">
+          No major Solana perp DEX lists tokens permissionlessly — we are
+          the only protocol that does.
+        </h2>
         <div className="pitch-matrix-wrap">
           <table className="pitch-matrix">
             <thead>
@@ -461,6 +817,13 @@ function Slide07Competition({ isCurrent }: SlideProps) {
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
               </tr>
               <tr>
+                <td className="pitch-matrix-feature">On-chain oracle (no Pyth dep.)</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
                 <td className="pitch-matrix-feature">Cross-margin</td>
                 <td className="pitch-matrix-yes">✓</td>
                 <td className="pitch-matrix-no">✗</td>
@@ -468,16 +831,16 @@ function Slide07Competition({ isCurrent }: SlideProps) {
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
               </tr>
               <tr>
-                <td className="pitch-matrix-feature">On-chain oracle</td>
+                <td className="pitch-matrix-feature">Market-creator fees</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
               </tr>
               <tr>
-                <td className="pitch-matrix-feature">Market creator fees</td>
+                <td className="pitch-matrix-feature">Open source (Apache 2.0)</td>
                 <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">partial</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
               </tr>
@@ -485,142 +848,308 @@ function Slide07Competition({ isCurrent }: SlideProps) {
           </table>
         </div>
         <p className="pitch-matrix-sub">
-          Everyone else competes for the same 30–50 tokens. We opened a new category.
+          Everyone else competes for the same 30-50 tokens. We open a category.
         </p>
       </div>
     </div>
   );
 }
 
-function Slide08WhyNow({ isCurrent }: SlideProps) {
+// ─── Slide 9 — GTM & Why Now ─────────────────────────────────────────────────
+
+function Slide09WhyNow(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Timing</div>
-        <h2 className="pitch-title">The window is open.</h2>
+        <div className="pitch-label">GTM & Why Now</div>
+        <h2 className="pitch-title">
+          SIMD-0266 and Token-2022 both landed in 2026 — making per-trade
+          economics work for long-tail tokens for the first time.
+        </h2>
         <div className="pitch-whynow-stats">
           <div className="pitch-whynow-stat">
-            <div className="pitch-whynow-num mono">$2–4B</div>
-            <div className="pitch-whynow-label">Monthly Solana perp volume today</div>
+            <svg viewBox="0 0 24 24" className="pitch-catalyst-icon" aria-hidden>
+              <path
+                d="M 6 8 L 12 14 L 18 8"
+                stroke="currentColor"
+                fill="none"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M 6 14 L 12 20 L 18 14"
+                stroke="currentColor"
+                fill="none"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity="0.45"
+              />
+            </svg>
+            <div className="pitch-whynow-num mono">SIMD-0266</div>
+            <div className="pitch-whynow-label">
+              Activated April 2026 — pinocchio-token instructions are 18×
+              cheaper. Long-tail per-trade economics only work after this
+              change.
+            </div>
           </div>
           <div className="pitch-whynow-stat">
-            <div className="pitch-whynow-num mono">10×</div>
-            <div className="pitch-whynow-label">Growth in Solana DEX volume in 18 months</div>
+            <svg viewBox="0 0 24 24" className="pitch-catalyst-icon" aria-hidden>
+              <rect
+                x="4"
+                y="4"
+                width="16"
+                height="16"
+                rx="2"
+                stroke="currentColor"
+                fill="none"
+                strokeWidth="1.8"
+              />
+              <circle cx="12" cy="12" r="3.5" fill="currentColor" />
+            </svg>
+            <div className="pitch-whynow-num mono">Token-2022</div>
+            <div className="pitch-whynow-label">
+              Mature now — transferable perp positions as NFTs are
+              possible. We&apos;re the first to ship.
+            </div>
           </div>
           <div className="pitch-whynow-stat">
-            <div className="pitch-whynow-num mono">Every week</div>
-            <div className="pitch-whynow-label">Thousands of new tradable tokens launch with no perp path</div>
+            <svg viewBox="0 0 24 24" className="pitch-catalyst-icon" aria-hidden>
+              <path
+                d="M 4 18 L 9 12 L 13 15 L 20 6"
+                stroke="currentColor"
+                fill="none"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M 16 6 L 20 6 L 20 10"
+                stroke="currentColor"
+                fill="none"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <div className="pitch-whynow-num mono">$793M</div>
+            <div className="pitch-whynow-label">
+              Hyperliquid OI in 3 months proved demand for permissionless
+              perps. They priced creators out at $19-25M. Long-tail supply
+              is empty.
+            </div>
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          Perps are the next trillion-dollar DeFi category. The winner is whoever can
-          list the most assets fastest.
+          GTM: devnet now → audit through Q3 → permissionless mainnet
+          launch with the first 10 creator-launched markets seeded by
+          revenue-share rebates → Jupiter / Birdeye / pump.fun routing
+          once on-chain volume validates the model.
         </div>
       </div>
     </div>
   );
 }
 
-function Slide09Users({ isCurrent }: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">The Users</div>
-        <h2 className="pitch-title">Three audiences. One protocol.</h2>
-        <div className="pitch-user-cards">
-          <div className="pitch-user-card">
-            <div className="pitch-user-role">The Trader</div>
-            <p className="pitch-user-story">
-              Wants leverage on WIF the moment it trends. Can't get it on Hyperliquid.
-              Opens Percolator, trades instantly.
-            </p>
-          </div>
-          <div className="pitch-user-card">
-            <div className="pitch-user-role">The Creator</div>
-            <p className="pitch-user-story">
-              Launches a token and wants a perp market for it. Deposits $500. Earns
-              fees from every trade for the life of the market.
-            </p>
-          </div>
-          <div className="pitch-user-card">
-            <div className="pitch-user-role">The LP</div>
-            <p className="pitch-user-story">
-              Backs long-tail inventory that didn't exist before. Earns yield
-              uncorrelated to blue-chip perp flow.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ─── Slide 10 — Roadmap ──────────────────────────────────────────────────────
 
-function Slide10Opportunity({ isCurrent }: SlideProps) {
+function Slide10Roadmap(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">The Market</div>
-        <h2 className="pitch-title">We're not taking a slice. We're building a new pie.</h2>
-        <div className="pitch-market-layout">
-          <div className="pitch-market-stat-block">
-            <div className="pitch-market-big-num mono">$2–4B</div>
-            <div className="pitch-market-big-label">Monthly Solana perp volume</div>
-            <div className="pitch-market-sub">~50 tokens. All blue chips.</div>
-            <div className="pitch-market-sub" style={{ marginTop: '0.25rem' }}>Mature, contested, low growth ceiling.</div>
-          </div>
-          <div className="pitch-market-divider" />
-          <div className="pitch-market-opportunity">
-            <div className="pitch-market-opp-num mono">15M+</div>
-            <div className="pitch-market-opp-label">Tokens with zero perp access today</div>
-            <p className="pitch-market-opp-desc">
-              Every token on pump.fun, every memecoin, every new launch.
-              The long tail of crypto, finally tradable with leverage.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Slide11Vision({ isCurrent }: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Where This Goes</div>
-        <h2 className="pitch-title">Every tradable asset becomes a perp market.</h2>
-        <p className="pitch-body-text" style={{ maxWidth: '680px', marginBottom: '2rem' }}>
-          Today perps are a luxury reserved for the 50 tokens exchanges choose to support.
-          In five years, every token worth trading spot will also be tradable perpetually.
-        </p>
+        <div className="pitch-label">Roadmap</div>
+        <h2 className="pitch-title">
+          Public mainnet launches in Q3 after the audit; targeting $50M+
+          daily volume by Q4 2026.
+        </h2>
         <div className="pitch-roadmap">
           <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase purple">Phase 1</div>
-            <div className="pitch-roadmap-name">Mainnet beta</div>
-            <div className="pitch-roadmap-desc">launching soon</div>
+            <div className="pitch-roadmap-phase purple">Q2 2026</div>
+            <div className="pitch-roadmap-name">Devnet live · audit kickoff</div>
+            <div className="pitch-roadmap-desc">SOL/USDC live, mobile beta, external audit started</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase cyan">Phase 2</div>
-            <div className="pitch-roadmap-name">Liquidity deepening</div>
-            <div className="pitch-roadmap-desc">market maker programs, LP incentives</div>
+            <div className="pitch-roadmap-phase cyan">Q3 2026</div>
+            <div className="pitch-roadmap-name">Public mainnet</div>
+            <div className="pitch-roadmap-desc">Audit complete, Jupiter / Birdeye, pump.fun creator markets</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase purple">Phase 3</div>
-            <div className="pitch-roadmap-name">Advanced primitives</div>
-            <div className="pitch-roadmap-desc">position NFTs, structured products, options</div>
+            <div className="pitch-roadmap-phase purple">Q4 2026</div>
+            <div className="pitch-roadmap-name">$50M+ daily volume</div>
+            <div className="pitch-roadmap-desc">Cross-margining, composable CPI oracle</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase cyan">Phase 4</div>
-            <div className="pitch-roadmap-name">Cross-chain expansion</div>
-            <div className="pitch-roadmap-desc">every-token perps beyond Solana</div>
+            <div className="pitch-roadmap-phase cyan">2027</div>
+            <div className="pitch-roadmap-name">Default rail</div>
+            <div className="pitch-roadmap-desc">Every-token perps as default for any new SPL</div>
           </div>
         </div>
-        <div className="pitch-vision-footer">
-          We're building this regardless. If that resonates, let's talk.
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide 11 — Risks ────────────────────────────────────────────────────────
+
+function Slide11Risks(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Risks</div>
+        <h2 className="pitch-title">
+          Three real risks we&apos;re solving — each with a concrete
+          mitigation already in flight.
+        </h2>
+
+        <div className="pitch-risks-grid">
+          <div className="pitch-risks-card">
+            <div className="pitch-risks-name">Liquidity bootstrap</div>
+            <p className="pitch-risks-desc">
+              Long-tail markets are illiquid by definition until creators
+              bring traffic.
+            </p>
+            <div className="pitch-risks-mitigation-label mono">Mitigation</div>
+            <p className="pitch-risks-mitigation">
+              Creator fee share = direct financial incentive for creators
+              to bring their own community. Rev-share rebates fund the
+              first 10 markets at launch.
+            </p>
+          </div>
+
+          <div className="pitch-risks-card">
+            <div className="pitch-risks-name">Audit timing</div>
+            <p className="pitch-risks-desc">
+              Public mainnet trading is gated on the Q3 external audit;
+              any slip pushes launch.
+            </p>
+            <div className="pitch-risks-mitigation-label mono">Mitigation</div>
+            <p className="pitch-risks-mitigation">
+              Pre-audit hardening sprint already closed every internal
+              CRITICAL/HIGH; 457 Kani proofs verify the risk-engine
+              invariants before the audit firm even starts.
+            </p>
+          </div>
+
+          <div className="pitch-risks-card">
+            <div className="pitch-risks-name">Regulatory drift</div>
+            <p className="pitch-risks-desc">
+              Perps regulation is unsettled globally. A hostile reading
+              would kneecap a centralised competitor.
+            </p>
+            <div className="pitch-risks-mitigation-label mono">Mitigation</div>
+            <p className="pitch-risks-mitigation">
+              Protocol is permissionless by design — no gatekeeping
+              action, no team in the loop on listing decisions, no party
+              to regulate.
+            </p>
+          </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide 12 — Next Steps (Ask + Exit) ──────────────────────────────────────
+
+function Slide12NextSteps(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Next Steps</div>
+        <h2 className="pitch-title">
+          We&apos;re shipping with or without capital — but the right
+          partner shortcuts the audit, market-maker bootstrap, and
+          creator acquisition.
+        </h2>
+
+        <div className="pitch-ask-grid">
+          <div className="pitch-ask-card">
+            <div className="pitch-ask-card-label mono">Open to</div>
+            <div className="pitch-ask-card-headline">
+              Strategic capital, sized to the partnership.
+            </div>
+            <div className="pitch-ask-card-sub">
+              SAFE, token warrant on PERC, LP co-investment, or bespoke.
+              We care more about the partner than the paper.
+            </div>
+          </div>
+          <div className="pitch-ask-card">
+            <div className="pitch-ask-card-label mono">Where it goes</div>
+            <ul className="pitch-ask-list">
+              <li>External audit + bug bounty program</li>
+              <li>Market-maker bootstrap on first 10 markets</li>
+              <li>Creator acquisition (rev-share rebates, not paid spend)</li>
+              <li>Two technical hires: matching + risk research</li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="pitch-ask-exit-wrap">
+          <div className="pitch-ask-exit-title mono">Liquidity path for capital</div>
+          <div className="pitch-ask-exit-grid">
+            <div className="pitch-ask-exit-item">
+              <div className="pitch-ask-exit-name">Primary</div>
+              <p className="pitch-ask-exit-desc">
+                Protocol-fee-backed token. PERC stakers earn from real fee revenue once mainnet trading opens.
+              </p>
+            </div>
+            <div className="pitch-ask-exit-item">
+              <div className="pitch-ask-exit-name">Secondary</div>
+              <p className="pitch-ask-exit-desc">
+                PERC trades on the existing creator-rewards market today; deeper venues post-mainnet.
+              </p>
+            </div>
+            <div className="pitch-ask-exit-item">
+              <div className="pitch-ask-exit-name">Optional backstop</div>
+              <p className="pitch-ask-exit-desc">
+                Drift, Jupiter, and Hyperliquid all have a structural interest in long-tail listing capability they can&apos;t ship internally. M&amp;A is an option, not the plan.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide 13 — Contact ──────────────────────────────────────────────────────
+
+function Slide13Contact(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner pitch-center">
+        <div className="pitch-label">Contact</div>
+        <h2 className="pitch-title">
+          The code is open, the market is live on devnet, and the door is
+          open at percolatorlaunch.com.
+        </h2>
+        <p
+          className="pitch-body-text"
+          style={{ maxWidth: "640px", marginBottom: "2rem" }}
+        >
+          Try the live market on devnet, fork the code under Apache 2.0,
+          or DM us on X. We answer.
+        </p>
+        <div className="pitch-contact-grid">
+          <div className="pitch-contact-card">
+            <div className="pitch-contact-label mono">Try it</div>
+            <div className="pitch-contact-value">percolatorlaunch.com</div>
+          </div>
+          <div className="pitch-contact-card">
+            <div className="pitch-contact-label mono">Code</div>
+            <div className="pitch-contact-value">github.com/percolator</div>
+          </div>
+          <div className="pitch-contact-card">
+            <div className="pitch-contact-label mono">Talk</div>
+            <div className="pitch-contact-value">@PercolatorLaunch</div>
+          </div>
+        </div>
+        <div className="pitch-divider" />
+        <p className="pitch-url">percolatorlaunch.com</p>
       </div>
     </div>
   );
@@ -629,19 +1158,22 @@ function Slide11Vision({ isCurrent }: SlideProps) {
 // ─── Slide Registry ───────────────────────────────────────────────────────────
 
 const SLIDES = [
-  { id: 1, title: "Cover", component: Slide01Cover },
+  { id: 1, title: "One-Liner", component: Slide01OneLiner },
   { id: 2, title: "Team", component: Slide02Team },
   { id: 3, title: "Traction", component: Slide03Traction },
-  { id: 4, title: "The Gap", component: Slide02Gap },
-  { id: 5, title: "Solution", component: Slide03Solution },
-  { id: 6, title: "Create a Market", component: Slide04Create },
-  { id: 7, title: "How It Works", component: Slide05HowItWorks },
-  { id: 8, title: "Competition", component: Slide07Competition },
-  { id: 9, title: "Why Now", component: Slide08WhyNow },
-  { id: 10, title: "Who Uses It", component: Slide09Users },
-  { id: 11, title: "The Opportunity", component: Slide10Opportunity },
-  { id: 12, title: "Vision + Roadmap", component: Slide11Vision },
+  { id: 4, title: "Hackathon Engineering Sprint", component: Slide04Sprint },
+  { id: 5, title: "Demo Product", component: Slide05Product },
+  { id: 6, title: "Business Model", component: Slide06Money },
+  { id: 7, title: "Opportunity", component: Slide07Opportunity },
+  { id: 8, title: "Competitors", component: Slide08Competitors },
+  { id: 9, title: "GTM & Why Now", component: Slide09WhyNow },
+  { id: 10, title: "Roadmap", component: Slide10Roadmap },
+  { id: 11, title: "Risks", component: Slide11Risks },
+  { id: 12, title: "Next Steps", component: Slide12NextSteps },
+  { id: 13, title: "Contact", component: Slide13Contact },
 ];
+
+const TOTAL_SLIDES = SLIDES.length;
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
@@ -675,16 +1207,17 @@ export default function PitchPage() {
 
   return (
     <>
-      {/* Full-screen overlay covering Header/Footer */}
       <div
         className="pitch-deck-overlay"
         onClick={next}
         role="presentation"
       >
-        {/* Slide content */}
-        <SlideComponent isCurrent />
+        <AuroraBackground />
+        <DripLine />
+        <div key={current} className="pitch-slide-stage">
+          <SlideComponent isCurrent />
+        </div>
 
-        {/* Controls bar */}
         <div
           className="pitch-controls"
           onClick={(e) => e.stopPropagation()}
@@ -710,7 +1243,6 @@ export default function PitchPage() {
           </button>
         </div>
 
-        {/* Slide dots */}
         <div
           className="pitch-dots"
           onClick={(e) => e.stopPropagation()}
@@ -726,8 +1258,122 @@ export default function PitchPage() {
         </div>
       </div>
 
-      {/* Styles */}
       <style>{`
+        /* ─────────────────────────────────────────────────────────────
+           LIQUID DRIP — visual identity layer
+           Subtle by default. Pauses on prefers-reduced-motion.
+           ───────────────────────────────────────────────────────────── */
+
+        .pitch-aurora {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+          overflow: hidden;
+        }
+
+        .pitch-aurora::before,
+        .pitch-aurora::after {
+          content: "";
+          position: absolute;
+          width: 60vw;
+          height: 60vh;
+          border-radius: 50%;
+          filter: blur(80px);
+          opacity: 0.10;
+          will-change: transform;
+        }
+
+        .pitch-aurora::before {
+          top: -20vh;
+          right: -15vw;
+          background: #9945FF;
+          animation: aurora-drift-a 32s ease-in-out infinite;
+        }
+
+        .pitch-aurora::after {
+          bottom: -20vh;
+          left: -15vw;
+          background: #22D3EE;
+          animation: aurora-drift-b 38s ease-in-out infinite reverse;
+        }
+
+        @keyframes aurora-drift-a {
+          0%, 100% { transform: translate(0, 0); }
+          50%      { transform: translate(-12vw, 8vh); }
+        }
+        @keyframes aurora-drift-b {
+          0%, 100% { transform: translate(0, 0); }
+          50%      { transform: translate(12vw, -8vh); }
+        }
+
+        .pitch-drip-line {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 22px;
+          width: 1px;
+          z-index: 1;
+          pointer-events: none;
+          background: linear-gradient(
+            to bottom,
+            transparent 0%,
+            rgba(153, 69, 255, 0.22) 18%,
+            rgba(34, 211, 238, 0.22) 82%,
+            transparent 100%
+          );
+        }
+
+        .pitch-drip-dot {
+          position: absolute;
+          left: -3px;
+          top: 0;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: #22D3EE;
+          box-shadow: 0 0 8px rgba(34, 211, 238, 0.55);
+          animation: drip-fall 6.5s cubic-bezier(0.36, 0, 0.66, 0.4) infinite;
+          will-change: transform, opacity;
+        }
+
+        @keyframes drip-fall {
+          0%   { transform: translateY(0);    opacity: 0; }
+          8%   { opacity: 1; }
+          92%  { opacity: 1; }
+          100% { transform: translateY(100vh); opacity: 0; }
+        }
+
+        /* ── Slide stage: re-mounts on slide change via key, retriggers entrance ── */
+        .pitch-slide-stage {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          position: relative;
+          z-index: 2;
+          animation: slide-enter 420ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        @keyframes slide-enter {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Reduced motion: stop ambient + entrance animations ── */
+        @media (prefers-reduced-motion: reduce) {
+          .pitch-drip-dot,
+          .pitch-aurora::before,
+          .pitch-aurora::after,
+          .pitch-slide-stage {
+            animation: none !important;
+          }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           Original deck styles below.
+           ───────────────────────────────────────────────────────────── */
+
         /* ── Full-screen overlay ── */
         .pitch-deck-overlay {
           position: fixed;
@@ -785,25 +1431,12 @@ export default function PitchPage() {
         }
 
         /* ── Typography ── */
-        .pitch-hero-title {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: clamp(4rem, 10vw, 8rem);
-          font-weight: 900;
-          letter-spacing: -0.04em;
-          line-height: 1;
-          background: linear-gradient(135deg, #fff 0%, #9945FF 50%, #22D3EE 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          margin-bottom: 1.5rem;
-        }
-
         .pitch-hero-sub {
           font-family: 'Inter', sans-serif;
           font-size: clamp(1.2rem, 2.5vw, 1.6rem);
           color: rgba(255,255,255,0.6);
           line-height: 1.5;
-          max-width: 550px;
+          max-width: 620px;
         }
 
         .pitch-divider {
@@ -832,10 +1465,10 @@ export default function PitchPage() {
 
         .pitch-title {
           font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: clamp(1.6rem, 3.5vw, 2.6rem);
-          font-weight: 800;
+          font-size: clamp(1.4rem, 3vw, 2.2rem);
+          font-weight: 700;
           letter-spacing: -0.02em;
-          line-height: 1.2;
+          line-height: 1.3;
           color: #fff;
           margin-bottom: 2rem;
         }
@@ -851,71 +1484,69 @@ export default function PitchPage() {
           color: rgba(255,255,255,0.6);
         }
 
-        /* ── Gap slide (was Insight) ── */
-        .pitch-insight-body {
-          max-width: 700px;
-        }
-
-        .pitch-callout {
-          margin-top: 2rem;
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1.4rem;
-          font-weight: 800;
-          color: #9945FF;
-          letter-spacing: -0.01em;
-        }
-
-        /* ── Solution slide (Slide 3) ── */
-        .pitch-solution-three {
+        /* ── Solution / How It Works stack ── */
+        .pitch-solution-stack {
           display: flex;
           flex-direction: column;
-          gap: 1.1rem;
-          margin-bottom: 2rem;
+          gap: 1.25rem;
         }
 
-        .pitch-solution-line {
+        .pitch-solution-item {
           display: flex;
-          align-items: baseline;
-          gap: 0.6rem;
-          font-family: 'Inter', sans-serif;
-          font-size: clamp(1rem, 1.8vw, 1.2rem);
-          line-height: 1.5;
+          gap: 1.5rem;
+          align-items: flex-start;
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 10px;
+          padding: 1.25rem 1.5rem;
         }
 
-        .pitch-solution-line-bold {
+        .pitch-solution-num {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 1.8rem;
+          font-weight: 700;
+          flex-shrink: 0;
+          line-height: 1;
+          padding-top: 0.1rem;
+        }
+
+        .pitch-solution-num.purple { color: #9945FF; }
+        .pitch-solution-num.cyan { color: #22D3EE; }
+
+        .pitch-solution-name {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.05rem;
           font-weight: 700;
           color: #fff;
-          flex-shrink: 0;
+          margin-bottom: 0.4rem;
         }
 
-        .pitch-solution-line-sep {
-          color: rgba(153,69,255,0.5);
-          flex-shrink: 0;
-        }
-
-        .pitch-solution-line-text {
+        .pitch-solution-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.875rem;
+          line-height: 1.6;
           color: rgba(255,255,255,0.55);
         }
 
         .pitch-solution-sub {
           font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1.15rem;
-          font-weight: 700;
-          color: #22D3EE;
+          font-size: 1rem;
+          font-weight: 600;
+          color: rgba(34,211,238,0.85);
           letter-spacing: -0.01em;
+          line-height: 1.55;
         }
 
-        /* ── Create-market slide (Slide 5) ── */
+        /* ── Live Product flow ── */
         .pitch-create-footer {
           font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1.1rem;
+          font-size: 1rem;
           font-weight: 700;
           color: #22D3EE;
           letter-spacing: -0.01em;
           margin-top: 1.5rem;
         }
 
-        /* ── Permissionless flow diagram (Slide 5) ── */
         .pflow-wrap {
           display: flex;
           align-items: stretch;
@@ -942,9 +1573,7 @@ export default function PitchPage() {
           box-shadow: 0 0 24px rgba(34,211,238,0.08);
         }
 
-        .pflow-num-wrap {
-          margin-bottom: 0.5rem;
-        }
+        .pflow-num-wrap { margin-bottom: 0.5rem; }
 
         .pflow-num {
           display: inline-block;
@@ -1003,9 +1632,7 @@ export default function PitchPage() {
           letter-spacing: 0.01em;
         }
 
-        .pflow-live-id {
-          color: #22D3EE;
-        }
+        .pflow-live-id { color: #22D3EE; }
 
         .pflow-live-dot-row {
           display: flex;
@@ -1039,189 +1666,9 @@ export default function PitchPage() {
           align-self: center;
         }
 
-        .pflow-arrow-svg {
-          display: block;
-        }
+        .pflow-arrow-svg { display: block; }
 
-        /* ── How It Works slide (Slide 6) ── */
-        .pitch-solution-stack {
-          display: flex;
-          flex-direction: column;
-          gap: 1.25rem;
-        }
-
-        .pitch-solution-item {
-          display: flex;
-          gap: 1.5rem;
-          align-items: flex-start;
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 10px;
-          padding: 1.25rem 1.5rem;
-        }
-
-        .pitch-solution-num {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 1.8rem;
-          font-weight: 700;
-          flex-shrink: 0;
-          line-height: 1;
-          padding-top: 0.1rem;
-        }
-
-        .pitch-solution-num.purple { color: #9945FF; }
-        .pitch-solution-num.cyan { color: #22D3EE; }
-
-        .pitch-solution-name {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1.05rem;
-          font-weight: 700;
-          color: #fff;
-          margin-bottom: 0.4rem;
-        }
-
-        .pitch-solution-desc {
-          font-family: 'Inter', sans-serif;
-          font-size: 0.875rem;
-          line-height: 1.6;
-          color: rgba(255,255,255,0.55);
-        }
-
-        /* ── Proof / Traction (Slide 7) ── */
-        .pitch-proof-row {
-          display: flex;
-          flex-direction: column;
-          gap: 1.5rem;
-        }
-
-        .pitch-traction-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 1rem;
-        }
-
-        .pitch-traction-card {
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px;
-          padding: 1.25rem;
-          text-align: center;
-        }
-
-        .pitch-traction-num {
-          font-size: clamp(1.6rem, 2.5vw, 2.2rem);
-          font-weight: 700;
-          color: #9945FF;
-          margin-bottom: 0.4rem;
-        }
-
-        .pitch-traction-label {
-          font-family: 'Inter', sans-serif;
-          font-size: 0.78rem;
-          color: rgba(255,255,255,0.45);
-          line-height: 1.4;
-        }
-
-        .pitch-proof-extras {
-          display: flex;
-          flex-direction: column;
-          gap: 0.6rem;
-        }
-
-        .pitch-milestone {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          font-family: 'Inter', sans-serif;
-          font-size: 0.875rem;
-          color: rgba(255,255,255,0.55);
-        }
-
-        .pitch-milestone-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          flex-shrink: 0;
-        }
-
-        .pitch-milestone-dot.cyan { background: #22D3EE; }
-        .pitch-milestone-dot.purple { background: #9945FF; }
-
-        /* ── Competition Matrix (Slide 8) ── */
-        .pitch-matrix-wrap {
-          overflow-x: auto;
-          margin-bottom: 1.5rem;
-        }
-
-        .pitch-matrix {
-          width: 100%;
-          border-collapse: collapse;
-          font-family: 'Inter', sans-serif;
-          font-size: 0.875rem;
-        }
-
-        .pitch-matrix thead tr {
-          border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .pitch-matrix th {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-weight: 700;
-          font-size: 0.85rem;
-          color: rgba(255,255,255,0.55);
-          padding: 0.75rem 1rem;
-          text-align: center;
-        }
-
-        .pitch-matrix th:first-child {
-          text-align: left;
-        }
-
-        .pitch-matrix tbody tr {
-          border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .pitch-matrix tbody tr:last-child {
-          border-bottom: none;
-        }
-
-        .pitch-matrix td {
-          padding: 0.85rem 1rem;
-          text-align: center;
-          color: rgba(255,255,255,0.5);
-        }
-
-        .pitch-matrix-feature {
-          text-align: left !important;
-          color: rgba(255,255,255,0.7) !important;
-          font-weight: 500;
-        }
-
-        .pitch-matrix-us {
-          color: #9945FF !important;
-          font-weight: 700 !important;
-          background: rgba(153,69,255,0.07);
-        }
-
-        .pitch-matrix-yes {
-          color: #22D3EE;
-          font-weight: 700;
-          font-size: 1rem;
-        }
-
-        .pitch-matrix-no {
-          color: rgba(255,255,255,0.2);
-          font-size: 1rem;
-        }
-
-        .pitch-matrix-sub {
-          font-family: 'Inter', sans-serif;
-          font-size: 0.875rem;
-          color: rgba(255,255,255,0.4);
-          font-style: italic;
-        }
-
-        /* ── Why Now (Slide 9) ── */
+        /* ── Why Now ── */
         .pitch-whynow-stats {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
@@ -1238,7 +1685,7 @@ export default function PitchPage() {
         }
 
         .pitch-whynow-num {
-          font-size: clamp(1.6rem, 2.8vw, 2.4rem);
+          font-size: clamp(1.4rem, 2.4vw, 2rem);
           font-weight: 700;
           color: #9945FF;
           margin-bottom: 0.5rem;
@@ -1247,54 +1694,23 @@ export default function PitchPage() {
 
         .pitch-whynow-label {
           font-family: 'Inter', sans-serif;
-          font-size: 0.82rem;
-          color: rgba(255,255,255,0.45);
-          line-height: 1.4;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.6);
+          line-height: 1.5;
+          text-align: left;
         }
 
         .pitch-whynow-closing {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: clamp(1rem, 1.8vw, 1.2rem);
-          font-weight: 600;
+          font-family: 'Inter', sans-serif;
+          font-size: clamp(0.9rem, 1.5vw, 1rem);
           color: rgba(255,255,255,0.65);
-          line-height: 1.5;
-          max-width: 680px;
+          line-height: 1.65;
+          max-width: 760px;
           border-left: 3px solid #22D3EE;
           padding-left: 1.25rem;
         }
 
-        /* ── User Stories (Slide 10) ── */
-        .pitch-user-cards {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 1.5rem;
-        }
-
-        .pitch-user-card {
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 12px;
-          padding: 1.75rem;
-        }
-
-        .pitch-user-role {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 0.75rem;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.1em;
-          color: #9945FF;
-          margin-bottom: 0.85rem;
-        }
-
-        .pitch-user-story {
-          font-family: 'Inter', sans-serif;
-          font-size: 0.9rem;
-          line-height: 1.65;
-          color: rgba(255,255,255,0.6);
-        }
-
-        /* ── Market Opportunity (Slide 11) ── */
+        /* ── Opportunity ── */
         .pitch-market-layout {
           display: grid;
           grid-template-columns: 1fr auto 1fr;
@@ -1359,7 +1775,442 @@ export default function PitchPage() {
           margin: 0 auto;
         }
 
-        /* ── Vision + Roadmap (Slide 12) ── */
+        /* ── Competitors Matrix ── */
+        .pitch-matrix-wrap {
+          overflow-x: auto;
+          margin-bottom: 1.5rem;
+        }
+
+        .pitch-matrix {
+          width: 100%;
+          border-collapse: collapse;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.875rem;
+        }
+
+        .pitch-matrix thead tr {
+          border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .pitch-matrix th {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-weight: 700;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.55);
+          padding: 0.75rem 1rem;
+          text-align: center;
+        }
+
+        .pitch-matrix th:first-child { text-align: left; }
+
+        .pitch-matrix tbody tr {
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .pitch-matrix tbody tr:last-child { border-bottom: none; }
+
+        .pitch-matrix td {
+          padding: 0.85rem 1rem;
+          text-align: center;
+          color: rgba(255,255,255,0.5);
+        }
+
+        .pitch-matrix-feature {
+          text-align: left !important;
+          color: rgba(255,255,255,0.7) !important;
+          font-weight: 500;
+        }
+
+        .pitch-matrix-us {
+          color: #9945FF !important;
+          font-weight: 700 !important;
+          background: rgba(153,69,255,0.07);
+        }
+
+        .pitch-matrix-yes {
+          color: #22D3EE;
+          font-weight: 700;
+          font-size: 1rem;
+        }
+
+        .pitch-matrix-no {
+          color: rgba(255,255,255,0.2);
+          font-size: 1rem;
+        }
+
+        .pitch-matrix-sub {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.875rem;
+          color: rgba(255,255,255,0.4);
+          font-style: italic;
+        }
+
+        /* ── Business Model ── */
+        .pitch-money-flow {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 1.25rem 1.25rem 1.5rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .pitch-money-flow-title {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.78rem;
+          color: rgba(255,255,255,0.45);
+          margin-bottom: 1rem;
+          text-align: center;
+          letter-spacing: 0.02em;
+        }
+
+        .pitch-money-flow-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: center;
+          gap: 0.6rem;
+          row-gap: 0.75rem;
+        }
+
+        .pitch-money-pill {
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 8px;
+          padding: 0.65rem 1rem;
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.85);
+          font-weight: 600;
+          text-align: center;
+          line-height: 1.3;
+        }
+
+        .pitch-money-pill-purple {
+          border-color: rgba(153,69,255,0.4);
+          background: rgba(153,69,255,0.08);
+          color: #fff;
+        }
+
+        .pitch-money-pill-cyan {
+          border-color: rgba(34,211,238,0.4);
+          background: rgba(34,211,238,0.08);
+          color: #fff;
+        }
+
+        .pitch-money-arrow {
+          font-family: 'JetBrains Mono', monospace;
+          color: rgba(255,255,255,0.35);
+          font-size: 1rem;
+        }
+
+        .pitch-money-econ {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .pitch-money-econ-stat {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 10px;
+          padding: 1rem 1.25rem;
+          text-align: center;
+        }
+
+        .pitch-money-econ-num {
+          font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+          font-weight: 700;
+          color: #22D3EE;
+          line-height: 1.1;
+          margin-bottom: 0.4rem;
+        }
+
+        .pitch-money-econ-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.78rem;
+          color: rgba(255,255,255,0.45);
+          line-height: 1.4;
+        }
+
+        .pitch-money-scale-wrap {
+          background: rgba(255,255,255,0.02);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 12px;
+          padding: 1rem 1.25rem 1.25rem;
+        }
+
+        .pitch-money-scale-title {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 0.85rem;
+          font-weight: 700;
+          color: rgba(255,255,255,0.7);
+          margin-bottom: 0.75rem;
+          letter-spacing: 0.01em;
+        }
+
+        .pitch-money-scale {
+          width: 100%;
+          border-collapse: collapse;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+        }
+
+        .pitch-money-scale thead th {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 0.72rem;
+          font-weight: 600;
+          color: rgba(255,255,255,0.4);
+          text-align: left;
+          padding: 0.4rem 0.6rem;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .pitch-money-scale tbody td {
+          padding: 0.5rem 0.6rem;
+          color: rgba(255,255,255,0.7);
+          border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+
+        .pitch-money-scale tbody tr:last-child td { border-bottom: none; }
+
+        .pitch-money-scale-result {
+          color: #22D3EE !important;
+          font-weight: 700;
+        }
+
+        /* ── Traction (Slide 3) ── */
+        .pitch-traction-chart-wrap {
+          background: rgba(255,255,255,0.02);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 14px;
+          padding: 1.5rem 1.5rem 1.25rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .pitch-traction-chart-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          margin-bottom: 1rem;
+          gap: 1rem;
+        }
+
+        .pitch-traction-chart-title {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1rem;
+          font-weight: 600;
+          color: #fff;
+        }
+
+        .pitch-traction-chart-sub {
+          font-size: 0.7rem;
+          color: rgba(255,255,255,0.4);
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-top: 0.2rem;
+        }
+
+        .pitch-traction-illus {
+          color: rgba(255,165,0,0.7);
+        }
+
+        .pitch-traction-chart-stat {
+          text-align: right;
+        }
+
+        .pitch-traction-chart-stat-num {
+          font-size: 1.4rem;
+          font-weight: 700;
+          background: linear-gradient(90deg, #9945FF, #22D3EE);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+
+        .pitch-traction-chart-stat-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.7rem;
+          color: rgba(255,255,255,0.4);
+          margin-top: 0.15rem;
+        }
+
+        .pitch-traction-chart-svg {
+          width: 100%;
+          height: 200px;
+          display: block;
+        }
+
+        .pitch-traction-chart-axis {
+          display: flex;
+          justify-content: space-between;
+          font-size: 0.65rem;
+          color: rgba(255,255,255,0.3);
+          margin-top: 0.6rem;
+          letter-spacing: 0.05em;
+        }
+
+        .pitch-traction-mini-row {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.75rem;
+        }
+
+        .pitch-traction-mini {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 10px;
+          padding: 0.9rem 1rem;
+          text-align: center;
+        }
+
+        .pitch-traction-mini-num {
+          font-size: 1.3rem;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 0.2rem;
+        }
+
+        .pitch-traction-mini-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.7rem;
+          color: rgba(255,255,255,0.45);
+          line-height: 1.3;
+        }
+
+        /* ── Risks (Slide 11) ── */
+        .pitch-risks-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1rem;
+        }
+
+        .pitch-risks-card {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 1.25rem 1.25rem;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .pitch-risks-name {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.05rem;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 0.5rem;
+        }
+
+        .pitch-risks-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.55);
+          line-height: 1.55;
+          margin: 0 0 1rem;
+        }
+
+        .pitch-risks-mitigation-label {
+          font-size: 0.62rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(34,211,238,0.7);
+          margin-bottom: 0.4rem;
+        }
+
+        .pitch-risks-mitigation {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.82rem;
+          color: rgba(255,255,255,0.65);
+          line-height: 1.55;
+          margin: 0;
+        }
+
+        /* ── Team ── */
+        .pitch-team-tier-label {
+          font-size: 0.7rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(34,211,238,0.7);
+          margin-bottom: 0.75rem;
+        }
+
+        .pitch-team-grid {
+          display: grid;
+          gap: 1.25rem;
+        }
+
+        .pitch-team-grid-two {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .pitch-team-card {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 1.25rem 1.25rem;
+        }
+
+        .pitch-team-name {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.15rem;
+          font-weight: 700;
+          color: #fff;
+          margin-bottom: 0.25rem;
+        }
+
+        .pitch-team-role {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.7rem;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: #22D3EE;
+          margin-bottom: 0.9rem;
+        }
+
+        .pitch-team-bio {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          line-height: 1.55;
+          color: rgba(255,255,255,0.6);
+          margin: 0;
+        }
+
+        .pitch-team-links {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.7rem;
+          line-height: 1.5;
+          margin: 0.85rem 0 0;
+          color: rgba(34,211,238,0.5);
+          word-break: break-all;
+        }
+
+        .pitch-team-links a {
+          color: rgba(34,211,238,0.85);
+          text-decoration: none;
+          transition: color 0.15s ease;
+        }
+
+        .pitch-team-links a:hover {
+          color: #22D3EE;
+          text-decoration: underline;
+        }
+
+        .pitch-team-footer {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.5);
+          padding-top: 1.25rem;
+          margin: 1.5rem 0 0;
+          border-top: 1px solid rgba(255,255,255,0.06);
+          line-height: 1.55;
+        }
+
+        /* ── Roadmap ── */
         .pitch-roadmap {
           display: flex;
           align-items: flex-start;
@@ -1414,13 +2265,145 @@ export default function PitchPage() {
           line-height: 1.4;
         }
 
-        .pitch-vision-footer {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1.1rem;
+        /* ── Next Steps / Ask ── */
+        .pitch-ask-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 1.25rem;
+          margin-bottom: 1.5rem;
+        }
+
+        .pitch-ask-card {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 1.25rem 1.5rem;
+        }
+
+        .pitch-ask-card-label {
+          font-size: 0.65rem;
           font-weight: 700;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(153,69,255,0.7);
+          margin-bottom: 0.6rem;
+        }
+
+        .pitch-ask-card-headline {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 1.4rem;
+          font-weight: 800;
+          color: #fff;
+          margin-bottom: 0.5rem;
+          letter-spacing: -0.01em;
+        }
+
+        .pitch-ask-card-sub {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.5);
+          line-height: 1.5;
+        }
+
+        .pitch-ask-list {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.4rem;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
           color: rgba(255,255,255,0.65);
-          border-left: 3px solid #9945FF;
-          padding-left: 1.25rem;
+          line-height: 1.5;
+        }
+
+        .pitch-ask-list li {
+          padding-left: 1rem;
+          position: relative;
+        }
+
+        .pitch-ask-list li::before {
+          content: "—";
+          position: absolute;
+          left: 0;
+          color: rgba(34,211,238,0.6);
+        }
+
+        .pitch-ask-exit-wrap {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 1.25rem 1.5rem;
+        }
+
+        .pitch-ask-exit-title {
+          font-size: 0.65rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(34,211,238,0.7);
+          margin-bottom: 0.85rem;
+        }
+
+        .pitch-ask-exit-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1.25rem;
+        }
+
+        .pitch-ask-exit-item {
+          display: flex;
+          flex-direction: column;
+          gap: 0.4rem;
+        }
+
+        .pitch-ask-exit-name {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 0.95rem;
+          font-weight: 700;
+          color: #fff;
+        }
+
+        .pitch-ask-exit-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.82rem;
+          line-height: 1.55;
+          color: rgba(255,255,255,0.55);
+          margin: 0;
+        }
+
+        /* ── Contact ── */
+        .pitch-contact-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1rem;
+          width: 100%;
+          max-width: 720px;
+          margin: 0 auto;
+        }
+
+        .pitch-contact-card {
+          background: rgba(255,255,255,0.025);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 10px;
+          padding: 1rem 1.25rem;
+          text-align: center;
+        }
+
+        .pitch-contact-label {
+          font-size: 0.65rem;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(153,69,255,0.7);
+          margin-bottom: 0.4rem;
+        }
+
+        .pitch-contact-value {
+          font-family: 'Inter Tight', 'Inter', sans-serif;
+          font-size: 0.95rem;
+          font-weight: 700;
+          color: #fff;
         }
 
         /* ── Controls ── */
@@ -1496,16 +2479,331 @@ export default function PitchPage() {
           border-radius: 3px;
         }
 
+        /* ─────────────────────────────────────────────────────────────
+           Card hover states — subtle lift + cyan border glow
+           Shared across every card family in the deck.
+           ───────────────────────────────────────────────────────────── */
+
+        .pitch-team-card,
+        .pitch-traction-card,
+        .pitch-traction-mini,
+        .pitch-money-econ-stat,
+        .pitch-whynow-stat,
+        .pitch-roadmap-item,
+        .pitch-ask-card,
+        .pitch-contact-card,
+        .pitch-risks-card,
+        .pitch-solution-item {
+          transition:
+            transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+            border-color 220ms ease,
+            box-shadow 220ms ease,
+            background 220ms ease;
+        }
+
+        @media (hover: hover) {
+          .pitch-team-card:hover,
+          .pitch-traction-card:hover,
+          .pitch-traction-mini:hover,
+          .pitch-money-econ-stat:hover,
+          .pitch-whynow-stat:hover,
+          .pitch-roadmap-item:hover,
+          .pitch-ask-card:hover,
+          .pitch-contact-card:hover,
+          .pitch-risks-card:hover,
+          .pitch-solution-item:hover {
+            transform: translateY(-2px);
+            border-color: rgba(34, 211, 238, 0.28);
+            box-shadow: 0 8px 24px rgba(34, 211, 238, 0.06);
+            background: rgba(255, 255, 255, 0.035);
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .pitch-team-card,
+          .pitch-traction-card,
+          .pitch-traction-mini,
+          .pitch-money-econ-stat,
+          .pitch-whynow-stat,
+          .pitch-roadmap-item,
+          .pitch-ask-card,
+          .pitch-contact-card,
+          .pitch-risks-card,
+          .pitch-solution-item {
+            transition: none !important;
+          }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           Slide 3 — Traction chart line-draw + dot fade-in
+           ───────────────────────────────────────────────────────────── */
+
+        .pitch-traction-line {
+          animation: traction-line-draw 1400ms cubic-bezier(0.4, 0, 0.2, 1) 200ms forwards;
+        }
+
+        @keyframes traction-line-draw {
+          to { stroke-dashoffset: 0; }
+        }
+
+        .pitch-traction-dot {
+          opacity: 0;
+          animation: traction-dot-in 280ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+
+        @keyframes traction-dot-in {
+          to { opacity: 1; }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           Slide 6 — Animated fee flow (the brand moment)
+           Drips from "Trader" through three channels into LP / Creator / Protocol.
+           ───────────────────────────────────────────────────────────── */
+
+        .pitch-fee-stage {
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 0;
+        }
+
+        .pitch-fee-source {
+          display: flex;
+          justify-content: center;
+        }
+
+        .pitch-fee-source .pitch-money-pill {
+          min-width: 160px;
+          text-align: center;
+        }
+
+        .pitch-fee-channel {
+          position: relative;
+          width: 480px;
+          max-width: 100%;
+          height: 140px;
+          margin: 0 auto;
+        }
+
+        .pitch-fee-svg {
+          width: 100%;
+          height: 100%;
+          display: block;
+          overflow: visible;
+        }
+
+        .pitch-fee-svg-dot {
+          filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.7));
+        }
+
+        .pitch-fee-buckets {
+          display: flex;
+          justify-content: space-between;
+          gap: 1rem;
+        }
+
+        .pitch-fee-buckets .pitch-money-pill {
+          flex: 1;
+          text-align: center;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .pitch-traction-line,
+          .pitch-traction-dot {
+            animation: none !important;
+          }
+          .pitch-traction-line { stroke-dashoffset: 0 !important; }
+          .pitch-traction-dot { opacity: 1 !important; }
+          .pitch-fee-svg-dot { display: none !important; }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           Slide 7 — Opportunity disparity bars
+           ───────────────────────────────────────────────────────────── */
+
+        .pitch-opp-compare {
+          display: flex;
+          flex-direction: column;
+          gap: 2rem;
+        }
+
+        .pitch-opp-row {
+          display: flex;
+          flex-direction: column;
+          gap: 0.85rem;
+        }
+
+        .pitch-opp-row-header {
+          display: flex;
+          align-items: baseline;
+          flex-wrap: wrap;
+          gap: 1rem;
+        }
+
+        .pitch-opp-tag {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.7rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(153, 69, 255, 0.85);
+          padding: 0.35rem 0.65rem;
+          background: rgba(153, 69, 255, 0.1);
+          border: 1px solid rgba(153, 69, 255, 0.25);
+          border-radius: 4px;
+        }
+
+        .pitch-opp-tag-cyan {
+          color: rgba(34, 211, 238, 0.95);
+          background: rgba(34, 211, 238, 0.1);
+          border-color: rgba(34, 211, 238, 0.3);
+        }
+
+        .pitch-opp-row-stat {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: clamp(1.4rem, 2.6vw, 2rem);
+          font-weight: 700;
+          color: #fff;
+          letter-spacing: -0.01em;
+        }
+
+        .pitch-opp-row-detail {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          color: rgba(255, 255, 255, 0.5);
+        }
+
+        .pitch-opp-bar-wrap {
+          height: 8px;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          border-radius: 4px;
+          overflow: hidden;
+        }
+
+        .pitch-opp-bar {
+          height: 100%;
+          border-radius: 4px;
+          transform: scaleX(0);
+          transform-origin: left;
+          animation: opp-bar-grow 1200ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+
+        .pitch-opp-bar-today {
+          width: 0.5%;
+          min-width: 6px;
+          background: rgba(153, 69, 255, 0.85);
+          box-shadow: 0 0 8px rgba(153, 69, 255, 0.5);
+          animation-delay: 200ms;
+        }
+
+        .pitch-opp-bar-opportunity {
+          width: 100%;
+          background: linear-gradient(90deg, #9945FF, #22D3EE);
+          box-shadow: 0 0 12px rgba(34, 211, 238, 0.3);
+          animation-delay: 500ms;
+        }
+
+        @keyframes opp-bar-grow {
+          to { transform: scaleX(1); }
+        }
+
+        .pitch-opp-callout {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          color: rgba(255, 255, 255, 0.5);
+          font-style: italic;
+          border-left: 2px solid rgba(34, 211, 238, 0.4);
+          padding-left: 1rem;
+          max-width: 580px;
+          line-height: 1.5;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .pitch-opp-bar {
+            animation: none !important;
+            transform: scaleX(1) !important;
+          }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           Slide 8 — Matrix cell entrance, column-by-column stagger
+           ───────────────────────────────────────────────────────────── */
+
+        .pitch-matrix tbody td {
+          animation: matrix-cell-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+
+        .pitch-matrix tbody td:nth-child(2) { animation-delay: 100ms; }
+        .pitch-matrix tbody td:nth-child(3) { animation-delay: 200ms; }
+        .pitch-matrix tbody td:nth-child(4) { animation-delay: 300ms; }
+        .pitch-matrix tbody td:nth-child(5) { animation-delay: 480ms; }
+
+        @keyframes matrix-cell-in {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .pitch-matrix tbody td {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           Slide 9 — Catalyst card icons
+           ───────────────────────────────────────────────────────────── */
+
+        .pitch-catalyst-icon {
+          width: 28px;
+          height: 28px;
+          color: rgba(153, 69, 255, 0.7);
+          margin-bottom: 0.85rem;
+          display: block;
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        .pitch-whynow-stat:nth-child(2) .pitch-catalyst-icon {
+          color: rgba(34, 211, 238, 0.7);
+        }
+
+        .pitch-whynow-stat:nth-child(3) .pitch-catalyst-icon {
+          color: rgba(153, 69, 255, 0.7);
+        }
+
         /* ─── PRINT STYLES ─── */
         @media print {
           .pitch-deck-overlay {
             position: static;
             display: block;
+            background: #0D0D0F !important;
           }
 
           .pitch-controls,
-          .pitch-dots {
+          .pitch-dots,
+          .pitch-aurora,
+          .pitch-drip-line,
+          .pitch-fee-svg-dot {
             display: none !important;
+          }
+
+          .pitch-slide-stage,
+          .pitch-traction-line,
+          .pitch-traction-dot,
+          .pitch-opp-bar,
+          .pitch-matrix tbody td {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+            stroke-dashoffset: 0 !important;
+          }
+
+          .pitch-opp-bar-today,
+          .pitch-opp-bar-opportunity {
+            transform: scaleX(1) !important;
           }
 
           .pitch-slide {
@@ -1515,15 +2813,19 @@ export default function PitchPage() {
             min-height: 100vh;
             padding: 0;
           }
+
+          /* Force colors to print correctly */
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
         }
 
         /* ─── Mobile ─── */
         @media (max-width: 768px) {
-          .pitch-slide-inner {
-            padding: 1.25rem 1rem;
-          }
+          .pitch-slide-inner { padding: 1.25rem 1rem; }
 
-          .pitch-traction-grid {
+          .pitch-traction-mini-row {
             grid-template-columns: repeat(2, 1fr);
           }
 
@@ -1541,10 +2843,6 @@ export default function PitchPage() {
             grid-template-columns: 1fr;
           }
 
-          .pitch-user-cards {
-            grid-template-columns: 1fr;
-          }
-
           .pitch-roadmap {
             flex-direction: column;
             gap: 0.75rem;
@@ -1556,7 +2854,6 @@ export default function PitchPage() {
             align-self: center;
           }
 
-          /* Pflow at mobile */
           .pflow-wrap {
             flex-direction: column;
             gap: 0.75rem;
@@ -1567,168 +2864,62 @@ export default function PitchPage() {
             height: 32px;
             transform: rotate(90deg);
           }
+
+          .pitch-team-grid-two {
+            grid-template-columns: 1fr;
+          }
+
+          .pitch-money-econ {
+            grid-template-columns: 1fr;
+          }
+
+          .pitch-ask-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .pitch-ask-exit-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .pitch-contact-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .pitch-risks-grid {
+            grid-template-columns: 1fr;
+          }
+
+          /* Slide 6 fee flow: collapse to vertical stack on mobile */
+          .pitch-fee-channel {
+            height: 100px;
+          }
+          .pitch-fee-buckets {
+            flex-direction: column;
+            gap: 0.5rem;
+          }
+          .pitch-fee-buckets .pitch-money-pill {
+            width: 100%;
+          }
+
+          /* Slide 7 opportunity: tighten gap */
+          .pitch-opp-compare {
+            gap: 1.5rem;
+          }
+          .pitch-opp-row-header {
+            gap: 0.6rem;
+          }
+
+          /* Drip line moves closer on mobile */
+          .pitch-drip-line { left: 12px; }
         }
 
         @media (max-width: 480px) {
-          .pitch-traction-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-
-        /* ── Team slide ── */
-        .pitch-team-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 1.25rem;
-          margin-bottom: 1.75rem;
-        }
-
-        .pitch-team-card {
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 12px;
-          padding: 1.5rem 1.25rem;
-        }
-
-        .pitch-team-name {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1.15rem;
-          font-weight: 700;
-          color: #fff;
-          margin-bottom: 0.25rem;
-        }
-
-        .pitch-team-role {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 0.7rem;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          color: #22D3EE;
-          margin-bottom: 0.9rem;
-        }
-
-        .pitch-team-bio {
-          font-family: 'Inter', sans-serif;
-          font-size: 0.875rem;
-          line-height: 1.55;
-          color: rgba(255,255,255,0.6);
-          margin: 0;
-        }
-
-        .pitch-team-footer {
-          font-family: 'Inter', sans-serif;
-          font-size: 0.9rem;
-          color: rgba(255,255,255,0.5);
-          padding-top: 1rem;
-          border-top: 1px solid rgba(255,255,255,0.06);
-          margin: 0;
-        }
-
-        @media (max-width: 768px) {
-          .pitch-team-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-
-        /* ── Traction chart ── */
-        .pitch-traction-chart-wrap {
-          background: rgba(255,255,255,0.02);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 14px;
-          padding: 1.5rem 1.5rem 1.25rem;
-          margin-bottom: 1.5rem;
-        }
-
-        .pitch-traction-chart-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-          margin-bottom: 1rem;
-          gap: 1rem;
-        }
-
-        .pitch-traction-chart-title {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1rem;
-          font-weight: 600;
-          color: #fff;
-        }
-
-        .pitch-traction-chart-sub {
-          font-size: 0.7rem;
-          color: rgba(255,255,255,0.4);
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          margin-top: 0.2rem;
-        }
-
-        .pitch-traction-chart-stat {
-          text-align: right;
-        }
-
-        .pitch-traction-chart-stat-num {
-          font-size: 1.4rem;
-          font-weight: 700;
-          background: linear-gradient(90deg, #9945FF, #22D3EE);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
-
-        .pitch-traction-chart-stat-label {
-          font-family: 'Inter', sans-serif;
-          font-size: 0.7rem;
-          color: rgba(255,255,255,0.4);
-          margin-top: 0.15rem;
-        }
-
-        .pitch-traction-chart-svg {
-          width: 100%;
-          height: 200px;
-          display: block;
-        }
-
-        .pitch-traction-chart-axis {
-          display: flex;
-          justify-content: space-between;
-          font-size: 0.65rem;
-          color: rgba(255,255,255,0.3);
-          margin-top: 0.6rem;
-          letter-spacing: 0.05em;
-        }
-
-        .pitch-traction-mini-row {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 0.75rem;
-        }
-
-        .pitch-traction-mini {
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px;
-          padding: 0.9rem 1rem;
-          text-align: center;
-        }
-
-        .pitch-traction-mini-num {
-          font-size: 1.3rem;
-          font-weight: 700;
-          color: #fff;
-          margin-bottom: 0.2rem;
-        }
-
-        .pitch-traction-mini-label {
-          font-family: 'Inter', sans-serif;
-          font-size: 0.7rem;
-          color: rgba(255,255,255,0.45);
-          line-height: 1.3;
-        }
-
-        @media (max-width: 768px) {
           .pitch-traction-mini-row {
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: 1fr;
           }
+
+          .pitch-fee-channel { height: 80px; }
+          .pitch-opp-row-stat { font-size: 1.4rem; }
         }
       `}</style>
     </>
