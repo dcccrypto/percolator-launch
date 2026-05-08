@@ -293,9 +293,9 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          Devnet program is live and busy: 8 markets created, 1,000+
-          transactions, 100% success rate. Mainnet is deployed but
-          private — no public trading until the external audit clears.
+          168 markets created on devnet in 2 weeks, all green. Mainnet is
+          deployed but private — no public trading until the external
+          audit clears.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -314,15 +314,15 @@ function Slide03Traction(_: SlideProps) {
             <div className="pitch-traction-network-stats pitch-traction-network-stats-three">
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">
-                  <NumberCounter target={8} />
+                  <NumberCounter target={168} />
                 </div>
                 <div className="pitch-traction-network-label">markets created</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
-                  <NumberCounter target={1000} suffix="+" />
+                  <NumberCounter target={2} />
                 </div>
-                <div className="pitch-traction-network-label">transactions</div>
+                <div className="pitch-traction-network-label">weeks</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
