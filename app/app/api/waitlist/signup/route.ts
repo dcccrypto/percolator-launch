@@ -36,6 +36,59 @@ function isValidSolanaPubkey(s: string): boolean {
   }
 }
 
+/**
+ * Spam filter: check that the pubkey has been seen on Solana mainnet at all.
+ *
+ * A spammer can generate ed25519 keypairs locally and sign arbitrary messages —
+ * the signature verifies but the wallet has never been funded or used. Real
+ * users have at least one on-chain transaction (Phantom funds the account on
+ * first use, and any received SOL creates an account info entry).
+ *
+ * Implementation: server-side getAccountInfo call against Helius mainnet using
+ * HELIUS_MAINNET_API_KEY. Result.value === null means "system program does not
+ * have an account here" = wallet has never received SOL.
+ *
+ * Posture: fail-open on RPC errors so a Helius outage doesn't block signups.
+ * The cost of letting through a few extras during an outage is lower than
+ * blocking real users.
+ */
+async function walletExistsOnMainnet(pubkey: string): Promise<boolean> {
+  const apiKey = (
+    process.env.HELIUS_MAINNET_API_KEY ??
+    process.env.HELIUS_API_KEY ??
+    ""
+  ).trim();
+  const url = apiKey
+    ? `https://mainnet.helius-rpc.com/?api-key=${apiKey}`
+    : "https://api.mainnet-beta.solana.com";
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getAccountInfo",
+        params: [pubkey, { encoding: "base64", commitment: "confirmed" }],
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      console.warn("[waitlist] mainnet RPC non-2xx, fail-open", res.status);
+      return true;
+    }
+    const data = (await res.json()) as { result?: { value?: unknown } };
+    return data?.result?.value !== null && data?.result?.value !== undefined;
+  } catch (err) {
+    console.warn("[waitlist] mainnet RPC error, fail-open", err);
+    return true;
+  }
+}
+
 function parseTimestampFromMessage(message: string): number | null {
   if (!message.startsWith(MESSAGE_PREFIX)) return null;
   const tail = message.slice(MESSAGE_PREFIX.length);
@@ -110,6 +163,20 @@ export async function POST(req: Request) {
   const ok = nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes);
   if (!ok) {
     return NextResponse.json({ error: "signature invalid" }, { status: 401 });
+  }
+
+  // Spam filter: wallet must have been seen on Solana mainnet at least once.
+  // Locally-generated vanity keypairs that have never received SOL get rejected
+  // here even if their signature verifies.
+  const exists = await walletExistsOnMainnet(pubkey);
+  if (!exists) {
+    return NextResponse.json(
+      {
+        error:
+          "wallet not seen on Solana mainnet — fund this wallet (any amount) and try again",
+      },
+      { status: 400 },
+    );
   }
 
   // Insert
