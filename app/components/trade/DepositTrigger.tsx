@@ -5,6 +5,7 @@ import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { useWalletAtaBalance } from "@/hooks/useWalletAtaBalance";
 import { formatTokenAmount } from "@/lib/format";
 import { DepositWithdrawCard } from "./DepositWithdrawCard";
 import { isMockMode } from "@/lib/mock-mode";
@@ -30,6 +31,23 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
 
   const capital = userAccount?.account.capital ?? 0n;
   const prevCapitalRef = useRef(capital);
+
+  // The bar at the top of the trade panel now shows the user's PHANTOM
+  // (or whichever wallet) USDC balance — what they have available to
+  // deposit — NOT what's already deposited into this market. Account
+  // balance (capital) is shown alongside the order-form Size row as
+  // "Account Bal:" instead.
+  //
+  // Pass `capital` as the refresh trigger so a deposit (which decreases
+  // wallet ATA balance and increases capital) re-fetches the wallet
+  // balance. Without this the bar would keep showing the pre-deposit
+  // number until the user reloaded the page.
+  const { balance: walletBalance, decimals: walletDecimals } = useWalletAtaBalance(
+    config?.collateralMint ?? null,
+    capital,
+  );
+  const displayBalance = walletBalance ?? 0n;
+  const displayDecimals = walletDecimals ?? decimals;
 
   // Read localStorage on mount
   useEffect(() => {
@@ -65,9 +83,12 @@ export const DepositTrigger: FC<{ slabAddress: string }> = ({ slabAddress }) => 
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-2">
-          <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Account</span>
+          {/* Label and value share the same brightness so the whole
+              "Wallet Balance: X USDC" line reads as one unit. The
+              earlier "Account" label was at --text-dim, which made
+              users squint to read which balance this was. */}
           <span className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-            {formatTokenAmount(capital, decimals)} {symbol}
+            Wallet Balance: {formatTokenAmount(displayBalance, displayDecimals)} {symbol}
           </span>
         </div>
         <div className="flex items-center gap-1.5">

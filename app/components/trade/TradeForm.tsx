@@ -704,7 +704,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div className="mb-1.5 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Size<InfoIcon tooltip="Position size — enter in contracts (tokens) or USD. Both fields sync automatically." /></label>
           <span className="text-[10px] text-[var(--text)] whitespace-nowrap min-w-0 shrink-0" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-            Bal: {userAccount ? formatPerc(capital, decimals) : (walletAtaBalance !== null ? formatPerc(walletAtaBalance, decimals) : "—")} {collateralSymbol}
+            Account Bal: {userAccount ? formatPerc(capital, decimals) : "0"} {collateralSymbol}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
