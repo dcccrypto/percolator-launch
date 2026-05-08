@@ -289,10 +289,9 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          168 markets created on devnet in a 2-week sprint earlier this
-          year, all green. Reactivating soon ahead of audit. Mainnet is
-          deployed but private until an external audit (quotes received,
-          not yet engaged) clears.
+          220 markets created on devnet across three program versions,
+          all green. Mainnet is deployed but private until an external
+          audit (quotes received, not yet engaged) clears.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -301,25 +300,25 @@ function Slide03Traction(_: SlideProps) {
               <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">Devnet · live program</div>
               <a
                 className="pitch-traction-network-link mono"
-                href="https://explorer.solana.com/address/g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in?cluster=devnet"
+                href="https://explorer.solana.com/address/FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD?cluster=devnet"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                g9msRSV3…dm9in ↗
+                FxfD37s1…sfKrD ↗
               </a>
             </div>
             <div className="pitch-traction-network-stats pitch-traction-network-stats-three">
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">
-                  <NumberCounter target={168} />
+                  <NumberCounter target={220} />
                 </div>
                 <div className="pitch-traction-network-label">markets created</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
-                  <NumberCounter target={2} />
+                  <NumberCounter target={3} />
                 </div>
-                <div className="pitch-traction-network-label">weeks</div>
+                <div className="pitch-traction-network-label">program versions</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
@@ -327,10 +326,11 @@ function Slide03Traction(_: SlideProps) {
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
-              Devnet sprint complete and ready to reactivate. Mainnet
-              program is deployed but private — open only to a small
-              group of open-source contributors until the external
-              audit (quotes received, not yet engaged) clears.
+              Devnet markets created across three program versions
+              (verifiable on chain). Mainnet program is deployed but
+              private — open only to a small group of open-source
+              contributors until the external audit (quotes received,
+              not yet engaged) clears.
             </div>
           </div>
         </div>
@@ -945,7 +945,7 @@ function Slide09WhyNow(_: SlideProps) {
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          GTM: 168-market devnet sprint complete · OSS contributor
+          GTM: 220-market devnet sprint complete · OSS contributor
           closed beta on mainnet · audit quotes received → reactivate
           devnet + engage audit firm → audit clears → public mainnet
           launch with first 10 creator-led markets seeded by
@@ -972,7 +972,7 @@ function Slide10Roadmap(_: SlideProps) {
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q2 2026</div>
             <div className="pitch-roadmap-name">Devnet · audit prep</div>
-            <div className="pitch-roadmap-desc">168-market devnet sprint shipped, mainnet program deployed to OSS-contributor closed beta, audit quotes received</div>
+            <div className="pitch-roadmap-desc">220-market devnet sprint shipped, mainnet program deployed to OSS-contributor closed beta, audit quotes received</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
@@ -1168,11 +1168,11 @@ function Slide13Contact(_: SlideProps) {
           </a>
           {" · "}devnet program{" "}
           <a
-            href="https://explorer.solana.com/address/g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in?cluster=devnet"
+            href="https://explorer.solana.com/address/FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD?cluster=devnet"
             target="_blank"
             rel="noopener noreferrer"
           >
-            g9msRSV3…dm9in
+            FxfD37s1…sfKrD
           </a>
         </p>
       </div>
@@ -2710,9 +2710,9 @@ export default function PitchPage() {
 
         .pitch-toly-photo img {
           width: 100%;
-          height: 110px;
-          object-fit: cover;
-          object-position: top;
+          aspect-ratio: 4 / 3;
+          object-fit: contain;
+          background: rgba(0, 0, 0, 0.35);
           border-radius: 6px;
           display: block;
         }
@@ -2746,7 +2746,7 @@ export default function PitchPage() {
             grid-template-columns: 1fr;
           }
           .pitch-toly-photo img {
-            height: 160px;
+            aspect-ratio: 16 / 9;
           }
         }
 
