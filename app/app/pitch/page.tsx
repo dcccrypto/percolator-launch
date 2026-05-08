@@ -128,12 +128,8 @@ function Slide01OneLiner(_: SlideProps) {
         </p>
         <ul className="pitch-hero-bullets">
           <li>
-            <span className="pitch-hero-bullet-num mono">$500</span>
-            <span className="pitch-hero-bullet-text">to launch a market on any SPL token</span>
-          </li>
-          <li>
             <span className="pitch-hero-bullet-num mono">60 sec</span>
-            <span className="pitch-hero-bullet-text">no team approval, no auction</span>
+            <span className="pitch-hero-bullet-text">to launch a market on any SPL token · no team approval, no auction</span>
           </li>
           <li>
             <span className="pitch-hero-bullet-num mono">15M+</span>
@@ -141,7 +137,7 @@ function Slide01OneLiner(_: SlideProps) {
           </li>
           <li>
             <span className="pitch-hero-bullet-num mono">Apache 2.0</span>
-            <span className="pitch-hero-bullet-text">fully open source · 8 public repos · fork it tomorrow</span>
+            <span className="pitch-hero-bullet-text">fully open source · 17 public repos · fork it tomorrow</span>
           </li>
         </ul>
         <div className="pitch-divider" />
@@ -348,7 +344,7 @@ function Slide03Traction(_: SlideProps) {
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={8} />
+              <NumberCounter target={17} />
             </div>
             <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
           </div>
@@ -386,7 +382,7 @@ function Slide04Sprint(_: SlideProps) {
             <div className="pitch-solution-num purple">1</div>
             <div>
               <div className="pitch-solution-name">
-                v12.17 mainnet upgrade + first SOL/USDC market on mainnet
+                v12.19 mainnet upgrade + first SOL/USDC market on mainnet
               </div>
               <p className="pitch-solution-desc">
                 Four programs upgraded and deployed. SOL/USDC Hyperp market
@@ -533,7 +529,7 @@ function Slide05Product(_: SlideProps) {
             <div className="pflow-example-card pflow-example-card-live">
               <div className="pflow-example-label mono">fee split</div>
               <div className="pflow-example-value mono pflow-live-id">
-                vault · creator · protocol
+                LP vault · creator · protocol · insurance
               </div>
               <div className="pflow-live-dot-row">
                 <span className="pflow-live-dot" />
@@ -659,6 +655,7 @@ function Slide06Money(_: SlideProps) {
               <div className="pitch-money-pill pitch-money-pill-cyan">
                 Protocol → PERC stakers
               </div>
+              <div className="pitch-money-pill">Insurance reserve</div>
             </div>
           </div>
         </div>
@@ -773,7 +770,7 @@ function Slide08Competitors(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Competitors</div>
         <h2 className="pitch-title">
-          No major Solana perp DEX lists tokens permissionlessly. We are the only protocol that does.
+          No major Solana perp DEX opens long-tail markets permissionlessly. Hyperliquid does — but only via a $19-25M dutch auction. We are the long-tail-native option on Solana.
         </h2>
         <div className="pitch-matrix-wrap">
           <table className="pitch-matrix">
@@ -788,24 +785,31 @@ function Slide08Competitors(_: SlideProps) {
             </thead>
             <tbody>
               <tr>
+                <td className="pitch-matrix-feature">Pricing model</td>
+                <td className="pitch-matrix-no">CLOB</td>
+                <td className="pitch-matrix-no">Oracle + JLP</td>
+                <td className="pitch-matrix-no">DLOB + JIT auction</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">Oracle + passive LP / vAMM</td>
+              </tr>
+              <tr>
                 <td className="pitch-matrix-feature">Permissionless markets</td>
+                <td className="pitch-matrix-no">auction-gated ($19-25M)</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Long-tail tokens (any DEX-listed SPL)</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
               </tr>
               <tr>
-                <td className="pitch-matrix-feature">Long-tail tokens</td>
+                <td className="pitch-matrix-feature">Oracle flexibility (Pyth + DEX EWMA + admin push)</td>
                 <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">On-chain oracle (no Pyth dep.)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">Pyth-only</td>
+                <td className="pitch-matrix-no">Pyth-only</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
               </tr>
               <tr>
@@ -813,11 +817,18 @@ function Slide08Competitors(_: SlideProps) {
                 <td className="pitch-matrix-yes">✓</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes">✓</td>
+                <td className="pitch-matrix-no pitch-matrix-us">roadmap</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Transferable positions (Token-2022 NFT)</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
               </tr>
               <tr>
-                <td className="pitch-matrix-feature">Market-creator fees</td>
-                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-feature">Market-creator fee share</td>
+                <td className="pitch-matrix-no">per HIP-1</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
@@ -826,14 +837,21 @@ function Slide08Competitors(_: SlideProps) {
                 <td className="pitch-matrix-feature">Open source (Apache 2.0)</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">partial</td>
-                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes">✓</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Native chain</td>
+                <td className="pitch-matrix-no">own L1</td>
+                <td className="pitch-matrix-yes">Solana</td>
+                <td className="pitch-matrix-yes">Solana</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">Solana</td>
               </tr>
             </tbody>
           </table>
         </div>
         <p className="pitch-matrix-sub">
-          Everyone else competes for the same 30-50 tokens. We open a category.
+          Everyone else competes for the same 30-50 tokens. We open a category — long-tail SPL perps at a price point creators can actually afford.
         </p>
       </div>
     </div>
@@ -1121,7 +1139,7 @@ function Slide13Contact(_: SlideProps) {
         >
           Closed beta is restricted to a small group of open-source
           contributors, pre-audit. Fork the code under Apache 2.0 across
-          all 8 public repos, or DM us on X. We answer.
+          all 17 public repos, or DM us on X. We answer.
         </p>
         <div className="pitch-contact-grid">
           <div className="pitch-contact-card">
@@ -1130,7 +1148,7 @@ function Slide13Contact(_: SlideProps) {
           </div>
           <div className="pitch-contact-card">
             <div className="pitch-contact-label mono">Code</div>
-            <div className="pitch-contact-value">github.com/percolator</div>
+            <div className="pitch-contact-value">github.com/dcccrypto</div>
           </div>
           <div className="pitch-contact-card">
             <div className="pitch-contact-label mono">Talk</div>
