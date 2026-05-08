@@ -228,8 +228,10 @@ const MAINNET_BETA_BLOCKED_PATHS = [
 //
 // This block runs FIRST, before all other middleware logic, so non-waitlist
 // hostnames continue to behave exactly as before.
-const WAITLIST_HOSTS = new Set(["percolator.trade", "www.percolator.trade"]);
+const WAITLIST_HOSTS = new Set(["percolator.trade"]);
 const REDIRECT_HOSTS = new Set([
+  // www.percolator.trade canonicalizes to apex (SEO)
+  "www.percolator.trade",
   "percolatorlaunch.com",
   "www.percolatorlaunch.com",
 ]);
