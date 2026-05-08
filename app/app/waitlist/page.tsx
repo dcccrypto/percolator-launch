@@ -31,14 +31,16 @@ export default function WaitlistPage() {
 
       <main className="relative mx-auto max-w-[1100px] px-6 pt-16 pb-24 sm:pt-20">
         <Hero />
-        <SeparatorMono label="Why join" />
-        <WhySection />
-        <SeparatorMono label="Mainnet status" />
-        <StatusReadout />
         <SeparatorMono label="Architecture" />
         <ArchitectureSection />
+        <SeparatorMono label="Mainnet status" />
+        <StatusReadout />
         <SeparatorMono label="Origin" />
         <OriginSection />
+        <SeparatorMono label="Reserve your spot" />
+        <SignupSection />
+        <SeparatorMono label="How we'll reach you" />
+        <NotifySection />
         <SeparatorMono label="FAQ" />
         <FAQSection />
         <Footer />
@@ -110,53 +112,59 @@ function SeparatorMono({ label }: { label: string }) {
 
 function Hero() {
   return (
-    <section className="grid gap-10 sm:gap-14 lg:grid-cols-[1.15fr_1fr] lg:gap-16">
-      {/* Left — message */}
-      <div>
-        {/* Top status row */}
-        <div className="mb-8 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--cyan)]" />
-          <span className="text-[var(--cyan)]">live on mainnet</span>
-          <span className="text-[var(--text-dim)]">/</span>
-          <span>audit Q3 · public open after</span>
-        </div>
-
-        <h1
-          className="text-[40px] font-bold leading-[1.02] tracking-[-0.025em] text-[var(--text)] sm:text-[52px] md:text-[64px]"
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          Perp futures
-          <br />
-          for{" "}
-          <span
-            className="bg-clip-text text-transparent"
-            style={{
-              backgroundImage:
-                "linear-gradient(110deg, #B97AFF 0%, #9945FF 35%, #14F195 100%)",
-            }}
-          >
-            every Solana token
-          </span>
-          .
-        </h1>
-
-        <p className="mt-6 max-w-[520px] text-[15px] leading-[1.65] text-[var(--text-secondary)]">
-          A creator launches a leveraged market on any SPL token in 60 seconds — no team approval, no auction. Built on{" "}
-          <span className="text-[var(--text)]">Anatoly Yakovenko&apos;s</span> open research, extended into a production protocol with our own LP vault, transferable Token-2022 NFT positions, dispute resolution, and audit-crank invariants.
-        </p>
-
-        {/* Specifics row — looks like a code line, not a "trust badge" */}
-        <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11.5px] text-[var(--text-muted)]">
-          <SpecPill k="program" v="ESa89R5E…D4edv" />
-          <SpecPill k="proofs" v="422 / 422 ✓" highlight="cyan" />
-          <SpecPill k="repos" v="17 · Apache 2.0" />
-          <SpecPill k="markets" v="220 on devnet" />
-        </div>
+    <section className="max-w-[820px]">
+      {/* Top status row */}
+      <div className="mb-8 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--cyan)]" />
+        <span className="text-[var(--cyan)]">live on mainnet</span>
+        <span className="text-[var(--text-dim)]">/</span>
+        <span>audit Q3 · public open after</span>
       </div>
 
-      {/* Right — signup card pinned beside hero text */}
-      <div className="flex flex-col justify-end">
-        <SignupCard />
+      <h1
+        className="text-[44px] font-bold leading-[1.02] tracking-[-0.025em] text-[var(--text)] sm:text-[60px] md:text-[76px]"
+        style={{ fontFamily: "var(--font-heading)" }}
+      >
+        Perp futures
+        <br />
+        for{" "}
+        <span
+          className="bg-clip-text text-transparent"
+          style={{
+            backgroundImage:
+              "linear-gradient(110deg, #B97AFF 0%, #9945FF 35%, #14F195 100%)",
+          }}
+        >
+          every Solana token
+        </span>
+        .
+      </h1>
+
+      <p className="mt-6 max-w-[640px] text-[16px] leading-[1.6] text-[var(--text-secondary)] sm:text-[17px]">
+        A creator launches a leveraged market on any SPL token in 60 seconds — no team approval, no auction. Built on{" "}
+        <span className="text-[var(--text)]">Anatoly Yakovenko&apos;s</span> open research, extended into a production protocol with LP vault, transferable Token-2022 NFT positions, dispute resolution, and audit-crank invariants.
+      </p>
+
+      {/* Specifics row — looks like a code line, not a "trust badge" */}
+      <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11.5px] text-[var(--text-muted)]">
+        <SpecPill k="program" v="ESa89R5E…D4edv" />
+        <SpecPill k="proofs" v="422 / 422 ✓" highlight="cyan" />
+        <SpecPill k="repos" v="17 · Apache 2.0" />
+        <SpecPill k="markets" v="220 on devnet" />
+      </div>
+
+      {/* Soft CTA pointing to the signup section below */}
+      <div className="mt-10 flex items-center gap-4">
+        <a
+          href="#reserve"
+          className="group inline-flex items-center gap-2 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/[0.08] px-5 py-2.5 text-[13px] font-semibold uppercase tracking-[0.1em] text-[var(--text)] transition-all hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.14]"
+        >
+          Reserve your spot
+          <span className="text-[var(--accent)] transition-transform group-hover:translate-y-0.5">↓</span>
+        </a>
+        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+          wallet · no email · no gas
+        </span>
       </div>
     </section>
   );
@@ -454,31 +462,82 @@ function StatusErr({ children }: { children: React.ReactNode }) {
 }
 
 // ============================================================================
-// WHY — numbered manifesto, opinionated copy
+// SIGNUP SECTION — anchored card, the actual reservation step
 // ============================================================================
 
-function WhySection() {
-  const items: [string, string, string][] = [
-    [
-      "01",
-      "Wallet-gated, not email-gated.",
-      "We don't have an email list to leak. You sign with the wallet that gets the access. No drips, no spam, no scammer farming.",
-    ],
-    [
-      "02",
-      "Priority access at mainnet open.",
-      "When the audit clears, waitlist wallets get in before broader public. The order you sign is the order you get notified.",
-    ],
-    [
-      "03",
-      "First ten markets · 50% creator-fee rebate · 90 days.",
-      "If you're going to launch a market, get on the list. The first ten launched after public open keep half their creator fees rebated for 90 days.",
-    ],
-    [
-      "04",
-      "Verifiable, end to end.",
-      "The mainnet program is already live in lab mode. The 422 Kani proofs run on every commit. Nothing is in marketing-deck-only territory.",
-    ],
+function SignupSection() {
+  return (
+    <section
+      id="reserve"
+      className="scroll-mt-20 grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_1.1fr]"
+    >
+      <div>
+        <h2
+          className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
+          style={{ fontFamily: "var(--font-heading)" }}
+        >
+          One signature.
+          <br />
+          You&apos;re on the list.
+        </h2>
+        <p className="mt-4 max-w-[420px] text-[14px] leading-[1.65] text-[var(--text-secondary)]">
+          We don&apos;t collect emails. Connect your Solana wallet, sign a short message proving you control it, and your pubkey lands on the list. Idempotent — re-signing with the same wallet keeps your original spot.
+        </p>
+        <div className="mt-6 space-y-3 font-mono text-[12px] text-[var(--text-secondary)]">
+          <SignupBullet color="cyan">No transaction. No gas. No token approvals.</SignupBullet>
+          <SignupBullet color="cyan">Server verifies the ed25519 signature with tweetnacl.</SignupBullet>
+          <SignupBullet color="cyan">Optional: drop your X handle so we can also DM you.</SignupBullet>
+        </div>
+      </div>
+      <div className="flex justify-start lg:justify-end">
+        <SignupCard />
+      </div>
+    </section>
+  );
+}
+
+function SignupBullet({
+  children,
+  color,
+}: {
+  children: React.ReactNode;
+  color: "cyan" | "purple";
+}) {
+  const c = color === "cyan" ? "var(--cyan)" : "var(--accent)";
+  return (
+    <div className="flex items-start gap-2.5">
+      <span
+        aria-hidden
+        className="mt-[7px] inline-block h-1 w-3 shrink-0 rounded-sm"
+        style={{ background: c, opacity: 0.85 }}
+      />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+// ============================================================================
+// NOTIFY — how we actually reach you when mainnet opens
+// ============================================================================
+
+function NotifySection() {
+  const channels: { tag: string; t: string; d: string; accent?: "cyan" }[] = [
+    {
+      tag: "default",
+      t: "On-chain memo from our project wallet",
+      d: "When mainnet opens, every waitlist wallet receives a memo-only transaction from our project wallet. You see it in Phantom, Solflare, Backpack, or Solscan as an incoming tx with a short message and a link to claim. No payload, no value, no token-approval prompt.",
+      accent: "cyan",
+    },
+    {
+      tag: "automatic",
+      t: "dApp gating at percolator.trade",
+      d: "When you connect the same wallet to percolator.trade after mainnet opens, the page checks the waitlist table on Supabase and unlocks priority access for that pubkey automatically. Your signup is the access pass.",
+    },
+    {
+      tag: "if provided",
+      t: "X DM to your handle",
+      d: "If you dropped your @handle when signing up, we'll DM you on X as a backup channel. We don't run drip campaigns and we don't auto-follow. One DM per major milestone, max.",
+    },
   ];
   return (
     <section className="grid gap-x-12 gap-y-10 lg:grid-cols-[1fr_2fr]">
@@ -487,37 +546,36 @@ function WhySection() {
           className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
           style={{ fontFamily: "var(--font-heading)" }}
         >
-          High-intent only.
+          We don&apos;t have your email.
           <br />
-          Wallet-gated.
+          Here&apos;s how we reach you.
         </h2>
-        <p className="mt-3 max-w-[280px] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
-          Signing with a real Solana wallet is the only filter you need to weed out spam, dedupe by pubkey, and reach early adopters cleanly.
+        <p className="mt-4 max-w-[330px] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
+          Three channels. Wallet-native by default — your inbox is your wallet, not your Gmail.
         </p>
       </div>
-      <ol className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-        {items.map(([n, t, d]) => (
-          <li
-            key={n}
-            className="grid grid-cols-[44px_1fr] gap-5 py-5 transition-colors hover:bg-[var(--bg-elevated)]/40"
+      <div className="space-y-3">
+        {channels.map((c) => (
+          <div
+            key={c.tag}
+            className="grid grid-cols-[110px_1fr] items-baseline gap-5 border-b border-[var(--border)] py-3 last:border-b-0"
           >
             <span
-              className="font-mono text-[11px] tracking-[0.05em] text-[var(--accent)]"
-              style={{ fontVariantNumeric: "tabular-nums" }}
+              className={`font-mono text-[11px] uppercase tracking-[0.05em] ${c.accent === "cyan" ? "text-[var(--cyan)]" : "text-[var(--accent)]"}`}
             >
-              {n}
+              {c.tag}
             </span>
             <div>
-              <div className="text-[15px] font-semibold leading-tight text-[var(--text)]">
-                {t}
+              <div className="text-[14px] font-semibold leading-tight text-[var(--text)]">
+                {c.t}
               </div>
-              <p className="mt-1.5 text-[13.5px] leading-[1.6] text-[var(--text-secondary)]">
-                {d}
+              <p className="mt-1.5 max-w-[600px] text-[13px] leading-[1.6] text-[var(--text-secondary)]">
+                {c.d}
               </p>
             </div>
-          </li>
+          </div>
         ))}
-      </ol>
+      </div>
     </section>
   );
 }
@@ -760,7 +818,13 @@ function FAQSection() {
     [
       "Why connect a wallet — why not just take my email?",
       <>
-        Wallet signatures dedupe by pubkey, prove you&apos;re a real Solana user, and let us scope future creator-fee rebates and access tiers cleanly. No email = no spam list to leak. We don&apos;t collect emails at all.
+        Wallet signatures dedupe by pubkey, prove you&apos;re a real Solana user, and let us scope future access tiers cleanly to specific wallets. No email = no spam list to leak. We don&apos;t collect emails at all.
+      </>,
+    ],
+    [
+      "How will I actually be notified when mainnet opens?",
+      <>
+        On-chain memo from our project wallet to your wallet (visible in Phantom, Solflare, Backpack, Solscan), automatic dApp gating when you reconnect at percolator.trade, and an optional X DM if you dropped a handle. See the &quot;How we&apos;ll reach you&quot; section above.
       </>,
     ],
     [
