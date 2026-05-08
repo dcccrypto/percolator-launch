@@ -268,9 +268,13 @@ function Slide02Team(_: SlideProps) {
         </div>
 
         <p className="pitch-team-footer">
-          Toly authored the protocol math and program. We built the
-          frontend, indexer, SDK, and infrastructure that turn it into
-          a live product on Solana mainnet.
+          Toly authored the protocol math and a reference program. We
+          took it from research to mainnet — building the on-chain
+          product layer (LP vault, dispute resolution, transferable
+          Token-2022 NFT positions, withdrawal queue, audit-crank
+          invariants, admin lifecycle tooling — 49 fork-only handlers
+          and 51 fork-only instructions past the reference) plus the
+          SDK, indexer, keeper fleet, and frontend.
         </p>
       </div>
     </div>
@@ -1279,9 +1283,15 @@ function SlideTolyStory(_: SlideProps) {
 
         <p className="pitch-toly-footer">
           Toly authored the protocol math and the reference program
-          (github.com/aeyakovenko/percolator-prog). We built the
-          frontend, SDK, indexer, keeper fleet, and infra around it.
-          Both co-founders have each won one of his public bounties.
+          (github.com/aeyakovenko/percolator-prog) — the H + A/K risk
+          engine. We took it from research to a production system on
+          Solana mainnet: extending the on-chain program with LP vault,
+          dispute resolution, transferable NFT positions, withdrawal
+          queue, audit-crank invariant checking, and admin lifecycle
+          tooling — 49 fork-only handlers, 51 fork-only instructions,
+          134 wrapper commits past the divergence point. Plus the SDK,
+          indexer, keeper fleet, and frontend. Both co-founders have
+          each won one of his public bounties.
         </p>
       </div>
     </div>
