@@ -160,12 +160,12 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two co-founders shipped Percolator from zero to mainnet-ready
-          with 457 formal proofs and zero outside capital.
+          Two co-founders and an AI pair-programmer shipped Percolator
+          from zero to mainnet-ready with 457 formal proofs and zero
+          outside capital.
         </h2>
 
-        <div className="pitch-team-tier-label mono">Co-founders</div>
-        <div className="pitch-team-grid pitch-team-grid-two">
+        <div className="pitch-team-grid pitch-team-grid-three">
           <div className="pitch-team-card">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -176,17 +176,10 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-team-name">Khubair</div>
             <div className="pitch-team-role">Co-founder · Product</div>
             <p className="pitch-team-bio">
-              Owns product direction, security review, vibe coding the
-              codebase with Claude, and external positioning. Shipping
-              everything from critical-bug reviews that hardened the
-              protocol pre-audit to the audit-prep plan, mainnet
-              rollout, and Frontier submission.
-            </p>
-            <p className="pitch-team-bio" style={{ marginTop: "0.5rem" }}>
-              Web2 startup background → Solana product co-founder;
-              winner of one of Toly&apos;s public bounties; found
-              multiple critical bugs in the Percolator protocol
-              pre-audit. Member of Superteam UK.
+              Owns product direction, security review, and external
+              positioning. Web2 startup background, now Solana product
+              co-founder. Member of Superteam UK; won one of Toly&apos;s
+              public bounties on pre-audit critical bug review.
             </p>
             <p className="pitch-team-links mono">
               <a
@@ -208,9 +201,9 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-team-name">Squid</div>
             <div className="pitch-team-role">Co-founder · Community</div>
             <p className="pitch-team-bio">
-              Owns community strategy, project management, and some of
-              the daily &ldquo;vibe code&rdquo; that helps benefit
-              Percolator. Built{" "}
+              Owns community strategy, project management, and the
+              daily &ldquo;vibe code&rdquo; that benefits Percolator.
+              Built{" "}
               <a
                 className="pitch-team-bio-link"
                 href="https://github.com/0x-SquidSol/percolator-buyback"
@@ -228,12 +221,8 @@ function Slide02Team(_: SlideProps) {
               >
                 percolator-locker
               </a>
-              . Shipping everything from contributor onboarding flows to
-              Solana native engagement programs.
-            </p>
-            <p className="pitch-team-bio" style={{ marginTop: "0.5rem" }}>
-              3 years in the Solana ecosystem (trader → CTO lead →
-              builder); winner of Toly&apos;s Percolator bounty.
+              . 3 years in Solana; winner of Toly&apos;s Percolator
+              bounty.
             </p>
             <p className="pitch-team-links mono">
               <a
@@ -253,15 +242,6 @@ function Slide02Team(_: SlideProps) {
               </a>
             </p>
           </div>
-        </div>
-
-        <div
-          className="pitch-team-tier-label mono"
-          style={{ marginTop: "1.5rem" }}
-        >
-          Team
-        </div>
-        <div className="pitch-team-grid">
           <div className="pitch-team-card">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -273,25 +253,18 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-team-role">Lead engineering · AI pair-programmer</div>
             <p className="pitch-team-bio">
               Owns most of the production code the co-founders direct:
-              Rust programs, TypeScript SDK and frontend, tests, and
-              Kani proof drafts. Shipping everything from the v12.17
-              mainnet upgrade to the 457-proof verification suite.
+              Rust programs, TypeScript SDK and frontend, tests, Kani
+              proof drafts. Anthropic&apos;s Claude (Opus 4.7) running
+              in Claude Code; funded by pump.fun creator rewards.
               Reviews PRs. Doesn&apos;t sleep.
-            </p>
-            <p className="pitch-team-bio" style={{ marginTop: "0.5rem" }}>
-              Anthropic&apos;s Claude (Opus 4.7, 1M context) running in
-              Claude Code; funded by pump.fun creator rewards on the
-              PERC market. Percolator is one of the first Solana teams
-              openly crediting an AI as a core contributor.
             </p>
           </div>
         </div>
 
         <p className="pitch-team-footer">
-          Founder-market fit: the H + A/K risk-engine math is Anatoly
-          Yakovenko&apos;s open research. Percolator is the team that
-          took it from spec to production. Khubair and Squid have
-          each won one of Toly&apos;s public bounties along the way.
+          Toly authored the protocol math and program. We built the
+          frontend, indexer, SDK, and infrastructure that turn it into
+          a live product on Solana mainnet.
         </p>
       </div>
     </div>
@@ -300,112 +273,84 @@ function Slide02Team(_: SlideProps) {
 
 // ─── Slide 3 · Traction ──────────────────────────────────────────────────────
 //
-// The traction series is illustrative compound growth (~20% WoW) ending at
-// the verified 2,700+ X follower count. Replace with the real weekly export
-// from Twitter analytics before sending to investors. The endpoint is
-// verifiable on the live X profile; the in-between weekly numbers are not.
-
-const TRACTION_FOLLOWERS_PLACEHOLDER = [750, 940, 1175, 1470, 1837, 2296, 2870, 3400];
+// Programs verified on-chain at the time of writing:
+//   - Devnet (testing, March 2026):  g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in
+//   - Mainnet (closed beta, May):     ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv
+// Stats below are pulled from getSignaturesForAddress + market slab tracking.
+// Followers are organic, no paid spend.
 
 function Slide03Traction(_: SlideProps) {
-  const series = TRACTION_FOLLOWERS_PLACEHOLDER;
-  const max = Math.max(...series);
-  const w = 760;
-  const h = 200;
-  const stepX = w / (series.length - 1);
-  const points = series
-    .map((v, i) => `${i * stepX},${h - (v / max) * h}`)
-    .join(" ");
-  const areaPoints = `0,${h} ${points} ${w},${h}`;
-
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Traction</div>
+        <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          Organic X followers grew from ~750 to 3,400+ over the last 8
-          weeks, averaging 25% week-over-week with zero paid acquisition
-          spend.
+          The protocol is live and busy. Devnet ran 1,000+ transactions
+          at 100% success during testing. Mainnet closed beta is live
+          with 14 markets created and active trades at 99.2% success.
         </h2>
 
-        <div className="pitch-traction-chart-wrap">
-          <div className="pitch-traction-chart-header">
-            <div>
-              <div className="pitch-traction-chart-title">Organic X followers · weekly</div>
-              <div className="pitch-traction-chart-sub mono">
-                last 8 weeks · zero paid spend
-                <span className="pitch-traction-illus"> · illustrative shape, real export pre-submission</span>
+        <div className="pitch-traction-network-grid">
+          <div className="pitch-traction-network-card">
+            <div className="pitch-traction-network-header">
+              <div className="pitch-traction-network-tag mono">Devnet · testing window</div>
+              <a
+                className="pitch-traction-network-link mono"
+                href="https://explorer.solana.com/address/g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in?cluster=devnet"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                g9msRSV3…dm9in ↗
+              </a>
+            </div>
+            <div className="pitch-traction-network-stats">
+              <div className="pitch-traction-network-stat">
+                <div className="pitch-traction-network-num mono">
+                  <NumberCounter target={1000} suffix="+" />
+                </div>
+                <div className="pitch-traction-network-label">transactions</div>
+              </div>
+              <div className="pitch-traction-network-stat">
+                <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
+                <div className="pitch-traction-network-label">success rate</div>
               </div>
             </div>
-            <div className="pitch-traction-chart-stat">
-              <div className="pitch-traction-chart-stat-num mono">+25% WoW</div>
-              <div className="pitch-traction-chart-stat-label">8-week average</div>
+            <div className="pitch-traction-network-meta mono">
+              March 2026 testing burst · zero failures across 1,000+ signatures
             </div>
           </div>
-          <svg
-            viewBox={`0 0 ${w} ${h}`}
-            className="pitch-traction-chart-svg"
-            preserveAspectRatio="none"
-            aria-hidden
-          >
-            <defs>
-              <linearGradient id="tractionAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#9945FF" stopOpacity="0.45" />
-                <stop offset="100%" stopColor="#9945FF" stopOpacity="0" />
-              </linearGradient>
-              <linearGradient id="tractionLineGrad" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#9945FF" />
-                <stop offset="100%" stopColor="#22D3EE" />
-              </linearGradient>
-            </defs>
-            <polygon
-              className="pitch-traction-area"
-              points={areaPoints}
-              fill="url(#tractionAreaGrad)"
-            />
-            <polyline
-              className="pitch-traction-line"
-              points={points}
-              fill="none"
-              stroke="url(#tractionLineGrad)"
-              strokeWidth="3"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              pathLength={100}
-              strokeDasharray="100"
-              strokeDashoffset="100"
-            />
-            {series.map((v, i) => (
-              <circle
-                key={i}
-                className="pitch-traction-dot"
-                cx={i * stepX}
-                cy={h - (v / max) * h}
-                r="4"
-                fill="#22D3EE"
-                style={{ animationDelay: `${600 + i * 90}ms` }}
-              />
-            ))}
-          </svg>
-          <div className="pitch-traction-chart-axis mono">
-            <span>W1</span>
-            <span>W2</span>
-            <span>W3</span>
-            <span>W4</span>
-            <span>W5</span>
-            <span>W6</span>
-            <span>W7</span>
-            <span>W8</span>
+
+          <div className="pitch-traction-network-card">
+            <div className="pitch-traction-network-header">
+              <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">Mainnet · closed beta</div>
+              <a
+                className="pitch-traction-network-link mono"
+                href="https://explorer.solana.com/address/ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                ESa89R5E…D4edv ↗
+              </a>
+            </div>
+            <div className="pitch-traction-network-stats">
+              <div className="pitch-traction-network-stat">
+                <div className="pitch-traction-network-num mono">
+                  <NumberCounter target={14} />
+                </div>
+                <div className="pitch-traction-network-label">markets created</div>
+              </div>
+              <div className="pitch-traction-network-stat">
+                <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">99.2%</div>
+                <div className="pitch-traction-network-label">success rate</div>
+              </div>
+            </div>
+            <div className="pitch-traction-network-meta mono">
+              v12.17 deployed · 1,000+ tx in last 5 hours · public access post-audit Q3
+            </div>
           </div>
         </div>
 
         <div className="pitch-traction-mini-row">
-          <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={3400} suffix="+" />
-            </div>
-            <div className="pitch-traction-mini-label">Organic X followers</div>
-          </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
               <NumberCounter target={457} />
@@ -417,6 +362,12 @@ function Slide03Traction(_: SlideProps) {
               <NumberCounter target={8} />
             </div>
             <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
+          </div>
+          <div className="pitch-traction-mini">
+            <div className="pitch-traction-mini-num mono">
+              <NumberCounter target={3400} suffix="+" />
+            </div>
+            <div className="pitch-traction-mini-label">Organic X followers</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">$0</div>
@@ -1213,7 +1164,7 @@ function SlideTolyStory(_: SlideProps) {
 
         <div className="pitch-toly-grid">
           <div className="pitch-toly-card">
-            <div className="pitch-toly-card-label mono">Founded</div>
+            <div className="pitch-toly-card-label mono">Toly · Founded</div>
             <div className="pitch-toly-card-name">
               <a
                 className="pitch-toly-card-link"
@@ -1227,25 +1178,28 @@ function SlideTolyStory(_: SlideProps) {
             <p className="pitch-toly-card-desc">
               Toly&apos;s reference implementation of the Percolator risk
               engine, actively maintained on his own GitHub with security
-              audits and 113 Kani proofs. We took his repo and built the
-              production system on Solana mainnet around it.
+              audits and 113 Kani proofs. The protocol math + program
+              are his.
+            </p>
+          </div>
+          <div className="pitch-toly-card pitch-toly-card-built">
+            <div className="pitch-toly-card-label mono">We · Built the product</div>
+            <div className="pitch-toly-card-name">Frontend, SDK, indexer, infra</div>
+            <p className="pitch-toly-card-desc">
+              Took Toly&apos;s reference repo from spec to live mainnet
+              product: trading frontend, TypeScript SDK, indexer + API,
+              keeper bot fleet, NFT positions, mainnet deploy ops, and
+              the closed-beta itself.
             </p>
           </div>
           <div className="pitch-toly-card pitch-toly-card-bounty">
-            <div className="pitch-toly-card-label mono">Bounty win · Khubair</div>
-            <div className="pitch-toly-card-name">Pre-audit critical bugs</div>
+            <div className="pitch-toly-card-label mono">Bounties · Won 2</div>
+            <div className="pitch-toly-card-name">Khubair + Squid each won one</div>
             <p className="pitch-toly-card-desc">
-              Found multiple critical bugs in the Percolator protocol
-              during pre-audit hardening, won one of Toly&apos;s public
-              bounties on the work.
-            </p>
-          </div>
-          <div className="pitch-toly-card pitch-toly-card-bounty">
-            <div className="pitch-toly-card-label mono">Bounty win · Squid</div>
-            <div className="pitch-toly-card-name">Toly&apos;s Percolator bounty</div>
-            <p className="pitch-toly-card-desc">
-              Won Toly&apos;s Percolator bounty during community-led
-              development of the protocol&apos;s market mechanics.
+              Khubair won Toly&apos;s pre-audit critical-bug bounty;
+              Squid won Toly&apos;s Percolator bounty during community-led
+              development. Two of Toly&apos;s public bounties paid out to
+              this team.
             </p>
           </div>
         </div>
@@ -1253,7 +1207,7 @@ function SlideTolyStory(_: SlideProps) {
         <p className="pitch-toly-footer">
           We don&apos;t claim endorsement. We cite the founder + bounties
           because they&apos;re the strongest external read on whether
-          our implementation of his protocol is correct.
+          our build of his protocol is correct.
         </p>
       </div>
     </div>
@@ -2242,6 +2196,109 @@ export default function PitchPage() {
           gap: 0.75rem;
         }
 
+        /* ─── Slide 3 · network proof cards ───────────────────────── */
+
+        .pitch-traction-network-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 1rem;
+          margin-bottom: 1.25rem;
+        }
+
+        .pitch-traction-network-card {
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 12px;
+          padding: 1.1rem 1.25rem;
+        }
+
+        .pitch-traction-network-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1rem;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        .pitch-traction-network-tag {
+          font-size: 0.65rem;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: rgba(153, 69, 255, 0.85);
+          padding: 0.3rem 0.6rem;
+          background: rgba(153, 69, 255, 0.1);
+          border: 1px solid rgba(153, 69, 255, 0.25);
+          border-radius: 4px;
+        }
+
+        .pitch-traction-network-tag-cyan {
+          color: rgba(34, 211, 238, 0.95);
+          background: rgba(34, 211, 238, 0.1);
+          border-color: rgba(34, 211, 238, 0.3);
+        }
+
+        .pitch-traction-network-link {
+          font-size: 0.72rem;
+          color: rgba(34, 211, 238, 0.7);
+          text-decoration: none;
+          letter-spacing: 0.05em;
+          transition: color 200ms ease;
+        }
+
+        .pitch-traction-network-link:hover {
+          color: #22D3EE;
+          text-decoration: underline;
+        }
+
+        .pitch-traction-network-stats {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 0.85rem;
+          margin-bottom: 0.85rem;
+        }
+
+        .pitch-traction-network-stat {
+          background: rgba(0, 0, 0, 0.25);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          border-radius: 8px;
+          padding: 0.85rem 1rem;
+          text-align: center;
+        }
+
+        .pitch-traction-network-num {
+          font-size: clamp(1.6rem, 2.6vw, 2.1rem);
+          font-weight: 700;
+          color: #fff;
+          line-height: 1;
+          margin-bottom: 0.3rem;
+          letter-spacing: -0.02em;
+        }
+
+        .pitch-traction-network-num-cyan {
+          color: #22D3EE;
+        }
+
+        .pitch-traction-network-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.75rem;
+          color: rgba(255, 255, 255, 0.55);
+        }
+
+        .pitch-traction-network-meta {
+          font-size: 0.7rem;
+          color: rgba(255, 255, 255, 0.4);
+          line-height: 1.45;
+          letter-spacing: 0.02em;
+        }
+
+        @media (max-width: 768px) {
+          .pitch-traction-network-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
         .pitch-traction-mini {
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.07);
@@ -2330,6 +2387,11 @@ export default function PitchPage() {
 
         .pitch-team-grid-two {
           grid-template-columns: repeat(2, 1fr);
+        }
+
+        .pitch-team-grid-three {
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1rem;
         }
 
         .pitch-team-card {
@@ -2461,11 +2523,11 @@ export default function PitchPage() {
         /* ─── Team PFPs ────────────────────────────────────────────── */
 
         .pitch-team-pfp {
-          width: 56px;
-          height: 56px;
+          width: 48px;
+          height: 48px;
           border-radius: 50%;
           border: 2px solid rgba(34, 211, 238, 0.22);
-          margin-bottom: 0.85rem;
+          margin-bottom: 0.75rem;
           display: block;
           object-fit: cover;
           background: rgba(255, 255, 255, 0.04);
@@ -2501,6 +2563,11 @@ export default function PitchPage() {
 
         .pitch-toly-card-bounty {
           border-left: 2px solid rgba(34, 211, 238, 0.5);
+        }
+
+        .pitch-toly-card-built {
+          border-left: 2px solid rgba(153, 69, 255, 0.6);
+          background: rgba(153, 69, 255, 0.04);
         }
 
         .pitch-toly-card-label {
@@ -3363,7 +3430,8 @@ export default function PitchPage() {
             transform: rotate(90deg);
           }
 
-          .pitch-team-grid-two {
+          .pitch-team-grid-two,
+          .pitch-team-grid-three {
             grid-template-columns: 1fr;
           }
 
