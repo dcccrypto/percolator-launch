@@ -1122,36 +1122,17 @@ function FAQSection() {
 }
 
 // ============================================================================
-// FOOTER — counter + contacts, mono-styled
+// FOOTER — status pill + contacts, mono-styled (waitlist count intentionally
+// hidden from the public page)
 // ============================================================================
 
 function Footer() {
-  const [count, setCount] = useState<number | null>(null);
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/waitlist/count")
-      .then((r) => r.json())
-      .then((d) => {
-        if (alive && typeof d?.count === "number") setCount(d.count);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-  const animated = useCountUp(count ?? 0);
   return (
     <div className="mt-24 grid gap-y-3 border-t border-[var(--border)] pt-6 sm:flex sm:items-center sm:justify-between">
-      <div className="flex items-baseline gap-3 font-mono">
+      <div className="flex items-center gap-3 font-mono">
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--cyan)]" />
-        <span
-          className="text-[20px] font-bold leading-none text-[var(--text)]"
-          style={{ fontVariantNumeric: "tabular-nums" }}
-        >
-          {count === null ? "—" : animated.toLocaleString()}
-        </span>
         <span className="text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-          on the waitlist
+          live · pre-audit · audit Q3
         </span>
       </div>
       <div className="font-mono text-[11.5px]">
@@ -1184,29 +1165,3 @@ function Footer() {
   );
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-function useCountUp(target: number, durationMs = 1200) {
-  const [v, setV] = useState(0);
-  useEffect(() => {
-    if (target === 0) {
-      setV(0);
-      return;
-    }
-    const start = performance.now();
-    const from = v;
-    let raf = 0;
-    const tick = (t: number) => {
-      const k = Math.min(1, (t - start) / durationMs);
-      const eased = 1 - Math.pow(1 - k, 3);
-      setV(Math.round(from + (target - from) * eased));
-      if (k < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target]);
-  return v;
-}
