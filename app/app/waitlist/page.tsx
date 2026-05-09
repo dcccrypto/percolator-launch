@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useLoginWithEmail } from "@privy-io/react-auth";
 import { useWallets, useSignMessage } from "@privy-io/react-auth/solana";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { resolveActiveWallet, usePreferredWallet } from "@/hooks/usePreferredWallet";
@@ -153,31 +153,17 @@ function Hero() {
         <SpecField k="markets" v="220 on devnet" />
       </div>
 
-      {/* Hero CTA — large, glowing, animated. The single most important
-          interaction above the fold. */}
+      {/* Hero CTA — clean, confident, no theatrics */}
       <div className="mt-12 flex flex-wrap items-center gap-5">
-        <a href="#reserve" className="group relative inline-flex items-center">
-          {/* Pulsing accent halo behind the button */}
-          <span
-            aria-hidden
-            className="pointer-events-none absolute -inset-1 rounded-lg opacity-60 blur-xl transition-opacity group-hover:opacity-100"
-            style={{
-              background:
-                "linear-gradient(110deg, rgba(153,69,255,0.55), rgba(20,241,149,0.45))",
-            }}
-          />
-          <span className="relative inline-flex items-center gap-3 rounded-lg border border-[var(--accent)]/60 bg-gradient-to-b from-[var(--accent)]/30 to-[var(--accent)]/10 px-7 py-3.5 text-[14px] font-bold uppercase tracking-[0.12em] text-[var(--text)] transition-all duration-200 group-hover:border-[var(--accent)] group-hover:from-[var(--accent)]/40 group-hover:to-[var(--accent)]/[0.18] group-hover:shadow-[0_16px_44px_-12px_rgba(153,69,255,0.7)]">
-            Reserve your spot
-            <span
-              aria-hidden
-              className="inline-block text-[var(--cyan)] transition-transform duration-200 group-hover:translate-y-1"
-            >
-              ↓
-            </span>
-          </span>
+        <a
+          href="#reserve"
+          className="inline-flex items-center gap-2.5 rounded-md bg-[var(--accent)] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_4px_14px_-4px_rgba(153,69,255,0.4)] transition-all duration-200 hover:bg-[var(--accent-muted)] hover:shadow-[0_8px_24px_-6px_rgba(153,69,255,0.55)]"
+        >
+          Reserve your spot
+          <span aria-hidden className="text-[15px] leading-none">↓</span>
         </a>
         <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-          wallet · no email · no gas
+          wallet or email · 30 seconds
         </span>
       </div>
     </section>
@@ -299,60 +285,134 @@ function TabButton({
 }
 
 // ============================================================================
-// EMAIL FLOW — alternative path, lower-friction signup
+// EMAIL FLOW — Privy email login → embedded Solana wallet → sign + submit
+// (so email signups also get the dApp gate, not just the email confirmation)
 // ============================================================================
 
 type EmailState =
   | { kind: "idle" }
-  | { kind: "submitting" }
-  | { kind: "done"; position: number | null }
+  | { kind: "sending-code"; email: string }
+  | { kind: "awaiting-code"; email: string }
+  | { kind: "verifying" }
+  | { kind: "signing"; email: string }
+  | { kind: "submitting"; email: string }
+  | { kind: "done"; email: string; position: number | null }
   | { kind: "error"; reason: string };
 
 function EmailFlow() {
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [twitter, setTwitter] = useState("");
   const [state, setState] = useState<EmailState>({ kind: "idle" });
 
-  const onSubmit = useCallback(async () => {
+  const { sendCode, loginWithCode } = useLoginWithEmail({
+    onComplete: () => {
+      // Privy login complete — useEffect below picks up the new wallet
+      // and runs sign + submit
+    },
+    onError: (err) => {
+      setState({ kind: "error", reason: typeof err === "string" ? err : "login failed" });
+    },
+  });
+
+  const { user, ready, authenticated } = usePrivy();
+  const { wallets } = useWallets();
+  const { signMessage } = useSignMessage();
+
+  const onSendCode = useCallback(async () => {
     const trimmed = email.trim().toLowerCase();
     if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
-      setState({ kind: "error", reason: "looks like that email isn't quite right" });
+      setState({ kind: "error", reason: "that email looks off" });
       return;
     }
-    setState({ kind: "submitting" });
+    setState({ kind: "sending-code", email: trimmed });
     try {
-      const url = new URL(window.location.href);
-      const source =
-        url.searchParams.get("ref") ?? url.searchParams.get("utm_source") ?? null;
-      const res = await fetch("/api/waitlist/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: trimmed,
-          twitter_handle: twitter.trim() || undefined,
-          source: source ?? undefined,
-        }),
-      });
-      const json = (await res.json()) as {
-        ok?: boolean;
-        error?: string;
-        position?: number | null;
-      };
-      if (!res.ok || !json.ok) {
-        setState({ kind: "error", reason: json.error ?? `HTTP ${res.status}` });
-        return;
-      }
-      setState({ kind: "done", position: json.position ?? null });
+      await sendCode({ email: trimmed });
+      setState({ kind: "awaiting-code", email: trimmed });
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "submit failed";
+      const msg = e instanceof Error ? e.message : "could not send code";
       setState({ kind: "error", reason: msg });
     }
-  }, [email, twitter]);
+  }, [email, sendCode]);
+
+  const onVerifyCode = useCallback(async () => {
+    if (state.kind !== "awaiting-code") return;
+    if (!code || code.length < 4) {
+      setState({ kind: "error", reason: "enter the 6-digit code from your inbox" });
+      return;
+    }
+    setState({ kind: "verifying" });
+    try {
+      await loginWithCode({ code: code.trim() });
+      // useEffect below will continue: sign + submit
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "code didn't verify";
+      setState({ kind: "error", reason: msg });
+    }
+  }, [code, state, loginWithCode]);
+
+  // After Privy login completes: auto-sign with the embedded wallet
+  // (created by Privy because config.embeddedWallets.solana.createOnLogin
+  // = "users-without-wallets") and submit to the waitlist API.
+  useEffect(() => {
+    if (state.kind !== "verifying") return;
+    if (!ready || !authenticated || !user) return;
+    const wallet = wallets.find((w) => w.address);
+    if (!wallet) return; // wait one tick for embedded wallet to register
+    const userEmail = user.email?.address ?? state.kind === "verifying" ? email.trim().toLowerCase() : null;
+    if (!userEmail) {
+      setState({ kind: "error", reason: "missing email after login" });
+      return;
+    }
+
+    setState({ kind: "signing", email: userEmail });
+    (async () => {
+      try {
+        const message = buildMessage(wallet.address);
+        const messageBytes = new TextEncoder().encode(message);
+        const { signature } = await signMessage({
+          message: messageBytes,
+          wallet,
+        });
+        const signatureB58 = bs58.encode(signature);
+        setState({ kind: "submitting", email: userEmail });
+
+        const url = new URL(window.location.href);
+        const source =
+          url.searchParams.get("ref") ?? url.searchParams.get("utm_source") ?? null;
+        const res = await fetch("/api/waitlist/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: userEmail,
+            pubkey: wallet.address,
+            signature: signatureB58,
+            message,
+            twitter_handle: twitter.trim() || undefined,
+            source: source ?? undefined,
+          }),
+        });
+        const json = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          position?: number | null;
+        };
+        if (!res.ok || !json.ok) {
+          setState({ kind: "error", reason: json.error ?? `HTTP ${res.status}` });
+          return;
+        }
+        setState({ kind: "done", email: userEmail, position: json.position ?? null });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "sign / submit failed";
+        setState({ kind: "error", reason: msg });
+      }
+    })();
+  }, [state, ready, authenticated, user, wallets, signMessage, twitter, email]);
 
   if (state.kind === "done") {
     return (
       <div className="space-y-4">
-        <PromptLine prefix="$" text="join_via_email" status="ok" />
+        <PromptLine prefix="$" text="email_signup" status="ok" />
         <div className="rounded-md border border-[var(--cyan)]/25 bg-[var(--cyan)]/[0.05] p-3.5">
           <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--cyan)]">
             ✓ on the list
@@ -366,27 +426,80 @@ function EmailFlow() {
             </div>
           ) : null}
           <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
-            We just sent a confirmation to <span className="font-mono text-[var(--accent)]">{email.trim()}</span>. Check your inbox (and spam, just in case).
+            Confirmation sent to <span className="font-mono text-[var(--accent)]">{state.email}</span>. We also created an embedded Solana wallet under your email — when mainnet opens, the dApp recognises you automatically.
           </p>
         </div>
-        <a
-          className={ctaSecondary}
-          href={`https://x.com/intent/post?text=${encodeURIComponent(
-            "Just joined the @percolatortrade waitlist. Permissionless perp futures on Solana. percolator.trade",
-          )}`}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          → Share on X
-        </a>
       </div>
     );
   }
 
-  const busy = state.kind === "submitting";
+  if (state.kind === "awaiting-code" || state.kind === "verifying") {
+    const busy = state.kind === "verifying";
+    return (
+      <div className="space-y-3.5">
+        <PromptLine prefix="$" text={`code_sent ${state.kind === "awaiting-code" ? state.email : ""}`} status="pending" />
+        <div className="space-y-1.5">
+          <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+            6-digit code
+          </label>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="one-time-code"
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[15px] tracking-[0.4em] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
+            placeholder="••••••"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            disabled={busy}
+            maxLength={6}
+            autoFocus
+          />
+        </div>
+        <button className={ctaPrimary} onClick={onVerifyCode} disabled={busy || code.length < 6}>
+          {busy ? "Verifying…" : "Verify & join"}
+        </button>
+        <button
+          className="text-[11px] font-mono uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
+          onClick={() => setState({ kind: "idle" })}
+        >
+          ← change email
+        </button>
+      </div>
+    );
+  }
+
+  if (state.kind === "signing" || state.kind === "submitting") {
+    return (
+      <div className="space-y-3">
+        <PromptLine
+          prefix="$"
+          text={state.kind === "signing" ? "signing_with_embedded_wallet" : "submitting"}
+          status="pending"
+        />
+        <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
+          Privy created an embedded Solana wallet for {state.email}. We&apos;re signing the join message with it now — no prompt, no gas.
+        </p>
+      </div>
+    );
+  }
+
+  if (state.kind === "error") {
+    return (
+      <div className="space-y-3.5">
+        <button className={ctaPrimary} onClick={() => setState({ kind: "idle" })}>
+          Try again
+        </button>
+        <StatusErr>{state.reason}</StatusErr>
+      </div>
+    );
+  }
+
+  // idle / sending-code
+  const sending = state.kind === "sending-code";
   return (
     <div className="space-y-3.5">
-      <PromptLine prefix="$" text="join_via_email" status="idle" />
+      <PromptLine prefix="$" text="email_signup" status="idle" />
       <div className="space-y-1.5">
         <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
           email
@@ -399,7 +512,7 @@ function EmailFlow() {
           placeholder="you@domain.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          disabled={busy}
+          disabled={sending}
           maxLength={254}
         />
       </div>
@@ -412,18 +525,16 @@ function EmailFlow() {
           placeholder="@yourhandle"
           value={twitter}
           onChange={(e) => setTwitter(e.target.value)}
-          disabled={busy}
+          disabled={sending}
           maxLength={30}
         />
       </div>
-      <button className={ctaPrimary} onClick={onSubmit} disabled={busy}>
-        {busy ? "Submitting…" : "Claim spot →"}
+      <button className={ctaPrimary} onClick={onSendCode} disabled={sending}>
+        {sending ? "Sending code…" : "Send 6-digit code →"}
       </button>
-      {state.kind === "error" ? <StatusErr>{state.reason}</StatusErr> : (
-        <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
-          Confirmation email lands instantly. We don&apos;t do drips.
-        </p>
-      )}
+      <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
+        We&apos;ll email you a 6-digit code, then create an embedded Solana wallet under your email so you also get the on-chain dApp gate when mainnet opens.
+      </p>
     </div>
   );
 }
@@ -609,7 +720,7 @@ function SignupFlow() {
       <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
         Phantom · Solflare · Backpack · Jupiter
         <br />
-        wallet-gated · no email · no gas · idempotent
+        sign-only · no gas · idempotent
       </p>
     </div>
   );
@@ -672,17 +783,17 @@ function SignupSection() {
           className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
           style={{ fontFamily: "var(--font-heading)" }}
         >
-          One signature.
+          Wallet or email.
           <br />
-          You&apos;re on the list.
+          Both get the dApp gate.
         </h2>
         <p className="mt-4 max-w-[420px] text-[14px] leading-[1.65] text-[var(--text-secondary)]">
-          We don&apos;t collect emails. Connect your Solana wallet, sign a short message proving you control it, and your pubkey lands on the list. Idempotent — re-signing with the same wallet keeps your original spot.
+          Two paths to the same list. Either connect a Solana wallet and sign once, or drop an email and verify with a 6-digit code — Privy creates an embedded Solana wallet under your email automatically, so the dApp at percolator.trade recognises you when mainnet opens either way.
         </p>
         <div className="mt-6 space-y-3 font-mono text-[12px] text-[var(--text-secondary)]">
-          <SignupBullet color="cyan">No transaction. No gas. No token approvals.</SignupBullet>
-          <SignupBullet color="cyan">Server verifies the ed25519 signature with tweetnacl.</SignupBullet>
-          <SignupBullet color="cyan">Optional: drop your X handle so we can also DM you.</SignupBullet>
+          <SignupBullet color="cyan">Wallet path: connect Phantom / Solflare / Backpack / Jupiter. Sign once. Done.</SignupBullet>
+          <SignupBullet color="cyan">Email path: 6-digit code → embedded wallet → automatic message sign. Same result.</SignupBullet>
+          <SignupBullet color="cyan">Optional X handle on either path for a backup DM channel.</SignupBullet>
         </div>
       </div>
       <div className="flex justify-start lg:justify-end">
@@ -719,20 +830,26 @@ function SignupBullet({
 function NotifySection() {
   const channels: { tag: string; t: string; d: string; accent?: "cyan" }[] = [
     {
-      tag: "default",
-      t: "On-chain memo from our project wallet",
-      d: "When mainnet opens, every waitlist wallet receives a memo-only transaction from our project wallet. You see it in Phantom, Solflare, Backpack, or Solscan as an incoming tx with a short message and a link to claim. No payload, no value, no token-approval prompt.",
+      tag: "every signup",
+      t: "Automatic dApp gating",
+      d: "When the same wallet reconnects to percolator.trade after mainnet opens, the page unlocks priority access for that pubkey. Email signups get this too — Privy creates a Solana embedded wallet under your email at signup, so the dApp recognises you when you come back.",
       accent: "cyan",
     },
     {
-      tag: "automatic",
-      t: "dApp gating at percolator.trade",
-      d: "When you connect the same wallet to percolator.trade after mainnet opens, the page checks the waitlist table on Supabase and unlocks priority access for that pubkey automatically. Your signup is the access pass.",
+      tag: "wallet signups",
+      t: "On-chain memo from our project wallet",
+      d: "Your wallet receives a memo-only transaction from our project wallet when mainnet opens — visible in Phantom, Solflare, Backpack, or Solscan as an incoming tx with a short message and a claim link. No payload, no value, no token-approval prompt.",
+    },
+    {
+      tag: "email signups",
+      t: "Transactional email at the milestone",
+      d: "Confirmation lands instantly at signup. The next email is the mainnet-open milestone. No drips, no marketing campaigns. One email per major milestone, max.",
+      accent: "cyan",
     },
     {
       tag: "if provided",
       t: "X DM to your handle",
-      d: "If you dropped your @handle when signing up, we'll DM you on X as a backup channel. We don't run drip campaigns and we don't auto-follow. One DM per major milestone, max.",
+      d: "Optional on either path. If you dropped your @handle, we'll DM you on X as a backup channel.",
     },
   ];
   return (
@@ -742,12 +859,12 @@ function NotifySection() {
           className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
           style={{ fontFamily: "var(--font-heading)" }}
         >
-          We don&apos;t have your email.
+          Both paths reach you.
           <br />
-          Here&apos;s how we reach you.
+          Pick your inbox.
         </h2>
         <p className="mt-4 max-w-[330px] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
-          Three channels. Wallet-native by default — your inbox is your wallet, not your Gmail.
+          Email signups get an embedded Solana wallet from Privy automatically — so they get the dApp gate too, not just the email. Wallet signups also get the on-chain memo.
         </p>
       </div>
       <div className="space-y-3">
@@ -1025,15 +1142,15 @@ function FAQSection() {
       </>,
     ],
     [
-      "Why connect a wallet — why not just take my email?",
+      "Wallet vs email — which should I pick?",
       <>
-        Wallet signatures dedupe by pubkey, prove you&apos;re a real Solana user, and let us scope future access tiers cleanly to specific wallets. No email = no spam list to leak. We don&apos;t collect emails at all.
+        Either works. Wallet path: connect your existing Solana wallet, sign once. Email path: drop your email, verify with a 6-digit code; Privy creates an embedded Solana wallet under your email so you also get the on-chain dApp gate when mainnet opens — not just the email confirmation. Email path is the lower-friction option if you don&apos;t already have a Solana wallet.
       </>,
     ],
     [
       "How will I actually be notified when mainnet opens?",
       <>
-        On-chain memo from our project wallet to your wallet (visible in Phantom, Solflare, Backpack, Solscan), automatic dApp gating when you reconnect at percolator.trade, and an optional X DM if you dropped a handle. See the &quot;How we&apos;ll reach you&quot; section above.
+        Both paths get automatic dApp gating — when you come back to percolator.trade, the page recognises your wallet (yours or the embedded one) and unlocks priority access. Wallet path additionally gets an on-chain memo from our project wallet (visible in Phantom / Solflare / Backpack / Solscan). Email path gets a one-shot transactional email at the milestone. Optional X DM on either path if you dropped a handle.
       </>,
     ],
     [

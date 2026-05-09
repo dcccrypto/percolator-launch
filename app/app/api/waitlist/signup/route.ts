@@ -131,129 +131,131 @@ export async function POST(req: Request) {
       : null;
   const userAgent = req.headers.get("user-agent")?.slice(0, 200) ?? null;
 
-  // ── Path A: Email-only signup ────────────────────────────────────────────
+  // ── Parse all candidate fields ──────────────────────────────────────────
   const emailRaw = typeof b.email === "string" ? b.email.trim().toLowerCase() : null;
-  const isEmailPath = emailRaw !== null && emailRaw.length > 0 &&
-    typeof b.pubkey !== "string";
-
-  if (isEmailPath) {
-    if (!emailRaw || !EMAIL_RE.test(emailRaw) || emailRaw.length > 254) {
-      return NextResponse.json({ error: "invalid email" }, { status: 400 });
-    }
-    const supabase = getWaitlistSupabase();
-    const { error: insertError } = await supabase
-      .from("waitlist")
-      .insert({
-        email: emailRaw,
-        twitter_handle,
-        source,
-        user_agent: userAgent,
-      });
-
-    // 23505 = unique violation (already on the list) — idempotent
-    if (insertError && insertError.code !== "23505") {
-      console.error("[waitlist:email] insert error", insertError);
-      return NextResponse.json({ error: "insert failed" }, { status: 500 });
-    }
-
-    // Position lookup (email-keyed)
-    let position: number | null = null;
-    try {
-      const { data } = await supabase.rpc("waitlist_position_by_email", {
-        p_email: emailRaw,
-      });
-      if (typeof data === "number") position = data;
-    } catch {
-      /* ignore */
-    }
-
-    // Send confirmation email (fire-and-forget; don't block the response)
-    sendConfirmationEmail(emailRaw, position).catch((err) =>
-      console.error("[waitlist:email] confirmation send failed", err),
-    );
-
-    return NextResponse.json({ ok: true, position });
-  }
-
-  // ── Path B: Wallet signup (existing flow) ────────────────────────────────
   const pubkey = typeof b.pubkey === "string" ? b.pubkey : null;
   const signature = typeof b.signature === "string" ? b.signature : null;
   const message = typeof b.message === "string" ? b.message : null;
 
-  if (!pubkey || !signature || !message) {
+  // Validate email shape if present
+  if (emailRaw !== null) {
+    if (!emailRaw || !EMAIL_RE.test(emailRaw) || emailRaw.length > 254) {
+      return NextResponse.json({ error: "invalid email" }, { status: 400 });
+    }
+  }
+
+  // Three valid input shapes:
+  //   1. email only                       → notify by email only
+  //   2. pubkey + signature + message     → notify on chain, no email
+  //   3. email + pubkey + sig + message   → BOTH (Privy email login flow:
+  //                                         email creates an embedded wallet
+  //                                         which signs the join message; we
+  //                                         skip the on-chain existence check
+  //                                         because the embedded wallet is
+  //                                         brand new and Privy's OTP gate
+  //                                         already proved real intent)
+  const hasWalletPart = pubkey !== null && signature !== null && message !== null;
+  const hasEmail = emailRaw !== null;
+
+  if (!hasEmail && !hasWalletPart) {
     return NextResponse.json(
-      { error: "provide either an email OR (pubkey + signature + message)" },
+      { error: "provide an email, a wallet signature, or both" },
       { status: 400 },
     );
   }
 
-  if (!isValidSolanaPubkey(pubkey)) {
-    return NextResponse.json({ error: "invalid pubkey" }, { status: 400 });
+  // If we have wallet fields, verify them. (Whether or not email is provided.)
+  if (hasWalletPart) {
+    if (!isValidSolanaPubkey(pubkey!)) {
+      return NextResponse.json({ error: "invalid pubkey" }, { status: 400 });
+    }
+    const ts = parseTimestampFromMessage(message!);
+    if (!ts) {
+      return NextResponse.json({ error: "invalid message format" }, { status: 400 });
+    }
+    if (Math.abs(Date.now() - ts) > MAX_MESSAGE_AGE_MS) {
+      return NextResponse.json({ error: "message expired" }, { status: 400 });
+    }
+    if (!message!.includes(pubkey!)) {
+      return NextResponse.json({ error: "message must include pubkey" }, { status: 400 });
+    }
+    let sigBytes: Uint8Array;
+    let pubBytes: Uint8Array;
+    try {
+      sigBytes = bs58.decode(signature!);
+      pubBytes = bs58.decode(pubkey!);
+    } catch {
+      return NextResponse.json({ error: "decode failed" }, { status: 400 });
+    }
+    if (sigBytes.length !== 64 || pubBytes.length !== 32) {
+      return NextResponse.json({ error: "wrong sig/pubkey length" }, { status: 400 });
+    }
+    const msgBytes = new TextEncoder().encode(message!);
+    const ok = nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes);
+    if (!ok) {
+      return NextResponse.json({ error: "signature invalid" }, { status: 401 });
+    }
+
+    // Spam filter: wallet must have been seen on Solana mainnet at least once.
+    // EXCEPTION: when email is also present, we trust Privy's OTP gate as proof
+    // of real intent and accept the embedded wallet (which has no on-chain
+    // history yet by design).
+    if (!hasEmail) {
+      const exists = await walletExistsOnMainnet(pubkey!);
+      if (!exists) {
+        return NextResponse.json(
+          {
+            error:
+              "wallet not seen on Solana mainnet — fund this wallet (any amount) and try again",
+          },
+          { status: 400 },
+        );
+      }
+    }
   }
 
-  const ts = parseTimestampFromMessage(message);
-  if (!ts) {
-    return NextResponse.json({ error: "invalid message format" }, { status: 400 });
-  }
-  if (Math.abs(Date.now() - ts) > MAX_MESSAGE_AGE_MS) {
-    return NextResponse.json({ error: "message expired" }, { status: 400 });
-  }
-  if (!message.includes(pubkey)) {
-    return NextResponse.json({ error: "message must include pubkey" }, { status: 400 });
-  }
-
-  let sigBytes: Uint8Array;
-  let pubBytes: Uint8Array;
-  try {
-    sigBytes = bs58.decode(signature);
-    pubBytes = bs58.decode(pubkey);
-  } catch {
-    return NextResponse.json({ error: "decode failed" }, { status: 400 });
-  }
-  if (sigBytes.length !== 64 || pubBytes.length !== 32) {
-    return NextResponse.json({ error: "wrong sig/pubkey length" }, { status: 400 });
-  }
-
-  const msgBytes = new TextEncoder().encode(message);
-  const ok = nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes);
-  if (!ok) {
-    return NextResponse.json({ error: "signature invalid" }, { status: 401 });
-  }
-
-  const exists = await walletExistsOnMainnet(pubkey);
-  if (!exists) {
-    return NextResponse.json(
-      {
-        error:
-          "wallet not seen on Solana mainnet — fund this wallet (any amount) and try again",
-      },
-      { status: 400 },
-    );
-  }
-
+  // ── Insert ──────────────────────────────────────────────────────────────
   const supabase = getWaitlistSupabase();
-  const { error: insertError } = await supabase
-    .from("waitlist")
-    .insert({
-      pubkey,
-      signature,
-      message,
-      twitter_handle,
-      source,
-      user_agent: userAgent,
-    });
+  const insertRow: Record<string, unknown> = {
+    twitter_handle,
+    source,
+    user_agent: userAgent,
+  };
+  if (hasEmail) insertRow.email = emailRaw;
+  if (hasWalletPart) {
+    insertRow.pubkey = pubkey;
+    insertRow.signature = signature;
+    insertRow.message = message;
+  }
 
+  const { error: insertError } = await supabase.from("waitlist").insert(insertRow);
+  // 23505 = unique violation (already on the list) — idempotent
   if (insertError && insertError.code !== "23505") {
-    console.error("[waitlist:wallet] insert error", insertError);
+    console.error("[waitlist] insert error", insertError);
     return NextResponse.json({ error: "insert failed" }, { status: 500 });
   }
 
+  // ── Position lookup ─────────────────────────────────────────────────────
   let position: number | null = null;
   try {
-    const { data } = await supabase.rpc("waitlist_position", { p_pubkey: pubkey });
-    if (typeof data === "number") position = data;
+    if (hasWalletPart) {
+      const { data } = await supabase.rpc("waitlist_position", { p_pubkey: pubkey });
+      if (typeof data === "number") position = data;
+    } else if (hasEmail) {
+      const { data } = await supabase.rpc("waitlist_position_by_email", {
+        p_email: emailRaw,
+      });
+      if (typeof data === "number") position = data;
+    }
   } catch {
     /* ignore */
+  }
+
+  // ── Confirmation email (fire-and-forget) ────────────────────────────────
+  if (hasEmail) {
+    sendConfirmationEmail(emailRaw!, position, hasWalletPart).catch((err) =>
+      console.error("[waitlist] confirmation send failed", err),
+    );
   }
 
   return NextResponse.json({ ok: true, position });
@@ -264,6 +266,7 @@ export async function POST(req: Request) {
 async function sendConfirmationEmail(
   email: string,
   position: number | null,
+  hasWallet: boolean,
 ): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) {
@@ -274,6 +277,22 @@ async function sendConfirmationEmail(
   const positionLine = position
     ? `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.5; color: #4A4B62;">You're <strong style="color: #9945FF; font-family: ui-monospace, SFMono-Regular, monospace;">#${position}</strong> on the list.</p>`
     : "";
+
+  // If the signup came in with a wallet (Privy email login → embedded
+  // wallet), the user is already covered by the on-chain notification
+  // path. If it's email-only, nudge them toward the wallet path as a
+  // backup channel.
+  const secondaryParagraph = hasWallet
+    ? `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
+        We also created a Solana wallet under your email (Privy embedded). When mainnet opens, the dApp at percolator.trade will recognise that wallet and unlock your priority access automatically — no extra step.
+      </p>`
+    : `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
+        Have a Solana wallet of your own? Sign up <a href="https://percolator.trade/#reserve" style="color:#9945FF; text-decoration: underline;">with your wallet too</a> — we send a wallet-native notification on chain (memo from our project wallet) when mainnet opens, so you get pinged in Phantom even if you miss this email.
+      </p>`;
+
+  const secondaryText = hasWallet
+    ? `We also created a Solana wallet under your email (Privy embedded). When mainnet opens, the dApp at percolator.trade will recognise that wallet and unlock your priority access automatically — no extra step.`
+    : `Have a Solana wallet? Sign up with your wallet too at https://percolator.trade/#reserve — we send a wallet-native notification on chain when mainnet opens.`;
 
   await resend.emails.send({
     from: FROM,
@@ -292,9 +311,7 @@ async function sendConfirmationEmail(
       <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
         Mainnet opens after our external audit clears (targeting Q3 2026). We'll email you here when it does.
       </p>
-      <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
-        Have a Solana wallet? Sign up <a href="https://percolator.trade/#reserve" style="color:#9945FF; text-decoration: underline;">with your wallet too</a> — we send a wallet-native notification on chain (memo from our project wallet) when mainnet opens, so you get pinged in Phantom even if you miss the email.
-      </p>
+      ${secondaryParagraph}
       <hr style="margin: 22px 0; border:0; border-top: 1px solid #E0E0EC;">
       <p style="margin: 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; line-height: 1.7; color: #8A8BA8;">
         <a href="https://x.com/percolatortrade" style="color:#8A8BA8; text-decoration:none;">@percolatortrade</a> · <a href="https://github.com/dcccrypto" style="color:#8A8BA8; text-decoration:none;">github.com/dcccrypto</a> · <a href="https://percolator.trade/pitch" style="color:#8A8BA8; text-decoration:none;">percolator.trade/pitch</a>
@@ -305,6 +322,6 @@ async function sendConfirmationEmail(
     You received this because you joined the Percolator waitlist at percolator.trade. If you'd like to be removed, reply with "remove".
   </p>
 </body></html>`,
-    text: `You're on the Percolator waitlist.${position ? `\n\nYou're #${position} on the list.` : ""}\n\nMainnet opens after our external audit clears (targeting Q3 2026). We'll email you here when it does.\n\nHave a Solana wallet? Sign up with your wallet too at https://percolator.trade/#reserve — we send a wallet-native notification on chain when mainnet opens.\n\n@percolatortrade · github.com/dcccrypto · percolator.trade/pitch\n\n—\nYou received this because you joined the Percolator waitlist. Reply "remove" to be removed.`,
+    text: `You're on the Percolator waitlist.${position ? `\n\nYou're #${position} on the list.` : ""}\n\nMainnet opens after our external audit clears (targeting Q3 2026). We'll email you here when it does.\n\n${secondaryText}\n\n@percolatortrade · github.com/dcccrypto · percolator.trade/pitch\n\n—\nYou received this because you joined the Percolator waitlist. Reply "remove" to be removed.`,
   });
 }
