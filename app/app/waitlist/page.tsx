@@ -98,7 +98,7 @@ function BackdropArt() {
 function SeparatorMono({ label }: { label: string }) {
   return (
     <div className="mt-24 mb-10 flex items-center gap-4 sm:mt-28 sm:mb-12">
-      <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-[var(--text-muted)]">
+      <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-[var(--text-secondary)]">
         ── {label}
       </span>
       <span className="h-px flex-1 bg-gradient-to-r from-[var(--border)] via-[var(--border)] to-transparent" />
@@ -114,7 +114,7 @@ function Hero() {
   return (
     <section className="max-w-[820px]">
       {/* Top status row */}
-      <div className="mb-8 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+      <div className="mb-8 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--cyan)]" />
         <span className="text-[var(--cyan)]">live on mainnet</span>
         <span className="text-[var(--text-dim)]">/</span>
@@ -147,22 +147,36 @@ function Hero() {
 
       {/* Specs row — looks like a struct field block, not a trust-badge row */}
       <div className="mt-9 grid max-w-[640px] grid-cols-2 gap-x-6 gap-y-2.5 sm:grid-cols-4">
-        <SpecField k="program" v="ESa89R5E…D4edv" />
+        <SpecField k="status" v="lab mode" highlight="cyan" />
         <SpecField k="proofs" v="422 / 422 ✓" highlight="cyan" />
         <SpecField k="repos" v="17 · Apache 2.0" />
         <SpecField k="markets" v="220 on devnet" />
       </div>
 
-      {/* Soft CTA pointing to the signup section below */}
-      <div className="mt-10 flex flex-wrap items-center gap-4">
-        <a
-          href="#reserve"
-          className="group inline-flex items-center gap-2 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/[0.08] px-5 py-2.5 text-[13px] font-semibold uppercase tracking-[0.1em] text-[var(--text)] transition-all hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/[0.14]"
-        >
-          Reserve your spot
-          <span className="text-[var(--accent)] transition-transform group-hover:translate-y-0.5">↓</span>
+      {/* Hero CTA — large, glowing, animated. The single most important
+          interaction above the fold. */}
+      <div className="mt-12 flex flex-wrap items-center gap-5">
+        <a href="#reserve" className="group relative inline-flex items-center">
+          {/* Pulsing accent halo behind the button */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute -inset-1 rounded-lg opacity-60 blur-xl transition-opacity group-hover:opacity-100"
+            style={{
+              background:
+                "linear-gradient(110deg, rgba(153,69,255,0.55), rgba(20,241,149,0.45))",
+            }}
+          />
+          <span className="relative inline-flex items-center gap-3 rounded-lg border border-[var(--accent)]/60 bg-gradient-to-b from-[var(--accent)]/30 to-[var(--accent)]/10 px-7 py-3.5 text-[14px] font-bold uppercase tracking-[0.12em] text-[var(--text)] transition-all duration-200 group-hover:border-[var(--accent)] group-hover:from-[var(--accent)]/40 group-hover:to-[var(--accent)]/[0.18] group-hover:shadow-[0_16px_44px_-12px_rgba(153,69,255,0.7)]">
+            Reserve your spot
+            <span
+              aria-hidden
+              className="inline-block text-[var(--cyan)] transition-transform duration-200 group-hover:translate-y-1"
+            >
+              ↓
+            </span>
+          </span>
         </a>
-        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+        <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
           wallet · no email · no gas
         </span>
       </div>
@@ -187,7 +201,7 @@ function SpecField({
         : "text-[var(--text)]";
   return (
     <div className="flex flex-col gap-0.5 border-l border-[var(--border)] pl-3">
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
         {k}
       </span>
       <span className={`font-mono text-[12.5px] ${color}`} style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -204,8 +218,18 @@ function SpecField({
 function SignupCard() {
   const privyAvailable = usePrivyAvailable();
   return (
+    <div className="relative w-full max-w-[460px]">
+      {/* Static accent gradient halo behind the card — gives it presence */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -inset-px rounded-md opacity-60 blur-sm"
+        style={{
+          background:
+            "linear-gradient(135deg, rgba(153,69,255,0.55), rgba(20,241,149,0.30) 70%)",
+        }}
+      />
     <div
-      className="relative w-full max-w-[460px] rounded-md border border-[var(--border)] bg-[var(--panel-bg)]/95 p-5 backdrop-blur-sm"
+      className="relative w-full rounded-md border border-[var(--border)] bg-[var(--panel-bg)]/95 p-5 backdrop-blur-sm"
       style={{
         boxShadow:
           "0 24px 48px -24px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.04) inset",
@@ -217,7 +241,7 @@ function SignupCard() {
           <span className="block h-2 w-2 rounded-full bg-[var(--short)]/70" />
           <span className="block h-2 w-2 rounded-full bg-[#fbbf24]/70" />
           <span className="block h-2 w-2 rounded-full bg-[var(--cyan)]/80" />
-          <span className="ml-3 font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+          <span className="ml-3 font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
             waitlist · sign · v1
           </span>
         </div>
@@ -231,6 +255,7 @@ function SignupCard() {
       ) : (
         <StatusErr>Wallet provider not configured. Reload the page.</StatusErr>
       )}
+    </div>
     </div>
   );
 }
@@ -361,7 +386,7 @@ function SignupFlow() {
       <div className="space-y-3.5">
         <PromptLine prefix="$" text={`connected ${pubkey?.slice(0, 6)}…${pubkey?.slice(-4)}`} status="ok" />
         <div className="space-y-1.5">
-          <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+          <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
             x_handle (optional)
           </label>
           <input
@@ -413,7 +438,7 @@ function SignupFlow() {
           ? "Connecting…"
           : "Connect wallet →"}
       </button>
-      <p className="font-mono text-[11px] leading-relaxed text-[var(--text-muted)]">
+      <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
         Phantom · Solflare · Backpack · Jupiter
         <br />
         wallet-gated · no email · no gas · idempotent
@@ -451,7 +476,7 @@ function PromptLine({
 }
 
 const ctaPrimary =
-  "block w-full rounded-md border border-[var(--accent)]/40 bg-gradient-to-b from-[var(--accent)]/[0.18] to-[var(--accent)]/[0.06] px-4 py-3 text-center text-[12.5px] font-bold uppercase tracking-[0.12em] text-[var(--text)] transition-all hover:border-[var(--accent)]/70 hover:from-[var(--accent)]/25 hover:to-[var(--accent)]/[0.10] hover:shadow-[0_12px_32px_-12px_rgba(153,69,255,0.55)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none";
+  "block w-full rounded-md border border-[var(--accent)]/60 bg-gradient-to-b from-[var(--accent)]/[0.28] to-[var(--accent)]/[0.10] px-4 py-3.5 text-center text-[13px] font-bold uppercase tracking-[0.14em] text-[var(--text)] transition-all duration-200 hover:border-[var(--accent)] hover:from-[var(--accent)]/40 hover:to-[var(--accent)]/[0.16] hover:shadow-[0_14px_36px_-12px_rgba(153,69,255,0.7)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none";
 
 const ctaSecondary =
   "block w-full rounded-md border border-[var(--border)] bg-transparent px-4 py-3 text-center text-[12.5px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:border-[var(--border-hover)] hover:text-[var(--text)]";
@@ -597,20 +622,15 @@ function StatusReadout() {
         <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
           [readout] mainnet · devnet · audit
         </div>
-        <a
-          href="https://explorer.solana.com/address/ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-mono text-[11px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent)]"
-        >
-          view program ↗
-        </a>
+        <span className="font-mono text-[11px] text-[var(--text-dim)]">
+          updated 2026-05
+        </span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         <ReadoutCell
-          label="Mainnet program"
-          value="ESa89R5E…D4edv"
-          sub="lab mode · 1 active market"
+          label="Mainnet"
+          value="lab mode"
+          sub="1 active market · audit pending"
           accent="purple"
         />
         <ReadoutCell
@@ -651,13 +671,22 @@ function ReadoutCell({
       : accent === "cyan"
         ? "text-[var(--cyan)]"
         : "text-[var(--text)]";
+  const isLive = accent === "cyan" || accent === "purple";
   return (
-    <div className="flex flex-col gap-1.5 border-b border-[var(--border)] p-5 last:border-b-0 sm:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(2n)]:border-r lg:[&:nth-child(4n)]:border-r-0">
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-        {label}
-      </span>
+    <div className="flex flex-col gap-2 border-b border-[var(--border)] p-5 transition-colors last:border-b-0 hover:bg-[var(--bg-elevated)]/40 sm:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(2n)]:border-r lg:[&:nth-child(4n)]:border-r-0">
+      <div className="flex items-center gap-1.5">
+        {isLive && (
+          <span
+            aria-hidden
+            className={`inline-block h-1.5 w-1.5 animate-pulse rounded-full ${accent === "cyan" ? "bg-[var(--cyan)]" : "bg-[var(--accent)]"}`}
+          />
+        )}
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+          {label}
+        </span>
+      </div>
       <span
-        className={`font-mono text-[22px] font-bold leading-none ${colorClass}`}
+        className={`font-mono text-[26px] font-bold leading-none tracking-[-0.01em] ${colorClass}`}
         style={{ fontVariantNumeric: "tabular-nums" }}
       >
         {value}
@@ -762,7 +791,7 @@ function OriginSection() {
         {/* Visual fork delta: toly → us */}
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel-bg)] p-5 sm:p-6">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-[11.5px]">
-            <span className="text-[var(--text-muted)]">github.com/</span>
+            <span className="text-[var(--text-secondary)]">github.com/</span>
             <span className="text-[var(--text)]">aeyakovenko/percolator-prog</span>
             <span className="text-[var(--text-dim)]">→</span>
             <span className="rounded bg-[var(--accent)]/[0.12] px-2 py-0.5 text-[var(--accent)]">
@@ -791,14 +820,18 @@ function OriginSection() {
 
 function ForkStat({ n, label }: { n: string; label: string }) {
   return (
-    <div className="flex flex-col gap-1 bg-[var(--panel-bg)] px-4 py-4 sm:px-5">
+    <div className="group flex flex-col gap-1.5 bg-[var(--panel-bg)] px-4 py-5 transition-colors hover:bg-[var(--bg-elevated)] sm:px-5">
       <span
-        className="font-mono text-[26px] font-bold leading-none text-[var(--text)]"
-        style={{ fontVariantNumeric: "tabular-nums" }}
+        className="bg-clip-text font-mono text-[32px] font-bold leading-none text-transparent"
+        style={{
+          fontVariantNumeric: "tabular-nums",
+          backgroundImage:
+            "linear-gradient(135deg, #B97AFF 0%, #9945FF 50%, #14F195 110%)",
+        }}
       >
         {n}
       </span>
-      <span className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
+      <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
         {label}
       </span>
     </div>
@@ -949,7 +982,7 @@ function Footer() {
         >
           {count === null ? "—" : animated.toLocaleString()}
         </span>
-        <span className="text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+        <span className="text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
           on the waitlist
         </span>
       </div>
@@ -958,23 +991,23 @@ function Footer() {
           href="https://x.com/percolatortrade"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[var(--text-muted)] transition-colors hover:text-[var(--accent)]"
+          className="text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
         >
           @percolatortrade
         </a>
         <span className="mx-2 text-[var(--text-dim)]">·</span>
         <a
-          href="mailto:dark@percolator.trade"
-          className="text-[var(--text-muted)] transition-colors hover:text-[var(--accent)]"
+          href="mailto:contact@percolator.trade"
+          className="text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
         >
-          dark@percolator.trade
+          contact@percolator.trade
         </a>
         <span className="mx-2 text-[var(--text-dim)]">·</span>
         <a
           href="https://github.com/dcccrypto"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[var(--text-muted)] transition-colors hover:text-[var(--accent)]"
+          className="text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
         >
           github
         </a>

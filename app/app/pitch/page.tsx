@@ -1169,21 +1169,13 @@ function Slide13Contact(_: SlideProps) {
           </div>
           <div className="pitch-contact-card">
             <div className="pitch-contact-label mono">Email</div>
-            <div className="pitch-contact-value">dark@percolator.trade</div>
+            <div className="pitch-contact-value">contact@percolator.trade</div>
           </div>
         </div>
         <div className="pitch-divider" />
         <p className="pitch-url">percolator.trade</p>
         <p className="pitch-onchain-footer mono">
-          Verifiable on-chain · mainnet program{" "}
-          <a
-            href="https://explorer.solana.com/address/ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            ESa89R5E…D4edv
-          </a>
-          {" · "}devnet program{" "}
+          Verifiable on-chain · mainnet program in OSS-contributor closed beta · devnet program{" "}
           <a
             href="https://explorer.solana.com/address/FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD?cluster=devnet"
             target="_blank"
