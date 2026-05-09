@@ -14,6 +14,12 @@ export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose 
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
 
+  // Entry animation must run exactly once per mount. The previous combined effect listed
+  // `onClose` in its deps, so every parent re-render — FundingRateCard re-renders every
+  // second from its countdown setInterval, passing a fresh `() => setShowExplainer(false)`
+  // each time — re-fired the animation. gsap.fromTo({opacity:0},{opacity:1}) reset opacity
+  // to 0 then animated to 1 once a second, producing a continuous blink for as long as
+  // the modal stayed open.
   useEffect(() => {
     const overlay = overlayRef.current;
     const modal = modalRef.current;
@@ -31,13 +37,16 @@ export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose 
         { opacity: 1, scale: 1, duration: 0.25, ease: "power2.out" }
       );
     }
+  }, [prefersReduced]);
 
+  // Escape handler is cheap to re-bind and needs the latest `onClose` reference.
+  useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [onClose, prefersReduced]);
+  }, [onClose]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();
