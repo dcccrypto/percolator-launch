@@ -159,7 +159,7 @@ function Hero() {
           href="#reserve"
           className="inline-flex items-center gap-2.5 rounded-md bg-[var(--accent)] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_4px_14px_-4px_rgba(153,69,255,0.4)] transition-all duration-200 hover:bg-[var(--accent-muted)] hover:shadow-[0_8px_24px_-6px_rgba(153,69,255,0.55)]"
         >
-          Reserve your spot
+          Join The Waitlist
           <span aria-hidden className="text-[15px] leading-none">↓</span>
         </a>
         <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
