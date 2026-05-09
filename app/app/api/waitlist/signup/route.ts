@@ -144,22 +144,39 @@ export async function POST(req: Request) {
     }
   }
 
-  // Three valid input shapes:
+  // Two valid input shapes:
   //   1. email only                       → notify by email only
   //   2. pubkey + signature + message     → notify on chain, no email
-  //   3. email + pubkey + sig + message   → BOTH (Privy email login flow:
-  //                                         email creates an embedded wallet
-  //                                         which signs the join message; we
-  //                                         skip the on-chain existence check
-  //                                         because the embedded wallet is
-  //                                         brand new and Privy's OTP gate
-  //                                         already proved real intent)
+  //
+  // The combined shape (email + wallet fields) was previously accepted for
+  // the Privy embedded-wallet flow, with the on-chain existence check
+  // skipped on the assumption that Privy's OTP gate proved real intent.
+  // The route never actually verified anything from Privy, so the skip
+  // let any caller bind an arbitrary email to a self-controlled keypair —
+  // and the silent 23505 swallow below meant a victim later signing up
+  // with the same email would receive {ok:true} while their pubkey was
+  // never persisted. Rejecting the combined shape closes that vector
+  // without touching the two pure paths. The dApp gate at mainnet open
+  // re-authenticates Privy users via Privy directly, so binding the
+  // embedded wallet into the waitlist row was never load-bearing for
+  // priority-access recovery — it was decorative trust the server
+  // couldn't actually validate.
   const hasWalletPart = pubkey !== null && signature !== null && message !== null;
   const hasEmail = emailRaw !== null;
 
+  if (hasEmail && hasWalletPart) {
+    return NextResponse.json(
+      {
+        error:
+          "email and wallet signups are separate paths — submit one or the other, not both",
+      },
+      { status: 400 },
+    );
+  }
+
   if (!hasEmail && !hasWalletPart) {
     return NextResponse.json(
-      { error: "provide an email, a wallet signature, or both" },
+      { error: "provide an email or a wallet signature" },
       { status: 400 },
     );
   }
@@ -197,20 +214,18 @@ export async function POST(req: Request) {
     }
 
     // Spam filter: wallet must have been seen on Solana mainnet at least once.
-    // EXCEPTION: when email is also present, we trust Privy's OTP gate as proof
-    // of real intent and accept the embedded wallet (which has no on-chain
-    // history yet by design).
-    if (!hasEmail) {
-      const exists = await walletExistsOnMainnet(pubkey!);
-      if (!exists) {
-        return NextResponse.json(
-          {
-            error:
-              "wallet not seen on Solana mainnet — fund this wallet (any amount) and try again",
-          },
-          { status: 400 },
-        );
-      }
+    // The combined-shape rejection above guarantees hasEmail is false here, so
+    // the previous `if (!hasEmail)` guard is now redundant — the check runs
+    // unconditionally on the wallet-only path.
+    const exists = await walletExistsOnMainnet(pubkey!);
+    if (!exists) {
+      return NextResponse.json(
+        {
+          error:
+            "wallet not seen on Solana mainnet — fund this wallet (any amount) and try again",
+        },
+        { status: 400 },
+      );
     }
   }
 
