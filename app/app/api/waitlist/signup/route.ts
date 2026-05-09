@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import { Resend } from "resend";
 import { getWaitlistSupabase } from "@/lib/waitlist/supabase";
 
 export const runtime = "nodejs";
+
+// RFC 5322-lite — good enough to reject obvious garbage, not strict enough
+// to reject corner-case-valid addresses.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const FROM = "Percolator <waitlist@percolator.trade>";
 
 /**
  * High-intent waitlist signup.
@@ -109,9 +115,12 @@ export async function POST(req: Request) {
   }
 
   const b = body as Record<string, unknown>;
-  const pubkey = typeof b.pubkey === "string" ? b.pubkey : null;
-  const signature = typeof b.signature === "string" ? b.signature : null;
-  const message = typeof b.message === "string" ? b.message : null;
+
+  // Honeypot — silently accept and drop
+  if (typeof b.website === "string" && b.website.length > 0) {
+    return NextResponse.json({ ok: true });
+  }
+
   const twitter_handle =
     typeof b.twitter_handle === "string" && b.twitter_handle.trim().length > 0
       ? b.twitter_handle.trim().slice(0, 50)
@@ -120,21 +129,68 @@ export async function POST(req: Request) {
     typeof b.source === "string" && b.source.length > 0
       ? b.source.slice(0, 100)
       : null;
+  const userAgent = req.headers.get("user-agent")?.slice(0, 200) ?? null;
 
-  // Honeypot — silently accept and drop
-  if (typeof b.website === "string" && b.website.length > 0) {
-    return NextResponse.json({ ok: true });
+  // ── Path A: Email-only signup ────────────────────────────────────────────
+  const emailRaw = typeof b.email === "string" ? b.email.trim().toLowerCase() : null;
+  const isEmailPath = emailRaw !== null && emailRaw.length > 0 &&
+    typeof b.pubkey !== "string";
+
+  if (isEmailPath) {
+    if (!emailRaw || !EMAIL_RE.test(emailRaw) || emailRaw.length > 254) {
+      return NextResponse.json({ error: "invalid email" }, { status: 400 });
+    }
+    const supabase = getWaitlistSupabase();
+    const { error: insertError } = await supabase
+      .from("waitlist")
+      .insert({
+        email: emailRaw,
+        twitter_handle,
+        source,
+        user_agent: userAgent,
+      });
+
+    // 23505 = unique violation (already on the list) — idempotent
+    if (insertError && insertError.code !== "23505") {
+      console.error("[waitlist:email] insert error", insertError);
+      return NextResponse.json({ error: "insert failed" }, { status: 500 });
+    }
+
+    // Position lookup (email-keyed)
+    let position: number | null = null;
+    try {
+      const { data } = await supabase.rpc("waitlist_position_by_email", {
+        p_email: emailRaw,
+      });
+      if (typeof data === "number") position = data;
+    } catch {
+      /* ignore */
+    }
+
+    // Send confirmation email (fire-and-forget; don't block the response)
+    sendConfirmationEmail(emailRaw, position).catch((err) =>
+      console.error("[waitlist:email] confirmation send failed", err),
+    );
+
+    return NextResponse.json({ ok: true, position });
   }
 
+  // ── Path B: Wallet signup (existing flow) ────────────────────────────────
+  const pubkey = typeof b.pubkey === "string" ? b.pubkey : null;
+  const signature = typeof b.signature === "string" ? b.signature : null;
+  const message = typeof b.message === "string" ? b.message : null;
+
   if (!pubkey || !signature || !message) {
-    return NextResponse.json({ error: "missing fields" }, { status: 400 });
+    return NextResponse.json(
+      { error: "provide either an email OR (pubkey + signature + message)" },
+      { status: 400 },
+    );
   }
 
   if (!isValidSolanaPubkey(pubkey)) {
     return NextResponse.json({ error: "invalid pubkey" }, { status: 400 });
   }
 
-  // Replay protection: timestamp must be recent and message must include the pubkey
   const ts = parseTimestampFromMessage(message);
   if (!ts) {
     return NextResponse.json({ error: "invalid message format" }, { status: 400 });
@@ -146,7 +202,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "message must include pubkey" }, { status: 400 });
   }
 
-  // Verify ed25519 signature
   let sigBytes: Uint8Array;
   let pubBytes: Uint8Array;
   try {
@@ -165,9 +220,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "signature invalid" }, { status: 401 });
   }
 
-  // Spam filter: wallet must have been seen on Solana mainnet at least once.
-  // Locally-generated vanity keypairs that have never received SOL get rejected
-  // here even if their signature verifies.
   const exists = await walletExistsOnMainnet(pubkey);
   if (!exists) {
     return NextResponse.json(
@@ -179,10 +231,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // Insert
   const supabase = getWaitlistSupabase();
-  const userAgent = req.headers.get("user-agent")?.slice(0, 200) ?? null;
-
   const { error: insertError } = await supabase
     .from("waitlist")
     .insert({
@@ -194,13 +243,11 @@ export async function POST(req: Request) {
       user_agent: userAgent,
     });
 
-  // Treat unique-violation as idempotent success
   if (insertError && insertError.code !== "23505") {
-    console.error("[waitlist] insert error", insertError);
+    console.error("[waitlist:wallet] insert error", insertError);
     return NextResponse.json({ error: "insert failed" }, { status: 500 });
   }
 
-  // Position lookup (best-effort — don't fail the signup if this errors)
   let position: number | null = null;
   try {
     const { data } = await supabase.rpc("waitlist_position", { p_pubkey: pubkey });
@@ -210,4 +257,54 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ ok: true, position });
+}
+
+// ─── Email confirmation send via Resend ──────────────────────────────────────
+
+async function sendConfirmationEmail(
+  email: string,
+  position: number | null,
+): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    console.warn("[waitlist] RESEND_API_KEY missing — skipping confirmation send");
+    return;
+  }
+  const resend = new Resend(apiKey);
+  const positionLine = position
+    ? `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.5; color: #4A4B62;">You're <strong style="color: #9945FF; font-family: ui-monospace, SFMono-Regular, monospace;">#${position}</strong> on the list.</p>`
+    : "";
+
+  await resend.emails.send({
+    from: FROM,
+    to: email,
+    subject: "You're on the Percolator waitlist",
+    html: `<!doctype html>
+<html><head><meta charset="utf-8"><title>Welcome</title></head>
+<body style="margin:0; padding:32px 16px; background:#F8F8FC; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #0D0E15;">
+  <div style="max-width:560px; margin:0 auto; background:#FFFFFF; border:1px solid #E0E0EC; border-radius:8px; overflow:hidden;">
+    <div style="padding: 28px 28px 0;">
+      <div style="font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; letter-spacing: 0.18em; color: #8A8BA8; text-transform: uppercase;">PERCOLATOR · WAITLIST</div>
+    </div>
+    <div style="padding: 18px 28px 28px;">
+      <h1 style="margin: 0 0 12px; font-size: 22px; line-height: 1.2; font-weight: 700; color: #0D0E15;">You're on the list.</h1>
+      ${positionLine}
+      <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
+        Mainnet opens after our external audit clears (targeting Q3 2026). We'll email you here when it does.
+      </p>
+      <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
+        Have a Solana wallet? Sign up <a href="https://percolator.trade/#reserve" style="color:#9945FF; text-decoration: underline;">with your wallet too</a> — we send a wallet-native notification on chain (memo from our project wallet) when mainnet opens, so you get pinged in Phantom even if you miss the email.
+      </p>
+      <hr style="margin: 22px 0; border:0; border-top: 1px solid #E0E0EC;">
+      <p style="margin: 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; line-height: 1.7; color: #8A8BA8;">
+        <a href="https://x.com/percolatortrade" style="color:#8A8BA8; text-decoration:none;">@percolatortrade</a> · <a href="https://github.com/dcccrypto" style="color:#8A8BA8; text-decoration:none;">github.com/dcccrypto</a> · <a href="https://percolator.trade/pitch" style="color:#8A8BA8; text-decoration:none;">percolator.trade/pitch</a>
+      </p>
+    </div>
+  </div>
+  <p style="max-width:560px; margin: 14px auto 0; font-size: 11px; line-height: 1.5; color: #B8B9CC; text-align: center;">
+    You received this because you joined the Percolator waitlist at percolator.trade. If you'd like to be removed, reply with "remove".
+  </p>
+</body></html>`,
+    text: `You're on the Percolator waitlist.${position ? `\n\nYou're #${position} on the list.` : ""}\n\nMainnet opens after our external audit clears (targeting Q3 2026). We'll email you here when it does.\n\nHave a Solana wallet? Sign up with your wallet too at https://percolator.trade/#reserve — we send a wallet-native notification on chain when mainnet opens.\n\n@percolatortrade · github.com/dcccrypto · percolator.trade/pitch\n\n—\nYou received this because you joined the Percolator waitlist. Reply "remove" to be removed.`,
+  });
 }

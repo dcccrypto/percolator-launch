@@ -217,6 +217,7 @@ function SpecField({
 
 function SignupCard() {
   const privyAvailable = usePrivyAvailable();
+  const [tab, setTab] = useState<"wallet" | "email">("wallet");
   return (
     <div className="relative w-full max-w-[460px]">
       {/* Static accent gradient halo behind the card — gives it presence */}
@@ -228,34 +229,201 @@ function SignupCard() {
             "linear-gradient(135deg, rgba(153,69,255,0.55), rgba(20,241,149,0.30) 70%)",
         }}
       />
-    <div
-      className="relative w-full rounded-md border border-[var(--border)] bg-[var(--panel-bg)]/95 p-5 backdrop-blur-sm"
-      style={{
-        boxShadow:
-          "0 24px 48px -24px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.04) inset",
-      }}
-    >
-      {/* Top frame label — like a tmux pane or window title */}
-      <div className="mb-4 flex items-center justify-between border-b border-[var(--border)] pb-3">
-        <div className="flex items-center gap-2">
-          <span className="block h-2 w-2 rounded-full bg-[var(--short)]/70" />
-          <span className="block h-2 w-2 rounded-full bg-[#fbbf24]/70" />
-          <span className="block h-2 w-2 rounded-full bg-[var(--cyan)]/80" />
-          <span className="ml-3 font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-            waitlist · sign · v1
+      <div
+        className="relative w-full rounded-md border border-[var(--border)] bg-[var(--panel-bg)]/95 p-5 backdrop-blur-sm"
+        style={{
+          boxShadow:
+            "0 24px 48px -24px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.04) inset",
+        }}
+      >
+        {/* Top frame label — terminal-window aesthetic */}
+        <div className="mb-4 flex items-center justify-between border-b border-[var(--border)] pb-3">
+          <div className="flex items-center gap-2">
+            <span className="block h-2 w-2 rounded-full bg-[var(--short)]/70" />
+            <span className="block h-2 w-2 rounded-full bg-[#fbbf24]/70" />
+            <span className="block h-2 w-2 rounded-full bg-[var(--cyan)]/80" />
+            <span className="ml-3 font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+              waitlist · v1
+            </span>
+          </div>
+          <span className="font-mono text-[10.5px] text-[var(--text-secondary)]">
+            {tab === "wallet" ? "ed25519" : "smtp"}
           </span>
         </div>
-        <span className="font-mono text-[10.5px] text-[var(--text-dim)]">
-          ed25519
-        </span>
-      </div>
 
-      {privyAvailable ? (
-        <SignupFlow />
-      ) : (
-        <StatusErr>Wallet provider not configured. Reload the page.</StatusErr>
-      )}
+        {/* Tab selector */}
+        <div className="mb-4 grid grid-cols-2 gap-1 rounded-md border border-[var(--border)] bg-[var(--bg)] p-1">
+          <TabButton active={tab === "wallet"} onClick={() => setTab("wallet")}>
+            Wallet
+          </TabButton>
+          <TabButton active={tab === "email"} onClick={() => setTab("email")}>
+            Email
+          </TabButton>
+        </div>
+
+        {tab === "wallet" ? (
+          privyAvailable ? (
+            <SignupFlow />
+          ) : (
+            <StatusErr>Wallet provider not configured. Reload the page.</StatusErr>
+          )
+        ) : (
+          <EmailFlow />
+        )}
+      </div>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        active
+          ? "rounded-sm bg-[var(--bg-elevated)] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--text)] shadow-[0_1px_0_rgba(255,255,255,0.04)_inset] transition-all"
+          : "rounded-sm bg-transparent px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+// ============================================================================
+// EMAIL FLOW — alternative path, lower-friction signup
+// ============================================================================
+
+type EmailState =
+  | { kind: "idle" }
+  | { kind: "submitting" }
+  | { kind: "done"; position: number | null }
+  | { kind: "error"; reason: string };
+
+function EmailFlow() {
+  const [email, setEmail] = useState("");
+  const [twitter, setTwitter] = useState("");
+  const [state, setState] = useState<EmailState>({ kind: "idle" });
+
+  const onSubmit = useCallback(async () => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
+      setState({ kind: "error", reason: "looks like that email isn't quite right" });
+      return;
+    }
+    setState({ kind: "submitting" });
+    try {
+      const url = new URL(window.location.href);
+      const source =
+        url.searchParams.get("ref") ?? url.searchParams.get("utm_source") ?? null;
+      const res = await fetch("/api/waitlist/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: trimmed,
+          twitter_handle: twitter.trim() || undefined,
+          source: source ?? undefined,
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        position?: number | null;
+      };
+      if (!res.ok || !json.ok) {
+        setState({ kind: "error", reason: json.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      setState({ kind: "done", position: json.position ?? null });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "submit failed";
+      setState({ kind: "error", reason: msg });
+    }
+  }, [email, twitter]);
+
+  if (state.kind === "done") {
+    return (
+      <div className="space-y-4">
+        <PromptLine prefix="$" text="join_via_email" status="ok" />
+        <div className="rounded-md border border-[var(--cyan)]/25 bg-[var(--cyan)]/[0.05] p-3.5">
+          <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--cyan)]">
+            ✓ on the list
+          </div>
+          {state.position ? (
+            <div
+              className="mt-1.5 font-mono text-[28px] font-bold leading-none text-[var(--text)]"
+              style={{ fontVariantNumeric: "tabular-nums" }}
+            >
+              #{state.position.toLocaleString()}
+            </div>
+          ) : null}
+          <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
+            We just sent a confirmation to <span className="font-mono text-[var(--accent)]">{email.trim()}</span>. Check your inbox (and spam, just in case).
+          </p>
+        </div>
+        <a
+          className={ctaSecondary}
+          href={`https://x.com/intent/post?text=${encodeURIComponent(
+            "Just joined the @percolatortrade waitlist. Permissionless perp futures on Solana. percolator.trade",
+          )}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          → Share on X
+        </a>
+      </div>
+    );
+  }
+
+  const busy = state.kind === "submitting";
+  return (
+    <div className="space-y-3.5">
+      <PromptLine prefix="$" text="join_via_email" status="idle" />
+      <div className="space-y-1.5">
+        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+          email
+        </label>
+        <input
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
+          placeholder="you@domain.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={busy}
+          maxLength={254}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+          x_handle (optional)
+        </label>
+        <input
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
+          placeholder="@yourhandle"
+          value={twitter}
+          onChange={(e) => setTwitter(e.target.value)}
+          disabled={busy}
+          maxLength={30}
+        />
+      </div>
+      <button className={ctaPrimary} onClick={onSubmit} disabled={busy}>
+        {busy ? "Submitting…" : "Claim spot →"}
+      </button>
+      {state.kind === "error" ? <StatusErr>{state.reason}</StatusErr> : (
+        <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
+          Confirmation email lands instantly. We don&apos;t do drips.
+        </p>
+      )}
     </div>
   );
 }
