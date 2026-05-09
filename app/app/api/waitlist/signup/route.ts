@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { createHash } from "crypto";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import { Resend } from "resend";
+import { Redis } from "@upstash/redis";
+import { Ratelimit } from "@upstash/ratelimit";
 import { getWaitlistSupabase } from "@/lib/waitlist/supabase";
 
 export const runtime = "nodejs";
@@ -10,6 +13,84 @@ export const runtime = "nodejs";
 // to reject corner-case-valid addresses.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const FROM = "Percolator <waitlist@percolator.trade>";
+
+// ── Email-send abuse limits ──────────────────────────────────────────────
+// Two distributed Upstash limiters bound the Resend send rate:
+//   • per-email: at most one confirmation per address per 24h. Belt-and-
+//     suspenders on top of the duplicate-insert short-circuit below — if
+//     the unique constraint on lower(email) ever regresses, this still
+//     caps inbox flooding from rotating IPs to one mail/day per victim.
+//   • global hourly: at most WAITLIST_EMAIL_HOURLY_CAP confirmations across
+//     all addresses per hour (default 500). Bounds Resend quota burn when
+//     an attacker rotates through many fresh victim emails (the per-email
+//     limiter can't help in that case because each is a first hit).
+// Both fail open when Upstash isn't configured, matching the in-memory
+// fallback posture in app/middleware.ts so local dev / CI keep working.
+let _emailLimiter: Ratelimit | null = null;
+let _globalEmailLimiter: Ratelimit | null = null;
+let _emailLimitersInitialized = false;
+
+function getEmailLimiters(): {
+  perEmail: Ratelimit | null;
+  global: Ratelimit | null;
+} {
+  if (_emailLimitersInitialized) {
+    return { perEmail: _emailLimiter, global: _globalEmailLimiter };
+  }
+  _emailLimitersInitialized = true;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return { perEmail: null, global: null };
+
+  try {
+    const redis = new Redis({ url, token });
+    _emailLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(1, "24 h"),
+      prefix: "rl:wl-em",
+      analytics: false,
+    });
+    const globalCap = Math.max(
+      1,
+      Number(process.env.WAITLIST_EMAIL_HOURLY_CAP ?? 500),
+    );
+    _globalEmailLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(globalCap, "1 h"),
+      prefix: "rl:wl-em-global",
+      analytics: false,
+    });
+  } catch {
+    // Init failure (bad credentials, network) — fail open.
+    _emailLimiter = null;
+    _globalEmailLimiter = null;
+  }
+  return { perEmail: _emailLimiter, global: _globalEmailLimiter };
+}
+
+/** sha256 hex of the lowercased email so the email cleartext doesn't end
+ *  up in Redis logs / dashboards. */
+function emailRateKey(email: string): string {
+  return createHash("sha256").update(email).digest("hex");
+}
+
+/** Returns true iff a confirmation email may be sent to this address now.
+ *  Consumes one slot from BOTH limiters on success — order matters: the
+ *  global cap is checked first so a system-wide overflow doesn't burn a
+ *  per-email budget that won't be used. Fail-open when Upstash is
+ *  unconfigured (local dev / Redis outage). */
+async function shouldSendConfirmationEmail(email: string): Promise<boolean> {
+  const { perEmail, global } = getEmailLimiters();
+  if (!perEmail || !global) return true; // fail-open
+  const g = await global.limit("global");
+  if (!g.success) {
+    console.warn("[waitlist] global email cap reached this hour");
+    return false;
+  }
+  const e = await perEmail.limit(emailRateKey(email));
+  return e.success;
+}
 
 /**
  * High-intent waitlist signup.
@@ -244,8 +325,13 @@ export async function POST(req: Request) {
   }
 
   const { error: insertError } = await supabase.from("waitlist").insert(insertRow);
-  // 23505 = unique violation (already on the list) — idempotent
-  if (insertError && insertError.code !== "23505") {
+  // 23505 = unique violation (already on the list) — idempotent. We capture
+  // the duplicate flag here to suppress the confirmation email below: the
+  // pre-fix unconditional send turned every repeat POST with the same email
+  // into another Resend call, which let an attacker flood a single victim's
+  // inbox by replaying the same payload from rotating IPs.
+  const isDuplicate = insertError?.code === "23505";
+  if (insertError && !isDuplicate) {
     console.error("[waitlist] insert error", insertError);
     return NextResponse.json({ error: "insert failed" }, { status: 500 });
   }
@@ -267,7 +353,22 @@ export async function POST(req: Request) {
   }
 
   // ── Confirmation email (fire-and-forget) ────────────────────────────────
-  if (hasEmail) {
+  // Three layers protect the Resend send from abuse:
+  //   (1) skip on duplicate insert — Resend send count == new-row count,
+  //       so the same email replayed from rotating IPs sends one mail, not N.
+  //   (2) per-email budget (1/24h) — backstops layer 1 if the unique
+  //       constraint on lower(email) ever regresses or a row gets deleted.
+  //   (3) global hourly cap — bounds Resend quota burn during the
+  //       many-fresh-victim-emails attack, where layer 1 and 2 don't help
+  //       because every signup is genuinely new.
+  // The response stays {ok:true, position} regardless of whether the mail
+  // actually went out — leaking "we suppressed your mail" would tell an
+  // attacker their target was already on the list (membership oracle).
+  if (
+    hasEmail &&
+    !isDuplicate &&
+    (await shouldSendConfirmationEmail(emailRaw!))
+  ) {
     sendConfirmationEmail(emailRaw!, position, hasWalletPart).catch((err) =>
       console.error("[waitlist] confirmation send failed", err),
     );
