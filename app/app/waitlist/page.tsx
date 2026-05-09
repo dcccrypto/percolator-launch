@@ -294,7 +294,6 @@ type EmailState =
   | { kind: "sending-code"; email: string }
   | { kind: "awaiting-code"; email: string }
   | { kind: "verifying" }
-  | { kind: "signing"; email: string }
   | { kind: "submitting"; email: string }
   | { kind: "done"; email: string; position: number | null }
   | { kind: "error"; reason: string };
@@ -316,8 +315,8 @@ function EmailFlow() {
   });
 
   const { user, ready, authenticated } = usePrivy();
-  const { wallets } = useWallets();
-  const { signMessage } = useSignMessage();
+  // The embedded-wallet binding step is gone — see the submit effect below
+  // for why. useWallets / useSignMessage are no longer needed in EmailFlow.
 
   const onSendCode = useCallback(async () => {
     const trimmed = email.trim().toLowerCase();
@@ -351,32 +350,30 @@ function EmailFlow() {
     }
   }, [code, state, loginWithCode]);
 
-  // After Privy login completes: auto-sign with the embedded wallet
-  // (created by Privy because config.embeddedWallets.solana.createOnLogin
-  // = "users-without-wallets") and submit to the waitlist API.
+  // After Privy login completes, submit the email to the waitlist API.
+  //
+  // The earlier flow had the embedded Privy Solana wallet sign the join
+  // message and submitted (email, pubkey, signature). The server skipped
+  // the on-chain existence check on this combined shape on the assumption
+  // that Privy's OTP gate proved real intent — but the server never
+  // actually verified anything from Privy, so any caller could pair a
+  // self-controlled keypair with an arbitrary email and pre-empt that
+  // email's row. The server now rejects the combined shape; here we just
+  // submit the email-only shape and rely on Privy at mainnet open to
+  // re-derive the user's embedded wallet from their verified email.
   useEffect(() => {
     if (state.kind !== "verifying") return;
     if (!ready || !authenticated || !user) return;
-    const wallet = wallets.find((w) => w.address);
-    if (!wallet) return; // wait one tick for embedded wallet to register
-    const userEmail = user.email?.address ?? state.kind === "verifying" ? email.trim().toLowerCase() : null;
+    const userEmail =
+      user.email?.address?.trim().toLowerCase() ?? email.trim().toLowerCase();
     if (!userEmail) {
       setState({ kind: "error", reason: "missing email after login" });
       return;
     }
 
-    setState({ kind: "signing", email: userEmail });
+    setState({ kind: "submitting", email: userEmail });
     (async () => {
       try {
-        const message = buildMessage(wallet.address);
-        const messageBytes = new TextEncoder().encode(message);
-        const { signature } = await signMessage({
-          message: messageBytes,
-          wallet,
-        });
-        const signatureB58 = bs58.encode(signature);
-        setState({ kind: "submitting", email: userEmail });
-
         const url = new URL(window.location.href);
         const source =
           url.searchParams.get("ref") ?? url.searchParams.get("utm_source") ?? null;
@@ -385,9 +382,6 @@ function EmailFlow() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             email: userEmail,
-            pubkey: wallet.address,
-            signature: signatureB58,
-            message,
             twitter_handle: twitter.trim() || undefined,
             source: source ?? undefined,
           }),
@@ -403,11 +397,11 @@ function EmailFlow() {
         }
         setState({ kind: "done", email: userEmail, position: json.position ?? null });
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "sign / submit failed";
+        const msg = e instanceof Error ? e.message : "submit failed";
         setState({ kind: "error", reason: msg });
       }
     })();
-  }, [state, ready, authenticated, user, wallets, signMessage, twitter, email]);
+  }, [state, ready, authenticated, user, twitter, email]);
 
   if (state.kind === "done") {
     return (
@@ -469,16 +463,12 @@ function EmailFlow() {
     );
   }
 
-  if (state.kind === "signing" || state.kind === "submitting") {
+  if (state.kind === "submitting") {
     return (
       <div className="space-y-3">
-        <PromptLine
-          prefix="$"
-          text={state.kind === "signing" ? "signing_with_embedded_wallet" : "submitting"}
-          status="pending"
-        />
+        <PromptLine prefix="$" text="submitting" status="pending" />
         <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
-          Privy created an embedded Solana wallet for {state.email}. We&apos;re signing the join message with it now — no prompt, no gas.
+          Verified {state.email}. Adding you to the list now.
         </p>
       </div>
     );
