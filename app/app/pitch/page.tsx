@@ -352,11 +352,10 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          220 markets created on devnet by 100+ creators over five
-          weeks of pre-hackathon stress testing (Feb 28 – Mar 31, 2026).
-          Hackathon sprint shipped all programs to v12.19 and the first
-          SOL/USDC market to mainnet closed beta. 100+ waitlist signups
-          in the first 48 hours.
+          220 markets created on devnet by 100+ creators seeding LP
+          vaults (Feb 28 – Mar 31, 2026). Hackathon sprint then shipped
+          the first SOL/USDC market to mainnet closed beta. 100+
+          waitlist signups in the first 48 hours.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -392,12 +391,10 @@ function Slide03Traction(_: SlideProps) {
             </div>
             <div className="pitch-traction-network-meta mono">
               136 + 12 + 72 markets across small / medium / large slab
-              tiers — all verifiable on chain. Earliest market
-              2026-02-28, last devnet activity 2026-03-31 (five weeks of
-              pre-hackathon stress testing). Frontier-window work (Apr 6
-              – May 11) shifted to mainnet, audit hardening, and the
-              closed-beta market. Mainnet program is private until the
-              external audit (quotes received, not yet engaged) clears.
+              tiers — all verifiable on chain. Each market seeds its own
+              LP vault (passive vAMM, same model as Jupiter&apos;s JLP).
+              Mainnet program is private until the external audit
+              (quotes received, not yet engaged) clears.
             </div>
           </div>
         </div>
@@ -544,10 +541,9 @@ function Slide05Product(_: SlideProps) {
 
         <div className="pitch-create-footer">
           Position is a Token-2022 NFT — first transferable perp
-          position on Solana. The LP vault is the counterparty (passive
-          vAMM, same model as Jupiter&apos;s JLP): no active market
-          makers required, no microstructure dependency. Closed beta on
-          mainnet at mainnet.percolatorlaunch.com.
+          position on Solana. LP vault is the counterparty (like
+          Jupiter&apos;s JLP) — no market makers required. Closed beta
+          at mainnet.percolatorlaunch.com.
         </div>
       </div>
     </div>
@@ -562,9 +558,8 @@ function Slide06Money(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Business Model</div>
         <h2 className="pitch-title">
-          0.1–1% per trade, split four ways on-chain in the same
-          transaction. &gt;95% gross margin — no off-chain claims, no
-          market makers to pay, no rebate burn.
+          0.1–1% per trade, split four ways on-chain. &gt;95% gross
+          margin — no market makers to pay, no off-chain claims.
         </h2>
 
         <div className="pitch-money-flow">
