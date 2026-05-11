@@ -141,15 +141,6 @@ function Slide01OneLiner(_: SlideProps) {
         <div className="pitch-hero-ctas">
           <a
             className="pitch-hero-cta pitch-hero-cta-primary"
-            href="https://mainnet.percolatorlaunch.com"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Try the closed beta
-            <span className="pitch-hero-cta-arrow" aria-hidden>→</span>
-          </a>
-          <a
-            className="pitch-hero-cta"
             href="https://github.com/dcccrypto"
             target="_blank"
             rel="noopener noreferrer"
