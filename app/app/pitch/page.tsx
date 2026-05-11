@@ -88,8 +88,10 @@ function NumberCounter({
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 //
-// 16 slides, ordered per Cap (Superteam UK) feedback 2026-04-30 plus
-// Toly Signal + Formal Verification + Problem expansion slides:
+// 12 slides, story-first arc reordered 2026-05-11:
+// Hook → Problem → Why Now → Demo → Why Us → Toly Signal → Proof →
+// Traction → Market → Business Model → Roadmap & Ask → Contact.
+// Earlier 16-slide layout (per Cap (Superteam UK) feedback 2026-04-30):
 //   "i recommend doing one-liner / team / traction as your first 3 slides"
 //   "don't have taglines - have a proper sentence which is the tldr of your
 //    traction with a time frame"
@@ -131,15 +133,19 @@ function Slide01OneLiner(_: SlideProps) {
         <ul className="pitch-hero-bullets">
           <li>
             <span className="pitch-hero-bullet-num mono">60 sec</span>
-            <span className="pitch-hero-bullet-text">to launch a market on any SPL token · no team approval, no auction</span>
+            <span className="pitch-hero-bullet-text">
+              Anyone can launch a perp market on any SPL token in about
+              a minute. No team approval, no auction, no $20M stake to
+              get in the door.
+            </span>
           </li>
           <li>
             <span className="pitch-hero-bullet-num mono">15M+</span>
-            <span className="pitch-hero-bullet-text">tokens incumbents refuse to list</span>
-          </li>
-          <li>
-            <span className="pitch-hero-bullet-num mono">Apache 2.0</span>
-            <span className="pitch-hero-bullet-text">fully open source · 22 public repos · fork it tomorrow</span>
+            <span className="pitch-hero-bullet-text">
+              SPL tokens have zero perp access today. Jupiter, Drift,
+              and Hyperliquid all curate ~50 blue chips — we open the
+              other 15 million.
+            </span>
           </li>
         </ul>
         <div className="pitch-divider" />
@@ -212,9 +218,10 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two co-founders and an AI pair-programmer shipped Percolator
-          from zero to mainnet-ready with 500+ formal proofs and zero
-          outside capital.
+          Two Solana founders who each won Toly&apos;s public bounties,
+          plus an AI pair-programmer. Shipped Percolator to
+          mainnet-ready with 500+ formal proofs and zero outside
+          capital.
         </h2>
 
         <div className="pitch-team-grid pitch-team-grid-three">
@@ -227,12 +234,11 @@ function Slide02Team(_: SlideProps) {
             />
             <div className="pitch-team-name">Khubair</div>
             <div className="pitch-team-role">Co-founder · Product</div>
-            <p className="pitch-team-bio">
-              Owns product direction, security review, and external
-              positioning. Web2 startup background, now Solana product
-              co-founder. Member of Superteam UK; won one of Toly&apos;s
-              public bounties on pre-audit critical bug review.
-            </p>
+            <ul className="pitch-team-bullets">
+              <li>Owns product direction, security review, and external positioning</li>
+              <li>Web2 startup background; Solana product co-founder and Superteam UK member</li>
+              <li>Won one of Toly&apos;s public bounties on pre-audit critical bug review</li>
+            </ul>
             <p className="pitch-team-links mono">
               <a
                 href="https://x.com/dcc_crypto"
@@ -260,30 +266,30 @@ function Slide02Team(_: SlideProps) {
             />
             <div className="pitch-team-name">Squid</div>
             <div className="pitch-team-role">Co-founder · Community</div>
-            <p className="pitch-team-bio">
-              Owns community strategy, project management, and the
-              daily &ldquo;vibe code&rdquo; that benefits Percolator.
-              Built{" "}
-              <a
-                className="pitch-team-bio-link"
-                href="https://github.com/0x-SquidSol/percolator-buyback"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                percolator-buyback
-              </a>
-              {" "}and{" "}
-              <a
-                className="pitch-team-bio-link"
-                href="https://github.com/0x-SquidSol/percolator-locker"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                percolator-locker
-              </a>
-              . 3 years in Solana; winner of Toly&apos;s Percolator
-              bounty.
-            </p>
+            <ul className="pitch-team-bullets">
+              <li>Owns community strategy, project management, and daily &ldquo;vibe code&rdquo;</li>
+              <li>3 years building on Solana; winner of Toly&apos;s Percolator bounty</li>
+              <li>
+                Shipped{" "}
+                <a
+                  className="pitch-team-bio-link"
+                  href="https://github.com/0x-SquidSol/percolator-buyback"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  percolator-buyback
+                </a>
+                {" "}and{" "}
+                <a
+                  className="pitch-team-bio-link"
+                  href="https://github.com/0x-SquidSol/percolator-locker"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  percolator-locker
+                </a>
+              </li>
+            </ul>
             <p className="pitch-team-links mono">
               <a
                 href="https://x.com/0xSquid_Sol"
@@ -311,24 +317,20 @@ function Slide02Team(_: SlideProps) {
             />
             <div className="pitch-team-name">Claude</div>
             <div className="pitch-team-role">Lead engineering · AI pair-programmer</div>
-            <p className="pitch-team-bio">
-              Owns most of the production code the co-founders direct:
-              Rust programs, TypeScript SDK and frontend, tests, Kani
-              proof drafts. Anthropic&apos;s Claude (Opus 4.7) running
-              in Claude Code. Reviews PRs. Doesn&apos;t sleep.
-            </p>
+            <ul className="pitch-team-bullets">
+              <li>Owns most of the production code: Rust programs, TypeScript SDK, frontend, tests, Kani proofs</li>
+              <li>Anthropic&apos;s Claude (Opus 4.7) running in Claude Code</li>
+              <li>Reviews PRs. Doesn&apos;t sleep.</li>
+            </ul>
           </div>
         </div>
 
         <p className="pitch-team-footer">
-          Toly built the on-chain Solana reference program and the
-          protocol math behind it — all his. We forked the engine and
-          built the product layer around it (LP vault, dispute
-          resolution, transferable Token-2022 NFT positions, withdrawal
-          queue, audit-crank invariants, admin lifecycle tooling — 49
-          fork-only handlers, 51 fork-only instructions, 187 wrapper
-          commits past divergence) plus the SDK, indexer, keeper fleet,
-          and frontend.
+          Anatoly Yakovenko (Solana co-founder) built the on-chain risk
+          engine and put it out as open source. We forked it and built
+          the product around it — the trading app, the position NFTs,
+          the keepers, the SDK, the frontend. Both co-founders each won
+          one of his public bounties along the way.
         </p>
       </div>
     </div>
@@ -351,9 +353,10 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          220 markets created on devnet across three program versions,
-          all green. Mainnet is deployed but private until an external
-          audit (quotes received, not yet engaged) clears.
+          220 markets created on devnet by 100+ creators seeding LP
+          vaults (Feb 28 – Mar 31, 2026). Hackathon sprint then shipped
+          the first SOL/USDC market to mainnet closed beta. 100+
+          waitlist signups in the first 48 hours.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -378,9 +381,9 @@ function Slide03Traction(_: SlideProps) {
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
-                  <NumberCounter target={3} />
+                  <NumberCounter target={100} suffix="+" />
                 </div>
-                <div className="pitch-traction-network-label">program versions</div>
+                <div className="pitch-traction-network-label">creators</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
@@ -388,11 +391,11 @@ function Slide03Traction(_: SlideProps) {
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
-              Devnet markets created across three program versions
-              (verifiable on chain). Mainnet program is deployed but
-              private — open only to a small group of open-source
-              contributors until the external audit (quotes received,
-              not yet engaged) clears.
+              136 + 12 + 72 markets across small / medium / large slab
+              tiers — all verifiable on chain. Each market seeds its own
+              LP vault (passive vAMM, same model as Jupiter&apos;s JLP).
+              Mainnet program is private until the external audit
+              (quotes received, not yet engaged) clears.
             </div>
           </div>
         </div>
@@ -417,6 +420,12 @@ function Slide03Traction(_: SlideProps) {
             <div className="pitch-traction-mini-label">Organic X followers</div>
           </div>
           <div className="pitch-traction-mini">
+            <div className="pitch-traction-mini-num mono">
+              <NumberCounter target={100} suffix="+" />
+            </div>
+            <div className="pitch-traction-mini-label">Waitlist signups · first 48 hours</div>
+          </div>
+          <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">$0</div>
             <div className="pitch-traction-mini-label">Paid acquisition · outside capital</div>
           </div>
@@ -426,80 +435,7 @@ function Slide03Traction(_: SlideProps) {
   );
 }
 
-// ─── Slide 4 · Hackathon Engineering Sprint ──────────────────────────────────
-
-function Slide04Sprint(_: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Hackathon Engineering Sprint</div>
-        <h2 className="pitch-title">
-          Across the 5-week Frontier window we shipped three changes that
-          unblock long-tail perp markets, each tied to direct customer
-          signal.
-        </h2>
-
-        <div className="pitch-solution-stack">
-          <div className="pitch-solution-item">
-            <div className="pitch-solution-num purple">1</div>
-            <div>
-              <div className="pitch-solution-name">
-                v12.19 mainnet upgrade + first SOL/USDC market on mainnet
-              </div>
-              <p className="pitch-solution-desc">
-                Four programs upgraded and deployed. SOL/USDC Hyperp market
-                created against a pinned Raydium CLMM pool, running today
-                in lab mode, gated until an external audit (not yet
-                started) clears.
-              </p>
-            </div>
-          </div>
-          <div className="pitch-solution-item">
-            <div className="pitch-solution-num cyan">2</div>
-            <div>
-              <div className="pitch-solution-name">
-                Token-2022 transferable position NFTs
-              </div>
-              <p className="pitch-solution-desc">
-                Customers asked for transferable positions. We shipped them
-                as Token-2022 NFTs. First transferable perp positions
-                ever shipped on Solana.
-              </p>
-            </div>
-          </div>
-          <div className="pitch-solution-item">
-            <div className="pitch-solution-num purple">3</div>
-            <div>
-              <div className="pitch-solution-name">
-                Pre-audit hardening — ongoing, every day
-              </div>
-              <p className="pitch-solution-desc">
-                Continuous self-audit. The proof suite has grown to
-                500+ Kani proofs across engine + wrapper + stake. 36
-                pre-audit hardening PRs merged in 4 days closing every
-                deep-audit CRITICAL finding. Ongoing line-by-line deep
-                audit against upstream produces a port queue of findings,
-                applied as they surface — ahead of external firm
-                engagement. Customers said audit posture was the #1
-                blocker for putting real capital on a long-tail market.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <p
-          className="pitch-solution-sub"
-          style={{ marginTop: "1.5rem" }}
-        >
-          What we did NOT build: a token launchpad, governance,
-          cross-margining. Out-of-scope, on the roadmap.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Slide 5 · Demo Product ──────────────────────────────────────────────────
+// ─── Slide · Demo Product ────────────────────────────────────────────────────
 
 function Slide05Product(_: SlideProps) {
   return (
@@ -507,11 +443,11 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          Closed beta on mainnet today running the first SOL/USDC
-          Hyperp — connect wallet, deposit USDC, open a leveraged long,
-          close at PnL, fees split four ways on-chain in the same
-          transaction. Public mainnet opens once the external audit
-          (quotes received, not yet engaged) clears.
+          Closed beta on mainnet today, running the first SOL/USDC
+          Hyperp. Connect wallet, deposit USDC, open a leveraged long,
+          close at PnL — fees settle on-chain in the same transaction.
+          Public mainnet opens once the external audit (quotes
+          received, not yet engaged) clears.
         </h2>
 
         <div className="pflow-wrap">
@@ -605,9 +541,10 @@ function Slide05Product(_: SlideProps) {
         </div>
 
         <div className="pitch-create-footer">
-          Position is a Token-2022 NFT. First transferable perp
-          position on Solana. Closed beta on mainnet at
-          mainnet.percolatorlaunch.com.
+          Position is a Token-2022 NFT — first transferable perp
+          position on Solana. LP vault is the counterparty (like
+          Jupiter&apos;s JLP) — no market makers required. Closed beta
+          at mainnet.percolatorlaunch.com.
         </div>
       </div>
     </div>
@@ -622,206 +559,66 @@ function Slide06Money(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Business Model</div>
         <h2 className="pitch-title">
-          We charge 0.1–1% per trade across every market, splitting fees
-          four ways on-chain. Gross margin &gt;95% after Solana compute.
+          0.1–1% per trade. Splits four ways on-chain in the same
+          transaction. &gt;95% gross margin — no market makers to pay.
         </h2>
 
-        <div className="pitch-money-flow">
-          <div className="pitch-money-flow-title">
-            Fee flow on every fill: automatic, on-chain, no claim transactions
+        <div className="pitch-revenue-hero">
+          <div className="pitch-revenue-hero-side">
+            <div className="pitch-revenue-hero-num mono">$1M / day</div>
+            <div className="pitch-revenue-hero-tag mono">scale projection</div>
           </div>
-
-          <div className="pitch-fee-stage">
-            <div className="pitch-fee-source">
-              <div className="pitch-money-pill pitch-money-pill-purple">
-                Trader pays<br /><span className="mono">0.1–1%</span>
-              </div>
-            </div>
-
-            <div className="pitch-fee-channel" aria-hidden>
-              <svg
-                viewBox="0 0 480 140"
-                preserveAspectRatio="xMidYMid meet"
-                className="pitch-fee-svg"
-              >
-                <defs>
-                  <linearGradient id="feeFlowGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#9945FF" stopOpacity="0.45" />
-                    <stop offset="100%" stopColor="#22D3EE" stopOpacity="0.45" />
-                  </linearGradient>
-                </defs>
-                <path
-                  id="feePathLeft"
-                  d="M 240 10 C 240 70, 60 70, 60 130"
-                  stroke="url(#feeFlowGrad)"
-                  fill="none"
-                  strokeWidth="1.5"
-                />
-                <path
-                  id="feePathCenter"
-                  d="M 240 10 L 240 130"
-                  stroke="url(#feeFlowGrad)"
-                  fill="none"
-                  strokeWidth="1.5"
-                />
-                <path
-                  id="feePathRight"
-                  d="M 240 10 C 240 70, 420 70, 420 130"
-                  stroke="url(#feeFlowGrad)"
-                  fill="none"
-                  strokeWidth="1.5"
-                />
-
-                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
-                  <animateMotion dur="3.2s" repeatCount="indefinite">
-                    <mpath href="#feePathLeft" />
-                  </animateMotion>
-                  <animate
-                    attributeName="opacity"
-                    values="0;1;1;0"
-                    keyTimes="0;0.1;0.9;1"
-                    dur="3.2s"
-                    repeatCount="indefinite"
-                  />
-                </circle>
-
-                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
-                  <animateMotion dur="3.2s" begin="1.05s" repeatCount="indefinite">
-                    <mpath href="#feePathCenter" />
-                  </animateMotion>
-                  <animate
-                    attributeName="opacity"
-                    values="0;1;1;0"
-                    keyTimes="0;0.1;0.9;1"
-                    dur="3.2s"
-                    begin="1.05s"
-                    repeatCount="indefinite"
-                  />
-                </circle>
-
-                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
-                  <animateMotion dur="3.2s" begin="2.1s" repeatCount="indefinite">
-                    <mpath href="#feePathRight" />
-                  </animateMotion>
-                  <animate
-                    attributeName="opacity"
-                    values="0;1;1;0"
-                    keyTimes="0;0.1;0.9;1"
-                    dur="3.2s"
-                    begin="2.1s"
-                    repeatCount="indefinite"
-                  />
-                </circle>
-              </svg>
-            </div>
-
-            <div className="pitch-fee-buckets">
-              <div className="pitch-money-pill">LP vault</div>
-              <div className="pitch-money-pill">Creator</div>
-              <div className="pitch-money-pill pitch-money-pill-cyan">
-                Protocol → PERC stakers
-              </div>
-              <div className="pitch-money-pill">Insurance reserve</div>
-            </div>
+          <div className="pitch-revenue-hero-desc">
+            Daily protocol fees at 1,000 active markets × $1M average
+            daily volume each — about $365M/year at modest scale, with
+            no rebate burn against margin.
           </div>
         </div>
 
-        <div className="pitch-money-econ">
-          <div className="pitch-money-econ-stat">
-            <div className="pitch-money-econ-num mono">&gt;95%</div>
-            <div className="pitch-money-econ-label">Gross margin per trade after Solana RPC + compute</div>
+        <div className="pitch-revenue-splits">
+          <div className="pitch-revenue-split">
+            <div className="pitch-revenue-split-name mono">LP vault</div>
+            <p className="pitch-revenue-split-desc">
+              Passive liquidity providers earn from trader losses —
+              same model as Jupiter&apos;s JLP. Sticky capital, no
+              active quoting required.
+            </p>
           </div>
-          <div className="pitch-money-econ-stat">
-            <div className="pitch-money-econ-num mono">~$0.002</div>
-            <div className="pitch-money-econ-label">Solana fee per trade (base + priority)</div>
+          <div className="pitch-revenue-split">
+            <div className="pitch-revenue-split-name mono">Creator</div>
+            <p className="pitch-revenue-split-desc">
+              Market launcher&apos;s revenue share — direct incentive
+              to bring long-tail listings and their own retail flow.
+            </p>
           </div>
-          <div className="pitch-money-econ-stat">
-            <div className="pitch-money-econ-num mono">$0</div>
-            <div className="pitch-money-econ-label">Outside capital required to keep shipping today</div>
+          <div className="pitch-revenue-split pitch-revenue-split-us">
+            <div className="pitch-revenue-split-name mono">Protocol</div>
+            <p className="pitch-revenue-split-desc">
+              Treasury — accrues on every trade on every market. Funds
+              audit, hiring, growth.
+            </p>
+          </div>
+          <div className="pitch-revenue-split">
+            <div className="pitch-revenue-split-name mono">Insurance</div>
+            <p className="pitch-revenue-split-desc">
+              Reserve — backstops liquidation deficits and bad debt
+              before LPs take losses.
+            </p>
           </div>
         </div>
 
-        <div className="pitch-money-scale-wrap">
-          <div className="pitch-money-scale-title">Scale path · protocol fees only · projected scenarios</div>
-          <table className="pitch-money-scale">
-            <thead>
-              <tr>
-                <th>Markets</th>
-                <th>Avg daily vol / market</th>
-                <th>Protocol fee (0.1%)</th>
-                <th>Daily protocol fees</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="mono">100</td>
-                <td className="mono">$500K</td>
-                <td className="mono">0.1%</td>
-                <td className="mono pitch-money-scale-result">$50K</td>
-              </tr>
-              <tr>
-                <td className="mono">1,000</td>
-                <td className="mono">$500K</td>
-                <td className="mono">0.1%</td>
-                <td className="mono pitch-money-scale-result">$500K</td>
-              </tr>
-              <tr>
-                <td className="mono">1,000</td>
-                <td className="mono">$1M</td>
-                <td className="mono">0.1%</td>
-                <td className="mono pitch-money-scale-result">$1M</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Slide 7 · Opportunity ───────────────────────────────────────────────────
-
-function Slide07Opportunity(_: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Opportunity</div>
-        <h2 className="pitch-title">
-          Solana perp volume runs in the tens of billions per month
-          across ~50 blue-chip tokens (Jupiter + Drift combined); 15
-          million tokens have zero perp access today.
-        </h2>
-
-        <div className="pitch-opp-compare">
-          <div className="pitch-opp-row">
-            <div className="pitch-opp-row-header">
-              <span className="pitch-opp-tag">Today</span>
-              <span className="pitch-opp-row-stat mono">$20B+ / month</span>
-              <span className="pitch-opp-row-detail">
-                ~50 tokens · all blue chips · contested
-              </span>
-            </div>
-            <div className="pitch-opp-bar-wrap">
-              <div className="pitch-opp-bar pitch-opp-bar-today" />
-            </div>
+        <div className="pitch-revenue-econ">
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">&gt;95%</div>
+            <div className="pitch-revenue-econ-label">gross margin per trade</div>
           </div>
-
-          <div className="pitch-opp-row">
-            <div className="pitch-opp-row-header">
-              <span className="pitch-opp-tag pitch-opp-tag-cyan">Opportunity</span>
-              <span className="pitch-opp-row-stat mono">15,000,000+ tokens</span>
-              <span className="pitch-opp-row-detail">
-                Every token with a live DEX pool · untouched · empty market
-              </span>
-            </div>
-            <div className="pitch-opp-bar-wrap">
-              <div className="pitch-opp-bar pitch-opp-bar-opportunity" />
-            </div>
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">~$0.002</div>
+            <div className="pitch-revenue-econ-label">Solana compute / trade</div>
           </div>
-
-          <div className="pitch-opp-callout">
-            Same axis. The &ldquo;today&rdquo; bar is barely visible. The
-            full-width bar is the gap we open.
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">$0</div>
+            <div className="pitch-revenue-econ-label">market-maker spend</div>
           </div>
         </div>
       </div>
@@ -829,103 +626,7 @@ function Slide07Opportunity(_: SlideProps) {
   );
 }
 
-// ─── Slide 8 · Competitors ───────────────────────────────────────────────────
-
-function Slide08Competitors(_: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Competitors</div>
-        <h2 className="pitch-title">
-          No major Solana perp DEX opens long-tail markets permissionlessly. Hyperliquid does — but only via HIP-3, which requires staking 500K HYPE (~$20M+) just to deploy a perp DEX. We are the long-tail-native option on Solana.
-        </h2>
-        <div className="pitch-matrix-wrap">
-          <table className="pitch-matrix">
-            <thead>
-              <tr>
-                <th className="pitch-matrix-feature"></th>
-                <th>Hyperliquid</th>
-                <th>Jupiter Perps</th>
-                <th>Drift</th>
-                <th className="pitch-matrix-us">Percolator</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="pitch-matrix-feature">Pricing model</td>
-                <td className="pitch-matrix-no">CLOB</td>
-                <td className="pitch-matrix-no">Oracle + JLP</td>
-                <td className="pitch-matrix-no">DLOB + JIT auction</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">Oracle + passive LP / vAMM</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Permissionless markets</td>
-                <td className="pitch-matrix-no">HIP-3 stake-gated ($20M+)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Long-tail tokens (any DEX-listed SPL)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Oracle flexibility (Pyth + DEX EWMA + admin push)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">Pyth-only</td>
-                <td className="pitch-matrix-no">Pyth + Switchboard</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Cross-margin</td>
-                <td className="pitch-matrix-yes">✓</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes">✓</td>
-                <td className="pitch-matrix-no pitch-matrix-us">roadmap</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Transferable positions (Token-2022 NFT)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Market-creator fee share</td>
-                <td className="pitch-matrix-no">per HIP-3 builder split</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Open source (Apache 2.0)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">partial</td>
-                <td className="pitch-matrix-yes">✓</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Native chain</td>
-                <td className="pitch-matrix-no">own L1</td>
-                <td className="pitch-matrix-yes">Solana</td>
-                <td className="pitch-matrix-yes">Solana</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">Solana</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p className="pitch-matrix-sub">
-          Everyone else competes for the same 30-50 tokens. We open a category — long-tail SPL perps at a price point creators can actually afford.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Slide 9 · GTM & Why Now ─────────────────────────────────────────────────
+// ─── Slide · Why Now ─────────────────────────────────────────────────────────
 
 function Slide09WhyNow(_: SlideProps) {
   return (
@@ -1012,185 +713,15 @@ function Slide09WhyNow(_: SlideProps) {
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          GTM: 220-market devnet sprint complete · OSS contributor
-          closed beta on mainnet · audit quotes received → reactivate
-          devnet + engage audit firm → audit clears → public mainnet
-          launch with first 10 creator-led markets seeded by
-          revenue-share rebates → Jupiter / Birdeye routing once
-          on-chain volume validates.
+          Three catalysts in one year. The window is open — and
+          we&apos;re shipping into it, not waiting for it to be perfect.
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Slide 10 · Roadmap ──────────────────────────────────────────────────────
-
-function Slide10Roadmap(_: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Roadmap</div>
-        <h2 className="pitch-title">
-          Public mainnet launches in Q3 after the audit; targeting $50M+
-          daily volume by Q4 2026.
-        </h2>
-        <div className="pitch-roadmap">
-          <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase purple">Q2 2026</div>
-            <div className="pitch-roadmap-name">Devnet · audit prep</div>
-            <div className="pitch-roadmap-desc">220-market devnet sprint shipped, mainnet program deployed to OSS-contributor closed beta, audit quotes received</div>
-          </div>
-          <div className="pitch-roadmap-connector" />
-          <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase cyan">Q3 2026</div>
-            <div className="pitch-roadmap-name">Public mainnet</div>
-            <div className="pitch-roadmap-desc">Audit complete, Jupiter / Birdeye routing, first 10 creator-led markets</div>
-          </div>
-          <div className="pitch-roadmap-connector" />
-          <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase purple">Q4 2026</div>
-            <div className="pitch-roadmap-name">$50M+ daily volume</div>
-            <div className="pitch-roadmap-desc">Cross-margining, composable CPI oracle</div>
-          </div>
-          <div className="pitch-roadmap-connector" />
-          <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase cyan">2027</div>
-            <div className="pitch-roadmap-name">Default rail</div>
-            <div className="pitch-roadmap-desc">Every-token perps as default for any new SPL</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Slide 11 · Risks ────────────────────────────────────────────────────────
-
-function Slide11Risks(_: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Risks</div>
-        <h2 className="pitch-title">
-          Three real risks we&apos;re solving, each with a concrete
-          mitigation already in flight.
-        </h2>
-
-        <div className="pitch-risks-grid">
-          <div className="pitch-risks-card">
-            <div className="pitch-risks-name">Liquidity bootstrap</div>
-            <p className="pitch-risks-desc">
-              Long-tail markets are illiquid by definition until creators
-              bring traffic.
-            </p>
-            <div className="pitch-risks-mitigation-label mono">Mitigation</div>
-            <p className="pitch-risks-mitigation">
-              Creator fee share = direct financial incentive for creators
-              to bring their own community. Rev-share rebates fund the
-              first 10 markets at launch.
-            </p>
-          </div>
-
-          <div className="pitch-risks-card">
-            <div className="pitch-risks-name">Audit timing</div>
-            <p className="pitch-risks-desc">
-              Public mainnet trading is gated on a not-yet-started
-              external audit; timing depends on funding + firm engagement.
-            </p>
-            <div className="pitch-risks-mitigation-label mono">Mitigation</div>
-            <p className="pitch-risks-mitigation">
-              Pre-audit hardening is ongoing every day — continuous
-              deep self-audit against upstream produces a port queue
-              we apply as findings surface, ahead of external firm
-              engagement. 500+ Kani proofs verify risk-engine invariants
-              before any auditor starts.
-            </p>
-          </div>
-
-          <div className="pitch-risks-card">
-            <div className="pitch-risks-name">Regulatory drift</div>
-            <p className="pitch-risks-desc">
-              Perps regulation is unsettled globally. A hostile reading
-              would kneecap a centralised competitor.
-            </p>
-            <div className="pitch-risks-mitigation-label mono">Mitigation</div>
-            <p className="pitch-risks-mitigation">
-              Protocol is permissionless by design. No gatekeeping
-              action, no team in the loop on listing decisions, no party
-              to regulate.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Slide 12 · Next Steps (Ask + Exit) ──────────────────────────────────────
-
-function Slide12NextSteps(_: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Next Steps</div>
-        <h2 className="pitch-title">
-          We&apos;re shipping with or without capital. The right
-          partner shortcuts the audit, market-maker bootstrap, and
-          creator acquisition.
-        </h2>
-
-        <div className="pitch-ask-grid">
-          <div className="pitch-ask-card">
-            <div className="pitch-ask-card-label mono">Open to</div>
-            <div className="pitch-ask-card-headline">
-              Strategic capital, sized to the partnership.
-            </div>
-            <div className="pitch-ask-card-sub">
-              SAFE, token warrant on PERC, LP co-investment, or bespoke.
-              We care more about the partner than the paper.
-            </div>
-          </div>
-          <div className="pitch-ask-card">
-            <div className="pitch-ask-card-label mono">Where it goes</div>
-            <ul className="pitch-ask-list">
-              <li>External audit + bug bounty program</li>
-              <li>Market-maker bootstrap on first 10 markets</li>
-              <li>Creator acquisition (rev-share rebates, not paid spend)</li>
-              <li>Two technical hires: matching + risk research</li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="pitch-ask-exit-wrap">
-          <div className="pitch-ask-exit-title mono">Liquidity path for capital</div>
-          <div className="pitch-ask-exit-grid">
-            <div className="pitch-ask-exit-item">
-              <div className="pitch-ask-exit-name">Primary</div>
-              <p className="pitch-ask-exit-desc">
-                Protocol-fee-backed token. PERC stakers earn from real fee revenue once mainnet trading opens.
-              </p>
-            </div>
-            <div className="pitch-ask-exit-item">
-              <div className="pitch-ask-exit-name">Secondary</div>
-              <p className="pitch-ask-exit-desc">
-                PERC trades on the existing creator-rewards market today; deeper venues post-mainnet.
-              </p>
-            </div>
-            <div className="pitch-ask-exit-item">
-              <div className="pitch-ask-exit-name">Optional backstop</div>
-              <p className="pitch-ask-exit-desc">
-                Drift, Jupiter, and Hyperliquid all have a structural interest in long-tail listing capability they can&apos;t ship internally. M&amp;A is an option, not the plan.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Slide 13 · Contact ──────────────────────────────────────────────────────
+// ─── Slide · Contact ─────────────────────────────────────────────────────────
 
 function Slide13Contact(_: SlideProps) {
   return (
@@ -1346,76 +877,216 @@ function SlideTolyStory(_: SlideProps) {
   );
 }
 
-// ─── Slide 6 · Kani Formal Verification ──────────────────────────────────────
+// ─── Slide · Proof (Sprint + Formal Verification merged) ─────────────────────
 
-function SlideKaniProofs(_: SlideProps) {
+function SlideProof(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Formal Verification</div>
+        <div className="pitch-label">Hackathon Sprint</div>
         <h2 className="pitch-title">
-          Kani proves protocol invariants hold across every possible
-          input. 500+ proofs, all green, before any auditor starts.
+          Customers told us audit posture and transferable positions
+          were the #1 blockers. We shipped both this hackathon — plus
+          500+ formal proofs before any auditor starts.
         </h2>
 
-        <div className="pitch-kani-callout">
-          <div className="pitch-kani-callout-num mono">
-            <NumberCounter target={500} suffix="+" />
+        <div className="pitch-solution-stack">
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num purple">1</div>
+            <div>
+              <div className="pitch-solution-name">
+                v12.19 mainnet upgrade + first SOL/USDC market on mainnet
+              </div>
+              <p className="pitch-solution-desc">
+                Four programs upgraded and deployed. SOL/USDC Hyperp market
+                running today in closed beta against a pinned Raydium pool.
+              </p>
+            </div>
           </div>
-          <div className="pitch-kani-callout-label">
-            formal proofs · all green · same model-checking technology
-            used in NASA &amp; aerospace systems, applied to the
-            Percolator risk engine
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num cyan">2</div>
+            <div>
+              <div className="pitch-solution-name">
+                Token-2022 transferable position NFTs
+              </div>
+              <p className="pitch-solution-desc">
+                First transferable perp positions ever shipped on Solana.
+                Customers asked, we shipped.
+              </p>
+            </div>
           </div>
-        </div>
-
-        <div className="pitch-kani-what">
-          <div className="pitch-kani-what-card">
-            <div className="pitch-kani-what-name">Haircut conservation</div>
-            <p className="pitch-kani-what-desc">
-              The H mechanism never lets profitable accounts extract
-              more than the vault holds. Proven across every state and
-              price.
-            </p>
-          </div>
-          <div className="pitch-kani-what-card">
-            <div className="pitch-kani-what-name">ADL fairness</div>
-            <p className="pitch-kani-what-desc">
-              A/K coefficients socialise position reduction equally
-              across each side. No queue, no first-mover advantage,
-              ever.
-            </p>
-          </div>
-          <div className="pitch-kani-what-card">
-            <div className="pitch-kani-what-name">Funding zero-sum</div>
-            <p className="pitch-kani-what-desc">
-              Funding settles to net zero across all accounts at every
-              step. Money in equals money out, provably.
-            </p>
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num purple">3</div>
+            <div>
+              <div className="pitch-solution-name">
+                500+ Kani formal-verification proofs
+              </div>
+              <p className="pitch-solution-desc">
+                Kani proves protocol invariants hold across every
+                possible input. 500+ proofs, all green. Hyperliquid,
+                Drift, and Jupiter have zero. 36 pre-audit hardening
+                PRs merged in 4 days closing every deep-audit CRITICAL.
+              </p>
+            </div>
           </div>
         </div>
 
         <div className="pitch-kani-vs">
-          <div className="pitch-kani-vs-title mono">
-            Formal proofs in production · perp DEXs on Solana
+          <div className="pitch-kani-vs-cell">
+            <div className="pitch-kani-vs-cell-num mono">0</div>
+            <div className="pitch-kani-vs-cell-label">Hyperliquid</div>
           </div>
-          <div className="pitch-kani-vs-row">
-            <div className="pitch-kani-vs-cell">
-              <div className="pitch-kani-vs-cell-num mono">0</div>
-              <div className="pitch-kani-vs-cell-label">Hyperliquid</div>
+          <div className="pitch-kani-vs-cell">
+            <div className="pitch-kani-vs-cell-num mono">0</div>
+            <div className="pitch-kani-vs-cell-label">Drift</div>
+          </div>
+          <div className="pitch-kani-vs-cell">
+            <div className="pitch-kani-vs-cell-num mono">0</div>
+            <div className="pitch-kani-vs-cell-label">Jupiter Perps</div>
+          </div>
+          <div className="pitch-kani-vs-cell pitch-kani-vs-cell-us">
+            <div className="pitch-kani-vs-cell-num mono">500+</div>
+            <div className="pitch-kani-vs-cell-label">Percolator</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide · Market (Opportunity + Competitors merged) ───────────────────────
+
+function SlideMarket(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Market</div>
+        <h2 className="pitch-title">
+          Solana perp volume averages $25B+/mo (DeFiLlama). The current
+          leaders — Jupiter, Drift, Hyperliquid (and Pacifica, the new
+          #1 on Solana) — all curate their listings. 15 million SPL
+          tokens have zero perp access. We open the long tail.
+        </h2>
+
+        <div className="pitch-matrix-wrap">
+          <table className="pitch-matrix">
+            <thead>
+              <tr>
+                <th className="pitch-matrix-feature"></th>
+                <th>Hyperliquid</th>
+                <th>Jupiter Perps</th>
+                <th>Drift</th>
+                <th className="pitch-matrix-us">Percolator</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="pitch-matrix-feature">Permissionless markets</td>
+                <td className="pitch-matrix-no">HIP-3 ($20M+ stake)</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Long-tail tokens (any DEX-listed SPL)</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Transferable positions (NFT)</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Market-creator fee share</td>
+                <td className="pitch-matrix-no">HIP-3 builder split</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature">Open source (Apache 2.0)</td>
+                <td className="pitch-matrix-no">✗</td>
+                <td className="pitch-matrix-no">partial</td>
+                <td className="pitch-matrix-yes">✓</td>
+                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="pitch-matrix-sub">
+          Everyone else competes for the same 30-50 tokens. We open a
+          category — long-tail SPL perps at a price point creators can
+          actually afford.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide · Roadmap & Ask (Roadmap + Risks + Next Steps merged) ─────────────
+
+function SlideRoadmapAsk(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Roadmap & Ask</div>
+        <h2 className="pitch-title">
+          Public mainnet Q3 after audit. $50M+ daily volume by Q4.
+          Default rail for every-token perps by 2027.
+        </h2>
+
+        <div className="pitch-roadmap">
+          <div className="pitch-roadmap-item">
+            <div className="pitch-roadmap-phase purple">Q2 2026</div>
+            <div className="pitch-roadmap-name">Closed beta · audit</div>
+            <div className="pitch-roadmap-desc">Mainnet program live, OSS-contributor beta, audit quotes received</div>
+          </div>
+          <div className="pitch-roadmap-connector" />
+          <div className="pitch-roadmap-item">
+            <div className="pitch-roadmap-phase cyan">Q3 2026</div>
+            <div className="pitch-roadmap-name">Public mainnet</div>
+            <div className="pitch-roadmap-desc">Audit complete, Jupiter / Birdeye routing, first 10 creator-led markets</div>
+          </div>
+          <div className="pitch-roadmap-connector" />
+          <div className="pitch-roadmap-item">
+            <div className="pitch-roadmap-phase purple">Q4 2026</div>
+            <div className="pitch-roadmap-name">$50M+ daily volume</div>
+            <div className="pitch-roadmap-desc">Cross-margining, composable CPI oracle</div>
+          </div>
+          <div className="pitch-roadmap-connector" />
+          <div className="pitch-roadmap-item">
+            <div className="pitch-roadmap-phase cyan">2027</div>
+            <div className="pitch-roadmap-name">Default rail</div>
+            <div className="pitch-roadmap-desc">Every-token perps as default for any new SPL</div>
+          </div>
+        </div>
+
+        <div className="pitch-ask-grid" style={{ marginTop: "2rem" }}>
+          <div className="pitch-ask-card">
+            <div className="pitch-ask-card-label mono">Open to</div>
+            <div className="pitch-ask-card-headline">
+              Strategic capital, sized to the partnership.
             </div>
-            <div className="pitch-kani-vs-cell">
-              <div className="pitch-kani-vs-cell-num mono">0</div>
-              <div className="pitch-kani-vs-cell-label">Drift</div>
+            <div className="pitch-ask-card-sub">
+              SAFE, LP co-investment, or bespoke equity. We&apos;re
+              shipping with or without capital — the right partner
+              shortcuts audit, LP-vault bootstrap, and creator
+              acquisition.
             </div>
-            <div className="pitch-kani-vs-cell">
-              <div className="pitch-kani-vs-cell-num mono">0</div>
-              <div className="pitch-kani-vs-cell-label">Jupiter Perps</div>
-            </div>
-            <div className="pitch-kani-vs-cell pitch-kani-vs-cell-us">
-              <div className="pitch-kani-vs-cell-num mono">500+</div>
-              <div className="pitch-kani-vs-cell-label">Percolator</div>
-            </div>
+          </div>
+          <div className="pitch-ask-card">
+            <div className="pitch-ask-card-label mono">Where it goes</div>
+            <ul className="pitch-ask-list">
+              <li>External audit + bug bounty program</li>
+              <li>LP-vault bootstrap on first 10 creator-led markets</li>
+              <li>Creator acquisition · rev-share rebates, not paid spend</li>
+              <li>Two technical hires · matching + risk research</li>
+            </ul>
           </div>
         </div>
       </div>
@@ -1431,17 +1102,13 @@ const SLIDES = [
   { id: 3, title: "Team", component: Slide02Team },
   { id: 4, title: "Toly Signal", component: SlideTolyStory },
   { id: 5, title: "Traction", component: Slide03Traction },
-  { id: 6, title: "Hackathon Engineering Sprint", component: Slide04Sprint },
-  { id: 7, title: "Formal Verification", component: SlideKaniProofs },
-  { id: 8, title: "Demo Product", component: Slide05Product },
-  { id: 9, title: "Business Model", component: Slide06Money },
-  { id: 10, title: "Opportunity", component: Slide07Opportunity },
-  { id: 11, title: "Competitors", component: Slide08Competitors },
-  { id: 12, title: "GTM & Why Now", component: Slide09WhyNow },
-  { id: 13, title: "Roadmap", component: Slide10Roadmap },
-  { id: 14, title: "Risks", component: Slide11Risks },
-  { id: 15, title: "Next Steps", component: Slide12NextSteps },
-  { id: 16, title: "Contact", component: Slide13Contact },
+  { id: 6, title: "Hackathon Sprint", component: SlideProof },
+  { id: 7, title: "Demo Product", component: Slide05Product },
+  { id: 8, title: "Business Model", component: Slide06Money },
+  { id: 9, title: "Market", component: SlideMarket },
+  { id: 10, title: "GTM & Why Now", component: Slide09WhyNow },
+  { id: 11, title: "Roadmap & Ask", component: SlideRoadmapAsk },
+  { id: 12, title: "Contact", component: Slide13Contact },
 ];
 
 const TOTAL_SLIDES = SLIDES.length;
@@ -2252,6 +1919,143 @@ export default function PitchPage() {
           font-weight: 700;
         }
 
+        /* ── Revenue (Slide 10 — redesigned) ── */
+
+        .pitch-revenue-hero {
+          display: flex;
+          gap: 1.75rem;
+          align-items: stretch;
+          padding: 1.4rem 1.6rem;
+          margin: 1.5rem 0;
+          background: linear-gradient(95deg,
+            rgba(153, 69, 255, 0.10) 0%,
+            rgba(34, 211, 238, 0.10) 100%);
+          border: 1px solid rgba(34, 211, 238, 0.28);
+          border-radius: 14px;
+        }
+
+        .pitch-revenue-hero-side {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 0.25rem;
+          padding-right: 1.6rem;
+          border-right: 1px solid rgba(255, 255, 255, 0.08);
+          flex: 0 0 auto;
+        }
+
+        .pitch-revenue-hero-num {
+          font-size: clamp(1.85rem, 3.4vw, 2.6rem);
+          font-weight: 700;
+          color: #22D3EE;
+          letter-spacing: -0.025em;
+          line-height: 1;
+        }
+
+        .pitch-revenue-hero-tag {
+          font-size: 0.62rem;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: rgba(34, 211, 238, 0.7);
+        }
+
+        .pitch-revenue-hero-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.92rem;
+          line-height: 1.5;
+          color: rgba(255, 255, 255, 0.78);
+          flex: 1;
+          display: flex;
+          align-items: center;
+        }
+
+        .pitch-revenue-splits {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.85rem;
+          margin: 1.5rem 0;
+        }
+
+        .pitch-revenue-split {
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 10px;
+          padding: 0.95rem 1rem;
+        }
+
+        .pitch-revenue-split-us {
+          border-color: rgba(34, 211, 238, 0.38);
+          background: rgba(34, 211, 238, 0.05);
+        }
+
+        .pitch-revenue-split-name {
+          font-size: 0.72rem;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          font-weight: 700;
+          color: rgba(34, 211, 238, 0.95);
+          margin-bottom: 0.55rem;
+        }
+
+        .pitch-revenue-split-us .pitch-revenue-split-name {
+          color: #22D3EE;
+        }
+
+        .pitch-revenue-split-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.78rem;
+          line-height: 1.5;
+          color: rgba(255, 255, 255, 0.6);
+          margin: 0;
+        }
+
+        .pitch-revenue-econ {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 0.85rem;
+        }
+
+        .pitch-revenue-econ-stat {
+          display: flex;
+          align-items: baseline;
+          gap: 0.7rem;
+          padding: 0.85rem 1.05rem;
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 10px;
+        }
+
+        .pitch-revenue-econ-num {
+          font-size: 1.35rem;
+          font-weight: 700;
+          color: rgba(255, 255, 255, 0.95);
+          letter-spacing: -0.01em;
+          line-height: 1;
+        }
+
+        .pitch-revenue-econ-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.78rem;
+          line-height: 1.35;
+          color: rgba(255, 255, 255, 0.55);
+        }
+
+        @media (max-width: 720px) {
+          .pitch-revenue-hero {
+            flex-direction: column;
+            gap: 0.85rem;
+          }
+          .pitch-revenue-hero-side {
+            border-right: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0 0 0.85rem;
+          }
+          .pitch-revenue-splits,
+          .pitch-revenue-econ {
+            grid-template-columns: 1fr 1fr;
+          }
+        }
+
         /* ── Traction (Slide 3) ── */
         .pitch-traction-chart-wrap {
           background: rgba(255,255,255,0.02);
@@ -2572,6 +2376,32 @@ export default function PitchPage() {
           line-height: 1.55;
           color: rgba(255,255,255,0.6);
           margin: 0;
+        }
+
+        .pitch-team-bullets {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.45rem;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          line-height: 1.5;
+          color: rgba(255,255,255,0.62);
+        }
+
+        .pitch-team-bullets li {
+          padding-left: 0.9rem;
+          position: relative;
+        }
+
+        .pitch-team-bullets li::before {
+          content: "·";
+          position: absolute;
+          left: 0;
+          color: rgba(34,211,238,0.7);
+          font-weight: 700;
         }
 
         .pitch-team-links {
