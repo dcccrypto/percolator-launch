@@ -442,11 +442,11 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          Closed beta on mainnet today running the first SOL/USDC
-          Hyperp — connect wallet, deposit USDC, open a leveraged long,
-          close at PnL, fees split four ways on-chain in the same
-          transaction. Public mainnet opens once the external audit
-          (quotes received, not yet engaged) clears.
+          Closed beta on mainnet today, running the first SOL/USDC
+          Hyperp. Connect wallet, deposit USDC, open a leveraged long,
+          close at PnL — fees settle on-chain in the same transaction.
+          Public mainnet opens once the external audit (quotes
+          received, not yet engaged) clears.
         </h2>
 
         <div className="pflow-wrap">
@@ -961,11 +961,10 @@ function SlideMarket(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Market</div>
         <h2 className="pitch-title">
-          Solana perp volume averages $25B+/mo (DeFiLlama). Pacifica
-          just overtook Jupiter as the #1 Solana perp DEX — proving the
-          space is wide open. But Pacifica, Jupiter, Drift, and
-          Hyperliquid all still curate. 15 million SPL tokens have zero
-          perp access. We open the long tail.
+          Solana perp volume averages $25B+/mo (DeFiLlama). The current
+          leaders — Jupiter, Drift, Hyperliquid (and Pacifica, the new
+          #1 on Solana) — all curate their listings. 15 million SPL
+          tokens have zero perp access. We open the long tail.
         </h2>
 
         <div className="pitch-matrix-wrap">
