@@ -133,15 +133,27 @@ function Slide01OneLiner(_: SlideProps) {
         <ul className="pitch-hero-bullets">
           <li>
             <span className="pitch-hero-bullet-num mono">60 sec</span>
-            <span className="pitch-hero-bullet-text">to launch a market on any SPL token · no team approval, no auction</span>
+            <span className="pitch-hero-bullet-text">
+              Anyone can launch a perp market on any SPL token in about
+              a minute. No team approval, no auction, no $20M stake to
+              get in the door.
+            </span>
           </li>
           <li>
             <span className="pitch-hero-bullet-num mono">15M+</span>
-            <span className="pitch-hero-bullet-text">tokens incumbents refuse to list</span>
+            <span className="pitch-hero-bullet-text">
+              SPL tokens have zero perp access today. Jupiter, Drift,
+              and Hyperliquid all curate ~50 blue chips — we open the
+              other 15 million.
+            </span>
           </li>
           <li>
             <span className="pitch-hero-bullet-num mono">Apache 2.0</span>
-            <span className="pitch-hero-bullet-text">fully open source · 22 public repos · fork it tomorrow</span>
+            <span className="pitch-hero-bullet-text">
+              Every program, SDK, keeper, and frontend is open source
+              across 22 public repos. Fork the whole stack and run
+              your own venue tomorrow.
+            </span>
           </li>
         </ul>
         <div className="pitch-divider" />
@@ -229,12 +241,11 @@ function Slide02Team(_: SlideProps) {
             />
             <div className="pitch-team-name">Khubair</div>
             <div className="pitch-team-role">Co-founder · Product</div>
-            <p className="pitch-team-bio">
-              Owns product direction, security review, and external
-              positioning. Web2 startup background, now Solana product
-              co-founder. Member of Superteam UK; won one of Toly&apos;s
-              public bounties on pre-audit critical bug review.
-            </p>
+            <ul className="pitch-team-bullets">
+              <li>Owns product direction, security review, and external positioning</li>
+              <li>Web2 startup background; Solana product co-founder and Superteam UK member</li>
+              <li>Won one of Toly&apos;s public bounties on pre-audit critical bug review</li>
+            </ul>
             <p className="pitch-team-links mono">
               <a
                 href="https://x.com/dcc_crypto"
@@ -262,30 +273,30 @@ function Slide02Team(_: SlideProps) {
             />
             <div className="pitch-team-name">Squid</div>
             <div className="pitch-team-role">Co-founder · Community</div>
-            <p className="pitch-team-bio">
-              Owns community strategy, project management, and the
-              daily &ldquo;vibe code&rdquo; that benefits Percolator.
-              Built{" "}
-              <a
-                className="pitch-team-bio-link"
-                href="https://github.com/0x-SquidSol/percolator-buyback"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                percolator-buyback
-              </a>
-              {" "}and{" "}
-              <a
-                className="pitch-team-bio-link"
-                href="https://github.com/0x-SquidSol/percolator-locker"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                percolator-locker
-              </a>
-              . 3 years in Solana; winner of Toly&apos;s Percolator
-              bounty.
-            </p>
+            <ul className="pitch-team-bullets">
+              <li>Owns community strategy, project management, and daily &ldquo;vibe code&rdquo;</li>
+              <li>3 years building on Solana; winner of Toly&apos;s Percolator bounty</li>
+              <li>
+                Shipped{" "}
+                <a
+                  className="pitch-team-bio-link"
+                  href="https://github.com/0x-SquidSol/percolator-buyback"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  percolator-buyback
+                </a>
+                {" "}and{" "}
+                <a
+                  className="pitch-team-bio-link"
+                  href="https://github.com/0x-SquidSol/percolator-locker"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  percolator-locker
+                </a>
+              </li>
+            </ul>
             <p className="pitch-team-links mono">
               <a
                 href="https://x.com/0xSquid_Sol"
@@ -313,12 +324,11 @@ function Slide02Team(_: SlideProps) {
             />
             <div className="pitch-team-name">Claude</div>
             <div className="pitch-team-role">Lead engineering · AI pair-programmer</div>
-            <p className="pitch-team-bio">
-              Owns most of the production code the co-founders direct:
-              Rust programs, TypeScript SDK and frontend, tests, Kani
-              proof drafts. Anthropic&apos;s Claude (Opus 4.7) running
-              in Claude Code. Reviews PRs. Doesn&apos;t sleep.
-            </p>
+            <ul className="pitch-team-bullets">
+              <li>Owns most of the production code: Rust programs, TypeScript SDK, frontend, tests, Kani proofs</li>
+              <li>Anthropic&apos;s Claude (Opus 4.7) running in Claude Code</li>
+              <li>Reviews PRs. Doesn&apos;t sleep.</li>
+            </ul>
           </div>
         </div>
 
@@ -2316,6 +2326,32 @@ export default function PitchPage() {
           line-height: 1.55;
           color: rgba(255,255,255,0.6);
           margin: 0;
+        }
+
+        .pitch-team-bullets {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.45rem;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.85rem;
+          line-height: 1.5;
+          color: rgba(255,255,255,0.62);
+        }
+
+        .pitch-team-bullets li {
+          padding-left: 0.9rem;
+          position: relative;
+        }
+
+        .pitch-team-bullets li::before {
+          content: "·";
+          position: absolute;
+          left: 0;
+          color: rgba(34,211,238,0.7);
+          font-weight: 700;
         }
 
         .pitch-team-links {
