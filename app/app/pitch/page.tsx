@@ -88,8 +88,8 @@ function NumberCounter({
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 //
-// 15 slides, ordered per Cap (Superteam UK) feedback 2026-04-30 plus
-// Toly Signal + Formal Verification expansion slides:
+// 16 slides, ordered per Cap (Superteam UK) feedback 2026-04-30 plus
+// Toly Signal + Formal Verification + Problem expansion slides:
 //   "i recommend doing one-liner / team / traction as your first 3 slides"
 //   "don't have taglines - have a proper sentence which is the tldr of your
 //    traction with a time frame"
@@ -139,13 +139,67 @@ function Slide01OneLiner(_: SlideProps) {
           </li>
           <li>
             <span className="pitch-hero-bullet-num mono">Apache 2.0</span>
-            <span className="pitch-hero-bullet-text">fully open source · 17 public repos · fork it tomorrow</span>
+            <span className="pitch-hero-bullet-text">fully open source · 22 public repos · fork it tomorrow</span>
           </li>
         </ul>
         <div className="pitch-divider" />
         <p className="pitch-url">percolator.trade</p>
       </div>
       <div className="pitch-bg-grid" aria-hidden />
+    </div>
+  );
+}
+
+// ─── Slide · Problem ─────────────────────────────────────────────────────────
+
+function SlideProblem(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Problem</div>
+        <h2 className="pitch-title">
+          Solana has 15M+ tokens. Only ~50 have a perp market. The other
+          15 million are gated by team approval, auctions, or capital
+          locks most builders can&apos;t clear.
+        </h2>
+
+        <div className="pitch-opp-compare">
+          <div className="pitch-opp-row">
+            <div className="pitch-opp-row-header">
+              <span className="pitch-opp-tag">Jupiter / Drift</span>
+              <span className="pitch-opp-row-stat mono">Curated</span>
+              <span className="pitch-opp-row-detail">
+                Team-gated whitelist · blue chips only · centralized listing
+              </span>
+            </div>
+          </div>
+
+          <div className="pitch-opp-row">
+            <div className="pitch-opp-row-header">
+              <span className="pitch-opp-tag">Hyperliquid HIP-3</span>
+              <span className="pitch-opp-row-stat mono">500K HYPE</span>
+              <span className="pitch-opp-row-detail">
+                ~$20M+ stake to deploy a perp · prices out every long-tail builder
+              </span>
+            </div>
+          </div>
+
+          <div className="pitch-opp-row">
+            <div className="pitch-opp-row-header">
+              <span className="pitch-opp-tag pitch-opp-tag-cyan">Result</span>
+              <span className="pitch-opp-row-stat mono">15M+ shut out</span>
+              <span className="pitch-opp-row-detail">
+                Every token with a live DEX pool — no perp access today
+              </span>
+            </div>
+          </div>
+
+          <div className="pitch-opp-callout">
+            The perp surface on Solana is a permissioned bottleneck. We
+            open it.
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -159,7 +213,7 @@ function Slide02Team(_: SlideProps) {
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
           Two co-founders and an AI pair-programmer shipped Percolator
-          from zero to mainnet-ready with 422 formal proofs and zero
+          from zero to mainnet-ready with 500+ formal proofs and zero
           outside capital.
         </h2>
 
@@ -261,20 +315,20 @@ function Slide02Team(_: SlideProps) {
               Owns most of the production code the co-founders direct:
               Rust programs, TypeScript SDK and frontend, tests, Kani
               proof drafts. Anthropic&apos;s Claude (Opus 4.7) running
-              in Claude Code; funded by pump.fun creator rewards.
-              Reviews PRs. Doesn&apos;t sleep.
+              in Claude Code. Reviews PRs. Doesn&apos;t sleep.
             </p>
           </div>
         </div>
 
         <p className="pitch-team-footer">
-          Toly authored the protocol math and a reference program. We
-          took it from research to mainnet — building the on-chain
-          product layer (LP vault, dispute resolution, transferable
-          Token-2022 NFT positions, withdrawal queue, audit-crank
-          invariants, admin lifecycle tooling — 49 fork-only handlers
-          and 51 fork-only instructions past the reference) plus the
-          SDK, indexer, keeper fleet, and frontend.
+          Toly built the on-chain Solana reference program and the
+          protocol math behind it — all his. We forked the engine and
+          built the product layer around it (LP vault, dispute
+          resolution, transferable Token-2022 NFT positions, withdrawal
+          queue, audit-crank invariants, admin lifecycle tooling — 49
+          fork-only handlers, 51 fork-only instructions, 187 wrapper
+          commits past divergence) plus the SDK, indexer, keeper fleet,
+          and frontend.
         </p>
       </div>
     </div>
@@ -346,13 +400,13 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-traction-mini-row">
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={422} />
+              <NumberCounter target={500} suffix="+" />
             </div>
             <div className="pitch-traction-mini-label">Kani formal proofs (all green)</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={17} />
+              <NumberCounter target={22} />
             </div>
             <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
           </div>
@@ -420,13 +474,14 @@ function Slide04Sprint(_: SlideProps) {
                 Pre-audit hardening — ongoing, every day
               </div>
               <p className="pitch-solution-desc">
-                Continuous self-audit. The proof suite has grown to 422
-                Kani proofs (replacing the prior 349). Ongoing
-                line-by-line deep audit against upstream produces a port
-                queue of findings, applied as they surface — ahead of
-                external firm engagement. Customers said audit posture
-                was the #1 blocker for putting real capital on a
-                long-tail market.
+                Continuous self-audit. The proof suite has grown to
+                500+ Kani proofs across engine + wrapper + stake. 36
+                pre-audit hardening PRs merged in 4 days closing every
+                deep-audit CRITICAL finding. Ongoing line-by-line deep
+                audit against upstream produces a port queue of findings,
+                applied as they surface — ahead of external firm
+                engagement. Customers said audit posture was the #1
+                blocker for putting real capital on a long-tail market.
               </p>
             </div>
           </div>
@@ -452,12 +507,11 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          Devnet open today at percolator.trade — connect wallet, deposit
-          USDC (faucet), open a leveraged long, close at PnL, fees split
-          four ways on-chain. Mainnet program is in OSS-contributor
-          closed beta running the first SOL/USDC Hyperp; public mainnet
-          opens once the external audit (quotes received, not yet
-          engaged) clears.
+          Closed beta on mainnet today running the first SOL/USDC
+          Hyperp — connect wallet, deposit USDC, open a leveraged long,
+          close at PnL, fees split four ways on-chain in the same
+          transaction. Public mainnet opens once the external audit
+          (quotes received, not yet engaged) clears.
         </h2>
 
         <div className="pflow-wrap">
@@ -552,7 +606,8 @@ function Slide05Product(_: SlideProps) {
 
         <div className="pitch-create-footer">
           Position is a Token-2022 NFT. First transferable perp
-          position on Solana. Closed beta on mainnet at percolator.trade.
+          position on Solana. Closed beta on mainnet at
+          mainnet.percolatorlaunch.com.
         </div>
       </div>
     </div>
@@ -732,15 +787,16 @@ function Slide07Opportunity(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Opportunity</div>
         <h2 className="pitch-title">
-          Solana perp volume runs $2–4B per month across ~50 blue-chip
-          tokens; 15 million tokens have zero perp access today.
+          Solana perp volume runs in the tens of billions per month
+          across ~50 blue-chip tokens (Jupiter + Drift combined); 15
+          million tokens have zero perp access today.
         </h2>
 
         <div className="pitch-opp-compare">
           <div className="pitch-opp-row">
             <div className="pitch-opp-row-header">
               <span className="pitch-opp-tag">Today</span>
-              <span className="pitch-opp-row-stat mono">$2–4B / month</span>
+              <span className="pitch-opp-row-stat mono">$20B+ / month</span>
               <span className="pitch-opp-row-detail">
                 ~50 tokens · all blue chips · contested
               </span>
@@ -781,7 +837,7 @@ function Slide08Competitors(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Competitors</div>
         <h2 className="pitch-title">
-          No major Solana perp DEX opens long-tail markets permissionlessly. Hyperliquid does — but only via a HIP-1 dutch auction (historically up to $19M+ per market). We are the long-tail-native option on Solana.
+          No major Solana perp DEX opens long-tail markets permissionlessly. Hyperliquid does — but only via HIP-3, which requires staking 500K HYPE (~$20M+) just to deploy a perp DEX. We are the long-tail-native option on Solana.
         </h2>
         <div className="pitch-matrix-wrap">
           <table className="pitch-matrix">
@@ -804,7 +860,7 @@ function Slide08Competitors(_: SlideProps) {
               </tr>
               <tr>
                 <td className="pitch-matrix-feature">Permissionless markets</td>
-                <td className="pitch-matrix-no">HIP-1 auction-gated</td>
+                <td className="pitch-matrix-no">HIP-3 stake-gated ($20M+)</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
@@ -820,7 +876,7 @@ function Slide08Competitors(_: SlideProps) {
                 <td className="pitch-matrix-feature">Oracle flexibility (Pyth + DEX EWMA + admin push)</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">Pyth-only</td>
-                <td className="pitch-matrix-no">Pyth-only</td>
+                <td className="pitch-matrix-no">Pyth + Switchboard</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
               </tr>
               <tr>
@@ -839,7 +895,7 @@ function Slide08Competitors(_: SlideProps) {
               </tr>
               <tr>
                 <td className="pitch-matrix-feature">Market-creator fee share</td>
-                <td className="pitch-matrix-no">per HIP-1</td>
+                <td className="pitch-matrix-no">per HIP-3 builder split</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
@@ -903,9 +959,9 @@ function Slide09WhyNow(_: SlideProps) {
             </svg>
             <div className="pitch-whynow-num mono">SIMD-0266</div>
             <div className="pitch-whynow-label">
-              Activated April 2026. Pinocchio-token instructions are 18×
-              cheaper. Long-tail per-trade economics only work after this
-              change.
+              Activated April 2026. Pinocchio-token instructions are
+              ~19× cheaper (95–98% reduction). Long-tail per-trade
+              economics only work after this change.
             </div>
           </div>
           <div className="pitch-whynow-stat">
@@ -947,11 +1003,11 @@ function Slide09WhyNow(_: SlideProps) {
                 strokeLinejoin="round"
               />
             </svg>
-            <div className="pitch-whynow-num mono">$793M</div>
+            <div className="pitch-whynow-num mono">$15B+</div>
             <div className="pitch-whynow-label">
-              Hyperliquid OI in 3 months proved demand for permissionless
-              perps. HIP-1 prices most creators out (auction has cleared
-              up to $19M+ per market). Long-tail supply on Solana is empty.
+              Hyperliquid OI by end of 2025 proved demand for permissionless
+              perps. HIP-3 prices most creators out (500K HYPE ≈ $20M+ stake
+              just to deploy a perp DEX). Long-tail supply on Solana is empty.
             </div>
           </div>
         </div>
@@ -960,8 +1016,8 @@ function Slide09WhyNow(_: SlideProps) {
           closed beta on mainnet · audit quotes received → reactivate
           devnet + engage audit firm → audit clears → public mainnet
           launch with first 10 creator-led markets seeded by
-          revenue-share rebates → Jupiter / Birdeye / pump.fun routing
-          once on-chain volume validates.
+          revenue-share rebates → Jupiter / Birdeye routing once
+          on-chain volume validates.
         </div>
       </div>
     </div>
@@ -989,7 +1045,7 @@ function Slide10Roadmap(_: SlideProps) {
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase cyan">Q3 2026</div>
             <div className="pitch-roadmap-name">Public mainnet</div>
-            <div className="pitch-roadmap-desc">Audit complete, Jupiter / Birdeye, pump.fun creator markets</div>
+            <div className="pitch-roadmap-desc">Audit complete, Jupiter / Birdeye routing, first 10 creator-led markets</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
@@ -1047,7 +1103,7 @@ function Slide11Risks(_: SlideProps) {
               Pre-audit hardening is ongoing every day — continuous
               deep self-audit against upstream produces a port queue
               we apply as findings surface, ahead of external firm
-              engagement. 422 Kani proofs verify risk-engine invariants
+              engagement. 500+ Kani proofs verify risk-engine invariants
               before any auditor starts.
             </p>
           </div>
@@ -1152,7 +1208,7 @@ function Slide13Contact(_: SlideProps) {
         >
           Closed beta is restricted to a small group of open-source
           contributors, pre-audit. Fork the code under Apache 2.0 across
-          all 17 public repos, or DM us on X. We answer.
+          all 22 public repos, or DM us on X. We answer.
         </p>
         <div className="pitch-contact-grid">
           <div className="pitch-contact-card">
@@ -1276,12 +1332,12 @@ function SlideTolyStory(_: SlideProps) {
         <p className="pitch-toly-footer">
           Toly authored the protocol math and the reference program
           (github.com/aeyakovenko/percolator-prog) — the H + A/K risk
-          engine. We took it from research to a production system on
+          engine. We forked it and built the product around it for
           Solana mainnet: extending the on-chain program with LP vault,
           dispute resolution, transferable NFT positions, withdrawal
           queue, audit-crank invariant checking, and admin lifecycle
           tooling — 49 fork-only handlers, 51 fork-only instructions,
-          134 wrapper commits past the divergence point. Plus the SDK,
+          187 wrapper commits past the divergence point. Plus the SDK,
           indexer, keeper fleet, and frontend. Both co-founders have
           each won one of his public bounties.
         </p>
@@ -1299,12 +1355,12 @@ function SlideKaniProofs(_: SlideProps) {
         <div className="pitch-label">Formal Verification</div>
         <h2 className="pitch-title">
           Kani proves protocol invariants hold across every possible
-          input. 422 proofs, all green, before any auditor starts.
+          input. 500+ proofs, all green, before any auditor starts.
         </h2>
 
         <div className="pitch-kani-callout">
           <div className="pitch-kani-callout-num mono">
-            <NumberCounter target={422} />
+            <NumberCounter target={500} suffix="+" />
           </div>
           <div className="pitch-kani-callout-label">
             formal proofs · all green · same model-checking technology
@@ -1357,7 +1413,7 @@ function SlideKaniProofs(_: SlideProps) {
               <div className="pitch-kani-vs-cell-label">Jupiter Perps</div>
             </div>
             <div className="pitch-kani-vs-cell pitch-kani-vs-cell-us">
-              <div className="pitch-kani-vs-cell-num mono">422</div>
+              <div className="pitch-kani-vs-cell-num mono">500+</div>
               <div className="pitch-kani-vs-cell-label">Percolator</div>
             </div>
           </div>
@@ -1371,20 +1427,21 @@ function SlideKaniProofs(_: SlideProps) {
 
 const SLIDES = [
   { id: 1, title: "One-Liner", component: Slide01OneLiner },
-  { id: 2, title: "Team", component: Slide02Team },
-  { id: 3, title: "Toly Signal", component: SlideTolyStory },
-  { id: 4, title: "Traction", component: Slide03Traction },
-  { id: 5, title: "Hackathon Engineering Sprint", component: Slide04Sprint },
-  { id: 6, title: "Formal Verification", component: SlideKaniProofs },
-  { id: 7, title: "Demo Product", component: Slide05Product },
-  { id: 8, title: "Business Model", component: Slide06Money },
-  { id: 9, title: "Opportunity", component: Slide07Opportunity },
-  { id: 10, title: "Competitors", component: Slide08Competitors },
-  { id: 11, title: "GTM & Why Now", component: Slide09WhyNow },
-  { id: 12, title: "Roadmap", component: Slide10Roadmap },
-  { id: 13, title: "Risks", component: Slide11Risks },
-  { id: 14, title: "Next Steps", component: Slide12NextSteps },
-  { id: 15, title: "Contact", component: Slide13Contact },
+  { id: 2, title: "Problem", component: SlideProblem },
+  { id: 3, title: "Team", component: Slide02Team },
+  { id: 4, title: "Toly Signal", component: SlideTolyStory },
+  { id: 5, title: "Traction", component: Slide03Traction },
+  { id: 6, title: "Hackathon Engineering Sprint", component: Slide04Sprint },
+  { id: 7, title: "Formal Verification", component: SlideKaniProofs },
+  { id: 8, title: "Demo Product", component: Slide05Product },
+  { id: 9, title: "Business Model", component: Slide06Money },
+  { id: 10, title: "Opportunity", component: Slide07Opportunity },
+  { id: 11, title: "Competitors", component: Slide08Competitors },
+  { id: 12, title: "GTM & Why Now", component: Slide09WhyNow },
+  { id: 13, title: "Roadmap", component: Slide10Roadmap },
+  { id: 14, title: "Risks", component: Slide11Risks },
+  { id: 15, title: "Next Steps", component: Slide12NextSteps },
+  { id: 16, title: "Contact", component: Slide13Contact },
 ];
 
 const TOTAL_SLIDES = SLIDES.length;
