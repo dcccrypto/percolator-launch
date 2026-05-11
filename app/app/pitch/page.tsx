@@ -1043,9 +1043,9 @@ function SlideRoadmapAsk(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Roadmap & Ask</div>
         <h2 className="pitch-title">
-          Public mainnet opens in Q3 once the audit clears. We&apos;re
-          targeting over $50M in daily volume by Q4 and aiming to be
-          the default rail for every-token perps by 2027.
+          Public mainnet opens in Q3 once the audit clears. We scale
+          to $50M+ daily volume through 2027 and aim to be the default
+          rail for every-token perps.
         </h2>
 
         <div className="pitch-roadmap">
@@ -1063,14 +1063,14 @@ function SlideRoadmapAsk(_: SlideProps) {
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q4 2026</div>
-            <div className="pitch-roadmap-name">$50M+ daily volume</div>
-            <div className="pitch-roadmap-desc">Cross-margining, composable CPI oracle</div>
+            <div className="pitch-roadmap-name">50+ markets live</div>
+            <div className="pitch-roadmap-desc">Creator-led listings ramp, rev-share to LPs flowing, first cohort scaling</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase cyan">2027</div>
-            <div className="pitch-roadmap-name">Default rail</div>
-            <div className="pitch-roadmap-desc">Every-token perps as default for any new SPL</div>
+            <div className="pitch-roadmap-name">$50M+ daily, default rail</div>
+            <div className="pitch-roadmap-desc">Cross-margining, composable CPI oracle, every-token perps as default</div>
           </div>
         </div>
 
