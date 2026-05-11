@@ -647,7 +647,7 @@ function Slide06Money(_: SlideProps) {
               <div className="pitch-money-pill">LP vault</div>
               <div className="pitch-money-pill">Creator</div>
               <div className="pitch-money-pill pitch-money-pill-cyan">
-                Protocol → PERC stakers
+                Protocol treasury
               </div>
               <div className="pitch-money-pill">Insurance reserve</div>
             </div>
@@ -1152,9 +1152,9 @@ function SlideRoadmapAsk(_: SlideProps) {
               Strategic capital, sized to the partnership.
             </div>
             <div className="pitch-ask-card-sub">
-              SAFE, token warrant on PERC, or LP co-investment. We
-              care more about the partner than the paper. Shipping with
-              or without capital — the right partner shortcuts audit,
+              SAFE, LP co-investment, or bespoke equity. We care more
+              about the partner than the paper. Shipping with or
+              without capital — the right partner shortcuts audit,
               market-maker bootstrap, and creator acquisition.
             </div>
           </div>
