@@ -218,9 +218,10 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two co-founders and an AI pair-programmer shipped Percolator
-          from zero to mainnet-ready with 500+ formal proofs and zero
-          outside capital.
+          Two Solana founders who each won Toly&apos;s public bounties,
+          plus an AI pair-programmer. Shipped Percolator to
+          mainnet-ready with 500+ formal proofs and zero outside
+          capital.
         </h2>
 
         <div className="pitch-team-grid pitch-team-grid-three">
@@ -884,9 +885,9 @@ function SlideProof(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Proof</div>
         <h2 className="pitch-title">
-          We&apos;ve shipped three things this hackathon — and proved
-          the math holds with 500+ formal proofs before any auditor
-          starts.
+          Customers told us audit posture and transferable positions
+          were the #1 blockers. We shipped both this hackathon — plus
+          500+ formal proofs before any auditor starts.
         </h2>
 
         <div className="pitch-solution-stack">
