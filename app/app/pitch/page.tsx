@@ -533,9 +533,11 @@ function Slide05Product(_: SlideProps) {
         </div>
 
         <div className="pitch-create-footer">
-          Position is a Token-2022 NFT. First transferable perp
-          position on Solana. Closed beta on mainnet at
-          mainnet.percolatorlaunch.com.
+          Position is a Token-2022 NFT — first transferable perp
+          position on Solana. The LP vault is the counterparty (passive
+          vAMM, same model as Jupiter&apos;s JLP): no active market
+          makers required, no microstructure dependency. Closed beta on
+          mainnet at mainnet.percolatorlaunch.com.
         </div>
       </div>
     </div>
@@ -794,7 +796,8 @@ function Slide09WhyNow(_: SlideProps) {
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          Three catalysts in one year. The window opens now.
+          Three catalysts in one year. The window is open — and
+          we&apos;re shipping into it, not waiting for it to be perfect.
         </div>
       </div>
     </div>
@@ -1042,9 +1045,10 @@ function SlideMarket(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Market</div>
         <h2 className="pitch-title">
-          Solana perp volume runs $20B+/mo across ~50 blue-chip tokens.
-          15 million tokens have zero perp access today. We&apos;re the
-          only one opening that long tail.
+          Solana perp volume averages $25B+/mo (peaked $65B in Oct 2025,
+          per DeFiLlama) across ~50 blue-chip tokens. 15 million tokens
+          have zero perp access today. We&apos;re the only one opening
+          that long tail.
         </h2>
 
         <div className="pitch-matrix-wrap">
