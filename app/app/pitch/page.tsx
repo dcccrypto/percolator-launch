@@ -131,24 +131,10 @@ function Slide01OneLiner(_: SlideProps) {
           Permissionless perpetual futures on Solana.
         </p>
         <p className="pitch-hero-body">
-          Anyone can launch a perp market on any SPL token in about
-          60 seconds, with no team approval and no $20M stake to
-          clear. The leading Solana perp DEXes today cover around
-          fifty blue-chip tokens between them. Over 15 million other
-          SPL tokens have no perp access at all. That&apos;s the long
-          tail we open.
+          Anyone launches a perp market on any SPL token in about 60
+          seconds. That opens leverage on the 15 million Solana tokens
+          that have no perp access today.
         </p>
-        <div className="pitch-hero-ctas">
-          <a
-            className="pitch-hero-cta pitch-hero-cta-primary"
-            href="https://github.com/dcccrypto"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            See the code on GitHub
-            <span className="pitch-hero-cta-arrow" aria-hidden>→</span>
-          </a>
-        </div>
         <p className="pitch-url">percolator.trade</p>
       </div>
       <div className="pitch-bg-grid" aria-hidden />
@@ -164,44 +150,33 @@ function SlideProblem(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Problem</div>
         <h2 className="pitch-title">
-          Fifty Solana tokens have a perp market. Fifteen million
-          don&apos;t.
+          Most Solana tokens can&apos;t be traded with leverage.
         </h2>
 
         <div className="pitch-opp-compare">
           <div className="pitch-opp-row">
             <div className="pitch-opp-row-header">
-              <span className="pitch-opp-tag">Jupiter / Drift</span>
-              <span className="pitch-opp-row-stat mono">Curated</span>
+              <span className="pitch-opp-tag">Today</span>
+              <span className="pitch-opp-row-stat mono">~50 tokens</span>
               <span className="pitch-opp-row-detail">
-                Team-gated whitelist, blue chips only, centralized listing.
+                The handful of blue chips with a perp market on Jupiter, Drift, Pacifica, or Hyperliquid.
               </span>
             </div>
           </div>
 
           <div className="pitch-opp-row">
             <div className="pitch-opp-row-header">
-              <span className="pitch-opp-tag">Hyperliquid HIP-3</span>
-              <span className="pitch-opp-row-stat mono">500K HYPE</span>
+              <span className="pitch-opp-tag pitch-opp-tag-cyan">The gap</span>
+              <span className="pitch-opp-row-stat mono">15M+ tokens</span>
               <span className="pitch-opp-row-detail">
-                Around $20M in stake to deploy a single perp DEX. Prices out every long-tail builder.
-              </span>
-            </div>
-          </div>
-
-          <div className="pitch-opp-row">
-            <div className="pitch-opp-row-header">
-              <span className="pitch-opp-tag pitch-opp-tag-cyan">Result</span>
-              <span className="pitch-opp-row-stat mono">15M+ shut out</span>
-              <span className="pitch-opp-row-detail">
-                Every token with a live DEX pool. No perp access today.
+                Every other SPL token. Creators can&apos;t list them. Traders can&apos;t go long or short with leverage.
               </span>
             </div>
           </div>
 
           <div className="pitch-opp-callout">
-            Today&apos;s perp market on Solana is a small permissioned
-            slice. We open it up.
+            Solana perps already do $25 billion a month across that
+            small slice. The rest is uncaptured.
           </div>
         </div>
       </div>
@@ -218,12 +193,11 @@ function Slide02Team(_: SlideProps) {
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
           Two Solana founders, each holding one of Toly&apos;s public
-          bounties on Percolator, plus an AI pair-programmer that
-          writes most of the code. We shipped to mainnet closed beta
-          with 500+ formal proofs and no outside capital.
+          bounties on Percolator. Shipped to mainnet closed beta with
+          no outside capital.
         </h2>
 
-        <div className="pitch-team-grid pitch-team-grid-three">
+        <div className="pitch-team-grid pitch-team-grid-two">
           <div className="pitch-team-card">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -307,21 +281,6 @@ function Slide02Team(_: SlideProps) {
               </a>
             </p>
           </div>
-          <div className="pitch-team-card">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="https://github.com/anthropics.png?size=200"
-              alt="Claude (Anthropic)"
-              className="pitch-team-pfp"
-            />
-            <div className="pitch-team-name">Claude</div>
-            <div className="pitch-team-role">Lead engineering · AI pair-programmer</div>
-            <ul className="pitch-team-bullets">
-              <li>Owns most of the production code: Rust programs, TypeScript SDK, frontend, tests, Kani proofs</li>
-              <li>Anthropic&apos;s Claude (Opus 4.7) running in Claude Code</li>
-              <li>Reviews PRs. Doesn&apos;t sleep.</li>
-            </ul>
-          </div>
         </div>
 
         <p className="pitch-team-footer">
@@ -348,11 +307,82 @@ function Slide03Traction(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Traction · On-Chain</div>
+        <div className="pitch-label">Traction</div>
         <h2 className="pitch-title">
-          220 perp markets on devnet from 100+ creators, and the first
-          SOL/USDC market live on mainnet in closed beta.
+          Solana&apos;s co-founder backs the work. Over 100 creators
+          have already shipped on top of it.
         </h2>
+
+        <div className="pitch-toly-photo-grid pitch-toly-photo-grid-compact">
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Squid bug fix, April 29"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo1.jpg"
+              alt="Toly tweet quote-RTing Squid's GitHub issue: 'big brain bug'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Apr 29</span>
+              <span>Squid&apos;s KeeperCrank fix</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Khubair bounty 3 critical, May 7"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo2.jpg"
+              alt="Toly tweet with brain emojis on Khubair's bounty 3 critical issue"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · May 7</span>
+              <span>Khubair&apos;s bounty 3 critical</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — percolator-stake repo signal, Feb 19"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo3.jpg"
+              alt="Toly tweet RTing dcccrypto/percolator-stake: 'Look, a contribution! Don't trust, verify!'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Feb 19</span>
+              <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Percolator is a job creator, Feb 13"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo4.jpg"
+              alt="Toly tweet: 'Percolator is a job creator'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Feb 13</span>
+              <span>&ldquo;Percolator is a job creator&rdquo;</span>
+            </div>
+          </a>
+        </div>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
           <div className="pitch-traction-network-card pitch-traction-network-card-wide">
@@ -403,15 +433,9 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-traction-mini-row">
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={500} suffix="+" />
+              <NumberCounter target={100} suffix="+" />
             </div>
-            <div className="pitch-traction-mini-label">Kani formal proofs (all green)</div>
-          </div>
-          <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={22} />
-            </div>
-            <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
+            <div className="pitch-traction-mini-label">Waitlist signups · first 48 hours</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
@@ -421,9 +445,9 @@ function Slide03Traction(_: SlideProps) {
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={100} suffix="+" />
+              <NumberCounter target={22} />
             </div>
-            <div className="pitch-traction-mini-label">Waitlist signups · first 48 hours</div>
+            <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">$0</div>
@@ -1103,15 +1127,14 @@ const SLIDES = [
   { id: 1, title: "One-Liner", component: Slide01OneLiner },
   { id: 2, title: "Problem", component: SlideProblem },
   { id: 3, title: "Team", component: Slide02Team },
-  { id: 4, title: "Toly Signal", component: SlideTolyStory },
-  { id: 5, title: "Traction", component: Slide03Traction },
-  { id: 6, title: "Hackathon Sprint", component: SlideProof },
-  { id: 7, title: "Demo Product", component: Slide05Product },
-  { id: 8, title: "Business Model", component: Slide06Money },
-  { id: 9, title: "Market", component: SlideMarket },
-  { id: 10, title: "GTM & Why Now", component: Slide09WhyNow },
-  { id: 11, title: "Roadmap & Ask", component: SlideRoadmapAsk },
-  { id: 12, title: "Contact", component: Slide13Contact },
+  { id: 4, title: "Traction", component: Slide03Traction },
+  { id: 5, title: "Hackathon Sprint", component: SlideProof },
+  { id: 6, title: "Demo Product", component: Slide05Product },
+  { id: 7, title: "Business Model", component: Slide06Money },
+  { id: 8, title: "Market", component: SlideMarket },
+  { id: 9, title: "GTM & Why Now", component: Slide09WhyNow },
+  { id: 10, title: "Roadmap & Ask", component: SlideRoadmapAsk },
+  { id: 11, title: "Contact", component: Slide13Contact },
 ];
 
 const TOTAL_SLIDES = SLIDES.length;
@@ -2135,8 +2158,8 @@ export default function PitchPage() {
 
         .pitch-traction-mini-row {
           display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 0.65rem;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.75rem;
         }
 
         @media (max-width: 720px) {
@@ -2673,6 +2696,23 @@ export default function PitchPage() {
           grid-template-columns: repeat(4, 1fr);
           gap: 0.75rem;
           margin-bottom: 1rem;
+        }
+
+        .pitch-toly-photo-grid-compact {
+          gap: 0.5rem;
+          margin-bottom: 0.85rem;
+        }
+
+        .pitch-toly-photo-grid-compact .pitch-toly-photo {
+          padding: 0.4rem;
+        }
+
+        .pitch-toly-photo-grid-compact .pitch-toly-photo img {
+          aspect-ratio: 4 / 3;
+        }
+
+        .pitch-toly-photo-grid-compact .pitch-toly-photo-cap {
+          font-size: 0.58rem;
         }
 
         @media (max-width: 900px) {
