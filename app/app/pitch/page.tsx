@@ -557,7 +557,7 @@ function Slide06Money(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Revenue</div>
+        <div className="pitch-label">Business Model</div>
         <h2 className="pitch-title">
           0.1–1% per trade. Splits four ways on-chain in the same
           transaction. &gt;95% gross margin — no market makers to pay.
@@ -632,7 +632,7 @@ function Slide09WhyNow(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Why Now</div>
+        <div className="pitch-label">GTM & Why Now</div>
         <h2 className="pitch-title">
           SIMD-0266 and Token-2022 both landed in 2026, making per-trade
           economics work for long-tail tokens for the first time.
@@ -883,7 +883,7 @@ function SlideProof(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Proof</div>
+        <div className="pitch-label">Hackathon Sprint</div>
         <h2 className="pitch-title">
           Customers told us audit posture and transferable positions
           were the #1 blockers. We shipped both this hackathon — plus
@@ -1097,16 +1097,16 @@ function SlideRoadmapAsk(_: SlideProps) {
 // ─── Slide Registry ───────────────────────────────────────────────────────────
 
 const SLIDES = [
-  { id: 1, title: "Hook", component: Slide01OneLiner },
+  { id: 1, title: "One-Liner", component: Slide01OneLiner },
   { id: 2, title: "Problem", component: SlideProblem },
-  { id: 3, title: "Why Now", component: Slide09WhyNow },
-  { id: 4, title: "Demo Product", component: Slide05Product },
-  { id: 5, title: "Why Us", component: Slide02Team },
-  { id: 6, title: "Toly Signal", component: SlideTolyStory },
-  { id: 7, title: "Proof", component: SlideProof },
-  { id: 8, title: "Traction", component: Slide03Traction },
+  { id: 3, title: "Team", component: Slide02Team },
+  { id: 4, title: "Toly Signal", component: SlideTolyStory },
+  { id: 5, title: "Traction", component: Slide03Traction },
+  { id: 6, title: "Hackathon Sprint", component: SlideProof },
+  { id: 7, title: "Demo Product", component: Slide05Product },
+  { id: 8, title: "Business Model", component: Slide06Money },
   { id: 9, title: "Market", component: SlideMarket },
-  { id: 10, title: "Business Model", component: Slide06Money },
+  { id: 10, title: "GTM & Why Now", component: Slide09WhyNow },
   { id: 11, title: "Roadmap & Ask", component: SlideRoadmapAsk },
   { id: 12, title: "Contact", component: Slide13Contact },
 ];
