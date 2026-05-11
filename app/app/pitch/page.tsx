@@ -352,9 +352,10 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          220 markets created on devnet across three program versions,
-          all green. Mainnet is deployed but private until an external
-          audit (quotes received, not yet engaged) clears.
+          220 markets created on devnet across three deployment tiers,
+          all green. 100+ waitlist signups in the first 48 hours.
+          Mainnet is deployed but private until an external audit
+          (quotes received, not yet engaged) clears.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -381,7 +382,7 @@ function Slide03Traction(_: SlideProps) {
                 <div className="pitch-traction-network-num mono">
                   <NumberCounter target={3} />
                 </div>
-                <div className="pitch-traction-network-label">program versions</div>
+                <div className="pitch-traction-network-label">deployment tiers</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
@@ -389,11 +390,11 @@ function Slide03Traction(_: SlideProps) {
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
-              Devnet markets created across three program versions
-              (verifiable on chain). Mainnet program is deployed but
-              private — open only to a small group of open-source
-              contributors until the external audit (quotes received,
-              not yet engaged) clears.
+              136 + 12 + 72 markets across small / medium / large slab
+              tiers — all verifiable on chain. Mainnet program is
+              deployed but private, open only to a small group of
+              open-source contributors until the external audit (quotes
+              received, not yet engaged) clears.
             </div>
           </div>
         </div>
@@ -416,6 +417,12 @@ function Slide03Traction(_: SlideProps) {
               <NumberCounter target={3400} suffix="+" />
             </div>
             <div className="pitch-traction-mini-label">Organic X followers</div>
+          </div>
+          <div className="pitch-traction-mini">
+            <div className="pitch-traction-mini-num mono">
+              <NumberCounter target={100} suffix="+" />
+            </div>
+            <div className="pitch-traction-mini-label">Waitlist signups · first 48 hours</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">$0</div>
@@ -552,8 +559,9 @@ function Slide06Money(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Business Model</div>
         <h2 className="pitch-title">
-          We charge 0.1–1% per trade across every market, splitting fees
-          four ways on-chain. Gross margin &gt;95% after Solana compute.
+          0.1–1% per trade, split four ways on-chain in the same
+          transaction. &gt;95% gross margin — no off-chain claims, no
+          market makers to pay, no rebate burn.
         </h2>
 
         <div className="pitch-money-flow">
@@ -672,13 +680,12 @@ function Slide06Money(_: SlideProps) {
         </div>
 
         <div className="pitch-money-scale-wrap">
-          <div className="pitch-money-scale-title">Scale path · protocol fees only · projected scenarios</div>
+          <div className="pitch-money-scale-title">Scale path · daily protocol fees at 0.1% rate</div>
           <table className="pitch-money-scale">
             <thead>
               <tr>
                 <th>Markets</th>
                 <th>Avg daily vol / market</th>
-                <th>Protocol fee (0.1%)</th>
                 <th>Daily protocol fees</th>
               </tr>
             </thead>
@@ -686,19 +693,11 @@ function Slide06Money(_: SlideProps) {
               <tr>
                 <td className="mono">100</td>
                 <td className="mono">$500K</td>
-                <td className="mono">0.1%</td>
                 <td className="mono pitch-money-scale-result">$50K</td>
               </tr>
               <tr>
                 <td className="mono">1,000</td>
-                <td className="mono">$500K</td>
-                <td className="mono">0.1%</td>
-                <td className="mono pitch-money-scale-result">$500K</td>
-              </tr>
-              <tr>
-                <td className="mono">1,000</td>
                 <td className="mono">$1M</td>
-                <td className="mono">0.1%</td>
                 <td className="mono pitch-money-scale-result">$1M</td>
               </tr>
             </tbody>
@@ -1045,10 +1044,11 @@ function SlideMarket(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Market</div>
         <h2 className="pitch-title">
-          Solana perp volume averages $25B+/mo (peaked $65B in Oct 2025,
-          per DeFiLlama) across ~50 blue-chip tokens. 15 million tokens
-          have zero perp access today. We&apos;re the only one opening
-          that long tail.
+          Solana perp volume averages $25B+/mo (DeFiLlama). Pacifica
+          just overtook Jupiter as the #1 Solana perp DEX — proving the
+          space is wide open. But Pacifica, Jupiter, Drift, and
+          Hyperliquid all still curate. 15 million SPL tokens have zero
+          perp access. We open the long tail.
         </h2>
 
         <div className="pitch-matrix-wrap">
@@ -1119,8 +1119,8 @@ function SlideRoadmapAsk(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Roadmap & Ask</div>
         <h2 className="pitch-title">
-          Public mainnet Q3 after audit, $50M+ daily volume Q4. Open to
-          strategic capital sized to the partnership.
+          Public mainnet Q3 after audit. $50M+ daily volume by Q4.
+          Default rail for every-token perps by 2027.
         </h2>
 
         <div className="pitch-roadmap">
@@ -1156,19 +1156,19 @@ function SlideRoadmapAsk(_: SlideProps) {
               Strategic capital, sized to the partnership.
             </div>
             <div className="pitch-ask-card-sub">
-              SAFE, LP co-investment, or bespoke equity. We care more
-              about the partner than the paper. Shipping with or
-              without capital — the right partner shortcuts audit,
-              market-maker bootstrap, and creator acquisition.
+              SAFE, LP co-investment, or bespoke equity. We&apos;re
+              shipping with or without capital — the right partner
+              shortcuts audit, LP-vault bootstrap, and creator
+              acquisition.
             </div>
           </div>
           <div className="pitch-ask-card">
-            <div className="pitch-ask-card-label mono">Where it goes · Risks we&apos;re solving</div>
+            <div className="pitch-ask-card-label mono">Where it goes</div>
             <ul className="pitch-ask-list">
-              <li>External audit + bug bounty (mitigates audit-timing risk)</li>
-              <li>Market-maker bootstrap on first 10 markets (mitigates liquidity-bootstrap risk)</li>
-              <li>Creator acquisition via rev-share rebates (mitigates liquidity-bootstrap risk)</li>
-              <li>Two technical hires: matching + risk research</li>
+              <li>External audit + bug bounty program</li>
+              <li>LP-vault bootstrap on first 10 creator-led markets</li>
+              <li>Creator acquisition · rev-share rebates, not paid spend</li>
+              <li>Two technical hires · matching + risk research</li>
             </ul>
           </div>
         </div>
