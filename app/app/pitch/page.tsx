@@ -147,14 +147,6 @@ function Slide01OneLiner(_: SlideProps) {
               other 15 million.
             </span>
           </li>
-          <li>
-            <span className="pitch-hero-bullet-num mono">Apache 2.0</span>
-            <span className="pitch-hero-bullet-text">
-              Every program, SDK, keeper, and frontend is open source
-              across 22 public repos. Fork the whole stack and run
-              your own venue tomorrow.
-            </span>
-          </li>
         </ul>
         <div className="pitch-divider" />
         <p className="pitch-url">percolator.trade</p>
