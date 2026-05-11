@@ -794,10 +794,8 @@ function SlideTolyStory(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Origin · Toly Signal</div>
         <h2 className="pitch-title">
-          Solana&apos;s co-founder Anatoly Yakovenko wrote the protocol
-          math behind Percolator and open-sourced a reference program.
-          He still publicly engages with our work. We built the
-          product on top of what he started.
+          Solana&apos;s co-founder wrote the protocol math behind
+          Percolator and still publicly engages with our work.
         </h2>
 
         <div className="pitch-toly-photo-grid">
@@ -891,10 +889,9 @@ function SlideProof(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Hackathon Sprint</div>
         <h2 className="pitch-title">
-          Customers told us their two biggest blockers were audit
-          posture and the ability to transfer positions. We shipped
-          both during this hackathon, plus 500+ formal proofs that
-          hold before any auditor starts.
+          Audit posture and transferable positions were the two biggest
+          customer blockers. We shipped both this hackathon, plus 500+
+          formal proofs.
         </h2>
 
         <div className="pitch-solution-stack">
@@ -1342,7 +1339,7 @@ export default function PitchPage() {
           display: flex;
           align-items: center;
           justify-content: center;
-          overflow: hidden;
+          overflow-y: auto;
           padding: 0 0 80px 0;
         }
 
@@ -1350,7 +1347,7 @@ export default function PitchPage() {
           width: 100%;
           max-width: 1000px;
           margin: 0 auto;
-          padding: 2rem 2.5rem;
+          padding: 1.5rem 2.5rem;
         }
 
         .pitch-center {
@@ -2670,19 +2667,25 @@ export default function PitchPage() {
 
         .pitch-toly-photo-grid {
           display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 0.85rem;
-          margin-bottom: 1.25rem;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.75rem;
+          margin-bottom: 1rem;
+        }
+
+        @media (max-width: 900px) {
+          .pitch-toly-photo-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
 
         .pitch-toly-photo {
           display: flex;
           flex-direction: column;
-          gap: 0.5rem;
+          gap: 0.4rem;
           background: rgba(255, 255, 255, 0.025);
           border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 12px;
-          padding: 0.6rem;
+          padding: 0.5rem;
           text-decoration: none;
           color: inherit;
           transition:
@@ -2701,10 +2704,10 @@ export default function PitchPage() {
 
         .pitch-toly-photo img {
           width: 100%;
-          aspect-ratio: 4 / 3;
+          aspect-ratio: 3 / 2;
           object-fit: contain;
           background: rgba(0, 0, 0, 0.35);
-          border-radius: 6px;
+          border-radius: 8px;
           display: block;
         }
 
@@ -2832,43 +2835,47 @@ export default function PitchPage() {
           background: rgba(255, 255, 255, 0.02);
           border: 1px solid rgba(255, 255, 255, 0.06);
           border-radius: 12px;
-          padding: 1rem 1.25rem;
+          padding: 0.7rem 1rem;
+          margin-top: 0.85rem;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.55rem;
         }
 
         .pitch-kani-vs-title {
-          font-size: 0.7rem;
+          font-size: 0.68rem;
           font-weight: 700;
           letter-spacing: 0.15em;
           text-transform: uppercase;
           color: rgba(153, 69, 255, 0.7);
-          margin-bottom: 0.85rem;
+          margin-bottom: 0.6rem;
         }
 
         .pitch-kani-vs-row {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          gap: 0.85rem;
+          gap: 0.6rem;
         }
 
         .pitch-kani-vs-cell {
           background: rgba(0, 0, 0, 0.25);
           border: 1px solid rgba(255, 255, 255, 0.06);
           border-radius: 8px;
-          padding: 0.85rem;
+          padding: 0.55rem 0.4rem;
           text-align: center;
         }
 
         .pitch-kani-vs-cell-num {
-          font-size: 1.7rem;
+          font-size: 1.3rem;
           font-weight: 700;
           color: rgba(255, 255, 255, 0.4);
           line-height: 1;
-          margin-bottom: 0.3rem;
+          margin-bottom: 0.25rem;
         }
 
         .pitch-kani-vs-cell-label {
           font-family: 'Inter', sans-serif;
-          font-size: 0.75rem;
+          font-size: 0.7rem;
           color: rgba(255, 255, 255, 0.5);
         }
 
