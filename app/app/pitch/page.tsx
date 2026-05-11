@@ -366,7 +366,9 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
           <div className="pitch-traction-network-card pitch-traction-network-card-wide">
             <div className="pitch-traction-network-header">
-              <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">Devnet · live program</div>
+              <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">
+                Devnet · Feb 28 – Mar 31, 2026
+              </div>
               <a
                 className="pitch-traction-network-link mono"
                 href="https://explorer.solana.com/address/FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD?cluster=devnet"
@@ -382,25 +384,27 @@ function Slide03Traction(_: SlideProps) {
                   <NumberCounter target={220} />
                 </div>
                 <div className="pitch-traction-network-label">markets created</div>
+                <div className="pitch-traction-network-sublabel mono">over 5 weeks</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
                   <NumberCounter target={100} suffix="+" />
                 </div>
                 <div className="pitch-traction-network-label">creators</div>
+                <div className="pitch-traction-network-sublabel mono">seeding LP vaults</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
                 <div className="pitch-traction-network-label">success rate</div>
+                <div className="pitch-traction-network-sublabel mono">across 3 tiers</div>
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
               136 + 12 + 72 markets across small, medium, and large slab
-              tiers, all verifiable on chain. Each market seeds its own
-              LP vault using the same passive vAMM model as Jupiter&apos;s
-              JLP. The mainnet program stays private until the external
-              audit clears. We&apos;ve received quotes but haven&apos;t
-              engaged the firm yet.
+              tiers between February 28 and March 31, 2026, all verifiable
+              on chain. Each market seeds its own LP vault using the same
+              passive vAMM model as Jupiter&apos;s JLP. The mainnet program
+              stays private until the external audit clears.
             </div>
           </div>
         </div>
@@ -2253,6 +2257,14 @@ export default function PitchPage() {
           font-family: 'Inter', sans-serif;
           font-size: 0.75rem;
           color: rgba(255, 255, 255, 0.55);
+        }
+
+        .pitch-traction-network-sublabel {
+          font-size: 0.62rem;
+          color: rgba(34, 211, 238, 0.65);
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          margin-top: 0.25rem;
         }
 
         .pitch-traction-network-meta {
