@@ -173,10 +173,8 @@ function SlideProblem(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Problem</div>
         <h2 className="pitch-title">
-          Solana hosts more than 15 million SPL tokens. Around fifty of
-          them have a perp market. Everyone else has to clear a team
-          approval process or a capital requirement most builders
-          can&apos;t meet.
+          Fifty Solana tokens have a perp market. Fifteen million
+          don&apos;t.
         </h2>
 
         <div className="pitch-opp-compare">
@@ -336,13 +334,9 @@ function Slide02Team(_: SlideProps) {
         </div>
 
         <p className="pitch-team-footer">
-          Anatoly Yakovenko, Solana&apos;s co-founder, wrote the
-          protocol math behind Percolator and shipped a reference
-          program as open source. We forked his engine and built the
-          rest of the stack on top of it: the trading app, the Token-2022
-          position NFTs, the keeper fleet, the SDK, and the frontend.
-          Both of our co-founders have won one of his public bounties
-          along the way.
+          Anatoly Yakovenko wrote the protocol math and open-sourced a
+          reference program. We forked his engine and built everything
+          else on top: trading app, keepers, SDK, frontend.
         </p>
       </div>
     </div>
@@ -365,11 +359,8 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          Over a hundred creators seeded LP vaults across 220 perp
-          markets on devnet between February 28 and March 31, 2026.
-          The hackathon sprint that followed shipped our first SOL/USDC
-          market to mainnet closed beta. The waitlist crossed 100
-          signups in its first 48 hours.
+          220 perp markets on devnet from 100+ creators, and the first
+          SOL/USDC market live on mainnet in closed beta.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -457,12 +448,8 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          The closed beta is live on mainnet today, running the first
-          SOL/USDC Hyperp market. Connect a Solana wallet, deposit
-          USDC, open a leveraged long, then close at PnL. Fees settle
-          on-chain in the same transaction. Public mainnet opens once
-          the external audit clears. We have quotes in hand and
-          haven&apos;t engaged the firm yet.
+          The first SOL/USDC market is live on mainnet in closed beta.
+          Public access opens once the audit clears.
         </h2>
 
         <div className="pflow-wrap">
@@ -885,17 +872,11 @@ function SlideTolyStory(_: SlideProps) {
         </div>
 
         <p className="pitch-toly-footer">
-          Toly wrote the protocol math and shipped a reference program
-          at github.com/aeyakovenko/percolator-prog, called the H + A/K
-          risk engine. We forked it and built the product on top for
-          Solana mainnet, extending the on-chain program with the LP
-          vault, dispute resolution, transferable NFT positions, the
-          withdrawal queue, audit-crank invariant checking, and admin
-          lifecycle tooling. That works out to 49 fork-only handlers,
-          51 fork-only instructions, and 187 wrapper commits past the
-          divergence point, plus the SDK, indexer, keeper fleet, and
-          frontend. Both co-founders have each won one of his public
-          bounties.
+          Toly wrote the H + A/K risk engine and shipped a reference
+          program at github.com/aeyakovenko/percolator-prog. We forked
+          it and shipped 51 fork-only instructions and 187 wrapper
+          commits of product on top: the LP vault, dispute resolution,
+          NFT positions, withdrawal queue, and the rest of the stack.
         </p>
       </div>
     </div>
@@ -992,12 +973,9 @@ function SlideMarket(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Market</div>
         <h2 className="pitch-title">
-          Solana perp volume averages over $25 billion per month per
-          DeFiLlama, and Pacifica recently overtook Jupiter as the
-          largest Solana venue. Every leading perp DEX, including
-          Hyperliquid on its own L1, curates its listings. Fifteen
-          million SPL tokens have no perp access at all. We open the
-          long tail.
+          Solana perps do over $25 billion a month. Every venue
+          curates its listings. We open the 15 million tokens that
+          have no perp access.
         </h2>
 
         <div className="pitch-matrix-wrap">
@@ -1100,7 +1078,7 @@ function SlideRoadmapAsk(_: SlideProps) {
         </div>
 
         <div className="pitch-ask-grid" style={{ marginTop: "2rem" }}>
-          <div className="pitch-ask-card">
+          <div className="pitch-ask-card pitch-ask-card-primary">
             <div className="pitch-ask-card-label mono">Open to</div>
             <div className="pitch-ask-card-headline">
               Strategic capital, sized to the partnership.
@@ -1420,7 +1398,7 @@ export default function PitchPage() {
         .pitch-url {
           font-family: 'JetBrains Mono', monospace;
           font-size: 0.85rem;
-          color: rgba(34,211,238,0.5);
+          color: rgba(34,211,238,0.75);
           letter-spacing: 0.05em;
         }
 
@@ -1459,7 +1437,7 @@ export default function PitchPage() {
         .pitch-solution-stack {
           display: flex;
           flex-direction: column;
-          gap: 1.25rem;
+          gap: 0.85rem;
         }
 
         .pitch-solution-item {
@@ -1468,8 +1446,8 @@ export default function PitchPage() {
           align-items: flex-start;
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 10px;
-          padding: 1.25rem 1.5rem;
+          border-radius: 12px;
+          padding: 0.95rem 1.25rem;
         }
 
         .pitch-solution-num {
@@ -1510,11 +1488,12 @@ export default function PitchPage() {
 
         /* ── Live Product flow ── */
         .pitch-create-footer {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1rem;
-          font-weight: 700;
-          color: #22D3EE;
-          letter-spacing: -0.01em;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.92rem;
+          font-weight: 500;
+          color: rgba(255, 255, 255, 0.65);
+          letter-spacing: 0;
+          line-height: 1.5;
           margin-top: 1.5rem;
         }
 
@@ -1650,7 +1629,7 @@ export default function PitchPage() {
         .pitch-whynow-stat {
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 1.5rem;
           text-align: center;
         }
@@ -1767,7 +1746,7 @@ export default function PitchPage() {
           font-family: 'Inter Tight', 'Inter', sans-serif;
           font-weight: 700;
           font-size: 0.85rem;
-          color: rgba(255,255,255,0.55);
+          color: rgba(255,255,255,0.8);
           padding: 0.75rem 1rem;
           text-align: center;
         }
@@ -1775,7 +1754,7 @@ export default function PitchPage() {
         .pitch-matrix th:first-child { text-align: left; }
 
         .pitch-matrix tbody tr {
-          border-bottom: 1px solid rgba(255,255,255,0.05);
+          border-bottom: 1px solid rgba(255,255,255,0.08);
         }
 
         .pitch-matrix tbody tr:last-child { border-bottom: none; }
@@ -1788,7 +1767,7 @@ export default function PitchPage() {
 
         .pitch-matrix-feature {
           text-align: left !important;
-          color: rgba(255,255,255,0.7) !important;
+          color: rgba(255,255,255,0.65) !important;
           font-weight: 500;
         }
 
@@ -1811,9 +1790,11 @@ export default function PitchPage() {
 
         .pitch-matrix-sub {
           font-family: 'Inter', sans-serif;
-          font-size: 0.875rem;
-          color: rgba(255,255,255,0.4);
+          font-size: 0.9rem;
+          color: rgba(255,255,255,0.6);
           font-style: italic;
+          margin-top: 1rem;
+          line-height: 1.5;
         }
 
         /* ── Business Model ── */
@@ -1964,7 +1945,7 @@ export default function PitchPage() {
             rgba(153, 69, 255, 0.10) 0%,
             rgba(34, 211, 238, 0.10) 100%);
           border: 1px solid rgba(34, 211, 238, 0.28);
-          border-radius: 14px;
+          border-radius: 12px;
         }
 
         .pitch-revenue-hero-side {
@@ -2012,8 +1993,8 @@ export default function PitchPage() {
         .pitch-revenue-split {
           background: rgba(255, 255, 255, 0.025);
           border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 10px;
-          padding: 0.95rem 1rem;
+          border-radius: 12px;
+          padding: 1.1rem 1.15rem;
         }
 
         .pitch-revenue-split-us {
@@ -2026,7 +2007,7 @@ export default function PitchPage() {
           letter-spacing: 0.08em;
           text-transform: uppercase;
           font-weight: 700;
-          color: rgba(34, 211, 238, 0.95);
+          color: rgba(255, 255, 255, 0.72);
           margin-bottom: 0.55rem;
         }
 
@@ -2162,8 +2143,14 @@ export default function PitchPage() {
 
         .pitch-traction-mini-row {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 0.75rem;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 0.65rem;
+        }
+
+        @media (max-width: 720px) {
+          .pitch-traction-mini-row {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
 
         /* ─── Slide 3 · network proof cards ───────────────────────── */
@@ -2287,7 +2274,7 @@ export default function PitchPage() {
         .pitch-traction-mini {
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 0.9rem 1rem;
           text-align: center;
         }
@@ -2576,13 +2563,16 @@ export default function PitchPage() {
         .pitch-hero-cta-primary {
           background: linear-gradient(135deg, rgba(153, 69, 255, 0.18), rgba(34, 211, 238, 0.18));
           border-color: rgba(34, 211, 238, 0.42);
+          border-left: 3px solid #22D3EE;
           color: #fff;
+          padding-left: calc(1.4rem - 2px);
         }
 
         @media (hover: hover) {
           .pitch-hero-cta-primary:hover {
             background: linear-gradient(135deg, rgba(153, 69, 255, 0.3), rgba(34, 211, 238, 0.3));
             border-color: rgba(34, 211, 238, 0.75);
+            border-left-color: #22D3EE;
           }
         }
 
@@ -2600,11 +2590,11 @@ export default function PitchPage() {
         /* ─── Team PFPs ────────────────────────────────────────────── */
 
         .pitch-team-pfp {
-          width: 48px;
-          height: 48px;
+          width: 64px;
+          height: 64px;
           border-radius: 50%;
           border: 2px solid rgba(34, 211, 238, 0.22);
-          margin-bottom: 0.75rem;
+          margin-bottom: 0.85rem;
           display: block;
           object-fit: cover;
           background: rgba(255, 255, 255, 0.04);
@@ -2691,7 +2681,7 @@ export default function PitchPage() {
           gap: 0.5rem;
           background: rgba(255, 255, 255, 0.025);
           border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 0.6rem;
           text-decoration: none;
           color: inherit;
@@ -2810,7 +2800,7 @@ export default function PitchPage() {
         .pitch-kani-what-card {
           background: rgba(255, 255, 255, 0.025);
           border: 1px solid rgba(255, 255, 255, 0.07);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 1rem 1.1rem;
           transition: border-color 220ms ease, background 220ms ease;
         }
@@ -3008,11 +2998,21 @@ export default function PitchPage() {
 
         .pitch-ask-card-headline {
           font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1.4rem;
-          font-weight: 800;
+          font-size: 1.1rem;
+          font-weight: 700;
           color: #fff;
           margin-bottom: 0.5rem;
-          letter-spacing: -0.01em;
+          letter-spacing: -0.005em;
+          line-height: 1.35;
+        }
+
+        .pitch-ask-card-primary {
+          border-color: rgba(34, 211, 238, 0.32);
+          background: rgba(34, 211, 238, 0.04);
+        }
+
+        .pitch-ask-card-primary .pitch-ask-card-label {
+          color: rgba(34, 211, 238, 0.85);
         }
 
         .pitch-ask-card-sub {
@@ -3093,17 +3093,23 @@ export default function PitchPage() {
         /* ── Contact ── */
         .pitch-contact-grid {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 1rem;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.85rem;
           width: 100%;
-          max-width: 720px;
+          max-width: 860px;
           margin: 0 auto;
+        }
+
+        @media (max-width: 720px) {
+          .pitch-contact-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
 
         .pitch-contact-card {
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 1rem 1.25rem;
           text-align: center;
         }
@@ -3367,6 +3373,10 @@ export default function PitchPage() {
           display: flex;
           flex-direction: column;
           gap: 0.85rem;
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 12px;
+          padding: 0.95rem 1.1rem;
         }
 
         .pitch-opp-row-header {
@@ -3446,13 +3456,14 @@ export default function PitchPage() {
 
         .pitch-opp-callout {
           font-family: 'Inter', sans-serif;
-          font-size: 0.85rem;
-          color: rgba(255, 255, 255, 0.5);
+          font-size: 0.92rem;
+          color: rgba(255, 255, 255, 0.7);
           font-style: italic;
-          border-left: 2px solid rgba(34, 211, 238, 0.4);
+          border-left: 3px solid #22D3EE;
           padding-left: 1rem;
           max-width: 580px;
-          line-height: 1.5;
+          line-height: 1.55;
+          margin-top: 0.5rem;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -3493,9 +3504,9 @@ export default function PitchPage() {
            ───────────────────────────────────────────────────────────── */
 
         .pitch-catalyst-icon {
-          width: 28px;
-          height: 28px;
-          color: rgba(153, 69, 255, 0.7);
+          width: 32px;
+          height: 32px;
+          color: rgba(153, 69, 255, 0.85);
           margin-bottom: 0.85rem;
           display: block;
           margin-left: auto;
