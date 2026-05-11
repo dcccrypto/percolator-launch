@@ -141,15 +141,6 @@ function Slide01OneLiner(_: SlideProps) {
         <div className="pitch-hero-ctas">
           <a
             className="pitch-hero-cta pitch-hero-cta-primary"
-            href="https://mainnet.percolatorlaunch.com"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Try the closed beta
-            <span className="pitch-hero-cta-arrow" aria-hidden>→</span>
-          </a>
-          <a
-            className="pitch-hero-cta"
             href="https://github.com/dcccrypto"
             target="_blank"
             rel="noopener noreferrer"
@@ -366,7 +357,9 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
           <div className="pitch-traction-network-card pitch-traction-network-card-wide">
             <div className="pitch-traction-network-header">
-              <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">Devnet · live program</div>
+              <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">
+                Devnet · Feb 28 – Mar 31, 2026
+              </div>
               <a
                 className="pitch-traction-network-link mono"
                 href="https://explorer.solana.com/address/FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD?cluster=devnet"
@@ -382,25 +375,27 @@ function Slide03Traction(_: SlideProps) {
                   <NumberCounter target={220} />
                 </div>
                 <div className="pitch-traction-network-label">markets created</div>
+                <div className="pitch-traction-network-sublabel mono">over 5 weeks</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
                   <NumberCounter target={100} suffix="+" />
                 </div>
                 <div className="pitch-traction-network-label">creators</div>
+                <div className="pitch-traction-network-sublabel mono">seeding LP vaults</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
                 <div className="pitch-traction-network-label">success rate</div>
+                <div className="pitch-traction-network-sublabel mono">across 3 tiers</div>
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
               136 + 12 + 72 markets across small, medium, and large slab
-              tiers, all verifiable on chain. Each market seeds its own
-              LP vault using the same passive vAMM model as Jupiter&apos;s
-              JLP. The mainnet program stays private until the external
-              audit clears. We&apos;ve received quotes but haven&apos;t
-              engaged the firm yet.
+              tiers between February 28 and March 31, 2026, all verifiable
+              on chain. Each market seeds its own LP vault using the same
+              passive vAMM model as Jupiter&apos;s JLP. The mainnet program
+              stays private until the external audit clears.
             </div>
           </div>
         </div>
@@ -1043,9 +1038,9 @@ function SlideRoadmapAsk(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Roadmap & Ask</div>
         <h2 className="pitch-title">
-          Public mainnet opens in Q3 once the audit clears. We&apos;re
-          targeting over $50M in daily volume by Q4 and aiming to be
-          the default rail for every-token perps by 2027.
+          Public mainnet opens in Q3 once the audit clears. We scale
+          to $50M+ daily volume through 2027 and aim to be the default
+          rail for every-token perps.
         </h2>
 
         <div className="pitch-roadmap">
@@ -1063,14 +1058,14 @@ function SlideRoadmapAsk(_: SlideProps) {
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q4 2026</div>
-            <div className="pitch-roadmap-name">$50M+ daily volume</div>
-            <div className="pitch-roadmap-desc">Cross-margining, composable CPI oracle</div>
+            <div className="pitch-roadmap-name">50+ markets live</div>
+            <div className="pitch-roadmap-desc">Creator-led listings ramp, rev-share to LPs flowing, first cohort scaling</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase cyan">2027</div>
-            <div className="pitch-roadmap-name">Default rail</div>
-            <div className="pitch-roadmap-desc">Every-token perps as default for any new SPL</div>
+            <div className="pitch-roadmap-name">$50M+ daily, default rail</div>
+            <div className="pitch-roadmap-desc">Cross-margining, composable CPI oracle, every-token perps as default</div>
           </div>
         </div>
 
@@ -2253,6 +2248,14 @@ export default function PitchPage() {
           font-family: 'Inter', sans-serif;
           font-size: 0.75rem;
           color: rgba(255, 255, 255, 0.55);
+        }
+
+        .pitch-traction-network-sublabel {
+          font-size: 0.62rem;
+          color: rgba(34, 211, 238, 0.65);
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          margin-top: 0.25rem;
         }
 
         .pitch-traction-network-meta {
