@@ -88,31 +88,25 @@ function NumberCounter({
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 //
-// 12 slides, story-first arc reordered 2026-05-11:
-// Hook → Problem → Why Now → Demo → Why Us → Toly Signal → Proof →
-// Traction → Market → Business Model → Roadmap & Ask → Contact.
-// Earlier 16-slide layout (per Cap (Superteam UK) feedback 2026-04-30):
-//   "i recommend doing one-liner / team / traction as your first 3 slides"
-//   "don't have taglines - have a proper sentence which is the tldr of your
-//    traction with a time frame"
+// 12 slides, restructured 2026-05-12 after senior-strategist audit + Reza review.
+// Story arc: Hook → Problem → Team → Traction → Math → Product → Business →
+// Moat → Why Now → GTM → Roadmap+Ask → Contact.
 //
-// Structure follows Cap's 13-slide framework, with two expansion slides
-// (Toly Signal at #3, Formal Verification at #6):
 //   1  One-Liner
-//   2  Team
-//   3  Traction (TL;DR sentence + growth chart)
-//   4  Hackathon Engineering Sprint
-//   5  Demo Product
-//   6  Business Model + Unit Economics
-//   7  Opportunity
-//   8  Competitors
-//   9  GTM & Why Now
-//  10  Roadmap
-//  11  Risks
-//  12  Next Steps (Ask + Exit Path)
-//  13  Contact
+//   2  Problem (hack history: Mango, Drift v1, JELLY, Drift v2)
+//   3  Team (roles re-titled; Toly attribution at bottom; stat strip)
+//   4  Traction (devnet stats first; Toly grid below; 71 creators, 3,200 followers)
+//   5  How the Math Works (A/K index, per-market isolation, warmup-H — leads
+//      with Toly's contribution, not Kani proofs)
+//   6  Demo Product (architectural primitives; screenshot placeholders)
+//   7  Business Model (scenario table, fee routing today vs Q3, unit econ)
+//   8  Moat (answers "where does value accrue when code is open?")
+//   9  Why Now (Drift Apr 1 hack reframe; long-tail empty; shared-LP failing)
+//  10  Go-to-Market (book depth, MM strategy, who you trade against)
+//  11  Roadmap, Risks & Ask ($2M SAFE @ $20M post-money cap, 3 risks)
+//  12  Contact
 //
-// Source of truth: percolator-ops/content/pitch-deck-copy.md (v6)
+// Source of truth: this file. Previous v6 copy doc superseded.
 // ──────────────────────────────────────────────────────────────────────────
 
 interface SlideProps {
@@ -128,12 +122,15 @@ function Slide01OneLiner(_: SlideProps) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo.png" alt="Percolator" className="pitch-logo" />
         <p className="pitch-hero-headline">
-          Permissionless perpetual futures on Solana.
+          Permissionless perpetual futures on Solana &mdash; with risk
+          math that prevents shared-LP wipeouts.
         </p>
         <p className="pitch-hero-body">
-          Anyone launches a perp market on any SPL token in about 60
-          seconds. That opens leverage on the 15 million Solana tokens
-          that have no perp access today.
+          Fewer than 50 Solana-native SPL tokens have a perp anywhere.
+          Hundreds more have real spot liquidity but no leverage venue,
+          because every existing perp DEX uses a shared LP pool and has
+          to curate. Percolator isolates LP capital per market, so the
+          long tail can finally list.
         </p>
         <p className="pitch-url">percolator.trade</p>
       </div>
@@ -150,35 +147,57 @@ function SlideProblem(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Problem</div>
         <h2 className="pitch-title">
-          Most Solana tokens can&apos;t be traded with leverage.
+          Every Solana perp DEX uses a shared LP pool. That&apos;s why
+          they&apos;re all curated, and why three of them have been
+          drained.
         </h2>
 
-        <div className="pitch-opp-compare">
-          <div className="pitch-opp-row">
-            <div className="pitch-opp-row-header">
-              <span className="pitch-opp-tag">Today</span>
-              <span className="pitch-opp-row-stat mono">~50 tokens</span>
-              <span className="pitch-opp-row-detail">
-                The handful of blue chips with a perp market on Jupiter, Drift, Pacifica, or Hyperliquid.
-              </span>
-            </div>
-          </div>
-
-          <div className="pitch-opp-row">
-            <div className="pitch-opp-row-header">
-              <span className="pitch-opp-tag pitch-opp-tag-cyan">The gap</span>
-              <span className="pitch-opp-row-stat mono">15M+ tokens</span>
-              <span className="pitch-opp-row-detail">
-                Every other SPL token. Creators can&apos;t list them. Traders can&apos;t go long or short with leverage.
-              </span>
-            </div>
-          </div>
-
-          <div className="pitch-opp-callout">
-            Solana perps already do $25 billion a month across that
-            small slice. The rest is uncaptured.
-          </div>
+        <div className="pitch-matrix-wrap">
+          <table className="pitch-matrix">
+            <thead>
+              <tr>
+                <th className="pitch-matrix-feature">When</th>
+                <th>Venue</th>
+                <th>Loss</th>
+                <th>What broke</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="pitch-matrix-feature mono">Oct 2022</td>
+                <td>Mango Markets</td>
+                <td className="pitch-matrix-no mono">$114M</td>
+                <td>Oracle attack on thin MNGO token; shared collateral drained.</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature mono">May 2022</td>
+                <td>Drift v1</td>
+                <td className="pitch-matrix-no mono">$10.5M</td>
+                <td>vAMM cascade during Terra collapse; shared insurance failed.</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature mono">Mar 2025</td>
+                <td>Hyperliquid</td>
+                <td className="pitch-matrix-no mono">~$12M HLP</td>
+                <td>JELLY squeeze; validators manually delisted &amp; hard-coded oracle.</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature mono">Apr 2026</td>
+                <td>Drift v2</td>
+                <td className="pitch-matrix-no mono">$285M</td>
+                <td>Admin multisig socially engineered via Solana durable nonces.</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+
+        <p className="pitch-matrix-sub">
+          Solana made spot creation permissionless. Perp creation never
+          followed, because a shared LP pool externalises every listing
+          decision onto every existing LP. Drift, Jupiter, and Pacifica
+          all converge on the same 30&ndash;50 tickers by architectural
+          necessity, not by taste.
+        </p>
       </div>
     </div>
   );
@@ -192,9 +211,8 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two Solana founders, each holding one of Toly&apos;s public
-          bounties on Percolator. Shipped to mainnet closed beta with
-          no outside capital.
+          Two-person team. Each won one of Toly&apos;s public bounties
+          on Percolator. Shipped to mainnet with no outside capital.
         </h2>
 
         <div className="pitch-team-grid pitch-team-grid-two">
@@ -206,11 +224,11 @@ function Slide02Team(_: SlideProps) {
               className="pitch-team-pfp"
             />
             <div className="pitch-team-name">Khubair</div>
-            <div className="pitch-team-role">Co-founder · Product</div>
+            <div className="pitch-team-role">Co-founder · Protocol &amp; Risk</div>
             <ul className="pitch-team-bullets">
-              <li>Owns product direction, security review, and external positioning</li>
-              <li>Web2 startup background; Solana product co-founder and Superteam UK member</li>
-              <li>Won one of Toly&apos;s public bounties on pre-audit critical bug review</li>
+              <li>Shipped the wrapper engine port, SDK, indexer, and 36 pre-audit hardening PRs in four days</li>
+              <li>Won Toly&apos;s public bounty on pre-audit critical bug review</li>
+              <li>Solana product co-founder, Superteam UK member, Web2 startup background</li>
             </ul>
             <p className="pitch-team-links mono">
               <a
@@ -238,10 +256,8 @@ function Slide02Team(_: SlideProps) {
               className="pitch-team-pfp"
             />
             <div className="pitch-team-name">Squid</div>
-            <div className="pitch-team-role">Co-founder · Community</div>
+            <div className="pitch-team-role">Co-founder · Systems &amp; Liquidity</div>
             <ul className="pitch-team-bullets">
-              <li>Owns community strategy, project management, and daily &ldquo;vibe code&rdquo;</li>
-              <li>3 years building on Solana; winner of Toly&apos;s Percolator bounty</li>
               <li>
                 Shipped{" "}
                 <a
@@ -262,6 +278,8 @@ function Slide02Team(_: SlideProps) {
                   percolator-locker
                 </a>
               </li>
+              <li>Found and patched the KeeperCrank big-brain bug (Toly QRT&apos;d the fix)</li>
+              <li>3 years building on Solana; winner of Toly&apos;s Percolator bounty</li>
             </ul>
             <p className="pitch-team-links mono">
               <a
@@ -283,10 +301,38 @@ function Slide02Team(_: SlideProps) {
           </div>
         </div>
 
-        <p className="pitch-team-footer">
+        <div className="pitch-revenue-econ" style={{ marginTop: "1.5rem" }}>
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">22</div>
+            <div className="pitch-revenue-econ-label">Apache-2.0 repos</div>
+          </div>
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">187</div>
+            <div className="pitch-revenue-econ-label">wrapper commits on top of Toly&apos;s reference</div>
+          </div>
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">51</div>
+            <div className="pitch-revenue-econ-label">fork-only instructions shipped</div>
+          </div>
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">4</div>
+            <div className="pitch-revenue-econ-label">programs live on mainnet</div>
+          </div>
+        </div>
+
+        <p className="pitch-team-footer" style={{ marginTop: "1.5rem" }}>
           Anatoly Yakovenko wrote the protocol math and open-sourced a
-          reference program. We forked his engine and built everything
-          else on top: trading app, keepers, SDK, frontend.
+          reference program at{" "}
+          <a
+            href="https://github.com/aeyakovenko/percolator-prog"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            github.com/aeyakovenko/percolator-prog
+          </a>
+          . We forked his engine and built everything on top: LP vault,
+          transferable NFT positions, dispute resolution, keepers, SDK,
+          frontend.
         </p>
       </div>
     </div>
@@ -309,80 +355,9 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction</div>
         <h2 className="pitch-title">
-          Solana&apos;s co-founder backs the work. Over 100 creators
-          have already shipped on top of it.
+          220 markets shipped on devnet in 5 weeks by 71 unique
+          creators. First SOL/USDC market live on mainnet today.
         </h2>
-
-        <div className="pitch-toly-photo-grid pitch-toly-photo-grid-compact">
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Squid bug fix, April 29"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo1.jpg"
-              alt="Toly tweet quote-RTing Squid's GitHub issue: 'big brain bug'"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly · Apr 29</span>
-              <span>Squid&apos;s KeeperCrank fix</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Khubair bounty 3 critical, May 7"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo2.jpg"
-              alt="Toly tweet with brain emojis on Khubair's bounty 3 critical issue"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly · May 7</span>
-              <span>Khubair&apos;s bounty 3 critical</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — percolator-stake repo signal, Feb 19"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo3.jpg"
-              alt="Toly tweet RTing dcccrypto/percolator-stake: 'Look, a contribution! Don't trust, verify!'"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly · Feb 19</span>
-              <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Percolator is a job creator, Feb 13"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo4.jpg"
-              alt="Toly tweet: 'Percolator is a job creator'"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly · Feb 13</span>
-              <span>&ldquo;Percolator is a job creator&rdquo;</span>
-            </div>
-          </a>
-        </div>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
           <div className="pitch-traction-network-card pitch-traction-network-card-wide">
@@ -409,49 +384,142 @@ function Slide03Traction(_: SlideProps) {
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
-                  <NumberCounter target={100} suffix="+" />
+                  <NumberCounter target={71} />
                 </div>
-                <div className="pitch-traction-network-label">creators</div>
-                <div className="pitch-traction-network-sublabel mono">seeding LP vaults</div>
+                <div className="pitch-traction-network-label">unique creators</div>
+                <div className="pitch-traction-network-sublabel mono">seeding their own LP vaults</div>
               </div>
               <div className="pitch-traction-network-stat">
-                <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
-                <div className="pitch-traction-network-label">success rate</div>
-                <div className="pitch-traction-network-sublabel mono">across 3 tiers</div>
+                <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">3 tiers</div>
+                <div className="pitch-traction-network-label">all running</div>
+                <div className="pitch-traction-network-sublabel mono">136 small · 12 med · 72 large</div>
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
-              136 + 12 + 72 markets across small, medium, and large slab
-              tiers between February 28 and March 31, 2026, all verifiable
-              on chain. Each market seeds its own LP vault using the same
-              passive vAMM model as Jupiter&apos;s JLP. The mainnet program
-              stays private until the external audit clears.
+              Markets span small, medium, and large slab tiers between
+              February 28 and March 31, 2026, all verifiable on chain.
+              Each market seeds its own per-market LP vault &mdash; the
+              same passive model as Jupiter&apos;s JLP, but isolated
+              per listing.
             </div>
+          </div>
+        </div>
+
+        <div
+          className="pitch-traction-mainnet-line mono"
+          style={{
+            marginTop: "1.25rem",
+            padding: "0.85rem 1.1rem",
+            background: "rgba(34,211,238,0.05)",
+            border: "1px solid rgba(34,211,238,0.2)",
+            borderRadius: "10px",
+            fontSize: "0.85rem",
+            color: "rgba(255,255,255,0.75)",
+            lineHeight: 1.55,
+          }}
+        >
+          <strong style={{ color: "#22D3EE", fontWeight: 700 }}>
+            Mainnet · closed beta:
+          </strong>{" "}
+          SOL/USDC perp live, pinned to a Raydium CLMM pool, open to
+          OSS contributors pre-audit. Public access opens once external
+          audit clears.
+        </div>
+
+        <div className="pitch-toly-attribution-strip">
+          <div className="pitch-toly-attribution-caption mono">
+            Toly publicly engages with the work &mdash;
+          </div>
+          <div className="pitch-toly-photo-grid pitch-toly-photo-grid-compact">
+            <a
+              className="pitch-toly-photo"
+              href="https://x.com/toly"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Toly tweet — Squid bug fix, April 29"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/toly/photo1.jpg"
+                alt="Toly tweet quote-RTing Squid's GitHub issue: 'big brain bug'"
+              />
+              <div className="pitch-toly-photo-cap mono">
+                <span>@toly · Apr 29</span>
+                <span>Squid&apos;s KeeperCrank fix</span>
+              </div>
+            </a>
+            <a
+              className="pitch-toly-photo"
+              href="https://x.com/toly"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Toly tweet — Khubair bounty 3 critical, May 7"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/toly/photo2.jpg"
+                alt="Toly tweet with brain emojis on Khubair's bounty 3 critical issue"
+              />
+              <div className="pitch-toly-photo-cap mono">
+                <span>@toly · May 7</span>
+                <span>Khubair&apos;s bounty 3 critical</span>
+              </div>
+            </a>
+            <a
+              className="pitch-toly-photo"
+              href="https://x.com/toly"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Toly tweet — percolator-stake repo signal, Feb 19"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/toly/photo3.jpg"
+                alt="Toly tweet RTing dcccrypto/percolator-stake: 'Look, a contribution! Don't trust, verify!'"
+              />
+              <div className="pitch-toly-photo-cap mono">
+                <span>@toly · Feb 19</span>
+                <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
+              </div>
+            </a>
+            <a
+              className="pitch-toly-photo"
+              href="https://x.com/toly"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Toly tweet — Percolator is a job creator, Feb 13"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/toly/photo4.jpg"
+                alt="Toly tweet: 'Percolator is a job creator'"
+              />
+              <div className="pitch-toly-photo-cap mono">
+                <span>@toly · Feb 13</span>
+                <span>&ldquo;Percolator is a job creator&rdquo;</span>
+              </div>
+            </a>
           </div>
         </div>
 
         <div className="pitch-traction-mini-row">
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={100} suffix="+" />
+              <NumberCounter target={3200} />
             </div>
-            <div className="pitch-traction-mini-label">Waitlist signups · first 48 hours</div>
+            <div className="pitch-traction-mini-label">Organic X followers</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={3400} suffix="+" />
+              <NumberCounter target={100} suffix="+" />
             </div>
-            <div className="pitch-traction-mini-label">Organic X followers</div>
+            <div className="pitch-traction-mini-label">Waitlist signups · first 48h</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
               <NumberCounter target={22} />
             </div>
             <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
-          </div>
-          <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">$0</div>
-            <div className="pitch-traction-mini-label">Paid acquisition · outside capital</div>
           </div>
         </div>
       </div>
@@ -467,8 +535,8 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          The first SOL/USDC market is live on mainnet in closed beta.
-          Public access opens once the audit clears.
+          First SOL/USDC perp market live on mainnet today. Public on
+          audit clearance.
         </h2>
 
         <div className="pflow-wrap">
@@ -476,14 +544,25 @@ function Slide05Product(_: SlideProps) {
             <div className="pflow-num-wrap">
               <div className="pflow-num mono">01</div>
             </div>
-            <div className="pflow-step-title">Connect & deposit</div>
+            <div className="pflow-step-title">Per-market USDC vault</div>
             <div className="pflow-step-desc">
-              Any Solana wallet. USDC into the vault.
+              PDA <span className="mono">[b&quot;vault&quot;, slab_key]</span>.
+              Risk isolated from every other market on the protocol.
             </div>
             <div className="pflow-example-card">
-              <div className="pflow-example-label mono">deposit</div>
-              <div className="pflow-example-value mono">25.00 USDC</div>
-              <div className="pflow-example-value mono">tx confirmed</div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/product/screenshot-deposit.png"
+                alt="Mainnet deposit screen"
+                style={{
+                  width: "100%",
+                  borderRadius: "5px",
+                  display: "block",
+                  background: "rgba(255,255,255,0.04)",
+                  minHeight: "84px",
+                  objectFit: "cover",
+                }}
+              />
             </div>
           </div>
 
@@ -510,14 +589,25 @@ function Slide05Product(_: SlideProps) {
             <div className="pflow-num-wrap">
               <div className="pflow-num mono">02</div>
             </div>
-            <div className="pflow-step-title">Open leveraged position</div>
+            <div className="pflow-step-title">Position mints as Token-2022 NFT</div>
             <div className="pflow-step-desc">
-              Long or short. Up to 10×. Mark price from HYPERP.
+              Up to 10&times; leverage. First transferable perp
+              position primitive on Solana.
             </div>
             <div className="pflow-example-card">
-              <div className="pflow-example-label mono">long</div>
-              <div className="pflow-example-value mono">SOL · 5×</div>
-              <div className="pflow-example-value mono">NFT minted</div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/product/screenshot-position.png"
+                alt="Open position with NFT mint"
+                style={{
+                  width: "100%",
+                  borderRadius: "5px",
+                  display: "block",
+                  background: "rgba(255,255,255,0.04)",
+                  minHeight: "84px",
+                  objectFit: "cover",
+                }}
+              />
             </div>
           </div>
 
@@ -544,29 +634,35 @@ function Slide05Product(_: SlideProps) {
             <div className="pflow-num-wrap">
               <div className="pflow-num mono">03</div>
             </div>
-            <div className="pflow-step-title">Close & settle</div>
+            <div className="pflow-step-title">Settlement on close</div>
             <div className="pflow-step-desc">
-              Fees split four ways automatically, on-chain.
+              Fee routes to per-market insurance &rarr; LPs accrue via
+              vault crank. Q3: four-way split.
             </div>
             <div className="pflow-example-card pflow-example-card-live">
-              <div className="pflow-example-label mono">fee split</div>
-              <div className="pflow-example-value mono pflow-live-id">
-                LP vault · creator · protocol · insurance
-              </div>
-              <div className="pflow-live-dot-row">
-                <span className="pflow-live-dot" />
-                <span className="pflow-live-text mono">SETTLED</span>
-              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/product/screenshot-settle.png"
+                alt="Settlement transaction on Solana explorer"
+                style={{
+                  width: "100%",
+                  borderRadius: "5px",
+                  display: "block",
+                  background: "rgba(34,211,238,0.04)",
+                  minHeight: "84px",
+                  objectFit: "cover",
+                }}
+              />
             </div>
           </div>
         </div>
 
         <div className="pitch-create-footer">
-          Each position is a Token-2022 NFT, which makes it the first
-          transferable perp position on Solana. The LP vault sits on
-          the other side of every trade, the same model as
-          Jupiter&apos;s JLP, so we don&apos;t need active market
-          makers. Closed beta at mainnet.percolatorlaunch.com.
+          Mark price from a pinned Raydium CLMM pool with Pyth as
+          primary, per-market oracle config with deviation circuit
+          breaker. The LP vault sits on the other side of every trade
+          &mdash; JLP-style, no active market makers required. Closed
+          beta at mainnet.percolatorlaunch.com.
         </div>
       </div>
     </div>
@@ -581,57 +677,134 @@ function Slide06Money(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Business Model</div>
         <h2 className="pitch-title">
-          Each trade pays 0.1 to 1 percent. The fee splits four ways
-          on-chain in the same transaction. Gross margin sits above 95
-          percent because we don&apos;t pay market makers.
+          ~5 bps blended per trade. &gt;95% gross margin because we
+          don&apos;t pay market makers. Here&apos;s the path from one
+          market to $1M/day in protocol fees.
         </h2>
 
-        <div className="pitch-revenue-hero">
-          <div className="pitch-revenue-hero-side">
-            <div className="pitch-revenue-hero-num mono">$1M / day</div>
-            <div className="pitch-revenue-hero-tag mono">scale projection</div>
+        <div className="pitch-matrix-wrap">
+          <table className="pitch-matrix">
+            <thead>
+              <tr>
+                <th className="pitch-matrix-feature">Scenario</th>
+                <th>Active markets</th>
+                <th>Avg daily volume / market</th>
+                <th>Daily protocol revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="pitch-matrix-feature mono">Conservative · Q4 2026</td>
+                <td className="mono">10</td>
+                <td className="mono">$1M</td>
+                <td className="mono">$500</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature mono">Base · mid-2027</td>
+                <td className="mono">100</td>
+                <td className="mono">$1M</td>
+                <td className="mono">$5,000</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature mono">Stretch · 2028</td>
+                <td className="mono">1,000</td>
+                <td className="mono">$1M</td>
+                <td className="mono">$50,000</td>
+              </tr>
+              <tr>
+                <td className="pitch-matrix-feature mono pitch-matrix-us">Hyperliquid-class · 2029+</td>
+                <td className="mono pitch-matrix-us">1,000</td>
+                <td className="mono pitch-matrix-us">$20M</td>
+                <td className="mono pitch-matrix-us">$1,000,000</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p className="pitch-matrix-sub" style={{ marginTop: "0.75rem" }}>
+          Math: avg market does $X spot/day &times; 3&ndash;5&times;
+          perp-to-spot ratio &times; 5 bps fee. Break-even on operating
+          cost (~$50K/month: audit + 2 engineers + infra) at the{" "}
+          <strong>Base</strong> scenario.
+        </p>
+
+        <div
+          className="pitch-fee-routing"
+          style={{
+            marginTop: "1.5rem",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "1rem",
+          }}
+        >
+          <div
+            style={{
+              padding: "1rem 1.1rem",
+              background: "rgba(255,255,255,0.025)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: "10px",
+            }}
+          >
+            <div
+              className="mono"
+              style={{
+                fontSize: "0.7rem",
+                color: "rgba(153,69,255,0.85)",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                marginBottom: "0.5rem",
+              }}
+            >
+              Fee routing today (v12.19)
+            </div>
+            <div
+              style={{
+                fontSize: "0.85rem",
+                lineHeight: 1.55,
+                color: "rgba(255,255,255,0.7)",
+              }}
+            >
+              Trade fee &rarr; per-market insurance fund &rarr; LPs
+              accrue via vault crank. Single-stream, fully on-chain,
+              isolated per market.
+            </div>
           </div>
-          <div className="pitch-revenue-hero-desc">
-            That&apos;s daily protocol fees at a thousand active markets
-            averaging $1M in daily volume each. Roughly $365M a year
-            at modest scale, with no rebates eating into margin.
+          <div
+            style={{
+              padding: "1rem 1.1rem",
+              background: "rgba(34,211,238,0.04)",
+              border: "1px solid rgba(34,211,238,0.2)",
+              borderRadius: "10px",
+            }}
+          >
+            <div
+              className="mono"
+              style={{
+                fontSize: "0.7rem",
+                color: "rgba(34,211,238,0.85)",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                marginBottom: "0.5rem",
+              }}
+            >
+              Q3 with audit
+            </div>
+            <div
+              style={{
+                fontSize: "0.85rem",
+                lineHeight: 1.55,
+                color: "rgba(255,255,255,0.7)",
+              }}
+            >
+              Four-way split &mdash; LP vault, market creator, protocol
+              treasury, insurance &mdash; atomically on-chain in the
+              settlement transaction. Exact percentages set per market
+              at <span className="mono">CreateLpVault</span>.
+            </div>
           </div>
         </div>
 
-        <div className="pitch-revenue-splits">
-          <div className="pitch-revenue-split">
-            <div className="pitch-revenue-split-name mono">LP vault</div>
-            <p className="pitch-revenue-split-desc">
-              Passive liquidity providers earn from trader losses, the
-              same model as Jupiter&apos;s JLP. Sticky capital with no
-              active quoting needed.
-            </p>
-          </div>
-          <div className="pitch-revenue-split">
-            <div className="pitch-revenue-split-name mono">Creator</div>
-            <p className="pitch-revenue-split-desc">
-              Market launchers take a revenue share, which gives them
-              a direct incentive to bring long-tail listings along
-              with their own retail flow.
-            </p>
-          </div>
-          <div className="pitch-revenue-split pitch-revenue-split-us">
-            <div className="pitch-revenue-split-name mono">Protocol</div>
-            <p className="pitch-revenue-split-desc">
-              The treasury accrues on every trade on every market and
-              funds the audit, hiring, and growth work.
-            </p>
-          </div>
-          <div className="pitch-revenue-split">
-            <div className="pitch-revenue-split-name mono">Insurance</div>
-            <p className="pitch-revenue-split-desc">
-              A reserve that backstops liquidation deficits and bad
-              debt before LPs take any losses.
-            </p>
-          </div>
-        </div>
-
-        <div className="pitch-revenue-econ">
+        <div className="pitch-revenue-econ" style={{ marginTop: "1.5rem" }}>
           <div className="pitch-revenue-econ-stat">
             <div className="pitch-revenue-econ-num mono">&gt;95%</div>
             <div className="pitch-revenue-econ-label">gross margin per trade</div>
@@ -642,7 +815,7 @@ function Slide06Money(_: SlideProps) {
           </div>
           <div className="pitch-revenue-econ-stat">
             <div className="pitch-revenue-econ-num mono">$0</div>
-            <div className="pitch-revenue-econ-label">market-maker spend</div>
+            <div className="pitch-revenue-econ-label">market-maker rebate spend</div>
           </div>
         </div>
       </div>
@@ -656,94 +829,173 @@ function Slide09WhyNow(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">GTM & Why Now</div>
+        <div className="pitch-label">Why Now</div>
         <h2 className="pitch-title">
-          SIMD-0266 and Token-2022 both landed in 2026, making per-trade
-          economics work for long-tail tokens for the first time.
+          Solana perps lost their #2 venue six weeks ago. The long-tail
+          supply that&apos;s left has nowhere to go.
         </h2>
         <div className="pitch-whynow-stats">
           <div className="pitch-whynow-stat">
             <svg viewBox="0 0 24 24" className="pitch-catalyst-icon" aria-hidden>
               <path
-                d="M 6 8 L 12 14 L 18 8"
+                d="M 12 3 L 21 18 L 3 18 Z"
                 stroke="currentColor"
                 fill="none"
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              <path
-                d="M 6 14 L 12 20 L 18 14"
-                stroke="currentColor"
-                fill="none"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity="0.45"
-              />
+              <line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="12" cy="16" r="0.9" fill="currentColor" />
             </svg>
-            <div className="pitch-whynow-num mono">SIMD-0266</div>
+            <div className="pitch-whynow-num mono">Apr 1, 2026</div>
             <div className="pitch-whynow-label">
-              Activated April 2026. Pinocchio-token instructions are
-              about 19 times cheaper, roughly a 95 to 98 percent
-              reduction in compute. Long-tail per-trade economics
-              only work after this change.
+              Drift drained for{" "}
+              <strong style={{ color: "rgba(255,255,255,0.9)" }}>
+                $285M
+              </strong>{" "}
+              by a DPRK durable-nonce attack on its admin multisig.
+              Solana&apos;s #2 perp venue is offline pending Q2
+              relaunch. Solana perp volume dropped from $25B+/month to
+              ~$15&ndash;20B. That gap is liquidity looking for a venue.
             </div>
           </div>
           <div className="pitch-whynow-stat">
             <svg viewBox="0 0 24 24" className="pitch-catalyst-icon" aria-hidden>
-              <rect
-                x="4"
-                y="4"
-                width="16"
-                height="16"
-                rx="2"
-                stroke="currentColor"
-                fill="none"
-                strokeWidth="1.8"
-              />
-              <circle cx="12" cy="12" r="3.5" fill="currentColor" />
+              <circle cx="12" cy="12" r="9" stroke="currentColor" fill="none" strokeWidth="1.8" />
+              <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
-            <div className="pitch-whynow-num mono">Token-2022</div>
+            <div className="pitch-whynow-num mono">Shared LP keeps failing</div>
             <div className="pitch-whynow-label">
-              The standard is mature now. Transferable perp positions
-              as NFTs are possible, and we&apos;re the first to ship
-              them.
+              Hyperliquid had to manually delist JELLY and hard-code
+              its oracle in March 2025 to bail out HLP. Mango lost
+              $114M to oracle manipulation on a thin token in 2022.
+              Adrena pivoted to RWAs Nov 2025. Zeta and Mango v4 are
+              dormant. The shared-pool model is failing in public.
             </div>
           </div>
           <div className="pitch-whynow-stat">
             <svg viewBox="0 0 24 24" className="pitch-catalyst-icon" aria-hidden>
               <path
-                d="M 4 18 L 9 12 L 13 15 L 20 6"
+                d="M 3 18 L 9 14 L 13 16 L 21 6"
                 stroke="currentColor"
                 fill="none"
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              <path
-                d="M 16 6 L 20 6 L 20 10"
-                stroke="currentColor"
-                fill="none"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <circle cx="3" cy="18" r="1.2" fill="currentColor" />
+              <circle cx="9" cy="14" r="1.2" fill="currentColor" />
+              <circle cx="13" cy="16" r="1.2" fill="currentColor" />
+              <circle cx="21" cy="6" r="1.2" fill="currentColor" />
             </svg>
-            <div className="pitch-whynow-num mono">$15B+</div>
+            <div className="pitch-whynow-num mono">200&ndash;1,500 tokens</div>
             <div className="pitch-whynow-label">
-              Hyperliquid open interest by the end of 2025 proved
-              there&apos;s real demand for permissionless perps. HIP-3
-              prices most creators out though, since it takes 500K
-              HYPE (around $20M in stake) just to deploy a perp DEX.
-              Long-tail supply on Solana sits empty.
+              Solana SPL tokens with $50K+ daily spot volume that have{" "}
+              <strong style={{ color: "rgba(255,255,255,0.9)" }}>
+                no perp anywhere
+              </strong>
+              . Only ~20&ndash;25 Solana-native tokens have a live perp
+              on any Solana venue today. Pacifica leads at 51% market
+              share with ~44 crypto markets total. The supply is empty.
             </div>
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          Three catalysts in one year. The window is open, and
-          we&apos;re shipping into it rather than waiting for everything
-          to be perfect.
+          Six-week-old window. The next venue that takes long-tail
+          seriously gets the volume that used to live on Drift.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slide · GTM ─────────────────────────────────────────────────────────────
+
+function SlideGTM(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Go-to-Market</div>
+        <h2 className="pitch-title">
+          Creators acquire markets. LP vaults provide depth.
+          Traders never trade against each other.
+        </h2>
+
+        <div className="pitch-solution-stack">
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num purple">1</div>
+            <div>
+              <div className="pitch-solution-name">
+                Who you trade against
+              </div>
+              <p className="pitch-solution-desc">
+                The per-market LP vault sits on the other side of
+                every trade. There is no order book; there are no
+                makers and takers. There&apos;s a passive vault, a
+                mark price, and the risk engine. Traders deposit USDC,
+                open a position, and the vault is their counterparty
+                &mdash; same passive model as Jupiter&apos;s JLP, sized
+                per market, isolated per market.
+              </p>
+            </div>
+          </div>
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num cyan">2</div>
+            <div>
+              <div className="pitch-solution-name">
+                How book depth gets built (no rebates)
+              </div>
+              <p className="pitch-solution-desc">
+                Day-zero depth from three sources, in order: (a)
+                creator-seeded LP &mdash; the market launcher deposits
+                first, incentivised by the creator fee share their
+                market will earn; (b) Percolator-bootstrap LP from
+                raise proceeds, $50K co-deposit per cohort market in
+                Q3, recyclable as creator LP scales; (c) open LP, JLP-style,
+                anyone can deposit into any market&apos;s per-market
+                vault and mint LP tokens.
+              </p>
+            </div>
+          </div>
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num purple">3</div>
+            <div>
+              <div className="pitch-solution-name">
+                Market-maker partnerships (Q4, not day-zero)
+              </div>
+              <p className="pitch-solution-desc">
+                Once a market clears $1M/day volume, we open dedicated
+                MM slots &mdash; programmatic LP topping with tighter
+                mark-deviation tolerances, paid via priority fee share
+                on that MM&apos;s deposit.{" "}
+                <strong style={{ color: "rgba(255,255,255,0.9)" }}>
+                  No rebates. No paid spread.
+                </strong>{" "}
+                MM as priority-LP, not quote-and-take &mdash; the
+                rebate model is what ate every Drift-class venue&apos;s
+                margin. Two firms in conversation; named after audit.
+              </p>
+            </div>
+          </div>
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num cyan">4</div>
+            <div>
+              <div className="pitch-solution-name">
+                Retail acquisition through the long tail
+              </div>
+              <p className="pitch-solution-desc">
+                Creator-first GTM, not trader-first. Every long-tail
+                listing is the creator&apos;s job to attract their
+                community &mdash; the model Pump.fun proved on spot,
+                applied to perps. Creator rev-share lever: 30% creator
+                share through Q4 for the first 10 cohort markets, 20%
+                standard from Q4 open listings onward. Creator pays no
+                gas they don&apos;t recover in the first 10 trades.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -805,112 +1057,17 @@ function Slide13Contact(_: SlideProps) {
   );
 }
 
-// ─── Slide 3 · Toly Story ────────────────────────────────────────────────────
+// ─── Slide · How the Math Works ──────────────────────────────────────────────
 
-function SlideTolyStory(_: SlideProps) {
+function SlideMath(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Origin · Toly Signal</div>
+        <div className="pitch-label">How the Math Works</div>
         <h2 className="pitch-title">
-          Solana&apos;s co-founder wrote the protocol math behind
-          Percolator and still publicly engages with our work.
-        </h2>
-
-        <div className="pitch-toly-photo-grid">
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Squid bug fix, April 29"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo1.jpg"
-              alt="Toly tweet quote-RTing Squid's GitHub issue: 'big brain bug'"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly · Apr 29</span>
-              <span>Squid&apos;s KeeperCrank fix</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Khubair bounty 3 critical, May 7"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo2.jpg"
-              alt="Toly tweet with brain emojis on Khubair's bounty 3 critical issue"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly · May 7</span>
-              <span>Khubair&apos;s bounty 3 critical</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — percolator-stake repo signal, Feb 19"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo3.jpg"
-              alt="Toly tweet RTing dcccrypto/percolator-stake: 'Look, a contribution! Don't trust, verify!'"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly · Feb 19</span>
-              <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Percolator is a job creator, Feb 13"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo4.jpg"
-              alt="Toly tweet: 'Percolator is a job creator'"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly · Feb 13</span>
-              <span>&ldquo;Percolator is a job creator&rdquo;</span>
-            </div>
-          </a>
-        </div>
-
-        <p className="pitch-toly-footer">
-          Toly wrote the H + A/K risk engine and shipped a reference
-          program at github.com/aeyakovenko/percolator-prog. We forked
-          it and shipped 51 fork-only instructions and 187 wrapper
-          commits of product on top: the LP vault, dispute resolution,
-          NFT positions, withdrawal queue, and the rest of the stack.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Slide · Proof (Sprint + Formal Verification merged) ─────────────────────
-
-function SlideProof(_: SlideProps) {
-  return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner">
-        <div className="pitch-label">Hackathon Sprint</div>
-        <h2 className="pitch-title">
-          Audit posture and transferable positions were the two biggest
-          customer blockers. We shipped both this hackathon, plus 500+
-          formal proofs.
+          Toly&apos;s risk math socialises bankruptcies in O(1) &mdash;
+          no shared insurance pool, no human override, no cross-market
+          contagion.
         </h2>
 
         <div className="pitch-solution-stack">
@@ -918,12 +1075,17 @@ function SlideProof(_: SlideProps) {
             <div className="pitch-solution-num purple">1</div>
             <div>
               <div className="pitch-solution-name">
-                v12.19 mainnet upgrade, first SOL/USDC market on mainnet
+                Per-market isolation, mathematically enforced
               </div>
               <p className="pitch-solution-desc">
-                We upgraded and redeployed all four programs. The
-                SOL/USDC Hyperp market is running today in closed beta
-                against a pinned Raydium pool.
+                Every market is its own Solana account with its own
+                PDA-derived collateral vault, LP vault, and insurance
+                fund. The solvency invariant{" "}
+                <span className="mono">vault &ge; open_collateral + insurance</span>{" "}
+                is checked after every public operation. A wipeout on
+                one market is mathematically incapable of touching
+                another market&apos;s vault &mdash; it&apos;s a Solana
+                account-model constraint, not a business policy.
               </p>
             </div>
           </div>
@@ -931,12 +1093,17 @@ function SlideProof(_: SlideProps) {
             <div className="pitch-solution-num cyan">2</div>
             <div>
               <div className="pitch-solution-name">
-                Token-2022 transferable position NFTs
+                The A/K index trick (Toly&apos;s contribution)
               </div>
               <p className="pitch-solution-desc">
-                Customers asked for transferable positions, so we
-                built them as Token-2022 NFTs. These are the first
-                transferable perp positions ever shipped on Solana.
+                When a bankruptcy happens, the engine shrinks a single
+                side-level multiplier <span className="mono">A</span>{" "}
+                and credits the loss to a side-level coefficient{" "}
+                <span className="mono">K</span>. Every surviving
+                opposing-side position is scaled by the new A &mdash;
+                no per-account loop, no shared insurance drained, no
+                human override. One integer subtraction socialises the
+                loss across the entire opposing side in O(1).
               </p>
             </div>
           </div>
@@ -944,110 +1111,123 @@ function SlideProof(_: SlideProps) {
             <div className="pitch-solution-num purple">3</div>
             <div>
               <div className="pitch-solution-name">
-                500+ Kani formal-verification proofs
+                Warmup-H prevents extract-and-run
               </div>
               <p className="pitch-solution-desc">
-                Kani checks that every protocol invariant holds for
-                every possible input. We have 500+ proofs, all
-                passing. Hyperliquid, Drift, and Jupiter have none of
-                these. We also merged 36 pre-audit hardening PRs in
-                four days, closing every CRITICAL from our deep
-                self-audit.
+                Positive PnL sits in a{" "}
+                <span className="mono">reserved_pnl</span> bucket for a
+                configurable warmup window. An oracle-manipulator
+                trying to withdraw the same block hits a wall. If the
+                vault ever runs short, winners are proportionally
+                haircut rather than a single winner draining the fund.
+                It&apos;s the failure mode that took Mango and JELLY,
+                arithmetically closed off.
               </p>
             </div>
           </div>
         </div>
 
-        <div className="pitch-kani-vs">
-          <div className="pitch-kani-vs-cell">
-            <div className="pitch-kani-vs-cell-num mono">0</div>
-            <div className="pitch-kani-vs-cell-label">Hyperliquid</div>
-          </div>
-          <div className="pitch-kani-vs-cell">
-            <div className="pitch-kani-vs-cell-num mono">0</div>
-            <div className="pitch-kani-vs-cell-label">Drift</div>
-          </div>
-          <div className="pitch-kani-vs-cell">
-            <div className="pitch-kani-vs-cell-num mono">0</div>
-            <div className="pitch-kani-vs-cell-label">Jupiter Perps</div>
-          </div>
-          <div className="pitch-kani-vs-cell pitch-kani-vs-cell-us">
-            <div className="pitch-kani-vs-cell-num mono">500+</div>
-            <div className="pitch-kani-vs-cell-label">Percolator</div>
-          </div>
-        </div>
+        <p className="pitch-team-footer" style={{ marginTop: "1.5rem" }}>
+          The engine is <span className="mono">no_std</span> Rust with
+          256-bit checked arithmetic end-to-end &mdash; portable to any
+          SVM chain. 305 bounded-invariant proofs run in CI.{" "}
+          <span style={{ color: "rgba(34,211,238,0.85)" }}>
+            External audit Q3.
+          </span>
+        </p>
       </div>
     </div>
   );
 }
 
-// ─── Slide · Market (Opportunity + Competitors merged) ───────────────────────
+// ─── Slide · Moat ────────────────────────────────────────────────────────────
 
-function SlideMarket(_: SlideProps) {
+function SlideMoat(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Market</div>
+        <div className="pitch-label">Moat</div>
         <h2 className="pitch-title">
-          Solana perps do over $25 billion a month. Every venue
-          curates its listings. We open the 15 million tokens that
-          have no perp access.
+          Code is forkable. Liquidity, architecture lock-in, and
+          first-mover position per market are not.
         </h2>
 
-        <div className="pitch-matrix-wrap">
-          <table className="pitch-matrix">
-            <thead>
-              <tr>
-                <th className="pitch-matrix-feature"></th>
-                <th>Hyperliquid</th>
-                <th>Jupiter Perps</th>
-                <th>Drift</th>
-                <th className="pitch-matrix-us">Percolator</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="pitch-matrix-feature">Permissionless markets</td>
-                <td className="pitch-matrix-no">HIP-3 ($20M+ stake)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Long-tail tokens (any DEX-listed SPL)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Transferable positions (NFT)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Market-creator fee share</td>
-                <td className="pitch-matrix-no">HIP-3 builder split</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature">Open source (Apache 2.0)</td>
-                <td className="pitch-matrix-no">✗</td>
-                <td className="pitch-matrix-no">partial</td>
-                <td className="pitch-matrix-yes">✓</td>
-                <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
-              </tr>
-            </tbody>
-          </table>
+        <div className="pitch-solution-stack">
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num purple">1</div>
+            <div>
+              <div className="pitch-solution-name">
+                Liquidity is local-per-market &mdash; forks inherit
+                empty vaults
+              </div>
+              <p className="pitch-solution-desc">
+                A Percolator clone with no LPs has empty per-market
+                vaults. SushiSwap pulled 55% of Uniswap&apos;s TVL in a
+                week in 2020 by paying for it; six months later Uniswap
+                had recovered to ~2&times; the TVL because liquidity
+                and integrations decayed back to the canonical version.
+                Forking our code without LP capital is the same
+                problem at higher resolution.
+              </p>
+            </div>
+          </div>
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num cyan">2</div>
+            <div>
+              <div className="pitch-solution-name">
+                Architecture lock-in for the incumbents
+              </div>
+              <p className="pitch-solution-desc">
+                Drift, Jupiter, and Pacifica all use a single shared LP
+                pool. Pivoting to per-market isolation means migrating
+                live capital across thousands of positions, with active
+                traders inside &mdash; a product change none of them can
+                make without breaking their own users. We don&apos;t
+                have that constraint; we shipped greenfield. They can
+                copy the math, but not the migration.
+              </p>
+            </div>
+          </div>
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num purple">3</div>
+            <div>
+              <div className="pitch-solution-name">
+                First-mover per market &mdash; network effects compound
+                locally
+              </div>
+              <p className="pitch-solution-desc">
+                Once a token has a Percolator market with seeded LP and
+                a creator earning rev-share, the next fork has to
+                bootstrap that market from zero against a live one. We
+                defend market-by-market rather than needing a single
+                $1B TVL number. Long-tail compounds in our favour: the
+                more markets we onboard, the more local moats we own.
+              </p>
+            </div>
+          </div>
+          <div className="pitch-solution-item">
+            <div className="pitch-solution-num cyan">4</div>
+            <div>
+              <div className="pitch-solution-name">
+                Distribution &amp; integrations
+              </div>
+              <p className="pitch-solution-desc">
+                Aggregator routing (Jupiter, Titan), keeper networks,
+                indexers, wallet integrations &mdash; relationships
+                forks can&apos;t copy. Plus the team&apos;s ability to
+                ship correctness updates faster than any fork can
+                reverse-engineer them. Toly publicly engaging is itself
+                a distribution asset no copycat can replicate.
+              </p>
+            </div>
+          </div>
         </div>
-        <p className="pitch-matrix-sub">
-          Everyone else competes for the same thirty to fifty tokens.
-          We open a new category: long-tail SPL perps at a price point
-          creators can actually afford.
+
+        <p className="pitch-matrix-sub" style={{ marginTop: "1.25rem" }}>
+          The Solana perp niche behaves like an order-book market:
+          liquidity concentrates by network effect, and forks split the
+          LP base which hurts both sides. That dynamic is structurally
+          protective once the canonical venue is established.
         </p>
       </div>
     </div>
@@ -1060,59 +1240,114 @@ function SlideRoadmapAsk(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Roadmap & Ask</div>
+        <div className="pitch-label">Roadmap, Risks &amp; Ask</div>
         <h2 className="pitch-title">
-          Public mainnet opens in Q3 once the audit clears. We scale
-          to $50M+ daily volume through 2027 and aim to be the default
-          rail for every-token perps.
+          $2M on a SAFE at $20M post-money cap. 18 months to public
+          mainnet, 50+ markets, and Series A.
         </h2>
 
         <div className="pitch-roadmap">
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q2 2026</div>
             <div className="pitch-roadmap-name">Closed beta · audit</div>
-            <div className="pitch-roadmap-desc">Mainnet program live, OSS-contributor beta, audit quotes received</div>
+            <div className="pitch-roadmap-desc">Mainnet program live, OSS-contributor beta, audit firm selected</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase cyan">Q3 2026</div>
             <div className="pitch-roadmap-name">Public mainnet</div>
-            <div className="pitch-roadmap-desc">Audit complete, Jupiter / Birdeye routing, first 10 creator-led markets</div>
+            <div className="pitch-roadmap-desc">Audit complete, four-way fee split wired, first 10 cohort markets</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q4 2026</div>
             <div className="pitch-roadmap-name">50+ markets live</div>
-            <div className="pitch-roadmap-desc">Creator-led listings ramp, rev-share to LPs flowing, first cohort scaling</div>
+            <div className="pitch-roadmap-desc">Creator-led listings ramp, Jupiter / Birdeye routing live</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase cyan">2027</div>
-            <div className="pitch-roadmap-name">$50M+ daily, default rail</div>
-            <div className="pitch-roadmap-desc">Cross-margining, composable CPI oracle, every-token perps as default</div>
+            <div className="pitch-roadmap-name">$1M+ daily fees</div>
+            <div className="pitch-roadmap-desc">Cross-margining, MM partnerships, Series A or strategic LP round</div>
           </div>
         </div>
 
-        <div className="pitch-ask-grid" style={{ marginTop: "2rem" }}>
+        <div
+          style={{
+            marginTop: "2rem",
+            padding: "1.1rem 1.25rem",
+            background: "rgba(255,255,255,0.025)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: "12px",
+          }}
+        >
+          <div
+            className="mono"
+            style={{
+              fontSize: "0.7rem",
+              color: "rgba(153,69,255,0.85)",
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              marginBottom: "0.75rem",
+            }}
+          >
+            Risks we take seriously
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: "0.9rem",
+              fontSize: "0.82rem",
+              lineHeight: 1.5,
+              color: "rgba(255,255,255,0.65)",
+            }}
+          >
+            <div>
+              <strong style={{ color: "#fff", fontWeight: 700 }}>
+                Toxic flow on long-tail.
+              </strong>{" "}
+              Per-market LP isolation, dynamic LP caps tied to on-DEX
+              spot float, per-market insurance sub-vaults.
+            </div>
+            <div>
+              <strong style={{ color: "#fff", fontWeight: 700 }}>
+                Oracle attacks on thin tokens.
+              </strong>{" "}
+              Pyth/Switchboard primary + pinned on-chain reference +
+              deviation circuit breaker + warmup-H gate on PnL extract.
+            </div>
+            <div>
+              <strong style={{ color: "#fff", fontWeight: 700 }}>
+                Admin-key compromise (Drift Apr 2026).
+              </strong>{" "}
+              4-of-7 Squads multisig at audit clearance,
+              blind-signing simulation, hardware-only rotation.
+            </div>
+          </div>
+        </div>
+
+        <div className="pitch-ask-grid" style={{ marginTop: "1.5rem" }}>
           <div className="pitch-ask-card pitch-ask-card-primary">
-            <div className="pitch-ask-card-label mono">Open to</div>
+            <div className="pitch-ask-card-label mono">The ask</div>
             <div className="pitch-ask-card-headline">
-              Strategic capital, sized to the partnership.
+              $2M · SAFE · $20M post-money cap
             </div>
             <div className="pitch-ask-card-sub">
-              SAFE, LP co-investment, or bespoke equity. We&apos;re
-              shipping with or without capital. The right partner
-              shortcuts the audit, LP-vault bootstrap, and creator
-              acquisition.
+              Pro-rata on Series A. Standard info rights. Future token
+              rights, if and when issued, to be negotiated at the
+              cap-equivalent price. We&apos;re shipping with or without
+              capital; the right partner shortens the timeline from 24
+              months to 9.
             </div>
           </div>
           <div className="pitch-ask-card">
-            <div className="pitch-ask-card-label mono">Where it goes</div>
+            <div className="pitch-ask-card-label mono">Use of funds &middot; 18 months</div>
             <ul className="pitch-ask-list">
-              <li>External audit and a bug bounty program</li>
-              <li>LP-vault bootstrap on the first ten creator-led markets</li>
-              <li>Creator acquisition through rev-share rebates, not paid spend</li>
-              <li>Two technical hires: matching and risk research</li>
+              <li><strong>40%</strong> external audit + bug bounty</li>
+              <li><strong>30%</strong> LP-vault bootstrap on first 10 cohort markets</li>
+              <li><strong>15%</strong> creator acquisition via rev-share rebates (no paid spend)</li>
+              <li><strong>15%</strong> two senior hires (matching engine, risk research)</li>
             </ul>
           </div>
         </div>
@@ -1128,13 +1363,14 @@ const SLIDES = [
   { id: 2, title: "Problem", component: SlideProblem },
   { id: 3, title: "Team", component: Slide02Team },
   { id: 4, title: "Traction", component: Slide03Traction },
-  { id: 5, title: "Hackathon Sprint", component: SlideProof },
+  { id: 5, title: "How the Math Works", component: SlideMath },
   { id: 6, title: "Demo Product", component: Slide05Product },
   { id: 7, title: "Business Model", component: Slide06Money },
-  { id: 8, title: "Market", component: SlideMarket },
-  { id: 9, title: "GTM & Why Now", component: Slide09WhyNow },
-  { id: 10, title: "Roadmap & Ask", component: SlideRoadmapAsk },
-  { id: 11, title: "Contact", component: Slide13Contact },
+  { id: 8, title: "Moat", component: SlideMoat },
+  { id: 9, title: "Why Now", component: Slide09WhyNow },
+  { id: 10, title: "Go-to-Market", component: SlideGTM },
+  { id: 11, title: "Roadmap & Ask", component: SlideRoadmapAsk },
+  { id: 12, title: "Contact", component: Slide13Contact },
 ];
 
 const TOTAL_SLIDES = SLIDES.length;
@@ -2691,6 +2927,21 @@ export default function PitchPage() {
 
         /* ─── Toly tweet-screenshot 2x2 grid ────────────────────── */
 
+        /* New: attribution strip wrapping Toly thumbnails below devnet card */
+        .pitch-toly-attribution-strip {
+          margin-top: 1.25rem;
+          padding-top: 1rem;
+          border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .pitch-toly-attribution-caption {
+          font-size: 0.65rem;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: rgba(153, 69, 255, 0.75);
+          margin-bottom: 0.6rem;
+        }
+
         .pitch-toly-photo-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -2784,6 +3035,14 @@ export default function PitchPage() {
           }
           .pitch-toly-photo img {
             aspect-ratio: 16 / 9;
+          }
+          /* Compact variant (used on Traction slide) stays 2x2 on mobile so
+             devnet stats + mini-row stay above the fold. Reza UX note 2026-05-11. */
+          .pitch-toly-photo-grid-compact {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .pitch-toly-photo-grid-compact .pitch-toly-photo img {
+            aspect-ratio: 4 / 3;
           }
         }
 
