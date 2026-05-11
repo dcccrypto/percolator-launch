@@ -352,11 +352,11 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          220 markets stress-tested on devnet across 5 weeks of
-          pre-hackathon hardening (Feb 28 – Mar 31, 2026) over three
-          deployment tiers. Hackathon sprint then upgraded all programs
-          to v12.19 and shipped the first SOL/USDC market to mainnet
-          closed beta. 100+ waitlist signups in the first 48 hours.
+          220 markets created on devnet by 70+ unique wallets over five
+          weeks of pre-hackathon stress testing (Feb 28 – Mar 31, 2026).
+          Hackathon sprint shipped all programs to v12.19 and the first
+          SOL/USDC market to mainnet closed beta. 100+ waitlist signups
+          in the first 48 hours.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -381,9 +381,9 @@ function Slide03Traction(_: SlideProps) {
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
-                  <NumberCounter target={3} />
+                  <NumberCounter target={70} suffix="+" />
                 </div>
-                <div className="pitch-traction-network-label">deployment tiers</div>
+                <div className="pitch-traction-network-label">unique creators</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">100%</div>
@@ -392,14 +392,14 @@ function Slide03Traction(_: SlideProps) {
             </div>
             <div className="pitch-traction-network-meta mono">
               136 + 12 + 72 markets across small / medium / large slab
-              tiers — all verifiable on chain. Earliest market
-              2026-02-28, last devnet activity 2026-03-31 — five weeks
-              of pre-hackathon stress testing. Frontier-window work
-              (Apr 6 – May 11) shifted to mainnet, audit hardening, and
-              the closed-beta market. Mainnet program is private, open
-              only to a small group of open-source contributors until
-              the external audit (quotes received, not yet engaged)
-              clears.
+              tiers, created by 70+ unique wallets — all verifiable on
+              chain. Earliest market 2026-02-28, last devnet activity
+              2026-03-31 (five weeks of pre-hackathon stress testing).
+              Our team wallet created only 4 of the 220 — the rest came
+              from contributors. Frontier-window work (Apr 6 – May 11)
+              shifted to mainnet, audit hardening, and the closed-beta
+              market. Mainnet program is private until the external
+              audit (quotes received, not yet engaged) clears.
             </div>
           </div>
         </div>
