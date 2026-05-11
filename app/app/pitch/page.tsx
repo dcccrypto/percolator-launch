@@ -130,25 +130,34 @@ function Slide01OneLiner(_: SlideProps) {
         <p className="pitch-hero-headline">
           Permissionless perpetual futures on Solana.
         </p>
-        <ul className="pitch-hero-bullets">
-          <li>
-            <span className="pitch-hero-bullet-num mono">60 sec</span>
-            <span className="pitch-hero-bullet-text">
-              Anyone can launch a perp market on any SPL token in about
-              a minute. No team approval, no auction, no $20M stake to
-              get in the door.
-            </span>
-          </li>
-          <li>
-            <span className="pitch-hero-bullet-num mono">15M+</span>
-            <span className="pitch-hero-bullet-text">
-              SPL tokens have zero perp access today. Jupiter, Drift,
-              and Hyperliquid all curate ~50 blue chips — we open the
-              other 15 million.
-            </span>
-          </li>
-        </ul>
-        <div className="pitch-divider" />
+        <p className="pitch-hero-body">
+          Anyone can launch a perp market on any SPL token in about
+          60 seconds, with no team approval and no $20M stake to
+          clear. The leading Solana perp DEXes today cover around
+          fifty blue-chip tokens between them. Over 15 million other
+          SPL tokens have no perp access at all. That&apos;s the long
+          tail we open.
+        </p>
+        <div className="pitch-hero-ctas">
+          <a
+            className="pitch-hero-cta pitch-hero-cta-primary"
+            href="https://mainnet.percolatorlaunch.com"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Try the closed beta
+            <span className="pitch-hero-cta-arrow" aria-hidden>→</span>
+          </a>
+          <a
+            className="pitch-hero-cta"
+            href="https://github.com/dcccrypto"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            See the code on GitHub
+            <span className="pitch-hero-cta-arrow" aria-hidden>→</span>
+          </a>
+        </div>
         <p className="pitch-url">percolator.trade</p>
       </div>
       <div className="pitch-bg-grid" aria-hidden />
@@ -164,9 +173,8 @@ function SlideProblem(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Problem</div>
         <h2 className="pitch-title">
-          Solana has 15M+ tokens. Only ~50 have a perp market. The other
-          15 million are gated by team approval, auctions, or capital
-          locks most builders can&apos;t clear.
+          Fifty Solana tokens have a perp market. Fifteen million
+          don&apos;t.
         </h2>
 
         <div className="pitch-opp-compare">
@@ -175,7 +183,7 @@ function SlideProblem(_: SlideProps) {
               <span className="pitch-opp-tag">Jupiter / Drift</span>
               <span className="pitch-opp-row-stat mono">Curated</span>
               <span className="pitch-opp-row-detail">
-                Team-gated whitelist · blue chips only · centralized listing
+                Team-gated whitelist, blue chips only, centralized listing.
               </span>
             </div>
           </div>
@@ -185,7 +193,7 @@ function SlideProblem(_: SlideProps) {
               <span className="pitch-opp-tag">Hyperliquid HIP-3</span>
               <span className="pitch-opp-row-stat mono">500K HYPE</span>
               <span className="pitch-opp-row-detail">
-                ~$20M+ stake to deploy a perp · prices out every long-tail builder
+                Around $20M in stake to deploy a single perp DEX. Prices out every long-tail builder.
               </span>
             </div>
           </div>
@@ -195,14 +203,14 @@ function SlideProblem(_: SlideProps) {
               <span className="pitch-opp-tag pitch-opp-tag-cyan">Result</span>
               <span className="pitch-opp-row-stat mono">15M+ shut out</span>
               <span className="pitch-opp-row-detail">
-                Every token with a live DEX pool — no perp access today
+                Every token with a live DEX pool. No perp access today.
               </span>
             </div>
           </div>
 
           <div className="pitch-opp-callout">
-            The perp surface on Solana is a permissioned bottleneck. We
-            open it.
+            Today&apos;s perp market on Solana is a small permissioned
+            slice. We open it up.
           </div>
         </div>
       </div>
@@ -218,10 +226,10 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two Solana founders who each won Toly&apos;s public bounties,
-          plus an AI pair-programmer. Shipped Percolator to
-          mainnet-ready with 500+ formal proofs and zero outside
-          capital.
+          Two Solana founders, each holding one of Toly&apos;s public
+          bounties on Percolator, plus an AI pair-programmer that
+          writes most of the code. We shipped to mainnet closed beta
+          with 500+ formal proofs and no outside capital.
         </h2>
 
         <div className="pitch-team-grid pitch-team-grid-three">
@@ -326,11 +334,9 @@ function Slide02Team(_: SlideProps) {
         </div>
 
         <p className="pitch-team-footer">
-          Anatoly Yakovenko (Solana co-founder) built the on-chain risk
-          engine and put it out as open source. We forked it and built
-          the product around it — the trading app, the position NFTs,
-          the keepers, the SDK, the frontend. Both co-founders each won
-          one of his public bounties along the way.
+          Anatoly Yakovenko wrote the protocol math and open-sourced a
+          reference program. We forked his engine and built everything
+          else on top: trading app, keepers, SDK, frontend.
         </p>
       </div>
     </div>
@@ -353,10 +359,8 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction · On-Chain</div>
         <h2 className="pitch-title">
-          220 markets created on devnet by 100+ creators seeding LP
-          vaults (Feb 28 – Mar 31, 2026). Hackathon sprint then shipped
-          the first SOL/USDC market to mainnet closed beta. 100+
-          waitlist signups in the first 48 hours.
+          220 perp markets on devnet from 100+ creators, and the first
+          SOL/USDC market live on mainnet in closed beta.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
@@ -391,11 +395,12 @@ function Slide03Traction(_: SlideProps) {
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
-              136 + 12 + 72 markets across small / medium / large slab
-              tiers — all verifiable on chain. Each market seeds its own
-              LP vault (passive vAMM, same model as Jupiter&apos;s JLP).
-              Mainnet program is private until the external audit
-              (quotes received, not yet engaged) clears.
+              136 + 12 + 72 markets across small, medium, and large slab
+              tiers, all verifiable on chain. Each market seeds its own
+              LP vault using the same passive vAMM model as Jupiter&apos;s
+              JLP. The mainnet program stays private until the external
+              audit clears. We&apos;ve received quotes but haven&apos;t
+              engaged the firm yet.
             </div>
           </div>
         </div>
@@ -443,11 +448,8 @@ function Slide05Product(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Demo Product</div>
         <h2 className="pitch-title">
-          Closed beta on mainnet today, running the first SOL/USDC
-          Hyperp. Connect wallet, deposit USDC, open a leveraged long,
-          close at PnL — fees settle on-chain in the same transaction.
-          Public mainnet opens once the external audit (quotes
-          received, not yet engaged) clears.
+          The first SOL/USDC market is live on mainnet in closed beta.
+          Public access opens once the audit clears.
         </h2>
 
         <div className="pflow-wrap">
@@ -541,10 +543,11 @@ function Slide05Product(_: SlideProps) {
         </div>
 
         <div className="pitch-create-footer">
-          Position is a Token-2022 NFT — first transferable perp
-          position on Solana. LP vault is the counterparty (like
-          Jupiter&apos;s JLP) — no market makers required. Closed beta
-          at mainnet.percolatorlaunch.com.
+          Each position is a Token-2022 NFT, which makes it the first
+          transferable perp position on Solana. The LP vault sits on
+          the other side of every trade, the same model as
+          Jupiter&apos;s JLP, so we don&apos;t need active market
+          makers. Closed beta at mainnet.percolatorlaunch.com.
         </div>
       </div>
     </div>
@@ -559,8 +562,9 @@ function Slide06Money(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Business Model</div>
         <h2 className="pitch-title">
-          0.1–1% per trade. Splits four ways on-chain in the same
-          transaction. &gt;95% gross margin — no market makers to pay.
+          Each trade pays 0.1 to 1 percent. The fee splits four ways
+          on-chain in the same transaction. Gross margin sits above 95
+          percent because we don&apos;t pay market makers.
         </h2>
 
         <div className="pitch-revenue-hero">
@@ -569,9 +573,9 @@ function Slide06Money(_: SlideProps) {
             <div className="pitch-revenue-hero-tag mono">scale projection</div>
           </div>
           <div className="pitch-revenue-hero-desc">
-            Daily protocol fees at 1,000 active markets × $1M average
-            daily volume each — about $365M/year at modest scale, with
-            no rebate burn against margin.
+            That&apos;s daily protocol fees at a thousand active markets
+            averaging $1M in daily volume each. Roughly $365M a year
+            at modest scale, with no rebates eating into margin.
           </div>
         </div>
 
@@ -579,30 +583,31 @@ function Slide06Money(_: SlideProps) {
           <div className="pitch-revenue-split">
             <div className="pitch-revenue-split-name mono">LP vault</div>
             <p className="pitch-revenue-split-desc">
-              Passive liquidity providers earn from trader losses —
-              same model as Jupiter&apos;s JLP. Sticky capital, no
-              active quoting required.
+              Passive liquidity providers earn from trader losses, the
+              same model as Jupiter&apos;s JLP. Sticky capital with no
+              active quoting needed.
             </p>
           </div>
           <div className="pitch-revenue-split">
             <div className="pitch-revenue-split-name mono">Creator</div>
             <p className="pitch-revenue-split-desc">
-              Market launcher&apos;s revenue share — direct incentive
-              to bring long-tail listings and their own retail flow.
+              Market launchers take a revenue share, which gives them
+              a direct incentive to bring long-tail listings along
+              with their own retail flow.
             </p>
           </div>
           <div className="pitch-revenue-split pitch-revenue-split-us">
             <div className="pitch-revenue-split-name mono">Protocol</div>
             <p className="pitch-revenue-split-desc">
-              Treasury — accrues on every trade on every market. Funds
-              audit, hiring, growth.
+              The treasury accrues on every trade on every market and
+              funds the audit, hiring, and growth work.
             </p>
           </div>
           <div className="pitch-revenue-split">
             <div className="pitch-revenue-split-name mono">Insurance</div>
             <p className="pitch-revenue-split-desc">
-              Reserve — backstops liquidation deficits and bad debt
-              before LPs take losses.
+              A reserve that backstops liquidation deficits and bad
+              debt before LPs take any losses.
             </p>
           </div>
         </div>
@@ -661,8 +666,9 @@ function Slide09WhyNow(_: SlideProps) {
             <div className="pitch-whynow-num mono">SIMD-0266</div>
             <div className="pitch-whynow-label">
               Activated April 2026. Pinocchio-token instructions are
-              ~19× cheaper (95–98% reduction). Long-tail per-trade
-              economics only work after this change.
+              about 19 times cheaper, roughly a 95 to 98 percent
+              reduction in compute. Long-tail per-trade economics
+              only work after this change.
             </div>
           </div>
           <div className="pitch-whynow-stat">
@@ -681,8 +687,9 @@ function Slide09WhyNow(_: SlideProps) {
             </svg>
             <div className="pitch-whynow-num mono">Token-2022</div>
             <div className="pitch-whynow-label">
-              Mature now. Transferable perp positions as NFTs are
-              possible. We&apos;re the first to ship.
+              The standard is mature now. Transferable perp positions
+              as NFTs are possible, and we&apos;re the first to ship
+              them.
             </div>
           </div>
           <div className="pitch-whynow-stat">
@@ -706,15 +713,18 @@ function Slide09WhyNow(_: SlideProps) {
             </svg>
             <div className="pitch-whynow-num mono">$15B+</div>
             <div className="pitch-whynow-label">
-              Hyperliquid OI by end of 2025 proved demand for permissionless
-              perps. HIP-3 prices most creators out (500K HYPE ≈ $20M+ stake
-              just to deploy a perp DEX). Long-tail supply on Solana is empty.
+              Hyperliquid open interest by the end of 2025 proved
+              there&apos;s real demand for permissionless perps. HIP-3
+              prices most creators out though, since it takes 500K
+              HYPE (around $20M in stake) just to deploy a perp DEX.
+              Long-tail supply on Solana sits empty.
             </div>
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          Three catalysts in one year. The window is open — and
-          we&apos;re shipping into it, not waiting for it to be perfect.
+          Three catalysts in one year. The window is open, and
+          we&apos;re shipping into it rather than waiting for everything
+          to be perfect.
         </div>
       </div>
     </div>
@@ -784,9 +794,10 @@ function SlideTolyStory(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Origin · Toly Signal</div>
         <h2 className="pitch-title">
-          Solana co-founder Anatoly Yakovenko originated Percolator&apos;s
-          protocol math and reference program, and publicly engages
-          with our team&apos;s work. We built the product around it.
+          Solana&apos;s co-founder Anatoly Yakovenko wrote the protocol
+          math behind Percolator and open-sourced a reference program.
+          He still publicly engages with our work. We built the
+          product on top of what he started.
         </h2>
 
         <div className="pitch-toly-photo-grid">
@@ -861,16 +872,11 @@ function SlideTolyStory(_: SlideProps) {
         </div>
 
         <p className="pitch-toly-footer">
-          Toly authored the protocol math and the reference program
-          (github.com/aeyakovenko/percolator-prog) — the H + A/K risk
-          engine. We forked it and built the product around it for
-          Solana mainnet: extending the on-chain program with LP vault,
-          dispute resolution, transferable NFT positions, withdrawal
-          queue, audit-crank invariant checking, and admin lifecycle
-          tooling — 49 fork-only handlers, 51 fork-only instructions,
-          187 wrapper commits past the divergence point. Plus the SDK,
-          indexer, keeper fleet, and frontend. Both co-founders have
-          each won one of his public bounties.
+          Toly wrote the H + A/K risk engine and shipped a reference
+          program at github.com/aeyakovenko/percolator-prog. We forked
+          it and shipped 51 fork-only instructions and 187 wrapper
+          commits of product on top: the LP vault, dispute resolution,
+          NFT positions, withdrawal queue, and the rest of the stack.
         </p>
       </div>
     </div>
@@ -885,9 +891,10 @@ function SlideProof(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Hackathon Sprint</div>
         <h2 className="pitch-title">
-          Customers told us audit posture and transferable positions
-          were the #1 blockers. We shipped both this hackathon — plus
-          500+ formal proofs before any auditor starts.
+          Customers told us their two biggest blockers were audit
+          posture and the ability to transfer positions. We shipped
+          both during this hackathon, plus 500+ formal proofs that
+          hold before any auditor starts.
         </h2>
 
         <div className="pitch-solution-stack">
@@ -895,11 +902,12 @@ function SlideProof(_: SlideProps) {
             <div className="pitch-solution-num purple">1</div>
             <div>
               <div className="pitch-solution-name">
-                v12.19 mainnet upgrade + first SOL/USDC market on mainnet
+                v12.19 mainnet upgrade, first SOL/USDC market on mainnet
               </div>
               <p className="pitch-solution-desc">
-                Four programs upgraded and deployed. SOL/USDC Hyperp market
-                running today in closed beta against a pinned Raydium pool.
+                We upgraded and redeployed all four programs. The
+                SOL/USDC Hyperp market is running today in closed beta
+                against a pinned Raydium pool.
               </p>
             </div>
           </div>
@@ -910,8 +918,9 @@ function SlideProof(_: SlideProps) {
                 Token-2022 transferable position NFTs
               </div>
               <p className="pitch-solution-desc">
-                First transferable perp positions ever shipped on Solana.
-                Customers asked, we shipped.
+                Customers asked for transferable positions, so we
+                built them as Token-2022 NFTs. These are the first
+                transferable perp positions ever shipped on Solana.
               </p>
             </div>
           </div>
@@ -922,10 +931,12 @@ function SlideProof(_: SlideProps) {
                 500+ Kani formal-verification proofs
               </div>
               <p className="pitch-solution-desc">
-                Kani proves protocol invariants hold across every
-                possible input. 500+ proofs, all green. Hyperliquid,
-                Drift, and Jupiter have zero. 36 pre-audit hardening
-                PRs merged in 4 days closing every deep-audit CRITICAL.
+                Kani checks that every protocol invariant holds for
+                every possible input. We have 500+ proofs, all
+                passing. Hyperliquid, Drift, and Jupiter have none of
+                these. We also merged 36 pre-audit hardening PRs in
+                four days, closing every CRITICAL from our deep
+                self-audit.
               </p>
             </div>
           </div>
@@ -962,10 +973,9 @@ function SlideMarket(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Market</div>
         <h2 className="pitch-title">
-          Solana perp volume averages $25B+/mo (DeFiLlama). The current
-          leaders — Jupiter, Drift, Hyperliquid (and Pacifica, the new
-          #1 on Solana) — all curate their listings. 15 million SPL
-          tokens have zero perp access. We open the long tail.
+          Solana perps do over $25 billion a month. Every venue
+          curates its listings. We open the 15 million tokens that
+          have no perp access.
         </h2>
 
         <div className="pitch-matrix-wrap">
@@ -1019,9 +1029,9 @@ function SlideMarket(_: SlideProps) {
           </table>
         </div>
         <p className="pitch-matrix-sub">
-          Everyone else competes for the same 30-50 tokens. We open a
-          category — long-tail SPL perps at a price point creators can
-          actually afford.
+          Everyone else competes for the same thirty to fifty tokens.
+          We open a new category: long-tail SPL perps at a price point
+          creators can actually afford.
         </p>
       </div>
     </div>
@@ -1036,8 +1046,9 @@ function SlideRoadmapAsk(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Roadmap & Ask</div>
         <h2 className="pitch-title">
-          Public mainnet Q3 after audit. $50M+ daily volume by Q4.
-          Default rail for every-token perps by 2027.
+          Public mainnet opens in Q3 once the audit clears. We&apos;re
+          targeting over $50M in daily volume by Q4 and aiming to be
+          the default rail for every-token perps by 2027.
         </h2>
 
         <div className="pitch-roadmap">
@@ -1067,25 +1078,25 @@ function SlideRoadmapAsk(_: SlideProps) {
         </div>
 
         <div className="pitch-ask-grid" style={{ marginTop: "2rem" }}>
-          <div className="pitch-ask-card">
+          <div className="pitch-ask-card pitch-ask-card-primary">
             <div className="pitch-ask-card-label mono">Open to</div>
             <div className="pitch-ask-card-headline">
               Strategic capital, sized to the partnership.
             </div>
             <div className="pitch-ask-card-sub">
               SAFE, LP co-investment, or bespoke equity. We&apos;re
-              shipping with or without capital — the right partner
-              shortcuts audit, LP-vault bootstrap, and creator
+              shipping with or without capital. The right partner
+              shortcuts the audit, LP-vault bootstrap, and creator
               acquisition.
             </div>
           </div>
           <div className="pitch-ask-card">
             <div className="pitch-ask-card-label mono">Where it goes</div>
             <ul className="pitch-ask-list">
-              <li>External audit + bug bounty program</li>
-              <li>LP-vault bootstrap on first 10 creator-led markets</li>
-              <li>Creator acquisition · rev-share rebates, not paid spend</li>
-              <li>Two technical hires · matching + risk research</li>
+              <li>External audit and a bug bounty program</li>
+              <li>LP-vault bootstrap on the first ten creator-led markets</li>
+              <li>Creator acquisition through rev-share rebates, not paid spend</li>
+              <li>Two technical hires: matching and risk research</li>
             </ul>
           </div>
         </div>
@@ -1387,7 +1398,7 @@ export default function PitchPage() {
         .pitch-url {
           font-family: 'JetBrains Mono', monospace;
           font-size: 0.85rem;
-          color: rgba(34,211,238,0.5);
+          color: rgba(34,211,238,0.75);
           letter-spacing: 0.05em;
         }
 
@@ -1426,7 +1437,7 @@ export default function PitchPage() {
         .pitch-solution-stack {
           display: flex;
           flex-direction: column;
-          gap: 1.25rem;
+          gap: 0.85rem;
         }
 
         .pitch-solution-item {
@@ -1435,8 +1446,8 @@ export default function PitchPage() {
           align-items: flex-start;
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 10px;
-          padding: 1.25rem 1.5rem;
+          border-radius: 12px;
+          padding: 0.95rem 1.25rem;
         }
 
         .pitch-solution-num {
@@ -1477,11 +1488,12 @@ export default function PitchPage() {
 
         /* ── Live Product flow ── */
         .pitch-create-footer {
-          font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1rem;
-          font-weight: 700;
-          color: #22D3EE;
-          letter-spacing: -0.01em;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.92rem;
+          font-weight: 500;
+          color: rgba(255, 255, 255, 0.65);
+          letter-spacing: 0;
+          line-height: 1.5;
           margin-top: 1.5rem;
         }
 
@@ -1617,7 +1629,7 @@ export default function PitchPage() {
         .pitch-whynow-stat {
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 1.5rem;
           text-align: center;
         }
@@ -1734,7 +1746,7 @@ export default function PitchPage() {
           font-family: 'Inter Tight', 'Inter', sans-serif;
           font-weight: 700;
           font-size: 0.85rem;
-          color: rgba(255,255,255,0.55);
+          color: rgba(255,255,255,0.8);
           padding: 0.75rem 1rem;
           text-align: center;
         }
@@ -1742,7 +1754,7 @@ export default function PitchPage() {
         .pitch-matrix th:first-child { text-align: left; }
 
         .pitch-matrix tbody tr {
-          border-bottom: 1px solid rgba(255,255,255,0.05);
+          border-bottom: 1px solid rgba(255,255,255,0.08);
         }
 
         .pitch-matrix tbody tr:last-child { border-bottom: none; }
@@ -1755,7 +1767,7 @@ export default function PitchPage() {
 
         .pitch-matrix-feature {
           text-align: left !important;
-          color: rgba(255,255,255,0.7) !important;
+          color: rgba(255,255,255,0.65) !important;
           font-weight: 500;
         }
 
@@ -1778,9 +1790,11 @@ export default function PitchPage() {
 
         .pitch-matrix-sub {
           font-family: 'Inter', sans-serif;
-          font-size: 0.875rem;
-          color: rgba(255,255,255,0.4);
+          font-size: 0.9rem;
+          color: rgba(255,255,255,0.6);
           font-style: italic;
+          margin-top: 1rem;
+          line-height: 1.5;
         }
 
         /* ── Business Model ── */
@@ -1931,7 +1945,7 @@ export default function PitchPage() {
             rgba(153, 69, 255, 0.10) 0%,
             rgba(34, 211, 238, 0.10) 100%);
           border: 1px solid rgba(34, 211, 238, 0.28);
-          border-radius: 14px;
+          border-radius: 12px;
         }
 
         .pitch-revenue-hero-side {
@@ -1979,8 +1993,8 @@ export default function PitchPage() {
         .pitch-revenue-split {
           background: rgba(255, 255, 255, 0.025);
           border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 10px;
-          padding: 0.95rem 1rem;
+          border-radius: 12px;
+          padding: 1.1rem 1.15rem;
         }
 
         .pitch-revenue-split-us {
@@ -1993,7 +2007,7 @@ export default function PitchPage() {
           letter-spacing: 0.08em;
           text-transform: uppercase;
           font-weight: 700;
-          color: rgba(34, 211, 238, 0.95);
+          color: rgba(255, 255, 255, 0.72);
           margin-bottom: 0.55rem;
         }
 
@@ -2129,8 +2143,14 @@ export default function PitchPage() {
 
         .pitch-traction-mini-row {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 0.75rem;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 0.65rem;
+        }
+
+        @media (max-width: 720px) {
+          .pitch-traction-mini-row {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
 
         /* ─── Slide 3 · network proof cards ───────────────────────── */
@@ -2254,7 +2274,7 @@ export default function PitchPage() {
         .pitch-traction-mini {
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 0.9rem 1rem;
           text-align: center;
         }
@@ -2498,14 +2518,83 @@ export default function PitchPage() {
           line-height: 1.4;
         }
 
+        .pitch-hero-body {
+          font-family: 'Inter', sans-serif;
+          font-size: clamp(0.95rem, 1.6vw, 1.1rem);
+          line-height: 1.65;
+          color: rgba(255, 255, 255, 0.78);
+          text-align: center;
+          max-width: 620px;
+          margin: 0 auto 1.85rem;
+        }
+
+        .pitch-hero-ctas {
+          display: flex;
+          gap: 0.75rem;
+          justify-content: center;
+          flex-wrap: wrap;
+          margin: 0.5rem 0 1.6rem;
+        }
+
+        .pitch-hero-cta {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.55rem;
+          padding: 0.78rem 1.4rem;
+          border-radius: 10px;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.95rem;
+          font-weight: 500;
+          text-decoration: none;
+          background: rgba(255, 255, 255, 0.035);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          color: rgba(255, 255, 255, 0.88);
+          transition: border-color 200ms ease, background 200ms ease, color 200ms ease;
+        }
+
+        @media (hover: hover) {
+          .pitch-hero-cta:hover {
+            border-color: rgba(34, 211, 238, 0.5);
+            background: rgba(34, 211, 238, 0.06);
+            color: #fff;
+          }
+        }
+
+        .pitch-hero-cta-primary {
+          background: linear-gradient(135deg, rgba(153, 69, 255, 0.18), rgba(34, 211, 238, 0.18));
+          border-color: rgba(34, 211, 238, 0.42);
+          border-left: 3px solid #22D3EE;
+          color: #fff;
+          padding-left: calc(1.4rem - 2px);
+        }
+
+        @media (hover: hover) {
+          .pitch-hero-cta-primary:hover {
+            background: linear-gradient(135deg, rgba(153, 69, 255, 0.3), rgba(34, 211, 238, 0.3));
+            border-color: rgba(34, 211, 238, 0.75);
+            border-left-color: #22D3EE;
+          }
+        }
+
+        .pitch-hero-cta-arrow {
+          font-family: 'JetBrains Mono', monospace;
+          transition: transform 200ms ease;
+        }
+
+        @media (hover: hover) {
+          .pitch-hero-cta:hover .pitch-hero-cta-arrow {
+            transform: translateX(3px);
+          }
+        }
+
         /* ─── Team PFPs ────────────────────────────────────────────── */
 
         .pitch-team-pfp {
-          width: 48px;
-          height: 48px;
+          width: 64px;
+          height: 64px;
           border-radius: 50%;
           border: 2px solid rgba(34, 211, 238, 0.22);
-          margin-bottom: 0.75rem;
+          margin-bottom: 0.85rem;
           display: block;
           object-fit: cover;
           background: rgba(255, 255, 255, 0.04);
@@ -2592,7 +2681,7 @@ export default function PitchPage() {
           gap: 0.5rem;
           background: rgba(255, 255, 255, 0.025);
           border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 0.6rem;
           text-decoration: none;
           color: inherit;
@@ -2711,7 +2800,7 @@ export default function PitchPage() {
         .pitch-kani-what-card {
           background: rgba(255, 255, 255, 0.025);
           border: 1px solid rgba(255, 255, 255, 0.07);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 1rem 1.1rem;
           transition: border-color 220ms ease, background 220ms ease;
         }
@@ -2909,11 +2998,21 @@ export default function PitchPage() {
 
         .pitch-ask-card-headline {
           font-family: 'Inter Tight', 'Inter', sans-serif;
-          font-size: 1.4rem;
-          font-weight: 800;
+          font-size: 1.1rem;
+          font-weight: 700;
           color: #fff;
           margin-bottom: 0.5rem;
-          letter-spacing: -0.01em;
+          letter-spacing: -0.005em;
+          line-height: 1.35;
+        }
+
+        .pitch-ask-card-primary {
+          border-color: rgba(34, 211, 238, 0.32);
+          background: rgba(34, 211, 238, 0.04);
+        }
+
+        .pitch-ask-card-primary .pitch-ask-card-label {
+          color: rgba(34, 211, 238, 0.85);
         }
 
         .pitch-ask-card-sub {
@@ -2994,17 +3093,23 @@ export default function PitchPage() {
         /* ── Contact ── */
         .pitch-contact-grid {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 1rem;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.85rem;
           width: 100%;
-          max-width: 720px;
+          max-width: 860px;
           margin: 0 auto;
+        }
+
+        @media (max-width: 720px) {
+          .pitch-contact-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
 
         .pitch-contact-card {
           background: rgba(255,255,255,0.025);
           border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px;
+          border-radius: 12px;
           padding: 1rem 1.25rem;
           text-align: center;
         }
@@ -3268,6 +3373,10 @@ export default function PitchPage() {
           display: flex;
           flex-direction: column;
           gap: 0.85rem;
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 12px;
+          padding: 0.95rem 1.1rem;
         }
 
         .pitch-opp-row-header {
@@ -3347,13 +3456,14 @@ export default function PitchPage() {
 
         .pitch-opp-callout {
           font-family: 'Inter', sans-serif;
-          font-size: 0.85rem;
-          color: rgba(255, 255, 255, 0.5);
+          font-size: 0.92rem;
+          color: rgba(255, 255, 255, 0.7);
           font-style: italic;
-          border-left: 2px solid rgba(34, 211, 238, 0.4);
+          border-left: 3px solid #22D3EE;
           padding-left: 1rem;
           max-width: 580px;
-          line-height: 1.5;
+          line-height: 1.55;
+          margin-top: 0.5rem;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -3394,9 +3504,9 @@ export default function PitchPage() {
            ───────────────────────────────────────────────────────────── */
 
         .pitch-catalyst-icon {
-          width: 28px;
-          height: 28px;
-          color: rgba(153, 69, 255, 0.7);
+          width: 32px;
+          height: 32px;
+          color: rgba(153, 69, 255, 0.85);
           margin-bottom: 0.85rem;
           display: block;
           margin-left: auto;
