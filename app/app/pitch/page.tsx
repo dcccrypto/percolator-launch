@@ -556,150 +556,69 @@ function Slide06Money(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Business Model</div>
+        <div className="pitch-label">Revenue</div>
         <h2 className="pitch-title">
-          0.1–1% per trade, split four ways on-chain. &gt;95% gross
-          margin — no market makers to pay, no off-chain claims.
+          0.1–1% per trade. Splits four ways on-chain in the same
+          transaction. &gt;95% gross margin — no market makers to pay.
         </h2>
 
-        <div className="pitch-money-flow">
-          <div className="pitch-money-flow-title">
-            Fee flow on every fill: automatic, on-chain, no claim transactions
+        <div className="pitch-revenue-hero">
+          <div className="pitch-revenue-hero-side">
+            <div className="pitch-revenue-hero-num mono">$1M / day</div>
+            <div className="pitch-revenue-hero-tag mono">scale projection</div>
           </div>
-
-          <div className="pitch-fee-stage">
-            <div className="pitch-fee-source">
-              <div className="pitch-money-pill pitch-money-pill-purple">
-                Trader pays<br /><span className="mono">0.1–1%</span>
-              </div>
-            </div>
-
-            <div className="pitch-fee-channel" aria-hidden>
-              <svg
-                viewBox="0 0 480 140"
-                preserveAspectRatio="xMidYMid meet"
-                className="pitch-fee-svg"
-              >
-                <defs>
-                  <linearGradient id="feeFlowGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#9945FF" stopOpacity="0.45" />
-                    <stop offset="100%" stopColor="#22D3EE" stopOpacity="0.45" />
-                  </linearGradient>
-                </defs>
-                <path
-                  id="feePathLeft"
-                  d="M 240 10 C 240 70, 60 70, 60 130"
-                  stroke="url(#feeFlowGrad)"
-                  fill="none"
-                  strokeWidth="1.5"
-                />
-                <path
-                  id="feePathCenter"
-                  d="M 240 10 L 240 130"
-                  stroke="url(#feeFlowGrad)"
-                  fill="none"
-                  strokeWidth="1.5"
-                />
-                <path
-                  id="feePathRight"
-                  d="M 240 10 C 240 70, 420 70, 420 130"
-                  stroke="url(#feeFlowGrad)"
-                  fill="none"
-                  strokeWidth="1.5"
-                />
-
-                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
-                  <animateMotion dur="3.2s" repeatCount="indefinite">
-                    <mpath href="#feePathLeft" />
-                  </animateMotion>
-                  <animate
-                    attributeName="opacity"
-                    values="0;1;1;0"
-                    keyTimes="0;0.1;0.9;1"
-                    dur="3.2s"
-                    repeatCount="indefinite"
-                  />
-                </circle>
-
-                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
-                  <animateMotion dur="3.2s" begin="1.05s" repeatCount="indefinite">
-                    <mpath href="#feePathCenter" />
-                  </animateMotion>
-                  <animate
-                    attributeName="opacity"
-                    values="0;1;1;0"
-                    keyTimes="0;0.1;0.9;1"
-                    dur="3.2s"
-                    begin="1.05s"
-                    repeatCount="indefinite"
-                  />
-                </circle>
-
-                <circle r="4" fill="#22D3EE" className="pitch-fee-svg-dot">
-                  <animateMotion dur="3.2s" begin="2.1s" repeatCount="indefinite">
-                    <mpath href="#feePathRight" />
-                  </animateMotion>
-                  <animate
-                    attributeName="opacity"
-                    values="0;1;1;0"
-                    keyTimes="0;0.1;0.9;1"
-                    dur="3.2s"
-                    begin="2.1s"
-                    repeatCount="indefinite"
-                  />
-                </circle>
-              </svg>
-            </div>
-
-            <div className="pitch-fee-buckets">
-              <div className="pitch-money-pill">LP vault</div>
-              <div className="pitch-money-pill">Creator</div>
-              <div className="pitch-money-pill pitch-money-pill-cyan">
-                Protocol treasury
-              </div>
-              <div className="pitch-money-pill">Insurance reserve</div>
-            </div>
+          <div className="pitch-revenue-hero-desc">
+            Daily protocol fees at 1,000 active markets × $1M average
+            daily volume each — about $365M/year at modest scale, with
+            no rebate burn against margin.
           </div>
         </div>
 
-        <div className="pitch-money-econ">
-          <div className="pitch-money-econ-stat">
-            <div className="pitch-money-econ-num mono">&gt;95%</div>
-            <div className="pitch-money-econ-label">Gross margin per trade after Solana RPC + compute</div>
+        <div className="pitch-revenue-splits">
+          <div className="pitch-revenue-split">
+            <div className="pitch-revenue-split-name mono">LP vault</div>
+            <p className="pitch-revenue-split-desc">
+              Passive liquidity providers earn from trader losses —
+              same model as Jupiter&apos;s JLP. Sticky capital, no
+              active quoting required.
+            </p>
           </div>
-          <div className="pitch-money-econ-stat">
-            <div className="pitch-money-econ-num mono">~$0.002</div>
-            <div className="pitch-money-econ-label">Solana fee per trade (base + priority)</div>
+          <div className="pitch-revenue-split">
+            <div className="pitch-revenue-split-name mono">Creator</div>
+            <p className="pitch-revenue-split-desc">
+              Market launcher&apos;s revenue share — direct incentive
+              to bring long-tail listings and their own retail flow.
+            </p>
           </div>
-          <div className="pitch-money-econ-stat">
-            <div className="pitch-money-econ-num mono">$0</div>
-            <div className="pitch-money-econ-label">Outside capital required to keep shipping today</div>
+          <div className="pitch-revenue-split pitch-revenue-split-us">
+            <div className="pitch-revenue-split-name mono">Protocol</div>
+            <p className="pitch-revenue-split-desc">
+              Treasury — accrues on every trade on every market. Funds
+              audit, hiring, growth.
+            </p>
+          </div>
+          <div className="pitch-revenue-split">
+            <div className="pitch-revenue-split-name mono">Insurance</div>
+            <p className="pitch-revenue-split-desc">
+              Reserve — backstops liquidation deficits and bad debt
+              before LPs take losses.
+            </p>
           </div>
         </div>
 
-        <div className="pitch-money-scale-wrap">
-          <div className="pitch-money-scale-title">Scale path · daily protocol fees at 0.1% rate</div>
-          <table className="pitch-money-scale">
-            <thead>
-              <tr>
-                <th>Markets</th>
-                <th>Avg daily vol / market</th>
-                <th>Daily protocol fees</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="mono">100</td>
-                <td className="mono">$500K</td>
-                <td className="mono pitch-money-scale-result">$50K</td>
-              </tr>
-              <tr>
-                <td className="mono">1,000</td>
-                <td className="mono">$1M</td>
-                <td className="mono pitch-money-scale-result">$1M</td>
-              </tr>
-            </tbody>
-          </table>
+        <div className="pitch-revenue-econ">
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">&gt;95%</div>
+            <div className="pitch-revenue-econ-label">gross margin per trade</div>
+          </div>
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">~$0.002</div>
+            <div className="pitch-revenue-econ-label">Solana compute / trade</div>
+          </div>
+          <div className="pitch-revenue-econ-stat">
+            <div className="pitch-revenue-econ-num mono">$0</div>
+            <div className="pitch-revenue-econ-label">market-maker spend</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1998,6 +1917,143 @@ export default function PitchPage() {
         .pitch-money-scale-result {
           color: #22D3EE !important;
           font-weight: 700;
+        }
+
+        /* ── Revenue (Slide 10 — redesigned) ── */
+
+        .pitch-revenue-hero {
+          display: flex;
+          gap: 1.75rem;
+          align-items: stretch;
+          padding: 1.4rem 1.6rem;
+          margin: 1.5rem 0;
+          background: linear-gradient(95deg,
+            rgba(153, 69, 255, 0.10) 0%,
+            rgba(34, 211, 238, 0.10) 100%);
+          border: 1px solid rgba(34, 211, 238, 0.28);
+          border-radius: 14px;
+        }
+
+        .pitch-revenue-hero-side {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 0.25rem;
+          padding-right: 1.6rem;
+          border-right: 1px solid rgba(255, 255, 255, 0.08);
+          flex: 0 0 auto;
+        }
+
+        .pitch-revenue-hero-num {
+          font-size: clamp(1.85rem, 3.4vw, 2.6rem);
+          font-weight: 700;
+          color: #22D3EE;
+          letter-spacing: -0.025em;
+          line-height: 1;
+        }
+
+        .pitch-revenue-hero-tag {
+          font-size: 0.62rem;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: rgba(34, 211, 238, 0.7);
+        }
+
+        .pitch-revenue-hero-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.92rem;
+          line-height: 1.5;
+          color: rgba(255, 255, 255, 0.78);
+          flex: 1;
+          display: flex;
+          align-items: center;
+        }
+
+        .pitch-revenue-splits {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 0.85rem;
+          margin: 1.5rem 0;
+        }
+
+        .pitch-revenue-split {
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 10px;
+          padding: 0.95rem 1rem;
+        }
+
+        .pitch-revenue-split-us {
+          border-color: rgba(34, 211, 238, 0.38);
+          background: rgba(34, 211, 238, 0.05);
+        }
+
+        .pitch-revenue-split-name {
+          font-size: 0.72rem;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          font-weight: 700;
+          color: rgba(34, 211, 238, 0.95);
+          margin-bottom: 0.55rem;
+        }
+
+        .pitch-revenue-split-us .pitch-revenue-split-name {
+          color: #22D3EE;
+        }
+
+        .pitch-revenue-split-desc {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.78rem;
+          line-height: 1.5;
+          color: rgba(255, 255, 255, 0.6);
+          margin: 0;
+        }
+
+        .pitch-revenue-econ {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 0.85rem;
+        }
+
+        .pitch-revenue-econ-stat {
+          display: flex;
+          align-items: baseline;
+          gap: 0.7rem;
+          padding: 0.85rem 1.05rem;
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 10px;
+        }
+
+        .pitch-revenue-econ-num {
+          font-size: 1.35rem;
+          font-weight: 700;
+          color: rgba(255, 255, 255, 0.95);
+          letter-spacing: -0.01em;
+          line-height: 1;
+        }
+
+        .pitch-revenue-econ-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 0.78rem;
+          line-height: 1.35;
+          color: rgba(255, 255, 255, 0.55);
+        }
+
+        @media (max-width: 720px) {
+          .pitch-revenue-hero {
+            flex-direction: column;
+            gap: 0.85rem;
+          }
+          .pitch-revenue-hero-side {
+            border-right: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0 0 0.85rem;
+          }
+          .pitch-revenue-splits,
+          .pitch-revenue-econ {
+            grid-template-columns: 1fr 1fr;
+          }
         }
 
         /* ── Traction (Slide 3) ── */
