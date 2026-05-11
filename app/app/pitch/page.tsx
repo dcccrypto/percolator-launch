@@ -139,7 +139,7 @@ function Slide01OneLiner(_: SlideProps) {
           </li>
           <li>
             <span className="pitch-hero-bullet-num mono">Apache 2.0</span>
-            <span className="pitch-hero-bullet-text">fully open source · 17 public repos · fork it tomorrow</span>
+            <span className="pitch-hero-bullet-text">fully open source · 22 public repos · fork it tomorrow</span>
           </li>
         </ul>
         <div className="pitch-divider" />
@@ -159,7 +159,7 @@ function Slide02Team(_: SlideProps) {
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
           Two co-founders and an AI pair-programmer shipped Percolator
-          from zero to mainnet-ready with 422 formal proofs and zero
+          from zero to mainnet-ready with 500+ formal proofs and zero
           outside capital.
         </h2>
 
@@ -346,13 +346,13 @@ function Slide03Traction(_: SlideProps) {
         <div className="pitch-traction-mini-row">
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={422} />
+              <NumberCounter target={500} suffix="+" />
             </div>
             <div className="pitch-traction-mini-label">Kani formal proofs (all green)</div>
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={17} />
+              <NumberCounter target={22} />
             </div>
             <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
           </div>
@@ -420,13 +420,14 @@ function Slide04Sprint(_: SlideProps) {
                 Pre-audit hardening — ongoing, every day
               </div>
               <p className="pitch-solution-desc">
-                Continuous self-audit. The proof suite has grown to 422
-                Kani proofs (replacing the prior 349). Ongoing
-                line-by-line deep audit against upstream produces a port
-                queue of findings, applied as they surface — ahead of
-                external firm engagement. Customers said audit posture
-                was the #1 blocker for putting real capital on a
-                long-tail market.
+                Continuous self-audit. The proof suite has grown to
+                500+ Kani proofs across engine + wrapper + stake. 36
+                pre-audit hardening PRs merged in 4 days closing every
+                deep-audit CRITICAL finding. Ongoing line-by-line deep
+                audit against upstream produces a port queue of findings,
+                applied as they surface — ahead of external firm
+                engagement. Customers said audit posture was the #1
+                blocker for putting real capital on a long-tail market.
               </p>
             </div>
           </div>
@@ -781,7 +782,7 @@ function Slide08Competitors(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Competitors</div>
         <h2 className="pitch-title">
-          No major Solana perp DEX opens long-tail markets permissionlessly. Hyperliquid does — but only via a HIP-1 dutch auction (historically up to $19M+ per market). We are the long-tail-native option on Solana.
+          No major Solana perp DEX opens long-tail markets permissionlessly. Hyperliquid does — but only via HIP-3, which requires staking 500K HYPE (~$20M+) just to deploy a perp DEX. We are the long-tail-native option on Solana.
         </h2>
         <div className="pitch-matrix-wrap">
           <table className="pitch-matrix">
@@ -804,7 +805,7 @@ function Slide08Competitors(_: SlideProps) {
               </tr>
               <tr>
                 <td className="pitch-matrix-feature">Permissionless markets</td>
-                <td className="pitch-matrix-no">HIP-1 auction-gated</td>
+                <td className="pitch-matrix-no">HIP-3 stake-gated ($20M+)</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
@@ -839,7 +840,7 @@ function Slide08Competitors(_: SlideProps) {
               </tr>
               <tr>
                 <td className="pitch-matrix-feature">Market-creator fee share</td>
-                <td className="pitch-matrix-no">per HIP-1</td>
+                <td className="pitch-matrix-no">per HIP-3 builder split</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-no">✗</td>
                 <td className="pitch-matrix-yes pitch-matrix-us">✓</td>
@@ -947,11 +948,11 @@ function Slide09WhyNow(_: SlideProps) {
                 strokeLinejoin="round"
               />
             </svg>
-            <div className="pitch-whynow-num mono">$793M</div>
+            <div className="pitch-whynow-num mono">$15B+</div>
             <div className="pitch-whynow-label">
-              Hyperliquid OI in 3 months proved demand for permissionless
-              perps. HIP-1 prices most creators out (auction has cleared
-              up to $19M+ per market). Long-tail supply on Solana is empty.
+              Hyperliquid OI by end of 2025 proved demand for permissionless
+              perps. HIP-3 prices most creators out (500K HYPE ≈ $20M+ stake
+              just to deploy a perp DEX). Long-tail supply on Solana is empty.
             </div>
           </div>
         </div>
@@ -1047,7 +1048,7 @@ function Slide11Risks(_: SlideProps) {
               Pre-audit hardening is ongoing every day — continuous
               deep self-audit against upstream produces a port queue
               we apply as findings surface, ahead of external firm
-              engagement. 422 Kani proofs verify risk-engine invariants
+              engagement. 500+ Kani proofs verify risk-engine invariants
               before any auditor starts.
             </p>
           </div>
