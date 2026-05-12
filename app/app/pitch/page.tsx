@@ -211,8 +211,8 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two-person team. We&apos;ve been building Percolator together
-          full-time.
+          Two-person team. We&apos;re both AI-assisted developers,
+          building Percolator together full-time.
         </h2>
 
         <div className="pitch-team-grid pitch-team-grid-two">
@@ -226,10 +226,9 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-team-name">Khubair</div>
             <div className="pitch-team-role">Co-founder · Protocol &amp; Risk</div>
             <ul className="pitch-team-bullets">
-              <li>I shipped the wrapper engine port, the SDK, and the indexer</li>
-              <li>I ran 36 pre-audit hardening PRs in four days, closing every critical from the self-audit</li>
+              <li>I&apos;ve shipped most of the build: the wrapper engine port, the SDK, the indexer, the hardening</li>
               <li>I do the security review and external positioning</li>
-              <li>Solana product co-founder. Superteam UK member. Web2 startup background.</li>
+              <li>Two years on Solana. Superteam UK for a year. Web2 startup background.</li>
             </ul>
             <p className="pitch-team-links mono">
               <a
@@ -257,7 +256,7 @@ function Slide02Team(_: SlideProps) {
               className="pitch-team-pfp"
             />
             <div className="pitch-team-name">Squid</div>
-            <div className="pitch-team-role">Co-founder · Systems &amp; Liquidity</div>
+            <div className="pitch-team-role">Co-founder · Community &amp; Partnerships</div>
             <ul className="pitch-team-bullets">
               <li>
                 He shipped{" "}
@@ -279,8 +278,8 @@ function Slide02Team(_: SlideProps) {
                   percolator-locker
                 </a>
               </li>
+              <li>He runs community and partnerships day-to-day</li>
               <li>He found and patched the KeeperCrank big-brain bug (Toly QRT&apos;d the fix)</li>
-              <li>3 years building on Solana</li>
             </ul>
             <p className="pitch-team-links mono">
               <a
