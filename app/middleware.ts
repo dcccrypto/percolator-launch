@@ -242,6 +242,8 @@ const REDIRECT_HOSTS = new Set([
 const WAITLIST_HOST_ALLOWED_PREFIXES = [
   "/waitlist",
   "/pitch",        // investor-facing deck (still accessible, just not linked from nav)
+  "/pitch-2",      // 10-slide narration variant for 2-min pitch video
+  "/demo-shots",   // screenshot-only UI mockup page for pitch-deck images
   "/guide",        // developer guide
   "/developers",
   "/join",         // community/applications
