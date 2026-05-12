@@ -89,8 +89,9 @@ function NumberCounter({
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 //
 // PITCH-2 — 10-slide narration variant tuned for the 2-minute pitch video.
-// Drops Moat, Why Now, and GTM (those live on /pitch for deep-dive sessions).
-// Slide order matches the linear video script — no cross-cuts.
+// Drops Moat and GTM (those live on /pitch for deep-dive sessions).
+// Keeps Why Now in slot 7 because the Drift hack window IS the urgency
+// the 2-min pitch needs.
 //
 //   1  One-Liner
 //   2  Problem
@@ -98,7 +99,7 @@ function NumberCounter({
 //   4  Traction
 //   5  Origin (Toly + bounties)
 //   6  How the Math Works
-//   7  Demo Product
+//   7  Why Now (Drift Apr 1 hack reframe; long-tail empty; shared-LP failing)
 //   8  Business Model
 //   9  Roadmap, Risks & Ask
 //  10  Contact
@@ -1424,7 +1425,7 @@ const SLIDES = [
   { id: 4, title: "Traction", component: Slide03Traction },
   { id: 5, title: "Origin", component: SlideOrigin },
   { id: 6, title: "How the Math Works", component: SlideMath },
-  { id: 7, title: "Built", component: Slide05Product },
+  { id: 7, title: "Why Now", component: Slide09WhyNow },
   { id: 8, title: "Business Model", component: Slide06Money },
   { id: 9, title: "Roadmap & Ask", component: SlideRoadmapAsk },
   { id: 10, title: "Contact", component: Slide13Contact },
