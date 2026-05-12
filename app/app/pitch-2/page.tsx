@@ -482,10 +482,10 @@ function Slide05Product(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Demo Product</div>
+        <div className="pitch-label">Built &middot; verifiable on-chain</div>
         <h2 className="pitch-title">
-          First SOL/USDC perp market live on mainnet today. Public on
-          audit clearance.
+          Don&apos;t trust, verify. Every primitive on this deck has a
+          PDA seed, an instruction name, or an on-chain program address.
         </h2>
 
         <div className="pflow-wrap">
@@ -580,11 +580,19 @@ function Slide05Product(_: SlideProps) {
         </div>
 
         <div className="pitch-create-footer">
-          Mark price from a pinned Raydium CLMM pool with Pyth as
-          primary, per-market oracle config with deviation circuit
-          breaker. The LP vault sits on the other side of every trade
-          &mdash; JLP-style, no active market makers required. Closed
-          beta at mainnet.percolatorlaunch.com.
+          Mainnet program{" "}
+          <span className="mono" style={{ color: "rgba(34,211,238,0.85)" }}>
+            ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv
+          </span>
+          . Twenty-one Apache-2.0 repos at{" "}
+          <span className="mono" style={{ color: "rgba(34,211,238,0.85)" }}>
+            github.com/dcccrypto
+          </span>
+          . Devnet program{" "}
+          <span className="mono" style={{ color: "rgba(34,211,238,0.85)" }}>
+            FxfD37s1…sfKrD
+          </span>{" "}
+          has the 220-market / 71-creator history from February.
         </div>
       </div>
     </div>
@@ -1416,7 +1424,7 @@ const SLIDES = [
   { id: 4, title: "Traction", component: Slide03Traction },
   { id: 5, title: "Origin", component: SlideOrigin },
   { id: 6, title: "How the Math Works", component: SlideMath },
-  { id: 7, title: "Demo Product", component: Slide05Product },
+  { id: 7, title: "Built", component: Slide05Product },
   { id: 8, title: "Business Model", component: Slide06Money },
   { id: 9, title: "Roadmap & Ask", component: SlideRoadmapAsk },
   { id: 10, title: "Contact", component: Slide13Contact },
