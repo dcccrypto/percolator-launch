@@ -211,9 +211,9 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two-person team. We&apos;ve been building Percolator together
-          full-time. Mainnet beta is live, open to OSS contributors,
-          and we haven&apos;t raised a round yet.
+          Two co-founders, full-time on Percolator. Four programs live
+          on mainnet, twenty-one Apache-2.0 repos public. Closed beta
+          is open to OSS contributors.
         </h2>
 
         <div className="pitch-team-grid pitch-team-grid-two">
@@ -228,7 +228,7 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-team-role">Co-founder · Protocol &amp; Risk</div>
             <ul className="pitch-team-bullets">
               <li>Shipped the wrapper engine port, SDK, indexer, and 36 pre-audit hardening PRs in four days</li>
-              <li>Won Toly&apos;s public bounty on pre-audit critical bug review</li>
+              <li>Owns the pre-audit security review and external positioning</li>
               <li>Solana product co-founder, Superteam UK member, Web2 startup background</li>
             </ul>
             <p className="pitch-team-links mono">
@@ -280,7 +280,7 @@ function Slide02Team(_: SlideProps) {
                 </a>
               </li>
               <li>Found and patched the KeeperCrank big-brain bug (Toly QRT&apos;d the fix)</li>
-              <li>3 years building on Solana; winner of Toly&apos;s Percolator bounty</li>
+              <li>3 years building on Solana, full-stack Rust and program-side</li>
             </ul>
             <p className="pitch-team-links mono">
               <a
