@@ -1,7 +1,7 @@
 "use client";
 
 import { FC } from "react";
-import { SLAB_TIERS, type SlabTierKey } from "@percolatorct/sdk";
+import { SLAB_TIERS, type SlabTierKey } from "@/lib/slabTiers";
 
 interface SlabTierPickerProps {
   value: SlabTierKey;

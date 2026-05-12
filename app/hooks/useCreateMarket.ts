@@ -835,8 +835,12 @@ export function useCreateMarket() {
           const depositIx = buildIx({ programId, keys: depositKeys, data: depositData });
 
           const topupData = encodeTopUpInsurance({ amount: params.insuranceAmount.toString() });
+          // ACCOUNTS_TOPUP_INSURANCE has 6 entries — clock was added in v12.19.
+          // Earlier code passed only 5 pubkeys, which silently broke TX3 on
+          // the deployed binary. SDK 2.0.9 has the right shape; we just need
+          // to supply the matching 6th pubkey here.
           const topupKeys = buildAccountMetas(ACCOUNTS_TOPUP_INSURANCE, [
-            wallet.publicKey, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram,
+            wallet.publicKey, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram, WELL_KNOWN.clock,
           ]);
           const topupIx = buildIx({ programId, keys: topupKeys, data: topupData });
 
