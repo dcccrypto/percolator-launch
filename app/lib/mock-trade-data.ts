@@ -293,7 +293,17 @@ export function getMockMarketInfo(address: string) {
 
 /* ── Mock user account for trade page ── */
 
+// For demo screenshots we don't want the "already has an open SOL Long
+// 5x +$21.45" position card cluttering every trade-page render —
+// freshly-launched markets should look clean and ready to trade.
+// getMockUserAccount() now returns the same IDLE state as
+// getMockUserAccountIdle. The original "with open position" variant
+// stayed under getMockUserAccountWithPosition for future use.
 export function getMockUserAccount(address: string) {
+  return getMockUserAccountIdle(address);
+}
+
+export function getMockUserAccountWithPosition(address: string) {
   const m = MOCK_MAP[address];
   if (!m) return null;
   const priceE6 = BigInt(Math.round(m.priceUsd * 1_000_000));
