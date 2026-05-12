@@ -22,6 +22,7 @@ import { RecoverSolBanner } from "./RecoverSolBanner";
 import { SlabTierPicker } from "./SlabTierPicker";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 import { useToast } from "@/hooks/useToast";
+import { isMockMode } from "@/lib/mock-mode";
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -283,8 +284,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // 1100 SOL LP collateral) cannot be auto-funded. Tightening the bypass from `isDevnet` to
   // `isDevnet && isPercolatorMirror` prevents the Launch button from being enabled when the user
   // has 5 SOL but entered 1100 SOL as LP collateral.
-  const skipTokenBalanceCheck = isDevnet && isPercolatorMirror;
-  const allValid = step1Valid && step2Valid && step3Valid && (skipTokenBalanceCheck || (hasTokens && hasSufficientTokensForSeed)) && hasSufficientSol;
+  // Mock-mode (?mock=1) bypasses all balance checks so investors / pitch
+  // captures can walk through the wizard without funding a real wallet.
+  const mockBypass = isMockMode();
+  const skipTokenBalanceCheck = (isDevnet && isPercolatorMirror) || mockBypass;
+  const allValid = step1Valid && step2Valid && step3Valid && (skipTokenBalanceCheck || (hasTokens && hasSufficientTokensForSeed)) && (mockBypass || hasSufficientSol);
 
   // Quick Launch auto-advance: step 1 → step 2 when token is resolved and params ready
   const quickAutoAdvancedRef = useRef(false);

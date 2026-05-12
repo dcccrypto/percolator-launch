@@ -7,10 +7,15 @@
 
 import Link from "next/link";
 
-// SOL mock market — pre-configured in app/lib/mock-trade-data.ts
-const MOCK_SOL_SLAB = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
-const MOCK_WIF_SLAB = "4nF7d2Z3oF8bTKwhat9k8xsR1TLAo9U7Bd2Rk3pYJne5";
+// Mock markets pre-configured in app/lib/mock-trade-data.ts.
+// BONK is the primary screenshot subject because it's the canonical
+// long-tail SPL example — the exact category the deck pitches.
+// Prices and 24h ranges are pulled from real CoinGecko spot data
+// (refreshed 2026-05-12). See mock-trade-data.ts header.
 const MOCK_BONK_SLAB = "HN7cABqLq46Es1jh92hQnvWo6BuZPdSmTQ5P2NMeVRgr";
+const MOCK_SOL_SLAB  = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
+const MOCK_WIF_SLAB  = "4nF7d2Z3oF8bTKwhat9k8xsR1TLAo9U7Bd2Rk3pYJne5";
+const MOCK_JUP_SLAB  = "B8mnfpCEt2z3SMz4giHGPNMB3DzBAJEYrPq9Uhnj4zXh";
 
 const PURPLE = "#9945FF";
 const HYPERP = "#22D3EE";
@@ -46,29 +51,30 @@ export default function DemoShotsLauncher() {
             step="STEP 1"
             color={PURPLE}
             title="Open Create Wizard"
-            body="The real /create market form. Connect any Solana wallet (an empty test wallet works) to render the wizard, then step through Token → Oracle → Parameters → Review. Do NOT click Deploy on the final step."
-            href="/create"
-            cta="Open /create →"
-            note="Needs any wallet connected (no deposit required)"
+            body="The real /create market form with ?mock=1, which bypasses wallet-balance checks so you can step through Token → Oracle → Parameters → Review without funding anything. Do NOT click Deploy on the final step."
+            href="/create?mock=1"
+            cta="Open /create ?mock=1 →"
+            note="Balance checks disabled · still needs a wallet connected for the form to render"
           />
           <LauncherCard
             step="STEP 2"
             color={HYPERP}
-            title="Open Trade UI (Mock SOL)"
-            body="The real /trade page with the pre-configured SOL/USDC mock market. Full production layout: market bar, chart, order panel, position card with NFT mint, recent trades, warmup-H indicator."
-            href={`/trade/${MOCK_SOL_SLAB}?mock=1`}
-            cta="Open /trade · SOL ?mock=1 →"
+            title="Open Trade UI (BONK · long-tail)"
+            body="The real /trade page with a populated mock BONK/USDC market. Full production layout: market bar with mark price, chart with 24h history, order panel with leverage slider, position card with NFT mint and warmup-H indicator, recent trades feed. Prices reflect real BONK spot (~$0.00000744)."
+            href={`/trade/${MOCK_BONK_SLAB}?mock=1`}
+            cta="Open /trade · BONK ?mock=1 →"
             note="?mock=1 enables mock data for this URL only"
           />
         </div>
 
         <div style={{ marginTop: "1.5rem", padding: "1rem 1.25rem", background: BG_ELEVATED, border: `1px solid ${BORDER}`, fontSize: "12px", color: TEXT_SECONDARY, lineHeight: 1.65 }}>
           <div style={{ fontFamily: mono, fontSize: "10px", color: TEXT_MUTED, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "0.5rem" }}>
-            other mock markets ready to screenshot
+            other mock markets · prices live from spot
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-            <MockLink href={`/trade/${MOCK_WIF_SLAB}?mock=1`} label="WIF · $0.847" />
-            <MockLink href={`/trade/${MOCK_BONK_SLAB}?mock=1`} label="BONK · $0.0000182" />
+            <MockLink href={`/trade/${MOCK_SOL_SLAB}?mock=1`} label="SOL · $96.63" />
+            <MockLink href={`/trade/${MOCK_WIF_SLAB}?mock=1`} label="WIF · $0.2275" />
+            <MockLink href={`/trade/${MOCK_JUP_SLAB}?mock=1`} label="JUP · $0.2469" />
           </div>
         </div>
 

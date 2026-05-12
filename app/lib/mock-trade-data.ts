@@ -13,6 +13,8 @@ interface MockMarketData {
   priceUsd: number;
   mint: string;
   maxLeverage: number;
+  /** When true, market runs in HYPERP mode (indexFeedId = zero → Hyperp EMA).
+   *  When false, market runs in PYTH-pinned mode (real Pyth feed configured). */
   adminOracle: boolean;
   oi: bigint;
   capital: bigint;
@@ -21,19 +23,31 @@ interface MockMarketData {
   numAccounts: number;
   tradingFeeBps: number;
   initialMarginBps: number;
+  /** Token decimals on the base mint (used for OI USD conversion in MarketInfoBar). */
+  decimals: number;
+  /** Pre-resolved logo URL. CoinGecko CDN is the most reliable source for
+   *  meme/long-tail tokens (solana-labs/token-list 404s for BONK et al). */
+  logoUrl: string;
 }
 
+// Prices refreshed 2026-05-12 against CoinGecko spot. Trading fees set to
+// 10 bps everywhere to match the verified code charging (was 25-50). Initial
+// margin standardised at 1000 bps (10%) to match deck claim. OI/vault/account
+// counts represent a "closed beta with moderate testing activity" state.
+//
+// adminOracle=true → HYPERP EMA mode (no Pyth feed, on-chain DEX pool oracle).
+// BONK runs HYPERP because that's the deck's long-tail story.
 const MOCK_MAP: Record<string, MockMarketData> = {
-  "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU": { symbol: "SOL", priceUsd: 148.52, mint: "So11111111111111111111111111111111111111112", maxLeverage: 20, adminOracle: false, oi: 85_000_000_000n, capital: 120_000_000_000n, insurance: 15_000_000_000n, vault: 200_000_000_000n, numAccounts: 42, tradingFeeBps: 30, initialMarginBps: 500 },
-  "9mRGKzEEQBus4bZ1YKg4tVEMx7fPYEBV5Pz9bGJjp7Cr": { symbol: "USDC", priceUsd: 1.00, mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", maxLeverage: 10, adminOracle: false, oi: 42_000_000_000n, capital: 80_000_000_000n, insurance: 10_000_000_000n, vault: 130_000_000_000n, numAccounts: 18, tradingFeeBps: 30, initialMarginBps: 1000 },
-  "4nF7d2Z3oF8bTKwhat9k8xsR1TLAo9U7Bd2Rk3pYJne5": { symbol: "WIF", priceUsd: 0.847, mint: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", maxLeverage: 20, adminOracle: false, oi: 65_000_000_000n, capital: 90_000_000_000n, insurance: 8_000_000_000n, vault: 150_000_000_000n, numAccounts: 31, tradingFeeBps: 30, initialMarginBps: 500 },
-  "B8mnfpCEt2z3SMz4giHGPNMB3DzBAJEYrPq9Uhnj4zXh": { symbol: "JUP", priceUsd: 0.624, mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", maxLeverage: 10, adminOracle: false, oi: 30_000_000_000n, capital: 55_000_000_000n, insurance: 6_000_000_000n, vault: 90_000_000_000n, numAccounts: 15, tradingFeeBps: 30, initialMarginBps: 1000 },
-  "HN7cABqLq46Es1jh92hQnvWo6BuZPdSmTQ5P2NMeVRgr": { symbol: "BONK", priceUsd: 0.0000182, mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", maxLeverage: 5, adminOracle: true, oi: 18_000_000_000n, capital: 40_000_000_000n, insurance: 5_000_000_000n, vault: 60_000_000_000n, numAccounts: 8, tradingFeeBps: 50, initialMarginBps: 2000 },
-  "FMJ1DFWV96VKb5z8hnRp5LJaP7RPAywUbioiRvLqZafV": { symbol: "RAY", priceUsd: 2.18, mint: "RaydiumPoolxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", maxLeverage: 10, adminOracle: false, oi: 22_000_000_000n, capital: 45_000_000_000n, insurance: 4_000_000_000n, vault: 70_000_000_000n, numAccounts: 12, tradingFeeBps: 30, initialMarginBps: 1000 },
-  "3Kat5BEzHTZmJYBR1QnP4FCn2jJRYkSgnTMGV4cANQrM": { symbol: "ORCA", priceUsd: 3.42, mint: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE", maxLeverage: 10, adminOracle: false, oi: 12_000_000_000n, capital: 28_000_000_000n, insurance: 3_000_000_000n, vault: 40_000_000_000n, numAccounts: 6, tradingFeeBps: 30, initialMarginBps: 1000 },
-  "5F2nFaJfVoR91EVBTzkg9hEb8w2jhaQD65FKmjfwUzSN": { symbol: "mSOL", priceUsd: 162.10, mint: "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", maxLeverage: 15, adminOracle: false, oi: 50_000_000_000n, capital: 70_000_000_000n, insurance: 9_000_000_000n, vault: 120_000_000_000n, numAccounts: 22, tradingFeeBps: 25, initialMarginBps: 667 },
-  "ArK3jGAHqPxTEHsMgrLwRbKMzH4DS7nVPEfkjxhpb9fn": { symbol: "WETH", priceUsd: 3241.88, mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", maxLeverage: 20, adminOracle: false, oi: 78_000_000_000n, capital: 110_000_000_000n, insurance: 12_000_000_000n, vault: 180_000_000_000n, numAccounts: 37, tradingFeeBps: 30, initialMarginBps: 500 },
-  "2qVfA7g3bKfc7WJBb6RvTa5rJFmB8itu4C88Rdg1xN8z": { symbol: "PYTH", priceUsd: 0.312, mint: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", maxLeverage: 10, adminOracle: true, oi: 5_000_000_000n, capital: 12_000_000_000n, insurance: 1_200_000_000n, vault: 18_000_000_000n, numAccounts: 4, tradingFeeBps: 30, initialMarginBps: 1000 },
+  "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU": { symbol: "SOL",  priceUsd: 96.63,      mint: "So11111111111111111111111111111111111111112",  maxLeverage: 10, adminOracle: false, oi: 320_000_000_000n, capital: 480_000_000_000n, insurance: 32_000_000_000n, vault: 750_000_000_000n, numAccounts: 38, tradingFeeBps: 10, initialMarginBps: 1000, decimals: 9, logoUrl: "https://assets.coingecko.com/coins/images/4128/standard/solana.png" },
+  "9mRGKzEEQBus4bZ1YKg4tVEMx7fPYEBV5Pz9bGJjp7Cr": { symbol: "USDC", priceUsd: 1.00,       mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", maxLeverage: 5,  adminOracle: false, oi: 12_000_000_000n,  capital: 30_000_000_000n,  insurance: 3_000_000_000n,  vault: 45_000_000_000n,  numAccounts: 6,  tradingFeeBps: 10, initialMarginBps: 1000, decimals: 6, logoUrl: "https://assets.coingecko.com/coins/images/6319/standard/usdc.png" },
+  "4nF7d2Z3oF8bTKwhat9k8xsR1TLAo9U7Bd2Rk3pYJne5": { symbol: "WIF",  priceUsd: 0.2275,     mint: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", maxLeverage: 10, adminOracle: true,  oi: 95_000_000_000n,  capital: 140_000_000_000n, insurance: 11_000_000_000n, vault: 220_000_000_000n, numAccounts: 27, tradingFeeBps: 10, initialMarginBps: 1000, decimals: 6, logoUrl: "https://assets.coingecko.com/coins/images/33566/standard/dogwifhat.jpg" },
+  "B8mnfpCEt2z3SMz4giHGPNMB3DzBAJEYrPq9Uhnj4zXh": { symbol: "JUP",  priceUsd: 0.2469,     mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", maxLeverage: 10, adminOracle: false, oi: 38_000_000_000n,  capital: 65_000_000_000n,  insurance: 5_500_000_000n,  vault: 110_000_000_000n, numAccounts: 14, tradingFeeBps: 10, initialMarginBps: 1000, decimals: 6, logoUrl: "https://assets.coingecko.com/coins/images/34188/standard/jup.png" },
+  "HN7cABqLq46Es1jh92hQnvWo6BuZPdSmTQ5P2NMeVRgr": { symbol: "BONK", priceUsd: 0.00000744, mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", maxLeverage: 10, adminOracle: true,  oi: 142_000_000_000n, capital: 195_000_000_000n, insurance: 14_500_000_000n, vault: 310_000_000_000n, numAccounts: 31, tradingFeeBps: 10, initialMarginBps: 1000, decimals: 5, logoUrl: "https://assets.coingecko.com/coins/images/28600/standard/bonk.jpg" },
+  "FMJ1DFWV96VKb5z8hnRp5LJaP7RPAywUbioiRvLqZafV": { symbol: "RAY",  priceUsd: 0.8499,     mint: "RaydiumPoolxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", maxLeverage: 10, adminOracle: false, oi: 28_000_000_000n,  capital: 50_000_000_000n,  insurance: 4_200_000_000n,  vault: 78_000_000_000n,  numAccounts: 11, tradingFeeBps: 10, initialMarginBps: 1000, decimals: 6, logoUrl: "https://assets.coingecko.com/coins/images/13928/standard/PSigc4ie_400x400.jpg" },
+  "3Kat5BEzHTZmJYBR1QnP4FCn2jJRYkSgnTMGV4cANQrM": { symbol: "ORCA", priceUsd: 1.63,       mint: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",  maxLeverage: 10, adminOracle: false, oi: 15_000_000_000n,  capital: 32_000_000_000n,  insurance: 2_800_000_000n,  vault: 48_000_000_000n,  numAccounts: 8,  tradingFeeBps: 10, initialMarginBps: 1000, decimals: 6, logoUrl: "https://assets.coingecko.com/coins/images/17547/standard/Orca_Logo.png" },
+  "5F2nFaJfVoR91EVBTzkg9hEb8w2jhaQD65FKmjfwUzSN": { symbol: "mSOL", priceUsd: 105.32,     mint: "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", maxLeverage: 10, adminOracle: false, oi: 85_000_000_000n,  capital: 130_000_000_000n, insurance: 10_500_000_000n, vault: 200_000_000_000n, numAccounts: 24, tradingFeeBps: 10, initialMarginBps: 1000, decimals: 9, logoUrl: "https://assets.coingecko.com/coins/images/17752/standard/mSOL.png" },
+  "ArK3jGAHqPxTEHsMgrLwRbKMzH4DS7nVPEfkjxhpb9fn": { symbol: "WETH", priceUsd: 2315.67,    mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", maxLeverage: 10, adminOracle: false, oi: 215_000_000_000n, capital: 310_000_000_000n, insurance: 24_000_000_000n, vault: 480_000_000_000n, numAccounts: 35, tradingFeeBps: 10, initialMarginBps: 1000, decimals: 8, logoUrl: "https://assets.coingecko.com/coins/images/279/standard/ethereum.png" },
+  "2qVfA7g3bKfc7WJBb6RvTa5rJFmB8itu4C88Rdg1xN8z": { symbol: "PYTH", priceUsd: 0.0572,     mint: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", maxLeverage: 10, adminOracle: false, oi: 8_500_000_000n,   capital: 18_000_000_000n,  insurance: 1_600_000_000n,  vault: 26_000_000_000n,  numAccounts: 5,  tradingFeeBps: 10, initialMarginBps: 1000, decimals: 6, logoUrl: "https://assets.coingecko.com/coins/images/31924/standard/pyth.png" },
 };
 
 export function isMockSlab(address: string): boolean {
@@ -230,6 +244,37 @@ export function getMockMarketData(address: string): MockMarketData | null {
   return MOCK_MAP[address] ?? null;
 }
 
+/**
+ * Supabase-shaped market metadata for mock slabs. Returned by useMarketInfo
+ * when running in mock mode so MarketLogo, MarketInfoBar (OI conversion,
+ * 24h volume), and other UI bits render correctly without DB access.
+ *
+ * Returns a partial of `markets_with_stats` shape; only fields the UI reads
+ * are populated. Cast to MarketWithStats at the call site.
+ */
+export function getMockMarketInfo(address: string) {
+  const m = MOCK_MAP[address];
+  if (!m) return null;
+  // Pseudo-random but seeded volume so screenshots stay stable per slab
+  let seed = 0;
+  for (let i = 0; i < address.length; i++) seed = ((seed << 5) - seed + address.charCodeAt(i)) | 0;
+  const seedScale = ((seed & 0x7fffffff) % 1000) / 1000; // 0–1
+  const volumeUsd24h = Math.round(40_000 + seedScale * 220_000); // $40K–$260K plausible long-tail closed-beta volume
+
+  return {
+    slab_address: address,
+    symbol: m.symbol,
+    logo_url: m.logoUrl,
+    decimals: m.decimals,
+    mainnet_ca: m.mint,
+    volume_24h: volumeUsd24h,
+    total_open_interest: Number(m.oi),
+    num_accounts: m.numAccounts,
+    is_active: true,
+    paused: false,
+  };
+}
+
 /* ── Mock user account for trade page ── */
 
 export function getMockUserAccount(address: string) {
@@ -355,7 +400,7 @@ export function getMockTrades(address: string) {
       side,
       size,
       price,
-      fee: Math.round(size * 0.003),
+      fee: Math.round(size * 0.001), // 10 bps to match market config
       trader: "7xKXtg" + i.toString().padStart(2, "0"),
       tx_signature: "mock" + "x".repeat(80) + i,
       created_at: time.toISOString(),

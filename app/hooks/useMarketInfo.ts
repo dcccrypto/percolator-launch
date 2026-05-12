@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
 import type { Database } from "@/lib/database.types";
+import { isMockMode } from "@/lib/mock-mode";
+import { isMockSlab, getMockMarketInfo } from "@/lib/mock-trade-data";
 
 type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 type SupabaseClient = ReturnType<typeof getSupabase>;
@@ -15,6 +17,16 @@ export function useMarketInfo(slabAddress: string) {
   useEffect(() => {
     setLoading(true);
     setError(null);
+
+    // Mock-mode short-circuit: serves logoUrl, decimals, symbol, OI, volume
+    // straight from the in-codebase mock-trade-data. Avoids a DB round-trip
+    // and lets demo-shots / pitch screenshots render with correct token logos.
+    if (isMockMode() && isMockSlab(slabAddress)) {
+      const mock = getMockMarketInfo(slabAddress);
+      setMarket(mock as unknown as MarketWithStats);
+      setLoading(false);
+      return;
+    }
 
     let supabase: SupabaseClient;
     try {
