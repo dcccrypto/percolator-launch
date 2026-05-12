@@ -1,7 +1,7 @@
 "use client";
 
 import { FC } from "react";
-import { type SlabTierKey } from "@percolatorct/sdk";
+import { type SlabTierKey } from "@/lib/slabTiers";
 import { SlabTierPicker } from "./SlabTierPicker";
 import { FeeSlider } from "./FeeSlider";
 import { ConflictWarning } from "./ConflictWarning";

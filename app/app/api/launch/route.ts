@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { SLAB_TIERS, type SlabTierKey } from "@percolatorct/sdk";
+import { SLAB_TIERS, type SlabTierKey } from "@/lib/slabTiers";
 import { getRpcEndpoint } from "@/lib/config";
 import { getClientIp } from "@/lib/get-client-ip";
 import {

@@ -9,7 +9,7 @@ import { clearInFlightMarket } from "@/lib/inFlightMarket";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
-import { SLAB_TIERS, type SlabTierKey } from "@percolatorct/sdk";
+import { SLAB_TIERS, type SlabTierKey } from "@/lib/slabTiers";
 import { getNetwork } from "@/lib/config";
 
 import { ModeSelector } from "./ModeSelector";

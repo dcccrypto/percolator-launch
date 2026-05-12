@@ -14,7 +14,7 @@
  */
 
 import { FC } from "react";
-import { type SlabTierKey, SLAB_TIERS } from "@percolatorct/sdk";
+import { type SlabTierKey, SLAB_TIERS } from "@/lib/slabTiers";
 import { CostEstimate } from "../create/CostEstimate";
 
 interface StepReviewDemoProps {
