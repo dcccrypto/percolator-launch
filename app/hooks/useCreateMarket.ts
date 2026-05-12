@@ -56,6 +56,11 @@ import {
 import { sendTx } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
+import {
+  saveInFlightMarket,
+  updateInFlightStep,
+  clearInFlightMarket,
+} from "@/lib/inFlightMarket";
 const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
 const ALL_ZEROS_FEED = "0".repeat(64);
 
@@ -303,6 +308,24 @@ export function useCreateMarket() {
           setState((s) => ({ ...s, step: 0, stepLabel: STEP_LABELS[0] }));
 
           vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
+
+          // Persist recovery state BEFORE sending TX0. Survives tab close so
+          // the user can recover via the in-UI ReclaimSlabRent path or the
+          // close-market-reclaim-all.ts script even if the browser dies.
+          // 2026-05-12: PERC-8329 superseded for this flow — slab secret IS
+          // persisted so the uninitialised-slab reclaim works. See
+          // lib/inFlightMarket.ts header for trade-off rationale.
+          saveInFlightMarket({
+            slabAddress: slabPk.toBase58(),
+            slabSecretKey: Array.from(slabKp.secretKey),
+            adminAddress: wallet.publicKey.toBase58(),
+            collateralAta: vaultAta.toBase58(),
+            collateralMint: params.mint.toBase58(),
+            programId: programId.toBase58(),
+            network: isDevnetEnv ? "devnet" : "mainnet",
+            createdAt: Date.now(),
+            lastStep: 0,
+          });
 
           // Check if slab account already exists (previous attempt may have landed)
           // PERC-1094 fix: also regenerate if the existing slab has the wrong size (stale
@@ -587,6 +610,7 @@ export function useCreateMarket() {
               txSigs: [...s.txSigs, sig],
               slabAddress: slabKp.publicKey.toBase58(),
             }));
+            updateInFlightStep(slabPk.toBase58(), 1);
           }
         } else {
           vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
@@ -685,6 +709,7 @@ export function useCreateMarket() {
             connection, wallet, instructions, computeUnits: 500_000,
           });
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
+          updateInFlightStep(slabPk.toBase58(), 2);
         }
 
         // Step 2: InitLP with matcher program (atomic: create ctx + init vAMM + init LP)
@@ -749,6 +774,7 @@ export function useCreateMarket() {
             signers: lpSigners,
           });
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
+          updateInFlightStep(slabPk.toBase58(), 3);
           } // end else (LP not yet initialized)
         }
 
@@ -980,8 +1006,9 @@ export function useCreateMarket() {
           }
         }
 
-        // Done! Clear in-memory keypair ref (PERC-8329: no localStorage to clean up).
+        // Done! Clear in-memory keypair ref + in-flight recovery state.
         slabKpRef.current = null;
+        clearInFlightMarket(slabPk.toBase58());
         setState((s) => ({
           ...s,
           loading: false,

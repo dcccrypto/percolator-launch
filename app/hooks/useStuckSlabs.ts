@@ -2,7 +2,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
+import {
+  loadLastInFlightMarket,
+  clearInFlightMarket,
+  type InFlightMarketState,
+} from "@/lib/inFlightMarket";
 
 /** Magic bytes at offset 0 of an initialized Percolator slab */
 const PERCOLAT_MAGIC = 0x504552434f4c4154n; // "PERCOLAT" as u64 LE
@@ -14,85 +19,111 @@ export interface StuckSlab {
   isInitialized: boolean;
   /** Whether the on-chain account exists at all */
   exists: boolean;
-  /** The keypair (if available — needed for recovery) */
+  /** Slab keypair, reconstructed from the persisted secret. Used by the
+   *  ReclaimSlabRent (tag 52) path on uninitialised slabs. */
   keypair: Keypair | null;
   /** Lamports held by the account (rent) */
   lamports: number;
   /** The program that owns the account */
   owner: string | null;
+  /** Last completed step from the in-flight save (0..4) */
+  lastStep: number;
+  /** Admin pubkey (for wallet-match check) */
+  adminAddress: string;
+  /** Collateral ATA pubkey (surfaced for the recovery script) */
+  collateralAta: string;
+  /** Full in-flight state for export-to-recovery JSON */
+  state: InFlightMarketState;
 }
 
-const STORAGE_KEY = "percolator-pending-slab-keypair";
-
 /**
- * Detects stuck slab accounts from localStorage.
+ * Detects in-flight markets that didn't complete (e.g. tab closed mid-flow).
  *
- * With the atomic market creation flow (Part 1), stuck slabs are rare:
- * - createAccount + InitMarket are in a single tx, so rollback is atomic.
- * - Stuck state only occurs if the tx landed but client didn't get confirmation
- *   (network timeout during confirmTransaction).
+ * Reads the persisted in-flight state written by useCreateMarket via
+ * lib/inFlightMarket.ts (NEVER stores the slab secret key — recovery uses
+ * the admin keypair the user already has on disk and runs
+ * scripts/close-market-reclaim-all.ts).
  *
- * Returns:
- * - `stuckSlab`: info about the pending slab, or null if none found
- * - `loading`: true while checking on-chain state
- * - `clearStuck`: removes the pending keypair from localStorage
- * - `refresh`: re-check on-chain state
+ * Only returns a stuck-slab record if the persisted entry's adminAddress
+ * matches the currently-connected wallet. That prevents the banner from
+ * showing entries from other wallets and naturally handles two-tab races.
  */
 export function useStuckSlabs() {
   const { connection } = useConnectionCompat();
+  const wallet = useWalletCompat();
   const [stuckSlab, setStuckSlab] = useState<StuckSlab | null>(null);
   const [loading, setLoading] = useState(true);
 
   const check = useCallback(async () => {
     setLoading(true);
     try {
-      const persisted = localStorage.getItem(STORAGE_KEY);
-      if (!persisted) {
+      const inFlight = loadLastInFlightMarket();
+      if (!inFlight) {
         setStuckSlab(null);
         return;
       }
 
-      let keypair: Keypair;
+      // Wallet-match gate: only show entries that belong to the connected wallet.
+      // Without this, two-tab race conditions could surface another tab's market.
+      if (!wallet.publicKey || wallet.publicKey.toBase58() !== inFlight.adminAddress) {
+        setStuckSlab(null);
+        return;
+      }
+
+      const slabPk = new PublicKey(inFlight.slabAddress);
+
+      // Reconstruct the keypair from the persisted secret. Falls back to
+      // null if the entry is malformed (older entries before the secret
+      // was added).
+      let keypair: Keypair | null = null;
       try {
-        const secretKey = Uint8Array.from(JSON.parse(persisted));
-        keypair = Keypair.fromSecretKey(secretKey);
+        if (inFlight.slabSecretKey && inFlight.slabSecretKey.length === 64) {
+          keypair = Keypair.fromSecretKey(Uint8Array.from(inFlight.slabSecretKey));
+        }
       } catch {
-        // Corrupted data — clean up
-        localStorage.removeItem(STORAGE_KEY);
-        setStuckSlab(null);
-        return;
+        keypair = null;
       }
 
-      // Check if the account exists on-chain
-      const accountInfo = await connection.getAccountInfo(keypair.publicKey);
+      const accountInfo = await connection.getAccountInfo(slabPk);
 
       if (!accountInfo) {
-        // Account doesn't exist — the atomic tx rolled back or was never sent.
-        // Clean up localStorage automatically.
+        // Account doesn't exist — the atomic TX0 rolled back or was never sent.
+        // Surface a "didn't land" record so the banner can offer to clear stale state.
         setStuckSlab({
-          publicKey: keypair.publicKey,
+          publicKey: slabPk,
           isInitialized: false,
           exists: false,
           keypair,
           lamports: 0,
           owner: null,
+          lastStep: inFlight.lastStep,
+          adminAddress: inFlight.adminAddress,
+          collateralAta: inFlight.collateralAta,
+          state: inFlight,
         });
         return;
       }
 
-      // Account exists — check if market was initialized
-      // Use DataView for browser-safe u64 read (Buffer.readBigUInt64LE is Node.js-only)
+      // Account exists — check if market was initialized via PERCOLAT magic.
       const isInitialized =
         accountInfo.data.length >= 8 &&
-        new DataView(accountInfo.data.buffer, accountInfo.data.byteOffset, accountInfo.data.byteLength).getBigUint64(0, /* littleEndian= */ true) === PERCOLAT_MAGIC;
+        new DataView(
+          accountInfo.data.buffer,
+          accountInfo.data.byteOffset,
+          accountInfo.data.byteLength,
+        ).getBigUint64(0, true) === PERCOLAT_MAGIC;
 
       setStuckSlab({
-        publicKey: keypair.publicKey,
+        publicKey: slabPk,
         isInitialized,
         exists: true,
         keypair,
         lamports: accountInfo.lamports,
         owner: accountInfo.owner.toBase58(),
+        lastStep: inFlight.lastStep,
+        adminAddress: inFlight.adminAddress,
+        collateralAta: inFlight.collateralAta,
+        state: inFlight,
       });
     } catch (err) {
       console.warn("[useStuckSlabs] Error checking stuck slab:", err);
@@ -101,16 +132,18 @@ export function useStuckSlabs() {
     } finally {
       setLoading(false);
     }
-  }, [connection]);
+  }, [connection, wallet.publicKey]);
 
   useEffect(() => {
     check();
   }, [check]);
 
   const clearStuck = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
+    if (stuckSlab) {
+      clearInFlightMarket(stuckSlab.publicKey.toBase58());
+    }
     setStuckSlab(null);
-  }, []);
+  }, [stuckSlab]);
 
   return { stuckSlab, loading, clearStuck, refresh: check };
 }

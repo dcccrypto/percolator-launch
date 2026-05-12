@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useCreateMarket, MIN_INIT_MARKET_SEED, type CreateMarketParams } from "@/hooks/useCreateMarket";
+import { clearInFlightMarket } from "@/lib/inFlightMarket";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
@@ -685,6 +686,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Issue #1141: Re-apply initialMint from URL param so 'Clear & Start Fresh'
   // doesn't lose the ?mint= address the user navigated here with.
   const handleReset = () => {
+    // Clear in-flight recovery state for the slab the user is abandoning, if any.
+    if (createState.slabAddress) {
+      clearInFlightMarket(createState.slabAddress);
+    }
     resetCreate();
     setWizard({ ...DEFAULT_STATE, mintAddress: initialMint ?? "" });
     setCompletedSteps(new Set());
@@ -704,6 +709,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         localStorage.removeItem(WIZARD_STORAGE_KEY);
         localStorage.removeItem("percolator-pending-slab-keypair");
       } catch {}
+      // Clear the in-flight recovery state — market is live, no recovery needed.
+      clearInFlightMarket(createState.slabAddress);
     }
   }, [createState.step, createState.insuranceMintFailed, createState.slabAddress]);
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { FC } from "react";
+import { RecoveryExportButton } from "./RecoveryExportButton";
 
 interface LaunchProgressProps {
   state: {
@@ -155,6 +156,23 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
               Start Over
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Recovery export — shown once the slab exists on chain (step >= 1)
+           so the user can download a recovery JSON if anything goes wrong
+           later. Survives tab close. */}
+      {state.step >= 1 && state.slabAddress && (
+        <div className="mt-5 border border-[var(--border)] bg-[var(--bg-surface)] p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] mb-1">
+            Recovery
+          </p>
+          <p className="text-[11px] text-[var(--text-secondary)] mb-3">
+            The slab is on chain. If anything stalls, you can recover via the
+            in-UI banner on the next /create visit, or download this JSON to
+            run the close-market script offline.
+          </p>
+          <RecoveryExportButton />
         </div>
       )}
     </div>

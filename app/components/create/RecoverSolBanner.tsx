@@ -110,6 +110,14 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
                 {stuckSlab.publicKey.toBase58().slice(0, 8)}...
                 {stuckSlab.publicKey.toBase58().slice(-4)}
               </code>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard.writeText(stuckSlab.publicKey.toBase58())}
+                className="ml-2 text-[10px] text-[var(--accent)]/70 hover:text-[var(--accent)] transition-colors"
+                title="Copy full slab address"
+              >
+                copy
+              </button>
             </p>
             <p className="text-[10px] text-[var(--text-secondary)]">
               The slab account is initialized ({rentSol} SOL in rent).
