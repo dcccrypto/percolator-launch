@@ -7,6 +7,7 @@ import { useDexPoolSearch, type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { OracleBadge } from "./OracleBadge";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 import { getNetwork } from "@/lib/config";
+import { isMockMode } from "@/lib/mock-mode";
 
 interface StepOracleSelectProps {
   mintAddress: string;
@@ -43,7 +44,11 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
   onBack,
   canContinue,
 }) => {
-  const isMainnet = getNetwork() === "mainnet";
+  // ?mock=1 bypasses the mainnet $2M DEX-pool-depth gate so screenshot
+  // captures can pick HYPERP regardless of which specific Raydium pool
+  // the auto-detector surfaced for the chosen token.
+  const mockBypass = isMockMode();
+  const isMainnet = getNetwork() === "mainnet" && !mockBypass;
   const MIN_MAINNET_POOL_DEPTH_USD = 2_000_000;
 
   const autoRouterMint = mintValid ? mintAddress : null;
