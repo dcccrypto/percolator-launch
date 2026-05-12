@@ -424,10 +424,41 @@ function Slide03Traction(_: SlideProps) {
           once the audit clears.
         </div>
 
-        <div className="pitch-toly-attribution-strip">
+        <div
+          className="pitch-toly-attribution-strip"
+          style={{ marginTop: "1.5rem" }}
+        >
           <div className="pitch-toly-attribution-caption mono">
-            Toly publicly engages with the work &mdash;
+            Origin &middot; how this came about
           </div>
+          <p
+            style={{
+              fontSize: "0.88rem",
+              lineHeight: 1.6,
+              color: "rgba(255,255,255,0.72)",
+              margin: "0.5rem 0 0.9rem",
+            }}
+          >
+            Anatoly Yakovenko wrote the protocol math and open-sourced
+            a reference program at{" "}
+            <a
+              href="https://github.com/aeyakovenko/percolator-prog"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "#22D3EE", textDecoration: "none", borderBottom: "1px dotted rgba(34,211,238,0.5)" }}
+            >
+              aeyakovenko/percolator-prog
+            </a>
+            , then posted public bounties for community ports. We each
+            won one &mdash;{" "}
+            <strong style={{ color: "rgba(255,255,255,0.9)" }}>Squid</strong>{" "}
+            for the KeeperCrank fix,{" "}
+            <strong style={{ color: "rgba(255,255,255,0.9)" }}>Khubair</strong>{" "}
+            for a pre-audit critical bug review &mdash; then shipped
+            the wrapper, LP vault, transferable NFT positions, dispute
+            resolution, keepers, and SDK on top. Toly has publicly
+            engaged with our work four times since February:
+          </p>
           <div className="pitch-toly-photo-grid pitch-toly-photo-grid-compact">
             <a
               className="pitch-toly-photo"
@@ -500,24 +531,53 @@ function Slide03Traction(_: SlideProps) {
           </div>
         </div>
 
-        <div className="pitch-traction-mini-row">
-          <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={3200} />
-            </div>
-            <div className="pitch-traction-mini-label">Organic X followers</div>
+        <div
+          className="pitch-waitlist-hero"
+          style={{
+            marginTop: "1.5rem",
+            padding: "1.5rem 1.75rem",
+            background:
+              "linear-gradient(135deg, rgba(153,69,255,0.08), rgba(34,211,238,0.06))",
+            border: "1px solid rgba(153,69,255,0.25)",
+            borderRadius: "14px",
+            textAlign: "center",
+          }}
+        >
+          <div
+            className="mono"
+            style={{
+              fontSize: "clamp(3rem, 7vw, 4.5rem)",
+              fontWeight: 700,
+              lineHeight: 1,
+              letterSpacing: "-0.02em",
+              background: "linear-gradient(135deg, #9945FF, #22D3EE)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
+            }}
+          >
+            <NumberCounter target={100} suffix="+" />
           </div>
-          <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={100} suffix="+" />
-            </div>
-            <div className="pitch-traction-mini-label">Waitlist signups · first 48h</div>
+          <div
+            style={{
+              fontSize: "1rem",
+              color: "rgba(255,255,255,0.78)",
+              marginTop: "0.5rem",
+              fontWeight: 500,
+            }}
+          >
+            Waitlist signups in the first 48 hours
           </div>
-          <div className="pitch-traction-mini">
-            <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={21} />
-            </div>
-            <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
+          <div
+            className="mono"
+            style={{
+              fontSize: "0.72rem",
+              color: "rgba(255,255,255,0.45)",
+              marginTop: "0.85rem",
+              letterSpacing: "0.06em",
+            }}
+          >
+            3,200 organic X followers &middot; 0 paid acquisition
           </div>
         </div>
       </div>
