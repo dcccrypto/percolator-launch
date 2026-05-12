@@ -88,23 +88,24 @@ function NumberCounter({
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 //
-// 12 slides, restructured 2026-05-12 after senior-strategist audit + Reza review.
-// Story arc: Hook → Problem → Team → Traction → Math → Product → Business →
-// Moat → Why Now → GTM → Roadmap+Ask → Contact.
+// 13 slides, restructured 2026-05-12 after senior-strategist audit + Reza review.
+// Story arc: Hook → Problem → Team → Traction → Origin → Math → Product →
+// Business → Moat → Why Now → GTM → Roadmap+Ask → Contact.
 //
 //   1  One-Liner
-//   2  Problem (hack history: Mango, Drift v1, JELLY, Drift v2)
+//   2  Problem (hack history: Drift v1, Mango, JELLY, Drift v2)
 //   3  Team (roles re-titled; Toly attribution at bottom; stat strip)
-//   4  Traction (devnet stats first; Toly grid below; 71 creators, 3,200 followers)
-//   5  How the Math Works (A/K index, per-market isolation, warmup-H — leads
+//   4  Traction (devnet stats + mainnet line + 100+ waitlist hero)
+//   5  Origin (Toly's bounties + how this came about; photo grid)
+//   6  How the Math Works (A/K index, per-market isolation, warmup-H — leads
 //      with Toly's contribution, not Kani proofs)
-//   6  Demo Product (architectural primitives; screenshot placeholders)
-//   7  Business Model (scenario table, fee routing today vs Q3, unit econ)
-//   8  Moat (answers "where does value accrue when code is open?")
-//   9  Why Now (Drift Apr 1 hack reframe; long-tail empty; shared-LP failing)
-//  10  Go-to-Market (book depth, MM strategy, who you trade against)
-//  11  Roadmap, Risks & Ask ($2M SAFE @ $20M post-money cap, 3 risks)
-//  12  Contact
+//   7  Demo Product (architectural primitives; screenshot placeholders)
+//   8  Business Model (10 bps; scenario table; fee routing today vs Q3)
+//   9  Moat (answers "where does value accrue when code is open?")
+//  10  Why Now (Drift Apr 1 hack reframe; long-tail empty; shared-LP failing)
+//  11  Go-to-Market (book depth, MM strategy, who you trade against)
+//  12  Roadmap, Risks & Ask ($2M SAFE @ $20M post-money cap, 3 risks)
+//  13  Contact
 //
 // Source of truth: this file. Previous v6 copy doc superseded.
 // ──────────────────────────────────────────────────────────────────────────
@@ -422,113 +423,6 @@ function Slide03Traction(_: SlideProps) {
           handful of OSS contributors stress-testing UX, keepers, and
           settlement before the external audit. Public access opens
           once the audit clears.
-        </div>
-
-        <div
-          className="pitch-toly-attribution-strip"
-          style={{ marginTop: "1.5rem" }}
-        >
-          <div className="pitch-toly-attribution-caption mono">
-            Origin &middot; how this came about
-          </div>
-          <p
-            style={{
-              fontSize: "0.88rem",
-              lineHeight: 1.6,
-              color: "rgba(255,255,255,0.72)",
-              margin: "0.5rem 0 0.9rem",
-            }}
-          >
-            Anatoly Yakovenko wrote the protocol math and open-sourced
-            a reference program at{" "}
-            <a
-              href="https://github.com/aeyakovenko/percolator-prog"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ color: "#22D3EE", textDecoration: "none", borderBottom: "1px dotted rgba(34,211,238,0.5)" }}
-            >
-              aeyakovenko/percolator-prog
-            </a>
-            , then posted public bounties for community ports. We each
-            won one &mdash;{" "}
-            <strong style={{ color: "rgba(255,255,255,0.9)" }}>Squid</strong>{" "}
-            for the KeeperCrank fix,{" "}
-            <strong style={{ color: "rgba(255,255,255,0.9)" }}>Khubair</strong>{" "}
-            for a pre-audit critical bug review &mdash; then shipped
-            the wrapper, LP vault, transferable NFT positions, dispute
-            resolution, keepers, and SDK on top. Toly has publicly
-            engaged with our work four times since February:
-          </p>
-          <div className="pitch-toly-photo-grid pitch-toly-photo-grid-compact">
-            <a
-              className="pitch-toly-photo"
-              href="https://x.com/toly"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Toly tweet — Squid bug fix, April 29"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/images/toly/photo1.jpg"
-                alt="Toly tweet quote-RTing Squid's GitHub issue: 'big brain bug'"
-              />
-              <div className="pitch-toly-photo-cap mono">
-                <span>@toly · Apr 29</span>
-                <span>Squid&apos;s KeeperCrank fix</span>
-              </div>
-            </a>
-            <a
-              className="pitch-toly-photo"
-              href="https://x.com/toly"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Toly tweet — Khubair bounty 3 critical, May 7"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/images/toly/photo2.jpg"
-                alt="Toly tweet with brain emojis on Khubair's bounty 3 critical issue"
-              />
-              <div className="pitch-toly-photo-cap mono">
-                <span>@toly · May 7</span>
-                <span>Khubair&apos;s bounty 3 critical</span>
-              </div>
-            </a>
-            <a
-              className="pitch-toly-photo"
-              href="https://x.com/toly"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Toly tweet — percolator-stake repo signal, Feb 19"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/images/toly/photo3.jpg"
-                alt="Toly tweet RTing dcccrypto/percolator-stake: 'Look, a contribution! Don't trust, verify!'"
-              />
-              <div className="pitch-toly-photo-cap mono">
-                <span>@toly · Feb 19</span>
-                <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
-              </div>
-            </a>
-            <a
-              className="pitch-toly-photo"
-              href="https://x.com/toly"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Toly tweet — Percolator is a job creator, Feb 13"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/images/toly/photo4.jpg"
-                alt="Toly tweet: 'Percolator is a job creator'"
-              />
-              <div className="pitch-toly-photo-cap mono">
-                <span>@toly · Feb 13</span>
-                <span>&ldquo;Percolator is a job creator&rdquo;</span>
-              </div>
-            </a>
-          </div>
         </div>
 
         <div
@@ -1117,6 +1011,126 @@ function Slide13Contact(_: SlideProps) {
   );
 }
 
+// ─── Slide · Origin · how this came about ────────────────────────────────────
+
+function SlideOrigin(_: SlideProps) {
+  return (
+    <div className="pitch-slide">
+      <div className="pitch-slide-inner">
+        <div className="pitch-label">Origin</div>
+        <h2 className="pitch-title">
+          Solana&apos;s co-founder wrote the math. We won his bounties.
+          He&apos;s still engaged.
+        </h2>
+
+        <p
+          style={{
+            fontSize: "0.95rem",
+            lineHeight: 1.7,
+            color: "rgba(255,255,255,0.75)",
+            marginBottom: "1.5rem",
+          }}
+        >
+          Anatoly Yakovenko wrote the protocol math and open-sourced a
+          reference program at{" "}
+          <a
+            href="https://github.com/aeyakovenko/percolator-prog"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: "#22D3EE",
+              textDecoration: "none",
+              borderBottom: "1px dotted rgba(34,211,238,0.5)",
+            }}
+          >
+            aeyakovenko/percolator-prog
+          </a>
+          , then posted public bounties for community ports. We each
+          won one &mdash;{" "}
+          <strong style={{ color: "rgba(255,255,255,0.95)" }}>Squid</strong>{" "}
+          for the KeeperCrank fix,{" "}
+          <strong style={{ color: "rgba(255,255,255,0.95)" }}>Khubair</strong>{" "}
+          for a pre-audit critical bug review &mdash; then shipped the
+          wrapper, LP vault, transferable NFT positions, dispute
+          resolution, keepers, and SDK on top. Toly has publicly
+          engaged with our work four times since February:
+        </p>
+
+        <div className="pitch-toly-photo-grid">
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Squid bug fix, April 29"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo1.jpg"
+              alt="Toly tweet quote-RTing Squid's GitHub issue: 'big brain bug'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Apr 29</span>
+              <span>Squid&apos;s KeeperCrank fix</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Khubair bounty 3 critical, May 7"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo2.jpg"
+              alt="Toly tweet with brain emojis on Khubair's bounty 3 critical issue"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · May 7</span>
+              <span>Khubair&apos;s bounty 3 critical</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — percolator-stake repo signal, Feb 19"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo3.jpg"
+              alt="Toly tweet RTing dcccrypto/percolator-stake: 'Look, a contribution! Don't trust, verify!'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Feb 19</span>
+              <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Percolator is a job creator, Feb 13"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo4.jpg"
+              alt="Toly tweet: 'Percolator is a job creator'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Feb 13</span>
+              <span>&ldquo;Percolator is a job creator&rdquo;</span>
+            </div>
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Slide · How the Math Works ──────────────────────────────────────────────
 
 function SlideMath(_: SlideProps) {
@@ -1424,14 +1438,15 @@ const SLIDES = [
   { id: 2, title: "Problem", component: SlideProblem },
   { id: 3, title: "Team", component: Slide02Team },
   { id: 4, title: "Traction", component: Slide03Traction },
-  { id: 5, title: "How the Math Works", component: SlideMath },
-  { id: 6, title: "Demo Product", component: Slide05Product },
-  { id: 7, title: "Business Model", component: Slide06Money },
-  { id: 8, title: "Moat", component: SlideMoat },
-  { id: 9, title: "Why Now", component: Slide09WhyNow },
-  { id: 10, title: "Go-to-Market", component: SlideGTM },
-  { id: 11, title: "Roadmap & Ask", component: SlideRoadmapAsk },
-  { id: 12, title: "Contact", component: Slide13Contact },
+  { id: 5, title: "Origin", component: SlideOrigin },
+  { id: 6, title: "How the Math Works", component: SlideMath },
+  { id: 7, title: "Demo Product", component: Slide05Product },
+  { id: 8, title: "Business Model", component: Slide06Money },
+  { id: 9, title: "Moat", component: SlideMoat },
+  { id: 10, title: "Why Now", component: Slide09WhyNow },
+  { id: 11, title: "Go-to-Market", component: SlideGTM },
+  { id: 12, title: "Roadmap & Ask", component: SlideRoadmapAsk },
+  { id: 13, title: "Contact", component: Slide13Contact },
 ];
 
 const TOTAL_SLIDES = SLIDES.length;
