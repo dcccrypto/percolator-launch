@@ -1052,8 +1052,14 @@ function SlideOrigin(_: SlideProps) {
           <strong style={{ color: "rgba(255,255,255,0.95)" }}>Khubair</strong>{" "}
           for a pre-audit critical bug review &mdash; then shipped the
           wrapper, LP vault, transferable NFT positions, dispute
-          resolution, keepers, and SDK on top. Toly has publicly
-          engaged with our work four times since February:
+          resolution, keepers, and SDK on top. We&apos;ve also
+          contributed back:{" "}
+          <strong style={{ color: "rgba(255,255,255,0.95)" }}>
+            29 upstream PRs
+          </strong>{" "}
+          and a series of critical security disclosures against
+          Toly&apos;s reference program. Toly has publicly engaged
+          with our work four times since February:
         </p>
 
         <div className="pitch-toly-photo-grid">
