@@ -499,19 +499,9 @@ function Slide05Product(_: SlideProps) {
               Risk isolated from every other market on the protocol.
             </div>
             <div className="pflow-example-card">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/images/product/screenshot-deposit.png"
-                alt="Mainnet deposit screen"
-                style={{
-                  width: "100%",
-                  borderRadius: "5px",
-                  display: "block",
-                  background: "rgba(255,255,255,0.04)",
-                  minHeight: "84px",
-                  objectFit: "cover",
-                }}
-              />
+              <div className="pflow-example-label mono">PDA seed</div>
+              <div className="pflow-example-value mono">[b&quot;vault&quot;, slab_key]</div>
+              <div className="pflow-example-value mono">+ [b&quot;lp_vault&quot;, slab_key]</div>
             </div>
           </div>
 
@@ -544,19 +534,9 @@ function Slide05Product(_: SlideProps) {
               position primitive on Solana.
             </div>
             <div className="pflow-example-card">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/images/product/screenshot-position.png"
-                alt="Open position with NFT mint"
-                style={{
-                  width: "100%",
-                  borderRadius: "5px",
-                  display: "block",
-                  background: "rgba(255,255,255,0.04)",
-                  minHeight: "84px",
-                  objectFit: "cover",
-                }}
-              />
+              <div className="pflow-example-label mono">mint instruction</div>
+              <div className="pflow-example-value mono">spl_token_2022::InitializeMint2</div>
+              <div className="pflow-example-value mono">+ TransferHook extension</div>
             </div>
           </div>
 
@@ -589,19 +569,12 @@ function Slide05Product(_: SlideProps) {
               vault crank. Q3: four-way split.
             </div>
             <div className="pflow-example-card pflow-example-card-live">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/images/product/screenshot-settle.png"
-                alt="Settlement transaction on Solana explorer"
-                style={{
-                  width: "100%",
-                  borderRadius: "5px",
-                  display: "block",
-                  background: "rgba(34,211,238,0.04)",
-                  minHeight: "84px",
-                  objectFit: "cover",
-                }}
-              />
+              <div className="pflow-example-label mono">fee routing</div>
+              <div className="pflow-example-value mono">charge_fee_to_insurance(slab)</div>
+              <div className="pflow-live-dot-row">
+                <span className="pflow-live-dot" />
+                <span className="pflow-live-text mono">ATOMIC</span>
+              </div>
             </div>
           </div>
         </div>
