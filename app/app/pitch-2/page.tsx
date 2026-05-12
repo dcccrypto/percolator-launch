@@ -226,9 +226,10 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-team-name">Khubair</div>
             <div className="pitch-team-role">Co-founder · Protocol &amp; Risk</div>
             <ul className="pitch-team-bullets">
-              <li>I shipped the wrapper engine port, SDK, indexer, and 36 pre-audit hardening PRs in four days</li>
-              <li>I do the pre-audit security review and external positioning</li>
-              <li>Solana product co-founder, Superteam UK member, Web2 startup background</li>
+              <li>I shipped the wrapper engine port, the SDK, and the indexer</li>
+              <li>I ran 36 pre-audit hardening PRs in four days, closing every critical from the self-audit</li>
+              <li>I do the security review and external positioning</li>
+              <li>Solana product co-founder. Superteam UK member. Web2 startup background.</li>
             </ul>
             <p className="pitch-team-links mono">
               <a
@@ -279,7 +280,7 @@ function Slide02Team(_: SlideProps) {
                 </a>
               </li>
               <li>He found and patched the KeeperCrank big-brain bug (Toly QRT&apos;d the fix)</li>
-              <li>3 years building on Solana, full-stack Rust and program-side</li>
+              <li>3 years building on Solana</li>
             </ul>
             <p className="pitch-team-links mono">
               <a
