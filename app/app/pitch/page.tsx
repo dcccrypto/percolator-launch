@@ -164,16 +164,16 @@ function SlideProblem(_: SlideProps) {
             </thead>
             <tbody>
               <tr>
+                <td className="pitch-matrix-feature mono">May 2022</td>
+                <td>Drift v1</td>
+                <td className="pitch-matrix-no mono">$14.5M</td>
+                <td>vAMM cascade during Terra collapse; shared insurance failed.</td>
+              </tr>
+              <tr>
                 <td className="pitch-matrix-feature mono">Oct 2022</td>
                 <td>Mango Markets</td>
                 <td className="pitch-matrix-no mono">$114M</td>
                 <td>Oracle attack on thin MNGO token; shared collateral drained.</td>
-              </tr>
-              <tr>
-                <td className="pitch-matrix-feature mono">May 2022</td>
-                <td>Drift v1</td>
-                <td className="pitch-matrix-no mono">$10.5M</td>
-                <td>vAMM cascade during Terra collapse; shared insurance failed.</td>
               </tr>
               <tr>
                 <td className="pitch-matrix-feature mono">Mar 2025</td>
@@ -182,9 +182,9 @@ function SlideProblem(_: SlideProps) {
                 <td>JELLY squeeze; validators manually delisted &amp; hard-coded oracle.</td>
               </tr>
               <tr>
-                <td className="pitch-matrix-feature mono">Apr 2026</td>
+                <td className="pitch-matrix-feature mono">Apr 1, 2026</td>
                 <td>Drift v2</td>
-                <td className="pitch-matrix-no mono">$285M</td>
+                <td className="pitch-matrix-no mono">$295M</td>
                 <td>Admin multisig socially engineered via Solana durable nonces.</td>
               </tr>
             </tbody>
@@ -303,7 +303,7 @@ function Slide02Team(_: SlideProps) {
 
         <div className="pitch-revenue-econ" style={{ marginTop: "1.5rem" }}>
           <div className="pitch-revenue-econ-stat">
-            <div className="pitch-revenue-econ-num mono">22</div>
+            <div className="pitch-revenue-econ-num mono">21</div>
             <div className="pitch-revenue-econ-label">Apache-2.0 repos</div>
           </div>
           <div className="pitch-revenue-econ-stat">
@@ -311,7 +311,7 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-revenue-econ-label">wrapper commits on top of Toly&apos;s reference</div>
           </div>
           <div className="pitch-revenue-econ-stat">
-            <div className="pitch-revenue-econ-num mono">51</div>
+            <div className="pitch-revenue-econ-num mono">50</div>
             <div className="pitch-revenue-econ-label">fork-only instructions shipped</div>
           </div>
           <div className="pitch-revenue-econ-stat">
@@ -421,9 +421,11 @@ function Slide03Traction(_: SlideProps) {
           <strong style={{ color: "#22D3EE", fontWeight: 700 }}>
             Mainnet · closed beta:
           </strong>{" "}
-          SOL/USDC perp live, pinned to a Raydium CLMM pool, open to
-          OSS contributors pre-audit. Public access opens once external
-          audit clears.
+          SOL/USDC perp live, pinned to a Raydium CLMM pool. We&apos;re
+          not chasing volume here yet &mdash; it&apos;s just us and a
+          handful of OSS contributors stress-testing UX, keepers, and
+          settlement before the external audit. Public access opens
+          once the audit clears.
         </div>
 
         <div className="pitch-toly-attribution-strip">
@@ -517,7 +519,7 @@ function Slide03Traction(_: SlideProps) {
           </div>
           <div className="pitch-traction-mini">
             <div className="pitch-traction-mini-num mono">
-              <NumberCounter target={22} />
+              <NumberCounter target={21} />
             </div>
             <div className="pitch-traction-mini-label">Public repos · Apache 2.0</div>
           </div>
@@ -677,7 +679,7 @@ function Slide06Money(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Business Model</div>
         <h2 className="pitch-title">
-          ~5 bps blended per trade. &gt;95% gross margin because we
+          10 bps per trade on notional. &gt;95% gross margin because we
           don&apos;t pay market makers. Here&apos;s the path from one
           market to $1M/day in protocol fees.
         </h2>
@@ -697,25 +699,25 @@ function Slide06Money(_: SlideProps) {
                 <td className="pitch-matrix-feature mono">Conservative · Q4 2026</td>
                 <td className="mono">10</td>
                 <td className="mono">$1M</td>
-                <td className="mono">$500</td>
+                <td className="mono">$1,000</td>
               </tr>
               <tr>
                 <td className="pitch-matrix-feature mono">Base · mid-2027</td>
                 <td className="mono">100</td>
                 <td className="mono">$1M</td>
-                <td className="mono">$5,000</td>
+                <td className="mono">$10,000</td>
               </tr>
               <tr>
                 <td className="pitch-matrix-feature mono">Stretch · 2028</td>
                 <td className="mono">1,000</td>
                 <td className="mono">$1M</td>
-                <td className="mono">$50,000</td>
+                <td className="mono">$100,000</td>
               </tr>
               <tr>
                 <td className="pitch-matrix-feature mono pitch-matrix-us">Hyperliquid-class · 2029+</td>
                 <td className="mono pitch-matrix-us">1,000</td>
                 <td className="mono pitch-matrix-us">$20M</td>
-                <td className="mono pitch-matrix-us">$1,000,000</td>
+                <td className="mono pitch-matrix-us">$2,000,000</td>
               </tr>
             </tbody>
           </table>
@@ -723,9 +725,10 @@ function Slide06Money(_: SlideProps) {
 
         <p className="pitch-matrix-sub" style={{ marginTop: "0.75rem" }}>
           Math: avg market does $X spot/day &times; 3&ndash;5&times;
-          perp-to-spot ratio &times; 5 bps fee. Break-even on operating
-          cost (~$50K/month: audit + 2 engineers + infra) at the{" "}
-          <strong>Base</strong> scenario.
+          perp-to-spot ratio &times; 10 bps fee. Break-even on
+          operating cost (~$50K/month: audit + 2 engineers + infra) at
+          roughly <strong>17 markets at $1M/day each</strong> &mdash;
+          between Conservative and Base.
         </p>
 
         <div
@@ -852,7 +855,7 @@ function Slide09WhyNow(_: SlideProps) {
             <div className="pitch-whynow-label">
               Drift drained for{" "}
               <strong style={{ color: "rgba(255,255,255,0.9)" }}>
-                $285M
+                $295M
               </strong>{" "}
               by a DPRK durable-nonce attack on its admin multisig.
               Solana&apos;s #2 perp venue is offline pending Q2
@@ -898,7 +901,8 @@ function Slide09WhyNow(_: SlideProps) {
               </strong>
               . Only ~20&ndash;25 Solana-native tokens have a live perp
               on any Solana venue today. Pacifica leads at 51% market
-              share with ~44 crypto markets total. The supply is empty.
+              share with ~48 crypto markets (65 total, the rest are
+              equities and FX). The supply is empty.
             </div>
           </div>
         </div>
@@ -1082,10 +1086,11 @@ function SlideMath(_: SlideProps) {
                 PDA-derived collateral vault, LP vault, and insurance
                 fund. The solvency invariant{" "}
                 <span className="mono">vault &ge; open_collateral + insurance</span>{" "}
-                is checked after every public operation. A wipeout on
-                one market is mathematically incapable of touching
-                another market&apos;s vault &mdash; it&apos;s a Solana
-                account-model constraint, not a business policy.
+                is enforced in the engine&apos;s integrity-check path.
+                A wipeout on one market is mathematically incapable of
+                touching another market&apos;s vault &mdash; it&apos;s
+                a Solana account-model constraint, not a business
+                policy.
               </p>
             </div>
           </div>
