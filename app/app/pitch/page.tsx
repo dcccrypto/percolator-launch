@@ -307,10 +307,6 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-revenue-econ-label">Apache-2.0 repos</div>
           </div>
           <div className="pitch-revenue-econ-stat">
-            <div className="pitch-revenue-econ-num mono">187</div>
-            <div className="pitch-revenue-econ-label">wrapper commits on top of Toly&apos;s reference</div>
-          </div>
-          <div className="pitch-revenue-econ-stat">
             <div className="pitch-revenue-econ-num mono">50</div>
             <div className="pitch-revenue-econ-label">fork-only instructions shipped</div>
           </div>
