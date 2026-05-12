@@ -44,12 +44,16 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
   onBack,
   canContinue,
 }) => {
-  // ?mock=1 bypasses the mainnet $2M DEX-pool-depth gate so screenshot
-  // captures can pick HYPERP regardless of which specific Raydium pool
+  // ?mock=1 bypasses the mainnet DEX-pool-depth gate so screenshot
+  // captures can pick HYPERP regardless of which specific pool
   // the auto-detector surfaced for the chosen token.
   const mockBypass = isMockMode();
   const isMainnet = getNetwork() === "mainnet" && !mockBypass;
-  const MIN_MAINNET_POOL_DEPTH_USD = 2_000_000;
+  // MUST stay in sync with on-chain MIN_DEX_QUOTE_LIQUIDITY in
+  // percolator-prog. Lowered to 200_000_000_000 (200K USDC) in
+  // v12.19.1 to admit creator-led mid-tier Meteora DLMM and Raydium
+  // CLMM pools. UpdateHyperpMark on chain still rejects below this.
+  const MIN_MAINNET_POOL_DEPTH_USD = 200_000;
 
   const autoRouterMint = mintValid ? mintAddress : null;
   const priceRouter = usePriceRouter(autoRouterMint);
@@ -331,7 +335,7 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
             <div className="border border-[var(--short)]/40 bg-[var(--short)]/[0.06] px-4 py-3 text-[11px]">
               <p className="text-[var(--short)] font-medium">✗ Insufficient pool depth for mainnet</p>
               <p className="text-[var(--text-secondary)] mt-1">
-                Pool has ${(selectedDexPool.liquidityUsd / 1000).toFixed(0)}K liquidity. Mainnet requires $2M+ DEX pool depth to prevent oracle manipulation.
+                Pool has ${(selectedDexPool.liquidityUsd / 1000).toFixed(0)}K liquidity. Mainnet requires $200K+ DEX pool depth (v12.19.1 floor).
               </p>
             </div>
           )}
