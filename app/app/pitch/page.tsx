@@ -799,13 +799,14 @@ function Slide09WhyNow(_: SlideProps) {
               <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
-            <div className="pitch-whynow-num mono">Shared LP keeps failing</div>
+            <div className="pitch-whynow-num mono">Phoenix &amp; Pacifica fill the gap &mdash; with the same constraints</div>
             <div className="pitch-whynow-label">
-              Hyperliquid had to manually delist JELLY and hard-code
-              its oracle in March 2025 to bail out HLP. Mango lost
-              $114M to oracle manipulation on a thin token in 2022.
-              Adrena pivoted to RWAs Nov 2025. Zeta and Mango v4 are
-              dormant. The shared-pool model is failing in public.
+              Phoenix is the newest entrant picking up Drift&apos;s
+              volume, but it&apos;s a CLOB &mdash; curated listings,
+              active market makers required. Pacifica leads at 51%
+              share, also curated. Hyperliquid had to manually delist
+              JELLY in March 2025. Every venue still runs the same
+              shared-pool playbook. We don&apos;t.
             </div>
           </div>
           <div className="pitch-whynow-stat">
