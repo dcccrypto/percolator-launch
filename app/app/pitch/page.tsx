@@ -211,8 +211,9 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two-person team. Each won one of Toly&apos;s public bounties
-          on Percolator. Shipped to mainnet with no outside capital.
+          Two-person team. We&apos;ve been building Percolator together
+          full-time. Mainnet beta is live, open to OSS contributors,
+          and we haven&apos;t raised a round yet.
         </h2>
 
         <div className="pitch-team-grid pitch-team-grid-two">
@@ -1026,16 +1027,15 @@ function SlideOrigin(_: SlideProps) {
           >
             aeyakovenko/percolator-prog
           </a>
-          , then posted public bounties for community ports. We each
-          won one.{" "}
+          . We started building on top of it. The trading app, the LP
+          vault, transferable NFT positions, dispute resolution,
+          keepers, and SDK. Later, Toly posted public bounties for
+          mainnet-market work, and we won two of them.{" "}
           <strong style={{ color: "rgba(255,255,255,0.95)" }}>Squid</strong>{" "}
           won the KeeperCrank fix.{" "}
           <strong style={{ color: "rgba(255,255,255,0.95)" }}>Khubair</strong>{" "}
-          won a pre-audit critical bug review. After that we built the
-          rest of the product on top of his reference: the trading app,
-          the LP vault, transferable NFT positions, dispute resolution,
-          keepers, and SDK. Toly has publicly engaged with our work
-          four times since February:
+          won a pre-audit critical bug review. Toly has publicly
+          engaged with our work four times since February:
         </p>
 
         <div className="pitch-toly-photo-grid">
