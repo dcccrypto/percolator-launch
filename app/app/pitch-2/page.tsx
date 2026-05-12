@@ -1027,20 +1027,15 @@ function SlideOrigin(_: SlideProps) {
             aeyakovenko/percolator-prog
           </a>
           , then posted public bounties for community ports. We each
-          won one &mdash;{" "}
+          won one.{" "}
           <strong style={{ color: "rgba(255,255,255,0.95)" }}>Squid</strong>{" "}
-          for the KeeperCrank fix,{" "}
+          won the KeeperCrank fix.{" "}
           <strong style={{ color: "rgba(255,255,255,0.95)" }}>Khubair</strong>{" "}
-          for a pre-audit critical bug review &mdash; then shipped the
-          wrapper, LP vault, transferable NFT positions, dispute
-          resolution, keepers, and SDK on top. We&apos;ve also
-          contributed back:{" "}
-          <strong style={{ color: "rgba(255,255,255,0.95)" }}>
-            29 upstream PRs
-          </strong>{" "}
-          and a series of critical security disclosures against
-          Toly&apos;s reference program. Toly has publicly engaged
-          with our work four times since February:
+          won a pre-audit critical bug review. After that we built the
+          rest of the product on top of his reference: the trading app,
+          the LP vault, transferable NFT positions, dispute resolution,
+          keepers, and SDK. Toly has publicly engaged with our work
+          four times since February:
         </p>
 
         <div className="pitch-toly-photo-grid">
