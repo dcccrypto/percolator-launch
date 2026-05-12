@@ -243,7 +243,9 @@ const WAITLIST_HOST_ALLOWED_PREFIXES = [
   "/waitlist",
   "/pitch",        // investor-facing deck (still accessible, just not linked from nav)
   "/pitch-2",      // 10-slide narration variant for 2-min pitch video
-  "/demo-shots",   // screenshot-only UI mockup page for pitch-deck images
+  "/demo-shots",   // launcher page for capturing pitch screenshots from the real UI
+  "/create",       // real create-market wizard; reached from /demo-shots
+  "/trade",        // real trade UI; reached from /demo-shots with ?mock=1
   "/guide",        // developer guide
   "/developers",
   "/join",         // community/applications
