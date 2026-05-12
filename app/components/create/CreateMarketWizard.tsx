@@ -23,6 +23,7 @@ import { SlabTierPicker } from "./SlabTierPicker";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 import { useToast } from "@/hooks/useToast";
 import { isMockMode } from "@/lib/mock-mode";
+import { StepReviewDemo } from "../create-demo/StepReviewDemo";
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -895,35 +896,56 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           />
         )}
 
-        {/* Step 4: Review */}
+        {/* Step 4: Review — demo variant strips all balance / wallet / mint
+            gates and shows a clean "LAUNCH MARKET →" CTA. Production uses
+            the real StepReview which enforces SOL / token / mint validity. */}
         {wizard.step === 4 && (
-          <StepReview
-            tokenSymbol={symbol}
-            tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
-            mintAddress={wizard.mintAddress}
-            tokenDecimals={decimals}
-            mintValid={mintValid}
-            mintExistsOnNetwork={mintExistsOnNetwork}
-            priceUsd={detectedPrice}
-            oracleType={wizard.oracleType}
-            oracleLabel={oracleLabel}
-            slabTier={wizard.slabTier}
-            tradingFeeBps={wizard.tradingFeeBps}
-            initialMarginBps={wizard.initialMarginBps}
-            lpCollateral={wizard.lpCollateral}
-            insuranceAmount={wizard.insuranceAmount}
-            walletConnected={!!publicKey}
-            walletBalanceSol={solBalance}
-            hasSufficientBalance={hasSufficientSol}
-            requiredSol={requiredSol}
-            hasTokens={hasTokens}
-            hasSufficientTokensForSeed={hasSufficientTokensForSeed}
-            feeConflict={feeConflict}
-            isPercolatorMirror={isPercolatorMirror}
-            onBack={goBack}
-            onLaunch={handleLaunch}
-            canLaunch={allValid && !!publicKey}
-          />
+          mockBypass ? (
+            <StepReviewDemo
+              tokenSymbol={symbol}
+              tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
+              mintAddress={wizard.mintAddress}
+              tokenDecimals={decimals}
+              priceUsd={detectedPrice}
+              oracleType={wizard.oracleType}
+              oracleLabel={oracleLabel}
+              slabTier={wizard.slabTier}
+              tradingFeeBps={wizard.tradingFeeBps}
+              initialMarginBps={wizard.initialMarginBps}
+              lpCollateral={wizard.lpCollateral}
+              insuranceAmount={wizard.insuranceAmount}
+              onBack={goBack}
+              onLaunch={() => { /* no-op in demo mode */ }}
+            />
+          ) : (
+            <StepReview
+              tokenSymbol={symbol}
+              tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
+              mintAddress={wizard.mintAddress}
+              tokenDecimals={decimals}
+              mintValid={mintValid}
+              mintExistsOnNetwork={mintExistsOnNetwork}
+              priceUsd={detectedPrice}
+              oracleType={wizard.oracleType}
+              oracleLabel={oracleLabel}
+              slabTier={wizard.slabTier}
+              tradingFeeBps={wizard.tradingFeeBps}
+              initialMarginBps={wizard.initialMarginBps}
+              lpCollateral={wizard.lpCollateral}
+              insuranceAmount={wizard.insuranceAmount}
+              walletConnected={!!publicKey}
+              walletBalanceSol={solBalance}
+              hasSufficientBalance={hasSufficientSol}
+              requiredSol={requiredSol}
+              hasTokens={hasTokens}
+              hasSufficientTokensForSeed={hasSufficientTokensForSeed}
+              feeConflict={feeConflict}
+              isPercolatorMirror={isPercolatorMirror}
+              onBack={goBack}
+              onLaunch={handleLaunch}
+              canLaunch={allValid && !!publicKey}
+            />
+          )
         )}
       </div>
     </div>
