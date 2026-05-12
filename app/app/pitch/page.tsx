@@ -88,19 +88,20 @@ function NumberCounter({
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 //
-// 12 slides, restructured 2026-05-12. Demo Product slide dropped — the
-// math + moat slides already cover the architectural story, and the
-// product walkthrough wasn't pulling its weight without screenshots.
+// 12 slides, restructured 2026-05-12 per Cap (Superteam UK) review.
+// New flow puts protocol context (Origin + Math) right after Problem,
+// then the people/proof (Team, Traction, Why Now), then close
+// (Business, Moat, GTM, Roadmap).
 //
 //   1  One-Liner
 //   2  Problem (hack history: Drift v1, Mango, JELLY, Drift v2)
-//   3  Team (roles re-titled; Toly attribution at bottom; stat strip)
-//   4  Traction (devnet stats + mainnet line + 100+ waitlist hero)
-//   5  Origin (Toly's bounties + how this came about; photo grid)
-//   6  How the Math Works (A/K index, per-market isolation, warmup-H)
-//   7  Business Model (10 bps; scenario table; fee routing today vs Q3)
-//   8  Moat (answers "where does value accrue when code is open?")
-//   9  Why Now (Drift Apr 1 hack reframe; long-tail empty; shared-LP failing)
+//   3  Origin (Toly's bounties + how this came about; photo grid)
+//   4  How the Math Works (A/K index, per-market isolation, warmup-H)
+//   5  Team (roles re-titled; Toly attribution at bottom; stat strip)
+//   6  Traction (devnet stats + mainnet line + 100+ waitlist hero)
+//   7  Why Now (Drift Apr 1 hack reframe; long-tail empty; shared-LP failing)
+//   8  Business Model (10 bps; scenario table; fee routing today vs Q3)
+//   9  Moat (answers "where does value accrue when code is open?")
 //  10  Go-to-Market (book depth, MM strategy, who you trade against)
 //  11  Roadmap, Risks & Ask ($2M SAFE @ $20M post-money cap, 3 risks)
 //  12  Contact
@@ -1421,13 +1422,13 @@ function SlideRoadmapAsk(_: SlideProps) {
 const SLIDES = [
   { id: 1, title: "One-Liner", component: Slide01OneLiner },
   { id: 2, title: "Problem", component: SlideProblem },
-  { id: 3, title: "Team", component: Slide02Team },
-  { id: 4, title: "Traction", component: Slide03Traction },
-  { id: 5, title: "Origin", component: SlideOrigin },
-  { id: 6, title: "How the Math Works", component: SlideMath },
-  { id: 7, title: "Business Model", component: Slide06Money },
-  { id: 8, title: "Moat", component: SlideMoat },
-  { id: 9, title: "Why Now", component: Slide09WhyNow },
+  { id: 3, title: "Origin", component: SlideOrigin },
+  { id: 4, title: "How the Math Works", component: SlideMath },
+  { id: 5, title: "Team", component: Slide02Team },
+  { id: 6, title: "Traction", component: Slide03Traction },
+  { id: 7, title: "Why Now", component: Slide09WhyNow },
+  { id: 8, title: "Business Model", component: Slide06Money },
+  { id: 9, title: "Moat", component: SlideMoat },
   { id: 10, title: "Go-to-Market", component: SlideGTM },
   { id: 11, title: "Roadmap & Ask", component: SlideRoadmapAsk },
   { id: 12, title: "Contact", component: Slide13Contact },

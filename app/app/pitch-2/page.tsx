@@ -88,20 +88,21 @@ function NumberCounter({
 
 // ─── Slide Data ──────────────────────────────────────────────────────────────
 //
-// PITCH-2 — 10-slide narration variant tuned for the 2-minute pitch video.
-// Drops Moat and GTM (those live on /pitch for deep-dive sessions).
-// Keeps Why Now in slot 7 because the Drift hack window IS the urgency
-// the 2-min pitch needs.
+// PITCH-2 — 10-slide Colosseum submission variant. Restructured 2026-05-12
+// per Cap (Superteam UK) feedback. Order: Problem → Origin → Math sets
+// the context first, then Team → Traction → Why Now is the proof, then
+// Business Model → Roadmap closes. Raise details stripped (Colosseum
+// doesn't include them on submissions).
 //
 //   1  One-Liner
 //   2  Problem
-//   3  Team
-//   4  Traction
-//   5  Origin (Toly + bounties)
-//   6  How the Math Works
-//   7  Why Now (Drift Apr 1 hack reframe; long-tail empty; shared-LP failing)
+//   3  Origin (Toly + bounties)
+//   4  How the Math Works
+//   5  Team
+//   6  Traction
+//   7  Why Now
 //   8  Business Model
-//   9  Roadmap, Risks & Ask
+//   9  Roadmap (no raise details — Colosseum submission)
 //  10  Contact
 //
 // Slide functions duplicated from /pitch/page.tsx — keep in sync manually
@@ -1294,16 +1295,16 @@ function SlideMoat(_: SlideProps) {
   );
 }
 
-// ─── Slide · Roadmap & Ask (Roadmap + Risks + Next Steps merged) ─────────────
+// ─── Slide · Roadmap (Colosseum variant — no raise details) ──────────────────
 
 function SlideRoadmapAsk(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Roadmap, Risks &amp; Ask</div>
+        <div className="pitch-label">Roadmap &amp; what&apos;s next</div>
         <h2 className="pitch-title">
-          $2M on a SAFE at $20M post-money cap. 18 months to public
-          mainnet, 50+ markets, and Series A.
+          Audit clears Q3. Public mainnet, 50+ creator-led markets by
+          Q4, $1M+ daily fees in 2027.
         </h2>
 
         <div className="pitch-roadmap">
@@ -1328,7 +1329,7 @@ function SlideRoadmapAsk(_: SlideProps) {
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase cyan">2027</div>
             <div className="pitch-roadmap-name">$1M+ daily fees</div>
-            <div className="pitch-roadmap-desc">Cross-margining, MM partnerships, Series A or strategic LP round</div>
+            <div className="pitch-roadmap-desc">Cross-margining, MM partnerships, default rail for every-token perps</div>
           </div>
         </div>
 
@@ -1386,31 +1387,6 @@ function SlideRoadmapAsk(_: SlideProps) {
             </div>
           </div>
         </div>
-
-        <div className="pitch-ask-grid" style={{ marginTop: "1.5rem" }}>
-          <div className="pitch-ask-card pitch-ask-card-primary">
-            <div className="pitch-ask-card-label mono">The ask</div>
-            <div className="pitch-ask-card-headline">
-              $2M · SAFE · $20M post-money cap
-            </div>
-            <div className="pitch-ask-card-sub">
-              Pro-rata on Series A. Standard info rights. Future token
-              rights, if and when issued, to be negotiated at the
-              cap-equivalent price. We&apos;re shipping with or without
-              capital; the right partner shortens the timeline from 24
-              months to 9.
-            </div>
-          </div>
-          <div className="pitch-ask-card">
-            <div className="pitch-ask-card-label mono">Use of funds &middot; 18 months</div>
-            <ul className="pitch-ask-list">
-              <li><strong>40%</strong> external audit + bug bounty</li>
-              <li><strong>30%</strong> LP-vault bootstrap on first 10 cohort markets</li>
-              <li><strong>15%</strong> creator acquisition via rev-share rebates (no paid spend)</li>
-              <li><strong>15%</strong> two senior hires (matching engine, risk research)</li>
-            </ul>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -1421,13 +1397,13 @@ function SlideRoadmapAsk(_: SlideProps) {
 const SLIDES = [
   { id: 1, title: "One-Liner", component: Slide01OneLiner },
   { id: 2, title: "Problem", component: SlideProblem },
-  { id: 3, title: "Team", component: Slide02Team },
-  { id: 4, title: "Traction", component: Slide03Traction },
-  { id: 5, title: "Origin", component: SlideOrigin },
-  { id: 6, title: "How the Math Works", component: SlideMath },
+  { id: 3, title: "Origin", component: SlideOrigin },
+  { id: 4, title: "How the Math Works", component: SlideMath },
+  { id: 5, title: "Team", component: Slide02Team },
+  { id: 6, title: "Traction", component: Slide03Traction },
   { id: 7, title: "Why Now", component: Slide09WhyNow },
   { id: 8, title: "Business Model", component: Slide06Money },
-  { id: 9, title: "Roadmap & Ask", component: SlideRoadmapAsk },
+  { id: 9, title: "Roadmap", component: SlideRoadmapAsk },
   { id: 10, title: "Contact", component: Slide13Contact },
 ];
 
