@@ -1,6 +1,7 @@
 "use client";
 
 import { FC, useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useCreateMarket, MIN_INIT_MARKET_SEED, type CreateMarketParams } from "@/hooks/useCreateMarket";
@@ -290,6 +291,55 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const mockBypass = isMockMode();
   const skipTokenBalanceCheck = (isDevnet && isPercolatorMirror) || mockBypass;
   const allValid = step1Valid && step2Valid && step3Valid && (skipTokenBalanceCheck || (hasTokens && hasSufficientTokensForSeed)) && (mockBypass || hasSufficientSol);
+
+  // Demo-launch state machine. When mockBypass is on and the user clicks
+  // LAUNCH MARKET, fake the 5-step deploy progress over ~3 seconds, then
+  // redirect to the BONK mock trade page so the demo flow continues into
+  // an actual-looking trading UI.
+  const router = useRouter();
+  const DEMO_BONK_SLAB = "HN7cABqLq46Es1jh92hQnvWo6BuZPdSmTQ5P2NMeVRgr";
+  const DEMO_STEPS = [
+    "Create slab & initialize market",
+    "Oracle setup & crank",
+    "Initialize LP",
+    "Deposit, insurance & finalize",
+    "Insurance LP mint",
+  ];
+  const [demoLaunch, setDemoLaunch] = useState<{
+    active: boolean;
+    step: number;
+    txSigs: string[];
+  }>({ active: false, step: 0, txSigs: [] });
+
+  useEffect(() => {
+    if (!demoLaunch.active) return;
+    if (demoLaunch.step >= DEMO_STEPS.length) {
+      // All 5 steps complete — redirect to the mock BONK trade page so the
+      // demo flows from create → trade without breaking pace.
+      const t = setTimeout(() => {
+        router.push(`/trade/${DEMO_BONK_SLAB}?mock=1`);
+      }, 600);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => {
+      setDemoLaunch((prev) => ({
+        ...prev,
+        step: prev.step + 1,
+        txSigs: [
+          ...prev.txSigs,
+          // Plausible-looking base58 mock tx signature (88 chars)
+          "5" + Math.random().toString(36).substring(2, 12).padEnd(10, "x") +
+          Math.random().toString(36).substring(2, 12).padEnd(10, "x") +
+          "demo" + Math.random().toString(36).substring(2, 12).padEnd(60, "x"),
+        ],
+      }));
+    }, 650);
+    return () => clearTimeout(t);
+  }, [demoLaunch.active, demoLaunch.step, router]);
+
+  const handleDemoLaunch = useCallback(() => {
+    setDemoLaunch({ active: true, step: 0, txSigs: [] });
+  }, []);
 
   // Quick Launch auto-advance: step 1 → step 2 when token is resolved and params ready
   const quickAutoAdvancedRef = useRef(false);
@@ -669,6 +719,26 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     );
   }
 
+  // Demo launch progress (mock mode only) — fake the 5-step deploy then
+  // redirect to the BONK mock trade page.
+  if (demoLaunch.active) {
+    return (
+      <LaunchProgress
+        state={{
+          step: demoLaunch.step,
+          loading: demoLaunch.step < DEMO_STEPS.length,
+          error: null,
+          slabAddress: demoLaunch.step >= DEMO_STEPS.length
+            ? DEMO_BONK_SLAB
+            : null,
+          txSigs: demoLaunch.txSigs,
+          stepLabel: DEMO_STEPS[Math.min(demoLaunch.step, DEMO_STEPS.length - 1)],
+        }}
+        onReset={() => setDemoLaunch({ active: false, step: 0, txSigs: [] })}
+      />
+    );
+  }
+
   // Oracle label for review
   const oracleLabel =
     wizard.oracleType === "pyth" && wizard.pythFeed
@@ -915,7 +985,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
               lpCollateral={wizard.lpCollateral}
               insuranceAmount={wizard.insuranceAmount}
               onBack={goBack}
-              onLaunch={() => { /* no-op in demo mode */ }}
+              onLaunch={handleDemoLaunch}
             />
           ) : (
             <StepReview
