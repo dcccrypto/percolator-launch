@@ -24,6 +24,7 @@ import { SlabTierPicker } from "./SlabTierPicker";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 import { useToast } from "@/hooks/useToast";
 import { isMockMode } from "@/lib/mock-mode";
+import { getMockTokenByMint } from "@/lib/mock-trade-data";
 import { StepReviewDemo } from "../create-demo/StepReviewDemo";
 
 type WizardStep = 1 | 2 | 3 | 4;
@@ -208,9 +209,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // Devnet mirror mint address (different from mainnet CA entered by user)
   const [devnetMintAddress, setDevnetMintAddress] = useState<string | null>(null);
 
-  // SOL balance for cost check in review step
+  // SOL balance for cost check in review step.
+  // In mock mode (?mock=1), force a funded-looking value (8.5 SOL) so
+  // captures don't show "Insufficient SOL" regardless of the connected
+  // wallet's real balance.
   const [solBalance, setSolBalance] = useState<number | null>(null);
   useEffect(() => {
+    if (isMockMode()) { setSolBalance(8.5); return; }
     if (!publicKey || !connection) { setSolBalance(null); return; }
     let cancelled = false;
     connection.getBalance(publicKey).then((lamports) => {
@@ -475,6 +480,25 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const setWalletBalance = useCallback((balance: bigint | null) => {
     setWizard((prev) => ({ ...prev, walletBalance: balance }));
   }, []);
+
+  // Mock-mode wallet-balance override. As soon as token metadata is
+  // available, fake a "3,000 token" balance so the Step 1 token panel
+  // and Step 3/4 review lines render as a funded wallet. No effect in
+  // production (isMockMode() returns false without ?mock=1).
+  useEffect(() => {
+    if (!mockBypass) return;
+    const decimals = wizard.tokenMeta?.decimals ?? 6;
+    const mockAtoms = BigInt(3000) * BigInt(10) ** BigInt(decimals);
+    setWizard((prev) => ({ ...prev, walletBalance: mockAtoms }));
+  }, [mockBypass, wizard.tokenMeta?.decimals]);
+
+  // Mock-mode logo lookup. When the user enters a recognized mint
+  // (BONK, SOL, WIF, etc.), the wizard surfaces a real token logo
+  // instead of the text-initials fallback. Used by StepReviewDemo.
+  const mockLogoUrl = useMemo(() => {
+    if (!mockBypass || !wizard.mintAddress) return undefined;
+    return getMockTokenByMint(wizard.mintAddress)?.logoUrl;
+  }, [mockBypass, wizard.mintAddress]);
 
   const setOracleType = useCallback(
     (oracleType: "pyth" | "hyperp_ema" | "admin") => {
@@ -984,6 +1008,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
               initialMarginBps={wizard.initialMarginBps}
               lpCollateral={wizard.lpCollateral}
               insuranceAmount={wizard.insuranceAmount}
+              logoUrl={mockLogoUrl}
+              walletBalanceSol={solBalance ?? 8.5}
               onBack={goBack}
               onLaunch={handleDemoLaunch}
             />

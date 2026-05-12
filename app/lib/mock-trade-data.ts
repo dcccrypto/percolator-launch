@@ -244,6 +244,22 @@ export function getMockMarketData(address: string): MockMarketData | null {
   return MOCK_MAP[address] ?? null;
 }
 
+/** Look up logoUrl + decimals + symbol by mint address (not slab address).
+ *  Used by the create wizard to render a real token logo and pre-fill
+ *  plausible wallet balance in mock mode. */
+export function getMockTokenByMint(mintAddress: string): {
+  symbol: string;
+  logoUrl: string;
+  decimals: number;
+} | null {
+  for (const m of Object.values(MOCK_MAP)) {
+    if (m.mint === mintAddress) {
+      return { symbol: m.symbol, logoUrl: m.logoUrl, decimals: m.decimals };
+    }
+  }
+  return null;
+}
+
 /**
  * Supabase-shaped market metadata for mock slabs. Returned by useMarketInfo
  * when running in mock mode so MarketLogo, MarketInfoBar (OI conversion,

@@ -30,6 +30,10 @@ interface StepReviewDemoProps {
   initialMarginBps: number;
   lpCollateral: string;
   insuranceAmount: string;
+  /** Logo URL for the token icon in the market preview. */
+  logoUrl?: string;
+  /** Funded-looking SOL balance shown on the review (e.g. 8.5). */
+  walletBalanceSol?: number;
   onBack: () => void;
   onLaunch: () => void;
 }
@@ -54,6 +58,8 @@ export const StepReviewDemo: FC<StepReviewDemoProps> = ({
   initialMarginBps,
   lpCollateral,
   insuranceAmount,
+  logoUrl,
+  walletBalanceSol = 8.5,
   onBack,
   onLaunch,
 }) => {
@@ -82,9 +88,18 @@ export const StepReviewDemo: FC<StepReviewDemoProps> = ({
         <div className="border border-[var(--accent)]/20 bg-[var(--accent)]/[0.02] backdrop-blur">
           <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--accent)]/10">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center border border-[var(--accent)]/30 bg-[var(--accent)]/[0.08] text-[12px] font-bold text-[var(--accent)]">
-                {tokenSymbol.slice(0, 2).toUpperCase()}
-              </div>
+              {logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoUrl}
+                  alt={tokenSymbol}
+                  className="h-9 w-9 border border-[var(--accent)]/30 object-cover"
+                />
+              ) : (
+                <div className="flex h-9 w-9 items-center justify-center border border-[var(--accent)]/30 bg-[var(--accent)]/[0.08] text-[12px] font-bold text-[var(--accent)]">
+                  {tokenSymbol.slice(0, 2).toUpperCase()}
+                </div>
+              )}
               <div>
                 <h3
                   className="text-[14px] font-bold text-[var(--text)]"
@@ -127,11 +142,11 @@ export const StepReviewDemo: FC<StepReviewDemoProps> = ({
         tokenPriceUsd={priceUsd}
       />
 
-      {/* Demo balance line — always green */}
+      {/* Balance line — always green, looks like a funded wallet */}
       <div className="flex items-center gap-2 text-[11px]">
         <span className="text-[var(--long)]">✓</span>
         <span className="text-[var(--text-secondary)]">
-          Wallet ready · demo mode (no real funds required)
+          Your balance: {walletBalanceSol.toFixed(4)} SOL
         </span>
       </div>
 
