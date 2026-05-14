@@ -34,30 +34,40 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Backend build/test steps skip when packages/* workspaces are absent
+      # (e.g. waitlist-only forks). They auto-run when packages/ is restored.
       - name: Build shared package
+        if: hashFiles('packages/shared/package.json') != ''
         run: pnpm --filter @percolator/shared build
-        
+
       - name: Build API
+        if: hashFiles('packages/api/package.json') != ''
         run: pnpm --filter @percolator/api build
-        
+
       - name: Build keeper
+        if: hashFiles('packages/keeper/package.json') != ''
         run: pnpm --filter @percolator/keeper build
-        
+
       - name: Build indexer
+        if: hashFiles('packages/indexer/package.json') != ''
         run: pnpm --filter @percolator/indexer build
-        
+
       - name: Test shared package
+        if: hashFiles('packages/shared/package.json') != ''
         run: pnpm --filter @percolator/shared test
-        
+
       - name: Test API
+        if: hashFiles('packages/api/package.json') != ''
         run: pnpm --filter @percolator/api test
-        
+
       - name: Test keeper
+        if: hashFiles('packages/keeper/package.json') != ''
         run: pnpm --filter @percolator/keeper test
-        
+
       - name: Test indexer
+        if: hashFiles('packages/indexer/package.json') != ''
         run: pnpm --filter @percolator/indexer test
-        
+
       - name: Build frontend
         run: cd app && npx next build
         env:

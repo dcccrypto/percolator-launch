@@ -24,13 +24,16 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Skip when packages/* workspaces are absent (e.g. waitlist-only forks).
+    # When packages/ is restored from upstream, the guard evaluates true and the job runs.
+    if: hashFiles('packages/shared/package.json') != ''
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
       matrix:
-        service: [api, keeper, indexer]
+        service: [api, oracle-keeper, indexer]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       
@@ -55,7 +58,7 @@ jobs:
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
-          file: packages/${{ matrix.service }}/Dockerfile
+          file: Dockerfile.${{ matrix.service }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
