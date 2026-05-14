@@ -51,4 +51,18 @@ describe("/api/waitlist/signup input shape", () => {
     expect(source).toContain("walletExistsOnMainnet(pubkey!)");
     expect(source).not.toMatch(/if\s*\(\s*!hasEmail\s*\)\s*\{\s*const\s+exists\s*=\s*await\s+walletExistsOnMainnet/);
   });
+
+  it("rejects signups missing a referral code (invite-only)", () => {
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    // The required-referrer branch must return 400. Pin the error string
+    // so a future refactor can't accidentally re-open the route to the
+    // unauthenticated public.
+    expect(source).toMatch(
+      /referredByRaw\s*===\s*null\s*\|\|\s*referredByRaw\.length\s*===\s*0/,
+    );
+    expect(source).toContain(
+      'referral code required — Percolator is invite-only',
+    );
+    expect(source).toMatch(/status:\s*400/);
+  });
 });

@@ -276,46 +276,51 @@ export async function POST(req: Request) {
     );
   }
 
-  // ── Referrer validation (optional field) ────────────────────────────────
-  // Shape check is a cheap pre-filter so the existence-check RPC isn't a
-  // free oracle for "is any 8-char string in the table" — we only consult
-  // it for inputs that could plausibly be a real code.
-  let referredByCode: string | null = null;
-  if (referredByRaw !== null && referredByRaw.length > 0) {
-    if (!isValidReferralCodeShape(referredByRaw)) {
+  // ── Referrer validation (REQUIRED — invite-only) ────────────────────────
+  // The waitlist is invite-only: every new signup must supply a valid
+  // referral code from an existing member. Existing rows from before this
+  // change are grandfathered (their referred_by_code stays NULL). Shape
+  // check is a cheap pre-filter so the existence-check RPC isn't a free
+  // oracle for "is any 8-char string in the table". On idempotent
+  // re-submit, the duplicate branch later silently drops the value
+  // without overwriting any prior referrer — preventing retroactive
+  // self-attribution.
+  if (referredByRaw === null || referredByRaw.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "referral code required — Percolator is invite-only. Ask a member for a code or follow @percolatortrade for drops.",
+      },
+      { status: 400 },
+    );
+  }
+  if (!isValidReferralCodeShape(referredByRaw)) {
+    return NextResponse.json(
+      { error: "referral code format invalid" },
+      { status: 400 },
+    );
+  }
+  let referredByCode: string;
+  try {
+    const existsCheck = await getWaitlistSupabase().rpc(
+      "waitlist_referral_code_exists",
+      { p_code: referredByRaw },
+    );
+    if (existsCheck.data !== true) {
       return NextResponse.json(
-        { error: "referral code format invalid" },
+        { error: "referral code not recognised" },
         { status: 400 },
       );
     }
-    try {
-      const existsCheck = await getWaitlistSupabase().rpc(
-        "waitlist_referral_code_exists",
-        { p_code: referredByRaw },
-      );
-      if (existsCheck.data === true) {
-        referredByCode = referredByRaw;
-      } else {
-        return NextResponse.json(
-          { error: "referral code not recognised" },
-          { status: 400 },
-        );
-      }
-    } catch (err) {
-      console.error("[waitlist] referral code existence check failed", err);
-      // Fail closed on RPC failure — better to reject than silently drop
-      // attribution.
-      return NextResponse.json(
-        { error: "referral code check failed, try again" },
-        { status: 503 },
-      );
-    }
-    // Self-referral isn't reachable at insert time: a brand-new signup has
-    // no row yet, so their own code does not exist; the existence check
-    // above already rejected. On idempotent re-submit, the duplicate
-    // branch silently drops referredByCode without overwriting any prior
-    // value — so an attacker can't retroactively attribute themselves to
-    // their own code, even if they later learn it.
+    referredByCode = referredByRaw;
+  } catch (err) {
+    console.error("[waitlist] referral code existence check failed", err);
+    // Fail closed on RPC failure — better to reject than admit signups
+    // bypassing the invite gate during a partial outage.
+    return NextResponse.json(
+      { error: "referral code check failed, try again" },
+      { status: 503 },
+    );
   }
 
   // If we have wallet fields, verify them. (Whether or not email is provided.)
@@ -385,7 +390,7 @@ export async function POST(req: Request) {
     baseRow.signature = signature;
     baseRow.message = message;
   }
-  if (referredByCode) baseRow.referred_by_code = referredByCode;
+  baseRow.referred_by_code = referredByCode;
 
   const MAX_CODE_ATTEMPTS = 8;
   let referralCode: string | null = null;
