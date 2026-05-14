@@ -489,6 +489,14 @@ export async function POST(req: Request) {
     ok: true,
     position: responsePosition,
     referral_code: responseCode,
+    // Wallet-path-only: signals to the UI that this signup was an
+    // idempotent re-submit so it can swap "you're in" copy for "welcome
+    // back". Deliberately NOT set on the email-duplicate branch — a
+    // `returning: true` flag tied to an email would be a clean
+    // membership oracle. The email-flow UI infers "returning" from
+    // referral_code === null instead (which is unavoidable signal we
+    // already accepted).
+    returning: isDuplicate && hasWalletPart,
   });
 }
 
