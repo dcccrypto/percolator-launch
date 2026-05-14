@@ -112,12 +112,14 @@ async function main() {
     `[backfill] DONE: processed=${processed} sent=${sent} failed=${failed} updateFailed=${updateFailed}`,
   );
   if (updateFailed > 0) {
-    console.warn(
-      "[backfill] some rows were emailed but their flag could not be set —",
-      "re-running will re-email those users. Investigate and either fix the",
-      "flag manually or accept the duplicate before re-running.",
+    console.error(
+      "[backfill] DO NOT RE-RUN until you reconcile flags. Some rows were",
+      "successfully emailed but their referral_code_emailed_at could not be",
+      "set — re-running will email those users a second time.",
     );
+    process.exit(2);
   }
+  if (failed > 0) process.exit(1);
 }
 
 function sleep(ms: number): Promise<void> {

@@ -434,19 +434,24 @@ export async function POST(req: Request) {
   }
 
   // ── Position lookup ─────────────────────────────────────────────────────
+  // Routed through the service-role client so the underlying functions can
+  // stay revoked from anon (membership-oracle prevention). Falls back to
+  // null if the service env var is missing; UX-wise the success card
+  // gracefully omits the position when null.
   let position: number | null = null;
   try {
+    const service = getWaitlistServiceSupabase();
     if (hasWalletPart) {
-      const { data } = await supabase.rpc("waitlist_position", { p_pubkey: pubkey });
+      const { data } = await service.rpc("waitlist_position", { p_pubkey: pubkey });
       if (typeof data === "number") position = data;
     } else if (hasEmail) {
-      const { data } = await supabase.rpc("waitlist_position_by_email", {
+      const { data } = await service.rpc("waitlist_position_by_email", {
         p_email: emailRaw,
       });
       if (typeof data === "number") position = data;
     }
-  } catch {
-    /* ignore */
+  } catch (err) {
+    console.warn("[waitlist-signup] position lookup unavailable", err);
   }
 
   // ── Confirmation email (fire-and-forget) ────────────────────────────────
@@ -471,10 +476,20 @@ export async function POST(req: Request) {
     );
   }
 
-  // Email-path duplicate: don't leak the existing code in the response — see
-  // the membership-oracle note above. Wallet-path always returns the code.
-  const responseCode = hasWalletPart || !isDuplicate ? referralCode : null;
-  return NextResponse.json({ ok: true, position, referral_code: responseCode });
+  // Email-path duplicate: withhold both the code AND the position. Returning
+  // either one would let an attacker holding the publishable key probe
+  // arbitrary email addresses for membership (the position number itself
+  // is a yes/no signal — non-null position = "this email is on the list").
+  // Wallet-path duplicate is safe to fully respond to because the wallet
+  // signature already proved ownership.
+  const isEmailDuplicate = isDuplicate && !hasWalletPart;
+  const responseCode = isEmailDuplicate ? null : referralCode;
+  const responsePosition = isEmailDuplicate ? null : position;
+  return NextResponse.json({
+    ok: true,
+    position: responsePosition,
+    referral_code: responseCode,
+  });
 }
 
 /**
@@ -554,7 +569,16 @@ async function sendConfirmationEmail(
    * send. Best-effort: a missing service-role key or a transient supabase
    * error logs and returns — the backfill script will retry on its next
    * pass. Pulled here (rather than as a separate await chain) so we don't
-   * block the route handler on this update. */
+   * block the route handler on this update.
+   *
+   * The `.eq("email", email)` match is case-sensitive at the storage layer.
+   * Two things make it correct anyway:
+   *   • New rows: this function only runs on `email` already lowercased by
+   *     the route (see emailRaw = ...toLowerCase() above).
+   *   • Pre-existing rows: the schema migration's one-time
+   *     `update waitlist set email = lower(email)` block normalises legacy
+   *     mixed-case rows before they can be touched here.
+   */
   const markEmailed = async () => {
     if (!referralCode) return;
     try {
@@ -565,7 +589,7 @@ async function sendConfirmationEmail(
         .eq("email", email)
         .is("referral_code_emailed_at", null);
     } catch (err) {
-      console.warn("[waitlist] mark emailed failed (non-fatal)", err);
+      console.warn("[waitlist-signup] mark emailed failed (non-fatal)", err);
     }
   };
   const positionLine = position

@@ -126,6 +126,18 @@ begin
 end;
 $$;
 
+-- ─── One-time email normalisation ───────────────────────────────────────────
+-- The signup route lowercases inbound emails (route.ts line ~265) and the
+-- unique index is on lower(email) — but rows inserted before that policy
+-- existed may store mixed-case emails. The route's referral-code-emailed
+-- flag update matches on `eq("email", lower(...))`, which silently misses
+-- those pre-normalised rows. Normalise once here so equality matches
+-- always succeed. Idempotent: re-runs are no-ops because the WHERE clause
+-- already excludes already-normalised rows.
+update public.waitlist
+set email = lower(email)
+where email is not null and email != lower(email);
+
 -- ─── Backfill: assign codes to any existing rows that don't have one ────────
 -- Retries on the (astronomically unlikely) unique-violation. Safe to re-run.
 
@@ -202,7 +214,11 @@ as $$
   select pos from ordered where pubkey = p_pubkey;
 $$;
 
-grant execute on function public.waitlist_position(text) to anon;
+-- Revoked from anon (was previously granted): a public membership lookup
+-- by pubkey is a low-grade enumeration vector. The signup route is the only
+-- legitimate caller and it now uses the service-role client. Counter is
+-- still public via waitlist_count() — only individual-row probes are gated.
+revoke execute on function public.waitlist_position(text) from anon;
 
 -- Position lookup by email (case-insensitive). Used when the row was
 -- inserted via the email path.
@@ -220,7 +236,12 @@ as $$
   select pos from ordered where lower(email) = lower(p_email);
 $$;
 
-grant execute on function public.waitlist_position_by_email(text) to anon;
+-- Revoked from anon (was previously granted): an anon caller holding the
+-- publishable key could probe arbitrary emails for membership, turning the
+-- function into a clean yes/no oracle on a PII-grade identifier. The
+-- signup route is the only legitimate caller and uses the service-role
+-- client.
+revoke execute on function public.waitlist_position_by_email(text) from anon;
 
 -- Referral code existence check (boolean only — never returns the row).
 -- Used by future attribution: a visitor lands at /r/<code> and we confirm
