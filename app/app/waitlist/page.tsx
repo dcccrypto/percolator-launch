@@ -28,6 +28,57 @@ function readReferrerFromUrl(): string {
   return raw ? raw.trim().toUpperCase() : "";
 }
 
+type CodeStatus = "empty" | "typing" | "checking" | "valid" | "invalid";
+
+/**
+ * Debounced live-validation against /api/waitlist/check-code.
+ *
+ * The waitlist is invite-only — every signup must supply a referrer code.
+ * Both Wallet and Email flows gate their submit CTA on `status === "valid"`
+ * so a user with a bogus code gets a green/red signal before being sent
+ * through Privy OTP or being asked to sign a wallet message.
+ */
+function useReferralCodeValidation(code: string): { status: CodeStatus } {
+  const [status, setStatus] = useState<CodeStatus>("empty");
+
+  useEffect(() => {
+    if (!code) {
+      setStatus("empty");
+      return;
+    }
+    if (code.length < 8) {
+      // Too short to plausibly be a real code — keep the rest of the form
+      // locked but don't burn a request on every keystroke.
+      setStatus("typing");
+      return;
+    }
+    setStatus("typing");
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
+      setStatus("checking");
+      try {
+        const res = await fetch(
+          `/api/waitlist/check-code?code=${encodeURIComponent(code)}`,
+          { cache: "no-store" },
+        );
+        const json = (await res.json()) as { valid?: boolean };
+        if (cancelled) return;
+        setStatus(json.valid ? "valid" : "invalid");
+      } catch {
+        if (cancelled) return;
+        setStatus("invalid");
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [code]);
+
+  return { status };
+}
+
 type State =
   | { kind: "idle" }
   | { kind: "connecting" }
@@ -184,11 +235,11 @@ function Hero() {
           href="#reserve"
           className="inline-flex items-center gap-2.5 rounded-md bg-[var(--accent)] px-6 py-3 text-[14px] font-semibold text-white shadow-[0_4px_14px_-4px_rgba(153,69,255,0.4)] transition-all duration-200 hover:bg-[var(--accent-muted)] hover:shadow-[0_8px_24px_-6px_rgba(153,69,255,0.55)]"
         >
-          Join The Waitlist
+          Enter your code
           <span aria-hidden className="text-[15px] leading-none">↓</span>
         </a>
         <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-          wallet or email · 30 seconds
+          invite-only · 30 seconds
         </span>
       </div>
     </section>
@@ -334,6 +385,7 @@ function EmailFlow() {
   const [twitter, setTwitter] = useState("");
   const [referredBy, setReferredBy] = useState("");
   const [state, setState] = useState<EmailState>({ kind: "idle" });
+  const { status: refStatus } = useReferralCodeValidation(referredBy);
 
   // Pre-fill the referrer input from /r/<code> landings.
   useEffect(() => {
@@ -548,9 +600,16 @@ function EmailFlow() {
 
   // idle / sending-code
   const sending = state.kind === "sending-code";
+  const formUnlocked = refStatus === "valid";
   return (
     <div className="space-y-3.5">
       <PromptLine prefix="$" text="email_signup" status="idle" />
+      <ReferralCodeInput
+        value={referredBy}
+        onChange={setReferredBy}
+        status={refStatus}
+        disabled={sending}
+      />
       <div className="space-y-1.5">
         <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
           email
@@ -559,11 +618,11 @@ function EmailFlow() {
           type="email"
           autoComplete="email"
           inputMode="email"
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
           placeholder="you@domain.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          disabled={sending}
+          disabled={sending || !formUnlocked}
           maxLength={254}
         />
       </div>
@@ -572,37 +631,26 @@ function EmailFlow() {
           x_handle (optional)
         </label>
         <input
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
           placeholder="@yourhandle"
           value={twitter}
           onChange={(e) => setTwitter(e.target.value)}
-          disabled={sending}
+          disabled={sending || !formUnlocked}
           maxLength={30}
         />
       </div>
-      <div className="space-y-1.5">
-        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-          referral code (optional)
-        </label>
-        <input
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] uppercase tracking-[0.08em] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
-          placeholder="AB23XYZ9"
-          value={referredBy}
-          onChange={(e) =>
-            setReferredBy(e.target.value.toUpperCase().slice(0, 8))
-          }
-          disabled={sending}
-          maxLength={8}
-          spellCheck={false}
-          autoCapitalize="characters"
-        />
-      </div>
-      <button className={ctaPrimary} onClick={onSendCode} disabled={sending}>
-        {sending ? "Sending code…" : "Send 6-digit code →"}
+      <button
+        className={ctaPrimary}
+        onClick={onSendCode}
+        disabled={sending || !formUnlocked}
+      >
+        {sending
+          ? "Sending code…"
+          : formUnlocked
+            ? "Send 6-digit code →"
+            : "Enter referral code to continue"}
       </button>
-      <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
-        We&apos;ll email you a 6-digit code, then create an embedded Solana wallet under your email so you also get the on-chain dApp gate when mainnet opens.
-      </p>
+      <NoCodeFallback />
     </div>
   );
 }
@@ -622,6 +670,7 @@ function SignupFlow() {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [twitter, setTwitter] = useState("");
   const [referredBy, setReferredBy] = useState("");
+  const { status: refStatus } = useReferralCodeValidation(referredBy);
 
   // Pre-fill the referrer input from /r/<code> landings (forwarded as
   // ?referrer=<code> by the /r route).
@@ -750,46 +799,43 @@ function SignupFlow() {
     state.kind === "submitting"
   ) {
     const busy = state.kind !== "ready";
+    const formUnlocked = refStatus === "valid";
     return (
       <div className="space-y-3.5">
         <PromptLine prefix="$" text={`connected ${pubkey?.slice(0, 6)}…${pubkey?.slice(-4)}`} status="ok" />
+        <ReferralCodeInput
+          value={referredBy}
+          onChange={setReferredBy}
+          status={refStatus}
+          disabled={busy}
+        />
         <div className="space-y-1.5">
           <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
             x_handle (optional)
           </label>
           <input
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
             placeholder="@yourhandle"
             value={twitter}
             onChange={(e) => setTwitter(e.target.value)}
-            disabled={busy}
+            disabled={busy || !formUnlocked}
             maxLength={30}
           />
         </div>
-        <div className="space-y-1.5">
-          <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-            referral code (optional)
-          </label>
-          <input
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] uppercase tracking-[0.08em] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
-            placeholder="AB23XYZ9"
-            value={referredBy}
-            onChange={(e) =>
-              setReferredBy(e.target.value.toUpperCase().slice(0, 8))
-            }
-            disabled={busy}
-            maxLength={8}
-            spellCheck={false}
-            autoCapitalize="characters"
-          />
-        </div>
-        <button className={ctaPrimary} onClick={onSign} disabled={busy}>
+        <button
+          className={ctaPrimary}
+          onClick={onSign}
+          disabled={busy || !formUnlocked}
+        >
           {state.kind === "signing"
             ? "Signing in your wallet…"
             : state.kind === "submitting"
               ? "Submitting…"
-              : "Sign & claim spot →"}
+              : formUnlocked
+                ? "Sign & claim spot →"
+                : "Enter referral code to continue"}
         </button>
+        <NoCodeFallback />
       </div>
     );
   }
@@ -807,6 +853,7 @@ function SignupFlow() {
   }
 
   // Idle / connecting
+  const formUnlocked = refStatus === "valid";
   return (
     <div className="space-y-3.5">
       <PromptLine
@@ -814,20 +861,29 @@ function SignupFlow() {
         text={state.kind === "connecting" ? "connecting…" : "connect_wallet"}
         status={state.kind === "connecting" ? "pending" : "idle"}
       />
+      <ReferralCodeInput
+        value={referredBy}
+        onChange={setReferredBy}
+        status={refStatus}
+        disabled={state.kind === "connecting"}
+      />
       <button
         className={ctaPrimary}
         onClick={onConnect}
-        disabled={state.kind === "connecting"}
+        disabled={state.kind === "connecting" || !formUnlocked}
       >
         {state.kind === "connecting"
           ? "Connecting…"
-          : "Connect wallet →"}
+          : formUnlocked
+            ? "Connect wallet →"
+            : "Enter referral code to continue"}
       </button>
       <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
         Phantom · Solflare · Backpack · Jupiter
         <br />
         sign-only · no gas · idempotent
       </p>
+      <NoCodeFallback />
     </div>
   );
 }
@@ -871,6 +927,96 @@ function StatusErr({ children }: { children: React.ReactNode }) {
     <div className="rounded-md border border-[var(--short)]/25 bg-[var(--short)]/[0.05] px-3 py-2.5 font-mono text-[12px] leading-relaxed text-[var(--text-secondary)]">
       {children}
     </div>
+  );
+}
+
+/**
+ * Referral code input with inline live-validation status. Pinned to the top
+ * of both signup flows because the form is gated on it (`status === "valid"`).
+ *
+ * Input is auto-uppercased and filtered to the Crockford base32 alphabet so
+ * users can't type chars that would always fail server-side validation
+ * (I, L, O, U look like 1, 1, 0, V — dropping them is faster feedback than
+ * round-tripping a 400).
+ */
+function ReferralCodeInput({
+  value,
+  onChange,
+  status,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  status: CodeStatus;
+  disabled?: boolean;
+}) {
+  const indicator = (() => {
+    if (status === "valid")
+      return { color: "var(--cyan)", text: "✓ accepted" };
+    if (status === "invalid")
+      return { color: "var(--short)", text: "× not recognised" };
+    if (status === "checking")
+      return { color: "var(--text-secondary)", text: "checking…" };
+    return null;
+  })();
+  const borderClass =
+    status === "valid"
+      ? "border-[var(--cyan)]/50 focus:border-[var(--cyan)] focus:ring-[var(--cyan)]/20"
+      : status === "invalid"
+        ? "border-[var(--short)]/50 focus:border-[var(--short)] focus:ring-[var(--short)]/20"
+        : "border-[var(--border)] focus:border-[var(--accent)]/50 focus:ring-[var(--accent)]/15";
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+          referral code{" "}
+          <span className="text-[var(--accent)]">· required</span>
+        </label>
+        {indicator && (
+          <span
+            className="font-mono text-[10px] uppercase tracking-[0.12em]"
+            style={{ color: indicator.color }}
+          >
+            {indicator.text}
+          </span>
+        )}
+      </div>
+      <input
+        className={`w-full rounded-md border bg-[var(--bg)] px-3 py-2.5 font-mono text-[15px] uppercase tracking-[0.12em] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:ring-1 ${borderClass}`}
+        placeholder="AB23XYZ9"
+        value={value}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .toUpperCase()
+              .replace(/[^0-9A-HJKMNP-TV-Z]/g, "")
+              .slice(0, 8),
+          )
+        }
+        disabled={disabled}
+        maxLength={8}
+        spellCheck={false}
+        autoCapitalize="characters"
+        autoComplete="off"
+      />
+    </div>
+  );
+}
+
+function NoCodeFallback() {
+  return (
+    <p className="font-mono text-[11px] leading-relaxed text-[var(--text-secondary)]">
+      Don&apos;t have a code?{" "}
+      <a
+        href="https://x.com/percolatortrade"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[var(--accent)] underline-offset-2 hover:underline"
+      >
+        Follow @percolatortrade
+      </a>{" "}
+      — we drop codes on tweets every so often.
+    </p>
   );
 }
 
@@ -940,17 +1086,17 @@ function SignupSection() {
           className="text-[28px] font-semibold leading-[1.1] tracking-[-0.015em] text-[var(--text)]"
           style={{ fontFamily: "var(--font-heading)" }}
         >
-          Wallet or email.
+          Invite-only.
           <br />
-          Both get the dApp gate.
+          Code required.
         </h2>
         <p className="mt-4 max-w-[420px] text-[14px] leading-[1.65] text-[var(--text-secondary)]">
-          Two paths to the same list. Either connect a Solana wallet and sign once, or drop an email and verify with a 6-digit code — Privy creates an embedded Solana wallet under your email automatically, so the dApp at percolator.trade recognises you when mainnet opens either way.
+          The waitlist is gated. Bring a referral code from an existing member — paste it in, the form unlocks, you finish in under a minute on wallet or email.
         </p>
         <div className="mt-6 space-y-3 font-mono text-[12px] text-[var(--text-secondary)]">
-          <SignupBullet color="cyan">Wallet path: connect Phantom / Solflare / Backpack / Jupiter. Sign once. Done.</SignupBullet>
-          <SignupBullet color="cyan">Email path: 6-digit code → embedded wallet → automatic message sign. Same result.</SignupBullet>
-          <SignupBullet color="cyan">Optional X handle on either path for a backup DM channel.</SignupBullet>
+          <SignupBullet color="cyan">Got a code from someone? Paste it. Form unlocks. Pick wallet or email.</SignupBullet>
+          <SignupBullet color="cyan">Landed via a share link? Code is already pre-filled — just finish.</SignupBullet>
+          <SignupBullet color="cyan">No code yet? Follow @percolatortrade — we drop codes on tweets every so often.</SignupBullet>
         </div>
       </div>
       <div className="flex justify-start lg:justify-end">
@@ -1296,6 +1442,21 @@ function FAQSection() {
       "Why a waitlist instead of letting me trade now?",
       <>
         Pre-audit, public trading puts user funds at risk. We won&apos;t do that. The waitlist is how we line up early adopters and creators so they get priority access the moment audit clears.
+      </>,
+    ],
+    [
+      "Why do I need a referral code?",
+      <>
+        The waitlist is invite-only. We&apos;re keeping it tight while we&apos;re pre-audit — fewer, higher-intent people, less noise. Every member who joins gets a unique code they can share. If you don&apos;t have one yet, follow{" "}
+        <a
+          href="https://x.com/percolatortrade"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[var(--accent)] hover:underline"
+        >
+          @percolatortrade
+        </a>{" "}
+        — we drop codes on tweets every so often.
       </>,
     ],
     [
