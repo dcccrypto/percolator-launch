@@ -7,6 +7,27 @@ import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { resolveActiveWallet, usePreferredWallet } from "@/hooks/usePreferredWallet";
 import bs58 from "bs58";
 
+/**
+ * Reads the inbound referrer code from the URL.
+ *
+ * Two sources are accepted:
+ *   • ?referrer=<code> — set by /r/[code]/page.tsx when someone lands on a
+ *     share link. Path-based (/r/AB23XYZ9) is what we generate and share;
+ *     ?referrer is the internal forwarding param.
+ *   • ?ref=<code> — legacy / direct query-string form. The existing source
+ *     handling uses ?ref for analytics, so we deliberately don't read from
+ *     there for attribution; mention it only because the search ordering
+ *     here is "referrer-first".
+ *
+ * Returns the uppercased code or empty string. Shape validation lives on
+ * the server — bad codes are rejected at submit, not at input.
+ */
+function readReferrerFromUrl(): string {
+  if (typeof window === "undefined") return "";
+  const raw = new URL(window.location.href).searchParams.get("referrer");
+  return raw ? raw.trim().toUpperCase() : "";
+}
+
 type State =
   | { kind: "idle" }
   | { kind: "connecting" }
@@ -311,7 +332,14 @@ function EmailFlow() {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [twitter, setTwitter] = useState("");
+  const [referredBy, setReferredBy] = useState("");
   const [state, setState] = useState<EmailState>({ kind: "idle" });
+
+  // Pre-fill the referrer input from /r/<code> landings.
+  useEffect(() => {
+    const fromUrl = readReferrerFromUrl();
+    if (fromUrl) setReferredBy(fromUrl);
+  }, []);
 
   const { sendCode, loginWithCode } = useLoginWithEmail({
     onComplete: () => {
@@ -393,6 +421,7 @@ function EmailFlow() {
             email: userEmail,
             twitter_handle: twitter.trim() || undefined,
             source: source ?? undefined,
+            referred_by_code: referredBy.trim() || undefined,
           }),
         });
         const json = (await res.json()) as {
@@ -416,7 +445,7 @@ function EmailFlow() {
         setState({ kind: "error", reason: msg });
       }
     })();
-  }, [state, ready, authenticated, user, twitter, email]);
+  }, [state, ready, authenticated, user, twitter, email, referredBy]);
 
   if (state.kind === "done") {
     const shareUrl = state.referralCode
@@ -551,6 +580,23 @@ function EmailFlow() {
           maxLength={30}
         />
       </div>
+      <div className="space-y-1.5">
+        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+          referral code (optional)
+        </label>
+        <input
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] uppercase tracking-[0.08em] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
+          placeholder="AB23XYZ9"
+          value={referredBy}
+          onChange={(e) =>
+            setReferredBy(e.target.value.toUpperCase().slice(0, 8))
+          }
+          disabled={sending}
+          maxLength={8}
+          spellCheck={false}
+          autoCapitalize="characters"
+        />
+      </div>
       <button className={ctaPrimary} onClick={onSendCode} disabled={sending}>
         {sending ? "Sending code…" : "Send 6-digit code →"}
       </button>
@@ -575,6 +621,14 @@ function SignupFlow() {
 
   const [state, setState] = useState<State>({ kind: "idle" });
   const [twitter, setTwitter] = useState("");
+  const [referredBy, setReferredBy] = useState("");
+
+  // Pre-fill the referrer input from /r/<code> landings (forwarded as
+  // ?referrer=<code> by the /r route).
+  useEffect(() => {
+    const fromUrl = readReferrerFromUrl();
+    if (fromUrl) setReferredBy(fromUrl);
+  }, []);
 
   const onConnect = useCallback(() => {
     setState({ kind: "connecting" });
@@ -608,6 +662,7 @@ function SignupFlow() {
           message,
           twitter_handle: twitter.trim() || undefined,
           source: source ?? undefined,
+          referred_by_code: referredBy.trim() || undefined,
         }),
       });
       const json = (await res.json()) as {
@@ -629,7 +684,7 @@ function SignupFlow() {
       const msg = e instanceof Error ? e.message : "sign cancelled";
       setState({ kind: "error", reason: msg });
     }
-  }, [activeWallet, pubkey, signMessage, twitter]);
+  }, [activeWallet, pubkey, signMessage, twitter, referredBy]);
 
   useEffect(() => {
     if (state.kind === "connecting" && ready && authenticated && pubkey) {
@@ -709,6 +764,23 @@ function SignupFlow() {
             onChange={(e) => setTwitter(e.target.value)}
             disabled={busy}
             maxLength={30}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+            referral code (optional)
+          </label>
+          <input
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] uppercase tracking-[0.08em] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
+            placeholder="AB23XYZ9"
+            value={referredBy}
+            onChange={(e) =>
+              setReferredBy(e.target.value.toUpperCase().slice(0, 8))
+            }
+            disabled={busy}
+            maxLength={8}
+            spellCheck={false}
+            autoCapitalize="characters"
           />
         </div>
         <button className={ctaPrimary} onClick={onSign} disabled={busy}>
