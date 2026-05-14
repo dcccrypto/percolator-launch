@@ -28,15 +28,25 @@ function readReferrerFromUrl(): string {
   return raw ? raw.trim().toUpperCase() : "";
 }
 
-type CodeStatus = "empty" | "typing" | "checking" | "valid" | "invalid";
+type CodeStatus =
+  | "empty"
+  | "typing"
+  | "checking"
+  | "valid"
+  | "invalid"
+  | "error";
 
 /**
  * Debounced live-validation against /api/waitlist/check-code.
  *
- * The waitlist is invite-only — every signup must supply a referrer code.
- * Both Wallet and Email flows gate their submit CTA on `status === "valid"`
+ * Both Wallet and Email flows gate their submit CTA on `status === "valid"`,
  * so a user with a bogus code gets a green/red signal before being sent
  * through Privy OTP or being asked to sign a wallet message.
+ *
+ * `"invalid"` means the server actively rejected the code (wrong, revoked,
+ * or never existed). `"error"` means we couldn't determine — network
+ * failure, server unreachable — and the UI tells the user to retry rather
+ * than implying the code is bad.
  */
 function useReferralCodeValidation(code: string): { status: CodeStatus } {
   const [status, setStatus] = useState<CodeStatus>("empty");
@@ -53,25 +63,27 @@ function useReferralCodeValidation(code: string): { status: CodeStatus } {
       return;
     }
     setStatus("typing");
-    let cancelled = false;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
-      if (cancelled) return;
+      if (controller.signal.aborted) return;
       setStatus("checking");
       try {
         const res = await fetch(
           `/api/waitlist/check-code?code=${encodeURIComponent(code)}`,
-          { cache: "no-store" },
+          { cache: "no-store", signal: controller.signal },
         );
         const json = (await res.json()) as { valid?: boolean };
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setStatus(json.valid ? "valid" : "invalid");
-      } catch {
-        if (cancelled) return;
-        setStatus("invalid");
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        // AbortError on cleanup — not a real failure
+        if (err instanceof Error && err.name === "AbortError") return;
+        setStatus("error");
       }
     }, 300);
     return () => {
-      cancelled = true;
+      controller.abort();
       clearTimeout(timer);
     };
   }, [code]);
@@ -546,16 +558,20 @@ function EmailFlow() {
       <div className="space-y-3.5">
         <PromptLine prefix="$" text={`code_sent ${state.kind === "awaiting-code" ? state.email : ""}`} status="pending" />
         <div className="space-y-1.5">
-          <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+          <label
+            htmlFor="otp-code"
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
+          >
             6-digit code
           </label>
           <input
+            id="otp-code"
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
             autoComplete="one-time-code"
             className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[15px] tracking-[0.4em] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15"
-            placeholder="••••••"
+            placeholder="000000"
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
             disabled={busy}
@@ -611,10 +627,14 @@ function EmailFlow() {
         disabled={sending}
       />
       <div className="space-y-1.5">
-        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+        <label
+          htmlFor="signup-email"
+          className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
+        >
           email
         </label>
         <input
+          id="signup-email"
           type="email"
           autoComplete="email"
           inputMode="email"
@@ -627,10 +647,14 @@ function EmailFlow() {
         />
       </div>
       <div className="space-y-1.5">
-        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+        <label
+          htmlFor="x-handle"
+          className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
+        >
           x_handle (optional)
         </label>
         <input
+          id="x-handle"
           className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
           placeholder="@yourhandle"
           value={twitter}
@@ -938,7 +962,15 @@ function StatusErr({ children }: { children: React.ReactNode }) {
  * users can't type chars that would always fail server-side validation
  * (I, L, O, U look like 1, 1, 0, V — dropping them is faster feedback than
  * round-tripping a 400).
+ *
+ * Indicator copy is split four ways so the user can distinguish a wrong
+ * code (red, "× not a valid code") from a network failure (amber,
+ * "× couldn't check — retry"). The status pill is wrapped in `role=status`
+ * + `aria-live=polite` so screen readers announce changes; the input has a
+ * stable `id` matched by the label's `htmlFor` and described by the help
+ * text below.
  */
+let _referralInputCounter = 0;
 function ReferralCodeInput({
   value,
   onChange,
@@ -950,13 +982,24 @@ function ReferralCodeInput({
   status: CodeStatus;
   disabled?: boolean;
 }) {
+  // Stable per-instance id — both wallet and email flows can render this on
+  // the same page, so a hardcoded id would collide.
+  const [inputId] = useState(() => `ref-code-${++_referralInputCounter}`);
+  const helpId = `${inputId}-help`;
+
   const indicator = (() => {
-    if (status === "valid")
-      return { color: "var(--cyan)", text: "✓ accepted" };
+    if (status === "valid") return { color: "var(--cyan)", text: "✓ accepted" };
     if (status === "invalid")
-      return { color: "var(--short)", text: "× not recognised" };
+      return { color: "var(--short)", text: "× not a valid code" };
+    if (status === "error")
+      return { color: "#fbbf24", text: "× couldn't check — retry" };
     if (status === "checking")
       return { color: "var(--text-secondary)", text: "checking…" };
+    if (status === "typing")
+      return {
+        color: "var(--text-secondary)",
+        text: `${value.length}/8`,
+      };
     return null;
   })();
   const borderClass =
@@ -964,24 +1007,31 @@ function ReferralCodeInput({
       ? "border-[var(--cyan)]/50 focus:border-[var(--cyan)] focus:ring-[var(--cyan)]/20"
       : status === "invalid"
         ? "border-[var(--short)]/50 focus:border-[var(--short)] focus:ring-[var(--short)]/20"
-        : "border-[var(--border)] focus:border-[var(--accent)]/50 focus:ring-[var(--accent)]/15";
+        : status === "error"
+          ? "border-[#fbbf24]/50 focus:border-[#fbbf24] focus:ring-[#fbbf24]/20"
+          : "border-[var(--border)] focus:border-[var(--accent)]/50 focus:ring-[var(--accent)]/15";
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">
-          referral code{" "}
-          <span className="text-[var(--accent)]">· required</span>
+        <label
+          htmlFor={inputId}
+          className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
+        >
+          referral code <span className="text-[var(--accent)]">· required</span>
         </label>
-        {indicator && (
-          <span
-            className="font-mono text-[10px] uppercase tracking-[0.12em]"
-            style={{ color: indicator.color }}
-          >
-            {indicator.text}
-          </span>
-        )}
+        <span
+          role="status"
+          aria-live="polite"
+          className="font-mono text-[10px] uppercase tracking-[0.12em]"
+          style={{ color: indicator?.color ?? "transparent" }}
+        >
+          {indicator?.text ?? "·"}
+        </span>
       </div>
       <input
+        id={inputId}
+        aria-describedby={helpId}
+        aria-invalid={status === "invalid" || status === "error"}
         className={`w-full rounded-md border bg-[var(--bg)] px-3 py-2.5 font-mono text-[15px] uppercase tracking-[0.12em] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:ring-1 ${borderClass}`}
         placeholder="AB23XYZ9"
         value={value}
@@ -998,7 +1048,14 @@ function ReferralCodeInput({
         spellCheck={false}
         autoCapitalize="characters"
         autoComplete="off"
+        inputMode="text"
       />
+      <p
+        id={helpId}
+        className="font-mono text-[10px] leading-relaxed text-[var(--text-secondary)]"
+      >
+        8 characters · uses 0–9 and A–Z (no I, L, O, U)
+      </p>
     </div>
   );
 }
