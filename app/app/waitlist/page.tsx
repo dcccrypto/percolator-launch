@@ -13,7 +13,11 @@ type State =
   | { kind: "ready" }
   | { kind: "signing" }
   | { kind: "submitting" }
-  | { kind: "done"; position: number | null }
+  | {
+      kind: "done";
+      position: number | null;
+      referralCode: string | null;
+    }
   | { kind: "error"; reason: string };
 
 const MESSAGE_PREFIX = "Joining the Percolator waitlist at ";
@@ -295,7 +299,12 @@ type EmailState =
   | { kind: "awaiting-code"; email: string }
   | { kind: "verifying" }
   | { kind: "submitting"; email: string }
-  | { kind: "done"; email: string; position: number | null }
+  | {
+      kind: "done";
+      email: string;
+      position: number | null;
+      referralCode: string | null;
+    }
   | { kind: "error"; reason: string };
 
 function EmailFlow() {
@@ -390,12 +399,18 @@ function EmailFlow() {
           ok?: boolean;
           error?: string;
           position?: number | null;
+          referral_code?: string | null;
         };
         if (!res.ok || !json.ok) {
           setState({ kind: "error", reason: json.error ?? `HTTP ${res.status}` });
           return;
         }
-        setState({ kind: "done", email: userEmail, position: json.position ?? null });
+        setState({
+          kind: "done",
+          email: userEmail,
+          position: json.position ?? null,
+          referralCode: json.referral_code ?? null,
+        });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "submit failed";
         setState({ kind: "error", reason: msg });
@@ -404,6 +419,9 @@ function EmailFlow() {
   }, [state, ready, authenticated, user, twitter, email]);
 
   if (state.kind === "done") {
+    const shareUrl = state.referralCode
+      ? `https://percolator.trade/r/${state.referralCode}`
+      : null;
     return (
       <div className="space-y-4">
         <PromptLine prefix="$" text="email_signup" status="ok" />
@@ -420,9 +438,23 @@ function EmailFlow() {
             </div>
           ) : null}
           <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
-            Confirmation sent to <span className="font-mono text-[var(--accent)]">{state.email}</span>. We also created an embedded Solana wallet under your email — when mainnet opens, the dApp recognises you automatically.
+            {state.referralCode ? (
+              <>
+                Confirmation + referral code sent to{" "}
+                <span className="font-mono text-[var(--accent)]">{state.email}</span>.
+              </>
+            ) : (
+              <>
+                You&apos;re already on the list under{" "}
+                <span className="font-mono text-[var(--accent)]">{state.email}</span>.
+                Your referral code is in the confirmation email we sent on your first signup.
+              </>
+            )}
           </p>
         </div>
+        {state.referralCode && shareUrl ? (
+          <ReferralCard code={state.referralCode} shareUrl={shareUrl} />
+        ) : null}
       </div>
     );
   }
@@ -582,12 +614,17 @@ function SignupFlow() {
         ok?: boolean;
         error?: string;
         position?: number | null;
+        referral_code?: string | null;
       };
       if (!res.ok || !json.ok) {
         setState({ kind: "error", reason: json.error ?? `HTTP ${res.status}` });
         return;
       }
-      setState({ kind: "done", position: json.position ?? null });
+      setState({
+        kind: "done",
+        position: json.position ?? null,
+        referralCode: json.referral_code ?? null,
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "sign cancelled";
       setState({ kind: "error", reason: msg });
@@ -602,6 +639,12 @@ function SignupFlow() {
 
   // Done state
   if (state.kind === "done") {
+    const shareUrl = state.referralCode
+      ? `https://percolator.trade/r/${state.referralCode}`
+      : "https://percolator.trade";
+    const shareText = state.referralCode
+      ? `Just joined the @percolatortrade waitlist. Permissionless perp futures on Solana. Use my code ${state.referralCode}: ${shareUrl}`
+      : "Just joined the @percolatortrade waitlist. Permissionless perp futures on Solana. percolator.trade";
     return (
       <div className="space-y-4">
         <PromptLine prefix="$" text="claim_spot" status="ok" />
@@ -630,11 +673,12 @@ function SignupFlow() {
             when mainnet opens.
           </p>
         </div>
+        {state.referralCode ? (
+          <ReferralCard code={state.referralCode} shareUrl={shareUrl} />
+        ) : null}
         <a
           className={ctaSecondary}
-          href={`https://x.com/intent/post?text=${encodeURIComponent(
-            "Just joined the @percolatortrade waitlist. Permissionless perp futures on Solana. percolator.trade",
-          )}`}
+          href={`https://x.com/intent/post?text=${encodeURIComponent(shareText)}`}
           target="_blank"
           rel="noopener noreferrer"
         >
@@ -754,6 +798,57 @@ function StatusErr({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-md border border-[var(--short)]/25 bg-[var(--short)]/[0.05] px-3 py-2.5 font-mono text-[12px] leading-relaxed text-[var(--text-secondary)]">
       {children}
+    </div>
+  );
+}
+
+function ReferralCard({ code, shareUrl }: { code: string; shareUrl: string }) {
+  const [copied, setCopied] = useState<"none" | "code" | "link">("none");
+  const copy = async (which: "code" | "link", value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(which);
+      window.setTimeout(() => setCopied("none"), 1600);
+    } catch {
+      // Clipboard API unavailable (insecure context / older browser).
+      // The values are visible in the UI — user can select-and-copy manually.
+    }
+  };
+  return (
+    <div className="rounded-md border border-[var(--accent)]/25 bg-[var(--accent)]/[0.05] p-3.5">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--accent)]">
+          your referral code
+        </span>
+        <button
+          onClick={() => copy("code", code)}
+          className="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
+        >
+          {copied === "code" ? "copied ✓" : "copy"}
+        </button>
+      </div>
+      <div
+        className="mt-1.5 font-mono text-[22px] font-bold leading-none tracking-[0.08em] text-[var(--text)]"
+        style={{ fontVariantNumeric: "tabular-nums" }}
+      >
+        {code}
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <a
+          href={shareUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="truncate font-mono text-[11.5px] text-[var(--text-secondary)] underline-offset-2 hover:text-[var(--accent)] hover:underline"
+        >
+          {shareUrl.replace(/^https?:\/\//, "")}
+        </a>
+        <button
+          onClick={() => copy("link", shareUrl)}
+          className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
+        >
+          {copied === "link" ? "copied ✓" : "copy link"}
+        </button>
+      </div>
     </div>
   );
 }
