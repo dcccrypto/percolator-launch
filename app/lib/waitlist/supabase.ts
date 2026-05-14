@@ -1,24 +1,30 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Waitlist-specific Supabase client.
+ * Waitlist Supabase clients.
  *
- * Uses a separate Supabase project from the trading frontend so the
- * waitlist landing page on percolator.trade can stay isolated from the
- * trading data on mainnet.percolatorlaunch.com.
+ * The waitlist uses a separate Supabase project from the trading frontend
+ * so the landing page on percolator.trade stays isolated from the trading
+ * data on mainnet.percolatorlaunch.com.
  *
- * Env vars (set on Vercel project, separate from existing
- * NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY):
+ * Env vars (set on the Vercel project, separate from the trading-DB ones):
  *   NEXT_PUBLIC_WAITLIST_SUPABASE_URL
- *   NEXT_PUBLIC_WAITLIST_SUPABASE_KEY  (publishable / anon)
+ *   NEXT_PUBLIC_WAITLIST_SUPABASE_KEY        — publishable / anon
+ *   WAITLIST_SUPABASE_SERVICE_ROLE_KEY       — server-only, bypasses RLS
  *
  * Schema lives at /supabase-waitlist-schema.sql at the repo root.
  */
 
-let _client: SupabaseClient | null = null;
+let _anonClient: SupabaseClient | null = null;
+let _serviceClient: SupabaseClient | null = null;
 
+/**
+ * Anonymous client — used for inserts gated by the "anon insert" RLS policy.
+ * SELECT is denied; reads need either a SECURITY DEFINER RPC or the service
+ * client.
+ */
 export function getWaitlistSupabase(): SupabaseClient {
-  if (_client) return _client;
+  if (_anonClient) return _anonClient;
 
   const url = process.env.NEXT_PUBLIC_WAITLIST_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_WAITLIST_SUPABASE_KEY;
@@ -29,9 +35,35 @@ export function getWaitlistSupabase(): SupabaseClient {
     );
   }
 
-  _client = createClient(url, key, {
+  _anonClient = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  return _client;
+  return _anonClient;
+}
+
+/**
+ * Service-role client — bypasses RLS. Server-only.
+ *
+ * Used by the signup route to read back a row's referral_code on idempotent
+ * re-submit (anon SELECT is denied for privacy, so we can't fetch via the
+ * anon client). The key is never exposed to the browser.
+ */
+export function getWaitlistServiceSupabase(): SupabaseClient {
+  if (_serviceClient) return _serviceClient;
+
+  const url = process.env.NEXT_PUBLIC_WAITLIST_SUPABASE_URL;
+  const key = process.env.WAITLIST_SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error(
+      "Waitlist service Supabase env vars not set: NEXT_PUBLIC_WAITLIST_SUPABASE_URL and WAITLIST_SUPABASE_SERVICE_ROLE_KEY are required.",
+    );
+  }
+
+  _serviceClient = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  return _serviceClient;
 }
