@@ -544,6 +544,25 @@ async function sendConfirmationEmail(
     return;
   }
   const resend = new Resend(apiKey);
+
+  /** Marks the row's `referral_code_emailed_at` once Resend confirms the
+   * send. Best-effort: a missing service-role key or a transient supabase
+   * error logs and returns — the backfill script will retry on its next
+   * pass. Pulled here (rather than as a separate await chain) so we don't
+   * block the route handler on this update. */
+  const markEmailed = async () => {
+    if (!referralCode) return;
+    try {
+      const service = getWaitlistServiceSupabase();
+      await service
+        .from("waitlist")
+        .update({ referral_code_emailed_at: new Date().toISOString() })
+        .eq("email", email)
+        .is("referral_code_emailed_at", null);
+    } catch (err) {
+      console.warn("[waitlist] mark emailed failed (non-fatal)", err);
+    }
+  };
   const positionLine = position
     ? `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.5; color: #4A4B62;">You're <strong style="color: #9945FF; font-family: ui-monospace, SFMono-Regular, monospace;">#${position}</strong> on the list.</p>`
     : "";
@@ -610,4 +629,8 @@ async function sendConfirmationEmail(
 </body></html>`,
     text: `You're on the Percolator waitlist.${position ? `\n\nYou're #${position} on the list.` : ""}${referralText}\nMainnet opens after our external audit clears (targeting Q3 2026). We'll email you here when it does.\n\n${secondaryText}\n\n@percolatortrade · github.com/dcccrypto · percolator.trade/pitch\n\n—\nYou received this because you joined the Percolator waitlist. Reply "remove" to be removed.`,
   });
+
+  // Resend.send resolves on accept — at that point the message is queued
+  // with Resend. Mark the row so the backfill doesn't re-email this user.
+  await markEmailed();
 }

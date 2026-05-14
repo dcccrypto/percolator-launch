@@ -47,6 +47,12 @@ alter table public.waitlist alter column message drop not null;
 alter table public.waitlist add column if not exists email text;
 alter table public.waitlist add column if not exists referral_code text;
 alter table public.waitlist add column if not exists referred_by_code text;
+-- "Have we emailed this user their referral code?" Set by the signup route
+-- after a successful confirmation send (new signups) and by the one-time
+-- backfill script (pre-existing signups). Lets the backfill be re-runnable
+-- safely — anyone already notified is skipped.
+alter table public.waitlist
+  add column if not exists referral_code_emailed_at timestamptz;
 
 -- Unique constraint on referral_code (idempotent via pg_constraint check).
 do $$ begin
