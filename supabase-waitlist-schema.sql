@@ -32,6 +32,7 @@ create table if not exists public.waitlist (
   user_agent text,
   ip_hash text,
   referral_code text unique,
+  referred_by_code text,
   created_at timestamptz not null default now(),
   constraint waitlist_pubkey_or_email check (pubkey is not null or email is not null)
 );
@@ -45,6 +46,7 @@ alter table public.waitlist alter column message drop not null;
 -- Idempotent column adds (for projects that pre-date these columns).
 alter table public.waitlist add column if not exists email text;
 alter table public.waitlist add column if not exists referral_code text;
+alter table public.waitlist add column if not exists referred_by_code text;
 
 -- Unique constraint on referral_code (idempotent via pg_constraint check).
 do $$ begin
@@ -85,6 +87,12 @@ create unique index if not exists waitlist_email_unique_idx
 create index if not exists waitlist_referral_code_idx
   on public.waitlist (referral_code)
   where referral_code is not null;
+
+-- Reverse-lookup index for the leaderboard: count signups grouped by who
+-- referred them. Partial — most rows have NULL (joined without a referrer).
+create index if not exists waitlist_referred_by_code_idx
+  on public.waitlist (referred_by_code)
+  where referred_by_code is not null;
 
 -- ─── Crockford base32 code generator ────────────────────────────────────────
 -- Alphabet excludes I, L, O, U — avoids visual confusion (1/I, 0/O) and the
@@ -223,6 +231,80 @@ as $$
 $$;
 
 grant execute on function public.waitlist_referral_code_exists(text) to anon;
+
+-- ─── Operator-only: referral leaderboard ────────────────────────────────────
+-- WHO USES THIS: only the operator, via the service-role key (server-side
+--   or `psql` with the project's database URL). Never callable by anon or
+--   authenticated users — anon is the role the publishable key maps to,
+--   and exposing the full pubkey/email columns would defeat the privacy
+--   posture of the rest of the schema (no anon SELECT on rows).
+--
+-- HOW TO QUERY:
+--   • Supabase SQL editor (logged in as project owner):
+--       select * from public.waitlist_referral_leaderboard();
+--   • psql with the DB URL:
+--       psql "$WAITLIST_DB_URL" -c \
+--         'select * from public.waitlist_referral_leaderboard() limit 50;'
+--   • Server-side from Node:
+--       supabase.rpc("waitlist_referral_leaderboard")
+--     where `supabase` was constructed with WAITLIST_SUPABASE_SERVICE_ROLE_KEY
+--     (see app/lib/waitlist/supabase.ts → getWaitlistServiceSupabase).
+--
+-- WHY IT'S TAMPER-RESISTANT:
+--   • referred_by_code is set at INSERT time by the signup route. The route
+--     never UPDATEs it afterwards.
+--   • The RLS policy on the waitlist table grants anon INSERT only — no
+--     UPDATE or DELETE policy exists, so anon cannot mutate the column.
+--   • This function reads `count(*)` of rows that reference each code; an
+--     attacker would need INSERT access to a row with a chosen
+--     referred_by_code (which they have — but their inserted row is then
+--     subject to the same RLS, and the route validates `referred_by_code`
+--     points at a real code before accepting). They cannot decrement, edit
+--     ownership of, or hide existing referrals.
+--   • Service role bypasses RLS but the service-role key lives in operator
+--     env (Vercel project + local .env), not in the browser bundle.
+create or replace function public.waitlist_referral_leaderboard()
+returns table (
+  referral_code text,
+  owner_pubkey text,
+  owner_email text,
+  twitter_handle text,
+  signups_referred bigint,
+  joined_at timestamptz
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    w.referral_code,
+    w.pubkey         as owner_pubkey,
+    w.email          as owner_email,
+    w.twitter_handle,
+    coalesce(c.cnt, 0) as signups_referred,
+    w.created_at     as joined_at
+  from public.waitlist w
+  left join (
+    select referred_by_code, count(*) as cnt
+    from public.waitlist
+    where referred_by_code is not null
+    group by referred_by_code
+  ) c on c.referred_by_code = w.referral_code
+  where w.referral_code is not null
+  order by signups_referred desc, w.created_at asc;
+$$;
+
+-- Lock down: NOT callable by anon or authenticated. Service role only.
+revoke all on function public.waitlist_referral_leaderboard() from public;
+revoke all on function public.waitlist_referral_leaderboard() from anon;
+-- The `authenticated` role exists on Supabase projects with auth turned on;
+-- the revoke is a no-op on projects that don't have it, so it's safe to
+-- include unconditionally.
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    execute 'revoke all on function public.waitlist_referral_leaderboard() from authenticated';
+  end if;
+end $$;
 
 -- ─── Verification probes ─────────────────────────────────────────────────────
 -- select count(*) from public.waitlist;
