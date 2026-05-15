@@ -16,6 +16,37 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
   );
 }
 
+function IntegrityRow({
+  ok,
+  label,
+  detail,
+}: {
+  ok: boolean;
+  label: string;
+  detail: string;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <span
+        className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center text-[10px] font-bold"
+        style={{
+          color: ok ? "var(--long)" : "var(--short)",
+          background: ok ? "rgba(35,196,124,0.12)" : "rgba(238,80,80,0.12)",
+          border: `1px solid ${ok ? "rgba(35,196,124,0.4)" : "rgba(238,80,80,0.4)"}`,
+        }}
+      >
+        {ok ? "✓" : "!"}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="text-[var(--text)]">{label}</div>
+        <div className="text-[11px] text-[var(--text-muted)] mt-0.5 break-words">
+          {detail}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface AdminLeaderboardEntry {
   rank: number;
   referralCode: string;
@@ -24,6 +55,42 @@ interface AdminLeaderboardEntry {
   twitterHandle: string | null;
   signupsReferred: number;
   joinedAt: string;
+}
+
+interface WaitlistStats {
+  totalSignups: number;
+  byMethod: {
+    walletOnly: number;
+    emailOnly: number;
+    walletAndEmail: number;
+    withTwitter: number;
+  };
+  codeAssignment: {
+    withCode: number;
+    withoutCode: number;
+    distinctCodes: number;
+    duplicateCodes: { code: string; count: number }[];
+    malformedCodes: string[];
+  };
+  attribution: {
+    withReferrer: number;
+    withoutReferrer: number;
+    topReferrer: { code: string; count: number } | null;
+    orphanedReferrers: string[];
+  };
+  emailNotification: {
+    notifiedTotal: number;
+    pendingEmailable: number;
+    walletOnlyNoEmail: number;
+  };
+  recency: { last24h: number; last7d: number };
+  integrity: {
+    selfReferrals: number;
+    backfillComplete: boolean;
+    codesUnique: boolean;
+    allCodesValidShape: boolean;
+    noOrphanedReferrers: boolean;
+  };
 }
 
 const fetcher = async (url: string) => {
@@ -81,6 +148,15 @@ export function WaitlistLeaderboardSection() {
     refreshInterval: 60_000,
     revalidateOnFocus: true,
   });
+
+  // Full integrity report — verifies the schema backfill assigned codes
+  // to every row, codes are unique, no orphan referred_by_code values,
+  // and shows the wallet/email/twitter breakdown.
+  const { data: stats } = useSWR<WaitlistStats>(
+    "/api/admin/waitlist/stats",
+    fetcher,
+    { refreshInterval: 60_000, revalidateOnFocus: true },
+  );
   const [backfillBusy, setBackfillBusy] = useState(false);
   const [backfillStatus, setBackfillStatus] = useState<string | null>(null);
 
@@ -156,6 +232,154 @@ export function WaitlistLeaderboardSection() {
 
   return (
     <div className="mb-8">
+      <SectionHeader>Waitlist Health</SectionHeader>
+
+      {/* Integrity check — answers "did the SQL backfill run, are
+          codes unique, is anything orphaned?". Hidden until first
+          fetch resolves so we never flash misleading zeroes. */}
+      {stats ? (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div className={`${card} p-4`}>
+              <div className={labelStyle}>Total Signups</div>
+              <div className="text-3xl font-bold mt-1 text-[var(--text)]">
+                {stats.totalSignups.toLocaleString()}
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] mt-1">
+                +{stats.recency.last24h} in 24h · +{stats.recency.last7d} in 7d
+              </div>
+            </div>
+            <div className={`${card} p-4`}>
+              <div className={labelStyle}>Code Coverage</div>
+              <div
+                className="text-3xl font-bold mt-1"
+                style={{
+                  color: stats.integrity.backfillComplete
+                    ? "var(--cyan)"
+                    : "var(--short)",
+                }}
+              >
+                {stats.codeAssignment.withCode}/{stats.totalSignups}
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] mt-1">
+                {stats.integrity.backfillComplete
+                  ? "every row has a code ✓"
+                  : `${stats.codeAssignment.withoutCode} missing — backfill incomplete`}
+              </div>
+            </div>
+            <div className={`${card} p-4`}>
+              <div className={labelStyle}>Attributed Signups</div>
+              <div
+                className="text-3xl font-bold mt-1"
+                style={{ color: "var(--accent)" }}
+              >
+                {stats.attribution.withReferrer}
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] mt-1">
+                {stats.attribution.withoutReferrer.toLocaleString()} pre-invite (grandfathered)
+              </div>
+            </div>
+            <div className={`${card} p-4`}>
+              <div className={labelStyle}>Email Notification</div>
+              <div className="text-3xl font-bold mt-1 text-[var(--text)]">
+                {stats.emailNotification.notifiedTotal}
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] mt-1">
+                {stats.emailNotification.pendingEmailable > 0
+                  ? `${stats.emailNotification.pendingEmailable} pending · ${stats.emailNotification.walletOnlyNoEmail} wallet-only`
+                  : `${stats.emailNotification.walletOnlyNoEmail} wallet-only (no email)`}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className={`${card} p-4`}>
+              <div className={labelStyle}>Wallet Only</div>
+              <div className="text-2xl font-bold mt-1 text-[var(--text)]">
+                {stats.byMethod.walletOnly.toLocaleString()}
+              </div>
+            </div>
+            <div className={`${card} p-4`}>
+              <div className={labelStyle}>Email Only</div>
+              <div className="text-2xl font-bold mt-1 text-[var(--text)]">
+                {stats.byMethod.emailOnly.toLocaleString()}
+              </div>
+            </div>
+            <div className={`${card} p-4`}>
+              <div className={labelStyle}>Wallet + Email</div>
+              <div className="text-2xl font-bold mt-1 text-[var(--text)]">
+                {stats.byMethod.walletAndEmail.toLocaleString()}
+              </div>
+            </div>
+            <div className={`${card} p-4`}>
+              <div className={labelStyle}>With Twitter Handle</div>
+              <div className="text-2xl font-bold mt-1 text-[var(--text)]">
+                {stats.byMethod.withTwitter.toLocaleString()}
+              </div>
+            </div>
+          </div>
+
+          {/* Integrity checks — green tick or red flag for each invariant */}
+          <div className={`${card} p-4 mb-4`}>
+            <div className={`${labelStyle} mb-3`}>Integrity Checks</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[12.5px]">
+              <IntegrityRow
+                ok={stats.integrity.backfillComplete}
+                label="Every row has a referral_code"
+                detail={
+                  stats.integrity.backfillComplete
+                    ? `${stats.codeAssignment.withCode} of ${stats.totalSignups}`
+                    : `${stats.codeAssignment.withoutCode} rows missing a code — re-run the SQL backfill`
+                }
+              />
+              <IntegrityRow
+                ok={stats.integrity.codesUnique}
+                label="All referral codes are unique"
+                detail={
+                  stats.integrity.codesUnique
+                    ? `${stats.codeAssignment.distinctCodes} distinct codes`
+                    : `${stats.codeAssignment.duplicateCodes.length} duplicate(s): ${stats.codeAssignment.duplicateCodes
+                        .slice(0, 5)
+                        .map((d) => `${d.code}(×${d.count})`)
+                        .join(", ")}`
+                }
+              />
+              <IntegrityRow
+                ok={stats.integrity.allCodesValidShape}
+                label="All codes match Crockford base32 × 8"
+                detail={
+                  stats.integrity.allCodesValidShape
+                    ? "no malformed codes"
+                    : `${stats.codeAssignment.malformedCodes.length} bad: ${stats.codeAssignment.malformedCodes.slice(0, 5).join(", ")}`
+                }
+              />
+              <IntegrityRow
+                ok={stats.integrity.noOrphanedReferrers}
+                label="Every referred_by_code points at a real code"
+                detail={
+                  stats.integrity.noOrphanedReferrers
+                    ? "no orphans"
+                    : `${stats.attribution.orphanedReferrers.length} orphan(s): ${stats.attribution.orphanedReferrers.slice(0, 5).join(", ")}`
+                }
+              />
+              <IntegrityRow
+                ok={stats.integrity.selfReferrals === 0}
+                label="No self-referrals"
+                detail={
+                  stats.integrity.selfReferrals === 0
+                    ? "clean"
+                    : `${stats.integrity.selfReferrals} row(s) reference their own code`
+                }
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className={`${card} p-4 mb-4 text-[12px] text-[var(--text-muted)]`}>
+          Loading waitlist health…
+        </div>
+      )}
+
       <SectionHeader>Waitlist Referral Leaderboard</SectionHeader>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
