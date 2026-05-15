@@ -47,6 +47,27 @@ function getDeploymentNetwork(): "mainnet" | "devnet" {
 }
 
 /**
+ * Timing-safe comparison of an inbound token against INTERNAL_API_SECRET.
+ *
+ * Returns true iff INTERNAL_API_SECRET is set, non-empty, and the provided
+ * token matches it exactly. Fails closed when the env var is unset/empty so
+ * misconfig cannot widen access. Both values are SHA-256 hashed before the
+ * compare so buffers have equal length and the comparison time is independent
+ * of the secret length.
+ *
+ * Shared by the no-Origin server-call gate in isAllowedOrigin and the
+ * cross-network override gate in validateNetworkOverride. One canonical
+ * comparison, one place to audit.
+ */
+function checkInternalSecret(token: string | null | undefined): boolean {
+  const secret = process.env.INTERNAL_API_SECRET?.trim();
+  if (!secret) return false;
+  const expected = createHash("sha256").update(secret).digest();
+  const provided = createHash("sha256").update(token ?? "").digest();
+  return timingSafeEqual(expected, provided);
+}
+
+/**
  * Validate that a network override is permitted for this deployment.
  * Returns an error response string, or null if allowed.
  */
@@ -64,18 +85,8 @@ function validateNetworkOverride(
 
   // Rule 2 & 3: any cross-network override requires internal auth secret
   if (requestedNetwork !== deploymentNetwork) {
-    const secret = process.env.INTERNAL_API_SECRET?.trim();
-    if (!secret) {
-      // No secret configured — disallow all network overrides for safety
-      console.warn("[/api/rpc] PERC-8310: network override blocked (INTERNAL_API_SECRET not set)");
-      return { error: "Network override requires authentication", status: 403 };
-    }
-    // Use timing-safe comparison to prevent side-channel brute-force of the secret.
-    // Hash both values to equalise buffer lengths (timingSafeEqual requires same length).
-    const expected = createHash("sha256").update(secret).digest();
-    const provided = createHash("sha256").update(authHeader ?? "").digest();
-    if (!timingSafeEqual(expected, provided)) {
-      console.warn("[/api/rpc] PERC-8310: network override blocked (invalid secret)");
+    if (!checkInternalSecret(authHeader)) {
+      console.warn("[/api/rpc] PERC-8310: network override blocked (missing/invalid INTERNAL_API_SECRET)");
       return { error: "Network override requires authentication", status: 403 };
     }
   }
@@ -318,15 +329,39 @@ async function processSingleRequest(
 }
 
 /**
- * PERC-8308: Enforce same-origin or allowlisted origin for all POST requests.
- * Prevents arbitrary external callers from abusing the Helius API key quota.
+ * Enforce same-origin or authenticated server-call on every POST.
+ *
+ * Two acceptance paths:
+ *   (a) Browser path — request carries Origin or Referer whose hostname is the
+ *       apex domain, an allowed subdomain, or localhost. No token required.
+ *   (b) Server path — request has neither Origin nor Referer (curl, internal
+ *       services, cron jobs) and MUST present X-Internal-Token matching
+ *       INTERNAL_API_SECRET. Fails closed when INTERNAL_API_SECRET is unset
+ *       or empty, so misconfig cannot widen access.
+ *
+ * Anything else (foreign Origin, malformed URL, mismatched token) is rejected
+ * with 403. Previously this gate had an unconditional `if (!origin && !referer)
+ * return true` branch justified as "server-side calls have no Origin header,"
+ * but no in-repo server caller routes through /api/rpc — `getRpcEndpoint()`
+ * returns the direct Helius URL server-side. The bypass allowed any anonymous
+ * external caller (curl, scripts, botnets) to drain paid Helius mainnet quota
+ * and relay arbitrary user-signed transactions via the allowlisted methods.
  */
 function isAllowedOrigin(req: NextRequest): boolean {
   const origin = req.headers.get("origin");
   const referer = req.headers.get("referer");
 
-  // Server-side calls (Railway services, crons) have no Origin header — allow
-  if (!origin && !referer) return true;
+  // Server-side path: no browser-provided origin. Require the shared secret.
+  // Any future internal caller (Railway service, cron, healthcheck) must send
+  // X-Internal-Token: $INTERNAL_API_SECRET. Fails closed if the env var is
+  // unset, so an unconfigured deployment cannot accidentally be open.
+  if (!origin && !referer) {
+    const ok = checkInternalSecret(req.headers.get("x-internal-token"));
+    if (!ok) {
+      console.warn("[/api/rpc] no-Origin request rejected (missing/invalid X-Internal-Token)");
+    }
+    return ok;
+  }
 
   const hostToCheck = origin ?? referer ?? "";
   let hostname: string | null = null;
