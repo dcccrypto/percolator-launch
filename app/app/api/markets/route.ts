@@ -1165,6 +1165,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Slab account does not exist on-chain" }, { status: 400 });
     }
     const validPrograms = new Set<string>([cfg.programId]);
+    // Slabs are owned by the matcher program. Without this, mainnet
+    // markets (no programsBySlabTier yet) get rejected here.
+    if (cfg.matcherProgramId) validPrograms.add(cfg.matcherProgramId);
     const tiers = (cfg as Record<string, unknown>).programsBySlabTier as Record<string, string> | undefined;
     if (tiers) Object.values(tiers).forEach((id) => validPrograms.add(id));
     if (!validPrograms.has(accountInfo.owner.toBase58())) {

@@ -199,6 +199,11 @@ export function getAllProgramIds(): string[] {
   const cfg = getConfig();
   const ids = new Set<string>();
   if (cfg.programId) ids.add(cfg.programId);
+  // Slabs are owned by the matcher program, not the engine. Mainnet has no
+  // programsBySlabTier yet (single matcher), so without this entry the
+  // mainnet allowlist excludes the canonical matcher and parseSlab rejects
+  // every legitimate market — trade UI dies on deploy.
+  if (cfg.matcherProgramId) ids.add(cfg.matcherProgramId);
   const byTier = cfg.programsBySlabTier;
   if (byTier) {
     Object.values(byTier).forEach((id) => { if (id) ids.add(id); });

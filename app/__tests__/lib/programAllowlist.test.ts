@@ -68,4 +68,14 @@ describe("programAllowlist", () => {
     expect(() => assertKnownProgram(allowed)).not.toThrow();
     expect(() => assertKnownProgram(new PublicKey(allowed))).not.toThrow();
   });
+
+  it("getAllProgramIds() includes the cluster's matcherProgramId", async () => {
+    // Slabs are owned by the matcher program; without this entry the gate
+    // rejects every legitimate market on mainnet.
+    const { getConfig } = await import("@/lib/config");
+    const cfg = getConfig();
+    const ids = getAllProgramIds();
+    expect(ids).toContain(cfg.matcherProgramId);
+    expect(isKnownProgram(cfg.matcherProgramId)).toBe(true);
+  });
 });
