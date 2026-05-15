@@ -18,6 +18,15 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
 
+  // Keep the onClose callback in a ref so the mount effect never re-runs on parent
+  // re-renders. Insurance-dashboard parents re-render whenever LP / vault / live-price
+  // data ticks and pass freshly-allocated inline `onClose` closures each time; with
+  // `onClose` in the effect deps, every parent re-render re-fired the gsap fade-in
+  // (opacity 0 → 1) and made the modal blink continuously while open. Same canonical
+  // pattern as TradeConfirmationModal.tsx.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     const overlay = overlayRef.current;
     const modal = modalRef.current;
@@ -41,11 +50,12 @@ export const InsuranceExplainerModal: FC<InsuranceExplainerModalProps> = ({
     }
 
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [onClose, prefersReduced]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefersReduced]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();

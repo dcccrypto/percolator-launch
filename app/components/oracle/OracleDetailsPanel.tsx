@@ -43,6 +43,17 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
   const overlayRef = useRef<HTMLDivElement>(null);
   const [isClosing, setIsClosing] = useState(false);
 
+  // Same pattern as TradeConfirmationModal — keep onClose accessible via ref
+  // so the mount-time Escape listener always invokes the latest closure
+  // without the effect needing to resubscribe on every parent render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const handleClose = useCallback(() => {
+    setIsClosing(true);
+    setTimeout(() => onCloseRef.current(), 200);
+  }, []);
+
   // Close on Escape
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -50,12 +61,7 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, []);
-
-  const handleClose = useCallback(() => {
-    setIsClosing(true);
-    setTimeout(onClose, 200);
-  }, [onClose]);
+  }, [handleClose]);
 
   // Close on overlay click
   const handleOverlayClick = useCallback(

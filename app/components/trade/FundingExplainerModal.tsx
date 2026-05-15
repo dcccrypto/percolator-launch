@@ -14,6 +14,16 @@ export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose 
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
 
+  // Keep the onClose callback in a ref so the mount effect never re-runs on parent
+  // re-renders. The parent FundingRateCard runs a 1-second `setCountdown` setInterval,
+  // so it re-renders every second and passes a freshly-allocated
+  // `() => setShowExplainer(false)` closure as `onClose` each time. With `onClose` in
+  // the effect deps, every parent tick re-fired the gsap fade-in (opacity 0 → 1),
+  // making the modal blink continuously while open. Same canonical pattern as
+  // TradeConfirmationModal.tsx.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     const overlay = overlayRef.current;
     const modal = modalRef.current;
@@ -33,11 +43,12 @@ export const FundingExplainerModal: FC<FundingExplainerModalProps> = ({ onClose 
     }
 
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [onClose, prefersReduced]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefersReduced]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();
