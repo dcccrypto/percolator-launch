@@ -33,6 +33,14 @@ vi.mock("@/lib/config", () => ({
   getBackendUrl: vi.fn(() => "http://localhost:3001"),
 }));
 
+// Bypass the program-allowlist gate for tests that focus on the withdraw flow.
+// The gate is exercised in app/__tests__/lib/programAllowlist.test.ts and
+// app/__tests__/providers/SlabProvider-allowlist.test.tsx.
+vi.mock("@/lib/programAllowlist", () => ({
+  isKnownProgram: () => true,
+  assertKnownProgram: () => {},
+}));
+
 const mockVaultAuth = new PublicKey("DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1");
 const mockOraclePda = new PublicKey("8DjWTsU1o8RHTKpRsqGFyYqFMknb8g7z2mjLfVYUyYyF");
 

@@ -24,6 +24,7 @@ import {
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
+import { assertKnownProgram } from "@/lib/programAllowlist";
 
 const INLINE_ORACLE_PUSH_REMOVED_ERROR =
   "Inline oracle price push was removed on-chain in beta.29. Migrate this flow to /api/oracle/advance-phase or another server-side oracle publisher before withdrawing as the oracle authority.";
@@ -44,7 +45,12 @@ export function useWithdraw(slabAddress: string) {
       setError(null);
       try {
         if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
-        
+        // Defense-in-depth: refuse to build a tx whose programId is not in
+        // our deployed allowlist. See SlabProvider.parseSlab for the primary
+        // gate; this hook is a second line so unknown-program slabs cannot
+        // produce a wallet-signed withdrawal CPI under any bypass scenario.
+        assertKnownProgram(slabProgramId);
+
         // P-CRITICAL-3: Validate network before withdrawal
         try {
           const slabInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
