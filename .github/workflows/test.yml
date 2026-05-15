@@ -19,6 +19,9 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Skip when packages/* workspaces are absent (e.g. waitlist-only forks).
+    # When packages/ is restored from upstream, the guard evaluates true and the job runs.
+    if: hashFiles('packages/shared/package.json') != ''
     env:
       HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
     
@@ -79,7 +82,9 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    
+    # Skip when packages/* workspaces are absent (e.g. waitlist-only forks).
+    if: hashFiles('packages/shared/package.json') != ''
+
     env:
       RPC_URL: ${{ secrets.DEVNET_RPC_URL || 'https://api.devnet.solana.com' }}
       DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
@@ -214,7 +219,9 @@ jobs:
     name: Security Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    
+    # Skip when packages/* workspaces are absent (e.g. waitlist-only forks).
+    if: hashFiles('packages/shared/package.json') != ''
+
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -279,12 +286,14 @@ jobs:
     name: ✅ Merge Gate
     runs-on: ubuntu-latest
     needs: [unit-tests, integration-tests, e2e-tests, security-tests, type-check]
-    if: github.event_name == 'pull_request'
-    
+    # Run even when backend jobs are skipped (e.g. waitlist-only forks where packages/* is absent).
+    # Fail only on actual failure or cancellation of a needed job.
+    if: ${{ always() && github.event_name == 'pull_request' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+
     steps:
       - name: All checks passed
         run: |
-          echo "✅ All test suites passed"
+          echo "✅ All test suites passed (skipped jobs treated as passing)"
           echo "✅ Type checking passed"
           echo "✅ Security checks passed"
           echo "🚀 Ready to merge"

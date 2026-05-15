@@ -2,7 +2,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: packages/api/Dockerfile
+      dockerfile: Dockerfile.api
     ports:
       - "4000:4000"
     env_file: .env
@@ -15,16 +15,16 @@ services:
   indexer:
     build:
       context: .
-      dockerfile: packages/indexer/Dockerfile
+      dockerfile: Dockerfile.indexer
     env_file: .env
     restart: unless-stopped
     networks:
       - percolator
 
-  keeper:
+  oracle-keeper:
     build:
       context: .
-      dockerfile: packages/keeper/Dockerfile
+      dockerfile: Dockerfile.oracle-keeper
     env_file: .env
     restart: unless-stopped
     networks:
