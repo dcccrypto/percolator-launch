@@ -325,8 +325,19 @@ function SignupCard() {
               waitlist · v1
             </span>
           </div>
-          <span className="font-mono text-[10.5px] text-[var(--text-secondary)]">
-            {tab === "wallet" ? "ed25519" : "smtp"}
+          <span className="inline-flex items-center gap-1.5 rounded-sm border border-[var(--accent)]/50 bg-[var(--accent)]/[0.12] px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.18em] text-[var(--accent)]">
+            <svg
+              aria-hidden
+              viewBox="0 0 12 12"
+              className="h-2.5 w-2.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.6}
+            >
+              <rect x="3" y="5.5" width="6" height="5" rx="0.6" />
+              <path d="M4.25 5.5V3.75a1.75 1.75 0 1 1 3.5 0V5.5" />
+            </svg>
+            Invite only
           </span>
         </div>
 
@@ -641,54 +652,64 @@ function EmailFlow() {
         disabled={sending}
       />
       <FormGateDivider unlocked={formUnlocked} />
-      <div className="space-y-1.5">
-        <label
-          htmlFor="signup-email"
-          className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
-        >
-          email
-        </label>
-        <input
-          id="signup-email"
-          type="email"
-          autoComplete="email"
-          inputMode="email"
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
-          placeholder="you@domain.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          disabled={sending || !formUnlocked}
-          maxLength={254}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <label
-          htmlFor="x-handle"
-          className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
-        >
-          x_handle (optional)
-        </label>
-        <input
-          id="x-handle"
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
-          placeholder="@yourhandle"
-          value={twitter}
-          onChange={(e) => setTwitter(e.target.value)}
-          disabled={sending || !formUnlocked}
-          maxLength={30}
-        />
-      </div>
-      <button
-        className={ctaPrimary}
-        onClick={onSendCode}
-        disabled={sending || !formUnlocked}
+      <div
+        className={`space-y-3.5 transition-opacity duration-200 ${
+          formUnlocked ? "" : "pointer-events-none select-none opacity-40"
+        }`}
+        aria-hidden={!formUnlocked}
       >
-        {sending
-          ? "Sending code…"
-          : formUnlocked
-            ? "Send 6-digit code →"
-            : "Enter referral code to continue"}
-      </button>
+        <div className="space-y-1.5">
+          <label
+            htmlFor="signup-email"
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
+          >
+            email
+          </label>
+          <input
+            id="signup-email"
+            type="email"
+            autoComplete="email"
+            inputMode="email"
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
+            placeholder="you@domain.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={sending || !formUnlocked}
+            maxLength={254}
+            tabIndex={formUnlocked ? 0 : -1}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label
+            htmlFor="x-handle"
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
+          >
+            x_handle (optional)
+          </label>
+          <input
+            id="x-handle"
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
+            placeholder="@yourhandle"
+            value={twitter}
+            onChange={(e) => setTwitter(e.target.value)}
+            disabled={sending || !formUnlocked}
+            maxLength={30}
+            tabIndex={formUnlocked ? 0 : -1}
+          />
+        </div>
+        <button
+          className={ctaPrimary}
+          onClick={onSendCode}
+          disabled={sending || !formUnlocked}
+          tabIndex={formUnlocked ? 0 : -1}
+        >
+          {sending
+            ? "Sending code…"
+            : formUnlocked
+              ? "Send 6-digit code →"
+              : "Enter referral code to continue"}
+        </button>
+      </div>
       <NoCodeFallback />
     </div>
   );
@@ -868,36 +889,45 @@ function SignupFlow() {
           disabled={busy}
         />
         <FormGateDivider unlocked={formUnlocked} />
-        <div className="space-y-1.5">
-          <label
-            htmlFor="x-handle-wallet"
-            className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
-          >
-            x_handle (optional)
-          </label>
-          <input
-            id="x-handle-wallet"
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
-            placeholder="@yourhandle"
-            value={twitter}
-            onChange={(e) => setTwitter(e.target.value)}
-            disabled={busy || !formUnlocked}
-            maxLength={30}
-          />
-        </div>
-        <button
-          className={ctaPrimary}
-          onClick={onSign}
-          disabled={busy || !formUnlocked}
+        <div
+          className={`space-y-3.5 transition-opacity duration-200 ${
+            formUnlocked ? "" : "pointer-events-none select-none opacity-40"
+          }`}
+          aria-hidden={!formUnlocked}
         >
-          {state.kind === "signing"
-            ? "Signing in your wallet…"
-            : state.kind === "submitting"
-              ? "Submitting…"
-              : formUnlocked
-                ? "Sign & claim spot →"
-                : "Enter referral code to continue"}
-        </button>
+          <div className="space-y-1.5">
+            <label
+              htmlFor="x-handle-wallet"
+              className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]"
+            >
+              x_handle (optional)
+            </label>
+            <input
+              id="x-handle-wallet"
+              className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 font-mono text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:ring-1 focus:ring-[var(--accent)]/15 disabled:opacity-50"
+              placeholder="@yourhandle"
+              value={twitter}
+              onChange={(e) => setTwitter(e.target.value)}
+              disabled={busy || !formUnlocked}
+              maxLength={30}
+              tabIndex={formUnlocked ? 0 : -1}
+            />
+          </div>
+          <button
+            className={ctaPrimary}
+            onClick={onSign}
+            disabled={busy || !formUnlocked}
+            tabIndex={formUnlocked ? 0 : -1}
+          >
+            {state.kind === "signing"
+              ? "Signing in your wallet…"
+              : state.kind === "submitting"
+                ? "Submitting…"
+                : formUnlocked
+                  ? "Sign & claim spot →"
+                  : "Enter referral code to continue"}
+          </button>
+        </div>
         <NoCodeFallback />
       </div>
     );
@@ -1124,18 +1154,35 @@ function NoCodeFallback() {
  * step label so the gate is legible.
  */
 function FormGateDivider({ unlocked }: { unlocked: boolean }) {
+  if (unlocked) {
+    return (
+      <div className="flex items-center gap-2.5 py-0.5">
+        <span className="h-px flex-1 bg-[var(--cyan)]/40" />
+        <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-[var(--cyan)]">
+          ↓ continue
+        </span>
+        <span className="h-px flex-1 bg-[var(--cyan)]/40" />
+      </div>
+    );
+  }
+  // Locked: stronger visual barrier with a lock icon. Pairs with the
+  // dimmed pointer-events-none wrapper around the fields below.
   return (
-    <div className="flex items-center gap-2.5 py-0.5">
-      <span className="h-px flex-1 bg-[var(--border)]" />
-      <span
-        className="font-mono text-[9px] uppercase tracking-[0.18em]"
-        style={{
-          color: unlocked ? "var(--cyan)" : "var(--text-secondary)",
-        }}
+    <div className="flex items-center gap-2.5 rounded-md border border-dashed border-[var(--border)] bg-[var(--bg)]/60 px-3 py-2">
+      <svg
+        aria-hidden
+        viewBox="0 0 14 14"
+        className="h-3 w-3 text-[var(--text-secondary)]"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.4}
       >
-        {unlocked ? "↓ continue" : "↓ unlocks with valid code"}
+        <rect x="3.5" y="6.5" width="7" height="5.5" rx="0.6" />
+        <path d="M5 6.5V4.5a2 2 0 1 1 4 0V6.5" />
+      </svg>
+      <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+        Locked — referral code required to continue
       </span>
-      <span className="h-px flex-1 bg-[var(--border)]" />
     </div>
   );
 }
