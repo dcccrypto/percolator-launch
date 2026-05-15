@@ -24,6 +24,8 @@ import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
+import { useLivePrice } from "@/hooks/useLivePrice";
+import { computeLimitPriceE6 } from "@/lib/slippage";
 
 const INLINE_ORACLE_PUSH_REMOVED_ERROR =
   "Inline oracle price push was removed on-chain in beta.29. Migrate this flow to /api/oracle/advance-phase or another server-side oracle publisher before trading as the oracle authority.";
@@ -32,6 +34,7 @@ export function useTrade(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
   const { config: mktConfig, accounts, programId: slabProgramId } = useSlabState();
+  const { priceE6: livePriceE6 } = useLivePrice();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
@@ -54,6 +57,20 @@ export function useTrade(slabAddress: string) {
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
         const [lpPda] = deriveLpPda(programId, slabPk, params.lpIdx);
+
+        // Slippage protection. The on-chain handler treats limit_price_e6 == 0
+        // as a "no limit" sentinel and skips the slippage check entirely
+        // (percolator.rs::handle_trade_cpi). Without a real limit, the only
+        // remaining defense is the anti-off-market band (~1% by default),
+        // leaving the user exposed within that band to a hostile matcher or
+        // an in-band MEV race. Derive a non-zero limit from the live mark
+        // when the caller omits one. An explicit `limitPriceE6: 0n` from the
+        // caller is preserved as an opt-in escape hatch for keeper/bot paths
+        // that intentionally skip the check.
+        const effectiveLimitPriceE6: bigint =
+          params.limitPriceE6 !== undefined
+            ? params.limitPriceE6
+            : computeLimitPriceE6({ markE6: livePriceE6 ?? 0n, size: params.size });
 
         // Determine oracle mode using centralised detectOracleMode (oraclePrice.ts).
         // "pyth-pinned" = Pyth feed; "admin" or "hyperp" = use slab as oracle account.
@@ -96,7 +113,7 @@ export function useTrade(slabAddress: string) {
             lpAccount.account.matcherContext,
             lpPda,
           ]),
-          data: encodeTradeCpi({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString(), limitPriceE6: params.limitPriceE6?.toString() ?? "0" }),
+          data: encodeTradeCpi({ lpIdx: params.lpIdx, userIdx: params.userIdx, size: params.size.toString(), limitPriceE6: effectiveLimitPriceE6.toString() }),
         });
         instructions.push(tradeIx);
 
@@ -110,7 +127,7 @@ export function useTrade(slabAddress: string) {
         setLoading(false);
       }
     },
-    [connection, wallet, mktConfig, accounts, slabAddress, slabProgramId]
+    [connection, wallet, mktConfig, accounts, slabAddress, slabProgramId, livePriceE6]
   );
 
   return { trade, loading, error };

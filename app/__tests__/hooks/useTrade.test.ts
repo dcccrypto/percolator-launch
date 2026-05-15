@@ -41,6 +41,17 @@ vi.mock("@/lib/programAllowlist", () => ({
   assertKnownProgram: () => {},
 }));
 
+// Mock useLivePrice so the slippage-limit auto-compute has a valid mark.
+// Tests that exercise the no-mark abort path override this with priceE6: null.
+vi.mock("@/hooks/useLivePrice", () => ({
+  useLivePrice: vi.fn(() => ({
+    priceUsd: 1.5,
+    priceE6: 1_500_000n,
+    price: 1.5,
+    loading: false,
+  })),
+}));
+
 const mockLpPda = new PublicKey("3yEEksiUkq5K2PmjbRSHpXVN4FJgYuNn7rV31ek3PCwu");
 const mockOraclePda = new PublicKey("8DjWTsU1o8RHTKpRsqGFyYqFMknb8g7z2mjLfVYUyYyF");
 const mockVaultAuth = new PublicKey("DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1");
@@ -310,6 +321,128 @@ describe("useTrade", () => {
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
       });
+    });
+  });
+
+  describe("Slippage protection", () => {
+    // useTrade builds a 2-ix tx: [crank, tradeCpi]. The tradeCpi data layout is
+    //   tag(u8=10) ‖ lpIdx(u16) ‖ userIdx(u16) ‖ size(i128) ‖ limit_price_e6(u64)
+    // = 1 + 2 + 2 + 16 + 8 = 29 bytes. The limit is the trailing u64 LE.
+    function decodeLimit(data: Uint8Array | Buffer): bigint {
+      const buf = data instanceof Uint8Array ? Buffer.from(data) : data;
+      return buf.readBigUInt64LE(buf.length - 8);
+    }
+
+    it("auto-computes a non-zero limit for a long when the caller omits limitPriceE6", async () => {
+      const { result } = renderHook(() => useTrade(mockSlabAddress));
+      await act(async () => {
+        await result.current.trade({ lpIdx: 0, userIdx: 1, size: 1_000_000n });
+      });
+      const tx = vi.mocked(sendTx).mock.calls[0][0] as {
+        instructions: Array<{ data: Uint8Array }>;
+      };
+      const tradeIx = tx.instructions[tx.instructions.length - 1];
+      const limit = decodeLimit(tradeIx.data);
+      // mark = 1_500_000, default 100 bps → 1_500_000 * 10_100 / 10_000 = 1_515_000
+      expect(limit).toBe(1_515_000n);
+    });
+
+    it("auto-computes a non-zero limit ≤ mark for a short (size < 0)", async () => {
+      const { result } = renderHook(() => useTrade(mockSlabAddress));
+      await act(async () => {
+        await result.current.trade({ lpIdx: 0, userIdx: 1, size: -1_000_000n });
+      });
+      const tx = vi.mocked(sendTx).mock.calls[0][0] as {
+        instructions: Array<{ data: Uint8Array }>;
+      };
+      const limit = decodeLimit(tx.instructions[tx.instructions.length - 1].data);
+      // mark = 1_500_000, default 100 bps → 1_500_000 * 9_900 / 10_000 = 1_485_000
+      expect(limit).toBe(1_485_000n);
+      expect(limit).toBeLessThan(1_500_000n);
+    });
+
+    it("preserves an explicit limitPriceE6 supplied by the caller", async () => {
+      const { result } = renderHook(() => useTrade(mockSlabAddress));
+      await act(async () => {
+        await result.current.trade({
+          lpIdx: 0,
+          userIdx: 1,
+          size: 1_000_000n,
+          limitPriceE6: 1_999_999n,
+        });
+      });
+      const tx = vi.mocked(sendTx).mock.calls[0][0] as {
+        instructions: Array<{ data: Uint8Array }>;
+      };
+      const limit = decodeLimit(tx.instructions[tx.instructions.length - 1].data);
+      expect(limit).toBe(1_999_999n);
+    });
+
+    it("keeper escape hatch: explicit limitPriceE6 = 0n is passed through unchanged", async () => {
+      const { result } = renderHook(() => useTrade(mockSlabAddress));
+      await act(async () => {
+        await result.current.trade({
+          lpIdx: 0,
+          userIdx: 1,
+          size: 1_000_000n,
+          limitPriceE6: 0n,
+        });
+      });
+      const tx = vi.mocked(sendTx).mock.calls[0][0] as {
+        instructions: Array<{ data: Uint8Array }>;
+      };
+      const limit = decodeLimit(tx.instructions[tx.instructions.length - 1].data);
+      expect(limit).toBe(0n);
+    });
+
+    it("aborts the trade if the live mark price is null (no oracle yet)", async () => {
+      const { useLivePrice } = await import("@/hooks/useLivePrice");
+      vi.mocked(useLivePrice).mockReturnValueOnce({
+        priceUsd: null,
+        priceE6: null,
+        price: null,
+        loading: true,
+      } as ReturnType<typeof useLivePrice>);
+
+      const { result } = renderHook(() => useTrade(mockSlabAddress));
+      await act(async () => {
+        await expect(
+          result.current.trade({ lpIdx: 0, userIdx: 1, size: 1_000_000n }),
+        ).rejects.toThrow(/mark price unavailable/i);
+      });
+      expect(sendTx).not.toHaveBeenCalled();
+    });
+
+    it("aborts the trade if the live mark price is 0n (broken oracle)", async () => {
+      const { useLivePrice } = await import("@/hooks/useLivePrice");
+      vi.mocked(useLivePrice).mockReturnValueOnce({
+        priceUsd: 0,
+        priceE6: 0n,
+        price: 0,
+        loading: false,
+      } as ReturnType<typeof useLivePrice>);
+
+      const { result } = renderHook(() => useTrade(mockSlabAddress));
+      await act(async () => {
+        await expect(
+          result.current.trade({ lpIdx: 0, userIdx: 1, size: 1_000_000n }),
+        ).rejects.toThrow(/mark price unavailable/i);
+      });
+      expect(sendTx).not.toHaveBeenCalled();
+    });
+
+    it("never encodes the on-chain 0-sentinel by default", async () => {
+      // Regression guard for the original bug: the trade ix must not be
+      // encoded with limit_price_e6 = 0 when the caller didn't ask for that.
+      const { result } = renderHook(() => useTrade(mockSlabAddress));
+      await act(async () => {
+        await result.current.trade({ lpIdx: 0, userIdx: 1, size: 1_000_000n });
+      });
+      const tx = vi.mocked(sendTx).mock.calls[0][0] as {
+        instructions: Array<{ data: Uint8Array }>;
+      };
+      const limit = decodeLimit(tx.instructions[tx.instructions.length - 1].data);
+      expect(limit).not.toBe(0n);
     });
   });
 });
