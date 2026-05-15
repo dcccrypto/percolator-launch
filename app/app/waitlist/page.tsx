@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import useSWR from "swr";
 import { usePrivy, useLoginWithEmail } from "@privy-io/react-auth";
 import { useWallets, useSignMessage } from "@privy-io/react-auth/solana";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
@@ -1151,6 +1152,17 @@ function ReferralCard({ code, shareUrl }: { code: string; shareUrl: string }) {
       // The values are visible in the UI — user can select-and-copy manually.
     }
   };
+
+  // Personal referral count. Polls every 30s so the user can paste their
+  // link in Discord, refresh, and watch the number climb. Failure is
+  // silent: the row hides rather than showing a confusing zero state.
+  const { data: countData } = useSWR<{ count: number }>(
+    code ? `/api/waitlist/my-referrals?code=${encodeURIComponent(code)}` : null,
+    swrFetcher,
+    { refreshInterval: 30_000, revalidateOnFocus: true, dedupingInterval: 5_000 },
+  );
+  const referralCount = countData?.count ?? null;
+
   return (
     <div className="rounded-md border border-[var(--accent)]/25 bg-[var(--accent)]/[0.05] p-3.5">
       <div className="flex items-center justify-between">
@@ -1186,9 +1198,25 @@ function ReferralCard({ code, shareUrl }: { code: string; shareUrl: string }) {
           {copied === "link" ? "copied ✓" : "copy link"}
         </button>
       </div>
+      {referralCount !== null && (
+        <div className="mt-3 flex items-center justify-between border-t border-[var(--accent)]/15 pt-3">
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--text-dim)]">
+            joined with your code
+          </span>
+          <span
+            className="font-mono text-[14px] font-bold text-[var(--accent)]"
+            style={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            {referralCount.toLocaleString()}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
+
+const swrFetcher = (url: string) =>
+  fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(r.status)));
 
 // ============================================================================
 // SIGNUP SECTION — anchored card, the actual reservation step
