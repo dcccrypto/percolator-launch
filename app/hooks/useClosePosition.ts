@@ -6,6 +6,7 @@ import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind } from "@percolatorct/sdk";
 import { useTrade } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
+import { useLivePrice } from "@/hooks/useLivePrice";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
 import { isMockMode } from "@/lib/mock-mode";
@@ -28,6 +29,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   const { connection } = useConnectionCompat();
   const userAccount = useUserAccount();
   const { trade } = useTrade(slabAddress);
+  const { priceE6: livePriceE6 } = useLivePrice();
   const { accounts } = useSlabState();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
 
@@ -97,6 +99,17 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           closeSize = freshIsLong ? -partialAbs : partialAbs;
         }
 
+        // useTrade derives limit_price_e6 from livePriceE6 and throws
+        // SlippageError when the live mark is unavailable. That error is
+        // non-transient — retrying it in withTransientRetry just burns
+        // 2×3s before failing. Short-circuit here when we know the mark
+        // is missing so the user sees the real reason immediately.
+        if (livePriceE6 == null) {
+          throw new Error(
+            "Live mark price unavailable — wait for the price feed to reconnect, then try again.",
+          );
+        }
+
         const sig = await withTransientRetry(
           async () => trade({ lpIdx, userIdx: userAccount.idx, size: closeSize }),
           { maxRetries: 2, delayMs: 3000 },
@@ -117,7 +130,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         setLoading(false);
       }
     },
-    [connection, userAccount, trade, lpIdx, slabAddress, mockMode],
+    [connection, userAccount, trade, lpIdx, slabAddress, mockMode, livePriceE6],
   );
 
   return { closePosition, loading, error, phase, lastSig, resetPhase };
