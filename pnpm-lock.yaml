@@ -27,7 +27,7 @@ importers:
   .:
     dependencies:
       '@percolatorct/sdk':
-        specifier: ^2.0.9
+        specifier: 2.0.9
         version: 2.0.9(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@solana/spl-token':
         specifier: ^0.4.14
@@ -64,7 +64,7 @@ importers:
   app:
     dependencies:
       '@percolatorct/sdk':
-        specifier: ^2.0.9
+        specifier: 2.0.9
         version: 2.0.9(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@privy-io/react-auth':
         specifier: ^3.14.1
