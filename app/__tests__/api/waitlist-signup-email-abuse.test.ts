@@ -37,9 +37,13 @@ describe("/api/waitlist/signup email-bombing hardening", () => {
   const source = fs.readFileSync(ROUTE_PATH, "utf8");
 
   it("captures isDuplicate from the insert error code", () => {
-    expect(source).toMatch(
-      /isDuplicate\s*=\s*insertError\?\.code\s*===\s*"23505"/,
-    );
+    // Refactored to retry-loop form (assigns true on 23505 inside the loop)
+    // rather than a single `isDuplicate = err?.code === "23505"` expression.
+    // Either form is correct; just confirm the route reads the unique-violation
+    // code and routes a flag named isDuplicate from it.
+    expect(source).toMatch(/let\s+isDuplicate\s*=\s*false/);
+    expect(source).toMatch(/error\.code\s*!==\s*"23505"/);
+    expect(source).toMatch(/isDuplicate\s*=\s*true/);
   });
 
   it("skips the confirmation email on duplicate insert", () => {
