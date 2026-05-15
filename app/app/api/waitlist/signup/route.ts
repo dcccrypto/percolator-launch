@@ -276,6 +276,87 @@ export async function POST(req: Request) {
     );
   }
 
+  // ── Wallet signature verification (moved up from later in the route) ────
+  // We need to verify the signature BEFORE we can trust the pubkey for
+  // the duplicate-lookup fast path below. Without that, anyone could
+  // probe arbitrary pubkeys for membership. The mainnet spam check
+  // (walletExistsOnMainnet) stays further down so it only fires on
+  // genuinely new signups — pre-invite users who are just looking up
+  // their existing code shouldn't burn a Helius RPC call.
+  if (hasWalletPart) {
+    if (!isValidSolanaPubkey(pubkey!)) {
+      return NextResponse.json({ error: "invalid pubkey" }, { status: 400 });
+    }
+    const ts = parseTimestampFromMessage(message!);
+    if (!ts) {
+      return NextResponse.json({ error: "invalid message format" }, { status: 400 });
+    }
+    if (Math.abs(Date.now() - ts) > MAX_MESSAGE_AGE_MS) {
+      return NextResponse.json({ error: "message expired" }, { status: 400 });
+    }
+    if (!message!.includes(pubkey!)) {
+      return NextResponse.json({ error: "message must include pubkey" }, { status: 400 });
+    }
+    let sigBytes: Uint8Array;
+    let pubBytes: Uint8Array;
+    try {
+      sigBytes = bs58.decode(signature!);
+      pubBytes = bs58.decode(pubkey!);
+    } catch {
+      return NextResponse.json({ error: "decode failed" }, { status: 400 });
+    }
+    if (sigBytes.length !== 64 || pubBytes.length !== 32) {
+      return NextResponse.json({ error: "wrong sig/pubkey length" }, { status: 400 });
+    }
+    const msgBytes = new TextEncoder().encode(message!);
+    const ok = nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes);
+    if (!ok) {
+      return NextResponse.json({ error: "signature invalid" }, { status: 401 });
+    }
+  }
+
+  // ── Sign-in fast path for existing wallet signups ───────────────────────
+  // The waitlist is invite-only NOW, but every row created before that
+  // change is grandfathered (referred_by_code IS NULL). Those users need
+  // to be able to come back and see their backfilled referral code
+  // without supplying an invite of their own — they ARE the invite list.
+  //
+  // Wallet-path only: the signature above proved ownership, so returning
+  // the existing code is safe. Email-path lookup would require an OTP
+  // (membership oracle) and is handled by the separate backfill-emails
+  // operator action.
+  if (hasWalletPart) {
+    try {
+      const service = getWaitlistServiceSupabase();
+      const { data: existing } = await service
+        .from("waitlist")
+        .select("referral_code")
+        .eq("pubkey", pubkey)
+        .maybeSingle();
+      if (existing && existing.referral_code) {
+        let position: number | null = null;
+        try {
+          const { data } = await service.rpc("waitlist_position", {
+            p_pubkey: pubkey,
+          });
+          if (typeof data === "number") position = data;
+        } catch (err) {
+          console.warn("[waitlist-signup] position lookup failed", err);
+        }
+        return NextResponse.json({
+          ok: true,
+          position,
+          referral_code: existing.referral_code,
+          returning: true,
+        });
+      }
+    } catch (err) {
+      console.warn("[waitlist-signup] lookup failed, falling through", err);
+      // Fall through to the normal signup flow — worst case the user
+      // gets the standard "invite required" error if they had no code.
+    }
+  }
+
   // ── Referrer validation (REQUIRED — invite-only) ────────────────────────
   // The waitlist is invite-only: every new signup must supply a valid
   // referral code from an existing member. Existing rows from before this
@@ -323,42 +404,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // If we have wallet fields, verify them. (Whether or not email is provided.)
+  // Wallet signature was already verified at the top of this route
+  // (before the sign-in fast-path lookup). Only the mainnet spam check
+  // remains for new wallet signups — it fires here so existing-user
+  // lookups don't burn a Helius RPC call.
   if (hasWalletPart) {
-    if (!isValidSolanaPubkey(pubkey!)) {
-      return NextResponse.json({ error: "invalid pubkey" }, { status: 400 });
-    }
-    const ts = parseTimestampFromMessage(message!);
-    if (!ts) {
-      return NextResponse.json({ error: "invalid message format" }, { status: 400 });
-    }
-    if (Math.abs(Date.now() - ts) > MAX_MESSAGE_AGE_MS) {
-      return NextResponse.json({ error: "message expired" }, { status: 400 });
-    }
-    if (!message!.includes(pubkey!)) {
-      return NextResponse.json({ error: "message must include pubkey" }, { status: 400 });
-    }
-    let sigBytes: Uint8Array;
-    let pubBytes: Uint8Array;
-    try {
-      sigBytes = bs58.decode(signature!);
-      pubBytes = bs58.decode(pubkey!);
-    } catch {
-      return NextResponse.json({ error: "decode failed" }, { status: 400 });
-    }
-    if (sigBytes.length !== 64 || pubBytes.length !== 32) {
-      return NextResponse.json({ error: "wrong sig/pubkey length" }, { status: 400 });
-    }
-    const msgBytes = new TextEncoder().encode(message!);
-    const ok = nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes);
-    if (!ok) {
-      return NextResponse.json({ error: "signature invalid" }, { status: 401 });
-    }
-
-    // Spam filter: wallet must have been seen on Solana mainnet at least once.
-    // The combined-shape rejection above guarantees hasEmail is false here, so
-    // the previous `if (!hasEmail)` guard is now redundant — the check runs
-    // unconditionally on the wallet-only path.
     const exists = await walletExistsOnMainnet(pubkey!);
     if (!exists) {
       return NextResponse.json(

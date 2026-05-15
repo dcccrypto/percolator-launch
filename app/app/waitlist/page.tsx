@@ -889,6 +889,13 @@ function SignupFlow() {
           disabled={busy}
         />
         <FormGateDivider unlocked={formUnlocked} />
+        {/* The x_handle is only relevant for NEW signups (it lands on the
+            inserted row). For returning users it's ignored, so we keep
+            it inside the locked container with the gate. The submit
+            button moves OUT of the locked container so pre-invite users
+            can sign in and look up their existing code without supplying
+            an invite — the server returns it once the wallet signature
+            proves ownership. */}
         <div
           className={`space-y-3.5 transition-opacity duration-200 ${
             formUnlocked ? "" : "pointer-events-none select-none opacity-40"
@@ -913,21 +920,27 @@ function SignupFlow() {
               tabIndex={formUnlocked ? 0 : -1}
             />
           </div>
-          <button
-            className={ctaPrimary}
-            onClick={onSign}
-            disabled={busy || !formUnlocked}
-            tabIndex={formUnlocked ? 0 : -1}
-          >
-            {state.kind === "signing"
-              ? "Signing in your wallet…"
-              : state.kind === "submitting"
-                ? "Submitting…"
-                : formUnlocked
-                  ? "Sign & claim spot →"
-                  : "Enter referral code to continue"}
-          </button>
         </div>
+        <button
+          className={ctaPrimary}
+          onClick={onSign}
+          disabled={busy}
+        >
+          {state.kind === "signing"
+            ? "Signing in your wallet…"
+            : state.kind === "submitting"
+              ? "Submitting…"
+              : formUnlocked
+                ? "Sign & claim spot →"
+                : "Sign in to check / look up code →"}
+        </button>
+        {!formUnlocked && (
+          <p className="font-mono text-[10.5px] leading-relaxed text-[var(--text-secondary)]">
+            Already on the waitlist? Sign — we&apos;ll surface your existing
+            referral code. New here? Enter a referral code above to claim
+            your spot.
+          </p>
+        )}
         <NoCodeFallback />
       </div>
     );
