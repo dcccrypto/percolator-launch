@@ -13,6 +13,15 @@ interface TradeConfirmationModalProps {
   leverage: number;
   estimatedLiqPrice: bigint;
   tradingFee: bigint;
+  /**
+   * Worst-acceptable fill price (limit_price_e6) the trade will be signed
+   * with, derived from live mark + default slippage bps. Shown so the user
+   * reviews the binding slippage tolerance before confirming. `0n` is used
+   * as a sentinel when no live mark is available; in that case the row is
+   * suppressed and the submit gate (priceUsd / oracleStale) blocks the
+   * trade anyway.
+   */
+  worstFillPriceE6?: bigint;
   /** Current slab account equity in collateral units. Used to show risk leverage. */
   accountEquity?: bigint | null;
   /** Underlying asset symbol (e.g. SOL). Used to label the position size. */
@@ -40,6 +49,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   leverage,
   estimatedLiqPrice,
   tradingFee,
+  worstFillPriceE6,
   accountEquity,
   symbol,
   collateralSymbol,
@@ -179,6 +189,16 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
               {estimatedLiqPrice <= 0n ? "N/A" : `$${formatPerc(estimatedLiqPrice, 6)}`}
             </span>
           </div>
+          {worstFillPriceE6 != null && worstFillPriceE6 > 0n && (
+            <div className="flex justify-between">
+              <span className="text-[var(--text-dim)]">
+                {direction === "long" ? "Max Fill Price:" : "Min Fill Price:"}
+              </span>
+              <span className="font-mono font-medium text-[var(--text)]">
+                ${formatPerc(worstFillPriceE6, 6)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Risk warning */}

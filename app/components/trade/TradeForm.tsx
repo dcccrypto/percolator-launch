@@ -8,6 +8,7 @@ import { useTrade } from "@/hooks/useTrade";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
+import { computeLimitPriceE6 } from "@/lib/slippage";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -147,6 +148,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     marginNative: bigint;
     estimatedLiqPrice: bigint;
     tradingFee: bigint;
+    worstFillPriceE6: bigint;
   } | null>(null);
   const [showCloseModal, setShowCloseModal] = useState(false);
   // Inline deposit form. Only rendered as a *fallback* — when the user has
@@ -928,11 +930,24 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             // Snapshot all price-dependent values so the modal doesn't flicker
             // when WebSocket price updates arrive while it's open.
             const oracleE6 = priceUsd ? BigInt(Math.round(priceUsd * 1e6)) : 0n;
+            // Same derivation useTrade will apply when this confirm fires.
+            // Showing it here means the user reviews the binding slippage
+            // limit before signing, rather than discovering it post-hoc.
+            const signedSize = direction === "short" ? -positionSize : positionSize;
+            let worstFillPriceE6 = 0n;
+            try {
+              worstFillPriceE6 = livePriceE6 && livePriceE6 > 0n
+                ? computeLimitPriceE6({ markE6: livePriceE6, size: signedSize })
+                : 0n;
+            } catch {
+              worstFillPriceE6 = 0n;
+            }
             setConfirmSnapshot({
               positionSize,
               marginNative,
               estimatedLiqPrice: computePreTradeLiqPrice(oracleE6, marginNative, positionSize, maintenanceMarginBps, tradingFeeBps, direction),
               tradingFee: livePriceE6 && livePriceE6 > 0n ? ((positionSize * livePriceE6 / 1_000_000n) * tradingFeeBps) / 10000n : 0n,
+              worstFillPriceE6,
             });
             setShowConfirmModal(true);
           }}
@@ -1026,6 +1041,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           leverage={leverage}
           estimatedLiqPrice={confirmSnapshot.estimatedLiqPrice}
           tradingFee={confirmSnapshot.tradingFee}
+          worstFillPriceE6={confirmSnapshot.worstFillPriceE6}
           accountEquity={userAccount ? capital : null}
           symbol={symbol}
           collateralSymbol={collateralSymbol}
