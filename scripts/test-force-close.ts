@@ -2,7 +2,8 @@ import { Connection, PublicKey, Keypair, TransactionInstruction, Transaction, Co
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import fs from "fs";
 
-const RPC = "https://mainnet.helius-rpc.com/?api-key=2a089bfd-18ae-48b5-abbe-36b0383ecad3";
+const RPC = process.env.RPC_URL || (process.env.HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}` : "");
+if (!RPC) throw new Error("Set RPC_URL or HELIUS_API_KEY before running this script");
 const SLAB = new PublicKey("5RfUzS1kpdhVb2CNGvE9UGdthsGbd354LoXSYjCFHv3R");
 const PROGRAM = new PublicKey("ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv");
 const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");

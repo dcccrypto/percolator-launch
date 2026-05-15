@@ -27,7 +27,8 @@ import * as path from "path";
 // ── Config ──────────────────────────────────────────────────────
 const STAKE_PROGRAM_ID = new PublicKey("DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F");
 const PERCOLATOR_PROGRAM_ID = new PublicKey("ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv");
-const RPC_URL = "https://mainnet.helius-rpc.com/?api-key=2a089bfd-18ae-48b5-abbe-36b0383ecad3";
+const RPC_URL = process.env.RPC_URL || (process.env.HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}` : "");
+if (!RPC_URL) throw new Error("Set RPC_URL or HELIUS_API_KEY before running this script");
 const ADMIN_KEYPAIR_PATH = path.join(process.env.HOME!, ".percolator-mainnet/keys/deploy-authority.json");
 
 // ── Parse args ──────────────────────────────────────────────────
