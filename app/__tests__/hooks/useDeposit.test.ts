@@ -28,6 +28,14 @@ vi.mock("@/lib/tx", () => ({
   sendTx: vi.fn(),
 }));
 
+// Bypass the program-allowlist gate for tests that focus on the deposit flow.
+// The gate is exercised in app/__tests__/lib/programAllowlist.test.ts and
+// app/__tests__/providers/SlabProvider-allowlist.test.tsx.
+vi.mock("@/lib/programAllowlist", () => ({
+  isKnownProgram: () => true,
+  assertKnownProgram: () => {},
+}));
+
 vi.mock("@percolatorct/sdk", async () => {
   const actual = await vi.importActual("@percolatorct/sdk");
   return {

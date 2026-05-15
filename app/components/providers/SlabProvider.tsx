@@ -26,6 +26,7 @@ import {
 } from "@percolatorct/sdk";
 import { isMockSlab, getMockSlabState } from "@/lib/mock-trade-data";
 import { isMockMode } from "@/lib/mock-mode";
+import { isKnownProgram } from "@/lib/programAllowlist";
 
 export interface SlabState {
   /** The slab account address this provider is tracking */
@@ -120,6 +121,35 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
 
     function parseSlab(data: Uint8Array, owner?: PublicKey) {
       if (cancelled) return;
+      // Refuse to surface programId for slabs owned by a program we did not
+      // deploy. The slab address in the URL is user-controlled, and Solana
+      // lets anyone create an account owned by any BPF program — so without
+      // this gate a phishing URL like /trade/<malicious_slab> would render
+      // a full trade UI whose Deposit/Trade/Withdraw flows build instructions
+      // against an attacker-controlled program. The downstream signing hooks
+      // (useDeposit/useWithdraw/useTrade/useInitUser) consume `programId`
+      // from useSlabState() and pass it straight into buildIx; keeping
+      // programId null here causes those hooks to short-circuit on their
+      // existing "Wallet not connected or market not loaded" guard.
+      // Source of truth: getAllProgramIds() (config.programId plus every
+      // entry in programsBySlabTier). New program deploys roll out via
+      // config, not by editing this gate.
+      if (owner && !isKnownProgram(owner)) {
+        if (process.env.NODE_ENV !== "production") {
+          console.error(
+            `[SlabProvider] Refusing to render slab owned by unknown program: ${owner.toBase58()}`,
+          );
+        }
+        setState((s) => ({
+          ...s,
+          loading: false,
+          error:
+            "This market is not owned by a recognized Percolator program. " +
+            "If you reached this page from a link, treat it as untrusted — only trade markets listed on the official Markets page.",
+          programId: null,
+        }));
+        return;
+      }
       try {
         const header = parseHeader(data);
 

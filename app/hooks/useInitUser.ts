@@ -19,6 +19,7 @@ import {
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { assertKnownProgram } from "@/lib/programAllowlist";
 
 
 export function useInitUser(slabAddress: string) {
@@ -34,6 +35,10 @@ export function useInitUser(slabAddress: string) {
       setError(null);
       try {
         if (!wallet.publicKey || !mktConfig || !slabProgramId) throw new Error("Wallet not connected or market not loaded");
+        // Defense-in-depth: refuse to build a tx whose programId is not in
+        // our deployed allowlist. See SlabProvider.parseSlab for the primary
+        // gate.
+        assertKnownProgram(slabProgramId);
 
         // The on-chain InitUser handler requires:
         //   1. fee_payment >= new_account_fee (account registration fee)

@@ -21,6 +21,7 @@ import {
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { assertKnownProgram } from "@/lib/programAllowlist";
 
 export function useDeposit(slabAddress: string) {
   const { connection } = useConnectionCompat();
@@ -39,6 +40,11 @@ export function useDeposit(slabAddress: string) {
       try {
         if (!wallet.publicKey || !mktConfig || !slabProgramId)
           throw new Error("Wallet not connected or market not loaded");
+        // Defense-in-depth: refuse to build a tx whose programId is not in
+        // our deployed allowlist, even if SlabProvider somehow surfaced one
+        // (e.g. a future code path mutates programId post-load, or a future
+        // page mounts this hook without going through SlabProvider's gate).
+        assertKnownProgram(slabProgramId);
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
