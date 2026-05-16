@@ -33,7 +33,7 @@ export async function GET() {
     const { data: rows, error } = await supabase
       .from("waitlist")
       .select(
-        "id, pubkey, email, referral_code, referred_by_code, referral_code_emailed_at, twitter_handle, created_at",
+        "id, pubkey, email, referral_code, referred_by_code, referral_code_emailed_at, twitter_handle, created_at, tier",
       );
     if (error) {
       console.error("[admin/waitlist/stats] select error", error);
@@ -52,8 +52,26 @@ export async function GET() {
       referral_code_emailed_at: string | null;
       twitter_handle: string | null;
       created_at: string;
+      tier: number | null;
     };
     const all = (rows ?? []) as Row[];
+
+    // ── Tier breakdown (A = 0, B = 1, ...) ────────────────────────────
+    // Computed from the row data so it stays in sync with whatever the
+    // table actually says. tier defaults to 0 in the DB, so pre-migration
+    // rows count as A.
+    const tierCounts = new Map<number, number>();
+    for (const r of all) {
+      const t = typeof r.tier === "number" ? r.tier : 0;
+      tierCounts.set(t, (tierCounts.get(t) ?? 0) + 1);
+    }
+    const tierBreakdown = Array.from(tierCounts.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([tier, count]) => ({
+        tier,
+        count,
+        label: tier >= 0 && tier <= 25 ? String.fromCharCode(65 + tier) : `t${tier}`,
+      }));
 
     // ── Totals + breakdown by signup method ────────────────────────────
     const totalSignups = all.length;
@@ -186,6 +204,7 @@ export async function GET() {
         walletOnlyNoEmail,
       },
       recency: { last24h, last7d },
+      tierBreakdown,
       integrity: {
         selfReferrals,
         backfillComplete: withoutCode === 0,

@@ -55,6 +55,7 @@ interface AdminLeaderboardEntry {
   twitterHandle: string | null;
   signupsReferred: number;
   joinedAt: string;
+  tier: number;
 }
 
 interface WaitlistStats {
@@ -84,6 +85,7 @@ interface WaitlistStats {
     walletOnlyNoEmail: number;
   };
   recency: { last24h: number; last7d: number };
+  tierBreakdown?: { tier: number; count: number; label: string }[];
   integrity: {
     selfReferrals: number;
     backfillComplete: boolean;
@@ -91,6 +93,18 @@ interface WaitlistStats {
     allCodesValidShape: boolean;
     noOrphanedReferrers: boolean;
   };
+}
+
+function tierLabel(tier: number): string {
+  return tier >= 0 && tier <= 25 ? String.fromCharCode(65 + tier) : `t${tier}`;
+}
+
+function tierColor(tier: number): string {
+  // A = solid accent, B = cyan, C = amber, D+ = dim.
+  if (tier === 0) return "var(--accent)";
+  if (tier === 1) return "var(--cyan)";
+  if (tier === 2) return "#fbbf24";
+  return "var(--text-secondary)";
 }
 
 const fetcher = async (url: string) => {
@@ -319,6 +333,47 @@ export function WaitlistLeaderboardSection() {
             </div>
           </div>
 
+          {/* Referral tier breakdown — A = the 126 pre-invite roots, B = referred by A, etc. */}
+          {stats.tierBreakdown && stats.tierBreakdown.length > 0 && (
+            <div className={`${card} p-4 mb-4`}>
+              <div className={`${labelStyle} mb-3`}>Referral Tiers</div>
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                {stats.tierBreakdown.map(({ tier, count, label }) => (
+                  <div
+                    key={tier}
+                    className="rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/40 p-3"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border px-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em]"
+                        style={{
+                          color: tierColor(tier),
+                          borderColor: `${tierColor(tier)}66`,
+                          backgroundColor: `${tierColor(tier)}14`,
+                        }}
+                      >
+                        {label}
+                      </span>
+                      <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
+                        tier {tier}
+                      </span>
+                    </div>
+                    <div
+                      className="mt-1 font-mono text-[18px] font-bold text-[var(--text)]"
+                      style={{ fontVariantNumeric: "tabular-nums" }}
+                    >
+                      {count.toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[11px] text-[var(--text-muted)]">
+                Tier = generation in the referral tree. A = pre-invite roots (the 126
+                grandfathered signups), B = referred by an A, C = referred by a B, etc.
+              </p>
+            </div>
+          )}
+
           {/* Integrity checks — green tick or red flag for each invariant */}
           <div className={`${card} p-4 mb-4`}>
             <div className={`${labelStyle} mb-3`}>Integrity Checks</div>
@@ -499,6 +554,9 @@ export function WaitlistLeaderboardSection() {
                     Rank
                   </th>
                   <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-[0.12em]">
+                    Tier
+                  </th>
+                  <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-[0.12em]">
                     Code
                   </th>
                   <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-[0.12em]">
@@ -526,6 +584,18 @@ export function WaitlistLeaderboardSection() {
                   >
                     <td className="px-3 py-2 font-mono text-[var(--text-muted)]">
                       #{row.rank}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border px-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em]"
+                        style={{
+                          color: tierColor(row.tier ?? 0),
+                          borderColor: `${tierColor(row.tier ?? 0)}66`,
+                          backgroundColor: `${tierColor(row.tier ?? 0)}14`,
+                        }}
+                      >
+                        {tierLabel(row.tier ?? 0)}
+                      </span>
                     </td>
                     <td className="px-3 py-2 font-mono font-bold text-[var(--text)]">
                       {row.referralCode}

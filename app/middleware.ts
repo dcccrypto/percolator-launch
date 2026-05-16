@@ -241,6 +241,8 @@ const REDIRECT_HOSTS = new Set([
 // here — they continue to live on mainnet.percolatorlaunch.com.
 const WAITLIST_HOST_ALLOWED_PREFIXES = [
   "/waitlist",
+  "/admin",        // operator dashboard (waitlist leaderboard + tiers, oracle admin, bug review)
+  "/r",            // referral-link landings (/r/<code>)
   "/pitch",        // investor-facing deck (still accessible, just not linked from nav)
   "/pitch-2",      // 10-slide narration variant for 2-min pitch video
   "/demo-shots",   // launcher page for capturing pitch screenshots from the real UI

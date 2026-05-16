@@ -15,6 +15,7 @@ interface LeaderboardRow {
   twitter_handle: string | null;
   signups_referred: number | string;
   joined_at: string;
+  tier: number | null;
 }
 
 interface AdminLeaderboardEntry {
@@ -25,6 +26,7 @@ interface AdminLeaderboardEntry {
   twitterHandle: string | null;
   signupsReferred: number;
   joinedAt: string;
+  tier: number;
 }
 
 /**
@@ -75,6 +77,7 @@ export async function GET() {
           twitterHandle: r.twitter_handle,
           signupsReferred: Number.isFinite(n) ? Number(n) : 0,
           joinedAt: r.joined_at,
+          tier: typeof r.tier === "number" ? r.tier : 0,
         };
       });
 

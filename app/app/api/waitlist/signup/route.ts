@@ -470,6 +470,23 @@ export async function POST(req: Request) {
   baseRow.referred_by_code = referredByCode;
   if (privyDid) baseRow.privy_did = privyDid;
 
+  // Compute the tier for this new row from the referrer's tier
+  // (tier = referrer.tier + 1). Falls back to 0 if the RPC isn't
+  // available yet (migration not applied) — the column default also
+  // catches that case, so the insert succeeds either way.
+  try {
+    const service = getWaitlistServiceSupabase();
+    const { data: tierData } = await service.rpc(
+      "waitlist_tier_for_referrer",
+      { p_code: referredByCode },
+    );
+    if (typeof tierData === "number" && tierData >= 0) {
+      baseRow.tier = tierData;
+    }
+  } catch (err) {
+    console.warn("[waitlist-signup] tier resolution failed, falling back to default", err);
+  }
+
   const MAX_CODE_ATTEMPTS = 8;
   let referralCode: string | null = null;
   let isDuplicate = false;
