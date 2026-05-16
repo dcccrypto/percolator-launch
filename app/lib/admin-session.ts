@@ -2,36 +2,43 @@ import { NextResponse } from "next/server";
 import { verifyPrivyAuth } from "@/lib/privy-auth";
 
 /**
- * Admin auth, pivoted from Supabase Auth + admin_users table to
- * Privy session + email allowlist.
+ * Admin auth — Privy session + allowlist.
  *
- * Why the change: the original implementation required a working
- * trading Supabase project (NEXT_PUBLIC_SUPABASE_URL) to verify
- * Supabase Auth cookies + read the admin_users table. When that
- * project went down, admin login broke entirely.
+ * Two allowlist mechanisms, either of which is sufficient. An admin
+ * is anyone whose Privy session matches:
  *
- * The new model:
- *  1. Caller (admin route handler or the admin page itself) attaches
- *     a Privy access token in `Authorization: Bearer …` plus an
- *     identity token in `X-Privy-Id-Token`. verifyPrivyAuth verifies
- *     both via @privy-io/node and extracts the user's linked email.
- *  2. We check the verified email against PRIVY_ADMIN_EMAILS, a
- *     comma-separated env-var allowlist (case-insensitive). Members
- *     are admins; everyone else gets 403.
+ *   • PRIVY_ADMIN_DIDS — comma-separated list of Privy DIDs. The
+ *     DID is the most stable identifier (doesn't depend on which
+ *     email is "primary", doesn't depend on OAuth linkage state,
+ *     never changes after Privy creates the account). Prefer this.
+ *     The list may include the "did:privy:" prefix or omit it —
+ *     we strip on both sides before comparing.
  *
- * The email comes from a verified Privy identity token, so we trust
- * Privy's OTP / 2FA verification implicitly — when Privy 2FA is
- * enabled in the dashboard, admins step through the second factor
- * before a session is issued, then any request bearing that session
- * is an authenticated-second-factor request.
+ *   • PRIVY_ADMIN_EMAILS — comma-separated list of email addresses,
+ *     lowercase. Matched against ANY of the user's verified emails
+ *     (direct email account, Google/Apple OAuth email). Useful when
+ *     onboarding a new admin who you don't yet have a DID for, but
+ *     less reliable than DID.
+ *
+ * 503 only when BOTH lists are empty — refuse to fail-open.
+ *
+ * Background: pivoted from Supabase Auth + admin_users table when
+ * the trading Supabase project went away. The DID path was added
+ * after operators hit "your email isn't admin" 403s caused by
+ * Privy linking the same human to a different primary email than
+ * the one in PRIVY_ADMIN_EMAILS — the DID sidesteps that whole class
+ * of confusion.
  */
 
 function normalizeEmail(s: string): string {
   return s.trim().toLowerCase();
 }
 
-// Resolved fresh on each call so env edits take effect on the next
-// request without needing a process restart.
+function stripDidPrefix(s: string): string {
+  const t = s.trim();
+  return t.startsWith("did:privy:") ? t.slice("did:privy:".length) : t;
+}
+
 function getAdminEmailSet(): Set<string> {
   const raw = (process.env.PRIVY_ADMIN_EMAILS ?? "").trim();
   return new Set(
@@ -42,29 +49,33 @@ function getAdminEmailSet(): Set<string> {
   );
 }
 
+function getAdminDidSet(): Set<string> {
+  const raw = (process.env.PRIVY_ADMIN_DIDS ?? "").trim();
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => stripDidPrefix(s))
+      .filter(Boolean),
+  );
+}
+
 export type AdminSessionResult =
-  | { ok: true; userId: string; email: string }
+  | { ok: true; userId: string; email: string | null }
   | { ok: false; response: NextResponse };
 
-/**
- * Verify the caller is an admin. Pass the incoming Request so we can
- * read the Privy headers off it.
- *
- * Returns 503 when the allowlist is empty (config error — refuse to
- * silently allow everyone). 401 on missing/invalid Privy token. 403
- * when the verified email isn't in the allowlist (or the token has
- * no verified email, which usually means the client forgot to send
- * the X-Privy-Id-Token header).
- */
 export async function requireAdminSession(
   req: Request,
 ): Promise<AdminSessionResult> {
   const adminEmails = getAdminEmailSet();
-  if (adminEmails.size === 0) {
+  const adminDids = getAdminDidSet();
+  if (adminEmails.size === 0 && adminDids.size === 0) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "PRIVY_ADMIN_EMAILS not configured" },
+        {
+          error:
+            "Neither PRIVY_ADMIN_DIDS nor PRIVY_ADMIN_EMAILS is configured on the server",
+        },
         { status: 503 },
       ),
     };
@@ -72,9 +83,6 @@ export async function requireAdminSession(
 
   const auth = await verifyPrivyAuth(req);
   if (!auth.ok) {
-    // Distinguish the two 503 paths the caller cares about — Privy
-    // server SDK unconfigured vs allowlist unconfigured (handled above)
-    // — so the admin page can tell the operator which env var to set.
     const message =
       auth.status === 503
         ? "PRIVY_APP_SECRET not configured on the server"
@@ -90,35 +98,30 @@ export async function requireAdminSession(
     };
   }
 
-  if (auth.emails.length === 0) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        {
-          error:
-            "Privy session has no verified email — make sure the client sends X-Privy-Id-Token",
-        },
-        { status: 403 },
-      ),
-    };
+  // DID match first — the canonical identity.
+  const didMatch = adminDids.has(stripDidPrefix(auth.userId));
+  if (didMatch) {
+    return { ok: true, userId: auth.userId, email: auth.email };
   }
 
-  // Any-match: a Privy user can have multiple linked emails (direct
-  // + Google OAuth + Apple OAuth). Accept if ANY of them is on the
-  // allowlist. Otherwise surface the full list so the operator can
-  // see exactly what Privy associates with their session.
-  const matched = auth.emails.find((e) => adminEmails.has(e)) ?? null;
-  if (!matched) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        {
-          error: `Signed in as ${auth.emails.join(", ")} — none of these is on PRIVY_ADMIN_EMAILS. Add one, or sign in with an allowlisted email.`,
-        },
-        { status: 403 },
-      ),
-    };
+  // Email any-match — works across multiple linked emails.
+  const emailMatch = auth.emails.find((e) => adminEmails.has(e)) ?? null;
+  if (emailMatch) {
+    return { ok: true, userId: auth.userId, email: emailMatch };
   }
 
-  return { ok: true, userId: auth.userId, email: matched };
+  // No match on either. Surface BOTH the DID and the emails so the
+  // operator can pick which to add to the allowlist.
+  const emailList = auth.emails.length
+    ? auth.emails.join(", ")
+    : "(no verified emails on session)";
+  return {
+    ok: false,
+    response: NextResponse.json(
+      {
+        error: `Not an admin. DID=${stripDidPrefix(auth.userId)}, emails=${emailList}. Add the DID to PRIVY_ADMIN_DIDS or one email to PRIVY_ADMIN_EMAILS.`,
+      },
+      { status: 403 },
+    ),
+  };
 }
