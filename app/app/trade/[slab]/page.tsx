@@ -9,6 +9,7 @@ import { UsdToggleProvider, useUsdToggle } from "@/components/providers/UsdToggl
 import { TradeForm } from "@/components/trade/TradeForm";
 import { PositionPanel } from "@/components/trade/PositionPanel";
 import { PositionNftPanel } from "@/components/trade/PositionNftPanel";
+import { AccountRiskSidebar } from "@/components/trade/AccountRiskSidebar";
 import { PositionsTable } from "@/components/trade/PositionsTable";
 import { AccountsCard } from "@/components/trade/AccountsCard";
 import { DepositTrigger } from "@/components/trade/DepositTrigger";
@@ -457,6 +458,11 @@ function TradePageInner({ slab }: { slab: string }) {
           <DepositTrigger slabAddress={slab} />
         </ErrorBoundary>
 
+        {/* Risk + account at-a-glance — hidden when there's no user account */}
+        <ErrorBoundary label="AccountRiskSidebar">
+          <AccountRiskSidebar slabAddress={slab} />
+        </ErrorBoundary>
+
         {/* Trade form */}
         <ErrorBoundary label="TradeForm">
           <TradeForm slabAddress={slab} />
@@ -565,6 +571,9 @@ function TradePageInner({ slab }: { slab: string }) {
           <div className="sticky top-0 z-20 space-y-1.5">
             <ErrorBoundary label="DepositTrigger">
               <DepositTrigger slabAddress={slab} />
+            </ErrorBoundary>
+            <ErrorBoundary label="AccountRiskSidebar">
+              <AccountRiskSidebar slabAddress={slab} />
             </ErrorBoundary>
             <ErrorBoundary label="TradeForm">
               <TradeForm slabAddress={slab} />
