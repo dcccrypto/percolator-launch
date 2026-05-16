@@ -304,6 +304,12 @@ export default function AdminDashboard() {
   const adminFetch = useAdminFetch();
   const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<
+    | null
+    | { kind: "not-configured"; message: string }
+    | { kind: "forbidden"; message: string }
+    | { kind: "unexpected"; message: string }
+  >(null);
   const [bugs, setBugs] = useState<BugReport[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
@@ -317,9 +323,19 @@ export default function AdminDashboard() {
 
   // ── Auth ───────────────────────────────────────────────────────────────────
   // Privy session → /api/admin/whoami → 200 means in PRIVY_ADMIN_EMAILS.
-  // Anything else sends them to /admin/login. The server-side route is the
-  // canonical gate — this client check exists so we can render the dashboard
-  // without flashing it to non-admins.
+  //
+  // Resolution policy:
+  //   200  → render the dashboard
+  //   401  → not logged in via Privy → bounce to /admin/login
+  //   403  → logged in but not on the allowlist → render an error state
+  //          (no auto-logout, no bounce — those caused login↔admin loops)
+  //   503  → server isn't configured (PRIVY_ADMIN_EMAILS unset / Privy secret
+  //          missing) → render an actionable error state STAYING on /admin
+  //   any other → render a generic error STAYING on /admin
+  //
+  // adminFetch is now a stable function (refs inside useAdminFetch), so this
+  // effect fires exactly once per ready/authenticated transition instead of
+  // every render. No more whoami flood.
 
   useEffect(() => {
     if (!ready) return;
@@ -335,26 +351,55 @@ export default function AdminDashboard() {
         if (res.status === 200) {
           const json = (await res.json()) as { email: string; userId: string };
           setUser({ email: json.email, userId: json.userId });
+          setAuthError(null);
           setLoading(false);
           return;
         }
-        if (res.status === 403) {
-          // Logged in via Privy but not in the admin allowlist.
-          await logout();
+        if (res.status === 401) {
+          // Lost the Privy session between page load and whoami call.
           router.replace("/admin/login");
           return;
         }
-        // 401/503/other — push back to login and let that page show
-        // a useful state.
-        router.replace("/admin/login");
-      } catch {
-        if (!cancelled) router.replace("/admin/login");
+        if (res.status === 403) {
+          setAuthError({
+            kind: "forbidden",
+            message:
+              "You're signed in via Privy, but your email isn't on the admin allowlist (PRIVY_ADMIN_EMAILS). Sign out and use an admin email, or ask an operator to add yours.",
+          });
+          setLoading(false);
+          return;
+        }
+        if (res.status === 503) {
+          const body = await res
+            .json()
+            .catch(() => ({ error: "Admin not configured" }));
+          setAuthError({
+            kind: "not-configured",
+            message:
+              (body as { error?: string }).error ??
+              "Admin auth is not configured on the server.",
+          });
+          setLoading(false);
+          return;
+        }
+        setAuthError({
+          kind: "unexpected",
+          message: `Admin check failed with HTTP ${res.status}.`,
+        });
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        setAuthError({
+          kind: "unexpected",
+          message: err instanceof Error ? err.message : "Network error",
+        });
+        setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [ready, authenticated, router, adminFetch, logout]);
+  }, [ready, authenticated, router, adminFetch]);
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -470,6 +515,58 @@ export default function AdminDashboard() {
       : platformStats?.health.status === "degraded"
       ? "var(--warning)"
       : "var(--text-muted)";
+
+  // ── Auth error state ───────────────────────────────────────────────────────
+  // Renders STAYING on /admin (no auto-bounce, no loop). Operator sees what's
+  // wrong and can act: set env var, switch account, etc.
+
+  if (authError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--panel-bg)] p-8">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            {authError.kind === "not-configured"
+              ? "Admin auth not configured"
+              : authError.kind === "forbidden"
+                ? "Forbidden"
+                : "Admin check failed"}
+          </div>
+          <h1 className="mb-4 text-xl font-bold text-[var(--text)]">
+            {authError.kind === "not-configured"
+              ? "Set PRIVY_ADMIN_EMAILS on Vercel"
+              : authError.kind === "forbidden"
+                ? "Your email isn't an admin"
+                : "Something went wrong"}
+          </h1>
+          <p className="mb-6 text-[13px] leading-relaxed text-[var(--text-secondary)]">
+            {authError.message}
+          </p>
+          {authError.kind === "not-configured" && (
+            <pre className="mb-6 overflow-x-auto rounded-none border border-[var(--border)] bg-[var(--bg)] p-3 font-mono text-[11px] text-[var(--text)]">
+{`PRIVY_ADMIN_EMAILS=dark@percolator.trade,squid@percolator.trade`}
+            </pre>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                await logout();
+                router.replace("/admin/login");
+              }}
+              className="flex-1 rounded-none border border-[var(--border)] px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-secondary)] hover:text-[var(--text)] hover:border-[var(--border-hover)] transition-colors"
+            >
+              Sign out
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="flex-1 rounded-none border border-[var(--accent)]/60 bg-[var(--accent)]/[0.12] px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text)] transition-colors hover:bg-[var(--accent)]/20"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── Loading state ──────────────────────────────────────────────────────────
 
