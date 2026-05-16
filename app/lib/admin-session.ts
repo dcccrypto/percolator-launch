@@ -72,19 +72,46 @@ export async function requireAdminSession(
 
   const auth = await verifyPrivyAuth(req);
   if (!auth.ok) {
+    // Distinguish the two 503 paths the caller cares about — Privy
+    // server SDK unconfigured vs allowlist unconfigured (handled above)
+    // — so the admin page can tell the operator which env var to set.
+    const message =
+      auth.status === 503
+        ? "PRIVY_APP_SECRET not configured on the server"
+        : auth.reason === "invalid-token"
+          ? "Session expired or invalid — sign in again"
+          : "No Privy session";
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Unauthorized" },
+        { error: message },
         { status: auth.status },
       ),
     };
   }
 
-  if (!auth.email || !adminEmails.has(auth.email)) {
+  if (!auth.email) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+      response: NextResponse.json(
+        {
+          error:
+            "Privy session has no verified email — make sure the client sends X-Privy-Id-Token",
+        },
+        { status: 403 },
+      ),
+    };
+  }
+
+  if (!adminEmails.has(auth.email)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error: `Email ${auth.email} is not on the PRIVY_ADMIN_EMAILS allowlist`,
+        },
+        { status: 403 },
+      ),
     };
   }
 

@@ -521,6 +521,24 @@ export default function AdminDashboard() {
   // wrong and can act: set env var, switch account, etc.
 
   if (authError) {
+    // Infer the missing env var from the server's error message so the
+    // panel tells the operator exactly what's wrong (PRIVY_APP_SECRET
+    // vs PRIVY_ADMIN_EMAILS — both surface as 503).
+    const missingEnv = authError.message.includes("PRIVY_APP_SECRET")
+      ? "PRIVY_APP_SECRET"
+      : authError.message.includes("PRIVY_ADMIN_EMAILS")
+        ? "PRIVY_ADMIN_EMAILS"
+        : null;
+    const title =
+      authError.kind === "not-configured"
+        ? missingEnv === "PRIVY_APP_SECRET"
+          ? "Set PRIVY_APP_SECRET on Vercel"
+          : missingEnv === "PRIVY_ADMIN_EMAILS"
+            ? "Set PRIVY_ADMIN_EMAILS on Vercel"
+            : "Admin server is not configured"
+        : authError.kind === "forbidden"
+          ? "Your email isn't an admin"
+          : "Something went wrong";
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-md rounded-none border border-[var(--border)] bg-[var(--panel-bg)] p-8">
@@ -531,17 +549,16 @@ export default function AdminDashboard() {
                 ? "Forbidden"
                 : "Admin check failed"}
           </div>
-          <h1 className="mb-4 text-xl font-bold text-[var(--text)]">
-            {authError.kind === "not-configured"
-              ? "Set PRIVY_ADMIN_EMAILS on Vercel"
-              : authError.kind === "forbidden"
-                ? "Your email isn't an admin"
-                : "Something went wrong"}
-          </h1>
+          <h1 className="mb-4 text-xl font-bold text-[var(--text)]">{title}</h1>
           <p className="mb-6 text-[13px] leading-relaxed text-[var(--text-secondary)]">
             {authError.message}
           </p>
-          {authError.kind === "not-configured" && (
+          {missingEnv === "PRIVY_APP_SECRET" && (
+            <pre className="mb-6 overflow-x-auto rounded-none border border-[var(--border)] bg-[var(--bg)] p-3 font-mono text-[11px] text-[var(--text)]">
+{`PRIVY_APP_SECRET=<paste from Privy dashboard → App Settings → API Keys>`}
+            </pre>
+          )}
+          {missingEnv === "PRIVY_ADMIN_EMAILS" && (
             <pre className="mb-6 overflow-x-auto rounded-none border border-[var(--border)] bg-[var(--bg)] p-3 font-mono text-[11px] text-[var(--text)]">
 {`PRIVY_ADMIN_EMAILS=dark@percolator.trade,squid@percolator.trade`}
             </pre>
