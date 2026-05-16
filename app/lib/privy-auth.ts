@@ -30,7 +30,8 @@ function getClient(): PrivyClient | null {
 
 export interface PrivyAuthResult {
   userId: string; // Privy DID, e.g. "did:privy:cl…"
-  email: string | null; // lowercased
+  email: string | null; // primary email (lowercased) — for storage/display
+  emails: string[]; // ALL verified emails (lowercased) — for allowlist matching
   solanaWallets: string[]; // base58 pubkeys
 }
 
@@ -94,33 +95,40 @@ export async function verifyPrivyAuth(
     }
   }
 
-  const email = extractEmail(user);
+  const emails = extractAllEmails(user);
   const solanaWallets = extractSolanaWallets(user);
 
-  return { ok: true, userId, email, solanaWallets };
+  return {
+    ok: true,
+    userId,
+    email: emails[0] ?? null,
+    emails,
+    solanaWallets,
+  };
 }
 
-function extractEmail(user: User | null): string | null {
-  if (!user) return null;
+/**
+ * Collects every verified email Privy has linked to the user — direct
+ * email logins, Google/Apple OAuth emails, etc. Returns lowercased and
+ * deduped. Callers that need any-match semantics (admin allowlist
+ * check) should iterate this array, not the single-email field.
+ */
+function extractAllEmails(user: User | null): string[] {
+  if (!user) return [];
   const accounts: LinkedAccount[] = user.linked_accounts ?? [];
-
-  // Prefer the directly-linked email account; fall back to a verified
-  // OAuth account that surfaces an email field.
+  const seen = new Set<string>();
   for (const a of accounts) {
     if (a.type === "email" && "address" in a && typeof a.address === "string") {
-      return a.address.toLowerCase();
-    }
-  }
-  for (const a of accounts) {
-    if (
+      seen.add(a.address.toLowerCase());
+    } else if (
       (a.type === "google_oauth" || a.type === "apple_oauth") &&
       "email" in a &&
       typeof a.email === "string"
     ) {
-      return a.email.toLowerCase();
+      seen.add(a.email.toLowerCase());
     }
   }
-  return null;
+  return [...seen];
 }
 
 function extractSolanaWallets(user: User | null): string[] {

@@ -90,7 +90,7 @@ export async function requireAdminSession(
     };
   }
 
-  if (!auth.email) {
+  if (auth.emails.length === 0) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -103,17 +103,22 @@ export async function requireAdminSession(
     };
   }
 
-  if (!adminEmails.has(auth.email)) {
+  // Any-match: a Privy user can have multiple linked emails (direct
+  // + Google OAuth + Apple OAuth). Accept if ANY of them is on the
+  // allowlist. Otherwise surface the full list so the operator can
+  // see exactly what Privy associates with their session.
+  const matched = auth.emails.find((e) => adminEmails.has(e)) ?? null;
+  if (!matched) {
     return {
       ok: false,
       response: NextResponse.json(
         {
-          error: `Email ${auth.email} is not on the PRIVY_ADMIN_EMAILS allowlist`,
+          error: `Signed in as ${auth.emails.join(", ")} — none of these is on PRIVY_ADMIN_EMAILS. Add one, or sign in with an allowlisted email.`,
         },
         { status: 403 },
       ),
     };
   }
 
-  return { ok: true, userId: auth.userId, email: auth.email };
+  return { ok: true, userId: auth.userId, email: matched };
 }
