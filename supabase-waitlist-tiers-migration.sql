@@ -103,8 +103,13 @@ do $$ begin
 end $$;
 
 -- ── Update the leaderboard RPC to include each row's tier ───────────
--- Keeps backward-compat: existing callers that ignore the new column
--- still work. New callers can read `tier` to render the A/B/C badge.
+-- Postgres won't let CREATE OR REPLACE change a function's return type
+-- (returning table (..., tier int) widens the row shape), so we DROP
+-- first. The previous version exists from the original waitlist schema
+-- migration; this DROP-then-CREATE is the documented Postgres idiom for
+-- "add a column to a SETOF/RETURNS TABLE function".
+drop function if exists public.waitlist_referral_leaderboard();
+
 create or replace function public.waitlist_referral_leaderboard()
 returns table (
   referral_code text,
