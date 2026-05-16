@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
+import { useAdminFetch } from "@/hooks/useAdminFetch";
 
 const card = "rounded-none bg-[var(--panel-bg)] border border-[var(--border)]";
 const labelStyle =
@@ -107,11 +108,8 @@ function tierColor(tier: number): string {
   return "var(--text-secondary)";
 }
 
-const fetcher = async (url: string) => {
-  const res = await fetch(url, { credentials: "include" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-};
+// Fetcher is now built inside the component from useAdminFetch so the
+// Privy access + identity tokens get attached to every admin call.
 
 function truncatePubkey(pubkey: string | null): string {
   if (!pubkey) return "—";
@@ -145,6 +143,16 @@ function formatDate(iso: string): string {
  * a sanitisation layer + sign-off on the gamification surface.
  */
 export function WaitlistLeaderboardSection() {
+  const adminFetch = useAdminFetch();
+  const fetcher = useMemo(
+    () => async (url: string) => {
+      const res = await adminFetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    [adminFetch],
+  );
+
   const [limit, setLimit] = useState<10 | 25 | 100>(25);
   const { data, error, isLoading, mutate } = useSWR<{
     leaderboard: AdminLeaderboardEntry[];
@@ -201,9 +209,8 @@ export function WaitlistLeaderboardSection() {
       // the run (which the server mirrors from the CLI script — re-running
       // after a flag-failure would double-email those users).
       while (true) {
-        const res = await fetch("/api/admin/waitlist/backfill-emails", {
+        const res = await adminFetch("/api/admin/waitlist/backfill-emails", {
           method: "POST",
-          credentials: "include",
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));

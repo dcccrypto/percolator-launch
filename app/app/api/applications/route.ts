@@ -19,8 +19,8 @@ const TABLE = "job_applications";
  * Lists job applications (full PII). **Auth:** Supabase session + `admin_users` row
  * (same model as `GET /api/admin/bugs`). Not gated by `INDEXER_API_KEY`.
  */
-export async function GET() {
-  const auth = await requireAdminSession();
+export async function GET(req: Request) {
+  const auth = await requireAdminSession(req);
   if (!auth.ok) return auth.response;
 
   try {

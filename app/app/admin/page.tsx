@@ -2,17 +2,20 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { createBrowserClient } from "@supabase/ssr";
-import type { User } from "@supabase/supabase-js";
+import { usePrivy } from "@privy-io/react-auth";
+import { useAdminFetch } from "@/hooks/useAdminFetch";
 import { OracleAdminSection } from "@/components/admin/OracleAdminSection";
 import { OracleFreshnessSection } from "@/components/admin/OracleFreshnessSection";
 import { WaitlistLeaderboardSection } from "@/components/admin/WaitlistLeaderboardSection";
 
-function getAuthClient() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+/**
+ * Admin user shape. Pivoted from a Supabase User to a slim Privy
+ * shape — see lib/admin-session.ts for the server-side gate
+ * (verifyPrivyAuth + PRIVY_ADMIN_EMAILS allowlist).
+ */
+interface AdminUser {
+  userId: string;
+  email: string;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -297,7 +300,9 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
+  const { ready, authenticated, logout } = usePrivy();
+  const adminFetch = useAdminFetch();
+  const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [bugs, setBugs] = useState<BugReport[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -311,29 +316,45 @@ export default function AdminDashboard() {
   const [statsLoading, setStatsLoading] = useState(false);
 
   // ── Auth ───────────────────────────────────────────────────────────────────
+  // Privy session → /api/admin/whoami → 200 means in PRIVY_ADMIN_EMAILS.
+  // Anything else sends them to /admin/login. The server-side route is the
+  // canonical gate — this client check exists so we can render the dashboard
+  // without flashing it to non-admins.
 
   useEffect(() => {
-    getAuthClient()
-      .auth.getUser()
-      .then(async ({ data }) => {
-        if (!data.user) {
-          router.push("/admin/login");
+    if (!ready) return;
+    if (!authenticated) {
+      router.replace("/admin/login");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await adminFetch("/api/admin/whoami");
+        if (cancelled) return;
+        if (res.status === 200) {
+          const json = (await res.json()) as { email: string; userId: string };
+          setUser({ email: json.email, userId: json.userId });
+          setLoading(false);
           return;
         }
-        const { data: adminRow } = await getAuthClient()
-          .from("admin_users")
-          .select("id")
-          .eq("email", data.user.email!)
-          .maybeSingle();
-        if (!adminRow) {
-          await getAuthClient().auth.signOut();
-          router.push("/admin/login");
+        if (res.status === 403) {
+          // Logged in via Privy but not in the admin allowlist.
+          await logout();
+          router.replace("/admin/login");
           return;
         }
-        setUser(data.user);
-        setLoading(false);
-      });
-  }, [router]);
+        // 401/503/other — push back to login and let that page show
+        // a useful state.
+        router.replace("/admin/login");
+      } catch {
+        if (!cancelled) router.replace("/admin/login");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, authenticated, router, adminFetch, logout]);
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -341,11 +362,11 @@ export default function AdminDashboard() {
     // Use server-side /api/admin/bugs which fetches with service_role, returning
     // all columns including those restricted from the authenticated Supabase role
     // by migration 034 (twitter_handle, admin_notes, bounty_wallet, ip, etc.).
-    const res = await fetch("/api/admin/bugs").catch(() => null);
+    const res = await adminFetch("/api/admin/bugs").catch(() => null);
     if (!res?.ok) return;
     const data = await res.json().catch(() => null);
     if (Array.isArray(data)) setBugs(data as BugReport[]);
-  }, []);
+  }, [adminFetch]);
 
   const fetchPlatformStats = useCallback(async () => {
     setStatsLoading(true);
@@ -391,7 +412,7 @@ export default function AdminDashboard() {
 
   const updateStatus = async (bugId: string, newStatus: string) => {
     setSaving(true);
-    const res = await fetch("/api/admin/bugs", {
+    const res = await adminFetch("/api/admin/bugs", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: bugId, status: newStatus }),
@@ -411,7 +432,7 @@ export default function AdminDashboard() {
   const saveNotes = async () => {
     if (!selectedBug) return;
     setSaving(true);
-    const res = await fetch("/api/admin/bugs", {
+    const res = await adminFetch("/api/admin/bugs", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: selectedBug.id, admin_notes: adminNotes }),
@@ -429,7 +450,7 @@ export default function AdminDashboard() {
   };
 
   const signOut = async () => {
-    await getAuthClient().auth.signOut();
+    await logout();
     router.push("/admin/login");
   };
 

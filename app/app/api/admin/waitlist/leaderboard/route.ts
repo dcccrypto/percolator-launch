@@ -44,8 +44,8 @@ interface AdminLeaderboardEntry {
  *    (people gaming for visibility) before we want that loop running
  *  - the leaderboard is an operator tool for now, not a user-facing one
  */
-export async function GET() {
-  const auth = await requireAdminSession();
+export async function GET(req: Request) {
+  const auth = await requireAdminSession(req);
   if (!auth.ok) return auth.response;
 
   try {

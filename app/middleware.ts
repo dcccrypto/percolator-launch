@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
@@ -353,50 +352,27 @@ export async function middleware(request: NextRequest) {
     });
   }
 
-  // ── Admin route guard (server-side session check) ──────────────────────────
-  // The /admin page component does a client-side auth check, but that fires
-  // after pre-render HTML is served (visible with JS disabled).  This guard
-  // ensures any unauthenticated request to /admin/* is redirected before any
-  // server-rendered content is produced.  Actual data is also protected by
-  // Supabase RLS + admin_users table, so this is defense-in-depth (LOW risk).
+  // ── Admin route guard ──────────────────────────────────────────────────────
+  // Was a Supabase Auth + admin_users check, but we pivoted admin auth to
+  // Privy + PRIVY_ADMIN_EMAILS (see lib/admin-session.ts) when the trading
+  // Supabase project went away. Privy session lives in the browser and gets
+  // attached to admin API calls via useAdminFetch, so the middleware can't
+  // verify the Privy session in the Edge runtime without bundling the SDK.
+  //
+  // Instead:
+  //   • The /admin page itself calls /api/admin/whoami on mount and bounces
+  //     to /admin/login if the Privy session isn't an allowlisted admin.
+  //   • Every /api/admin/* route gates on requireAdminSession(req) server-
+  //     side, so even if the page leaked HTML the data is locked down.
+  //
+  // We still attach the security headers + skip /admin/login from any host-
+  // level redirects above.
   const isAdminRoute =
     request.nextUrl.pathname.startsWith("/admin") &&
     !request.nextUrl.pathname.startsWith("/admin/login");
 
   if (isAdminRoute) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      // Env vars missing — redirect to login rather than expose admin
-      const loginUrl = new URL("/admin/login", request.url);
-      return NextResponse.redirect(loginUrl);
-    }
-
     const response = NextResponse.next();
-    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
-          });
-        },
-      },
-    });
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      const loginUrl = new URL("/admin/login", request.url);
-      return NextResponse.redirect(loginUrl);
-    }
-
-    // User is authenticated — continue to admin route with security headers
     addSecurityHeaders(response);
     return response;
   }

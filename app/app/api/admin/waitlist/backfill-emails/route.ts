@@ -28,8 +28,8 @@ function sleep(ms: number): Promise<void> {
  * GET — return the pending count without sending anything.
  * The admin UI uses this to decide whether to show the "Send emails" button.
  */
-export async function GET() {
-  const auth = await requireAdminSession();
+export async function GET(req: Request) {
+  const auth = await requireAdminSession(req);
   if (!auth.ok) return auth.response;
   try {
     const supabase = getWaitlistServiceSupabase();
@@ -65,8 +65,8 @@ export async function GET() {
  * `referral_code_emailed_at IS NOT NULL` so already-emailed users
  * are never re-sent.
  */
-export async function POST() {
-  const auth = await requireAdminSession();
+export async function POST(req: Request) {
+  const auth = await requireAdminSession(req);
   if (!auth.ok) return auth.response;
 
   const resendKey = process.env.RESEND_API_KEY?.trim();

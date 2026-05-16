@@ -19,8 +19,8 @@ export const dynamic = "force-dynamic";
  * Service-role reads only — anon path stays revoked. Admin session
  * required.
  */
-export async function GET() {
-  const auth = await requireAdminSession();
+export async function GET(req: Request) {
+  const auth = await requireAdminSession(req);
   if (!auth.ok) return auth.response;
 
   try {

@@ -1,94 +1,80 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createBrowserClient } from "@supabase/ssr";
+import { usePrivy } from "@privy-io/react-auth";
 
-function getAuthClient() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-}
-
+/**
+ * Admin login — delegates to Privy's modal (email + OTP, optional 2FA
+ * once enabled in the Privy dashboard). Whether the logged-in user is
+ * an admin is decided server-side from PRIVY_ADMIN_EMAILS, so this
+ * page just gets them through Privy and bounces them to /admin where
+ * the page-level guard does the actual gate.
+ */
 const card = "rounded-none bg-[var(--panel-bg)] border border-[var(--border)] p-8";
-const labelStyle = "block text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-muted)] mb-1.5";
-const inputStyle =
-  "w-full rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)] focus:outline-none transition-colors";
 
 export default function AdminLoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { ready, authenticated, login, user } = usePrivy();
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    const { error: authError } = await getAuthClient().auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (authError) {
-      setError(authError.message);
-      setLoading(false);
-      return;
+  useEffect(() => {
+    if (ready && authenticated) {
+      router.replace("/admin");
     }
+  }, [ready, authenticated, router]);
 
-    router.push("/admin");
-  };
+  if (!ready) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className={`${card} w-full max-w-sm text-center`}>
+          <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
+            Loading session...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <div className={`${card} w-full max-w-[400px]`}>
-        <div className="mb-6">
-          <div className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--accent)] mb-1">
-            Percolator
-          </div>
-          <h1 className="text-lg font-bold text-[var(--text)]">Admin Access</h1>
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className={`${card} w-full max-w-sm`}>
+        <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-muted)]">
+          Percolator
         </div>
+        <h1 className="text-xl font-bold text-[var(--text)] mb-6">Admin Login</h1>
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className={labelStyle}>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className={inputStyle}
-              placeholder="Email address"
-              required
-            />
+        {authenticated ? (
+          <div className="space-y-3">
+            <p className="text-[13px] text-[var(--text-secondary)]">
+              Signed in as{" "}
+              <span className="font-mono text-[var(--text)]">
+                {user?.email?.address ?? user?.id}
+              </span>
+            </p>
+            <button
+              onClick={() => router.replace("/admin")}
+              className="block w-full rounded-none border border-[var(--accent)]/60 bg-[var(--accent)]/[0.12] px-4 py-3 text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--text)] transition-colors hover:bg-[var(--accent)]/20"
+            >
+              Continue to admin &rarr;
+            </button>
           </div>
-
-          <div>
-            <label className={labelStyle}>Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputStyle}
-              placeholder="Enter password"
-              required
-            />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
+              Sign in via Privy. Email + 2FA. Only addresses listed in
+              <code className="mx-1 font-mono text-[12px] text-[var(--text)]">
+                PRIVY_ADMIN_EMAILS
+              </code>
+              can reach the dashboard.
+            </p>
+            <button
+              onClick={login}
+              className="block w-full rounded-none border border-[var(--accent)]/60 bg-[var(--accent)]/[0.12] px-4 py-3 text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--text)] transition-colors hover:bg-[var(--accent)]/20"
+            >
+              Sign in with Privy &rarr;
+            </button>
           </div>
-
-          {error && (
-            <div className="text-[12px] text-[var(--short)]">{error}</div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-none bg-[var(--accent)] px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.15em] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-          >
-            {loading ? "Signing in..." : "Sign In"}
-          </button>
-        </form>
+        )}
       </div>
     </div>
   );

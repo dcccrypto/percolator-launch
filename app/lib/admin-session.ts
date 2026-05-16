@@ -1,86 +1,92 @@
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
-import type { User } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/supabase";
-
-export type AdminSessionResult =
-  | { ok: true; user: User }
-  | { ok: false; response: NextResponse };
-
-function normalizeEmail(value: string): string {
-  return value.trim().toLowerCase();
-}
+import { verifyPrivyAuth } from "@/lib/privy-auth";
 
 /**
- * Verify Supabase Auth session (cookies) and membership in `admin_users`.
- * For Route Handlers that return PII using `getServiceClient()`.
+ * Admin auth, pivoted from Supabase Auth + admin_users table to
+ * Privy session + email allowlist.
+ *
+ * Why the change: the original implementation required a working
+ * trading Supabase project (NEXT_PUBLIC_SUPABASE_URL) to verify
+ * Supabase Auth cookies + read the admin_users table. When that
+ * project went down, admin login broke entirely.
+ *
+ * The new model:
+ *  1. Caller (admin route handler or the admin page itself) attaches
+ *     a Privy access token in `Authorization: Bearer …` plus an
+ *     identity token in `X-Privy-Id-Token`. verifyPrivyAuth verifies
+ *     both via @privy-io/node and extracts the user's linked email.
+ *  2. We check the verified email against PRIVY_ADMIN_EMAILS, a
+ *     comma-separated env-var allowlist (case-insensitive). Members
+ *     are admins; everyone else gets 403.
+ *
+ * The email comes from a verified Privy identity token, so we trust
+ * Privy's OTP / 2FA verification implicitly — when Privy 2FA is
+ * enabled in the dashboard, admins step through the second factor
+ * before a session is issued, then any request bearing that session
+ * is an authenticated-second-factor request.
  */
-export async function requireAdminSession(): Promise<AdminSessionResult> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Admin auth is not configured" }, { status: 503 }),
-    };
-  }
 
-  const cookieStore = await cookies();
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseAnonKey,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll() {
-          /* read-only in Route Handlers */
-        },
-      },
-    },
+function normalizeEmail(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+// Resolved fresh on each call so env edits take effect on the next
+// request without needing a process restart.
+function getAdminEmailSet(): Set<string> {
+  const raw = (process.env.PRIVY_ADMIN_EMAILS ?? "").trim();
+  return new Set(
+    raw
+      .split(",")
+      .map(normalizeEmail)
+      .filter(Boolean),
   );
+}
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  if (error || !user) {
+export type AdminSessionResult =
+  | { ok: true; userId: string; email: string }
+  | { ok: false; response: NextResponse };
+
+/**
+ * Verify the caller is an admin. Pass the incoming Request so we can
+ * read the Privy headers off it.
+ *
+ * Returns 503 when the allowlist is empty (config error — refuse to
+ * silently allow everyone). 401 on missing/invalid Privy token. 403
+ * when the verified email isn't in the allowlist (or the token has
+ * no verified email, which usually means the client forgot to send
+ * the X-Privy-Id-Token header).
+ */
+export async function requireAdminSession(
+  req: Request,
+): Promise<AdminSessionResult> {
+  const adminEmails = getAdminEmailSet();
+  if (adminEmails.size === 0) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "PRIVY_ADMIN_EMAILS not configured" },
+        { status: 503 },
+      ),
     };
   }
-  if (!user.email) {
+
+  const auth = await verifyPrivyAuth(req);
+  if (!auth.ok) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "Unauthorized" },
+        { status: auth.status },
+      ),
     };
   }
 
-  if (!user.email_confirmed_at) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
-    };
-  }
-
-  const email = normalizeEmail(user.email);
-
-  const sb = getServiceClient();
-  const { data: adminRow } = await sb
-    .from("admin_users")
-    .select("id")
-    .eq("email", email)
-    .maybeSingle();
-
-  if (!adminRow) {
+  if (!auth.email || !adminEmails.has(auth.email)) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     };
   }
 
-  return { ok: true, user };
+  return { ok: true, userId: auth.userId, email: auth.email };
 }

@@ -24,8 +24,8 @@ import { requireAdminSession } from "@/lib/admin-session";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const auth = await requireAdminSession();
+export async function GET(req: Request) {
+  const auth = await requireAdminSession(req);
   if (!auth.ok) return auth.response;
 
   const sb = getServiceClient();
@@ -46,7 +46,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await requireAdminSession();
+  const auth = await requireAdminSession(req);
   if (!auth.ok) return auth.response;
 
   const sb = getServiceClient();
