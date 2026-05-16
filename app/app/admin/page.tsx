@@ -361,9 +361,17 @@ export default function AdminDashboard() {
           return;
         }
         if (res.status === 403) {
+          // The server tells us exactly which emails are on the
+          // session (PR #2188 — multi-email match). Show that
+          // verbatim so the operator can see which account they're
+          // signed in as and which one needs adding to the allowlist.
+          const body = await res
+            .json()
+            .catch(() => ({ error: "" }));
           setAuthError({
             kind: "forbidden",
             message:
+              (body as { error?: string }).error ||
               "You're signed in via Privy, but your email isn't on the admin allowlist (PRIVY_ADMIN_EMAILS). Sign out and use an admin email, or ask an operator to add yours.",
           });
           setLoading(false);
