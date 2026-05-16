@@ -5,6 +5,7 @@ import bs58 from "bs58";
 import { Resend } from "resend";
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
+import { renderWelcomeEmail } from "@/lib/waitlist/email-template";
 import {
   getWaitlistSupabase,
   getWaitlistServiceSupabase,
@@ -650,72 +651,12 @@ async function sendConfirmationEmail(
       console.warn("[waitlist-signup] mark emailed failed (non-fatal)", err);
     }
   };
-  const positionLine = position
-    ? `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.5; color: #4A4B62;">You're <strong style="color: #9945FF; font-family: ui-monospace, SFMono-Regular, monospace;">#${position}</strong> on the list.</p>`
-    : "";
-
-  // Referral block — code + share link. Rendered inline as a copy-friendly
-  // monospace pill. The link points at /r/<code>; that route attributes the
-  // referrer for any signup that lands through it (separate follow-up PR).
-  const referralBlock = referralCode
-    ? `<div style="margin: 0 0 20px; padding: 14px 16px; background: #F8F8FC; border: 1px solid #E0E0EC; border-radius: 6px;">
-        <div style="font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; letter-spacing: 0.18em; color: #8A8BA8; text-transform: uppercase; margin-bottom: 6px;">YOUR REFERRAL CODE</div>
-        <div style="font-family: ui-monospace, SFMono-Regular, monospace; font-size: 20px; font-weight: 700; letter-spacing: 0.08em; color: #0D0E15;">${referralCode}</div>
-        <div style="margin-top: 10px; font-size: 12.5px; line-height: 1.55; color: #4A4B62;">Share your link: <a href="https://percolator.trade/r/${referralCode}" style="color:#9945FF; text-decoration: underline; font-family: ui-monospace, SFMono-Regular, monospace;">percolator.trade/r/${referralCode}</a></div>
-      </div>`
-    : "";
-
-  const referralText = referralCode
-    ? `\n\nYour referral code: ${referralCode}\nShare your link: https://percolator.trade/r/${referralCode}\n`
-    : "";
-
-  // If the signup came in with a wallet (Privy email login → embedded
-  // wallet), the user is already covered by the on-chain notification
-  // path. If it's email-only, nudge them toward the wallet path as a
-  // backup channel.
-  const secondaryParagraph = hasWallet
-    ? `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
-        We also created a Solana wallet under your email (Privy embedded). When mainnet opens, the dApp at percolator.trade will recognise that wallet and unlock your priority access automatically — no extra step.
-      </p>`
-    : `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
-        Have a Solana wallet of your own? Sign up <a href="https://percolator.trade/#reserve" style="color:#9945FF; text-decoration: underline;">with your wallet too</a> — we send a wallet-native notification on chain (memo from our project wallet) when mainnet opens, so you get pinged in Phantom even if you miss this email.
-      </p>`;
-
-  const secondaryText = hasWallet
-    ? `We also created a Solana wallet under your email (Privy embedded). When mainnet opens, the dApp at percolator.trade will recognise that wallet and unlock your priority access automatically — no extra step.`
-    : `Have a Solana wallet? Sign up with your wallet too at https://percolator.trade/#reserve — we send a wallet-native notification on chain when mainnet opens.`;
-
-  await resend.emails.send({
-    from: FROM,
-    to: email,
-    subject: "You're on the Percolator waitlist",
-    html: `<!doctype html>
-<html><head><meta charset="utf-8"><title>Welcome</title></head>
-<body style="margin:0; padding:32px 16px; background:#F8F8FC; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #0D0E15;">
-  <div style="max-width:560px; margin:0 auto; background:#FFFFFF; border:1px solid #E0E0EC; border-radius:8px; overflow:hidden;">
-    <div style="padding: 28px 28px 0;">
-      <div style="font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; letter-spacing: 0.18em; color: #8A8BA8; text-transform: uppercase;">PERCOLATOR · WAITLIST</div>
-    </div>
-    <div style="padding: 18px 28px 28px;">
-      <h1 style="margin: 0 0 12px; font-size: 22px; line-height: 1.2; font-weight: 700; color: #0D0E15;">You're on the list.</h1>
-      ${positionLine}
-      ${referralBlock}
-      <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.65; color: #4A4B62;">
-        Mainnet opens after our external audit clears (targeting Q3 2026). We'll email you here when it does.
-      </p>
-      ${secondaryParagraph}
-      <hr style="margin: 22px 0; border:0; border-top: 1px solid #E0E0EC;">
-      <p style="margin: 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; line-height: 1.7; color: #8A8BA8;">
-        <a href="https://x.com/percolatortrade" style="color:#8A8BA8; text-decoration:none;">@percolatortrade</a> · <a href="https://github.com/dcccrypto" style="color:#8A8BA8; text-decoration:none;">github.com/dcccrypto</a> · <a href="https://percolator.trade/pitch" style="color:#8A8BA8; text-decoration:none;">percolator.trade/pitch</a>
-      </p>
-    </div>
-  </div>
-  <p style="max-width:560px; margin: 14px auto 0; font-size: 11px; line-height: 1.5; color: #B8B9CC; text-align: center;">
-    You received this because you joined the Percolator waitlist at percolator.trade. If you'd like to be removed, reply with "remove".
-  </p>
-</body></html>`,
-    text: `You're on the Percolator waitlist.${position ? `\n\nYou're #${position} on the list.` : ""}${referralText}\nMainnet opens after our external audit clears (targeting Q3 2026). We'll email you here when it does.\n\n${secondaryText}\n\n@percolatortrade · github.com/dcccrypto · percolator.trade/pitch\n\n—\nYou received this because you joined the Percolator waitlist. Reply "remove" to be removed.`,
+  const { html, text, subject } = renderWelcomeEmail({
+    position,
+    referralCode,
+    hasWallet,
   });
+  await resend.emails.send({ from: FROM, to: email, subject, html, text });
 
   // Resend.send resolves on accept — at that point the message is queued
   // with Resend. Mark the row so the backfill doesn't re-email this user.
