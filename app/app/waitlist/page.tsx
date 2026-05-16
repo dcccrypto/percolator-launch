@@ -6,6 +6,7 @@ import { usePrivy, useLoginWithEmail } from "@privy-io/react-auth";
 import { useWallets, useSignMessage } from "@privy-io/react-auth/solana";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
 import { resolveActiveWallet, usePreferredWallet } from "@/hooks/usePreferredWallet";
+import { useWaitlistWhoami } from "@/hooks/useWaitlistWhoami";
 import bs58 from "bs58";
 
 /**
@@ -297,6 +298,13 @@ function SpecField({
 function SignupCard() {
   const privyAvailable = usePrivyAvailable();
   const [tab, setTab] = useState<"wallet" | "email">("wallet");
+
+  // Auto-detect: if the visitor is already a Privy user *and* already on
+  // the waitlist (by DID / wallet / email), skip the signup form entirely
+  // and surface their existing referral code. Returns "idle" / "checking"
+  // / "not-found" / "found" — we only intercept the rendering on "found".
+  const whoami = useWaitlistWhoami();
+
   return (
     <div className="relative w-full max-w-[460px]">
       {/* Static accent gradient halo behind the card — gives it presence */}
@@ -325,42 +333,115 @@ function SignupCard() {
               waitlist · v1
             </span>
           </div>
-          <span className="inline-flex items-center gap-1.5 rounded-sm border border-[var(--accent)]/50 bg-[var(--accent)]/[0.12] px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.18em] text-[var(--accent)]">
-            <svg
-              aria-hidden
-              viewBox="0 0 12 12"
-              className="h-2.5 w-2.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.6}
-            >
-              <rect x="3" y="5.5" width="6" height="5" rx="0.6" />
-              <path d="M4.25 5.5V3.75a1.75 1.75 0 1 1 3.5 0V5.5" />
-            </svg>
-            Invite only
-          </span>
-        </div>
-
-        {/* Tab selector */}
-        <div className="mb-4 grid grid-cols-2 gap-1 rounded-md border border-[var(--border)] bg-[var(--bg)] p-1">
-          <TabButton active={tab === "wallet"} onClick={() => setTab("wallet")}>
-            Wallet
-          </TabButton>
-          <TabButton active={tab === "email"} onClick={() => setTab("email")}>
-            Email
-          </TabButton>
-        </div>
-
-        {tab === "wallet" ? (
-          privyAvailable ? (
-            <SignupFlow />
+          {whoami.status === "found" ? (
+            <span className="inline-flex items-center gap-1.5 rounded-sm border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.12] px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.18em] text-[var(--cyan)]">
+              ✓ on the list
+            </span>
           ) : (
-            <StatusErr>Wallet provider not configured. Reload the page.</StatusErr>
-          )
+            <span className="inline-flex items-center gap-1.5 rounded-sm border border-[var(--accent)]/50 bg-[var(--accent)]/[0.12] px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.18em] text-[var(--accent)]">
+              <svg
+                aria-hidden
+                viewBox="0 0 12 12"
+                className="h-2.5 w-2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.6}
+              >
+                <rect x="3" y="5.5" width="6" height="5" rx="0.6" />
+                <path d="M4.25 5.5V3.75a1.75 1.75 0 1 1 3.5 0V5.5" />
+              </svg>
+              Invite only
+            </span>
+          )}
+        </div>
+
+        {whoami.status === "found" ? (
+          <WelcomeBackPanel
+            referralCode={whoami.referralCode}
+            position={whoami.position}
+          />
         ) : (
-          <EmailFlow />
+          <>
+            {/* Tab selector */}
+            <div className="mb-4 grid grid-cols-2 gap-1 rounded-md border border-[var(--border)] bg-[var(--bg)] p-1">
+              <TabButton active={tab === "wallet"} onClick={() => setTab("wallet")}>
+                Wallet
+              </TabButton>
+              <TabButton active={tab === "email"} onClick={() => setTab("email")}>
+                Email
+              </TabButton>
+            </div>
+
+            {whoami.status === "checking" && (
+              <div className="mb-3 flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--text-dim)]">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent)]" />
+                checking_session...
+              </div>
+            )}
+
+            {tab === "wallet" ? (
+              privyAvailable ? (
+                <SignupFlow />
+              ) : (
+                <StatusErr>Wallet provider not configured. Reload the page.</StatusErr>
+              )
+            ) : (
+              <EmailFlow />
+            )}
+          </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Returning-user UI. Shown when /api/waitlist/whoami resolves to "found"
+ * via Privy session — usually a single fetch after page load, no manual
+ * sign / submit step required from the user.
+ *
+ * Reuses ReferralCard for the code + share link block so the visual
+ * language matches the post-signup state of the existing flows.
+ */
+function WelcomeBackPanel({
+  referralCode,
+  position,
+}: {
+  referralCode: string;
+  position: number | null;
+}) {
+  const shareUrl = `https://percolator.trade/r/${referralCode}`;
+  return (
+    <div className="space-y-3.5">
+      <PromptLine prefix="$" text="welcome_back" status="ok" />
+      <div className="rounded-md border border-[var(--cyan)]/25 bg-[var(--cyan)]/[0.05] p-3.5">
+        <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--cyan)]">
+          ✓ already on the list
+        </div>
+        {position ? (
+          <div
+            className="mt-1.5 font-mono text-[28px] font-bold leading-none text-[var(--text)]"
+            style={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            #{position.toLocaleString()}
+          </div>
+        ) : null}
+        <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
+          We recognised you from your Privy session — no need to sign again.
+          Your referral code is below.
+        </p>
+      </div>
+      <ReferralCard code={referralCode} shareUrl={shareUrl} />
+      <a
+        className={ctaSecondary}
+        href={`https://x.com/intent/post?text=${encodeURIComponent(
+          `Just got my Percolator waitlist code: ${referralCode}. Permissionless perp futures on Solana. ${shareUrl}`,
+        )}`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        → Share on X
+      </a>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { Resend } from "resend";
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
 import { renderWelcomeEmail } from "@/lib/waitlist/email-template";
+import { verifyPrivyAuth } from "@/lib/privy-auth";
 import {
   getWaitlistSupabase,
   getWaitlistServiceSupabase,
@@ -203,6 +204,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
 
+  // Optional Privy attestation. When present and verifiable, we'll:
+  //   • match this signup to an existing waitlist row by DID first,
+  //   • backfill privy_did onto rows we find via pubkey or email,
+  //   • stamp privy_did onto any new row we insert.
+  // The route still accepts unauthenticated signups (just an email or
+  // just a wallet sig) — the DID is purely additive when supplied.
+  const privyAuth = await verifyPrivyAuth(req);
+  const privyDid = privyAuth.ok ? privyAuth.userId : null;
+
   const b = body as Record<string, unknown>;
 
   // Honeypot — silently accept and drop
@@ -331,10 +341,26 @@ export async function POST(req: Request) {
       const service = getWaitlistServiceSupabase();
       const { data: existing } = await service
         .from("waitlist")
-        .select("referral_code")
+        .select("id, referral_code, privy_did")
         .eq("pubkey", pubkey)
         .maybeSingle();
       if (existing && existing.referral_code) {
+        // Opportunistic Privy DID backfill — if the caller carries a
+        // valid Privy session and this row has no DID yet, link them
+        // so future /whoami lookups are O(1) on the indexed column.
+        if (privyDid && !existing.privy_did) {
+          try {
+            await service
+              .from("waitlist")
+              .update({ privy_did: privyDid })
+              .eq("id", existing.id)
+              .is("privy_did", null);
+          } catch (err) {
+            // 23505 means another concurrent request claimed the DID;
+            // the row is now linked either way. Non-fatal.
+            console.warn("[waitlist-signup] privy_did backfill non-fatal", err);
+          }
+        }
         let position: number | null = null;
         try {
           const { data } = await service.rpc("waitlist_position", {
@@ -442,6 +468,7 @@ export async function POST(req: Request) {
     baseRow.message = message;
   }
   baseRow.referred_by_code = referredByCode;
+  if (privyDid) baseRow.privy_did = privyDid;
 
   const MAX_CODE_ATTEMPTS = 8;
   let referralCode: string | null = null;
