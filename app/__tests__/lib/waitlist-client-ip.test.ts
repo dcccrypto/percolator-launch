@@ -1,0 +1,119 @@
+/**
+ * Header-precedence + IP-hashing tests for the waitlist client-IP helper.
+ *
+ * The route trusts header values from upstream proxies. Wrong precedence
+ * here would let a client inject a fake IP via `x-forwarded-for` and
+ * bypass the per-IP rate limit. The tests pin:
+ *
+ *   1. cf-connecting-ip wins over x-real-ip wins over x-forwarded-for.
+ *   2. x-forwarded-for chain handling takes the LEFTMOST entry only.
+ *   3. IPv6 bracketed-with-port is normalised.
+ *   4. IPv4 with trailing port is stripped.
+ *   5. Garbage in any header → null returned (route writes NULL).
+ *   6. Hash requires a salt; returns null without one.
+ *   7. Same IP + same salt → stable hash; different salt → different hash.
+ */
+
+import { describe, it, expect } from "vitest";
+import { getClientIp, hashIp } from "../../lib/waitlist/client-ip";
+
+function headers(map: Record<string, string>): Headers {
+  const h = new Headers();
+  for (const [k, v] of Object.entries(map)) h.set(k, v);
+  return h;
+}
+
+describe("getClientIp", () => {
+  it("prefers cf-connecting-ip over x-real-ip and x-forwarded-for", () => {
+    const h = headers({
+      "cf-connecting-ip": "203.0.113.10",
+      "x-real-ip": "198.51.100.1",
+      "x-forwarded-for": "192.0.2.1, 10.0.0.1",
+    });
+    expect(getClientIp(h)).toBe("203.0.113.10");
+  });
+
+  it("falls back to x-real-ip when cf-connecting-ip absent", () => {
+    const h = headers({
+      "x-real-ip": "198.51.100.1",
+      "x-forwarded-for": "192.0.2.1, 10.0.0.1",
+    });
+    expect(getClientIp(h)).toBe("198.51.100.1");
+  });
+
+  it("falls back to leftmost x-forwarded-for entry when both above absent", () => {
+    const h = headers({ "x-forwarded-for": "192.0.2.1, 10.0.0.1, 172.16.0.1" });
+    expect(getClientIp(h)).toBe("192.0.2.1");
+  });
+
+  it("returns null when no forwarding header is present", () => {
+    expect(getClientIp(headers({}))).toBeNull();
+  });
+
+  it("returns null when the header value is malformed garbage", () => {
+    const h = headers({ "cf-connecting-ip": "not-an-ip!@#$" });
+    expect(getClientIp(h)).toBeNull();
+  });
+
+  it("returns null when the header value is empty after trim", () => {
+    const h = headers({ "x-forwarded-for": "   ,   ,   " });
+    expect(getClientIp(h)).toBeNull();
+  });
+
+  it("strips the trailing port off an IPv4 with :port", () => {
+    const h = headers({ "cf-connecting-ip": "192.0.2.1:51234" });
+    expect(getClientIp(h)).toBe("192.0.2.1");
+  });
+
+  it("strips the brackets off a bracketed IPv6", () => {
+    const h = headers({ "cf-connecting-ip": "[2001:db8::1]:443" });
+    expect(getClientIp(h)).toBe("2001:db8::1");
+  });
+
+  it("returns a bare IPv6 unmodified", () => {
+    const h = headers({ "cf-connecting-ip": "2001:db8::1" });
+    expect(getClientIp(h)).toBe("2001:db8::1");
+  });
+
+  it("does not treat the colon in IPv6 as a port separator", () => {
+    // Same hex format, no brackets — we must not strip after the first colon.
+    const h = headers({ "cf-connecting-ip": "fe80::1" });
+    expect(getClientIp(h)).toBe("fe80::1");
+  });
+
+  it("rejects implausibly long header values", () => {
+    const h = headers({ "cf-connecting-ip": "1.2.3.4" + "5".repeat(100) });
+    expect(getClientIp(h)).toBeNull();
+  });
+});
+
+describe("hashIp", () => {
+  it("returns null when no salt is configured", () => {
+    expect(hashIp("203.0.113.10", undefined)).toBeNull();
+    expect(hashIp("203.0.113.10", null)).toBeNull();
+    expect(hashIp("203.0.113.10", "")).toBeNull();
+  });
+
+  it("returns a 64-char hex string when a salt is configured", () => {
+    const h = hashIp("203.0.113.10", "test-salt");
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("returns the same hash for the same ip + salt across calls", () => {
+    const a = hashIp("203.0.113.10", "test-salt");
+    const b = hashIp("203.0.113.10", "test-salt");
+    expect(a).toBe(b);
+  });
+
+  it("returns different hashes when the salt changes", () => {
+    const a = hashIp("203.0.113.10", "salt-A");
+    const b = hashIp("203.0.113.10", "salt-B");
+    expect(a).not.toBe(b);
+  });
+
+  it("returns different hashes for different IPs under the same salt", () => {
+    const a = hashIp("203.0.113.10", "test-salt");
+    const b = hashIp("203.0.113.11", "test-salt");
+    expect(a).not.toBe(b);
+  });
+});

@@ -15,6 +15,7 @@ import {
   generateReferralCode,
   isValidReferralCodeShape,
 } from "@/lib/waitlist/referralCode";
+import { getClientIp, hashIp } from "@/lib/waitlist/client-ip";
 
 export const runtime = "nodejs";
 
@@ -82,6 +83,48 @@ function getEmailLimiters(): {
  *  up in Redis logs / dashboards. */
 function emailRateKey(email: string): string {
   return createHash("sha256").update(email).digest("hex");
+}
+
+// ── Per-IP signup limiter ─────────────────────────────────────────────────
+// Caps fresh signup attempts to N per IP per 24h. Mirrors the email-limiter
+// fail-open posture: when Upstash isn't configured (local dev / CI / Redis
+// outage) we accept the signup rather than block the route. Only consumed
+// on signup attempts that get PAST the idempotent-refresh fast-path so a
+// real user reloading their existing waitlist row doesn't burn the budget.
+//
+// The Redis key is the SHA-256 of the raw IP — same posture as the email
+// limiter: never put PII in keys that surface in dashboards.
+let _ipLimiter: Ratelimit | null = null;
+let _ipLimiterInitialized = false;
+
+function getIpLimiter(): Ratelimit | null {
+  if (_ipLimiterInitialized) return _ipLimiter;
+  _ipLimiterInitialized = true;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+
+  try {
+    const redis = new Redis({ url, token });
+    const perIpCap = Math.max(
+      1,
+      Number(process.env.WAITLIST_IP_DAILY_CAP ?? 5),
+    );
+    _ipLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(perIpCap, "24 h"),
+      prefix: "rl:wl-ip",
+      analytics: false,
+    });
+  } catch {
+    _ipLimiter = null;
+  }
+  return _ipLimiter;
+}
+
+function ipRateKey(ip: string): string {
+  return createHash("sha256").update(ip).digest("hex");
 }
 
 /** Returns true iff a confirmation email may be sent to this address now.
@@ -229,6 +272,14 @@ export async function POST(req: Request) {
       ? b.source.slice(0, 100)
       : null;
   const userAgent = req.headers.get("user-agent")?.slice(0, 200) ?? null;
+  // Client IP capture for the admin spam panel + per-IP rate limit below.
+  // null on proxies that strip forwarding headers — we accept the signup
+  // anyway (NULL stored) rather than blocking real users for proxy
+  // behaviour outside their control. See `lib/waitlist/client-ip.ts` for
+  // header precedence and the hash-with-salt rationale.
+  const clientIp = getClientIp(req.headers);
+  const clientIpHash =
+    clientIp !== null ? hashIp(clientIp, process.env.WAITLIST_IP_SALT) : null;
 
   // ── Parse all candidate fields ──────────────────────────────────────────
   const emailRaw = typeof b.email === "string" ? b.email.trim().toLowerCase() : null;
@@ -384,6 +435,30 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── Per-IP rate limit ───────────────────────────────────────────────────
+  // Bounds new-signup attempts per source IP. Positioned AFTER the
+  // sign-in fast-path above so honest users refreshing their existing
+  // row never consume the budget — only attempts that will actually try
+  // to create a new row count against the cap. Fail-open when Upstash
+  // isn't configured or when we couldn't extract a client IP at all
+  // (the failure modes match the email limiter's posture so local dev /
+  // CI / proxy oddities don't block legitimate traffic).
+  if (clientIp !== null) {
+    const ipLimiter = getIpLimiter();
+    if (ipLimiter) {
+      const r = await ipLimiter.limit(ipRateKey(clientIp));
+      if (!r.success) {
+        return NextResponse.json(
+          {
+            error:
+              "too many signups from this network — try again later",
+          },
+          { status: 429 },
+        );
+      }
+    }
+  }
+
   // ── Referrer validation (REQUIRED — invite-only) ────────────────────────
   // The waitlist is invite-only: every new signup must supply a valid
   // referral code from an existing member. Existing rows from before this
@@ -469,6 +544,12 @@ export async function POST(req: Request) {
   }
   baseRow.referred_by_code = referredByCode;
   if (privyDid) baseRow.privy_did = privyDid;
+  // IP capture for the admin spam panel — both raw (forensic lookup) and
+  // salted hash (long-term velocity analytics). Both nullable on the
+  // table so we just omit unset values; the column defaults to NULL.
+  // See `supabase-waitlist-schema.sql` for the column rationale.
+  if (clientIp) baseRow.ip_address = clientIp;
+  if (clientIpHash) baseRow.ip_hash = clientIpHash;
 
   // Compute the tier for this new row from the referrer's tier
   // (tier = referrer.tier + 1). Falls back to 0 if the RPC isn't
