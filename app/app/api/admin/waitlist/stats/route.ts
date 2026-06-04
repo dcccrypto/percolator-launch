@@ -43,6 +43,7 @@ export async function GET(req: Request) {
       twitter_handle: string | null;
       created_at: string;
       tier: number | null;
+      ip_hash: string | null;
     };
     const PAGE_SIZE = 1000;
     const all: Row[] = [];
@@ -50,7 +51,7 @@ export async function GET(req: Request) {
       const { data, error } = await supabase
         .from("waitlist")
         .select(
-          "id, pubkey, email, referral_code, referred_by_code, referral_code_emailed_at, twitter_handle, created_at, tier",
+          "id, pubkey, email, referral_code, referred_by_code, referral_code_emailed_at, twitter_handle, created_at, tier, ip_hash",
         )
         .order("created_at", { ascending: true })
         .range(from, from + PAGE_SIZE - 1);
@@ -277,6 +278,15 @@ export async function GET(req: Request) {
     const minuteBuckets = new Map<number, number>(); // unix-minute → count
     const referrerMinute = new Map<string, Map<number, number>>(); // code → minute → count
     const referrerHour = new Map<string, Map<number, number>>(); // code → hour → count
+    // IP-based aggregates. ip_hash is a salted SHA-256 written by the
+    // signup route — same hash from the same source IP under the same
+    // salt, so it's safe to use as a group-by key without ever surfacing
+    // the raw IP here. NULL rows pre-date IP capture or arrived through
+    // a forwarding-header-stripping proxy.
+    const ipHashCount = new Map<string, number>(); // ip_hash → total signups
+    const ipHashReferrers = new Map<string, Set<string>>(); // ip_hash → distinct referrer codes
+    const ipHashHour = new Map<string, Map<number, number>>(); // ip_hash → hour → count
+    let withoutIp = 0; // rows where ip_hash is NULL
 
     for (const r of all) {
       // Email signals
@@ -314,9 +324,9 @@ export async function GET(req: Request) {
       }
       // Timing buckets
       const t = new Date(r.created_at).getTime();
+      const hour = Number.isFinite(t) ? Math.floor(t / 3_600_000) : null;
       if (Number.isFinite(t)) {
         const minute = Math.floor(t / 60_000);
-        const hour = Math.floor(t / 3_600_000);
         minuteBuckets.set(minute, (minuteBuckets.get(minute) ?? 0) + 1);
         if (r.referred_by_code) {
           const code = r.referred_by_code;
@@ -331,8 +341,30 @@ export async function GET(req: Request) {
             hMap = new Map();
             referrerHour.set(code, hMap);
           }
-          hMap.set(hour, (hMap.get(hour) ?? 0) + 1);
+          hMap.set(hour!, (hMap.get(hour!) ?? 0) + 1);
         }
+      }
+      // IP signals
+      if (r.ip_hash) {
+        ipHashCount.set(r.ip_hash, (ipHashCount.get(r.ip_hash) ?? 0) + 1);
+        if (r.referred_by_code) {
+          let s = ipHashReferrers.get(r.ip_hash);
+          if (!s) {
+            s = new Set();
+            ipHashReferrers.set(r.ip_hash, s);
+          }
+          s.add(r.referred_by_code);
+        }
+        if (hour !== null) {
+          let h = ipHashHour.get(r.ip_hash);
+          if (!h) {
+            h = new Map();
+            ipHashHour.set(r.ip_hash, h);
+          }
+          h.set(hour, (h.get(hour) ?? 0) + 1);
+        }
+      } else {
+        withoutIp++;
       }
     }
 
@@ -386,6 +418,42 @@ export async function GET(req: Request) {
     }
     crossDomainLocals.sort((a, b) => b.domains - a.domains);
 
+    // ── IP signal post-loop aggregation ───────────────────────────────
+    // Top-8 IPs by signup count. We surface the ip_hash (12 hex chars are
+    // plenty to disambiguate in the UI; full 64-char hex is included for
+    // the operator to cross-reference against a raw lookup query). The
+    // raw ip_address column is intentionally NOT pulled into this route
+    // — analytics stays hash-only so PII doesn't show up in the admin
+    // dashboard.
+    const topIps = Array.from(ipHashCount.entries())
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 8)
+      .map(([ipHash, count]) => ({ ipHash, count }));
+
+    // IPs spanning ≥3 distinct referrer codes — a single source running
+    // signups across multiple "friends" of different referrers is a
+    // strong cluster signal, especially when paired with a high
+    // ipHashCount value.
+    const crossReferrerIps: { ipHash: string; referrers: number }[] = [];
+    for (const [ipHash, refs] of ipHashReferrers) {
+      if (refs.size >= 3) {
+        crossReferrerIps.push({ ipHash, referrers: refs.size });
+      }
+    }
+    crossReferrerIps.sort((a, b) => b.referrers - a.referrers);
+
+    // Worst single-IP single-hour velocity. Mirror of worstReferrerHour
+    // but keyed on IP — catches the case where one bot host fires many
+    // signups in a window even if it rotated referrer codes.
+    let worstIpHour: { ipHash: string; hour: number; count: number } | null = null;
+    for (const [ipHash, hMap] of ipHashHour) {
+      for (const [hour, count] of hMap) {
+        if (!worstIpHour || count > worstIpHour.count) {
+          worstIpHour = { ipHash, hour, count };
+        }
+      }
+    }
+
     const toIsoMinute = (m: number): string =>
       new Date(m * 60_000).toISOString().replace(":00.000Z", "Z");
     const toIsoHour = (h: number): string =>
@@ -414,6 +482,19 @@ export async function GET(req: Request) {
               code: worstReferrerHour.code,
               at: toIsoHour(worstReferrerHour.hour),
               count: worstReferrerHour.count,
+            }
+          : null,
+      },
+      ip: {
+        distinctIps: ipHashCount.size,
+        withoutIp,
+        topIps,
+        crossReferrerIps: crossReferrerIps.slice(0, 8),
+        worstIpHour: worstIpHour
+          ? {
+              ipHash: worstIpHour.ipHash,
+              at: toIsoHour(worstIpHour.hour),
+              count: worstIpHour.count,
             }
           : null,
       },

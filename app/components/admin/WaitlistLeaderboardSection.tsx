@@ -100,6 +100,13 @@ interface WaitlistStats {
       worst5Min: { startAt: string; count: number } | null;
       worstReferrerHour: { code: string; at: string; count: number } | null;
     };
+    ip: {
+      distinctIps: number;
+      withoutIp: number;
+      topIps: { ipHash: string; count: number }[];
+      crossReferrerIps: { ipHash: string; referrers: number }[];
+      worstIpHour: { ipHash: string; at: string; count: number } | null;
+    };
   };
   tierBreakdown?: { tier: number; count: number; label: string }[];
   integrity: {
@@ -212,6 +219,19 @@ function SpamSignals({
   const crossDomainCount = spam.email.crossDomainLocalParts.length;
   const crossDomainLevel: 0 | 1 | 2 =
     crossDomainCount >= 10 ? 2 : crossDomainCount >= 3 ? 1 : 0;
+  // IP-based severities. ip is undefined on legacy /stats responses
+  // (pre IP-capture deploy) — fall back to "no signal" so the panel
+  // still renders cleanly during the rollout window.
+  const ip = spam.ip;
+  const topIpCount = ip?.topIps[0]?.count ?? 0;
+  const topIpLevel: 0 | 1 | 2 =
+    topIpCount >= 20 ? 2 : topIpCount >= 10 ? 1 : 0;
+  const crossReferrerCount = ip?.crossReferrerIps.length ?? 0;
+  const crossReferrerLevel: 0 | 1 | 2 =
+    crossReferrerCount >= 10 ? 2 : crossReferrerCount >= 3 ? 1 : 0;
+  const worstIpHourCount = ip?.worstIpHour?.count ?? 0;
+  const worstIpHourLevel: 0 | 1 | 2 =
+    worstIpHourCount >= 25 ? 2 : worstIpHourCount >= 10 ? 1 : 0;
 
   const levels = [
     disposableLevel,
@@ -220,6 +240,9 @@ function SpamSignals({
     fiveMinLevel,
     refHourLevel,
     crossDomainLevel,
+    topIpLevel,
+    crossReferrerLevel,
+    worstIpHourLevel,
   ];
   const verdict = Math.max(...levels) as 0 | 1 | 2;
   const verdictLabel = verdict === 0 ? "Looks organic" : verdict === 1 ? "Watch closely" : "Signs of inflation";
@@ -304,6 +327,48 @@ function SpamSignals({
                   .join(" · ")
           }
         />
+        {ip && (
+          <>
+            <SignalRow
+              level={topIpLevel}
+              label="Most-active IP (signups from one source)"
+              value={`+${topIpCount}`}
+              detail={
+                ip.topIps.length === 0
+                  ? `${ip.distinctIps.toLocaleString()} distinct IPs · ${ip.withoutIp.toLocaleString()} legacy NULL`
+                  : `${ip.distinctIps.toLocaleString()} distinct · top ${ip.topIps
+                      .slice(0, 3)
+                      .map((x) => `${x.ipHash.slice(0, 8)}×${x.count}`)
+                      .join(" · ")}`
+              }
+            />
+            <SignalRow
+              level={crossReferrerLevel}
+              label="IPs spanning ≥3 referrer codes"
+              value={crossReferrerCount.toLocaleString()}
+              detail={
+                crossReferrerCount === 0
+                  ? "no cross-referrer IP clusters"
+                  : ip.crossReferrerIps
+                      .slice(0, 3)
+                      .map((x) => `${x.ipHash.slice(0, 8)}×${x.referrers}`)
+                      .join(" · ")
+              }
+            />
+            <SignalRow
+              level={worstIpHourLevel}
+              label="Worst single-IP hour"
+              value={`+${worstIpHourCount}`}
+              detail={
+                ip.worstIpHour
+                  ? `${ip.worstIpHour.ipHash.slice(0, 8)} · at ${formatTimeShort(
+                      ip.worstIpHour.at,
+                    )} UTC`
+                  : "—"
+              }
+            />
+          </>
+        )}
       </div>
 
       {/* Top email domains — eyeball check; healthy = gmail/outlook lead */}
