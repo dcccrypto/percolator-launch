@@ -1,10 +1,11 @@
 /**
- * Source-pattern guards for the waitlist signup route's IP capture +
- * per-IP rate limit. Mirrors the existing waitlist-signup-shape style
- * — greps the route source so a future refactor can't silently drop
- * the IP write, lose the rate-limit gate, or move the limit so it
- * fires before the idempotent-refresh fast-path (which would block
- * honest users from reloading their own waitlist row).
+ * Source-pattern guards for the waitlist signup route's IP capture,
+ * per-IP rate limit, and Cloudflare Turnstile gate. Mirrors the
+ * existing waitlist-signup-shape style — greps the route source so a
+ * future refactor can't silently drop a write, lose a gate, or
+ * reorder them in a way that defeats the design (e.g. moving the
+ * captcha verify AFTER the IP rate limit would let bots burn the
+ * limiter without solving the challenge).
  */
 
 import { describe, it, expect } from "vitest";
@@ -72,5 +73,35 @@ describe("/api/waitlist/signup IP capture + rate limit", () => {
     expect(source).toMatch(
       /createHash\("sha256"\)\.update\(ip\)\.digest\("hex"\)/,
     );
+  });
+
+  it("verifies the Turnstile token before any other expensive work", () => {
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    expect(source).toContain(
+      `import { verifyTurnstile } from "@/lib/waitlist/turnstile"`,
+    );
+    expect(source).toMatch(/await verifyTurnstile\(turnstileToken, clientIp\)/);
+  });
+
+  it("rejects with 400 when the captcha verdict is not ok", () => {
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    expect(source).toContain("captcha required");
+    expect(source).toContain("captcha verification failed");
+    // The error body carries a `captcha: reason` field so the UI can
+    // tell "missing token" apart from "Cloudflare said no".
+    expect(source).toMatch(/captcha:\s*turnstileVerdict\.reason/);
+  });
+
+  it("places the Turnstile gate BEFORE the per-IP rate limit", () => {
+    // Order matters: a bad token must short-circuit BEFORE we consume
+    // any Upstash budget. If the rate limit ran first an attacker
+    // could burn the per-IP cap with garbage tokens and DoS legitimate
+    // signups from the same network.
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    const captchaIdx = source.indexOf("Cloudflare Turnstile gate");
+    const rateLimitIdx = source.indexOf("Per-IP rate limit");
+    expect(captchaIdx).toBeGreaterThan(0);
+    expect(rateLimitIdx).toBeGreaterThan(0);
+    expect(captchaIdx).toBeLessThan(rateLimitIdx);
   });
 });

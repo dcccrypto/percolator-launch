@@ -16,6 +16,7 @@ import {
   isValidReferralCodeShape,
 } from "@/lib/waitlist/referralCode";
 import { getClientIp, hashIp } from "@/lib/waitlist/client-ip";
+import { verifyTurnstile } from "@/lib/waitlist/turnstile";
 
 export const runtime = "nodejs";
 
@@ -433,6 +434,33 @@ export async function POST(req: Request) {
       // Fall through to the normal signup flow — worst case the user
       // gets the standard "invite required" error if they had no code.
     }
+  }
+
+  // ── Cloudflare Turnstile gate ───────────────────────────────────────────
+  // The client widget produces a single-use token after the user solves
+  // (or auto-passes through, for the invisible path) the challenge. The
+  // signup route verifies the token with Cloudflare BEFORE consuming
+  // any rate-limit budget or running expensive RPCs — a missing or
+  // invalid token short-circuits the request cheaply.
+  //
+  // Posture in `lib/waitlist/turnstile.ts`:
+  //   • prod + missing TURNSTILE_SECRET = misconfiguration, reject.
+  //   • non-prod + missing secret = fail-open (local dev keeps working).
+  //   • valid secret + missing/invalid token = always reject.
+  const turnstileToken =
+    typeof b.turnstile_token === "string" ? b.turnstile_token : null;
+  const turnstileVerdict = await verifyTurnstile(turnstileToken, clientIp);
+  if (!turnstileVerdict.ok) {
+    return NextResponse.json(
+      {
+        error:
+          turnstileVerdict.reason === "missing_token"
+            ? "captcha required — refresh and complete the challenge"
+            : "captcha verification failed — refresh and try again",
+        captcha: turnstileVerdict.reason,
+      },
+      { status: 400 },
+    );
   }
 
   // ── Per-IP rate limit ───────────────────────────────────────────────────
