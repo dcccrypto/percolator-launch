@@ -47,6 +47,23 @@ alter table public.waitlist alter column message drop not null;
 alter table public.waitlist add column if not exists email text;
 alter table public.waitlist add column if not exists referral_code text;
 alter table public.waitlist add column if not exists referred_by_code text;
+
+-- IP tracking for bot/abuse defense. Two complementary columns:
+--   • ip_address (inet): the raw IPv4/IPv6 the request arrived from, used
+--     by the operator for one-off forensic lookups in /admin. Stored raw
+--     so an operator can match a signup against a known bad host without
+--     a hashing key. Considered PII; the retention policy is operator-set
+--     (e.g. a cron that nulls ip_address older than 90 days while keeping
+--     ip_hash for analytics).
+--   • ip_hash (text): SHA-256 of the ip_address with a server-side salt,
+--     populated by the signup route alongside ip_address. Drives the
+--     velocity / cross-referrer signals in the admin spam panel. Safe to
+--     retain indefinitely because the salt is server-side and rotation
+--     of the salt unlinks past hashes from future ones.
+-- Both columns are nullable: legacy rows pre-date the capture, and a few
+-- proxies can strip the forwarding headers (the route handles that by
+-- writing NULL rather than failing the signup).
+alter table public.waitlist add column if not exists ip_address inet;
 -- "Have we emailed this user their referral code?" Set by the signup route
 -- after a successful confirmation send (new signups) and by the one-time
 -- backfill script (pre-existing signups). Lets the backfill be re-runnable
@@ -99,6 +116,16 @@ create index if not exists waitlist_referral_code_idx
 create index if not exists waitlist_referred_by_code_idx
   on public.waitlist (referred_by_code)
   where referred_by_code is not null;
+
+-- IP-velocity index for the admin spam-signals panel. Hash, not raw — the
+-- velocity queries group by ip_hash so a single botnet rotating IP-text-
+-- across-runs but reusing the same source still aggregates correctly when
+-- the salt is stable, and an operator who rotates the salt deliberately
+-- breaks that aggregation as a recovery action. Partial — legacy rows
+-- and the rare strip-forwarding-header signups have NULL.
+create index if not exists waitlist_ip_hash_idx
+  on public.waitlist (ip_hash)
+  where ip_hash is not null;
 
 -- ─── Crockford base32 code generator ────────────────────────────────────────
 -- Alphabet excludes I, L, O, U — avoids visual confusion (1/I, 0/O) and the
