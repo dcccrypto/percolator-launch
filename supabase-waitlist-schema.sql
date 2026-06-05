@@ -63,7 +63,14 @@ alter table public.waitlist add column if not exists referred_by_code text;
 -- Both columns are nullable: legacy rows pre-date the capture, and a few
 -- proxies can strip the forwarding headers (the route handles that by
 -- writing NULL rather than failing the signup).
+--
+-- Both ALTERs are explicit because the CREATE TABLE above is gated on
+-- IF NOT EXISTS — projects bootstrapped before either column was added
+-- to this file would otherwise skip the create AND have no alter to
+-- catch up, leaving the downstream index creation to fail with
+-- "column does not exist".
 alter table public.waitlist add column if not exists ip_address inet;
+alter table public.waitlist add column if not exists ip_hash text;
 -- "Have we emailed this user their referral code?" Set by the signup route
 -- after a successful confirmation send (new signups) and by the one-time
 -- backfill script (pre-existing signups). Lets the backfill be re-runnable
@@ -123,7 +130,16 @@ create index if not exists waitlist_referred_by_code_idx
 -- the salt is stable, and an operator who rotates the salt deliberately
 -- breaks that aggregation as a recovery action. Partial — legacy rows
 -- and the rare strip-forwarding-header signups have NULL.
-create index if not exists waitlist_ip_hash_idx
+--
+-- CONCURRENTLY avoids the ACCESS EXCLUSIVE lock a plain CREATE INDEX
+-- would take during build — which would block every signup INSERT for
+-- the duration. On a small table the difference is sub-second but the
+-- schema file is meant to be safely re-runnable against the live
+-- project, so we use the safer form. CONCURRENTLY cannot run inside a
+-- transaction block — Supabase's SQL editor runs each top-level
+-- statement standalone so this is fine, but anyone wrapping the whole
+-- file in BEGIN/COMMIT must run this statement separately.
+create index concurrently if not exists waitlist_ip_hash_idx
   on public.waitlist (ip_hash)
   where ip_hash is not null;
 
