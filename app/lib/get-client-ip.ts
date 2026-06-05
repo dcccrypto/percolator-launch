@@ -14,9 +14,13 @@ export function getClientIp(req: NextRequest): string {
   if (PROXY_DEPTH > 0) {
     const forwarded = req.headers.get("x-forwarded-for");
     if (forwarded) {
-      const ips = forwarded.split(",").map((s) => s.trim());
-      const idx = Math.max(0, ips.length - PROXY_DEPTH);
-      return ips[idx] ?? "unknown";
+      const ips = forwarded.split(",").map((s) =>
+      s.trim()).filter(Boolean);
+      if (ips.length > 0) {
+        const idx = Math.max(0, ips.length - 
+      PROXY_DEPTH);
+        return ips[idx] ?? "unknown";
+      }
     }
   }
   const realIp = req.headers.get("x-real-ip");
