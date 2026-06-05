@@ -65,4 +65,34 @@ describe("/api/waitlist/signup input shape", () => {
     );
     expect(source).toMatch(/status:\s*400/);
   });
+
+  it("rejects disposable email domains at signup, not just in admin", () => {
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    // Import from the shared module — pins the single-source-of-truth
+    // contract. If a future refactor re-defines the list inline in the
+    // route, the admin panel's count would silently drift from what
+    // the route blocks.
+    expect(source).toContain(
+      `import { isDisposableEmail } from "@/lib/waitlist/disposable-domains"`,
+    );
+    // The check runs inside the email-shape branch, returns 400, and
+    // the error string does NOT echo the rejected domain (no need to
+    // confirm to a bot which entries are on the list).
+    expect(source).toMatch(/if\s*\(\s*isDisposableEmail\s*\(\s*emailRaw\s*\)\s*\)/);
+    expect(source).toContain("this email provider isn't accepted");
+  });
+
+  it("places the disposable check INSIDE the email-shape branch", () => {
+    // Defence-in-depth: the disposable check should only run after the
+    // email passed shape validation. If a future refactor moves it
+    // above the shape check, malformed inputs could reach the helper
+    // (it'd return false for them, but the route would then fall
+    // through to the wallet path with a half-validated email field).
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    const emailShapeIdx = source.indexOf("EMAIL_RE.test(emailRaw)");
+    const disposableCheckIdx = source.indexOf("isDisposableEmail(emailRaw)");
+    expect(emailShapeIdx).toBeGreaterThan(0);
+    expect(disposableCheckIdx).toBeGreaterThan(0);
+    expect(disposableCheckIdx).toBeGreaterThan(emailShapeIdx);
+  });
 });

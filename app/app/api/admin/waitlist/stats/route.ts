@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWaitlistServiceSupabase } from "@/lib/waitlist/supabase";
 import { requireAdminSession } from "@/lib/admin-session";
+import { DISPOSABLE_EMAIL_DOMAINS } from "@/lib/waitlist/disposable-domains";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -241,29 +242,13 @@ export async function GET(req: Request) {
     // shape, and timing as possible. Each one would have a different
     // failure mode for a botnet — a single bypass would still trip
     // others. The frontend shows them as a panel; operator judges.
-    const DISPOSABLE_DOMAINS = new Set<string>([
-      "mailinator.com","guerrillamail.com","guerrillamail.net","guerrillamail.org",
-      "guerrillamailblock.com","sharklasers.com","grr.la","tempmail.com",
-      "temp-mail.org","temp-mail.io","tempmailo.com","10minutemail.com",
-      "10minutemail.net","yopmail.com","yopmail.net","throwawaymail.com",
-      "trashmail.com","trashmail.de","dispostable.com","fakeinbox.com",
-      "emailondeck.com","mailnesia.com","getnada.com","nada.email",
-      "mintemail.com","mohmal.com","tmail.ws","tmpmail.org","mailpoof.com",
-      "emaildrop.io","tempr.email","mailcatch.com","spam4.me","mvrht.com",
-      "owlpic.com","spamgourmet.com","maildrop.cc","mailtemporaire.fr",
-      "mailtemp.info","my10minutemail.com","mailbox.in.ua","disbox.net",
-      "fakemail.net","tempinbox.com","temp-mail.ru","mailto.plus",
-      "fexpost.com","fexbox.org","inboxbear.com","linshiyouxiang.net",
-      "monemail.fr.nf","incognitomail.com","spambog.com","spambox.us",
-      "tafmail.com","tempmail.dev","tempmail.email","tempmail.us.com",
-      "tempmail.de","tempmail.plus","minutemail.com","jetable.org",
-      "anonbox.net","throwam.com","mailcuk.com","mailsac.com","spambox.org",
-      "byom.de","mytemp.email","tempemail.net","mvrht.net","clrmail.com",
-      "boximail.com","emltmp.com","mailsink.com","mfsa.ru","kepfree.com",
-      "boltbox.com","forexnews.bz","fivemail.de","spamavert.com",
-      "rcpt.at","tempemail.com","tempemail.co","instant-mail.de",
-      "thraml.com","trash-mail.com","fudgerub.com","mailimate.com",
-    ]);
+    //
+    // The disposable-domain list is now imported from a shared module
+    // so the signup route can reject at the door using the SAME list
+    // we surface here — without sharing, the two lists would inevitably
+    // drift and the admin counts would stop matching what the route
+    // blocks. New entries to lib/waitlist/disposable-domains.ts
+    // automatically flow through to both surfaces.
     // bot-style handle: 6+ trailing digits that aren't just a calendar year.
     const BOT_HANDLE = /^([a-z][a-z_]{1,})(\d{6,})$/i;
     const isYearLike = (d: string): boolean =>
@@ -297,7 +282,7 @@ export async function GET(req: Request) {
           const local = e.slice(0, at);
           const domain = e.slice(at + 1);
           emailDomainCount.set(domain, (emailDomainCount.get(domain) ?? 0) + 1);
-          if (DISPOSABLE_DOMAINS.has(domain)) {
+          if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) {
             disposableEmails++;
             disposableDomainSet.add(domain);
           }

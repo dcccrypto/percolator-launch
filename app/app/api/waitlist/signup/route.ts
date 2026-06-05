@@ -17,6 +17,7 @@ import {
 } from "@/lib/waitlist/referralCode";
 import { getClientIp, hashIp } from "@/lib/waitlist/client-ip";
 import { verifyTurnstile } from "@/lib/waitlist/turnstile";
+import { isDisposableEmail } from "@/lib/waitlist/disposable-domains";
 
 export const runtime = "nodejs";
 
@@ -299,6 +300,24 @@ export async function POST(req: Request) {
   if (emailRaw !== null) {
     if (!emailRaw || !EMAIL_RE.test(emailRaw) || emailRaw.length > 254) {
       return NextResponse.json({ error: "invalid email" }, { status: 400 });
+    }
+    // Disposable-domain block. The admin spam panel already flagged
+    // these post-facto; this is the same list moved to a shared
+    // module (lib/waitlist/disposable-domains.ts) and applied at the
+    // door so the row never lands in the table. Bots typically rotate
+    // through 10minutemail/mailinator/etc.; this forces them to
+    // procure real inboxes (~$0.05+/email at burner-mail-as-a-service
+    // rates) and meaningfully changes the attacker economics. The
+    // error string deliberately doesn't echo the rejected domain — no
+    // need to confirm to a bot which entries are on the list.
+    if (isDisposableEmail(emailRaw)) {
+      return NextResponse.json(
+        {
+          error:
+            "this email provider isn't accepted — please use a permanent address",
+        },
+        { status: 400 },
+      );
     }
   }
 
