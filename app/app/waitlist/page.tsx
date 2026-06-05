@@ -314,6 +314,15 @@ function SignupCard() {
     setTurnstileToken(null);
     setTurnstileNonce((n) => n + 1);
   }, []);
+  // Mount-time wall clock. Captured ONCE on first render via useState's
+  // lazy initialiser so React StrictMode's double-mount in dev doesn't
+  // jitter the value; both flows below send this back to the server as
+  // `mounted_at` so the route can enforce a minimum dwell time before
+  // accepting the submit. Raw-HTTP bots that never load the page omit
+  // the field; lazy scripted bots send 0 or hardcoded values that fail
+  // the server's bounds. See `/api/waitlist/signup/route.ts` for the
+  // floor + stale-cap.
+  const [mountedAt] = useState<number>(() => Date.now());
 
   // Auto-detect: if the visitor is already a Privy user *and* already on
   // the waitlist (by DID / wallet / email), skip the signup form entirely
@@ -413,6 +422,7 @@ function SignupCard() {
                 <SignupFlow
                   turnstileToken={turnstileToken}
                   resetCaptcha={resetCaptcha}
+                  mountedAt={mountedAt}
                 />
               ) : (
                 <StatusErr>Wallet provider not configured. Reload the page.</StatusErr>
@@ -421,6 +431,7 @@ function SignupCard() {
               <EmailFlow
                 turnstileToken={turnstileToken}
                 resetCaptcha={resetCaptcha}
+                mountedAt={mountedAt}
               />
             )}
           </>
@@ -526,9 +537,11 @@ type EmailState =
 function EmailFlow({
   turnstileToken,
   resetCaptcha,
+  mountedAt,
 }: {
   turnstileToken: string | null;
   resetCaptcha: () => void;
+  mountedAt: number;
 }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -652,6 +665,7 @@ function EmailFlow({
             source: source ?? undefined,
             referred_by_code: referredBy.trim() || undefined,
             turnstile_token: turnstileToken ?? undefined,
+            mounted_at: mountedAt,
           }),
         });
         const json = (await res.json()) as {
@@ -693,6 +707,7 @@ function EmailFlow({
     referredBy,
     turnstileToken,
     resetCaptcha,
+    mountedAt,
   ]);
 
   if (state.kind === "done") {
@@ -879,9 +894,11 @@ function EmailFlow({
 function SignupFlow({
   turnstileToken,
   resetCaptcha,
+  mountedAt,
 }: {
   turnstileToken: string | null;
   resetCaptcha: () => void;
+  mountedAt: number;
 }) {
   const { ready, authenticated, login } = usePrivy();
   const { wallets } = useWallets();
@@ -949,6 +966,7 @@ function SignupFlow({
           source: source ?? undefined,
           referred_by_code: referredBy.trim() || undefined,
           turnstile_token: turnstileToken ?? undefined,
+          mounted_at: mountedAt,
         }),
       });
       const json = (await res.json()) as {
@@ -984,6 +1002,7 @@ function SignupFlow({
     referredBy,
     turnstileToken,
     resetCaptcha,
+    mountedAt,
   ]);
 
   useEffect(() => {

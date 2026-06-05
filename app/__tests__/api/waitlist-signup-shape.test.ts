@@ -95,4 +95,44 @@ describe("/api/waitlist/signup input shape", () => {
     expect(disposableCheckIdx).toBeGreaterThan(0);
     expect(disposableCheckIdx).toBeGreaterThan(emailShapeIdx);
   });
+
+  it("enforces a minimum time-on-page (dwell) before accepting a submit", () => {
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    // Floor + stale cap constants present.
+    expect(source).toMatch(/MIN_DWELL_MS\s*=\s*1500/);
+    expect(source).toMatch(/MAX_STALE_MS\s*=\s*7\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
+    // Reads from the body, validates as a finite number.
+    expect(source).toMatch(/typeof\s+b\.mounted_at\s*===\s*"number"/);
+    expect(source).toContain("Number.isFinite(b.mounted_at)");
+    // Rejects with 400 (opaque error so a bot can't refine its script
+    // off our copy).
+    expect(source).toContain("request rejected — refresh the page");
+  });
+
+  it("places the dwell check immediately after the honeypot", () => {
+    // The check is essentially free (one branch, no I/O) so positioning
+    // it as the very first non-trivial gate maximises the work saved
+    // when the dwell is wrong — a missing `mounted_at` short-circuits
+    // BEFORE the captcha siteverify call and BEFORE the wallet
+    // signature verify.
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    const honeypotIdx = source.indexOf("Honeypot — silently accept");
+    const dwellIdx = source.indexOf("Time-on-page (dwell) check");
+    const captchaIdx = source.indexOf("Cloudflare Turnstile gate");
+    expect(honeypotIdx).toBeGreaterThan(0);
+    expect(dwellIdx).toBeGreaterThan(0);
+    expect(captchaIdx).toBeGreaterThan(0);
+    expect(dwellIdx).toBeGreaterThan(honeypotIdx);
+    expect(dwellIdx).toBeLessThan(captchaIdx);
+  });
+
+  it("rejects when dwell is below the floor, above the cap, or negative", () => {
+    // The conditional should cover three independent fail modes,
+    // not just the under-floor case. Pin all three so a future
+    // refactor that drops one branch is flagged.
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    expect(source).toMatch(/dwellMs\s*<\s*0/);
+    expect(source).toMatch(/dwellMs\s*<\s*MIN_DWELL_MS/);
+    expect(source).toMatch(/dwellMs\s*>\s*MAX_STALE_MS/);
+  });
 });

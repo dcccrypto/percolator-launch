@@ -313,6 +313,50 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // ── Time-on-page (dwell) check ──────────────────────────────────────────
+  // The client captures Date.now() at component mount and sends it as
+  // `mounted_at` (ms unix epoch). Real users take seconds to read the
+  // form, solve the captcha, enter their email/wallet, and submit; a
+  // raw-HTTP bot that POSTs without ever loading the page sends nothing,
+  // and a scripted submitter that doesn't bother computing the field
+  // sends 0 or a future timestamp. We reject:
+  //   • missing / non-numeric value → no JS form interaction occurred
+  //   • dwell < 0 (mounted_at in the future) → client-clock attack
+  //     or skew that doesn't match real browsers
+  //   • dwell < MIN_DWELL_MS → submitted faster than any human can
+  //   • dwell > MAX_STALE_MS → 7-day cap closes the mounted_at:0 bypass
+  //     (which would otherwise produce a ~54-year "dwell" that passes
+  //     the floor); real users with multi-week stale tabs are rare and
+  //     they can just refresh
+  //
+  // A SOPHISTICATED bot that reads our code can spoof mounted_at to
+  // bypass this — the check is defence-in-depth, not the load-bearing
+  // gate. Pairs with Turnstile (forces a captcha solve) and the
+  // per-IP cap (bounds attempt rate) to make each successful bypass
+  // expensive.
+  //
+  // Position is RIGHT AFTER the honeypot and BEFORE the captcha verify
+  // because the check is essentially free (one branch, no I/O) — a
+  // failed mounted_at saves a Cloudflare siteverify call.
+  const MIN_DWELL_MS = 1500;
+  const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+  const mountedAt =
+    typeof b.mounted_at === "number" && Number.isFinite(b.mounted_at)
+      ? b.mounted_at
+      : null;
+  const dwellMs = mountedAt !== null ? Date.now() - mountedAt : null;
+  if (
+    dwellMs === null ||
+    dwellMs < 0 ||
+    dwellMs < MIN_DWELL_MS ||
+    dwellMs > MAX_STALE_MS
+  ) {
+    return NextResponse.json(
+      { error: "request rejected — refresh the page and try again" },
+      { status: 400 },
+    );
+  }
+
   const twitter_handle =
     typeof b.twitter_handle === "string" && b.twitter_handle.trim().length > 0
       ? b.twitter_handle.trim().slice(0, 50)
