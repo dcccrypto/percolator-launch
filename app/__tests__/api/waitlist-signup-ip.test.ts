@@ -52,17 +52,34 @@ describe("/api/waitlist/signup IP capture + rate limit", () => {
     expect(source).toMatch(/status:\s*429/);
   });
 
-  it("places the per-IP rate limit AFTER the sign-in fast-path", () => {
-    // The fast-path returns idempotently for existing wallet signups
-    // before the rate limit runs; otherwise honest users refreshing
-    // their row would consume the per-IP budget and eventually get
-    // 429'd from their own waitlist page.
+  it("places the per-IP rate limit BEFORE the sign-in fast-path", () => {
+    // Earlier the fast-path ran first to spare honest refreshers from
+    // the per-IP budget, but that left the Supabase service-role
+    // SELECT inside the fast-path reachable without consuming captcha
+    // or rate-limit — an attacker with locally-generated ed25519
+    // keys could fire valid-shape signups and hammer the DB. The
+    // gates now run BEFORE the fast-path; the UX cost (one captcha
+    // solve per session for returning users) is much smaller than
+    // the security cost of the bypass.
     const source = fs.readFileSync(ROUTE_PATH, "utf8");
     const fastPathIdx = source.indexOf("Sign-in fast path for existing");
     const ipLimitIdx = source.indexOf("Per-IP rate limit");
     expect(fastPathIdx).toBeGreaterThan(0);
     expect(ipLimitIdx).toBeGreaterThan(0);
-    expect(ipLimitIdx).toBeGreaterThan(fastPathIdx);
+    expect(ipLimitIdx).toBeLessThan(fastPathIdx);
+  });
+
+  it("places the Turnstile gate BEFORE the sign-in fast-path", () => {
+    // Same rationale as the per-IP rate-limit ordering test above:
+    // the fast-path's Supabase service-role read must be gated on
+    // captcha so a locally-generated valid signature isn't a free
+    // DB-probe oracle.
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    const fastPathIdx = source.indexOf("Sign-in fast path for existing");
+    const captchaIdx = source.indexOf("Cloudflare Turnstile gate");
+    expect(fastPathIdx).toBeGreaterThan(0);
+    expect(captchaIdx).toBeGreaterThan(0);
+    expect(captchaIdx).toBeLessThan(fastPathIdx);
   });
 
   it("uses sha256 of the raw IP as the Redis key, never the cleartext", () => {

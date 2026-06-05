@@ -378,6 +378,62 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── Cloudflare Turnstile gate ───────────────────────────────────────────
+  // Positioned ABOVE the sign-in fast-path because a locally-generated
+  // ed25519 key + a fresh signed message is free for an attacker to
+  // produce — without the gate here, an attacker could fire valid-shape
+  // signups at 10k+ rps, each one chewing a Supabase service-role
+  // SELECT in the fast-path's existing-row probe. The captcha verify
+  // gates that probe behind a Cloudflare challenge (cents per token at
+  // captcha-farm rates), reducing the attack to economics. UX cost on
+  // a returning honest user is one Turnstile solve per visit, which is
+  // mostly invisible on clean browsers anyway.
+  //
+  // Posture in `lib/waitlist/turnstile.ts`:
+  //   • prod + missing TURNSTILE_SECRET = misconfiguration, reject.
+  //   • non-prod + missing secret = fail-open (local dev keeps working).
+  //   • valid secret + missing/invalid token = always reject.
+  const turnstileToken =
+    typeof b.turnstile_token === "string" ? b.turnstile_token : null;
+  const turnstileVerdict = await verifyTurnstile(turnstileToken, clientIp);
+  if (!turnstileVerdict.ok) {
+    return NextResponse.json(
+      {
+        error:
+          turnstileVerdict.reason === "missing_token"
+            ? "captcha required — refresh and complete the challenge"
+            : "captcha verification failed — refresh and try again",
+        captcha: turnstileVerdict.reason,
+      },
+      { status: 400 },
+    );
+  }
+
+  // ── Per-IP rate limit ───────────────────────────────────────────────────
+  // Bounds total signup attempts per source IP, including fast-path
+  // lookups. Positioned AFTER the captcha gate so a missing/invalid
+  // token short-circuits without consuming the budget — otherwise an
+  // attacker could exhaust the per-IP cap with garbage tokens. Fail-
+  // open when Upstash isn't configured or when we couldn't extract a
+  // client IP at all (the failure modes match the email limiter's
+  // posture so local dev / CI / proxy oddities don't block legitimate
+  // traffic).
+  if (clientIp !== null) {
+    const ipLimiter = getIpLimiter();
+    if (ipLimiter) {
+      const r = await ipLimiter.limit(ipRateKey(clientIp));
+      if (!r.success) {
+        return NextResponse.json(
+          {
+            error:
+              "too many signups from this network — try again later",
+          },
+          { status: 429 },
+        );
+      }
+    }
+  }
+
   // ── Sign-in fast path for existing wallet signups ───────────────────────
   // The waitlist is invite-only NOW, but every row created before that
   // change is grandfathered (referred_by_code IS NULL). Those users need
@@ -388,6 +444,10 @@ export async function POST(req: Request) {
   // the existing code is safe. Email-path lookup would require an OTP
   // (membership oracle) and is handled by the separate backfill-emails
   // operator action.
+  //
+  // The captcha + per-IP gates above protect this Supabase service-role
+  // read from being a free probing oracle — without them, an attacker
+  // could enumerate generated pubkeys to hammer the DB.
   if (hasWalletPart) {
     try {
       const service = getWaitlistServiceSupabase();
@@ -433,57 +493,6 @@ export async function POST(req: Request) {
       console.warn("[waitlist-signup] lookup failed, falling through", err);
       // Fall through to the normal signup flow — worst case the user
       // gets the standard "invite required" error if they had no code.
-    }
-  }
-
-  // ── Cloudflare Turnstile gate ───────────────────────────────────────────
-  // The client widget produces a single-use token after the user solves
-  // (or auto-passes through, for the invisible path) the challenge. The
-  // signup route verifies the token with Cloudflare BEFORE consuming
-  // any rate-limit budget or running expensive RPCs — a missing or
-  // invalid token short-circuits the request cheaply.
-  //
-  // Posture in `lib/waitlist/turnstile.ts`:
-  //   • prod + missing TURNSTILE_SECRET = misconfiguration, reject.
-  //   • non-prod + missing secret = fail-open (local dev keeps working).
-  //   • valid secret + missing/invalid token = always reject.
-  const turnstileToken =
-    typeof b.turnstile_token === "string" ? b.turnstile_token : null;
-  const turnstileVerdict = await verifyTurnstile(turnstileToken, clientIp);
-  if (!turnstileVerdict.ok) {
-    return NextResponse.json(
-      {
-        error:
-          turnstileVerdict.reason === "missing_token"
-            ? "captcha required — refresh and complete the challenge"
-            : "captcha verification failed — refresh and try again",
-        captcha: turnstileVerdict.reason,
-      },
-      { status: 400 },
-    );
-  }
-
-  // ── Per-IP rate limit ───────────────────────────────────────────────────
-  // Bounds new-signup attempts per source IP. Positioned AFTER the
-  // sign-in fast-path above so honest users refreshing their existing
-  // row never consume the budget — only attempts that will actually try
-  // to create a new row count against the cap. Fail-open when Upstash
-  // isn't configured or when we couldn't extract a client IP at all
-  // (the failure modes match the email limiter's posture so local dev /
-  // CI / proxy oddities don't block legitimate traffic).
-  if (clientIp !== null) {
-    const ipLimiter = getIpLimiter();
-    if (ipLimiter) {
-      const r = await ipLimiter.limit(ipRateKey(clientIp));
-      if (!r.success) {
-        return NextResponse.json(
-          {
-            error:
-              "too many signups from this network — try again later",
-          },
-          { status: 429 },
-        );
-      }
     }
   }
 
