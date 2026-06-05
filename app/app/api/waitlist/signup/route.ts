@@ -599,6 +599,14 @@ export async function POST(req: Request) {
   const MAX_CODE_ATTEMPTS = 8;
   let referralCode: string | null = null;
   let isDuplicate = false;
+  // Defensive fallback: if a malformed IP slips through `getClientIp`'s
+  // `net.isIP()` check (Postgres `inet` is stricter than `net.isIP` for
+  // a few edge cases — zone-id IPv6, octal IPv4, leading-zero forms),
+  // the first insert will fail with `22P02 invalid input syntax for
+  // type inet`. We drop the IP columns and retry once rather than
+  // losing the signup. This is belt-and-braces — the upstream
+  // validator should already have caught it.
+  let ipColumnsDropped = false;
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     const candidate = generateReferralCode();
     const { error } = await supabase
@@ -607,6 +615,18 @@ export async function POST(req: Request) {
     if (!error) {
       referralCode = candidate;
       break;
+    }
+    if (error.code === "22P02" && !ipColumnsDropped) {
+      // Bad-IP cast at the database. Strip both IP columns from the
+      // row and retry once. Log so the bad value can be investigated.
+      console.warn(
+        "[waitlist] insert rejected with 22P02 — dropping ip columns and retrying",
+        { code: error.code, message: error.message },
+      );
+      delete baseRow.ip_address;
+      delete baseRow.ip_hash;
+      ipColumnsDropped = true;
+      continue;
     }
     if (error.code !== "23505") {
       console.error("[waitlist] insert error", error);

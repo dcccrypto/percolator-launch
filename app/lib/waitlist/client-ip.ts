@@ -9,6 +9,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 
 /**
  * Extract the originating client IP from request headers, taking the
@@ -37,18 +38,42 @@ import { createHash } from "node:crypto";
  */
 export function getClientIp(headers: Headers): string | null {
   const cfIp = headers.get("cf-connecting-ip")?.trim();
-  if (cfIp && isPlausibleIp(cfIp)) return normaliseIp(cfIp);
+  const cfChecked = cfIp ? checkIp(cfIp) : null;
+  if (cfChecked) return cfChecked;
 
   const realIp = headers.get("x-real-ip")?.trim();
-  if (realIp && isPlausibleIp(realIp)) return normaliseIp(realIp);
+  const realChecked = realIp ? checkIp(realIp) : null;
+  if (realChecked) return realChecked;
 
   const xff = headers.get("x-forwarded-for");
   if (xff) {
     const first = xff.split(",")[0]?.trim();
-    if (first && isPlausibleIp(first)) return normaliseIp(first);
+    const xffChecked = first ? checkIp(first) : null;
+    if (xffChecked) return xffChecked;
   }
 
   return null;
+}
+
+/**
+ * Normalise a header value and validate it as a real IPv4 / IPv6 address.
+ * Returns the validated address string on success, `null` on anything
+ * else. The validation uses Node's built-in `net.isIP()` which matches
+ * the grammar Postgres `inet` accepts in practice — meaning a value
+ * that passes this check will not crash the downstream `INSERT`.
+ *
+ * Pulled out of `getClientIp` so all three header paths share the same
+ * normalise + strict-check + reject logic. Earlier code had a loose
+ * `/^[\[\]0-9a-fA-F:.\-]+$/` regex that admitted strings like
+ * `"1.2.3.4.5"`, `"::::::"`, and `"a:b:c:d.e"` — each of which would
+ * pass our test but make Postgres throw `22P02` on insert, abort the
+ * whole row, and surface as a confusing 500 to the user. `net.isIP()`
+ * closes that gap.
+ */
+function checkIp(raw: string): string | null {
+  const normalised = normaliseIp(raw);
+  if (isIP(normalised) === 0) return null;
+  return normalised;
 }
 
 /**
@@ -73,24 +98,12 @@ export function hashIp(ip: string, salt: string | undefined | null): string | nu
 }
 
 /**
- * Light syntactic check — rejects obviously malformed strings without
- * trying to fully validate IPv4 / IPv6 grammar (postgres re-validates
- * on insert via the `inet` column type). The aim is to drop garbage
- * before it reaches the DB, not to be a parser.
- */
-function isPlausibleIp(s: string): boolean {
-  if (s.length < 3 || s.length > 64) return false;
-  // IPv4: digits + dots. IPv6: hex + colons + optional dots (mapped form).
-  // Allow brackets around IPv6 and a trailing :port that we strip in
-  // normaliseIp; permit them through the loose pattern here.
-  return /^[\[\]0-9a-fA-F:.\-]+$/.test(s);
-}
-
-/**
  * Strip the cruft proxies append to the raw IP — surrounding brackets
  * on IPv6, trailing `:port` on IPv4. IPv6 with a port is always
  * bracketed (`[::1]:443`) so we can strip the bracket pair and the
  * post-bracket port safely; bare IPv6 has no port and stays intact.
+ *
+ * Does NOT validate — that's `checkIp`'s job via `net.isIP()`.
  */
 function normaliseIp(raw: string): string {
   let s = raw;

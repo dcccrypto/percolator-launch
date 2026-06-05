@@ -85,6 +85,26 @@ describe("getClientIp", () => {
     const h = headers({ "cf-connecting-ip": "1.2.3.4" + "5".repeat(100) });
     expect(getClientIp(h)).toBeNull();
   });
+
+  // Regression: an earlier loose-regex validator accepted these as
+  // "plausible," let them through to Postgres `inet` cast which
+  // rejected them with 22P02, and crashed the signup INSERT. The
+  // current `net.isIP()`-based check rejects them at the front door.
+  it.each([
+    "1.2.3.4.5",
+    "::::::",
+    "a:b:c:d.e",
+    "............",
+    "------",
+    "999.999.999.999",
+    "1.2.3",
+    "g::1",
+    "2001:db8::1::2",
+  ])("rejects malformed IP-looking string %s", (bad) => {
+    expect(getClientIp(headers({ "cf-connecting-ip": bad }))).toBeNull();
+    expect(getClientIp(headers({ "x-real-ip": bad }))).toBeNull();
+    expect(getClientIp(headers({ "x-forwarded-for": bad }))).toBeNull();
+  });
 });
 
 describe("hashIp", () => {
