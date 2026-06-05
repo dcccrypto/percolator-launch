@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { usePrivy, useLoginWithEmail } from "@privy-io/react-auth";
 import { useWallets, useSignMessage } from "@privy-io/react-auth/solana";
@@ -536,6 +536,16 @@ function EmailFlow({
   const [referredBy, setReferredBy] = useState("");
   const [state, setState] = useState<EmailState>({ kind: "idle" });
   const { status: refStatus } = useReferralCodeValidation(referredBy);
+  // Guards against double-firing the submit fetch when the post-OTP
+  // effect re-runs because a non-state dep changed (turnstileToken
+  // expiring → onToken(null); Privy user object updating). Without
+  // this guard a re-run while state is still "verifying" can kick off
+  // a second concurrent POST before the first one's setState({ kind:
+  // "submitting" }) has flushed through React's scheduler. The ref is
+  // toggled true at fetch dispatch and false in the finally arm so a
+  // subsequent retry (user clicks "Try again" → idle → re-enter the
+  // flow) starts clean.
+  const submitInFlightRef = useRef(false);
 
   // Pre-fill the referrer input from /r/<code> landings, then scrub the
   // query param so users who copy from the address bar later don't end up
@@ -612,6 +622,13 @@ function EmailFlow({
   useEffect(() => {
     if (state.kind !== "verifying") return;
     if (!ready || !authenticated || !user) return;
+    // Guard against re-entry. The effect's dep array includes
+    // turnstileToken + the Privy user object — either can churn while
+    // state.kind is still "verifying" (token expiry mid-OTP-verify,
+    // Privy linked-accounts hydration), and a re-entry that gets past
+    // the early returns above would fire a second concurrent POST
+    // before the first's setState had a chance to flush.
+    if (submitInFlightRef.current) return;
     const userEmail =
       user.email?.address?.trim().toLowerCase() ?? email.trim().toLowerCase();
     if (!userEmail) {
@@ -619,6 +636,7 @@ function EmailFlow({
       return;
     }
 
+    submitInFlightRef.current = true;
     setState({ kind: "submitting", email: userEmail });
     (async () => {
       try {
@@ -659,6 +677,10 @@ function EmailFlow({
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "submit failed";
         setState({ kind: "error", reason: msg });
+      } finally {
+        // Release the lock so a subsequent retry (user hits "Try again"
+        // → idle → re-enter the OTP flow) can fire cleanly.
+        submitInFlightRef.current = false;
       }
     })();
   }, [
