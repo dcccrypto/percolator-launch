@@ -129,6 +129,54 @@ function ipRateKey(ip: string): string {
   return createHash("sha256").update(ip).digest("hex");
 }
 
+// ── Per-referral-code burn-rate limiter ─────────────────────────────────
+// Caps how many signups can be attributed to a single referral code per
+// hour. Closes the "leaked code" attack: a bot farm that gets hold of
+// ONE valid code (a member's code posted publicly, scraped from a chat,
+// shared by mistake) could otherwise pump unbounded signups through it.
+//
+// The cap defaults to 20/hour — well below the admin spam panel's
+// amber-threshold of 40/hour for the "top referrer's busiest hour"
+// signal, so the limiter fires BEFORE the dashboard would alert.
+// A legitimate organic referrer in our existing data rarely tops 20
+// signups in a single hour; anyone doing so during a coordinated drop
+// can have the cap temporarily raised by the operator via
+// WAITLIST_REFCODE_HOURLY_CAP. Conservative defaults + per-launch
+// override is the right ratio.
+//
+// Referral codes are public-by-design (members share them in URLs and
+// posts), so the Redis key is the raw code rather than a hash — no PII
+// concern. Fail-open when Upstash isn't configured to match the email
+// + IP limiter posture.
+let _refCodeLimiter: Ratelimit | null = null;
+let _refCodeLimiterInitialized = false;
+
+function getRefCodeLimiter(): Ratelimit | null {
+  if (_refCodeLimiterInitialized) return _refCodeLimiter;
+  _refCodeLimiterInitialized = true;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+
+  try {
+    const redis = new Redis({ url, token });
+    const cap = Math.max(
+      1,
+      Number(process.env.WAITLIST_REFCODE_HOURLY_CAP ?? 20),
+    );
+    _refCodeLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(cap, "1 h"),
+      prefix: "rl:wl-refcode",
+      analytics: false,
+    });
+  } catch {
+    _refCodeLimiter = null;
+  }
+  return _refCodeLimiter;
+}
+
 /** Returns true iff a confirmation email may be sent to this address now.
  *  Consumes one slot from BOTH limiters on success — order matters: the
  *  global cap is checked first so a system-wide overflow doesn't burn a
@@ -573,6 +621,43 @@ export async function POST(req: Request) {
       { error: "referral code check failed, try again" },
       { status: 503 },
     );
+  }
+
+  // ── Per-referral-code burn-rate limit ───────────────────────────────────
+  // Closes the "leaked code" attack — a bot farm that scraped one
+  // valid code from a public post could otherwise pump unbounded
+  // signups through it. The default cap of 20/hour sits below the
+  // admin panel's amber threshold for "top referrer's busiest hour"
+  // (40), so the limiter fires before the dashboard alerts; legitimate
+  // organic referrers in our data almost never exceed 20 in a single
+  // hour, and coordinated launch drops can have the cap temporarily
+  // raised via WAITLIST_REFCODE_HOURLY_CAP. Positioned AFTER the
+  // existence-check above so an invalid code is rejected without
+  // consuming any budget — an attacker can't probe-and-burn budgets
+  // for codes they guessed by submitting many invalid candidates.
+  //
+  // Wrapped in try/catch — a transient Upstash blip falls open with
+  // a warn log rather than 500ing the user. Same posture as the per-
+  // IP + email limiters elsewhere in this route.
+  const refCodeLimiter = getRefCodeLimiter();
+  if (refCodeLimiter) {
+    try {
+      const r = await refCodeLimiter.limit(referredByCode);
+      if (!r.success) {
+        return NextResponse.json(
+          {
+            error:
+              "this referral code is at its hourly cap — try again later or use a different code",
+          },
+          { status: 429 },
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "[waitlist-signup] refcode rate-limit check failed, falling open",
+        err,
+      );
+    }
   }
 
   // Wallet signature was already verified at the top of this route

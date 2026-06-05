@@ -121,4 +121,40 @@ describe("/api/waitlist/signup IP capture + rate limit", () => {
     expect(rateLimitIdx).toBeGreaterThan(0);
     expect(captchaIdx).toBeLessThan(rateLimitIdx);
   });
+
+  it("rate-limits per referral code in addition to per IP", () => {
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    // Helper module shape mirrors the email + IP limiter pattern.
+    expect(source).toContain("getRefCodeLimiter()");
+    expect(source).toMatch(/refCodeLimiter\.limit\(referredByCode\)/);
+    expect(source).toContain(
+      "this referral code is at its hourly cap",
+    );
+    expect(source).toMatch(/status:\s*429/);
+  });
+
+  it("places the refcode rate-limit AFTER the existence check", () => {
+    // An invalid code must be rejected before it consumes any budget —
+    // otherwise an attacker could submit many invalid codes from one
+    // IP to exhaust the rate-limit slots of arbitrary codes they
+    // happened to guess. Pin the ordering.
+    //
+    // The marker is the call expression itself — it appears only at
+    // the in-handler check, not in any helper-block comments above.
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    const existenceIdx = source.indexOf("waitlist_referral_code_exists");
+    const refLimitIdx = source.indexOf("refCodeLimiter.limit(referredByCode)");
+    expect(existenceIdx).toBeGreaterThan(0);
+    expect(refLimitIdx).toBeGreaterThan(0);
+    expect(refLimitIdx).toBeGreaterThan(existenceIdx);
+  });
+
+  it("wraps the refcode limit() call in try/catch (fail-open)", () => {
+    // Matches the per-IP limiter posture — a transient Upstash blip
+    // shouldn't bubble up as an unhandled 500.
+    const source = fs.readFileSync(ROUTE_PATH, "utf8");
+    expect(source).toMatch(
+      /refcode rate-limit check failed, falling open/,
+    );
+  });
 });
