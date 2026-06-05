@@ -70,7 +70,7 @@ function loadTurnstileScript(): Promise<void> {
   if (getTurnstile()) return Promise.resolve();
   if (scriptPromise) return scriptPromise;
 
-  scriptPromise = new Promise<void>((resolve, reject) => {
+  const promise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(
       `script[src^="https://challenges.cloudflare.com/turnstile"]`,
     );
@@ -94,8 +94,23 @@ function loadTurnstileScript(): Promise<void> {
     );
     document.head.appendChild(script);
   });
+  scriptPromise = promise;
 
-  return scriptPromise;
+  // Reset the cached promise on rejection so a subsequent mount (e.g.,
+  // after the user re-solves a captcha-rejected POST and the widget
+  // remounts via turnstileNonce, or after a network outage clears)
+  // retries the script load from scratch. Without this reset the
+  // cached rejected promise routes every later mount straight to the
+  // catch arm and the widget never recovers until a full page reload.
+  //
+  // This attaches a SEPARATE catch chain that doesn't interfere with
+  // the caller's promise handlers — each .then/.catch chain on a
+  // promise sees the original rejection independently.
+  promise.catch(() => {
+    if (scriptPromise === promise) scriptPromise = null;
+  });
+
+  return promise;
 }
 
 export function TurnstileGate({
