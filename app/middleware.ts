@@ -480,7 +480,11 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
   const scriptNonce = nonce ? `'nonce-${nonce}' ` : "";
   const csp = [
     "default-src 'self'",
-    `script-src 'self' ${scriptNonce}'unsafe-inline' https://cdn.vercel-insights.com`,
+    // challenges.cloudflare.com: Turnstile widget script (api.js). Loaded
+    // by `components/waitlist/TurnstileGate.tsx` on the /waitlist surface
+    // to render the bot-defence challenge; without this entry the script
+    // is blocked and every submit button stays disabled.
+    `script-src 'self' ${scriptNonce}'unsafe-inline' https://cdn.vercel-insights.com https://challenges.cloudflare.com`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
@@ -490,10 +494,15 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     // and REST fallback (https://). The subdomain must resolve via DNS CNAME to
     // percolator-api-production.up.railway.app — without this CSP entry browsers
     // would block the connection even after DNS is configured.
-    "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://api.geckoterminal.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app https://api.percolatorlaunch.com wss://api.percolatorlaunch.com https://lite.jup.ag https://token.jup.ag https://tokens.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org blob:",
+    // challenges.cloudflare.com is appended for the Turnstile widget's
+    // XHR back-channel (telemetry + challenge-state checks). Same
+    // origin as the script load.
+    "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://api.geckoterminal.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app https://api.percolatorlaunch.com wss://api.percolatorlaunch.com https://lite.jup.ag https://token.jup.ag https://tokens.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org https://challenges.cloudflare.com blob:",
     // Removed https://*.vercel.app wildcard (issue #635) — no legitimate use case for embedding
     // arbitrary Vercel-hosted content in iframes. frame-src controls outbound iframe embedding.
-    "frame-src 'self' https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org",
+    // challenges.cloudflare.com is the iframe origin the Turnstile widget
+    // renders into — distinct from the api.js script-src entry above.
+    "frame-src 'self' https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://phantom.app https://solflare.com https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com",
     // Removed https://*.vercel.app wildcard (issue #632) — any Vercel project could embed the app,
     // creating a clickjacking surface over wallet/sign flows. Keep only the specific preview URL.
     "frame-ancestors 'self' https://percolatorlaunch.com https://*.percolatorlaunch.com https://percolator-launch.vercel.app",
