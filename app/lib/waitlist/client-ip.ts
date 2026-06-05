@@ -25,11 +25,14 @@ import { isIP } from "node:net";
  *      direct peer. Single IP, not a chain. Client-injectable in
  *      theory but Vercel overwrites whatever the client sent.
  *   3. `x-forwarded-for` — Comma-separated `client, proxy1, proxy2`
- *      chain. Used only as a last resort because the chain is built
- *      up across hops and the leftmost entry can be client-injected
- *      at the public edge. When we fall through to this header we
- *      take the LEFTMOST entry — that's the originating client per
- *      RFC 7239 / de-facto convention.
+ *      chain. **Non-production fallback only.** In production the
+ *      CF→Vercel topology guarantees one of the two headers above
+ *      always carries the real client IP, so this last-resort path
+ *      is dead code legitimately AND spoofable by anyone who reaches
+ *      it (the leftmost entry is set by the public edge — including
+ *      a direct-to-Vercel attacker who bypassed Cloudflare). We
+ *      consult it ONLY in non-prod so local dev proxy setups that
+ *      rely on it (e.g., ngrok, custom test rigs) keep working.
  *
  * Returns `null` when no header gives a syntactically-plausible IP.
  * The route writes NULL to `ip_address` in that case rather than
@@ -44,6 +47,16 @@ export function getClientIp(headers: Headers): string | null {
   const realIp = headers.get("x-real-ip")?.trim();
   const realChecked = realIp ? checkIp(realIp) : null;
   if (realChecked) return realChecked;
+
+  // x-forwarded-for is the only header on this chain whose leftmost
+  // entry is client-injectable at the public edge. In production
+  // (CF→Vercel) one of the two headers above always wins, so reaching
+  // this fallback would imply a direct-to-Vercel attacker spoofing
+  // the chain — refuse to trust XFF in that case. Keep the dev path
+  // alive for local proxy tooling that legitimately uses it.
+  if (process.env.NODE_ENV === "production") {
+    return null;
+  }
 
   const xff = headers.get("x-forwarded-for");
   if (xff) {

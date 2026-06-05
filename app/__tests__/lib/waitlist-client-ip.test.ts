@@ -14,8 +14,14 @@
  *   7. Same IP + same salt → stable hash; different salt → different hash.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { getClientIp, hashIp } from "../../lib/waitlist/client-ip";
+
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+afterEach(() => {
+  if (ORIGINAL_NODE_ENV === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+});
 
 function headers(map: Record<string, string>): Headers {
   const h = new Headers();
@@ -84,6 +90,31 @@ describe("getClientIp", () => {
   it("rejects implausibly long header values", () => {
     const h = headers({ "cf-connecting-ip": "1.2.3.4" + "5".repeat(100) });
     expect(getClientIp(h)).toBeNull();
+  });
+
+  // In production we refuse to trust x-forwarded-for entirely — CF or
+  // Vercel set cf-connecting-ip / x-real-ip for legitimate traffic, so
+  // a request reaching the XFF fallback in prod implies a spoofing
+  // attempt (e.g., direct-to-Vercel bypassing Cloudflare).
+  it("ignores x-forwarded-for fallback when NODE_ENV === production", () => {
+    process.env.NODE_ENV = "production";
+    expect(
+      getClientIp(headers({ "x-forwarded-for": "192.0.2.1" })),
+    ).toBeNull();
+  });
+
+  it("still trusts cf-connecting-ip in production", () => {
+    process.env.NODE_ENV = "production";
+    expect(
+      getClientIp(headers({ "cf-connecting-ip": "203.0.113.10" })),
+    ).toBe("203.0.113.10");
+  });
+
+  it("still trusts x-real-ip in production", () => {
+    process.env.NODE_ENV = "production";
+    expect(getClientIp(headers({ "x-real-ip": "198.51.100.1" }))).toBe(
+      "198.51.100.1",
+    );
   });
 
   // Regression: an earlier loose-regex validator accepted these as
