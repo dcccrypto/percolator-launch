@@ -421,14 +421,27 @@ export async function POST(req: Request) {
   if (clientIp !== null) {
     const ipLimiter = getIpLimiter();
     if (ipLimiter) {
-      const r = await ipLimiter.limit(ipRateKey(clientIp));
-      if (!r.success) {
-        return NextResponse.json(
-          {
-            error:
-              "too many signups from this network — try again later",
-          },
-          { status: 429 },
+      // Wrap the limit() call itself in try/catch so a transient
+      // Upstash blip (network error, partial outage) doesn't bubble
+      // up as an unhandled 500 to the user. Fail-open matches the
+      // posture documented on the limiter init paths at the top of
+      // this file — an Upstash outage is operator-visible via the
+      // failing health-check, not via blocked signups.
+      try {
+        const r = await ipLimiter.limit(ipRateKey(clientIp));
+        if (!r.success) {
+          return NextResponse.json(
+            {
+              error:
+                "too many signups from this network — try again later",
+            },
+            { status: 429 },
+          );
+        }
+      } catch (err) {
+        console.warn(
+          "[waitlist-signup] ip rate-limit check failed, falling open",
+          err,
         );
       }
     }
