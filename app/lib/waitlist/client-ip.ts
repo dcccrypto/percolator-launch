@@ -77,14 +77,37 @@ function checkIp(raw: string): string | null {
 }
 
 /**
+ * Minimum salt length the hash function will accept. 16 ASCII chars
+ * ≈ 128 bits of entropy if the operator picks a random string, which
+ * is the standard floor for salts intended to defeat offline
+ * precomputation. Anything shorter is treated as "no salt" — silently
+ * accepting a 1-char salt would produce a "hash" whose precompute
+ * cost is just 256× the unsalted IPv4 enumeration (~seconds on
+ * commodity hardware), giving no real privacy advantage over the
+ * raw IP. Fail-noisily-and-store-NULL is the safer posture.
+ */
+const MIN_SALT_LENGTH = 16;
+
+/**
+ * Module-local "we've already warned about this" flag so a
+ * misconfigured deploy emits one warning at first signup rather than
+ * one per signup forever. Reset by process restart, which matches the
+ * intent — operators see it again only if the bad config persists
+ * across a restart.
+ */
+let _shortSaltWarned = false;
+
+/**
  * SHA-256(`${ip}|${salt}`), hex-encoded. The salt is required because
  * the ~4-billion IPv4 space is brute-forceable against an unsalted
  * SHA-256 in well under a minute on commodity hardware — without the
  * salt the "hash" gives no privacy advantage over the raw value.
  *
- * Returns `null` when no salt is configured. The route writes NULL to
+ * Returns `null` when no salt is configured OR when the configured
+ * salt is shorter than `MIN_SALT_LENGTH`. The route writes NULL to
  * `ip_hash` in that case (the column is nullable; the operator should
- * set `WAITLIST_IP_SALT` in production env to enable analytics).
+ * set a sufficiently long `WAITLIST_IP_SALT` in production env to
+ * enable analytics).
  *
  * Stable across process restarts because the salt is configuration,
  * not memory state. Rotating the salt deliberately breaks the
@@ -94,6 +117,16 @@ function checkIp(raw: string): string | null {
  */
 export function hashIp(ip: string, salt: string | undefined | null): string | null {
   if (!salt) return null;
+  if (salt.length < MIN_SALT_LENGTH) {
+    if (!_shortSaltWarned) {
+      _shortSaltWarned = true;
+      console.warn(
+        `[waitlist] WAITLIST_IP_SALT is ${salt.length} chars; ` +
+          `min ${MIN_SALT_LENGTH} required. Treating as unset — ip_hash will be NULL.`,
+      );
+    }
+    return null;
+  }
   return createHash("sha256").update(`${ip}|${salt}`).digest("hex");
 }
 

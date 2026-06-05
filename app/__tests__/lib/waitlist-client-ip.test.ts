@@ -115,25 +115,41 @@ describe("hashIp", () => {
   });
 
   it("returns a 64-char hex string when a salt is configured", () => {
-    const h = hashIp("203.0.113.10", "test-salt");
+    const h = hashIp("203.0.113.10", "0123456789abcdef");
     expect(h).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("returns the same hash for the same ip + salt across calls", () => {
-    const a = hashIp("203.0.113.10", "test-salt");
-    const b = hashIp("203.0.113.10", "test-salt");
+    const a = hashIp("203.0.113.10", "stable-salt-1234");
+    const b = hashIp("203.0.113.10", "stable-salt-1234");
     expect(a).toBe(b);
   });
 
   it("returns different hashes when the salt changes", () => {
-    const a = hashIp("203.0.113.10", "salt-A");
-    const b = hashIp("203.0.113.10", "salt-B");
+    const a = hashIp("203.0.113.10", "first-salt-abcde");
+    const b = hashIp("203.0.113.10", "second-salt-xyzw");
     expect(a).not.toBe(b);
   });
 
   it("returns different hashes for different IPs under the same salt", () => {
-    const a = hashIp("203.0.113.10", "test-salt");
-    const b = hashIp("203.0.113.11", "test-salt");
+    const a = hashIp("203.0.113.10", "shared-salt-1234");
+    const b = hashIp("203.0.113.11", "shared-salt-1234");
     expect(a).not.toBe(b);
+  });
+
+  // Regression: previous version accepted any truthy salt. A one-char
+  // salt only multiplies precompute cost by 256, leaving the IPv4
+  // space brute-forceable in seconds. Min length 16 (≈ 128 bits) is
+  // the standard salt floor.
+  it.each(["x", "ab", "shortsalt"])(
+    "returns null when salt is below 16 chars (%s)",
+    (badSalt) => {
+      expect(hashIp("203.0.113.10", badSalt)).toBeNull();
+    },
+  );
+
+  it("accepts the boundary salt length of exactly 16 chars", () => {
+    const h = hashIp("203.0.113.10", "x".repeat(16));
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
   });
 });
