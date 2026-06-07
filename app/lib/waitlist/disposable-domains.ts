@@ -32,6 +32,10 @@
  * and their many ccTLD / wildcard mirrors.
  */
 export const DISPOSABLE_EMAIL_DOMAINS: ReadonlySet<string> = new Set<string>([
+  // Jun-2026 bot-wave: attacker-controlled catch-all domains. Script signups
+  // to these (random/sequential local-parts) drove most of the wave;
+  // akaikadot.com surfaced Jun 6 (sequential aster1..N).
+  "tirtamulya.xyz","wshu.net","minitts.net","mtupu.com","akaikadot.com",
   "mailinator.com","guerrillamail.com","guerrillamail.net","guerrillamail.org",
   "guerrillamailblock.com","sharklasers.com","grr.la","tempmail.com",
   "temp-mail.org","temp-mail.io","tempmailo.com","10minutemail.com",

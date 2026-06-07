@@ -154,7 +154,14 @@ export function TurnstileGate({
           "expired-callback": () => onTokenRef.current(null),
           "error-callback": () => onTokenRef.current(null),
           theme: "dark",
-          appearance: "always",
+          // Invisible for legitimate users: the widget runs in the background
+          // and only surfaces an interactive challenge if Cloudflare flags the
+          // visitor as suspicious. Keeps 100% of the server-side siteverify
+          // protection with zero UX cost on the happy path (Privy already
+          // shows its own challenge; we don't want a second visible one).
+          // NOTE: pair with a "Managed" widget type on the Cloudflare side so
+          // the invisible/interaction-only behaviour is honoured.
+          appearance: "interaction-only",
           size: "flexible",
         });
       })

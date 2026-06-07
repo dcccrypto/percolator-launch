@@ -177,6 +177,28 @@ function getRefCodeLimiter(): Ratelimit | null {
   return _refCodeLimiter;
 }
 
+// ── Bot user-agent gate ───────────────────────────────────────────────────
+// Cheap pre-filter ahead of the Turnstile siteverify call: scripted clients
+// have no business on a human signup form. The wave used Python
+// aiohttp/requests/urllib + curl, and a hardcoded Chrome/120 + bare
+// "Mozilla/5.0" spoof. Real browsers and wallet in-app browsers
+// (Phantom/Backpack/Jupiter) never match these. Chrome/120 is a 2023 build the
+// wave hardcoded — tunable off via WAITLIST_ALLOW_CHROME120=1 if it ever
+// false-positives on a genuine old client.
+const BOT_UA_RE =
+  /(python|aiohttp|requests|urllib|httpx|curl|wget|go-http|okhttp|axios|node-fetch|java\/|libwww|scrapy|headless|\bbot\b|spider)/i;
+function isBotUserAgent(ua: string | null): boolean {
+  if (!ua || ua.trim().length < 12) return true; // missing / stub UA
+  if (BOT_UA_RE.test(ua)) return true;
+  if (
+    process.env.WAITLIST_ALLOW_CHROME120 !== "1" &&
+    /Chrome\/120\.0\.0\.0 Safari/.test(ua)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Returns true iff a confirmation email may be sent to this address now.
  *  Consumes one slot from BOTH limiters on success — order matters: the
  *  global cap is checked first so a system-wide overflow doesn't burn a
@@ -366,6 +388,14 @@ export async function POST(req: Request) {
       ? b.source.slice(0, 100)
       : null;
   const userAgent = req.headers.get("user-agent")?.slice(0, 200) ?? null;
+
+  // ── Bot user-agent gate ─────────────────────────────────────────────────
+  // Reject scripted clients before the (network) Turnstile siteverify — the
+  // wave hit this route directly with python/curl + spoofed UAs.
+  if (isBotUserAgent(userAgent)) {
+    return NextResponse.json({ error: "unsupported client" }, { status: 403 });
+  }
+
   // Client IP capture for the admin spam panel + per-IP rate limit below.
   // null on proxies that strip forwarding headers — we accept the signup
   // anyway (NULL stored) rather than blocking real users for proxy
