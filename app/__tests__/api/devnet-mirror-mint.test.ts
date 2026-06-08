@@ -11,14 +11,14 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { resolve } from "node:path";
 
 // ─── Trusted client IP for rate limiting ───────────────────────────────────
 
 describe("devnet-mirror-mint uses shared getClientIp (x-real-ip fallback)", () => {
   it("imports getClientIp from @/lib/get-client-ip instead of a local copy", () => {
     const source = readFileSync(
-      join(process.cwd(), "app/api/devnet-mirror-mint/route.ts"),
+      resolve(__dirname, "../../app/api/devnet-mirror-mint/route.ts"),
       "utf8",
     );
     expect(source).toContain('import { getClientIp } from "@/lib/get-client-ip"');
