@@ -40,6 +40,7 @@ import {
   createInitializeMintInstruction,
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
+import { getClientIp } from "@/lib/get-client-ip";
 import { getServiceClient } from "@/lib/supabase";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import { validateTokenMetadata, validateDexScreenerResponse, validateJupiterTokenResponse } from "@/lib/token-metadata-validators";
@@ -125,20 +126,6 @@ async function checkMintRateLimit(ip: string): Promise<{ allowed: boolean; retry
 
   // Fallback to in-memory (local dev or Redis unavailable)
   return checkMintRateLimitFallback(ip);
-}
-
-/** Extract client IP from request headers, respecting proxy depth env var. */
-function getClientIp(req: NextRequest): string {
-  const PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
-  if (PROXY_DEPTH > 0) {
-    const forwarded = req.headers.get("x-forwarded-for");
-    if (forwarded) {
-      const ips = forwarded.split(",").map((s) => s.trim());
-      const idx = Math.max(0, ips.length - PROXY_DEPTH);
-      return ips[idx] ?? "unknown";
-    }
-  }
-  return "unknown";
 }
 
 const NETWORK =

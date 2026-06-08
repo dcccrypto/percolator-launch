@@ -5,7 +5,7 @@
  * `x-forwarded-for` chain (rightmost hop is most-trusted). Falls back to
  * `x-real-ip` if the forwarded-for header is absent, then "unknown".
  *
- * Must stay in sync with app/app/api/devnet-mirror-mint/route.ts (getClientIp).
+ * Used by API routes for trusted-proxy-aware rate limiting.
  */
 import type { NextRequest } from "next/server";
 

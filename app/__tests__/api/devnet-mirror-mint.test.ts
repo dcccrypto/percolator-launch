@@ -10,6 +10,22 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+// ─── Trusted client IP for rate limiting ───────────────────────────────────
+
+describe("devnet-mirror-mint uses shared getClientIp (x-real-ip fallback)", () => {
+  it("imports getClientIp from @/lib/get-client-ip instead of a local copy", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/api/devnet-mirror-mint/route.ts"),
+      "utf8",
+    );
+    expect(source).toContain('import { getClientIp } from "@/lib/get-client-ip"');
+    expect(source).toContain("const clientIp = getClientIp(req);");
+    expect(source).not.toMatch(/function getClientIp\s*\(/);
+  });
+});
 
 // ─── GH#1477: walletAddress validation ──────────────────────────────────────
 
