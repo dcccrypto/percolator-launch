@@ -12,7 +12,7 @@ Percolator is a permissionless perpetual futures protocol on Solana (devnet live
 This threat model documents all identified security concerns, their severity, and their current status.
 
 **Pre-mainnet blockers (Khubair action required):**
-- 🔴 **CRITICAL: GH#1823** — Upgrade authority is single keypair. Transfer to Squads multisig.
+- 🔴 **CRITICAL: GH#1823 / GH#2014** — Upgrade authority is single keypair. Transfer to Squads multisig. Monitor: `npx tsx scripts/check-upgrade-authority.ts`.
 - 🔴 **CRITICAL: GH#1876** — Supabase service_role key leaked in git history (7+ weeks). Rotate immediately.
 
 **Remaining open issues:** LOW/INFO only. All CRITICAL/HIGH technical findings have been fixed.
@@ -130,7 +130,7 @@ All 12 Kani proofs reviewed and approved (PR#174 + PR#70):
 
 | # | Issue | Status | Action |
 |---|-------|--------|--------|
-| 1 | **GH#1823: Upgrade authority single keypair** | OPEN | Khubair must create Squads multisig and transfer program authority. On-chain verified 2026-03-31: Authority 7JVQvrAf is System Program owner = plain keypair. Transfer has NOT happened. |
+| 1 | **GH#1823 / GH#2014: Upgrade authority single keypair** | OPEN | Khubair must create Squads multisig and transfer program authority. On-chain verified 2026-03-31: Authority 7JVQvrAf is System Program owner = plain keypair. Transfer has NOT happened. Runbook: `docs/GH-2014-upgrade-authority-governance.md`. |
 | 2 | **GH#1876: Supabase service_role key in git history** | OPEN | Khubair must rotate at Supabase dashboard. Key leaked 7+ weeks (since ~Feb 8). No upstream fix until rotation. |
 
 ### 🟡 LOW / INFORMATIONAL

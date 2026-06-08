@@ -27,7 +27,10 @@
     "fleet:keygen:dry": "tsx scripts/generate-keeper-wallets.ts",
     "fleet:deploy": "bash scripts/deploy-mm-fleet.sh",
     "fleet:deploy:dry": "bash scripts/deploy-mm-fleet.sh --dry-run",
-    "localnet:test": "npx tsx tests/localnet/test-trade-flow.ts"
+    "localnet:test": "npx tsx tests/localnet/test-trade-flow.ts",
+    "check:upgrade-authority": "tsx scripts/check-upgrade-authority.ts",
+    "check:upgrade-authority:mainnet": "tsx scripts/check-upgrade-authority.ts --network mainnet",
+    "check:upgrade-authority:devnet": "tsx scripts/check-upgrade-authority.ts --network devnet --allow-eoa"
   },
   "engines": {
     "node": ">=20"
