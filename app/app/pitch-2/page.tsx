@@ -251,33 +251,14 @@ function Slide02Team(_: SlideProps) {
           <div className="pitch-team-card">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="https://pbs.twimg.com/profile_images/2050225373145686016/2eOEQdFC_400x400.jpg"
-              alt="Squid"
+              src="/images/squidprof.jpg"
+              alt="David"
               className="pitch-team-pfp"
             />
-            <div className="pitch-team-name">Squid</div>
+            <div className="pitch-team-name">David</div>
             <div className="pitch-team-role">Co-founder · Community &amp; Partnerships</div>
             <ul className="pitch-team-bullets">
-              <li>
-                He shipped{" "}
-                <a
-                  className="pitch-team-bio-link"
-                  href="https://github.com/0x-SquidSol/percolator-buyback"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  percolator-buyback
-                </a>
-                {" "}and{" "}
-                <a
-                  className="pitch-team-bio-link"
-                  href="https://github.com/0x-SquidSol/percolator-locker"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  percolator-locker
-                </a>
-              </li>
+              <li>He experiments with building new features</li>
               <li>He runs community and partnerships day-to-day</li>
               <li>He found and patched the KeeperCrank big-brain bug (Toly QRT&apos;d the fix)</li>
             </ul>
@@ -449,7 +430,7 @@ function Slide03Traction(_: SlideProps) {
               backgroundClip: "text",
             }}
           >
-            <NumberCounter target={100} suffix="+" />
+            <NumberCounter target={7800} suffix="+" />
           </div>
           <div
             style={{
@@ -459,7 +440,7 @@ function Slide03Traction(_: SlideProps) {
               fontWeight: 500,
             }}
           >
-            Waitlist signups in the first 48 hours
+            Waitlist sign ups in less than 60 days
           </div>
           <div
             className="mono"
@@ -470,7 +451,7 @@ function Slide03Traction(_: SlideProps) {
               letterSpacing: "0.06em",
             }}
           >
-            3,200 organic X followers &middot; 0 paid acquisition
+            Over 6,500 organic X followers &middot; 0 paid acquisition
           </div>
         </div>
       </div>
@@ -1034,7 +1015,7 @@ function SlideOrigin(_: SlideProps) {
           won the KeeperCrank fix.{" "}
           <strong style={{ color: "rgba(255,255,255,0.95)" }}>Khubair</strong>{" "}
           won a pre-audit critical bug review. Toly has publicly
-          engaged with our work four times since February:
+          engaged with our work over 20 times since February:
         </p>
 
         <div className="pitch-toly-photo-grid">
@@ -1104,6 +1085,74 @@ function SlideOrigin(_: SlideProps) {
             <div className="pitch-toly-photo-cap mono">
               <span>@toly · Feb 13</span>
               <span>&ldquo;Percolator is a job creator&rdquo;</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Percolator build update, Jun 1"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo5.png"
+              alt="Toly tweet with boat emojis quote-RTing Percolator's '1/12: Build update' thread"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · Jun 1</span>
+              <span>Build-update QT</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — 'ZERO sense not to join the waitlist', May 27"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo6.png"
+              alt="Toly tweet quote-RTing Percolator: 'It literally makes ZERO sense not to join the waitlist'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · May 27</span>
+              <span>&ldquo;ZERO sense not to join&rdquo;</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — 'Gonna pull Canada out of a recession', May 29"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo7.png"
+              alt="Toly tweet 'Gonna pull Canada out of a recession' quote-RTing Percolator on Superteam founders"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · May 29</span>
+              <span>&ldquo;Pull Canada out of a recession&rdquo;</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — 'Two devs and a dream', May 29"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo8.png"
+              alt="Toly tweet 'Two devs and a dream' quote-RTing Squid on long-tail assets needing perps"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly · May 29</span>
+              <span>&ldquo;Two devs and a dream&rdquo;</span>
             </div>
           </a>
         </div>
@@ -1298,8 +1347,8 @@ function SlideRoadmapAsk(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Roadmap &amp; what&apos;s next</div>
         <h2 className="pitch-title">
-          Audit clears Q3. Public mainnet, 50+ creator-led markets by
-          Q4, $1M+ daily fees in 2027.
+          Audit clears Q3. Public mainnet Q4, 50+ creator-led markets by
+          Q2 2027, $1M+ daily fees in 2028.
         </h2>
 
         <div className="pitch-roadmap">
@@ -1310,19 +1359,19 @@ function SlideRoadmapAsk(_: SlideProps) {
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase cyan">Q3 2026</div>
+            <div className="pitch-roadmap-phase cyan">Q4 2026</div>
             <div className="pitch-roadmap-name">Public mainnet</div>
             <div className="pitch-roadmap-desc">Audit complete, four-way fee split wired, first 10 cohort markets</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase purple">Q4 2026</div>
+            <div className="pitch-roadmap-phase purple">Q2 2027</div>
             <div className="pitch-roadmap-name">50+ markets live</div>
             <div className="pitch-roadmap-desc">Creator-led listings ramp, Jupiter / Birdeye routing live</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
-            <div className="pitch-roadmap-phase cyan">2027</div>
+            <div className="pitch-roadmap-phase cyan">2028</div>
             <div className="pitch-roadmap-name">$1M+ daily fees</div>
             <div className="pitch-roadmap-desc">Cross-margining, MM partnerships, default rail for every-token perps</div>
           </div>
@@ -1408,6 +1457,48 @@ const TOTAL_SLIDES = SLIDES.length;
 
 export default function PitchPage() {
   const [current, setCurrent] = useState(0);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  // Auto-fit: scale a slide's content down just enough to fit the viewport so
+  // no slide ever needs to scroll, at any window size. Only scales down, never
+  // up — slides that already fit are left at 1:1. Re-runs per slide and on
+  // resize / image load.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const slide = stage.querySelector<HTMLElement>(".pitch-slide");
+    const inner = stage.querySelector<HTMLElement>(".pitch-slide-inner");
+    if (!slide || !inner) return;
+
+    const fit = () => {
+      inner.style.transform = "";
+      const cs = getComputedStyle(slide);
+      const padY =
+        (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const available = slide.clientHeight - padY;
+      const natural = inner.scrollHeight;
+      if (available > 0 && natural > available) {
+        // Scale from the top so shrunk content hugs upward instead of leaving
+        // a gap above it (align-items: safe center top-aligns when overflowing).
+        inner.style.transformOrigin = "top center";
+        inner.style.transform = `scale(${available / natural})`;
+      }
+    };
+
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(slide);
+    ro.observe(inner);
+    // Re-measure once images finish loading (they grow the content height).
+    const imgs = Array.from(inner.querySelectorAll("img"));
+    imgs.forEach((img) => {
+      if (!img.complete) img.addEventListener("load", fit, { once: true });
+    });
+    return () => {
+      ro.disconnect();
+      imgs.forEach((img) => img.removeEventListener("load", fit));
+    };
+  }, [current]);
 
   const prev = useCallback(() => {
     setCurrent((c) => Math.max(0, c - 1));
@@ -1443,7 +1534,7 @@ export default function PitchPage() {
       >
         <AuroraBackground />
         <DripLine />
-        <div key={current} className="pitch-slide-stage">
+        <div key={current} ref={stageRef} className="pitch-slide-stage">
           <SlideComponent isCurrent />
         </div>
 
@@ -1620,10 +1711,25 @@ export default function PitchPage() {
           position: relative;
           flex: 1;
           display: flex;
-          align-items: center;
+          /* 'safe center' centers when the slide fits, but falls back to
+             top-aligned when it is taller than the viewport so the top stays
+             reachable by scroll instead of being clipped (e.g. content-heavy
+             slides in a non-fullscreen window). */
+          align-items: safe center;
           justify-content: center;
           overflow-y: auto;
           padding: 0 0 80px 0;
+        }
+
+        /* Desktop: auto-fit handles sizing, so hide the scrollbar (wheel-scroll
+           stays as a silent fallback). Mobile keeps its native scrollbar. */
+        @media (min-width: 769px) {
+          .pitch-slide {
+            scrollbar-width: none; /* Firefox */
+          }
+          .pitch-slide::-webkit-scrollbar {
+            display: none; /* Chrome / Safari / Edge */
+          }
         }
 
         .pitch-slide-inner {
