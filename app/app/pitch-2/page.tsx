@@ -106,7 +106,9 @@ function NumberCounter({
 //  10  Contact
 //
 // Slide functions duplicated from /pitch/page.tsx — keep in sync manually
-// when the canonical deck changes.
+// when the canonical deck changes. Last synced 2026-06-10 (stats re-verified
+// on-chain; /pitch additionally gained Product + Competition slides that are
+// NOT in this 10-slide variant).
 // ──────────────────────────────────────────────────────────────────────────
 
 interface SlideProps {
@@ -122,15 +124,16 @@ function Slide01OneLiner(_: SlideProps) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo.png" alt="Percolator" className="pitch-logo" />
         <p className="pitch-hero-headline">
-          Permissionless perpetual futures on Solana &mdash; with risk
-          math that prevents shared-LP wipeouts.
+          Perpetual futures for every token on Solana.
         </p>
         <p className="pitch-hero-body">
-          Fewer than 50 Solana-native SPL tokens have a perp anywhere.
-          Hundreds more have real spot liquidity but no leverage venue,
-          because every existing perp DEX uses a shared LP pool and has
-          to curate. Percolator isolates LP capital per market, so the
-          long tail can finally list.
+          Fewer than 50 Solana-native tokens have a perp anywhere, while
+          hundreds have real spot liquidity and no leverage venue. The
+          reason is architectural: every existing perp DEX runs one
+          shared LP pool, so every listing is a risk to every LP &mdash;
+          they have to curate. Percolator isolates LP capital per
+          market, so anyone can list anything, and no market can drain
+          another.
         </p>
         <p className="pitch-url">percolator.trade</p>
       </div>
@@ -178,8 +181,8 @@ function SlideProblem(_: SlideProps) {
               <tr>
                 <td className="pitch-matrix-feature mono">Mar 2025</td>
                 <td>Hyperliquid</td>
-                <td className="pitch-matrix-no mono">~$12M HLP</td>
-                <td>JELLY squeeze; validators manually delisted &amp; hard-coded oracle.</td>
+                <td className="pitch-matrix-no mono">$12M at risk</td>
+                <td>JELLY squeeze put HLP $12M underwater; validators manually delisted &amp; hard-coded the oracle to avert it.</td>
               </tr>
               <tr>
                 <td className="pitch-matrix-feature mono">Apr 1, 2026</td>
@@ -211,15 +214,15 @@ function Slide02Team(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Team</div>
         <h2 className="pitch-title">
-          Two-person team. We&apos;re both AI-assisted developers,
-          building Percolator together full-time.
+          Two founders, full-time. AI-leveraged development &mdash; 22
+          public repos shipped since February.
         </h2>
 
         <div className="pitch-team-grid pitch-team-grid-two">
           <div className="pitch-team-card">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="https://pbs.twimg.com/profile_images/2020207940389548032/j7hY6v_m_400x400.jpg"
+              src="/images/khubairprof.jpg"
               alt="Khubair"
               className="pitch-team-pfp"
             />
@@ -258,8 +261,8 @@ function Slide02Team(_: SlideProps) {
             <div className="pitch-team-name">David</div>
             <div className="pitch-team-role">Co-founder · Community &amp; Partnerships</div>
             <ul className="pitch-team-bullets">
-              <li>He experiments with building new features</li>
-              <li>He runs community and partnerships day-to-day</li>
+              <li>He took prediction markets from design doc to a shipped on-chain matcher program</li>
+              <li>He runs community and partnerships day-to-day, plus a 30+ PR keeper-hardening campaign</li>
               <li>He found and patched the KeeperCrank big-brain bug (Toly QRT&apos;d the fix)</li>
             </ul>
             <p className="pitch-team-links mono">
@@ -284,11 +287,11 @@ function Slide02Team(_: SlideProps) {
 
         <div className="pitch-revenue-econ" style={{ marginTop: "1.5rem" }}>
           <div className="pitch-revenue-econ-stat">
-            <div className="pitch-revenue-econ-num mono">21</div>
-            <div className="pitch-revenue-econ-label">Apache-2.0 repos</div>
+            <div className="pitch-revenue-econ-num mono">22</div>
+            <div className="pitch-revenue-econ-label">public repos (engine, programs, SDK, app)</div>
           </div>
           <div className="pitch-revenue-econ-stat">
-            <div className="pitch-revenue-econ-num mono">50</div>
+            <div className="pitch-revenue-econ-num mono">51</div>
             <div className="pitch-revenue-econ-label">fork-only instructions shipped</div>
           </div>
           <div className="pitch-revenue-econ-stat">
@@ -332,15 +335,16 @@ function Slide03Traction(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Traction</div>
         <h2 className="pitch-title">
-          220 markets shipped on devnet in 5 weeks by 71 unique
-          creators. First SOL/USDC market live on mainnet today.
+          220 markets shipped on devnet by 71 unique creators &mdash;
+          verified on-chain. First SOL/USDC market deployed on
+          mainnet.
         </h2>
 
         <div className="pitch-traction-network-grid pitch-traction-network-grid-single">
           <div className="pitch-traction-network-card pitch-traction-network-card-wide">
             <div className="pitch-traction-network-header">
               <div className="pitch-traction-network-tag mono pitch-traction-network-tag-cyan">
-                Devnet · Feb 28 – Mar 31, 2026
+                Devnet · on-chain census, spring 2026
               </div>
               <a
                 className="pitch-traction-network-link mono"
@@ -357,7 +361,7 @@ function Slide03Traction(_: SlideProps) {
                   <NumberCounter target={220} />
                 </div>
                 <div className="pitch-traction-network-label">markets created</div>
-                <div className="pitch-traction-network-sublabel mono">over 5 weeks</div>
+                <div className="pitch-traction-network-sublabel mono">across 3 slab-tier programs</div>
               </div>
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono">
@@ -369,15 +373,15 @@ function Slide03Traction(_: SlideProps) {
               <div className="pitch-traction-network-stat">
                 <div className="pitch-traction-network-num mono pitch-traction-network-num-cyan">3 tiers</div>
                 <div className="pitch-traction-network-label">all running</div>
-                <div className="pitch-traction-network-sublabel mono">136 small · 12 med · 72 large</div>
+                <div className="pitch-traction-network-sublabel mono">72 small · 12 med · 136 large</div>
               </div>
             </div>
             <div className="pitch-traction-network-meta mono">
-              Markets span small, medium, and large slab tiers between
-              February 28 and March 31, 2026, all verifiable on chain.
-              Each market seeds its own per-market LP vault &mdash; the
-              same passive model as Jupiter&apos;s JLP, but isolated
-              per listing.
+              220 valid slabs counted by magic-byte filter across the
+              three slab-tier program deployments &mdash; every one
+              verifiable on chain. Each market seeds its own
+              per-market LP vault: the same passive model as
+              Jupiter&apos;s JLP, but isolated per listing.
             </div>
           </div>
         </div>
@@ -398,11 +402,11 @@ function Slide03Traction(_: SlideProps) {
           <strong style={{ color: "#22D3EE", fontWeight: 700 }}>
             Mainnet · closed beta:
           </strong>{" "}
-          SOL/USDC perp live, pinned to a Raydium CLMM pool. We&apos;re
-          not chasing volume here yet &mdash; it&apos;s just us and a
-          handful of OSS contributors stress-testing UX, keepers, and
-          settlement before the external audit. Public access opens
-          once the audit clears.
+          First SOL/USDC perp market created on mainnet in May,
+          pinned to a Raydium CLMM pool &mdash; deliberately small,
+          zero volume-chasing. The stack is now converging on
+          Toly&apos;s newest engine design (v17) ahead of the external
+          audit; public access opens once the audit clears.
         </div>
 
         <div
@@ -430,7 +434,7 @@ function Slide03Traction(_: SlideProps) {
               backgroundClip: "text",
             }}
           >
-            <NumberCounter target={7800} suffix="+" />
+            <NumberCounter target={7900} suffix="+" />
           </div>
           <div
             style={{
@@ -440,7 +444,7 @@ function Slide03Traction(_: SlideProps) {
               fontWeight: 500,
             }}
           >
-            Waitlist sign ups in less than 60 days
+            Verified waitlist signups in the first month
           </div>
           <div
             className="mono"
@@ -451,7 +455,10 @@ function Slide03Traction(_: SlideProps) {
               letterSpacing: "0.06em",
             }}
           >
-            Over 6,500 organic X followers &middot; 0 paid acquisition
+            Every wallet signature-checked against mainnet history
+            &middot; 4,500+ bot signups detected and purged, not counted
+            &middot; 6,500+ organic X followers &middot; 0 paid
+            acquisition
           </div>
         </div>
       </div>
@@ -459,16 +466,16 @@ function Slide03Traction(_: SlideProps) {
   );
 }
 
-// ─── Slide · Demo Product ────────────────────────────────────────────────────
+// ─── Slide · What It Is (product, three personas — unused in this variant) ───
 
 function Slide05Product(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner">
-        <div className="pitch-label">Built &middot; verifiable on-chain</div>
+        <div className="pitch-label">The Product</div>
         <h2 className="pitch-title">
-          Don&apos;t trust, verify. Every primitive on this deck has a
-          PDA seed, an instruction name, or an on-chain program address.
+          One account, any token with leverage &mdash; and a market
+          anyone can launch in about 60 seconds.
         </h2>
 
         <div className="pflow-wrap">
@@ -476,15 +483,16 @@ function Slide05Product(_: SlideProps) {
             <div className="pflow-num-wrap">
               <div className="pflow-num mono">01</div>
             </div>
-            <div className="pflow-step-title">Per-market USDC vault</div>
+            <div className="pflow-step-title">Creators launch the market</div>
             <div className="pflow-step-desc">
-              PDA <span className="mono">[b&quot;vault&quot;, slab_key]</span>.
-              Risk isolated from every other market on the protocol.
+              Any SPL token with DEX liquidity. No listing committee,
+              no oracle feed required &mdash; the index pins to the
+              token&apos;s own DEX pool.
             </div>
             <div className="pflow-example-card">
-              <div className="pflow-example-label mono">PDA seed</div>
-              <div className="pflow-example-value mono">[b&quot;vault&quot;, slab_key]</div>
-              <div className="pflow-example-value mono">+ [b&quot;lp_vault&quot;, slab_key]</div>
+              <div className="pflow-example-label mono">time to market</div>
+              <div className="pflow-example-value mono">~60 seconds, no approval</div>
+              <div className="pflow-example-value mono">creator earns a fee share</div>
             </div>
           </div>
 
@@ -511,15 +519,16 @@ function Slide05Product(_: SlideProps) {
             <div className="pflow-num-wrap">
               <div className="pflow-num mono">02</div>
             </div>
-            <div className="pflow-step-title">Position mints as Token-2022 NFT</div>
+            <div className="pflow-step-title">LPs seed the depth</div>
             <div className="pflow-step-desc">
-              Up to 10&times; leverage. First transferable perp
-              position primitive on Solana.
+              Deposit USDC into that one market&apos;s vault and earn
+              its fees, JLP-style. Exposure ends at that market&apos;s
+              edge &mdash; no other listing can touch it.
             </div>
             <div className="pflow-example-card">
-              <div className="pflow-example-label mono">mint instruction</div>
-              <div className="pflow-example-value mono">spl_token_2022::InitializeMint2</div>
-              <div className="pflow-example-value mono">+ TransferHook extension</div>
+              <div className="pflow-example-label mono">LP model</div>
+              <div className="pflow-example-value mono">per-market vault, isolated</div>
+              <div className="pflow-example-value mono">+ per-market insurance fund</div>
             </div>
           </div>
 
@@ -546,36 +555,32 @@ function Slide05Product(_: SlideProps) {
             <div className="pflow-num-wrap">
               <div className="pflow-num mono">03</div>
             </div>
-            <div className="pflow-step-title">Settlement on close</div>
+            <div className="pflow-step-title">Traders get the leverage</div>
             <div className="pflow-step-desc">
-              Fee routes to per-market insurance &rarr; LPs accrue via
-              vault crank. Q3: four-way split.
+              One cross-margin USDC account, up to 10&times;, on tokens
+              no other venue lists. Positions mint as transferable
+              Token-2022 NFTs.
             </div>
             <div className="pflow-example-card pflow-example-card-live">
-              <div className="pflow-example-label mono">fee routing</div>
-              <div className="pflow-example-value mono">charge_fee_to_insurance(slab)</div>
+              <div className="pflow-example-label mono">fees on every trade</div>
+              <div className="pflow-example-value mono">&rarr; creator + LPs + insurance</div>
               <div className="pflow-live-dot-row">
                 <span className="pflow-live-dot" />
-                <span className="pflow-live-text mono">ATOMIC</span>
+                <span className="pflow-live-text mono">LIVE ON DEVNET</span>
               </div>
             </div>
           </div>
         </div>
 
         <div className="pitch-create-footer">
-          Mainnet program{" "}
+          The loop compounds: every trade pays the creator and the LPs
+          who made the market possible, which recruits the next
+          creator. 220 markets prove it on devnet; mainnet program{" "}
           <span className="mono" style={{ color: "rgba(34,211,238,0.85)" }}>
-            ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv
-          </span>
-          . Twenty-one Apache-2.0 repos at{" "}
-          <span className="mono" style={{ color: "rgba(34,211,238,0.85)" }}>
-            github.com/dcccrypto
-          </span>
-          . Devnet program{" "}
-          <span className="mono" style={{ color: "rgba(34,211,238,0.85)" }}>
-            FxfD37s1…sfKrD
+            ESa89R5…D4edv
           </span>{" "}
-          has the 220-market / 71-creator history from February.
+          is in closed beta &mdash; every primitive verifiable
+          on-chain.
         </div>
       </div>
     </div>
@@ -607,13 +612,13 @@ function Slide06Money(_: SlideProps) {
             </thead>
             <tbody>
               <tr>
-                <td className="pitch-matrix-feature mono">Conservative · Q4 2026</td>
+                <td className="pitch-matrix-feature mono">Conservative · Q1 2027</td>
                 <td className="mono">10</td>
                 <td className="mono">$1M</td>
                 <td className="mono">$1,000</td>
               </tr>
               <tr>
-                <td className="pitch-matrix-feature mono">Base · mid-2027</td>
+                <td className="pitch-matrix-feature mono">Base · late 2027</td>
                 <td className="mono">100</td>
                 <td className="mono">$1M</td>
                 <td className="mono">$10,000</td>
@@ -669,7 +674,7 @@ function Slide06Money(_: SlideProps) {
                 marginBottom: "0.5rem",
               }}
             >
-              Fee routing today (v12.19)
+              Fee routing today (closed beta)
             </div>
             <div
               style={{
@@ -701,7 +706,7 @@ function Slide06Money(_: SlideProps) {
                 marginBottom: "0.5rem",
               }}
             >
-              Q3 with audit
+              At public mainnet (Q4 &middot; post-audit)
             </div>
             <div
               style={{
@@ -745,7 +750,7 @@ function Slide09WhyNow(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Why Now</div>
         <h2 className="pitch-title">
-          Solana perps lost their #2 venue six weeks ago. The long-tail
+          Solana perps lost their #2 venue in April. The long-tail
           supply that&apos;s left has nowhere to go.
         </h2>
         <div className="pitch-whynow-stats">
@@ -819,8 +824,9 @@ function Slide09WhyNow(_: SlideProps) {
           </div>
         </div>
         <div className="pitch-whynow-closing">
-          Six-week-old window. The next venue that takes long-tail
-          seriously gets the volume that used to live on Drift.
+          The hole opened in April and is still unfilled. The next
+          venue that takes long-tail seriously gets the volume that
+          used to live on Drift.
         </div>
       </div>
     </div>
@@ -847,13 +853,13 @@ function SlideGTM(_: SlideProps) {
                 Who you trade against
               </div>
               <p className="pitch-solution-desc">
-                The per-market LP vault sits on the other side of
-                every trade. There is no order book; there are no
-                makers and takers. There&apos;s a passive vault, a
-                mark price, and the risk engine. Traders deposit USDC,
-                open a position, and the vault is their counterparty
-                &mdash; same passive model as Jupiter&apos;s JLP, sized
-                per market, isolated per market.
+                Instead of bootstrapping a public order book of
+                competing market makers, the per-market LP vault takes
+                the economic other side of every trade. Traders
+                deposit USDC, open a position, and the vault is their
+                counterparty &mdash; same passive model as
+                Jupiter&apos;s JLP, sized per market, isolated per
+                market.
               </p>
             </div>
           </div>
@@ -867,11 +873,12 @@ function SlideGTM(_: SlideProps) {
                 Day-zero depth from three sources, in order: (a)
                 creator-seeded LP &mdash; the market launcher deposits
                 first, incentivised by the creator fee share their
-                market will earn; (b) Percolator-bootstrap LP from
-                raise proceeds, $50K co-deposit per cohort market in
-                Q3, recyclable as creator LP scales; (c) open LP, JLP-style,
-                anyone can deposit into any market&apos;s per-market
-                vault and mint LP tokens.
+                market will earn; (b) Percolator-bootstrap LP from the
+                protocol treasury, $50K co-deposit per cohort market
+                at public-mainnet launch, recyclable as creator LP
+                scales; (c) open LP, JLP-style, anyone can deposit
+                into any market&apos;s per-market vault and mint LP
+                tokens.
               </p>
             </div>
           </div>
@@ -935,8 +942,9 @@ function Slide13Contact(_: SlideProps) {
           style={{ maxWidth: "640px", marginBottom: "2rem" }}
         >
           Closed beta is restricted to a small group of open-source
-          contributors, pre-audit. Fork the code under Apache 2.0 across
-          all 22 public repos, or DM us on X. We answer.
+          contributors, pre-audit. The engine, core program, SDK, and
+          app are Apache 2.0 across 22 public repos &mdash; fork them,
+          or DM us on X. We answer.
         </p>
         <div className="pitch-contact-grid">
           <div className="pitch-contact-card">
@@ -1235,7 +1243,8 @@ function SlideMath(_: SlideProps) {
         <p className="pitch-team-footer" style={{ marginTop: "1.5rem" }}>
           The engine is <span className="mono">no_std</span> Rust with
           256-bit checked arithmetic end-to-end &mdash; portable to any
-          SVM chain. 305 bounded-invariant proofs run in CI.{" "}
+          SVM chain. 420 bounded-invariant Kani proof harnesses across
+          the engine.{" "}
           <span style={{ color: "rgba(34,211,238,0.85)" }}>
             External audit Q3.
           </span>
@@ -1347,15 +1356,15 @@ function SlideRoadmapAsk(_: SlideProps) {
       <div className="pitch-slide-inner">
         <div className="pitch-label">Roadmap &amp; what&apos;s next</div>
         <h2 className="pitch-title">
-          Audit clears Q3. Public mainnet Q4, 50+ creator-led markets by
-          Q2 2027, $1M+ daily fees in 2028.
+          Audit clears Q3. Public mainnet Q4, 50+ creator-led markets
+          by Q2 2027, $100K+/day protocol fees at scale in 2028.
         </h2>
 
         <div className="pitch-roadmap">
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q2 2026</div>
             <div className="pitch-roadmap-name">Closed beta · audit</div>
-            <div className="pitch-roadmap-desc">Mainnet program live, OSS-contributor beta, audit firm selected</div>
+            <div className="pitch-roadmap-desc">Mainnet program deployed, OSS-contributor beta, v17 engine convergence, audit firm selection underway</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
@@ -1372,8 +1381,8 @@ function SlideRoadmapAsk(_: SlideProps) {
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase cyan">2028</div>
-            <div className="pitch-roadmap-name">$1M+ daily fees</div>
-            <div className="pitch-roadmap-desc">Cross-margining, MM partnerships, default rail for every-token perps</div>
+            <div className="pitch-roadmap-name">$100K+/day fees</div>
+            <div className="pitch-roadmap-desc">1,000-market stretch case &mdash; cross-margining, MM partnerships, default rail for every-token perps</div>
           </div>
         </div>
 
