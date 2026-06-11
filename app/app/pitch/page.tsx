@@ -404,9 +404,9 @@ function Slide03Traction(_: SlideProps) {
           </strong>{" "}
           First SOL/USDC perp market created on mainnet in May,
           pinned to a Raydium CLMM pool &mdash; deliberately small,
-          zero volume-chasing. The stack is now converging on
-          Toly&apos;s newest engine design (v17) ahead of the external
-          audit; public access opens once the audit clears.
+          zero volume-chasing. We&apos;re hardening the engine ahead
+          of the external audit; public access opens once the audit
+          clears.
         </div>
 
         <div
@@ -1440,7 +1440,7 @@ function SlideRoadmapAsk(_: SlideProps) {
           <div className="pitch-roadmap-item">
             <div className="pitch-roadmap-phase purple">Q2 2026</div>
             <div className="pitch-roadmap-name">Closed beta · audit</div>
-            <div className="pitch-roadmap-desc">Mainnet program deployed, OSS-contributor beta, v17 engine convergence, audit firm selection underway</div>
+            <div className="pitch-roadmap-desc">Mainnet program deployed, OSS-contributor beta, engine hardening, audit firm selection underway</div>
           </div>
           <div className="pitch-roadmap-connector" />
           <div className="pitch-roadmap-item">
