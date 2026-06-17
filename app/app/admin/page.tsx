@@ -1206,14 +1206,26 @@ export default function AdminDashboard() {
                   {selectedBug.page_url && (
                     <div className="min-w-0">
                       <span className="text-[var(--text-muted)]">URL:</span>{" "}
-                      <a
-                        href={selectedBug.page_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[var(--accent)] hover:underline break-all"
-                      >
-                        {selectedBug.page_url}
-                      </a>
+                      {/* page_url comes from the PUBLIC, unauthenticated POST /api/bugs
+                          submission. React 18 does not block javascript:/data:/vbscript
+                          URLs in href (only React 19 does), so an attacker could plant a
+                          javascript: URL that runs in the admin origin when an operator
+                          clicks it. Only render a clickable link for http(s); otherwise
+                          show inert (JSX-escaped) text. */}
+                      {/^https?:\/\//i.test(selectedBug.page_url) ? (
+                        <a
+                          href={selectedBug.page_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[var(--accent)] hover:underline break-all"
+                        >
+                          {selectedBug.page_url}
+                        </a>
+                      ) : (
+                        <span className="text-[var(--text-secondary)] break-all">
+                          {selectedBug.page_url}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
