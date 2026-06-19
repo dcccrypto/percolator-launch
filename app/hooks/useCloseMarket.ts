@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { PublicKey, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   parseHeader,
@@ -156,6 +156,10 @@ export function useCloseMarket() {
           recentBlockhash: blockhash,
           feePayer: walletCompat.publicKey,
         });
+        // v17 wrapper installs a custom 128KB heap allocator and aborts unless the
+        // tx requests the full heap frame. Must be the FIRST instruction. (issue #176)
+        tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+        tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
         tx.add(ix);
 
         const signed = await walletCompat.signTransaction(tx);

@@ -21,6 +21,9 @@ async function main() {
   console.log("--- RescueOrphanVault (tag 72) ---");
   {
     const tx = new Transaction();
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
     tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }));
     tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
     tx.add(new TransactionInstruction({
@@ -45,6 +48,9 @@ async function main() {
   console.log("\n--- CloseOrphanSlab (tag 73) ---");
   {
     const tx = new Transaction();
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
     tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }));
     tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
     tx.add(new TransactionInstruction({

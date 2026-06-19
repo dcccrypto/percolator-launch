@@ -295,6 +295,10 @@ export function useTransferPositionNft(slabAddress: string) {
 
         stage = "assembling transaction";
         const tx = new Transaction();
+        // The TransferChecked hook CPIs the v17 wrapper (TransferOwnershipCpi tag 69),
+        // which installs a custom 128KB heap allocator and aborts unless the tx
+        // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+        tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
         tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
         tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
         tx.add(createDestAtaIx);

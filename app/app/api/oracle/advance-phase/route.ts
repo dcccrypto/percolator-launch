@@ -126,6 +126,10 @@ export async function POST(req: NextRequest) {
     const ix = buildIx({ programId, keys, data });
 
     const tx = new Transaction().add(
+      // AdvanceOraclePhase is a wrapper-program instruction. The v17 wrapper installs
+      // a custom 128KB heap allocator and aborts unless the tx requests the full heap
+      // frame. Must be the FIRST instruction. (issue #176)
+      ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }),
       ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
       ix,
     );

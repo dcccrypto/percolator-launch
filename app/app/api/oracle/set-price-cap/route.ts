@@ -202,6 +202,9 @@ export async function POST(req: NextRequest) {
 
       const tx = new Transaction();
       tx.add(
+        // v17 wrapper installs a custom 128KB heap allocator and aborts unless the
+        // tx requests the full heap frame. Must be the FIRST instruction. (issue #176)
+        ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }),
         ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }),
         ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
         ix,
