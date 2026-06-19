@@ -170,7 +170,6 @@ describe("/api/rpc no-Origin server-call gate", () => {
 describe("/api/rpc getProgramAccounts guard", () => {
   const originalFetch = global.fetch;
   const originalDefaultNetwork = process.env.NEXT_PUBLIC_DEFAULT_NETWORK;
-  const KNOWN_PROGRAM = "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv";
   const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
   let originalLocalNetwork: string | null = null;
@@ -232,32 +231,58 @@ describe("/api/rpc getProgramAccounts guard", () => {
     expect(global.fetch).not.toHaveBeenCalled();
     const body = await res.json();
     expect(body.error.code).toBe(-32602);
-    expect(body.error.message).toContain("target is not allowed");
+    expect(body.error.message).toContain("bounding filter");
   });
 
-  it("requires filters even for allowlisted getProgramAccounts targets", async () => {
+  it("rejects non-bounding getProgramAccounts filters before proxying", async () => {
     const res = await POST(
       makeReq({
         jsonrpc: "2.0",
         id: 2205,
         method: "getProgramAccounts",
-        params: [KNOWN_PROGRAM],
+        params: [SPL_TOKEN_PROGRAM, { filters: [{ unsupported: true }] }],
       }),
     );
 
     expect(res.status).toBe(400);
     expect(global.fetch).not.toHaveBeenCalled();
     const body = await res.json();
-    expect(body.error.message).toContain("at least one filter");
+    expect(body.error.message).toContain("dataSize or memcmp");
   });
 
-  it("allows filtered getProgramAccounts for known Percolator programs", async () => {
+  it("allows dataSize-bounded getProgramAccounts requests", async () => {
     const res = await POST(
       makeReq({
         jsonrpc: "2.0",
         id: 2206,
         method: "getProgramAccounts",
-        params: [KNOWN_PROGRAM, { filters: [{ dataSize: 128 }] }],
+        params: [SPL_TOKEN_PROGRAM, { filters: [{ dataSize: 165 }] }],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows memcmp-bounded getProgramAccounts requests", async () => {
+    const res = await POST(
+      makeReq({
+        jsonrpc: "2.0",
+        id: 2207,
+        method: "getProgramAccounts",
+        params: [
+          SPL_TOKEN_PROGRAM,
+          {
+            filters: [
+              {
+                memcmp: {
+                  offset: 0,
+                  bytes: "11111111111111111111111111111111",
+                },
+              },
+            ],
+          },
+        ],
       }),
     );
 

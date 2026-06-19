@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAllProgramIds, getRpcEndpoint } from "@/lib/config";
+import { getRpcEndpoint } from "@/lib/config";
 import { createHash, timingSafeEqual } from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -265,23 +265,18 @@ function validateGetProgramAccounts(req: Record<string, unknown>) {
     return jsonRpcValidationError(req.id ?? null, "getProgramAccounts requires array params");
   }
 
-  const targetProgram = params[0];
-  if (typeof targetProgram !== "string" || targetProgram.trim() === "") {
-    return jsonRpcValidationError(req.id ?? null, "getProgramAccounts requires a program id");
-  }
-
-  const allowedPrograms = getAllProgramIds();
-  if (!allowedPrograms.includes(targetProgram)) {
-    console.warn("[/api/rpc] Blocked getProgramAccounts for non-allowlisted program", {
-      targetProgram,
-    });
-    return jsonRpcValidationError(req.id ?? null, "getProgramAccounts target is not allowed");
-  }
-
   const config = params[1];
   const filters = isRecord(config) ? config.filters : undefined;
-  if (!Array.isArray(filters) || filters.length === 0) {
-    return jsonRpcValidationError(req.id ?? null, "getProgramAccounts requires at least one filter");
+  const bounded =
+    Array.isArray(filters) &&
+    filters.some((filter) => isRecord(filter) && ("dataSize" in filter || "memcmp" in filter));
+
+  if (!bounded) {
+    console.warn("[/api/rpc] Blocked unbounded getProgramAccounts");
+    return jsonRpcValidationError(
+      req.id ?? null,
+      "getProgramAccounts requires a bounding filter (dataSize or memcmp)",
+    );
   }
 
   return null;
