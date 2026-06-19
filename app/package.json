@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@percolatorct/sdk": "file:/Users/khubair/percolator-sdk",
+    "@percolatorct/sdk": "github:dcccrypto/percolator-sdk#1a174d3",
     "@privy-io/node": "^0.18.0",
     "@privy-io/react-auth": "^3.14.1",
     "@sentry/nextjs": "^10.39.0",
