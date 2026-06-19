@@ -166,3 +166,102 @@ describe("/api/rpc no-Origin server-call gate", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("/api/rpc getProgramAccounts guard", () => {
+  const originalFetch = global.fetch;
+  const originalDefaultNetwork = process.env.NEXT_PUBLIC_DEFAULT_NETWORK;
+  const KNOWN_PROGRAM = "ESa89R5Es3rJ5mnwGybVRG1GrNt9etP11Z5V2QWD4edv";
+  const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+
+  let originalLocalNetwork: string | null = null;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    global.fetch = vi.fn().mockResolvedValue({
+      json: async () => ({ jsonrpc: "2.0", id: 1, result: [] }),
+    } as Response) as typeof fetch;
+    process.env.NEXT_PUBLIC_DEFAULT_NETWORK = "mainnet";
+    try {
+      originalLocalNetwork = window.localStorage.getItem("percolator-network");
+      window.localStorage.setItem("percolator-network", "mainnet");
+    } catch {
+      originalLocalNetwork = null;
+    }
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalDefaultNetwork === undefined) {
+      delete process.env.NEXT_PUBLIC_DEFAULT_NETWORK;
+    } else {
+      process.env.NEXT_PUBLIC_DEFAULT_NETWORK = originalDefaultNetwork;
+    }
+    try {
+      if (originalLocalNetwork === null) {
+        window.localStorage.removeItem("percolator-network");
+      } else {
+        window.localStorage.setItem("percolator-network", originalLocalNetwork);
+      }
+    } catch {
+      // localStorage may be unavailable in non-browser test runners.
+    }
+  });
+
+  function makeReq(body: unknown): NextRequest {
+    return new NextRequest("http://localhost/api/rpc", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://percolatorlaunch.com",
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("blocks unbounded getProgramAccounts sweeps against SPL Token before proxying", async () => {
+    const res = await POST(
+      makeReq({
+        jsonrpc: "2.0",
+        id: 2204,
+        method: "getProgramAccounts",
+        params: [SPL_TOKEN_PROGRAM],
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(global.fetch).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.error.code).toBe(-32602);
+    expect(body.error.message).toContain("target is not allowed");
+  });
+
+  it("requires filters even for allowlisted getProgramAccounts targets", async () => {
+    const res = await POST(
+      makeReq({
+        jsonrpc: "2.0",
+        id: 2205,
+        method: "getProgramAccounts",
+        params: [KNOWN_PROGRAM],
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(global.fetch).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.error.message).toContain("at least one filter");
+  });
+
+  it("allows filtered getProgramAccounts for known Percolator programs", async () => {
+    const res = await POST(
+      makeReq({
+        jsonrpc: "2.0",
+        id: 2206,
+        method: "getProgramAccounts",
+        params: [KNOWN_PROGRAM, { filters: [{ dataSize: 128 }] }],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+});

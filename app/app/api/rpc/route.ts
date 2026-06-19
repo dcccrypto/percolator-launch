@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRpcEndpoint } from "@/lib/config";
+import { getAllProgramIds, getRpcEndpoint } from "@/lib/config";
 import { createHash, timingSafeEqual } from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -247,6 +247,46 @@ interface JsonRpcRequest {
   params?: unknown;
 }
 
+function jsonRpcValidationError(id: unknown, message: string) {
+  return {
+    jsonrpc: "2.0",
+    error: { code: -32602, message },
+    id,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateGetProgramAccounts(req: Record<string, unknown>) {
+  const params = req.params;
+  if (!Array.isArray(params)) {
+    return jsonRpcValidationError(req.id ?? null, "getProgramAccounts requires array params");
+  }
+
+  const targetProgram = params[0];
+  if (typeof targetProgram !== "string" || targetProgram.trim() === "") {
+    return jsonRpcValidationError(req.id ?? null, "getProgramAccounts requires a program id");
+  }
+
+  const allowedPrograms = getAllProgramIds();
+  if (!allowedPrograms.includes(targetProgram)) {
+    console.warn("[/api/rpc] Blocked getProgramAccounts for non-allowlisted program", {
+      targetProgram,
+    });
+    return jsonRpcValidationError(req.id ?? null, "getProgramAccounts target is not allowed");
+  }
+
+  const config = params[1];
+  const filters = isRecord(config) ? config.filters : undefined;
+  if (!Array.isArray(filters) || filters.length === 0) {
+    return jsonRpcValidationError(req.id ?? null, "getProgramAccounts requires at least one filter");
+  }
+
+  return null;
+}
+
 /** Validate a single JSON-RPC request, return error response or null if valid */
 function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error: { code: number; message: string }; id: unknown } | null {
   const method = req?.method;
@@ -264,6 +304,9 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
       error: { code: -32601, message: `Method not allowed: ${method}` },
       id: req?.id ?? null,
     };
+  }
+  if (method === "getProgramAccounts") {
+    return validateGetProgramAccounts(req);
   }
   return null;
 }
