@@ -110,22 +110,20 @@ describe("admin Privy token subject binding", () => {
     });
   });
 
-  it("rejects attacker access token combined with admin identity token", async () => {
-    privy.verifyAccessToken.mockResolvedValue(accessClaims(ATTACKER_DID));
-    privy.verifyIdentityToken.mockResolvedValue(
-      identityUser(ADMIN_DID, ADMIN_EMAIL),
-    );
+  it("rejects when identity token verification fails", async () => {
+  privy.verifyAccessToken.mockResolvedValue(accessClaims(ADMIN_DID));
+  privy.verifyIdentityToken.mockRejectedValue(new Error("invalid signature"));
 
-    const response = await callWhoami(
-      "attacker-access-token",
-      "admin-identity-token",
-    );
+  const response = await callWhoami(
+    "admin-access-token",
+    "bad-identity-token",
+  );
 
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({
-      error: "Session expired or invalid — sign in again",
-    });
+  expect(response.status).toBe(401);
+  expect(await response.json()).toEqual({
+    error: "Session expired or invalid — sign in again",
   });
+});
 
   it("still permits DID-based admin authorization without an identity token", async () => {
     process.env.PRIVY_ADMIN_DIDS = ADMIN_DID;
