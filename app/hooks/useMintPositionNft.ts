@@ -1,16 +1,21 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PublicKey, Keypair, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemProgram } from "@solana/web3.js";
+import { Keypair, TransactionInstruction, SystemProgram } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
-import { encodeMintPositionNft, getProgramId } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
-import { PERCOLATOR_NFT_PROGRAM_ID, deriveNftPda } from "@/lib/nft-program";
+import {
+  deriveExtraAccountMetas,
+  deriveMintAuthority,
+  deriveNftPda,
+  NFT_MINT_TAG,
+  PERCOLATOR_NFT_PROGRAM_ID,
+} from "@/lib/nft-program";
 
 export function useMintPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
@@ -33,27 +38,24 @@ export function useMintPositionNft(slabAddress: string) {
     setError(null);
 
     try {
-      const slabPk = new PublicKey(slabAddress);
-      const userIdx = userAccount.idx;
+      const portfolioPk = userAccount.portfolioPubkey;
+      const assetIndex = userAccount.assetIndex;
+      if (!portfolioPk || assetIndex === undefined) {
+        throw new Error("No active v17 portfolio position found to mint as an NFT");
+      }
       const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
 
       // Derive PDA for state, generate fresh keypair for mint
-      const [nftPda] = deriveNftPda(slabPk, userIdx);
+      const [nftPda] = deriveNftPda(portfolioPk, assetIndex);
       // nft_mint is a fresh keypair (not a PDA) — the program creates it via
       // create_account which requires the mint account to sign the transaction
       const nftMintKeypair = Keypair.generate();
       const nftMint = nftMintKeypair.publicKey;
 
       // mint_authority PDA: ["mint_authority"] on NFT program
-      const [mintAuth] = PublicKey.findProgramAddressSync(
-        [Buffer.from("mint_authority")],
-        nftProgId,
-      );
+      const [mintAuth] = deriveMintAuthority(nftProgId);
       // extra-account-metas PDA: ["extra-account-metas", nft_mint] on NFT program
-      const [extraMetas] = PublicKey.findProgramAddressSync(
-        [Buffer.from("extra-account-metas"), nftMint.toBuffer()],
-        nftProgId,
-      );
+      const [extraMetas] = deriveExtraAccountMetas(nftMint, nftProgId);
 
       // Owner's Token-2022 ATA for the NFT mint
       const ownerAta = getAssociatedTokenAddressSync(
@@ -64,7 +66,7 @@ export function useMintPositionNft(slabAddress: string) {
       );
 
       // MintPositionNft (tag 0 on NFT program)
-      // 10 accounts: owner, nft_pda, nft_mint, owner_ata, slab, mint_auth, token22, ata_program, system, extra_metas
+      // 10 accounts: owner, nft_pda, nft_mint, owner_ata, portfolio, mint_auth, token22, ata_program, system, extra_metas
       const ix = new TransactionInstruction({
         programId: nftProgId,
         keys: [
@@ -72,14 +74,14 @@ export function useMintPositionNft(slabAddress: string) {
           { pubkey: nftPda, isSigner: false, isWritable: true },          // 1: nft_pda
           { pubkey: nftMint, isSigner: true, isWritable: true },          // 2: nft_mint (SIGNER — fresh keypair)
           { pubkey: ownerAta, isSigner: false, isWritable: true },        // 3: owner_ata
-          { pubkey: slabPk, isSigner: false, isWritable: false },         // 4: slab (read-only)
+          { pubkey: portfolioPk, isSigner: false, isWritable: true },     // 4: portfolio
           { pubkey: mintAuth, isSigner: false, isWritable: false },       // 5: mint_authority PDA
           { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // 6: token-2022
           { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // 7: ata_program
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // 8: system
           { pubkey: extraMetas, isSigner: false, isWritable: true },      // 9: extra_account_metas PDA
         ],
-        data: Buffer.from([0, userIdx & 0xff, (userIdx >> 8) & 0xff]),
+        data: Buffer.from([NFT_MINT_TAG, assetIndex & 0xff, (assetIndex >> 8) & 0xff]),
       });
 
       // Build and sign manually — Privy embedded wallets can't handle extra

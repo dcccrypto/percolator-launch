@@ -1,31 +1,21 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { usePositionNft } from "@/hooks/usePositionNft";
-import { encodeBurnPositionNft } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
-
-const NFT_PROGRAM_ID = new PublicKey("FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS");
-
-/**
- * Derive the position_nft PDA.
- * Seeds: ["position_nft", slab_key, user_idx as u16 LE]
- */
-function deriveNftPda(programId: PublicKey, slab: PublicKey, userIdx: number): [PublicKey, number] {
-  const idxBuf = new Uint8Array(2);
-  new DataView(idxBuf.buffer).setUint16(0, userIdx, true);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("position_nft"), slab.toBytes(), idxBuf],
-    programId,
-  );
-}
+import {
+  deriveMintAuthority,
+  deriveNftPda,
+  NFT_BURN_TAG,
+  PERCOLATOR_NFT_PROGRAM_ID,
+} from "@/lib/nft-program";
 
 export function useBurnPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
@@ -49,16 +39,15 @@ export function useBurnPositionNft(slabAddress: string) {
     setError(null);
 
     try {
-      const slabPk = new PublicKey(slabAddress);
-      const userIdx = userAccount.idx;
+      const portfolioPk = userAccount.portfolioPubkey;
+      const assetIndex = userAccount.assetIndex;
+      if (!portfolioPk || assetIndex === undefined) {
+        throw new Error("No active v17 portfolio position found to burn as an NFT");
+      }
 
-      // Derive PDAs — NFT PDA uses NFT program, vault auth uses wrapper program
-      const nftProgId = NFT_PROGRAM_ID;
-      const [nftPda] = deriveNftPda(nftProgId, slabPk, userIdx);
-      const [vaultAuth] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), slabPk.toBuffer()],
-        programId!,
-      );
+      const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
+      const [nftPda] = deriveNftPda(portfolioPk, assetIndex, nftProgId);
+      const [mintAuth] = deriveMintAuthority(nftProgId);
 
       // Owner's Token-2022 ATA for the NFT mint
       const ownerAta = getAssociatedTokenAddressSync(
@@ -68,21 +57,20 @@ export function useBurnPositionNft(slabAddress: string) {
         TOKEN_2022_PROGRAM_ID,
       );
 
-      // Build BurnPositionNft instruction (tag 66)
-      // Accounts: [owner(signer), slab, nft_pda, nft_mint, owner_ata, vault_auth, token22]
+      // Build standalone NFT BurnPositionNft instruction (tag 1).
+      // Accounts: [holder, nft_pda, nft_mint, holder_ata, portfolio, mint_auth, token22]
       const ix = new TransactionInstruction({
         programId: nftProgId,
         keys: [
-          { pubkey: walletPubkey, isSigner: true, isWritable: true },    // owner
-          { pubkey: slabPk, isSigner: false, isWritable: true },         // slab
+          { pubkey: walletPubkey, isSigner: true, isWritable: true },    // holder
           { pubkey: nftPda, isSigner: false, isWritable: true },         // nft_pda
           { pubkey: nftMint, isSigner: false, isWritable: true },        // nft_mint
-          { pubkey: ownerAta, isSigner: false, isWritable: true },       // owner_ata
-          { pubkey: vaultAuth, isSigner: false, isWritable: false },     // vault_auth PDA
+          { pubkey: ownerAta, isSigner: false, isWritable: true },       // holder_ata
+          { pubkey: portfolioPk, isSigner: false, isWritable: false },   // portfolio
+          { pubkey: mintAuth, isSigner: false, isWritable: false },      // mint_authority PDA
           { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // token-2022
         ],
-        // NFT program uses tag 1 for BurnPositionNft (not SDK's tag which is for the wrapper)
-        data: Buffer.from([1]),
+        data: Buffer.from([NFT_BURN_TAG]),
       });
 
       const sig = await sendTx({

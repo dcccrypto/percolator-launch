@@ -9,6 +9,10 @@ import { AccountKind, isV17Account, parsePortfolioV17, type Account } from "@per
 export interface UserAccountInfo {
   idx: number;
   account: Account;
+  /** v17 standalone portfolio account used by percolator-nft v16. */
+  portfolioPubkey?: PublicKey;
+  /** Active v17 asset index bound by percolator-nft v16. */
+  assetIndex?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +139,13 @@ export function useUserAccount(): UserAccountInfo | null {
         }
         const data = results[0].account.data;
         const portfolio = parsePortfolioV17(data instanceof Buffer ? data : Buffer.from(data));
-        setV17Account({ idx: 0, account: portfolioV17ToAccount(portfolio) });
+        const activeLeg = portfolio.legs.find((l) => l.active);
+        setV17Account({
+          idx: 0,
+          account: portfolioV17ToAccount(portfolio),
+          portfolioPubkey: results[0].pubkey,
+          assetIndex: activeLeg?.assetIndex,
+        });
       } catch {
         if (!cancelled) setV17Account(null);
       }

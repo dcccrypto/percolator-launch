@@ -31,8 +31,8 @@ export interface UsePositionNftResult {
  * Hook: derives the position_nft PDA for the current user, fetches the
  * account, and parses the NFT mint + settlement flag.
  *
- * PDA seeds: ["position_nft", slab, user_idx_u16_LE]
- * Layout per percolator-nft program (PERC-303).
+ * PDA seeds: ["position_nft", portfolio_account, asset_index_u16_LE]
+ * Layout per percolator-nft v16.
  */
 export function usePositionNft(slabAddress: string): UsePositionNftResult {
   const { connection } = useConnectionCompat();
@@ -55,11 +55,13 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
   // changes when the user index or program/slab identity changes, so key the
   // effect on those primitives alone. Refetches after mint/burn can be
   // wired later via a manual trigger if needed.
-  const userIdx = userAccount?.idx ?? null;
+  const portfolioPubkey = userAccount?.portfolioPubkey ?? null;
+  const portfolioPubkeyStr = portfolioPubkey?.toBase58() ?? null;
+  const assetIndex = userAccount?.assetIndex ?? null;
   const programIdStr = slabProgramId?.toBase58() ?? null;
 
   useEffect(() => {
-    if (userIdx === null || !programIdStr || !slabAddress) {
+    if (!portfolioPubkey || assetIndex === null || !programIdStr || !slabAddress) {
       setState({
         hasMintedNft: false,
         nftMint: null,
@@ -74,8 +76,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
 
     (async () => {
       try {
-        const slabPk = new PublicKey(slabAddress);
-        const [nftPda] = deriveNftPda(slabPk, userIdx, PERCOLATOR_NFT_PROGRAM_ID);
+        const [nftPda] = deriveNftPda(portfolioPubkey, assetIndex, PERCOLATOR_NFT_PROGRAM_ID);
         const pdaStr = nftPda.toBase58();
 
         if (mockMode) {
@@ -151,7 +152,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     // Deliberately excluding `connection` — it's from context and stable in
     // practice; including the object reference was part of the flicker bug.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userIdx, programIdStr, slabAddress, mockMode]);
+  }, [portfolioPubkeyStr, assetIndex, programIdStr, slabAddress, mockMode]);
 
   return state;
 }
