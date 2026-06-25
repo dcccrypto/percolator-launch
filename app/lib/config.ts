@@ -5,6 +5,13 @@
 export type Network = "mainnet" | "devnet";
 
 export function getNetwork(): Network {
+  // NEXT_PUBLIC_DEFAULT_NETWORK is baked into the client bundle at build time.
+  // On mainnet deployments this check is enforced before localStorage is read,
+  // so an XSS payload calling localStorage.setItem("percolator-network","devnet")
+  // cannot redirect a mainnet frontend to devnet config or devnet program IDs.
+  const deploymentNet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
+  if (deploymentNet === "mainnet") return "mainnet";
+
   if (typeof window !== "undefined") {
     try {
       const override = localStorage.getItem("percolator-network") as Network | null;
@@ -13,9 +20,7 @@ export function getNetwork(): Network {
       // localStorage may be unavailable (SSR, iframes, or test environments)
     }
   }
-  // Trim env var to handle trailing whitespace/newlines (Vercel env var copy-paste issue)
-  const envNet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
-  if (envNet === "mainnet" || envNet === "devnet") return envNet;
+  if (deploymentNet === "devnet") return "devnet";
   // Default fail-closed to mainnet; prevents devnet-only features (pre-fund, faucet)
   // from activating on misconfigured production deployments.
   // Set NEXT_PUBLIC_DEFAULT_NETWORK=devnet explicitly for devnet environments.
