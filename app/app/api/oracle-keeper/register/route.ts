@@ -16,13 +16,22 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { getServiceClient } from "@/lib/supabase";
 import { PublicKey } from "@solana/web3.js";
 
 export const dynamic = "force-dynamic";
 
-const KEEPER_URL = process.env.KEEPER_INTERNAL_URL ?? "http://localhost:8081";
+const _rawKeeperUrl = process.env.KEEPER_INTERNAL_URL ?? "http://localhost:8081";
+// LAUNCH-16: Allow http:// only for loopback (localhost / 127.0.0.1); remote targets must use https://.
+// Checked at module load so a misconfigured deployment surfaces at startup rather than at request time.
+const _isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?($|\/)/.test(_rawKeeperUrl);
+if (!_isLoopback && !_rawKeeperUrl.startsWith("https://")) {
+  throw new Error(
+    `KEEPER_INTERNAL_URL must be https:// or a loopback address — plaintext remote URL would expose KEEPER_REGISTER_SECRET: "${_rawKeeperUrl}"`,
+  );
+}
+const KEEPER_URL = _rawKeeperUrl;
 /** Trimmed — whitespace-only env counts as unset (same idea as set-price-cap / ADMIN_API_SECRET). */
 const REGISTER_SECRET = (process.env.KEEPER_REGISTER_SECRET ?? "").trim();
 
@@ -111,14 +120,23 @@ export async function POST(req: NextRequest) {
     let keeperRegistered = false;
     let keeperMessage = "Keeper unreachable — market will auto-discover on next cycle";
     try {
+      // LAUNCH-16: Sign the request with HMAC-SHA256 instead of forwarding the raw secret.
+      // The keeper verifies: HMAC-SHA256(REGISTER_SECRET, "<timestamp>.<body>") == x-keeper-signature.
+      // This means the raw credential is never sent on the wire regardless of URL scheme.
+      const keeperPayload = JSON.stringify({ slabAddress, mainnetCA });
+      const keeperTimestamp = Date.now().toString();
+      const keeperSig = createHmac("sha256", REGISTER_SECRET)
+        .update(`${keeperTimestamp}.${keeperPayload}`)
+        .digest("hex");
+
       const keeperResp = await fetch(`${KEEPER_URL}/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Forward shared secret so keeper's defense-in-depth auth passes (#780)
-          "x-shared-secret": REGISTER_SECRET,
+          "x-keeper-timestamp": keeperTimestamp,
+          "x-keeper-signature": keeperSig,
         },
-        body: JSON.stringify({ slabAddress, mainnetCA }),
+        body: keeperPayload,
         signal: AbortSignal.timeout(8_000),
       });
       const keeperData = (await keeperResp.json()) as { success: boolean; message: string };
