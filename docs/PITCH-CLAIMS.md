@@ -16,6 +16,10 @@ route that imports the shared slides and passes its own ordered `slides` array �
   early; drops Why Now, Business Model, Moat, GTM)
 - `/pitch/grants` — **Solana Foundation / Superteam** (9 slides; open-source +
   ecosystem-contribution story; drops Business Model, Moat, Competition, Why Now)
+- `/pitch/intro` — **short intro/teaser deck** (8 slides, minimal words, one
+  bold statement per slide, built for a cold async read). Own lean slide
+  components, reuses the shared PitchDeck runner + CSS. The ask states the
+  milestone, not a number (fill before sending).
 - `/pitch-2` — legacy Colosseum cut, NOT on the shared library yet (still a
   copy-paste file; Frontier ended May 11, retire or migrate).
 
