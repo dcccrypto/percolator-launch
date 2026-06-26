@@ -67,7 +67,7 @@ function IntroWhyNow(_: SlideProps) {
   );
 }
 
-// ── 4 · Solution ─────────────────────────────────────────────────────────────
+// ── 4 · Solution (with live product screenshot as proof) ─────────────────────
 function IntroSolution(_: SlideProps) {
   return (
     <div className="pitch-slide">
@@ -76,10 +76,21 @@ function IntroSolution(_: SlideProps) {
         <p className="pitch-hero-headline">
           Launch a perp market for any token in about 60 seconds.
         </p>
-        <p className="pitch-hero-body">
-          Each market is isolated, so one blow-up can never touch another.
-          Live on devnet today.
-        </p>
+        <div
+          className="pflow-shot-wrap"
+          style={{ maxWidth: "820px", marginTop: "1.25rem" }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/images/product/launch-market.webp"
+            alt="The live Launch a Market flow: deploy a perp market for any token in about 60 seconds"
+            className="pflow-shot"
+          />
+          <div className="pflow-shot-cap mono">
+            Live on devnet &middot; each market isolated, so one blow-up
+            can&apos;t touch another
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -122,8 +133,8 @@ function IntroTraction(_: SlideProps) {
           className="pitch-hero-body"
           style={{ marginTop: "0.75rem" }}
         >
-          waitlist signups in ~6 weeks, organic. Plus 220 markets created on
-          devnet by 71 builders, all verifiable on-chain.
+          waitlist signups in 7 weeks. Organic, zero paid. Plus 220 markets
+          created on devnet by 71 builders, all verifiable on-chain.
         </p>
       </div>
     </div>
