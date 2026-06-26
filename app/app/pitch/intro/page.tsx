@@ -78,7 +78,7 @@ function IntroSolution(_: SlideProps) {
         </p>
         <div
           className="pflow-shot-wrap"
-          style={{ maxWidth: "820px", marginTop: "1.25rem" }}
+          style={{ maxWidth: "960px", width: "100%", marginTop: "1rem" }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
