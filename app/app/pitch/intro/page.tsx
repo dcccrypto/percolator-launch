@@ -41,8 +41,9 @@ function IntroProblem(_: SlideProps) {
           Almost no Solana token can be traded with leverage.
         </p>
         <p className="pitch-hero-body">
-          Every perp venue shares one pool of capital, so they all curate down
-          to the same ~40 large caps. The long tail has the demand and no venue.
+          Hundreds of thousands of tokens trade on Solana. Barely a hundred
+          have a perp market, all curated down to the same majors. The long
+          tail has the demand and no venue.
         </p>
       </div>
     </div>
@@ -56,11 +57,12 @@ function IntroWhyNow(_: SlideProps) {
       <div className="pitch-slide-inner pitch-center">
         <div className="pitch-label">Why now</div>
         <p className="pitch-hero-headline">
-          Solana perps are at a record. The market leader just went dark.
+          $77B traded on Solana perps in May, a record. Then the leader got
+          drained and went dark.
         </p>
         <p className="pitch-hero-body">
-          $77B traded in May, an all-time high. The #1 venue was drained and
-          shut down. Only ~13% of new tokens ever get a perp anywhere.
+          The volume re-routed in weeks. Only ~13% of new tokens ever get a
+          perp, so the long tail still has nowhere to go.
         </p>
       </div>
     </div>
@@ -141,20 +143,93 @@ function IntroTraction(_: SlideProps) {
   );
 }
 
-// ── 6 · Why us ───────────────────────────────────────────────────────────────
+// ── 6 · Why us (Toly's own words + his actual tweets as proof) ────────────────
 function IntroWhyUs(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner pitch-center">
         <div className="pitch-label">Why us</div>
-        <p className="pitch-hero-headline">
-          We took the Solana co-founder&apos;s open challenge and shipped it.
+        <p className="pitch-title" style={{ marginBottom: "0.6rem" }}>
+          &ldquo;Pls steal the idea.&rdquo; We did.
         </p>
-        <p className="pitch-hero-body">
-          Anatoly Yakovenko open-sourced the risk engine and said &ldquo;steal
-          the idea.&rdquo; We built the venue on it, and he&apos;s engaged with
-          our work publicly.
+        <p
+          className="pitch-hero-body"
+          style={{ marginBottom: "1.5rem" }}
+        >
+          Anatoly Yakovenko, Solana&apos;s co-founder, open-sourced the perp
+          engine and dared builders to run with it. We built the venue on it,
+          and he&apos;s followed the work since:
         </p>
+        <div className="pitch-toly-photo-grid">
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Percolator is a job creator, Feb 13"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo4.jpg"
+              alt="Toly tweet: 'Percolator is a job creator'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly &middot; Feb 13</span>
+              <span>&ldquo;Percolator is a job creator&rdquo;</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Don't trust, verify, Feb 19"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo3.jpg"
+              alt="Toly tweet reposting our stake program: 'Don't trust, verify!'"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly &middot; Feb 19</span>
+              <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — David's KeeperCrank fix, Apr 29"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo1.jpg"
+              alt="Toly tweet quote-RTing David's engine bug fix"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly &middot; Apr 29</span>
+              <span>David&apos;s engine bug fix</span>
+            </div>
+          </a>
+          <a
+            className="pitch-toly-photo"
+            href="https://x.com/toly"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Toly tweet — Two devs and a dream, May 29"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/toly/photo8.png"
+              alt="Toly tweet 'Two devs and a dream' on our work"
+            />
+            <div className="pitch-toly-photo-cap mono">
+              <span>@toly &middot; May 29</span>
+              <span>&ldquo;Two devs and a dream&rdquo;</span>
+            </div>
+          </a>
+        </div>
       </div>
     </div>
   );
