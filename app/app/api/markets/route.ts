@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
-import { parseHeader, parseConfig } from "@percolatorct/sdk";
+import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
-import { getConfig } from "@/lib/config";
+import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { getClientIp } from "@/lib/get-client-ip";
 import * as Sentry from "@sentry/nextjs";
 import nacl from "tweetnacl";
@@ -77,123 +77,79 @@ const MAINNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
 ];
 
+// v17 devnet static fallback — used only when Supabase AND on-chain discovery both fail.
+// Program: 69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9 (v17 wrapper, deployed 2026-06-26)
+// Collateral: DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC (Sim-USDC, 6dp)
 const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   {
-    slab_address: "FCusfsg4uzcLSdRbj9Ez5okcrS1MwvKHvDbmcwrnSWvL",
-    program_id: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
-    mint_address: null,
-    symbol: "DEVNET-SMALL-1",
-    name: "Devnet Small Market",
+    // dexoracle-poc market — SOL-PERP, hyperp oracle (Raydium-CLMM pool)
+    slab_address: "7VrvSC57aB9gdM8iymEDJtrgjE4RGZMPfkuxCR4sFcrj",
+    program_id: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+    mint_address: "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
+    symbol: "SOL-PERP",
+    name: "SOL/USD Perpetual (Devnet)",
     decimals: 6,
     deployer: null,
     oracle_authority: null,
-    oracle_mode: null,
+    oracle_mode: "hyperp",
+    dex_pool_address: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
+    mainnet_ca: "So11111111111111111111111111111111111111112",
     created_at: null,
+    stats_updated_at: null,
     is_zombie: false,
+    last_price: null,
+    mark_price: null,
+    index_price: null,
+    volume_24h: 0,
+    trade_count_24h: 0,
+    open_interest_long: 0,
+    open_interest_short: 0,
+    total_open_interest: 0,
+    total_open_interest_usd: 0,
+    insurance_fund: 0,
+    insurance_balance: 0,
+    total_accounts: 0,
+    funding_rate: null,
+    net_lp_pos: 0,
+    lp_sum_abs: 0,
+    c_tot: 0,
+    volume_24h_usd: 0,
+    vault_balance: 0,
   },
   {
-    slab_address: "4r4bxZ2LxNCu4EWdkXThoVaBHBsYQcWkizdkmWciprJC",
-    program_id: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
-    mint_address: null,
-    symbol: "DEVNET-SMALL-2",
-    name: "Devnet Small Market",
+    // okm.env market — SOL TEST-PERP, admin oracle mode
+    slab_address: "B3QmZRHqdLfxqMUbPp5Hzx4KwUwQDCmYNbFmWdbY1DBG",
+    program_id: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+    mint_address: "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
+    symbol: "TEST-PERP",
+    name: "SOL TEST-PERP (Devnet)",
     decimals: 6,
     deployer: null,
     oracle_authority: null,
-    oracle_mode: null,
+    oracle_mode: "admin",
+    dex_pool_address: null,
+    mainnet_ca: "So11111111111111111111111111111111111111112",
     created_at: null,
+    stats_updated_at: null,
     is_zombie: false,
-  },
-  {
-    slab_address: "7G3SsnevWwUWjWAwGGmr2N11x8KAGn1abzjV3bBbZkAM",
-    program_id: "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",
-    mint_address: null,
-    symbol: "DEVNET-SMALL-3",
-    name: "Devnet Small Market",
-    decimals: 6,
-    deployer: null,
-    oracle_authority: null,
-    oracle_mode: null,
-    created_at: null,
-    is_zombie: false,
-  },
-  {
-    slab_address: "GfRak5ben9rvZiaEWW6FmmkeqjXFz9SBLhDwiPWhoapS",
-    program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
-    mint_address: null,
-    symbol: "DEVNET-MEDIUM-1",
-    name: "Devnet Medium Market",
-    decimals: 6,
-    deployer: null,
-    oracle_authority: null,
-    oracle_mode: null,
-    created_at: null,
-    is_zombie: false,
-  },
-  {
-    slab_address: "9Av38ug3FE1goNB4JanwjqdHVvF5JeQbHV6jUVEvvocB",
-    program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
-    mint_address: null,
-    symbol: "DEVNET-MEDIUM-2",
-    name: "Devnet Medium Market",
-    decimals: 6,
-    deployer: null,
-    oracle_authority: null,
-    oracle_mode: null,
-    created_at: null,
-    is_zombie: false,
-  },
-  {
-    slab_address: "A3XJVaQxKsM4bbikoSTvKczQLVQQ19GbrxY9S9ShK119",
-    program_id: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",
-    mint_address: null,
-    symbol: "DEVNET-MEDIUM-3",
-    name: "Devnet Medium Market",
-    decimals: 6,
-    deployer: null,
-    oracle_authority: null,
-    oracle_mode: null,
-    created_at: null,
-    is_zombie: false,
-  },
-  {
-    slab_address: "HrdveBrbepjvwAn2qmCPU9eRSFG6Munpkw7gXCHvLpBN",
-    program_id: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-    mint_address: null,
-    symbol: "DEVNET-LARGE-1",
-    name: "Devnet Large Market",
-    decimals: 6,
-    deployer: null,
-    oracle_authority: null,
-    oracle_mode: null,
-    created_at: null,
-    is_zombie: false,
-  },
-  {
-    slab_address: "JBS3qeCoiAvyPRm4DsUfunA7YcL6UnRmbk6TyRBHTz2X",
-    program_id: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-    mint_address: null,
-    symbol: "DEVNET-LARGE-2",
-    name: "Devnet Large Market",
-    decimals: 6,
-    deployer: null,
-    oracle_authority: null,
-    oracle_mode: null,
-    created_at: null,
-    is_zombie: false,
-  },
-  {
-    slab_address: "5JUTyfARLVAWTMPxPnGq5jyYq7aNuq5c1M2tvDqaFQJL",
-    program_id: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-    mint_address: null,
-    symbol: "DEVNET-LARGE-3",
-    name: "Devnet Large Market",
-    decimals: 6,
-    deployer: null,
-    oracle_authority: null,
-    oracle_mode: null,
-    created_at: null,
-    is_zombie: false,
+    last_price: null,
+    mark_price: null,
+    index_price: null,
+    volume_24h: 0,
+    trade_count_24h: 0,
+    open_interest_long: 0,
+    open_interest_short: 0,
+    total_open_interest: 0,
+    total_open_interest_usd: 0,
+    insurance_fund: 0,
+    insurance_balance: 0,
+    total_accounts: 0,
+    funding_rate: null,
+    net_lp_pos: 0,
+    lp_sum_abs: 0,
+    c_tot: 0,
+    volume_24h_usd: 0,
+    vault_balance: 0,
   },
 ];
 
@@ -237,6 +193,164 @@ function numericOrNull(v: unknown): number | null {
   if (v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Map a DiscoveredMarket to the API response row format.
+ * For v17 markets, configV17 carries all config fields.
+ * For v12 slabs, config has the fields; engine/params hold stats.
+ */
+function discoveredToApiRow(m: DiscoveredMarket): Record<string, unknown> {
+  const slabAddress = m.slabAddress.toBase58();
+  const programId = m.programId.toBase58();
+
+  if (m.configV17) {
+    const cfg = m.configV17;
+    const markPriceRaw = cfg.markEwmaE6;
+    const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
+    return {
+      slab_address: slabAddress,
+      program_id: programId,
+      mint_address: cfg.collateralMint.toBase58(),
+      symbol: null,
+      name: null,
+      decimals: 6,
+      deployer: cfg.marketauth.toBase58(),
+      oracle_authority: cfg.marketauth.toBase58(),
+      oracle_mode: cfg.oracleMode === 1 ? "hyperp" : "admin",
+      dex_pool_address: null,
+      mainnet_ca: null,
+      created_at: null,
+      stats_updated_at: null,
+      is_zombie: false,
+      last_price: markPriceUsd,
+      mark_price: markPriceUsd,
+      index_price: null,
+      volume_24h: 0,
+      trade_count_24h: 0,
+      open_interest_long: 0,
+      open_interest_short: 0,
+      total_open_interest: 0,
+      total_open_interest_usd: 0,
+      insurance_fund: 0,
+      insurance_balance: 0,
+      total_accounts: 0,
+      funding_rate: null,
+      net_lp_pos: 0,
+      lp_sum_abs: 0,
+      c_tot: 0,
+      volume_24h_usd: 0,
+      vault_balance: 0,
+    };
+  }
+
+  // v12 slab — config is a real MarketConfig
+  const collateralMint = (m.config as { collateralMint?: { toBase58: () => string } })?.collateralMint;
+  return {
+    slab_address: slabAddress,
+    program_id: programId,
+    mint_address: collateralMint?.toBase58() ?? null,
+    symbol: null,
+    name: null,
+    decimals: 6,
+    deployer: null,
+    oracle_authority: null,
+    oracle_mode: null,
+    dex_pool_address: null,
+    mainnet_ca: null,
+    created_at: null,
+    stats_updated_at: null,
+    is_zombie: false,
+    last_price: null,
+    mark_price: null,
+    index_price: null,
+    volume_24h: 0,
+    trade_count_24h: 0,
+    open_interest_long: 0,
+    open_interest_short: 0,
+    total_accounts: 0,
+    funding_rate: null,
+    vault_balance: 0,
+  };
+}
+
+/**
+ * Server-side on-chain market discovery via SDK discoverMarkets().
+ *
+ * Only runs on devnet — getProgramAccounts is blocked on public mainnet RPCs.
+ * Uses maxTierQueries:0 to skip v12 tier scans entirely and only run the
+ * v17 memcmp filter (one RPC call per program). Fast: ~1–2s on Helius devnet.
+ *
+ * Returns [] on any failure; callers must degrade gracefully.
+ */
+async function discoverMarketsOnChain(): Promise<Record<string, unknown>[]> {
+  const cfg = getConfig();
+  if (cfg.network !== "devnet") return [];
+
+  const rpcUrl = getRpcEndpoint();
+  const connection = new Connection(rpcUrl, "confirmed");
+
+  try {
+    const programId = new PublicKey(cfg.programId);
+    const found = await discoverMarkets(connection, programId, {
+      sequential: true,
+      maxTierQueries: 0, // Skip v12 tier scans — only the v17 memcmp path runs
+    });
+    if (found.length === 0) return [];
+
+    const seen = new Set<string>();
+    return found
+      .filter(m => {
+        const key = m.slabAddress.toBase58();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map(discoveredToApiRow);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns a markets response via on-chain discovery (when Supabase is not configured),
+ * falling back to the static DEVNET_MARKET_DIRECTORY_FALLBACK list on failure.
+ */
+async function onChainOrStaticResponse(request: NextRequest, reason: string): Promise<NextResponse> {
+  try {
+    const rows = await discoverMarketsOnChain();
+    if (rows.length > 0) {
+      const programIdParam = request?.nextUrl?.searchParams?.get("program_id") ?? null;
+      const searchParam =
+        request?.nextUrl?.searchParams?.get("search") ??
+        request?.nextUrl?.searchParams?.get("q") ??
+        null;
+      const searchTrimmed = searchParam?.trim().toLowerCase() ?? null;
+
+      const filtered = rows
+        .filter(m => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string))
+        .filter(m => !programIdParam || m.program_id === programIdParam)
+        .filter(m => {
+          if (!searchTrimmed) return true;
+          const symbol = String(m.symbol ?? "").toLowerCase();
+          const name = String(m.name ?? "").toLowerCase();
+          const slab = String(m.slab_address ?? "").toLowerCase();
+          const mint = String(m.mint_address ?? "").toLowerCase();
+          return symbol.includes(searchTrimmed) || name.includes(searchTrimmed) || slab.includes(searchTrimmed) || mint.includes(searchTrimmed);
+        });
+
+      if (filtered.length > 0) {
+        return NextResponse.json(
+          { total: filtered.length, activeTotal: filtered.length, marketsWithPrice: 0, zombieCount: 0, markets: filtered },
+          { headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "on-chain-discovery" } },
+        );
+      }
+    }
+  } catch {
+    // Silently fall through to static fallback
+  }
+
+  return fallbackMarketsResponse(request, reason);
 }
 
 function fallbackMarketsResponse(request: NextRequest, reason: string): NextResponse {
@@ -395,7 +509,8 @@ export async function GET(request: NextRequest) {
     try {
       supabase = getServiceClient();
     } catch {
-      return fallbackMarketsResponse(request, "supabase-not-configured");
+      // Supabase not configured — try on-chain discovery, then static directory.
+      return await onChainOrStaticResponse(request, "supabase-not-configured");
     }
     // GH#1781: Exclude zombie markets with null slab_address at the DB layer.
     // These are incomplete DB rows (TEST x2, BREW, LOBSTAR) with no on-chain account —
