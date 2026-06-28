@@ -16,7 +16,7 @@ interface StepReviewProps {
   mintValid: boolean;
   mintExistsOnNetwork: boolean;
   // Oracle
-  oracleType: "pyth" | "hyperp_ema" | "admin";
+  oracleType: "pyth" | "hyperp_ema" | "admin" | "keeper";
   oracleLabel: string;
   // Parameters
   slabTier: SlabTierKey;
@@ -91,7 +91,9 @@ export const StepReview: FC<StepReviewProps> = ({
       ? "Pyth"
       : oracleType === "hyperp_ema"
         ? "HyperpEMA"
-        : "Admin";
+        : oracleType === "keeper"
+          ? "Keeper"
+          : "Admin";
 
   const isDevnet = getNetwork() === "devnet";
 

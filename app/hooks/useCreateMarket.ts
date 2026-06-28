@@ -5,6 +5,7 @@ import {
   Keypair,
   PublicKey,
   SystemProgram,
+  Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -138,13 +139,18 @@ export interface CreateMarketParams {
   /** Mainnet token CA — used by oracle keeper to fetch real-time prices (PERC-465) */
   mainnetCA?: string;
   /** PERC-470: Oracle mode — determines how price is fed to the market */
-  oracleMode?: "pyth" | "hyperp" | "admin";
+  oracleMode?: "pyth" | "hyperp" | "admin" | "keeper";
   /** PERC-470: DEX pool address for hyperp mode (PumpSwap/Raydium/Meteora) */
   dexPoolAddress?: string;
   /** PERC-470: Base vault address for hyperp mode (PumpSwap) */
   dexBaseVault?: string;
   /** PERC-470: Quote vault address for hyperp mode (PumpSwap) */
   dexQuoteVault?: string;
+  /**
+   * Keeper oracle: DEX pool type (raydium-clmm / meteora-dlmm / pumpswap).
+   * Used by the keeper registration call after market creation.
+   */
+  dexType?: string;
 }
 
 export interface CreateMarketState {
@@ -168,6 +174,10 @@ export interface CreateMarketState {
    * independently later. Success screen shows a soft warning rather than hard error.
    */
   insuranceMintFailed: boolean;
+  /** Keeper oracle mode: true when oracle_authority was delegated to keeper */
+  keeperDelegated: boolean;
+  /** Keeper registration result message */
+  keeperMessage: string | null;
 }
 
 const STEP_LABELS = [
@@ -193,6 +203,8 @@ export function useCreateMarket() {
     devnetAirdropSymbol: null,
     devnetMintError: null,
     insuranceMintFailed: false,
+    keeperDelegated: false,
+    keeperMessage: null,
   });
 
   // PERC-8329 / GH#1964: Slab keypair is kept in-memory ONLY — never in localStorage.
@@ -227,9 +239,12 @@ export function useCreateMarket() {
       // Force admin oracle mode for all devnet mirror markets (params.mainnetCA is set).
       const isDevnetMirror = !!params.mainnetCA;
       const resolvedOracleMode = params.oracleMode ?? (params.oracleFeed === ALL_ZEROS_FEED ? "admin" : "pyth");
-      const oracleMode: "pyth" | "hyperp" | "admin" = (resolvedOracleMode === "hyperp" && isDevnetMirror) ? "admin" : resolvedOracleMode;
+      // "keeper" mode: AUTH_MARK oracle with oracle_authority delegated to our keeper service.
+      // On devnet mirrors, hyperp falls back to admin; keeper stays keeper (it's designed for devnet).
+      const oracleMode: "pyth" | "hyperp" | "admin" | "keeper" = (resolvedOracleMode === "hyperp" && isDevnetMirror) ? "admin" : resolvedOracleMode as "pyth" | "hyperp" | "admin" | "keeper";
       const isAdminOracle = oracleMode === "admin";
       const isHyperpOracle = oracleMode === "hyperp";
+      const isKeeperOracle = oracleMode === "keeper";
       // PERC-devnet: isDevnetEnv must be runtime-detected, not build-time.
       // Users toggle devnet via localStorage — NEXT_PUBLIC_DEFAULT_NETWORK is always "mainnet" on Vercel prod.
       // Use getNetwork() which reads localStorage("percolator-network") first, then env var, then defaults
@@ -684,6 +699,51 @@ export function useCreateMarket() {
           // v17 note: isAdminOracle for v17 slabs → oracle params already in InitMarket;
           // no SetOracleAuthority / PushOraclePrice / SetOraclePriceCap / UpdateConfig needed.
 
+          // Keeper oracle mode (v17): ConfigureAuthMark + UpdateAssetAuthority(Oracle → keeper).
+          // The backend co-signs UpdateAssetAuthority (as the new oracle_authority = keeper).
+          // After this tx: oracle_mode=3 (AUTH_MARK), oracle_authority=keeperPubkey.
+          if (isKeeperOracle && isV17Slab) {
+            setState((s) => ({ ...s, stepLabel: "Delegating oracle authority to keeper..." }));
+            const cosignResp = await fetch("/api/playground/keeper-cosign", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                deployer: wallet.publicKey.toBase58(),
+                slabAddress: slabPk.toBase58(),
+                initialPriceE6: params.initialPriceE6.toString(),
+                assetIndex: 0,
+              }),
+            });
+            if (!cosignResp.ok) {
+              const errData = await cosignResp.json().catch(() => ({ error: "co-sign failed" }));
+              throw new Error(
+                `Keeper co-sign failed (${cosignResp.status}): ${(errData as { error?: string }).error ?? cosignResp.statusText}. ` +
+                `Is PLAYGROUND_KEEPER_KEYPAIR set in server env?`,
+              );
+            }
+            const { partialTxBase64 } = await cosignResp.json() as { partialTxBase64: string };
+
+            // Deserialize the partially-signed tx (keeper has signed UpdateAssetAuthority)
+            const partialTxBytes = Buffer.from(partialTxBase64, "base64");
+            const partialTx = Transaction.from(partialTxBytes);
+
+            // Wallet signs (adds creator sig for ConfigureAuthMark + UpdateAssetAuthority)
+            if (!wallet.signTransaction) throw new Error("Wallet does not support signTransaction");
+            const signedTx = await wallet.signTransaction(partialTx);
+
+            // Send the fully-signed tx
+            const keeperDelegateSig = await connection.sendRawTransaction(signedTx.serialize(), {
+              skipPreflight: false,
+            });
+            const keeperDelegateConfirm = await connection.confirmTransaction(keeperDelegateSig, "confirmed");
+            if (keeperDelegateConfirm.value.err) {
+              throw new Error(
+                `Keeper delegate tx failed on-chain: ${JSON.stringify(keeperDelegateConfirm.value.err)}`,
+              );
+            }
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, keeperDelegateSig] }));
+          }
+
           // Pre-LP crank — v17 PermissionlessCrank requires a portfolio at accounts[2].
           // For v17 slabs, we skip the pre-LP crank (oracle is managed by UpdateAssetLifecycle
           // server-side; no oracle account required here). For v12 legacy slabs, use the old path.
@@ -1085,6 +1145,37 @@ export function useCreateMarket() {
           }
         }
 
+        // Keeper registration — non-fatal; market is live regardless.
+        // Registers { marketAddress, poolAddress, dexType } with the keeper service so
+        // PushAuthMark price-push starts within the next keeper cycle (~30s).
+        let keeperDelegated = false;
+        let keeperMessage: string | null = null;
+        if (isKeeperOracle && params.dexPoolAddress) {
+          try {
+            const keeperRegResp = await fetch("/api/playground/keeper-register", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                slabAddress: slabPk.toBase58(),
+                mainnetCA: params.mainnetCA ?? null,
+                dexPoolAddress: params.dexPoolAddress,
+                dexType: params.dexType ?? "raydium-clmm",
+                symbol: params.symbol ?? null,
+              }),
+            });
+            const keeperRegData = await keeperRegResp.json() as {
+              registered?: boolean;
+              message?: string;
+            };
+            keeperDelegated = keeperRegData.registered ?? false;
+            keeperMessage = keeperRegData.message ?? null;
+            console.log("[useCreateMarket] Keeper registration:", keeperRegData);
+          } catch (keeperErr) {
+            console.warn("[useCreateMarket] Keeper registration failed (non-fatal):", keeperErr);
+            keeperMessage = "Keeper registration failed — prices will start on next keeper discovery cycle";
+          }
+        }
+
         // Done! Clear in-memory keypair ref + in-flight recovery state.
         slabKpRef.current = null;
         clearInFlightMarket(slabPk.toBase58());
@@ -1093,6 +1184,8 @@ export function useCreateMarket() {
           loading: false,
           step: 5,
           stepLabel: "Market created!",
+          keeperDelegated,
+          keeperMessage,
           // GH#1266: Defensively re-set slabAddress from slabPk at completion to guard
           // against any state-update race where a prior step's address is stale.
           slabAddress: slabPk.toBase58(),
@@ -1128,6 +1221,8 @@ export function useCreateMarket() {
       devnetAirdropSymbol: null,
       devnetMintError: null,
       insuranceMintFailed: false,
+      keeperDelegated: false,
+      keeperMessage: null,
     });
   }, []);
 
