@@ -390,7 +390,13 @@ export const dynamic = "force-dynamic";
 // GET /api/markets — list all active markets with stats
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getServiceClient();
+    // Degrade gracefully when Supabase is not configured (e.g. devnet playground without DB).
+    let supabase: ReturnType<typeof getServiceClient>;
+    try {
+      supabase = getServiceClient();
+    } catch {
+      return fallbackMarketsResponse(request, "supabase-not-configured");
+    }
     // GH#1781: Exclude zombie markets with null slab_address at the DB layer.
     // These are incomplete DB rows (TEST x2, BREW, LOBSTAR) with no on-chain account —
     // they have slab=null, mainnet_ca=null, vault_balance=null and cannot be indexed.

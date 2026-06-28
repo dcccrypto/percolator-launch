@@ -26,7 +26,7 @@ import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 import { useToast } from "@/hooks/useToast";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockTokenByMint } from "@/lib/mock-trade-data";
-import { StepReviewDemo } from "../create-demo/StepReviewDemo";
+
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -1001,54 +1001,33 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             gates and shows a clean "LAUNCH MARKET →" CTA. Production uses
             the real StepReview which enforces SOL / token / mint validity. */}
         {wizard.step === 4 && (
-          mockBypass ? (
-            <StepReviewDemo
-              tokenSymbol={symbol}
-              tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
-              mintAddress={wizard.mintAddress}
-              tokenDecimals={decimals}
-              priceUsd={detectedPrice}
-              oracleType={wizard.oracleType}
-              oracleLabel={oracleLabel}
-              slabTier={wizard.slabTier}
-              tradingFeeBps={wizard.tradingFeeBps}
-              initialMarginBps={wizard.initialMarginBps}
-              lpCollateral={wizard.lpCollateral}
-              insuranceAmount={wizard.insuranceAmount}
-              logoUrl={mockLogoUrl}
-              walletBalanceSol={solBalance ?? 8.5}
-              onBack={goBack}
-              onLaunch={handleDemoLaunch}
-            />
-          ) : (
-            <StepReview
-              tokenSymbol={symbol}
-              tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
-              mintAddress={wizard.mintAddress}
-              tokenDecimals={decimals}
-              mintValid={mintValid}
-              mintExistsOnNetwork={mintExistsOnNetwork}
-              priceUsd={detectedPrice}
-              oracleType={wizard.oracleType}
-              oracleLabel={oracleLabel}
-              slabTier={wizard.slabTier}
-              tradingFeeBps={wizard.tradingFeeBps}
-              initialMarginBps={wizard.initialMarginBps}
-              lpCollateral={wizard.lpCollateral}
-              insuranceAmount={wizard.insuranceAmount}
-              walletConnected={!!publicKey}
-              walletBalanceSol={solBalance}
-              hasSufficientBalance={hasSufficientSol}
-              requiredSol={requiredSol}
-              hasTokens={hasTokens}
-              hasSufficientTokensForSeed={hasSufficientTokensForSeed}
-              feeConflict={feeConflict}
-              isPercolatorMirror={isPercolatorMirror}
-              onBack={goBack}
-              onLaunch={handleLaunch}
-              canLaunch={allValid && !!publicKey}
-            />
-          )
+          <StepReview
+            tokenSymbol={symbol}
+            tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
+            mintAddress={wizard.mintAddress}
+            tokenDecimals={decimals}
+            mintValid={mintValid}
+            mintExistsOnNetwork={mintExistsOnNetwork}
+            priceUsd={detectedPrice}
+            oracleType={wizard.oracleType}
+            oracleLabel={oracleLabel}
+            slabTier={wizard.slabTier}
+            tradingFeeBps={wizard.tradingFeeBps}
+            initialMarginBps={wizard.initialMarginBps}
+            lpCollateral={wizard.lpCollateral}
+            insuranceAmount={wizard.insuranceAmount}
+            walletConnected={!!publicKey}
+            walletBalanceSol={solBalance}
+            hasSufficientBalance={hasSufficientSol}
+            requiredSol={requiredSol}
+            hasTokens={hasTokens}
+            hasSufficientTokensForSeed={hasSufficientTokensForSeed}
+            feeConflict={feeConflict}
+            isPercolatorMirror={isPercolatorMirror}
+            onBack={goBack}
+            onLaunch={handleLaunch}
+            canLaunch={allValid && !!publicKey}
+          />
         )}
       </div>
     </div>

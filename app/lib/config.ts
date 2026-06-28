@@ -115,20 +115,19 @@ const CONFIGS = {
   },
   devnet: {
     get rpcUrl() { return getRpcEndpoint(); },
-    programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-    matcherProgramId: "GTRgyTDfrMvBubALAqtHuQwT8tbGyXid7svXZKtWfC9k",
+    // v17 deployed devnet programs (2026-06-26)
+    programId: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+    matcherProgramId: "4seJWjv3R5qfXY8R5ntuPHWsoqcVvaxvfFSnU2AnGMhT",
+    nftProgramId: "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP",
+    vaultProgramId: "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",
     crankWallet: "FF7KFfU5Bb3Mze2AasDHCCZuyhdaSLjUZy2K3JvjdB7x",
     explorerUrl: "https://explorer.solana.com",
-    // Multiple program deployments for different slab sizes (PERC-286).
-    // Each tier has its own on-chain program compiled with the appropriate --features flag.
-    // small:  256 slots  (~0.44 SOL rent) — --features small
-    // medium: 1024 slots (~1.8 SOL rent)  — --features medium
-    // large:  4096 slots (~7 SOL rent)    — default build (no features)
-    // v12.17: micro tier removed — only small/medium/large
+    // v17 uses a single unified wrapper — no slab-tier program splits.
+    // All tiers use the same program ID.
     programsBySlabTier: {
-      small:  "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",  // 256 slots
-      medium: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",   // 1024 slots
-      large:  "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",  // 4096 slots (confirmed working)
+      small:  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+      medium: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+      large:  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
     } satisfies Record<string, string>,
     // PERC-356: Test USDC mint for auto-fund on wallet connect
     testUsdcMint:
@@ -195,8 +194,12 @@ export function getConfig() {
 // These are NOT yet deployed; real on-chain addresses will be set at cutover (Phase 7).
 // Listed here so the known-program gate is ready for v17 cutover without a code change.
 // IMPORTANT: Do NOT add production keys here until they are audited and deployed.
+// v17 deployed devnet program IDs (2026-06-26) — pre-listed for allowlist gate
 const V17_PROGRAM_ID_PLACEHOLDERS = [
-  "Perco1ator111111111111111111111111111111111",  // v17 wrapper (declare_id placeholder)
+  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",  // v17 wrapper
+  "4seJWjv3R5qfXY8R5ntuPHWsoqcVvaxvfFSnU2AnGMhT",  // v17 matcher
+  "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP",  // v17 nft
+  "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",  // v17 vault
 ] as const;
 
 /**
