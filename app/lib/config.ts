@@ -129,10 +129,12 @@ const CONFIGS = {
       medium: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
       large:  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
     } satisfies Record<string, string>,
-    // PERC-356: Test USDC mint for auto-fund on wallet connect
+    // Playground: canonical Sim-USDC mint (6 decimals).
+    // Overridable via NEXT_PUBLIC_TEST_USDC_MINT env var.
+    // Default: DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC (mint authority: GRMMNsNP...)
     testUsdcMint:
       process.env.NEXT_PUBLIC_TEST_USDC_MINT?.trim() ||
-      "EqDqqRzRwA5xnZYu7oJ6LfJbcFuwkTKs7KBSTu2xaG66",
+      "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
   },
 } as const;
 

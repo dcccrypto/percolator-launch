@@ -4,6 +4,7 @@ import { Component, FC, ReactNode, useMemo, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { AutoFundProvider } from "./AutoFundProvider";
 import { PrivyAvailableContext, PrivyLoginContext } from "@/hooks/usePrivySafe";
+import { WalletAdapterAvailableContext } from "@/hooks/useWalletAdapterAvailable";
 import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModal";
 import {
   PreferredWalletContext,
@@ -53,6 +54,17 @@ const PrivyProviderClient = dynamic(
   { ssr: false }
 );
 
+/**
+ * Dynamically import the wallet-adapter provider with SSR disabled.
+ * Used as the fallback when NEXT_PUBLIC_PRIVY_APP_ID is not set, so any user can
+ * connect Phantom / Solflare / Backpack (or any Wallet Standard wallet) without
+ * needing a Privy account.
+ */
+const WalletAdapterProviderClient = dynamic(
+  () => import("./WalletAdapterProviderClient").then((mod) => mod.default),
+  { ssr: false }
+);
+
 export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   const preferredWallet = usePreferredWalletState();
@@ -75,31 +87,47 @@ export const WalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   const readOnlyFallback = (
     <PrivyAvailableContext.Provider value={false}>
-      <PreferredWalletContext.Provider value={preferredWallet}>
-        {children}
-      </PreferredWalletContext.Provider>
+      <WalletAdapterAvailableContext.Provider value={false}>
+        <PreferredWalletContext.Provider value={preferredWallet}>
+          {children}
+        </PreferredWalletContext.Provider>
+      </WalletAdapterAvailableContext.Provider>
     </PrivyAvailableContext.Provider>
   );
 
-  // No app ID configured: read-only mode (skip Privy entirely)
+  // No Privy app ID → use wallet-adapter so anyone with Phantom/Solflare/Backpack
+  // can connect without a Privy account. WalletAdapterAvailableContext is set to
+  // true so ConnectButton and useWalletCompat take the adapter path.
   if (!appId) {
-    return readOnlyFallback;
+    return (
+      <PrivyAvailableContext.Provider value={false}>
+        <WalletAdapterAvailableContext.Provider value={true}>
+          <PreferredWalletContext.Provider value={preferredWallet}>
+            <WalletAdapterProviderClient>
+              {children}
+            </WalletAdapterProviderClient>
+          </PreferredWalletContext.Provider>
+        </WalletAdapterAvailableContext.Provider>
+      </PrivyAvailableContext.Provider>
+    );
   }
 
   // Mount Privy client-side only via dynamic import (ssr: false)
   return (
     <PrivyErrorBoundary fallback={readOnlyFallback}>
       <PrivyAvailableContext.Provider value={true}>
-        <PreferredWalletContext.Provider value={preferredWallet}>
-          <PrivyProviderClient appId={appId}>
-            <AutoFundProvider>
-              {children}
-              {/* PERC-808: Global devnet faucet modal — shown on any page when wallet
-                  has < 0.05 SOL or < 1,000 USDC. Decoupled from SlabProvider. */}
-              <DevnetFaucetModal />
-            </AutoFundProvider>
-          </PrivyProviderClient>
-        </PreferredWalletContext.Provider>
+        <WalletAdapterAvailableContext.Provider value={false}>
+          <PreferredWalletContext.Provider value={preferredWallet}>
+            <PrivyProviderClient appId={appId}>
+              <AutoFundProvider>
+                {children}
+                {/* PERC-808: Global devnet faucet modal — shown on any page when wallet
+                    has < 0.05 SOL or < 1,000 USDC. Decoupled from SlabProvider. */}
+                <DevnetFaucetModal />
+              </AutoFundProvider>
+            </PrivyProviderClient>
+          </PreferredWalletContext.Provider>
+        </WalletAdapterAvailableContext.Provider>
       </PrivyAvailableContext.Provider>
     </PrivyErrorBoundary>
   );

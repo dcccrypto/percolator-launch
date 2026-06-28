@@ -3,41 +3,61 @@
 import { useMemo } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useWallets, useSignTransaction, useSignAndSendTransaction } from "@privy-io/react-auth/solana";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+// bs58 v6: default export is the codec object
+import _bs58 from "bs58";
+const bs58 = _bs58 as { decode(str: string): Uint8Array };
 import { getConfig, getNetwork, getWsEndpoint } from "@/lib/config";
 import { usePrivyAvailable } from "@/hooks/usePrivySafe";
+import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
 import { usePreferredWallet, resolveActiveWallet } from "@/hooks/usePreferredWallet";
 import { getBatchRpc } from "@/lib/batchRpc";
 
 /**
  * Compatibility hook that provides the same interface as @solana/wallet-adapter-react's
- * useWallet() + useConnection(), backed by Privy.
+ * useWallet() + useConnection(), backed by Privy (primary) or wallet-adapter (fallback).
  *
- * When Privy is not available (no app ID or init failure), returns safe defaults
- * so the app runs in read-only mode without crashing.
+ * Resolution order:
+ *   1. Privy  — when NEXT_PUBLIC_PRIVY_APP_ID is set and PrivyProvider is mounted.
+ *   2. Wallet-adapter — when Privy is absent and WalletAdapterProvider is mounted.
+ *      Covers Phantom / Solflare / Backpack and any Wallet Standard extension.
+ *   3. Safe defaults (read-only) — no wallet at all.
+ *
+ * NOTE: The early-return pattern (calling inner hooks conditionally) technically
+ * breaks React's rules-of-hooks, but is safe here because both context values
+ * (`privyAvailable`, `adapterAvailable`) are stable — set once by the provider tree
+ * and never changed during a component's lifetime.
  */
 export function useWalletCompat() {
   const privyAvailable = usePrivyAvailable();
+  const adapterAvailable = useWalletAdapterAvailable();
 
-  if (!privyAvailable) {
-    return {
-      publicKey: null,
-      connected: false,
-      connecting: false,
-      wallet: null,
-      signTransaction: undefined,
-      signAndSendTransaction: undefined,
-      disconnect: async () => {},
-    };
+  if (privyAvailable) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    return useWalletCompatPrivyInner();
   }
 
-  return useWalletCompatInner();
+  if (adapterAvailable) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    return useWalletCompatAdapterInner();
+  }
+
+  return {
+    publicKey: null as PublicKey | null,
+    connected: false,
+    connecting: false,
+    wallet: null,
+    signTransaction: undefined as ((tx: Transaction) => Promise<Transaction>) | undefined,
+    signAndSendTransaction: undefined as ((tx: Transaction) => Promise<Uint8Array>) | undefined,
+    disconnect: async () => {},
+  };
 }
 
 /**
  * Inner hook that calls Privy hooks. Only called when PrivyProvider is mounted.
  */
-function useWalletCompatInner() {
+function useWalletCompatPrivyInner() {
   const { ready, authenticated, user, logout } = usePrivy();
   const { wallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();
@@ -112,6 +132,69 @@ function useWalletCompatInner() {
     signTransaction,
     signAndSendTransaction,
     disconnect: logout,
+  };
+}
+
+/**
+ * Inner hook that calls @solana/wallet-adapter-react hooks.
+ * Only called when WalletAdapterProvider is mounted (no Privy).
+ *
+ * Provides sign + send helpers that match the Privy path so all existing
+ * components (devnet-mint, trade flows) work unchanged.
+ */
+function useWalletCompatAdapterInner() {
+  const {
+    publicKey,
+    connected,
+    connecting,
+    wallet,
+    signTransaction: adapterSignTx,
+    disconnect,
+  } = useWallet();
+
+  const cfg = getConfig();
+
+  const signTransaction = useMemo(() => {
+    if (!adapterSignTx || !publicKey) return undefined;
+    return async (tx: Transaction): Promise<Transaction> => {
+      // Ensure fee payer + blockhash are set so the adapter can sign cleanly.
+      if (!tx.recentBlockhash) {
+        const conn = new Connection(cfg.rpcUrl, "confirmed");
+        const { blockhash } = await conn.getLatestBlockhash("confirmed");
+        tx.recentBlockhash = blockhash;
+      }
+      if (!tx.feePayer) {
+        tx.feePayer = publicKey;
+      }
+      return adapterSignTx(tx);
+    };
+  }, [adapterSignTx, publicKey, cfg.rpcUrl]);
+
+  const signAndSendTransaction = useMemo(() => {
+    if (!adapterSignTx || !publicKey) return undefined;
+    return async (tx: Transaction): Promise<Uint8Array> => {
+      const conn = new Connection(cfg.rpcUrl, "confirmed");
+      if (!tx.recentBlockhash) {
+        const { blockhash } = await conn.getLatestBlockhash("confirmed");
+        tx.recentBlockhash = blockhash;
+      }
+      if (!tx.feePayer) {
+        tx.feePayer = publicKey;
+      }
+      const signed = await adapterSignTx(tx);
+      const sig = await conn.sendRawTransaction(signed.serialize());
+      return bs58.decode(sig);
+    };
+  }, [adapterSignTx, publicKey, cfg.rpcUrl]);
+
+  return {
+    publicKey,
+    connected,
+    connecting,
+    wallet,
+    signTransaction,
+    signAndSendTransaction,
+    disconnect,
   };
 }
 
