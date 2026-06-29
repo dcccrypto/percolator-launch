@@ -1,6 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { parseEngine, isV17Account } from "@percolatorct/sdk";
+import {
+  parseEngine,
+  isV17Account,
+  parseMarketGroupV17OI,
+  isV17MarketAccount,
+} from "@percolatorct/sdk";
 import { proxyToApi } from "@/lib/api-proxy";
 import { validateSlabParam } from "@/lib/route-validators";
 import { isBlockedSlab } from "@/lib/blocklist";
@@ -82,11 +87,39 @@ export async function GET(
 
     const bytes = new Uint8Array(info.data);
 
-    // v17 market group accounts (PERCV16\0 magic) do not embed a v12-style engine
-    // block; their aggregate OI lives in per-portfolio accounts and is not yet
-    // aggregated server-side.  Return zeros cleanly — the component handles
-    // empty historicalOi by hiding the bar chart and showing "0 / 0 OI".
+    // v17 market group accounts (PERCV16\0 magic) use a completely different layout
+    // from v12 slabs. Parse OI directly from per-asset slot fields when the account
+    // is a market (kind=1); degrade to zeros for other v17 account kinds.
     if (isV17Account(bytes)) {
+      if (isV17MarketAccount(bytes)) {
+        try {
+          const oi = parseMarketGroupV17OI(bytes);
+          const totalOi = oi.totalLongOiQ + oi.totalShortOiQ;
+          return NextResponse.json(
+            {
+              totalOi: totalOi.toString(),
+              longOi: oi.totalLongOiQ.toString(),
+              shortOi: oi.totalShortOiQ.toString(),
+              // v17 does not aggregate net LP position server-side — return 0 until
+              // per-portfolio accumulation is implemented.
+              netLpPosition: "0",
+              insuranceBalance: oi.insuranceBalance.toString(),
+              historicalOi: [],
+            },
+            {
+              headers: {
+                "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+              },
+            },
+          );
+        } catch (v17Err) {
+          console.warn(
+            `[/api/open-interest/${validSlab}] v17 OI parse failed:`,
+            v17Err,
+          );
+        }
+      }
+      // Non-market v17 account or parse failure — degrade gracefully.
       return NextResponse.json(
         {
           totalOi: "0",
