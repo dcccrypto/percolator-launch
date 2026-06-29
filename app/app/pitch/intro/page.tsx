@@ -2,225 +2,364 @@
 
 // ─── Intro / teaser deck (/pitch/intro) ─────────────────────────────────────
 //
-// 8 slides, minimal words, built for a cold async read (a VC skims in <2 min,
-// decides in the first 3 slides). One bold statement per slide, one support
-// line max. Separate, leaner artifact from the full /pitch deck — it exists to
-// earn the meeting, not close the round. Reuses the PitchDeck runner + CSS from
-// ../_deck so it stays on-brand. The full deck lives at /pitch.
+// 8 slides, built for a cold async read (a VC skims in <2 min). Dark Premium
+// base with full-bleed brand-colour "statement" slides interleaved for rhythm
+// (dark → colour → dark). Number-as-hero, real charts, one idea per slide.
+// Reuses the PitchDeck runner + CSS from ../_deck; all rich visuals are
+// inline-styled so this file is self-contained. Every figure is cited in-slide.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { PitchDeck, type SlideDef, type SlideProps } from "../_deck";
 
-// ── Inline data-as-hero charts (dependency-free, on-brand) ───────────────────
-// Every number below is cited in the caption; do not change a value without
-// updating the source. Brand fill = purple→cyan gradient; rest = faint white.
-
+const PURPLE = "#9945FF";
+const CYAN = "#22D3EE";
 const BRAND_FILL = "linear-gradient(135deg, #9945FF, #22D3EE)";
+const INK = "#0D0D0F";
 
-// A single bar split into a small "has it" portion and a large "doesn't"
-// portion — the long-tail perp gap.
-function GapBar() {
-  return (
-    <div style={{ width: "100%", maxWidth: "720px", margin: "1.75rem auto 0" }}>
-      <div
-        className="mono"
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: "0.55rem",
-          fontSize: "0.72rem",
-          letterSpacing: "0.04em",
-        }}
-      >
-        <span style={{ color: "#22D3EE", fontWeight: 700 }}>~13% get a perp</span>
-        <span style={{ color: "rgba(255,255,255,0.45)" }}>
-          ~87% have none, anywhere
-        </span>
-      </div>
-      <div
-        style={{
-          display: "flex",
-          height: "30px",
-          borderRadius: "8px",
-          overflow: "hidden",
-          border: "1px solid rgba(255,255,255,0.1)",
-        }}
-      >
-        <div style={{ width: "13%", background: BRAND_FILL }} />
-        <div style={{ width: "87%", background: "rgba(255,255,255,0.06)" }} />
-      </div>
-      <div
-        className="mono"
-        style={{
-          marginTop: "0.7rem",
-          fontSize: "0.66rem",
-          color: "rgba(255,255,255,0.4)",
-          lineHeight: 1.5,
-        }}
-      >
-        Of every new token launched since 2025, only ~13% ever get a perp on any
-        venue. Source: CoinGecko, State of Crypto Perpetuals 2026.
-      </div>
-    </div>
-  );
-}
+// ── Shared bits ──────────────────────────────────────────────────────────────
 
-// Two proportional bars: Solana perps record vs prior peak (momentum).
-function ScaleBars() {
-  const rows = [
-    { label: "May 2026 — new record", value: 77, display: "$77B" },
-    { label: "Nov 2025 — prior peak", value: 57, display: "$57B" },
-  ];
-  const max = 77;
+function Eyebrow({ children, dark }: { children: ReactNode; dark?: boolean }) {
   return (
     <div
+      className="mono"
       style={{
-        width: "100%",
-        maxWidth: "720px",
-        margin: "1.75rem auto 0",
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.9rem",
+        fontSize: "0.72rem",
+        fontWeight: 700,
+        letterSpacing: "0.22em",
+        textTransform: "uppercase",
+        color: dark ? "rgba(13,13,15,0.6)" : "rgba(153,69,255,0.85)",
+        marginBottom: "1.4rem",
       }}
     >
-      {rows.map((r, i) => (
-        <div key={r.label}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: "0.8rem",
-              marginBottom: "0.35rem",
-              color: "rgba(255,255,255,0.7)",
-            }}
-          >
-            <span>{r.label}</span>
-            <span className="mono">{r.display} / mo</span>
-          </div>
-          <div
-            style={{
-              height: "22px",
-              borderRadius: "6px",
-              background: "rgba(255,255,255,0.05)",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                width: `${(r.value / max) * 100}%`,
-                height: "100%",
-                borderRadius: "6px",
-                background: i === 0 ? BRAND_FILL : "rgba(255,255,255,0.18)",
-              }}
-            />
-          </div>
-        </div>
-      ))}
+      {children}
+    </div>
+  );
+}
+
+// Full-bleed accent-colour slide (the Vibe rhythm device).
+function ColorSlide({ bg, children }: { bg: string; children: ReactNode }) {
+  return (
+    <div className="pitch-slide">
+      <div style={{ position: "absolute", inset: 0, background: bg, zIndex: 0 }} aria-hidden />
       <div
-        className="mono"
-        style={{
-          fontSize: "0.66rem",
-          color: "rgba(255,255,255,0.4)",
-          lineHeight: 1.5,
-        }}
+        className="pitch-slide-inner pitch-center"
+        style={{ position: "relative", zIndex: 1 }}
       >
-        Solana perps just set an all-time high, +35% over the prior peak. Then
-        the #1 venue was drained and went dark; the volume re-routed within
-        weeks. Source: DefiLlama, 2026.
+        {children}
       </div>
     </div>
   );
 }
 
-// ── 1 · One-liner ────────────────────────────────────────────────────────────
+function Caption({ children, dark }: { children: ReactNode; dark?: boolean }) {
+  return (
+    <div
+      className="mono"
+      style={{
+        marginTop: "1rem",
+        fontSize: "0.66rem",
+        lineHeight: 1.5,
+        color: dark ? "rgba(13,13,15,0.55)" : "rgba(255,255,255,0.38)",
+        maxWidth: "640px",
+        marginLeft: "auto",
+        marginRight: "auto",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ── 1 · Cover ────────────────────────────────────────────────────────────────
 function IntroTitle(_: SlideProps) {
   return (
     <div className="pitch-slide">
-      <div className="pitch-slide-inner pitch-center">
+      <div className="pitch-bg-grid" aria-hidden />
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          width: "70vw",
+          height: "70vh",
+          transform: "translate(-50%,-55%)",
+          background:
+            "radial-gradient(closest-side, rgba(153,69,255,0.22), rgba(34,211,238,0.10) 55%, transparent 75%)",
+          filter: "blur(20px)",
+          zIndex: 0,
+        }}
+      />
+      <div
+        className="pitch-slide-inner pitch-center"
+        style={{ position: "relative", zIndex: 1 }}
+      >
+        <Eyebrow>Seed round &middot; 2026</Eyebrow>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/images/logo.png" alt="Percolator" className="pitch-logo" />
-        <p className="pitch-hero-headline">
-          Perpetual futures for every token on Solana.
+        <img
+          src="/images/logo.png"
+          alt="Percolator"
+          className="pitch-logo"
+          style={{ marginBottom: "2.2rem" }}
+        />
+        <p
+          style={{
+            fontFamily: "'Inter Tight', 'Inter', sans-serif",
+            fontSize: "clamp(2.2rem, 5.5vw, 4rem)",
+            fontWeight: 800,
+            letterSpacing: "-0.03em",
+            lineHeight: 1.05,
+            color: "#fff",
+            maxWidth: "16ch",
+          }}
+        >
+          Perpetual futures for{" "}
+          <span
+            style={{
+              background: BRAND_FILL,
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
+            }}
+          >
+            every token
+          </span>{" "}
+          on Solana.
         </p>
-        <p className="pitch-hero-body">
+        <p
+          style={{
+            marginTop: "1.4rem",
+            fontSize: "clamp(1rem, 2vw, 1.25rem)",
+            color: "rgba(255,255,255,0.6)",
+            maxWidth: "44ch",
+          }}
+        >
           Anyone can open a leverage market for any token, in about a minute.
         </p>
-        <p className="pitch-url">percolator.trade</p>
+        <p className="pitch-url" style={{ marginTop: "2.4rem" }}>
+          percolator.trade
+        </p>
       </div>
-      <div className="pitch-bg-grid" aria-hidden />
     </div>
   );
 }
 
-// ── 2 · Problem ──────────────────────────────────────────────────────────────
+// ── 2 · Problem (full-bleed purple statement) ────────────────────────────────
 function IntroProblem(_: SlideProps) {
   return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner pitch-center">
-        <div className="pitch-label">The problem</div>
-        <p className="pitch-hero-headline">
-          Almost no Solana token can be traded with leverage.
-        </p>
-        <p className="pitch-hero-body">
-          Hundreds of thousands of tokens trade on Solana. Barely a hundred
-          have a perp market, all curated down to the same majors.
-        </p>
-        <GapBar />
+    <ColorSlide bg="linear-gradient(150deg, #7C3AED 0%, #9945FF 60%, #B15CFF 100%)">
+      <Eyebrow dark>The problem</Eyebrow>
+      <p
+        style={{
+          fontFamily: "'Inter Tight', 'Inter', sans-serif",
+          fontSize: "clamp(2rem, 4.6vw, 3.3rem)",
+          fontWeight: 800,
+          letterSpacing: "-0.025em",
+          lineHeight: 1.08,
+          color: "#fff",
+          maxWidth: "18ch",
+        }}
+      >
+        Almost no Solana token can be traded with leverage.
+      </p>
+
+      {/* big gap bar */}
+      <div style={{ width: "100%", maxWidth: "760px", margin: "2.4rem auto 0" }}>
+        <div
+          style={{
+            display: "flex",
+            height: "62px",
+            borderRadius: "12px",
+            overflow: "hidden",
+            border: "1px solid rgba(13,13,15,0.18)",
+            boxShadow: "0 12px 40px rgba(13,13,15,0.25)",
+          }}
+        >
+          <div
+            style={{
+              width: "13%",
+              minWidth: "58px",
+              background: INK,
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 800,
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "1.05rem",
+            }}
+          >
+            13%
+          </div>
+          <div
+            style={{
+              flex: 1,
+              background: "rgba(13,13,15,0.12)",
+              display: "flex",
+              alignItems: "center",
+              paddingLeft: "1.2rem",
+              color: "rgba(13,13,15,0.7)",
+              fontWeight: 700,
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "0.95rem",
+            }}
+          >
+            87% &mdash; no perp, anywhere
+          </div>
+        </div>
+        <div
+          className="mono"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginTop: "0.7rem",
+            fontSize: "0.72rem",
+            color: "rgba(13,13,15,0.6)",
+          }}
+        >
+          <span>get a perp</span>
+          <span>the long tail has the demand, and no venue</span>
+        </div>
+        <Caption dark>
+          Of every new token launched since 2025, only ~13% ever get a perp on
+          any venue. Source: CoinGecko, State of Crypto Perpetuals 2026.
+        </Caption>
       </div>
-    </div>
+    </ColorSlide>
   );
 }
 
-// ── 3 · Why now ──────────────────────────────────────────────────────────────
+// ── 3 · Why now (dark, big record column chart) ──────────────────────────────
 function IntroWhyNow(_: SlideProps) {
+  // honest: two cited Solana data points (record vs prior peak), drawn big.
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner pitch-center">
-        <div className="pitch-label">Why now</div>
-        <p className="pitch-hero-headline">
+        <Eyebrow>Why now</Eyebrow>
+        <p
+          style={{
+            fontFamily: "'Inter Tight', 'Inter', sans-serif",
+            fontSize: "clamp(1.8rem, 4vw, 2.9rem)",
+            fontWeight: 800,
+            letterSpacing: "-0.025em",
+            lineHeight: 1.1,
+            color: "#fff",
+            maxWidth: "20ch",
+          }}
+        >
           Solana perps just hit a record. Then the leader got drained and went
           dark.
         </p>
-        <p className="pitch-hero-body">
-          The demand is proven and it moves fast. The long tail still has
-          nowhere to go.
-        </p>
-        <ScaleBars />
+
+        <svg
+          viewBox="0 0 640 300"
+          style={{ width: "100%", maxWidth: "640px", marginTop: "1.6rem" }}
+          role="img"
+          aria-label="Solana perp monthly volume: $77B in May 2026, a record, vs $57B prior peak in Nov 2025"
+        >
+          <defs>
+            <linearGradient id="recordBar" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={CYAN} />
+              <stop offset="100%" stopColor={PURPLE} />
+            </linearGradient>
+          </defs>
+          {/* baseline */}
+          <line x1="60" y1="250" x2="620" y2="250" stroke="rgba(255,255,255,0.14)" strokeWidth="1.5" />
+          {/* y ticks */}
+          {[0, 20, 40, 60, 80].map((v) => {
+            const y = 250 - (v / 80) * 200;
+            return (
+              <g key={v}>
+                <line x1="60" y1={y} x2="620" y2={y} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+                <text x="48" y={y + 4} textAnchor="end" fontFamily="'JetBrains Mono', monospace" fontSize="13" fill="rgba(255,255,255,0.4)">
+                  ${v}B
+                </text>
+              </g>
+            );
+          })}
+          {/* prior peak bar */}
+          <rect x="150" y={250 - (57 / 80) * 200} width="120" height={(57 / 80) * 200} rx="6" fill="rgba(255,255,255,0.16)" />
+          <text x="210" y={250 - (57 / 80) * 200 - 12} textAnchor="middle" fontFamily="'JetBrains Mono', monospace" fontWeight="700" fontSize="20" fill="rgba(255,255,255,0.7)">$57B</text>
+          <text x="210" y="272" textAnchor="middle" fontFamily="'Inter', sans-serif" fontSize="13" fill="rgba(255,255,255,0.5)">Nov 2025 · prior peak</text>
+          {/* record bar */}
+          <rect x="380" y={250 - (77 / 80) * 200} width="120" height={(77 / 80) * 200} rx="6" fill="url(#recordBar)" />
+          <text x="440" y={250 - (77 / 80) * 200 - 12} textAnchor="middle" fontFamily="'JetBrains Mono', monospace" fontWeight="800" fontSize="24" fill="#fff">$77B</text>
+          <text x="440" y="272" textAnchor="middle" fontFamily="'Inter', sans-serif" fontSize="13" fill="rgba(255,255,255,0.75)">May 2026 · record</text>
+          {/* +35% callout */}
+          <text x="585" y={250 - (77 / 80) * 200 + 6} textAnchor="end" fontFamily="'JetBrains Mono', monospace" fontWeight="700" fontSize="15" fill={CYAN}>+35%</text>
+        </svg>
+
+        <Caption>
+          A new all-time high for Solana perp volume, then the #1 venue was
+          drained and went dark; the flow re-routed within weeks. Source:
+          DefiLlama, 2026.
+        </Caption>
       </div>
     </div>
   );
 }
 
-// ── 4 · Solution (with live product screenshot as proof) ─────────────────────
+// ── 4 · Solution (dark, framed live screenshot) ──────────────────────────────
 function IntroSolution(_: SlideProps) {
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner pitch-center">
-        <div className="pitch-label">What we built</div>
-        <p className="pitch-hero-headline">
+        <Eyebrow>What we built</Eyebrow>
+        <p
+          style={{
+            fontFamily: "'Inter Tight', 'Inter', sans-serif",
+            fontSize: "clamp(1.8rem, 4vw, 2.9rem)",
+            fontWeight: 800,
+            letterSpacing: "-0.025em",
+            lineHeight: 1.1,
+            color: "#fff",
+            maxWidth: "20ch",
+            marginBottom: "1.4rem",
+          }}
+        >
           Launch a perp market for any token in about 60 seconds.
         </p>
         <div
-          className="pflow-shot-wrap"
-          style={{ maxWidth: "960px", width: "100%", marginTop: "1rem" }}
+          style={{
+            position: "relative",
+            maxWidth: "920px",
+            width: "100%",
+            margin: "0 auto",
+          }}
         >
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: "-8% -4%",
+              background:
+                "radial-gradient(closest-side, rgba(34,211,238,0.18), transparent 70%)",
+              filter: "blur(8px)",
+            }}
+          />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/images/product/launch-market.webp"
-            alt="The live Launch a Market flow: deploy a perp market for any token in about 60 seconds"
-            className="pflow-shot"
+            alt="The live Launch a Market flow on Percolator"
+            style={{
+              position: "relative",
+              width: "100%",
+              borderRadius: "14px",
+              border: "1px solid rgba(153,69,255,0.3)",
+              boxShadow: "0 24px 70px rgba(0,0,0,0.55)",
+            }}
           />
-          <div className="pflow-shot-cap mono">
-            Live on devnet &middot; each market isolated, so one blow-up
-            can&apos;t touch another
-          </div>
         </div>
+        <Caption>
+          Live on devnet &middot; each market is isolated, so one blow-up
+          can&apos;t touch another.
+        </Caption>
       </div>
     </div>
   );
 }
 
-// ── 5 · Traction (hero number, live waitlist) ────────────────────────────────
+// ── 5 · Traction (dark, 120px+ stat hero + metric cards) ─────────────────────
 function IntroTraction(_: SlideProps) {
   const [waitlist, setWaitlist] = useState(8000);
   useEffect(() => {
@@ -234,18 +373,24 @@ function IntroTraction(_: SlideProps) {
       .catch(() => {});
   }, []);
 
+  const cards = [
+    { n: "220", l: "markets on devnet" },
+    { n: "71", l: "unique builders" },
+    { n: "$0", l: "paid acquisition" },
+  ];
+
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner pitch-center">
-        <div className="pitch-label">Traction</div>
+        <Eyebrow>Traction</Eyebrow>
         <div
           className="mono"
           style={{
-            fontSize: "clamp(3.5rem, 9vw, 6rem)",
-            fontWeight: 700,
-            lineHeight: 1,
-            letterSpacing: "-0.02em",
-            background: "linear-gradient(135deg, #9945FF, #22D3EE)",
+            fontSize: "clamp(4.5rem, 13vw, 9rem)",
+            fontWeight: 800,
+            lineHeight: 0.95,
+            letterSpacing: "-0.04em",
+            background: BRAND_FILL,
             WebkitBackgroundClip: "text",
             WebkitTextFillColor: "transparent",
             backgroundClip: "text",
@@ -253,49 +398,46 @@ function IntroTraction(_: SlideProps) {
         >
           {waitlist.toLocaleString()}+
         </div>
-        <p className="pitch-hero-body" style={{ marginTop: "0.6rem" }}>
-          waitlist signups in seven weeks. Organic, zero paid.
+        <p
+          style={{
+            marginTop: "0.6rem",
+            fontSize: "clamp(1rem, 2vw, 1.2rem)",
+            color: "rgba(255,255,255,0.7)",
+          }}
+        >
+          waitlist signups in seven weeks &middot; organic, zero paid
         </p>
         <div
           style={{
             display: "flex",
-            gap: "0.85rem",
-            marginTop: "1.75rem",
+            gap: "1rem",
+            marginTop: "2rem",
             flexWrap: "wrap",
             justifyContent: "center",
           }}
         >
-          {[
-            { n: "220", l: "markets on devnet" },
-            { n: "71", l: "unique builders" },
-            { n: "$0", l: "paid acquisition" },
-          ].map((s) => (
+          {cards.map((s) => (
             <div
               key={s.l}
               style={{
                 background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: "12px",
-                padding: "0.9rem 1.4rem",
-                minWidth: "150px",
+                border: "1px solid rgba(255,255,255,0.09)",
+                borderRadius: "14px",
+                padding: "1.2rem 1.8rem",
+                minWidth: "168px",
               }}
             >
               <div
                 className="mono"
-                style={{
-                  fontSize: "1.7rem",
-                  fontWeight: 700,
-                  color: "#fff",
-                  lineHeight: 1,
-                }}
+                style={{ fontSize: "2.2rem", fontWeight: 800, color: "#fff", lineHeight: 1 }}
               >
                 {s.n}
               </div>
               <div
                 style={{
-                  fontSize: "0.72rem",
+                  fontSize: "0.78rem",
                   color: "rgba(255,255,255,0.5)",
-                  marginTop: "0.35rem",
+                  marginTop: "0.45rem",
                 }}
               >
                 {s.l}
@@ -303,128 +445,166 @@ function IntroTraction(_: SlideProps) {
             </div>
           ))}
         </div>
+        <Caption>Every figure verifiable on-chain &middot; live waitlist count.</Caption>
       </div>
     </div>
   );
 }
 
-// ── 6 · Why us (Toly's own words + his actual tweets as proof) ────────────────
+// ── 6 · Why us (dark, big quote + Toly's actual tweets) ──────────────────────
 function IntroWhyUs(_: SlideProps) {
+  const tiles = [
+    { src: "/images/toly/photo4.jpg", date: "Feb 13", cap: "“Percolator is a job creator”", alt: "Toly tweet: 'Percolator is a job creator'" },
+    { src: "/images/toly/photo3.jpg", date: "Feb 19", cap: "“Don’t trust, verify”", alt: "Toly reposting our stake program: 'Don't trust, verify!'" },
+    { src: "/images/toly/photo1.jpg", date: "Apr 29", cap: "David’s engine bug fix", alt: "Toly quote-RTing David's engine bug fix" },
+    { src: "/images/toly/photo8.png", date: "May 29", cap: "“Two devs and a dream”", alt: "Toly tweet 'Two devs and a dream' on our work" },
+  ];
   return (
     <div className="pitch-slide">
       <div className="pitch-slide-inner pitch-center">
-        <div className="pitch-label">Why us</div>
-        <p className="pitch-title" style={{ marginBottom: "0.6rem" }}>
-          &ldquo;Pls steal the idea.&rdquo; We did.
+        <Eyebrow>Why us</Eyebrow>
+        <p
+          style={{
+            fontFamily: "'Inter Tight', 'Inter', sans-serif",
+            fontSize: "clamp(2rem, 4.4vw, 3.1rem)",
+            fontWeight: 800,
+            letterSpacing: "-0.025em",
+            lineHeight: 1.1,
+            color: "#fff",
+          }}
+        >
+          &ldquo;Pls steal the idea.&rdquo;{" "}
+          <span
+            style={{
+              background: BRAND_FILL,
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
+            }}
+          >
+            We did.
+          </span>
         </p>
         <p
-          className="pitch-hero-body"
-          style={{ marginBottom: "1.5rem" }}
+          style={{
+            marginTop: "1rem",
+            fontSize: "clamp(0.95rem, 1.7vw, 1.1rem)",
+            color: "rgba(255,255,255,0.65)",
+            maxWidth: "60ch",
+            marginLeft: "auto",
+            marginRight: "auto",
+          }}
         >
           Anatoly Yakovenko, Solana&apos;s co-founder, open-sourced the perp
           engine and dared builders to run with it. We built the venue on it,
           and he&apos;s followed the work since:
         </p>
-        <div className="pitch-toly-photo-grid">
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Percolator is a job creator, Feb 13"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo4.jpg"
-              alt="Toly tweet: 'Percolator is a job creator'"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly &middot; Feb 13</span>
-              <span>&ldquo;Percolator is a job creator&rdquo;</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Don't trust, verify, Feb 19"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo3.jpg"
-              alt="Toly tweet reposting our stake program: 'Don't trust, verify!'"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly &middot; Feb 19</span>
-              <span>&ldquo;Don&apos;t trust, verify&rdquo;</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — David's KeeperCrank fix, Apr 29"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo1.jpg"
-              alt="Toly tweet quote-RTing David's engine bug fix"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly &middot; Apr 29</span>
-              <span>David&apos;s engine bug fix</span>
-            </div>
-          </a>
-          <a
-            className="pitch-toly-photo"
-            href="https://x.com/toly"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Toly tweet — Two devs and a dream, May 29"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/images/toly/photo8.png"
-              alt="Toly tweet 'Two devs and a dream' on our work"
-            />
-            <div className="pitch-toly-photo-cap mono">
-              <span>@toly &middot; May 29</span>
-              <span>&ldquo;Two devs and a dream&rdquo;</span>
-            </div>
-          </a>
+        <div className="pitch-toly-photo-grid" style={{ marginTop: "1.6rem" }}>
+          {tiles.map((t) => (
+            <a
+              key={t.date}
+              className="pitch-toly-photo"
+              href="https://x.com/toly"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Toly tweet — ${t.date}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={t.src} alt={t.alt} />
+              <div className="pitch-toly-photo-cap mono">
+                <span>@toly &middot; {t.date}</span>
+                <span>{t.cap}</span>
+              </div>
+            </a>
+          ))}
         </div>
       </div>
     </div>
   );
 }
 
-// ── 7 · The ask ──────────────────────────────────────────────────────────────
+// ── 7 · The ask (full-bleed blue→cyan statement) ─────────────────────────────
 function IntroAsk(_: SlideProps) {
+  const chips = ["Security audit", "Mainnet launch", "Runway"];
   return (
-    <div className="pitch-slide">
-      <div className="pitch-slide-inner pitch-center">
-        <div className="pitch-label">The ask</div>
-        <p className="pitch-hero-headline">
-          We&apos;re raising to get audited and ship mainnet.
-        </p>
-        <p className="pitch-hero-body">
-          A small round to fund a top-tier security audit and our launch. The
-          only thing between proven demand and a live, secured product.
-        </p>
+    <ColorSlide bg="linear-gradient(140deg, #1D4ED8 0%, #2A6BE6 55%, #22D3EE 130%)">
+      <Eyebrow dark>The ask</Eyebrow>
+      <p
+        style={{
+          fontFamily: "'Inter Tight', 'Inter', sans-serif",
+          fontSize: "clamp(2.1rem, 5vw, 3.6rem)",
+          fontWeight: 800,
+          letterSpacing: "-0.03em",
+          lineHeight: 1.05,
+          color: "#fff",
+          maxWidth: "17ch",
+        }}
+      >
+        We&apos;re raising to get audited and ship mainnet.
+      </p>
+      <p
+        style={{
+          marginTop: "1.3rem",
+          fontSize: "clamp(1rem, 2vw, 1.25rem)",
+          color: "rgba(255,255,255,0.9)",
+          maxWidth: "46ch",
+        }}
+      >
+        A small round to fund a top-tier security audit and our launch. The only
+        thing between proven demand and a live, secured product.
+      </p>
+      <div
+        style={{
+          display: "flex",
+          gap: "0.7rem",
+          marginTop: "2rem",
+          flexWrap: "wrap",
+          justifyContent: "center",
+        }}
+      >
+        {chips.map((c) => (
+          <div
+            key={c}
+            className="mono"
+            style={{
+              background: "rgba(13,13,15,0.22)",
+              border: "1px solid rgba(255,255,255,0.35)",
+              borderRadius: "999px",
+              padding: "0.6rem 1.2rem",
+              color: "#fff",
+              fontSize: "0.82rem",
+              fontWeight: 600,
+            }}
+          >
+            {c}
+          </div>
+        ))}
       </div>
-    </div>
+    </ColorSlide>
   );
 }
 
-// ── 8 · Contact ──────────────────────────────────────────────────────────────
+// ── 8 · Contact (dark, clean close) ──────────────────────────────────────────
 function IntroContact(_: SlideProps) {
   return (
     <div className="pitch-slide">
-      <div className="pitch-slide-inner pitch-center">
-        <div className="pitch-label">Let&apos;s talk</div>
-        <p className="pitch-hero-headline">percolator.trade</p>
+      <div className="pitch-bg-grid" aria-hidden />
+      <div className="pitch-slide-inner pitch-center" style={{ position: "relative", zIndex: 1 }}>
+        <Eyebrow>Let&apos;s talk</Eyebrow>
+        <p
+          style={{
+            fontFamily: "'Inter Tight', 'Inter', sans-serif",
+            fontSize: "clamp(2.4rem, 6vw, 4rem)",
+            fontWeight: 800,
+            letterSpacing: "-0.03em",
+            background: BRAND_FILL,
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+          }}
+        >
+          percolator.trade
+        </p>
         <div className="pitch-divider" />
         <div className="pitch-contact-grid">
           <div className="pitch-contact-card">
@@ -442,7 +622,7 @@ function IntroContact(_: SlideProps) {
 }
 
 const SLIDES: SlideDef[] = [
-  { id: 1, title: "One-Liner", component: IntroTitle },
+  { id: 1, title: "Cover", component: IntroTitle },
   { id: 2, title: "Problem", component: IntroProblem },
   { id: 3, title: "Why Now", component: IntroWhyNow },
   { id: 4, title: "Solution", component: IntroSolution },
