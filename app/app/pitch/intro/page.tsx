@@ -11,6 +11,127 @@
 import { useEffect, useState } from "react";
 import { PitchDeck, type SlideDef, type SlideProps } from "../_deck";
 
+// ── Inline data-as-hero charts (dependency-free, on-brand) ───────────────────
+// Every number below is cited in the caption; do not change a value without
+// updating the source. Brand fill = purple→cyan gradient; rest = faint white.
+
+const BRAND_FILL = "linear-gradient(135deg, #9945FF, #22D3EE)";
+
+// A single bar split into a small "has it" portion and a large "doesn't"
+// portion — the long-tail perp gap.
+function GapBar() {
+  return (
+    <div style={{ width: "100%", maxWidth: "720px", margin: "1.75rem auto 0" }}>
+      <div
+        className="mono"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: "0.55rem",
+          fontSize: "0.72rem",
+          letterSpacing: "0.04em",
+        }}
+      >
+        <span style={{ color: "#22D3EE", fontWeight: 700 }}>~13% get a perp</span>
+        <span style={{ color: "rgba(255,255,255,0.45)" }}>
+          ~87% have none, anywhere
+        </span>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          height: "30px",
+          borderRadius: "8px",
+          overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <div style={{ width: "13%", background: BRAND_FILL }} />
+        <div style={{ width: "87%", background: "rgba(255,255,255,0.06)" }} />
+      </div>
+      <div
+        className="mono"
+        style={{
+          marginTop: "0.7rem",
+          fontSize: "0.66rem",
+          color: "rgba(255,255,255,0.4)",
+          lineHeight: 1.5,
+        }}
+      >
+        Of every new token launched since 2025, only ~13% ever get a perp on any
+        venue. Source: CoinGecko, State of Crypto Perpetuals 2026.
+      </div>
+    </div>
+  );
+}
+
+// Two proportional bars: Solana perps record vs prior peak (momentum).
+function ScaleBars() {
+  const rows = [
+    { label: "May 2026 — new record", value: 77, display: "$77B" },
+    { label: "Nov 2025 — prior peak", value: 57, display: "$57B" },
+  ];
+  const max = 77;
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: "720px",
+        margin: "1.75rem auto 0",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.9rem",
+      }}
+    >
+      {rows.map((r, i) => (
+        <div key={r.label}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: "0.8rem",
+              marginBottom: "0.35rem",
+              color: "rgba(255,255,255,0.7)",
+            }}
+          >
+            <span>{r.label}</span>
+            <span className="mono">{r.display} / mo</span>
+          </div>
+          <div
+            style={{
+              height: "22px",
+              borderRadius: "6px",
+              background: "rgba(255,255,255,0.05)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${(r.value / max) * 100}%`,
+                height: "100%",
+                borderRadius: "6px",
+                background: i === 0 ? BRAND_FILL : "rgba(255,255,255,0.18)",
+              }}
+            />
+          </div>
+        </div>
+      ))}
+      <div
+        className="mono"
+        style={{
+          fontSize: "0.66rem",
+          color: "rgba(255,255,255,0.4)",
+          lineHeight: 1.5,
+        }}
+      >
+        Solana perps just set an all-time high, +35% over the prior peak. Then
+        the #1 venue was drained and went dark; the volume re-routed within
+        weeks. Source: DefiLlama, 2026.
+      </div>
+    </div>
+  );
+}
+
 // ── 1 · One-liner ────────────────────────────────────────────────────────────
 function IntroTitle(_: SlideProps) {
   return (
@@ -42,9 +163,9 @@ function IntroProblem(_: SlideProps) {
         </p>
         <p className="pitch-hero-body">
           Hundreds of thousands of tokens trade on Solana. Barely a hundred
-          have a perp market, all curated down to the same majors. The long
-          tail has the demand and no venue.
+          have a perp market, all curated down to the same majors.
         </p>
+        <GapBar />
       </div>
     </div>
   );
@@ -57,13 +178,14 @@ function IntroWhyNow(_: SlideProps) {
       <div className="pitch-slide-inner pitch-center">
         <div className="pitch-label">Why now</div>
         <p className="pitch-hero-headline">
-          $77B traded on Solana perps in May, a record. Then the leader got
-          drained and went dark.
+          Solana perps just hit a record. Then the leader got drained and went
+          dark.
         </p>
         <p className="pitch-hero-body">
-          The volume re-routed in weeks. Only ~13% of new tokens ever get a
-          perp, so the long tail still has nowhere to go.
+          The demand is proven and it moves fast. The long tail still has
+          nowhere to go.
         </p>
+        <ScaleBars />
       </div>
     </div>
   );
@@ -131,13 +253,56 @@ function IntroTraction(_: SlideProps) {
         >
           {waitlist.toLocaleString()}+
         </div>
-        <p
-          className="pitch-hero-body"
-          style={{ marginTop: "0.75rem" }}
-        >
-          waitlist signups in 7 weeks. Organic, zero paid. Plus 220 markets
-          created on devnet by 71 builders, all verifiable on-chain.
+        <p className="pitch-hero-body" style={{ marginTop: "0.6rem" }}>
+          waitlist signups in seven weeks. Organic, zero paid.
         </p>
+        <div
+          style={{
+            display: "flex",
+            gap: "0.85rem",
+            marginTop: "1.75rem",
+            flexWrap: "wrap",
+            justifyContent: "center",
+          }}
+        >
+          {[
+            { n: "220", l: "markets on devnet" },
+            { n: "71", l: "unique builders" },
+            { n: "$0", l: "paid acquisition" },
+          ].map((s) => (
+            <div
+              key={s.l}
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: "12px",
+                padding: "0.9rem 1.4rem",
+                minWidth: "150px",
+              }}
+            >
+              <div
+                className="mono"
+                style={{
+                  fontSize: "1.7rem",
+                  fontWeight: 700,
+                  color: "#fff",
+                  lineHeight: 1,
+                }}
+              >
+                {s.n}
+              </div>
+              <div
+                style={{
+                  fontSize: "0.72rem",
+                  color: "rgba(255,255,255,0.5)",
+                  marginTop: "0.35rem",
+                }}
+              >
+                {s.l}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
