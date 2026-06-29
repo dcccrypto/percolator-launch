@@ -315,3 +315,65 @@ export const RES_TO_SECONDS: Record<string, number> = {
   "240": 4 * 60 * 60,
   "1D":  24 * 60 * 60,
 };
+
+// ── protocol-wide stats ──────────────────────────────────────────────────────
+
+export interface StatsAggregate {
+  /** Number of distinct markets with at least one recorded trade. */
+  marketCount: number;
+  uniqueTraders: number;
+  trades24h: number;
+  /**
+   * Sum of ABS(size) for trades in the last 24 hours, as a raw bigint.
+   * `size` is stored in collateral token's smallest unit (e.g. microUSDC for
+   * a 6-decimal USDC-collateral market).  Callers must divide by 10^decimals
+   * to get USD volume.
+   */
+  volume24hRaw: bigint;
+}
+
+/**
+ * Single-query aggregate for protocol-wide stats (playground self-contained path).
+ * Used by /api/stats when INDEXER_DATABASE_URL is set instead of Supabase.
+ */
+export async function queryStatsAggregate(): Promise<StatsAggregate> {
+  const sql = getSql();
+  const rows = await sql<Array<{
+    market_count: string;
+    unique_traders: string;
+    trades_24h: string;
+    volume_24h_raw: string;
+  }>>`
+    SELECT
+      COUNT(DISTINCT slab_address)::text               AS market_count,
+      COUNT(DISTINCT trader)::text                     AS unique_traders,
+      COUNT(*)
+        FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours')::text
+                                                       AS trades_24h,
+      COALESCE(
+        SUM(ABS(size::numeric))
+          FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'),
+        0
+      )::text                                          AS volume_24h_raw
+    FROM trades
+  `;
+  const row = rows[0];
+  return {
+    marketCount:  Number(row?.market_count   ?? "0"),
+    uniqueTraders: Number(row?.unique_traders ?? "0"),
+    trades24h:    Number(row?.trades_24h     ?? "0"),
+    volume24hRaw: BigInt(row?.volume_24h_raw ?? "0"),
+  };
+}
+
+/**
+ * Returns the set of distinct slab addresses that appear in the trades table.
+ * Capped at 100 to bound the downstream batch-RPC call for on-chain OI.
+ */
+export async function queryKnownSlabs(): Promise<string[]> {
+  const sql = getSql();
+  const rows = await sql<Array<{ slab_address: string }>>`
+    SELECT DISTINCT slab_address FROM trades LIMIT 100
+  `;
+  return rows.map((r) => r.slab_address);
+}
