@@ -8,8 +8,8 @@ the guardrails.
 
 ## Golden rules (don't skip these)
 
-1. **Clone `percolator-sdk` as a sibling** of this repo before `pnpm install`, or the
-   install fails (`@percolatorct/sdk` is `file:../../percolator-sdk`).
+1. **One repo, one install.** `git clone` this repo → `pnpm install` (it fetches the
+   pinned `@percolatorct/sdk` from GitHub automatically — no sibling clone, no SDK build).
 2. **Frontend + devnet only.** We want frontend improvements and bug fixes. Never
    redeploy programs, switch to mainnet, run the keeper/faucet locally, `npm publish`,
    or `vercel deploy`.

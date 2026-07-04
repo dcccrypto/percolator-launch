@@ -13,7 +13,7 @@
     "dev:price-ws": "tsx scripts/local-price-ws-server.ts"
   },
   "dependencies": {
-    "@percolatorct/sdk": "file:../../percolator-sdk",
+    "@percolatorct/sdk": "github:dcccrypto/percolator-sdk#32a7c5bead09274fe245c92ad2170b66d39ce888",
     "@privy-io/node": "^0.18.0",
     "@privy-io/react-auth": "^3.14.1",
     "@sentry/nextjs": "^10.39.0",
