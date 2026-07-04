@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { proxyToApi } from "@/lib/api-proxy";
 import { isBlockedSlab } from "@/lib/blocklist";
+import { hasIndexerDb, queryFundingGlobal } from "@/lib/indexer-db";
 
 export const dynamic = "force-dynamic";
 
@@ -21,49 +22,73 @@ export interface FundingGlobalEntry {
 /**
  * GET /api/funding/global
  *
- * Proxies to percolator-api GET /funding/global, then applies an additional
- * defense-in-depth filter to strip any blocked slabs from the response.
+ * Primary path: proxy to percolator-api GET /funding/global.
+ * Fallback (playground / Railway dead): read latest funding rate per market
+ * from the local indexer Postgres (INDEXER_DATABASE_URL).
+ * Returns graceful {} if both unavailable.
  *
- * GH#1461: Even when the Railway API fix (PR #1460) applies isBlockedSlab()
- * server-side, deploy lag or env-var misconfiguration can let blocked slabs
- * slip through. This layer guarantees they are stripped before Vercel serves
- * the response to the browser.
- *
- * Removed standalone Supabase impl (GH#1066 — arch cleanup).
+ * GH#1461: blocked slabs are stripped from the response at this layer.
  */
 export async function GET(req: NextRequest) {
-  const upstream = await proxyToApi(req, "/funding/global");
-
-  // Only post-process successful JSON responses (2xx).
-  // For errors/timeouts, pass the upstream status through unchanged.
-  if (!upstream.ok) return upstream;
-
-  let data: Record<string, unknown>;
+  // ── 1. Try Railway proxy ───────────────────────────────────────────────────
+  let upstream: Response | null = null;
   try {
-    data = await upstream.clone().json();
+    upstream = await proxyToApi(req, "/funding/global");
   } catch {
-    // If the body isn't JSON (shouldn't happen but be safe), pass through.
-    return upstream;
+    // proxyToApi itself shouldn't throw but guard anyway
   }
 
-  // GH#1461: Strip blocked slabs from the global list.
-  // This is a defense-in-depth guard — the Railway API applies the same filter
-  // (PR #1460) but Vercel-layer filtering ensures correctness even when Railway
-  // hasn't redeployed or env BLOCKED_MARKET_ADDRESSES is misconfigured.
-  if (Array.isArray(data.markets)) {
-    const filtered = (data.markets as Array<{ slabAddress?: string }>).filter(
-      (m) => !isBlockedSlab(m.slabAddress)
-    );
-    data = { ...data, markets: filtered, count: filtered.length };
+  if (upstream && upstream.ok) {
+    let data: Record<string, unknown>;
+    try {
+      data = await upstream.clone().json();
+    } catch {
+      return upstream as unknown as NextResponse;
+    }
+
+    // Strip blocked slabs
+    if (Array.isArray(data.markets)) {
+      const filtered = (data.markets as Array<{ slabAddress?: string }>).filter(
+        (m) => !isBlockedSlab(m.slabAddress)
+      );
+      data = { ...data, markets: filtered, count: filtered.length };
+    }
+
+    const upstreamCacheControl =
+      upstream.headers.get("Cache-Control") ?? "no-store, max-age=0";
+
+    return NextResponse.json(data, {
+      status: upstream.status,
+      headers: { "Cache-Control": upstreamCacheControl },
+    });
   }
 
-  const upstreamCacheControl =
-    upstream.headers.get("Cache-Control") ?? "no-store, max-age=0";
+  // ── 2. Fallback: local indexer Postgres ────────────────────────────────────
+  if (hasIndexerDb()) {
+    try {
+      const rows = await queryFundingGlobal();
+      const markets: FundingGlobalEntry[] = rows
+        .filter((r) => !isBlockedSlab(r.slabAddress))
+        .map((r) => ({
+          slabAddress: r.slabAddress,
+          baseSymbol: null,
+          rateBpsPerSlot: r.rateBpsPerSlot,
+          hourlyRatePercent: r.hourlyRatePercent,
+          dailyRatePercent: r.dailyRatePercent,
+          netLpPos: r.netLpPos,
+        }));
+      return NextResponse.json(
+        { markets, count: markets.length },
+        { headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" } },
+      );
+    } catch (err) {
+      console.warn("[funding/global] indexer-db fallback failed:", err instanceof Error ? err.message : String(err));
+    }
+  }
 
-  return NextResponse.json(data, {
-    status: upstream.status,
-    headers: {
-      "Cache-Control": upstreamCacheControl,
-    },
-  });
+  // ── 3. Graceful empty response ─────────────────────────────────────────────
+  return NextResponse.json(
+    { markets: [], count: 0 },
+    { headers: { "Cache-Control": "no-store, max-age=0" } },
+  );
 }

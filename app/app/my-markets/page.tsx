@@ -324,7 +324,18 @@ const MarketCard: FC<{
         description="enter the amount of collateral tokens to add."
         placeholder="100"
         confirmLabel="top up"
-        onConfirm={(v) => { setShowTopUpInput(false); const parsed = parseFloat(v); if (isNaN(parsed) || parsed <= 0) return; const amount = BigInt(Math.round(parsed * 1e6)); handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount)); }}
+        onConfirm={(v) => {
+          setShowTopUpInput(false);
+          const parsed = parseFloat(v);
+          if (isNaN(parsed) || parsed <= 0) return;
+          // C-08: derive token decimals from on-chain unitScale (1_000_000 → 6dp, etc.)
+          // unitScale is stored in both v17 (configV17.unitScale) and v12 (config.unitScale).
+          // Math.log10(1_000_000) = 6; Math.log10(1_000_000_000) = 9. Default 6 if unknown.
+          const unitScaleRaw = Number(market.configV17?.unitScale ?? market.config?.unitScale ?? 1_000_000);
+          const collateralDecimals = unitScaleRaw > 1 ? Math.round(Math.log10(unitScaleRaw)) : 6;
+          const amount = BigInt(Math.round(parsed * Math.pow(10, collateralDecimals)));
+          handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount));
+        }}
         onCancel={() => setShowTopUpInput(false)}
       />
       {/* Burn admin key - requires typing BURN to confirm */}
@@ -387,7 +398,7 @@ const LoadingSkeleton: FC = () => (
 
 /* main page */
 const MyMarketsPage: FC = () => {
-  const { myMarkets: realMyMarkets, loading: realLoading, error, connected: walletConnected } = useMyMarkets();
+  const { myMarkets: realMyMarkets, loading: realLoading, error, connected: walletConnected, refetch: refetchMarkets } = useMyMarkets();
   const mockMode = isMockMode();
   const connected = walletConnected || mockMode;
   const mockMarkets = useMemo(() => mockMode ? getMockMyMarkets() : [], [mockMode]);
@@ -412,6 +423,8 @@ const MyMarketsPage: FC = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     setInsuranceMintChecking(true);
+    // C-07: actually re-fetch market data (not just insurance mint map)
+    await refetchMarkets?.();
     if (myMarkets.length > 0) {
       const pdas = myMarkets.map((m) => ({
         key: m.slabAddress.toBase58(),

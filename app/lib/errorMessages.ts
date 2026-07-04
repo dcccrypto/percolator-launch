@@ -35,52 +35,61 @@ function isLighthouseError(msg: string): boolean {
 
 export { LIGHTHOUSE_USER_MESSAGE };
 
+// v17 PercolatorError enum — percolator-prog src/v16_program.rs (verified against
+// the deployed program: Custom(N) == enum ordinal, no offset; ProgramError::Custom(value as u32)).
+// This was previously a stale v12 map whose codes were misaligned from ordinal 4
+// onward (e.g. 21 showed "Position size mismatch" but v17 21 = EngineLockActive).
 const ERROR_CODE_MAP: Record<number, string> = {
-  0: "Invalid market magic — data corrupted.",
-  1: "This market was created with an older program version and needs migration. The program has been upgraded — please contact the market admin to migrate this market, or create a new market with the current program.",
+  0: "Invalid market data (bad magic) — corrupted or not a Percolator market.",
+  1: "This market uses a different program version and needs migration.",
   2: "Market already initialized.",
   3: "Market not initialized.",
-  4: "Invalid slab data length — corrupted market.",
-  5: "Invalid oracle key.",
-  6: "Oracle price is stale — push a fresh price first.",
-  7: "Oracle confidence interval too wide.",
-  8: "Invalid vault token account.",
-  9: "Invalid mint account.",
-  10: "Missing required signer.",
-  11: "Account must be writable.",
-  12: "Oracle is invalid — no price available.",
-  13: "Insufficient balance — deposit more collateral.",
-  14: "Undercollateralized — either your margin is too low or the market's LP has insufficient capital. Try a smaller amount, deposit more collateral, or contact the market admin.",
-  15: "Unauthorized — you don't have permission for this action.",
-  16: "Invalid matching engine — LP matcher mismatch.",
-  17: "PnL not yet warmed up — crank the market a few more times.",
-  18: "Math overflow in engine calculation.",
-  19: "Account not found in this market.",
-  20: "Not an LP account — invalid account kind.",
-  21: "Position size mismatch — trade conflict.",
-  22: "Risk reduction only mode — market is de-risking, only closing trades allowed.",
-  23: "Account kind mismatch.",
-  24: "Invalid token account.",
-  25: "Invalid token program.",
-  26: "Invalid configuration parameter.",
-  27: "TradeNoCpi disabled in Hyperp mode — use TradeCpi instead.",
-  28: "Insurance LP mint already exists.",
-  29: "Insurance LP mint not created yet.",
-  30: "Insurance fund below minimum threshold.",
-  31: "Insurance deposit/withdrawal amount must be > 0.",
-  32: "Insurance LP supply mismatch.",
-  33: "Market is paused — trading, deposits, and withdrawals are disabled by the admin.",
-  34: "Cannot renounce admin — the market must be resolved first.",
-  35: "Invalid confirmation code for admin renouncement.",
-  36: "Vault seed balance too low — deposit more tokens to the vault before creating the market.",
-  37: "DEX pool has insufficient liquidity for safe oracle bootstrapping.",
-  38: "LP vault already exists for this market.",
-  39: "LP vault not yet created — create it first.",
-  40: "LP vault amount must be greater than zero.",
-  41: "LP vault supply/capital mismatch — please report this error.",
-  42: "LP vault withdrawal exceeds available capital (some is reserved for open interest).",
-  43: "LP vault fee share out of range (must be 0–100%).",
-  44: "No new fees to distribute to LP vault yet.",
+  4: "Wrong account type for this action.",
+  5: "Invalid account data length — corrupted account.",
+  6: "Missing required signature.",
+  7: "An account that must be writable was passed as read-only.",
+  8: "Unauthorized — you don't have permission for this action.",
+  9: "Invalid or unsupported instruction.",
+  10: "Invalid mint account.",
+  11: "Invalid token account.",
+  12: "Invalid vault account.",
+  13: "Invalid token program.",
+  14: "Invalid engine configuration for this market.",
+  15: "Math overflow in engine calculation — try a smaller size.",
+  16: "Account provenance mismatch — wrong market or account passed.",
+  17: "Position has an unsettled leg — crank the market and retry.",
+  18: "Invalid position leg.",
+  19: "Market data is stale — a fresh price/crank is needed. Try again in a moment.",
+  20: "Counterparty (backing) state is stale — crank the market, then retry.",
+  21: "This market is temporarily locked while it recovers/cranks. Try again shortly, or trade another market.",
+  22: "Crank made no progress — the market may need attention. Try again shortly.",
+  23: "This market is in recovery mode and must be cranked before trading resumes.",
+  24: "Engine counter overflow.",
+  25: "Engine counter underflow.",
+  26: "Oracle is invalid — no price available for this market.",
+  27: "Oracle price is stale — a fresh price must be pushed before trading. Try again in a moment.",
+  28: "Oracle confidence interval too wide — price too uncertain to trade right now.",
+  29: "Invalid oracle account for this market.",
+  30: "An LP vault already exists for this market.",
+  31: "LP vault not found for this market.",
+  32: "LP vault is paused.",
+  33: "LP vault still has shares outstanding — cannot proceed.",
+  34: "Amount must be greater than zero.",
+  35: "Insufficient LP vault shares.",
+  36: "LP vault redemption cooldown is still active — wait before redeeming.",
+  37: "Trade would exceed the market's open-interest cap. Try a smaller size.",
+  38: "No LP vault fees available to crank yet.",
+  39: "LP vault share supply mismatch — please report this error.",
+  40: "LP vault authority mismatch.",
+  41: "Deposit too small — it would mint zero LP shares. Deposit a larger amount.",
+  42: "Position-NFT registry not found for this market.",
+  43: "This position can't be transferred as an NFT right now.",
+  44: "Invalid NFT transfer — cannot transfer to yourself or a zero address.",
+  45: "Invalid NFT mint authority.",
+  46: "Position-NFT provenance mismatch.",
+  47: "Insurance withdrawal cooldown is still active.",
+  48: "Insurance withdrawal exceeds the allowed ceiling (deposits-only limit).",
+  49: "Insufficient margin for this trade — deposit more collateral or reduce size/leverage.",
 };
 
 /** Legacy Anchor error map (unused but kept for compatibility) */
@@ -119,7 +128,7 @@ const NFT_ERROR_CODE_MAP: Record<number, string> = {
 
 /** Hard-coded NFT program id. Matches app/lib/nft-program.ts. Kept here to
  *  avoid importing the (client-only) PublicKey wrapper from this module. */
-const NFT_PROGRAM_ID = "FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS";
+const NFT_PROGRAM_ID = "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP";
 
 function isNftProgramError(msg: string): boolean {
   if (msg.includes(NFT_PROGRAM_ID)) return true;
@@ -151,8 +160,9 @@ function extractCustomIndex(msg: string): number | null {
   return null;
 }
 
-// Transient = worth auto-retrying (oracle stale, blockhash expiry)
-const TRANSIENT_CODES = new Set([6, 12]); // OracleStale=6, OracleInvalid=12
+// Transient = worth auto-retrying (a fresh price push / crank clears it).
+// v17 codes: EngineStale=19, EngineBStale=20, OracleInvalid=26, OracleStale=27.
+const TRANSIENT_CODES = new Set([19, 20, 26, 27]);
 
 export function isTransientError(msg: string): boolean {
   const code = extractErrorCode(msg);
@@ -165,7 +175,9 @@ export function isTransientError(msg: string): boolean {
 
 export function isOracleStaleError(msg: string): boolean {
   const code = extractErrorCode(msg);
-  return code === 6 || code === 12; // OracleStale or OracleInvalid
+  // v17: OracleStale=27, OracleInvalid=26, EngineStale=19, EngineBStale=20 —
+  // all resolved by pushing a fresh price / cranking the market.
+  return code === 27 || code === 26 || code === 19 || code === 20;
 }
 
 export function humanizeError(rawMsg: string): string {

@@ -50,6 +50,7 @@ export function useWalletCompat() {
     wallet: null,
     signTransaction: undefined as ((tx: Transaction) => Promise<Transaction>) | undefined,
     signAndSendTransaction: undefined as ((tx: Transaction) => Promise<Uint8Array>) | undefined,
+    signMessage: undefined as ((message: Uint8Array) => Promise<Uint8Array>) | undefined,
     disconnect: async () => {},
   };
 }
@@ -131,6 +132,8 @@ function useWalletCompatPrivyInner() {
     wallet: activeWallet,
     signTransaction,
     signAndSendTransaction,
+    /** Privy embedded wallets do not expose signMessage via this hook — undefined in Privy mode. */
+    signMessage: undefined as ((message: Uint8Array) => Promise<Uint8Array>) | undefined,
     disconnect: logout,
   };
 }
@@ -149,6 +152,7 @@ function useWalletCompatAdapterInner() {
     connecting,
     wallet,
     signTransaction: adapterSignTx,
+    signMessage: adapterSignMessage,
     disconnect,
   } = useWallet();
 
@@ -194,6 +198,8 @@ function useWalletCompatAdapterInner() {
     wallet,
     signTransaction,
     signAndSendTransaction,
+    /** signMessage: available on most Wallet Standard adapters (Phantom, Solflare, etc.). */
+    signMessage: adapterSignMessage,
     disconnect,
   };
 }

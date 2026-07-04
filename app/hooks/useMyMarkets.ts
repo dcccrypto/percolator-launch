@@ -27,7 +27,7 @@ export interface MyMarket extends DiscoveredMarket {
 export function useMyMarkets() {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { markets, loading: discoveryLoading, error } = useMarketDiscovery();
+  const { markets, loading: discoveryLoading, error, refetch: discoveryRefetch } = useMarketDiscovery();
 
   // Token label cache: mint → symbol (persists across re-renders)
   const tokenLabelCache = useRef<Map<string, string>>(new Map());
@@ -178,5 +178,7 @@ export function useMyMarkets() {
     loading: discoveryLoading || accountsLoading,
     error,
     connected: !!publicKey,
+    /** Trigger a fresh discovery fetch (bypasses SWR dedup window). */
+    refetch: discoveryRefetch,
   };
 }

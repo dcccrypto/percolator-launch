@@ -20,7 +20,14 @@ const { mockSendAndConfirm, mockFromSecretKey, mockCheckRateLimit } = vi.hoisted
 // --- Mocks ---
 
 vi.mock("@/lib/config", () => ({
-  getConfig: () => ({ rpcUrl: "https://api.devnet.solana.com" }),
+  // BUG FIX (devnet flow-test 2026-07-01): route.ts's program-ID fallback changed from a
+  // hardcoded (and confirmed non-existent on-chain) string to cfg.programId — this mock
+  // didn't provide that field, so programIdStr resolved to undefined and `new PublicKey`
+  // threw, breaking every test that exercises the success path.
+  getConfig: () => ({
+    rpcUrl: "https://api.devnet.solana.com",
+    programId: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+  }),
 }));
 
 vi.mock("@sentry/nextjs", () => ({
@@ -51,6 +58,12 @@ vi.mock("@solana/web3.js", () => {
       return this;
     }),
     ComputeBudgetProgram: {
+      // requestHeapFrame was missing from this mock (pre-existing staleness, unrelated to
+      // the programId fix below) — route.ts calls it unconditionally (issue #176, v17's
+      // custom heap allocator requires it as the first instruction), so its absence here
+      // threw a TypeError inside the try block on every request, silently swallowed into
+      // {success:false}.
+      requestHeapFrame: vi.fn().mockReturnValue({ type: "heap_frame" }),
       setComputeUnitLimit: vi.fn().mockReturnValue({ type: "cu_limit" }),
     },
     sendAndConfirmTransaction: mockSendAndConfirm,

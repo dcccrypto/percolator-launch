@@ -377,3 +377,240 @@ export async function queryKnownSlabs(): Promise<string[]> {
   `;
   return rows.map((r) => r.slab_address);
 }
+
+// ── leaderboard / trader stats (P0 self-contained paths) ────────────────────
+
+export interface LeaderboardRow {
+  trader: string;
+  tradeCount: number;
+  totalVolume: bigint;
+  lastTradeAt: string;
+}
+
+interface RawLeaderboardRow {
+  trader: string;
+  trade_count: string;
+  total_volume: string;
+  last_trade_at: Date;
+}
+
+/**
+ * Aggregate leaderboard from local indexer trades table.
+ * period: "24h" | "7d" | "alltime"
+ */
+export async function queryLeaderboard(
+  period: string,
+  limit: number,
+): Promise<LeaderboardRow[]> {
+  const sql = getSql();
+
+  let rows: RawLeaderboardRow[];
+  if (period === "24h") {
+    rows = await sql<RawLeaderboardRow[]>`
+      SELECT
+        trader,
+        COUNT(*)::text            AS trade_count,
+        SUM(ABS(size::numeric))::text AS total_volume,
+        MAX(created_at)           AS last_trade_at
+      FROM trades
+      WHERE created_at >= NOW() - INTERVAL '24 hours'
+      GROUP BY trader
+      ORDER BY SUM(ABS(size::numeric)) DESC
+      LIMIT ${limit}
+    `;
+  } else if (period === "7d") {
+    rows = await sql<RawLeaderboardRow[]>`
+      SELECT
+        trader,
+        COUNT(*)::text            AS trade_count,
+        SUM(ABS(size::numeric))::text AS total_volume,
+        MAX(created_at)           AS last_trade_at
+      FROM trades
+      WHERE created_at >= NOW() - INTERVAL '7 days'
+      GROUP BY trader
+      ORDER BY SUM(ABS(size::numeric)) DESC
+      LIMIT ${limit}
+    `;
+  } else {
+    rows = await sql<RawLeaderboardRow[]>`
+      SELECT
+        trader,
+        COUNT(*)::text            AS trade_count,
+        SUM(ABS(size::numeric))::text AS total_volume,
+        MAX(created_at)           AS last_trade_at
+      FROM trades
+      GROUP BY trader
+      ORDER BY SUM(ABS(size::numeric)) DESC
+      LIMIT ${limit}
+    `;
+  }
+
+  return rows.map((r) => ({
+    trader: r.trader,
+    tradeCount: Number(r.trade_count),
+    totalVolume: BigInt(r.total_volume.split(".")[0]),
+    lastTradeAt: r.last_trade_at instanceof Date
+      ? r.last_trade_at.toISOString()
+      : String(r.last_trade_at),
+  }));
+}
+
+export interface TraderStatsRow {
+  side: string;
+  size: string;
+  price: string;
+  fee: string;
+  slab_address: string;
+  created_at: string;
+}
+
+/**
+ * Fetch all trade rows for a wallet for stats aggregation.
+ * Returns at most 10 000 rows (same cap as the Supabase path).
+ */
+export async function queryTraderStatsRows(wallet: string): Promise<TraderStatsRow[]> {
+  const sql = getSql();
+  const rows = await sql<Array<{
+    side: string;
+    size: string;
+    price: string;
+    fee: string;
+    slab_address: string;
+    created_at: Date;
+  }>>`
+    SELECT side, size::text AS size, price::text AS price,
+           fee::text AS fee, slab_address, created_at
+    FROM trades
+    WHERE trader = ${wallet}
+    ORDER BY created_at ASC
+    LIMIT 10000
+  `;
+  return rows.map((r) => ({
+    side: r.side,
+    size: r.size,
+    price: r.price,
+    fee: r.fee,
+    slab_address: r.slab_address,
+    created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+  }));
+}
+
+export interface TraderTradesPageResult {
+  trades: IndexerTrade[];
+  total: number;
+}
+
+/**
+ * Paginated trade history for a specific wallet, optionally filtered by slab.
+ */
+export async function queryTraderTradesPage(
+  wallet: string,
+  limit: number,
+  offset: number,
+  slabFilter?: string,
+): Promise<TraderTradesPageResult> {
+  const sql = getSql();
+
+  // Get total count
+  const countRows = slabFilter
+    ? await sql<Array<{ cnt: string }>>`
+        SELECT COUNT(*)::text AS cnt FROM trades
+        WHERE trader = ${wallet} AND slab_address = ${slabFilter}
+      `
+    : await sql<Array<{ cnt: string }>>`
+        SELECT COUNT(*)::text AS cnt FROM trades
+        WHERE trader = ${wallet}
+      `;
+  const total = Number(countRows[0]?.cnt ?? "0");
+
+  // Get page
+  const tradeRows: Array<{
+    id: string;
+    slab_address: string;
+    trader: string;
+    side: string;
+    size: string;
+    price: string;
+    fee: string;
+    tx_signature: string | null;
+    created_at: Date;
+    asset_index: number | null;
+  }> = slabFilter
+    ? await sql`
+        SELECT id, slab_address, trader, side, size::text AS size,
+               price::text AS price, fee::text AS fee, tx_signature,
+               created_at, asset_index
+        FROM trades
+        WHERE trader = ${wallet} AND slab_address = ${slabFilter}
+        ORDER BY created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `
+    : await sql`
+        SELECT id, slab_address, trader, side, size::text AS size,
+               price::text AS price, fee::text AS fee, tx_signature,
+               created_at, asset_index
+        FROM trades
+        WHERE trader = ${wallet}
+        ORDER BY created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+
+  const trades: IndexerTrade[] = tradeRows.map((r) => ({
+    id: String(r.id),
+    slab_address: r.slab_address,
+    trader: r.trader,
+    tx_signature: r.tx_signature ?? "",
+    side: r.side as "long" | "short",
+    size: r.size,
+    price: r.price,
+    fee: r.fee,
+    created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+    asset_index: r.asset_index ?? null,
+  }));
+
+  return { trades, total };
+}
+
+// ── funding/global local fallback ────────────────────────────────────────────
+
+export interface FundingGlobalLocalEntry {
+  slabAddress: string;
+  rateBpsPerSlot: number;
+  hourlyRatePercent: number;
+  dailyRatePercent: number;
+  netLpPos: number;
+}
+
+/**
+ * Aggregate latest funding rate per market from the local indexer.
+ * Used as fallback when Railway /funding/global is unavailable.
+ */
+export async function queryFundingGlobal(): Promise<FundingGlobalLocalEntry[]> {
+  const sql = getSql();
+  const rows = await sql<Array<{
+    market_slab: string;
+    rate_bps_per_slot: string;
+    net_lp_pos: string;
+  }>>`
+    SELECT DISTINCT ON (market_slab)
+      market_slab,
+      rate_bps_per_slot::text,
+      net_lp_pos::text
+    FROM funding_history
+    ORDER BY market_slab, timestamp DESC
+    LIMIT 200
+  `;
+
+  return rows.map((r) => {
+    const rateBpsPerSlot = Number(r.rate_bps_per_slot);
+    const hourlyRatePercent = toHourlyPercent(rateBpsPerSlot);
+    const dailyRatePercent = hourlyRatePercent * 24;
+    return {
+      slabAddress: r.market_slab,
+      rateBpsPerSlot,
+      hourlyRatePercent,
+      dailyRatePercent,
+      netLpPos: Number(r.net_lp_pos),
+    };
+  });
+}

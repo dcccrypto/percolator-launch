@@ -12,6 +12,10 @@ if (!API_URL && process.env.NODE_ENV === "production") {
 }
 
 const nextConfig: NextConfig = {
+  // Allow loading the dev server from the LAN IP (e.g. phone on the same WiFi).
+  // Next 16 blocks /_next/* dev resources from non-localhost origins by default,
+  // which makes the page render blank when accessed via an IP. Dev-only setting.
+  allowedDevOrigins: ["192.168.1.42", "192.168.1.*", "localhost", "127.0.0.1"],
   // @solana/kit must be transpiled: its browser export resolves to an ESM .mjs file
   // that webpack includes verbatim, causing "Unexpected token 'export'" in production bundles.
   transpilePackages: ["@percolator/sdk", "@solana/kit"],
@@ -69,6 +73,8 @@ const nextConfig: NextConfig = {
       ...(useLocalIndexer ? [] : [
         { source: "/api/markets/:slab/trades", destination: `${API_URL}/markets/:slab/trades` },
         { source: "/api/funding/:slab/history", destination: `${API_URL}/funding/:slab/history` },
+        // NOTE: /api/funding/global has its own route.ts with local-indexer fallback;
+        // skip the generic /api/funding/:slab rewrite that would shadow it.
       ]),
       // NOTE: Do NOT rewrite /api/markets/:slab/prices — route.ts handles it (proxies to /prices/:slab).
       // A rewrite here would bypass route.ts and hit the wrong Railway path (/markets/:slab/prices → 404→500).

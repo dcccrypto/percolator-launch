@@ -42,7 +42,7 @@ function fundingRateBpsTo8h(rateBps: bigint): number {
 
 export const MarketStatsCard: FC = () => {
   const { engine, params, fundingRate, loading } = useEngineState();
-  const { config: mktConfig, slabAddress } = useSlabState();
+  const { config: mktConfig, slabAddress, wrapperConfigV17 } = useSlabState();
   const config = useMarketConfig();
   const { market: marketInfo } = useMarketInfo(slabAddress);
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
@@ -58,11 +58,11 @@ export const MarketStatsCard: FC = () => {
   const { markPriceE6, indexPriceE6, spreadBps, oracleMode } = useMemo(() => {
     if (!mktConfig) return { markPriceE6: null, indexPriceE6: null, spreadBps: null, oracleMode: null };
 
-    const mode = detectOracleMode(mktConfig);
+    const mode = detectOracleMode({ ...mktConfig, oracleModeByte: wrapperConfigV17?.oracleMode });
     let mark: bigint | null = null;
     let index: bigint | null = null;
 
-    if (mode === "hyperp" || mode === "admin") {
+    if (mode === "hyperp" || mode === "admin" || mode === "keeper") {
       // authorityPriceE6 = latest pushed/mark price
       // lastEffectivePriceE6 = EMA / effective / index price
       const rawMark = sanitizePriceE6(mktConfig.authorityPriceE6);
@@ -91,7 +91,7 @@ export const MarketStatsCard: FC = () => {
     }
 
     return { markPriceE6: mark, indexPriceE6: index, spreadBps: bps, oracleMode: mode };
-  }, [mktConfig]);
+  }, [mktConfig, wrapperConfigV17]);
 
   // ─── Funding Rate ──────────────────────────────────────────────────────────
   // sanitizeFundingRateBps guards against garbage on-chain values (e.g. wrong
@@ -101,7 +101,11 @@ export const MarketStatsCard: FC = () => {
     ? fundingRateBpsTo8h(sanitizeFundingRateBps(fundingRate)!)
     : null;
 
-  if (loading || !engine || !config || !params) {
+  // P2-04: v17 markets set engine=null (no legacy engine block). Treat wrapperConfigV17
+  // as the "loaded" signal for v17 so Stats tab doesn't show "Market not loaded" when
+  // price/chart are live. Stats that require engine fall back to 0/unavailable for v17.
+  const isV17 = wrapperConfigV17 !== null;
+  if (loading || (!engine && !isV17) || !config) {
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <p className="text-[10px] text-[var(--text-secondary)]">{loading ? "Loading..." : "Market not loaded"}</p>
@@ -112,8 +116,9 @@ export const MarketStatsCard: FC = () => {
   const decimals = tokenMeta?.decimals ?? 6;
   const tokenDivisor = 10 ** decimals;
   // Sanitize sentinel values (u64::MAX) from uninitialized on-chain fields
-  const totalOI = sanitizeOnChainValue(engine.totalOpenInterest ?? 0n);
-  const vault = sanitizeOnChainValue(engine.vault ?? 0n);
+  // v17: engine is null — fall back to 0n for OI/vault stats
+  const totalOI = sanitizeOnChainValue(engine?.totalOpenInterest ?? 0n);
+  const vault = sanitizeOnChainValue(engine?.vault ?? 0n);
   const oiDisplay = showUsd && priceUsd != null
     ? formatNum((Number(totalOI) / tokenDivisor) * priceUsd)
     : formatCompactTokenAmount(totalOI, decimals);
@@ -204,7 +209,10 @@ export const MarketStatsCard: FC = () => {
     {
       label: "Trading Fee",
       value: (() => {
-        const onChain = sanitizeBps(params.tradingFeeBps, 5_000);
+        // v17: use wrapperConfigV17.tradeFeeBps; v12: params.tradingFeeBps
+        const onChain = params
+          ? sanitizeBps(params.tradingFeeBps, 5_000)
+          : (isV17 && wrapperConfigV17 ? sanitizeBps(Number(wrapperConfigV17.tradeFeeBps), 5_000) : null);
         if (onChain != null && onChain > 0) return formatBps(onChain);
         // Fallback: use DB trading_fee_bps
         const dbFee = marketInfo?.trading_fee_bps;
@@ -215,7 +223,7 @@ export const MarketStatsCard: FC = () => {
     {
       label: "Init. Margin",
       value: (() => {
-        const onChain = sanitizeBps(params.initialMarginBps);
+        const onChain = params ? sanitizeBps(params.initialMarginBps) : null;
         if (onChain != null && onChain > 0) return formatBps(onChain);
         // Fallback: derive from max_leverage (initialMarginBps = 10000 / max_leverage)
         const maxLev = marketInfo?.max_leverage;
@@ -226,7 +234,7 @@ export const MarketStatsCard: FC = () => {
         return "—";
       })(),
     },
-    { label: "Accounts", value: sanitizeAccountCount(engine.numUsedAccounts ?? 0, params ? Number(params.maxAccounts) : undefined).toString() },
+    { label: "Accounts", value: sanitizeAccountCount(engine?.numUsedAccounts ?? 0, params ? Number(params.maxAccounts) : undefined).toString() },
   ];
 
   return (

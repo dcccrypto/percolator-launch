@@ -99,7 +99,8 @@ export function useWithdraw(slabAddress: string) {
           // ── v17 withdraw path ─────────────────────────────────────────────
           // v17 Withdraw (tag 4): [owner(signer,w), market(w), portfolio(w), destToken(w), vaultToken(w), vaultAuthority, tokenProgram]
           // No clock, no oracle. crank is NOT prepended (v17 Withdraw is standalone).
-          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint);
+          // vaultPda is a program PDA (off-curve) → allowOwnerOffCurve=true (else TokenOwnerOffCurveError)
+          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
 
           // Find the user's portfolio account.
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);

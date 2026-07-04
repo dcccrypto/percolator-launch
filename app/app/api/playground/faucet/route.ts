@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
     // Record claim AFTER on-chain success — don't lock wallet on partial failure
     const nextClaimAt = recordClaim(walletAddress);
 
-    // ── Small SOL airdrop (best-effort) ────────────────────────────────────
+    // ── Small SOL airdrop (best-effort, 3 s timeout per attempt) ──────────
     // Tries public devnet faucet for ~0.05 SOL so the user can pay for their
     // own subsequent transactions. Non-blocking — failure is acceptable.
     let solAirdropped = false;
@@ -225,10 +225,20 @@ export async function POST(req: NextRequest) {
     for (const rpcEndpoint of DEVNET_RPC_POOL) {
       try {
         const pubConn = new Connection(rpcEndpoint, "confirmed");
-        const sig = await pubConn.requestAirdrop(walletPk, SOL_AIRDROP_AMOUNT);
-        await pubConn.confirmTransaction(sig, "confirmed");
+        // Wrap the airdrop + confirm in a 3 s timeout so a slow/dead RPC
+        // endpoint doesn't block the entire response past 4 s.
+        const airdropSig: string = await Promise.race([
+          (async () => {
+            const s = await pubConn.requestAirdrop(walletPk, SOL_AIRDROP_AMOUNT);
+            await pubConn.confirmTransaction(s, "confirmed");
+            return s;
+          })(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("airdrop timeout")), 3_000)
+          ),
+        ]);
         solAirdropped = true;
-        solSig = sig;
+        solSig = airdropSig;
         break;
       } catch {
         // Try next endpoint or give up gracefully

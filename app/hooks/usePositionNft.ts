@@ -2,17 +2,29 @@
 
 import { useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import {
-  deriveNftPda,
-  parsePositionNftAccount,
-  POSITION_NFT_STATE_LEN,
   PERCOLATOR_NFT_PROGRAM_ID,
+  deriveNftPda as deriveNftPdaV12,
+  parsePositionNftAccount as parsePositionNftAccountLib,
+  POSITION_NFT_STATE_LEN as POSITION_NFT_STATE_LEN_V12,
 } from "@/lib/nft-program";
+import {
+  deriveNftPda as deriveNftPdaV17,
+  parsePositionNftAccount as parsePositionNftAccountSdk,
+  parsePortfolioV17,
+  isV17Account,
+} from "@percolatorct/sdk";
+
+// Minimum byte length accepted by the v17 (SDK) NFT account parser.
+const POSITION_NFT_STATE_LEN_V17 = 199;
+
+// v17 portfolio magic bytes for getProgramAccounts filter.
+const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 
 export interface UsePositionNftResult {
   /** Whether the position NFT has been minted (PDA account exists on-chain) */
@@ -31,13 +43,19 @@ export interface UsePositionNftResult {
  * Hook: derives the position_nft PDA for the current user, fetches the
  * account, and parses the NFT mint + settlement flag.
  *
- * PDA seeds: ["position_nft", slab, user_idx_u16_LE]
- * Layout per percolator-nft program (PERC-303).
+ * v17 markets (isV17Account(raw)):
+ *   PDA seeds: ["position_nft", portfolioAccount, marketId_u64_LE]
+ *   Layout: SDK parsePositionNftAccount (199 bytes, nftMint at offset 42)
+ *
+ * v12 markets (fallback):
+ *   PDA seeds: ["position_nft", slab, user_idx_u16_LE]
+ *   Layout: lib parsePositionNftAccount (208 bytes, mint at offset 56)
  */
 export function usePositionNft(slabAddress: string): UsePositionNftResult {
   const { connection } = useConnectionCompat();
+  const { publicKey: walletPubkey } = useWalletCompat();
   const userAccount = useUserAccount();
-  const { programId: slabProgramId } = useSlabState();
+  const { programId: slabProgramId, raw } = useSlabState();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
 
   const [state, setState] = useState<UsePositionNftResult>({
@@ -48,18 +66,19 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     isLoading: false,
   });
 
-  // Stabilise effect deps with primitives. `userAccount` and `connection` object
-  // references are recreated on every slab poll (~2s), which used to re-trigger
-  // the entire fetch and flash isLoading=true — making the Mint/Burn buttons
-  // visibly disappear and reappear every 2–3s. The NFT PDA account only
-  // changes when the user index or program/slab identity changes, so key the
-  // effect on those primitives alone. Refetches after mint/burn can be
-  // wired later via a manual trigger if needed.
+  // Stabilise effect deps with primitives so the effect doesn't re-run on
+  // every slab poll (~2s). The NFT PDA only changes when identity (program,
+  // slab, user) changes.
   const userIdx = userAccount?.idx ?? null;
   const programIdStr = slabProgramId?.toBase58() ?? null;
+  const walletPubkeyStr = walletPubkey?.toBase58() ?? null;
+  const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
 
   useEffect(() => {
-    if (userIdx === null || !programIdStr || !slabAddress) {
+    // For v17 we need wallet pubkey; for v12 we need userIdx.
+    const needsV12 = !isV17 && userIdx === null;
+    const needsV17 = isV17 && walletPubkeyStr === null;
+    if (!programIdStr || !slabAddress || needsV12 || needsV17) {
       setState({
         hasMintedNft: false,
         nftMint: null,
@@ -75,8 +94,7 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     (async () => {
       try {
         const slabPk = new PublicKey(slabAddress);
-        const [nftPda] = deriveNftPda(slabPk, userIdx, PERCOLATOR_NFT_PROGRAM_ID);
-        const pdaStr = nftPda.toBase58();
+        const programId = new PublicKey(programIdStr);
 
         if (mockMode) {
           if (!cancelled) {
@@ -84,53 +102,172 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
               hasMintedNft: false,
               nftMint: null,
               pendingSettlement: false,
-              nftPdaAddress: pdaStr,
+              nftPdaAddress: null,
               isLoading: false,
             });
           }
           return;
         }
 
-        // Only flip isLoading on the FIRST fetch (when we have no data yet).
-        // Subsequent refetches — which shouldn't happen any more thanks to the
-        // stable deps above, but belt-and-braces — keep the cached state
-        // visible so the UI doesn't flash.
-        setState((prev) => ({
-          ...prev,
-          nftPdaAddress: pdaStr,
-          isLoading: prev.nftPdaAddress === null,
-        }));
+        if (isV17) {
+          // ── v17 path ─────────────────────────────────────────────────────
+          // 1. Find the user's portfolio via getProgramAccounts (magic + market_group + owner).
+          // 2. Parse the portfolio to get the active leg's marketId.
+          // 3. Derive PDA with SDK seeds: ["position_nft", portfolio, marketId_u64_LE].
+          // 4. Fetch the PDA account and parse with SDK parser (199 bytes).
+          setState((prev) => ({ ...prev, isLoading: prev.nftPdaAddress === null }));
 
-        const accountInfo = await connection.getAccountInfo(nftPda);
+          const allPortfolios = await connection.getProgramAccounts(programId, {
+            filters: [
+              { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
+              // market_group_id sits at provenance offset 16 (after 8-byte header)
+              { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
+              // portfolio owner sits at provenance offset 80
+              { memcmp: { offset: 80, bytes: walletPubkeyStr! } },
+            ],
+          });
 
-        if (cancelled) return;
+          if (cancelled) return;
 
-        if (!accountInfo || !accountInfo.data || accountInfo.data.length < POSITION_NFT_STATE_LEN) {
+          if (allPortfolios.length === 0) {
+            // The owner-scan finds nothing once the position is WRAPPED: minting
+            // B-3-transfers portfolio.owner to the NFT program's escrow PDA. Fall
+            // back to the NFT the wallet still holds — scan PositionNft accounts
+            // by last_holder (offset 167) == wallet, then keep the one whose
+            // wrapped portfolio (portfolio_account @10) is on this market. This
+            // keeps Burn / Send / status working after the mint.
+            const heldNfts = await connection.getProgramAccounts(PERCOLATOR_NFT_PROGRAM_ID, {
+              filters: [
+                { dataSize: POSITION_NFT_STATE_LEN_V17 },
+                { memcmp: { offset: 167, bytes: walletPubkeyStr! } },
+              ],
+            });
+            if (cancelled) return;
+            for (const heldNft of heldNfts) {
+              let parsedNft;
+              try {
+                parsedNft = parsePositionNftAccountSdk(new Uint8Array(heldNft.account.data));
+              } catch {
+                continue;
+              }
+              const wrappedPfInfo = await connection.getAccountInfo(parsedNft.portfolioAccount);
+              if (cancelled) return;
+              if (!wrappedPfInfo) continue;
+              let wrappedPf;
+              try {
+                wrappedPf = parsePortfolioV17(new Uint8Array(wrappedPfInfo.data));
+              } catch {
+                continue;
+              }
+              if (!(wrappedPf.marketGroupId?.equals(slabPk) ?? false)) continue;
+              const wrappedLeg = wrappedPf.legs.find((l) => l.active);
+              setState({
+                hasMintedNft: true,
+                nftMint: parsedNft.nftMint,
+                // No active (non-zero) leg ⇒ closed-but-unburned ⇒ burn to reclaim.
+                pendingSettlement: !wrappedLeg || wrappedLeg.basisPosQ === 0n,
+                nftPdaAddress: heldNft.pubkey.toBase58(),
+                isLoading: false,
+              });
+              return;
+            }
+            setState({
+              hasMintedNft: false,
+              nftMint: null,
+              pendingSettlement: false,
+              nftPdaAddress: null,
+              isLoading: false,
+            });
+            return;
+          }
+
+          const portfolioPk = allPortfolios[0].pubkey;
+          const pf = parsePortfolioV17(new Uint8Array(allPortfolios[0].account.data));
+          const activeLeg = pf.legs.find((l) => l.active);
+
+          if (!activeLeg) {
+            // No active position — NFT definitely not minted.
+            setState({
+              hasMintedNft: false,
+              nftMint: null,
+              pendingSettlement: false,
+              nftPdaAddress: portfolioPk.toBase58(),
+              isLoading: false,
+            });
+            return;
+          }
+
+          const [nftPda] = deriveNftPdaV17(portfolioPk, activeLeg.marketId, PERCOLATOR_NFT_PROGRAM_ID);
+          const pdaStr = nftPda.toBase58();
+
+          setState((prev) => ({ ...prev, nftPdaAddress: pdaStr }));
+
+          const accountInfo = await connection.getAccountInfo(nftPda);
+
+          if (cancelled) return;
+
+          if (!accountInfo || accountInfo.data.length < POSITION_NFT_STATE_LEN_V17) {
+            setState({
+              hasMintedNft: false,
+              nftMint: null,
+              pendingSettlement: false,
+              nftPdaAddress: pdaStr,
+              isLoading: false,
+            });
+            return;
+          }
+
+          const parsed = parsePositionNftAccountSdk(new Uint8Array(accountInfo.data));
+
           setState({
-            hasMintedNft: false,
-            nftMint: null,
-            pendingSettlement: false,
+            hasMintedNft: true,
+            nftMint: parsed.nftMint,
+            // positionSize === 0 means position closed but NFT not yet burned.
+            pendingSettlement: parsed.basisPosQAtMint === 0n,
             nftPdaAddress: pdaStr,
             isLoading: false,
           });
-          return;
+
+        } else {
+          // ── v12 path ─────────────────────────────────────────────────────
+          // PDA seeds: ["position_nft", slab, userIdx_u16_LE]
+          // Layout: lib parsePositionNftAccount (208 bytes)
+          const [nftPda] = deriveNftPdaV12(slabPk, userIdx!, PERCOLATOR_NFT_PROGRAM_ID);
+          const pdaStr = nftPda.toBase58();
+
+          setState((prev) => ({
+            ...prev,
+            nftPdaAddress: pdaStr,
+            isLoading: prev.nftPdaAddress === null,
+          }));
+
+          const accountInfo = await connection.getAccountInfo(nftPda);
+
+          if (cancelled) return;
+
+          if (!accountInfo || accountInfo.data.length < POSITION_NFT_STATE_LEN_V12) {
+            setState({
+              hasMintedNft: false,
+              nftMint: null,
+              pendingSettlement: false,
+              nftPdaAddress: pdaStr,
+              isLoading: false,
+            });
+            return;
+          }
+
+          const { mint, positionSize } = parsePositionNftAccountLib(
+            Buffer.from(accountInfo.data)
+          );
+
+          setState({
+            hasMintedNft: true,
+            nftMint: mint,
+            pendingSettlement: positionSize === 0n,
+            nftPdaAddress: pdaStr,
+            isLoading: false,
+          });
         }
-
-        const { mint, positionSize } = parsePositionNftAccount(
-          Buffer.from(accountInfo.data)
-        );
-
-        setState({
-          hasMintedNft: true,
-          nftMint: mint,
-          // No dedicated `pending_settlement` byte in the 208-byte layout.
-          // Derive it from the snapshot: a PositionNft PDA with zero
-          // position_size is one where the underlying trade has been
-          // closed on-chain — the NFT is waiting to be burned.
-          pendingSettlement: positionSize === 0n,
-          nftPdaAddress: pdaStr,
-          isLoading: false,
-        });
       } catch (e) {
         console.error("[usePositionNft] Error fetching PDA:", e);
         if (!cancelled) {
@@ -148,10 +285,9 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
     return () => {
       cancelled = true;
     };
-    // Deliberately excluding `connection` — it's from context and stable in
-    // practice; including the object reference was part of the flicker bug.
+    // Deliberately excluding `connection` — object ref recreated on every poll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userIdx, programIdStr, slabAddress, mockMode]);
+  }, [isV17, walletPubkeyStr, userIdx, programIdStr, slabAddress, mockMode]);
 
   return state;
 }

@@ -16,7 +16,6 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
-import { useUserAccount } from "@/hooks/useUserAccount";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
@@ -152,7 +151,6 @@ function deriveExtraAccountMetasPda(mint: PublicKey): PublicKey {
 export function useTransferPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey, signTransaction } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const userAccount = useUserAccount();
   const { nftMint } = usePositionNft(slabAddress);
   const { toast } = useToast();
 
@@ -162,8 +160,8 @@ export function useTransferPositionNft(slabAddress: string) {
   const transfer = useCallback(
     async (destinationWallet: PublicKey): Promise<string | null> => {
       setError(null);
-      if (!walletPubkey || !userAccount || !nftMint) {
-        setError("Wallet not connected, no position, or NFT not minted");
+      if (!walletPubkey || !nftMint) {
+        setError("Wallet not connected or NFT not minted");
         return null;
       }
       if (!signTransaction) {
@@ -350,24 +348,24 @@ export function useTransferPositionNft(slabAddress: string) {
         console.error("[useTransferPositionNft] stage:", stage, "error:", e);
 
         // Build a meaningful raw string even when .message is empty.
-        let raw = "";
+        let errMsg = "";
         if (e instanceof Error) {
-          raw = e.message || e.name || e.constructor?.name || "";
+          errMsg = e.message || e.name || e.constructor?.name || "";
         } else if (e != null) {
-          raw = String(e);
+          errMsg = String(e);
         }
-        if (!raw.trim()) {
-          raw = `Failed while ${stage}. Check the browser console for the raw error object.`;
+        if (!errMsg.trim()) {
+          errMsg = `Failed while ${stage}. Check the browser console for the raw error object.`;
         }
 
         // User rejected wallet signature — surface a clean UX message and
         // do not treat it as an error state.
-        if (/user (rejected|cancelled|denied)|rejected the request/i.test(raw)) {
+        if (/user (rejected|cancelled|denied)|rejected the request/i.test(errMsg)) {
           setError(null);
           return null;
         }
 
-        const msg = humanizeError(raw);
+        const msg = humanizeError(errMsg);
         setError(msg);
         toast(msg, "error");
         return null;
@@ -375,7 +373,7 @@ export function useTransferPositionNft(slabAddress: string) {
         setLoading(false);
       }
     },
-    [walletPubkey, userAccount, nftMint, signTransaction, connection, toast],
+    [walletPubkey, nftMint, signTransaction, connection, toast],
   );
 
   return { transfer, loading, error };

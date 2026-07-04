@@ -21,9 +21,10 @@ import {
   encodeDepositCollateral,
   encodeTopUpInsurance,
   encodePermissionlessCrank,
-  encodeMatcherInitPassive,
+  encodeInitMatcherCtx,
   encodeSetMatcherConfig,
   encodeInitUser,
+  encodeSetNftProgramId,
   CrankAction,
   detectDexType,
   parseDexPool,
@@ -32,6 +33,7 @@ import {
   ACCOUNTS_TOPUP_INSURANCE,
   ACCOUNTS_PERMISSIONLESS_CRANK_BASE,
   ACCOUNTS_SET_MATCHER_CONFIG,
+  ACCOUNTS_INIT_MATCHER_CTX,
   ACCOUNTS_INIT_USER,
   buildAccountMetas,
   WELL_KNOWN,
@@ -39,12 +41,14 @@ import {
   deriveVaultAuthority,
   derivePythPushOraclePDA,
   deriveMatcherDelegate,
+  deriveNftRegistry,
   parseHeader,
   isV17Account,
   v17MarketAccountLen,
   V17_PORTFOLIO_ACCOUNT_LEN,
   MATCHER_CONTEXT_LEN,
 } from "@percolatorct/sdk";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
 // and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
 // in InitMarket (extended tail). The sdk-compat stubs throw at runtime if called.
@@ -105,6 +109,22 @@ async function fetchJupiterPriceE6(ca: string): Promise<bigint | null> {
 
 /** Minimum vault seed required by percolator-prog before InitMarket (500_000_000 raw tokens). */
 export const MIN_INIT_MARKET_SEED = 500_000_000n;
+
+/**
+ * BUG FIX (devnet flow-test 2026-07-01, flowtest/debug-maxassets-bisect.ts): the deployed
+ * wrapper program rejects InitMarket with a raw ProgramError::InvalidAccountData ("invalid
+ * account data for instruction" — no Custom error code, so parseMarketCreationError can't give
+ * the user a useful message) whenever initial_margin_bps/maintenance_margin_bps are too low.
+ * Bisected on-chain: 1000/500 bps (10x leverage) and 1100/550 both fail; 1200/600 (~8.33x) and
+ * MARKET_PARAMS' proven values consistently succeed. This means EVERY market ever created
+ * through this wizard at the previous default leverage range would have silently failed Step 0
+ * with a cryptic error. 1500 bps (~6.67x max leverage) is enforced as a floor here — comfortably
+ * above the proven-good 1200 boundary (the exact edge between 1100 and 1200 wasn't bisected
+ * further) — regardless of what leverage the caller requests, so no create-market attempt can
+ * hit this failure mode. If product wants to offer >6.67x leverage again, this needs a fresh
+ * on-chain bisection first.
+ */
+const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
 
 export interface VammParams {
   spreadBps: number;
@@ -441,29 +461,32 @@ export function useCreateMarket() {
                 userCollateralAtaRecovery, vaultAta, wallet.publicKey, MIN_INIT_MARKET_SEED,
               );
 
-              const initialMarginBps = BigInt(params.initialMarginBps);
+              const requestedMarginBps = BigInt(params.initialMarginBps);
+              const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
+                ? MIN_SAFE_INITIAL_MARGIN_BPS
+                : requestedMarginBps;
               const v17InitArgs: InitMarketV17Args = {
                 maxPortfolioAssets: V17_MAX_PORTFOLIO_ASSETS,
-                hMin: "100",
-                hMax: "86400",
+                hMin: "1000",
+                hMax: "100000",
                 initialPrice: params.initialPriceE6.toString(),
-                minNonzeroMmReq: "0",
-                minNonzeroImReq: "0",
+                minNonzeroMmReq: "1000000",
+                minNonzeroImReq: "2000000",
                 maintenanceMarginBps: (initialMarginBps / 2n).toString(),
                 initialMarginBps: initialMarginBps.toString(),
                 maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
                 tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
-                liquidationFeeBps: "100",
-                liquidationFeeCap: "100000000000",
-                minLiquidationAbs: "1000000",
-                maxPriceMoveBpsPerSlot: "4",
-                maxAccrualDtSlots: "400",
-                maxAbsFundingE9PerSlot: "1000",
-                minFundingLifetimeSlots: "50",
+                liquidationFeeBps: "50",
+                liquidationFeeCap: "10000000000",
+                minLiquidationAbs: "0",
+                maxPriceMoveBpsPerSlot: "1",
+                maxAccrualDtSlots: "500",
+                maxAbsFundingE9PerSlot: "0",
+                minFundingLifetimeSlots: "500",
                 maxAccountBSettlementChunks: "10",
                 maxBankruptCloseChunks: "10",
                 maxBankruptCloseLifetimeSlots: "500",
-                publicBChunkAtoms: "1000000",
+                publicBChunkAtoms: "1000000000000",
                 maintenanceFeePerSlot: "0",
               };
               const initMarketData = encodeInitMarket(v17InitArgs);
@@ -588,29 +611,32 @@ export function useCreateMarket() {
               userCollateralAta, vaultAta, wallet.publicKey, MIN_INIT_MARKET_SEED,
             );
 
-            const initialMarginBps = BigInt(params.initialMarginBps);
+            const requestedMarginBps = BigInt(params.initialMarginBps);
+            const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
+              ? MIN_SAFE_INITIAL_MARGIN_BPS
+              : requestedMarginBps;
             const v17InitArgs: InitMarketV17Args = {
               maxPortfolioAssets: 14,
-              hMin: "100",
-              hMax: "86400",
+              hMin: "1000",
+              hMax: "100000",
               initialPrice: params.initialPriceE6.toString(),
-              minNonzeroMmReq: "0",
-              minNonzeroImReq: "0",
+              minNonzeroMmReq: "1000000",
+              minNonzeroImReq: "2000000",
               maintenanceMarginBps: (initialMarginBps / 2n).toString(),
               initialMarginBps: initialMarginBps.toString(),
               maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
               tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
-              liquidationFeeBps: "100",
-              liquidationFeeCap: "100000000000",
-              minLiquidationAbs: "1000000",
-              maxPriceMoveBpsPerSlot: "4",
-              maxAccrualDtSlots: "400",
-              maxAbsFundingE9PerSlot: "1000",
-              minFundingLifetimeSlots: "50",
+              liquidationFeeBps: "50",
+              liquidationFeeCap: "10000000000",
+              minLiquidationAbs: "0",
+              maxPriceMoveBpsPerSlot: "1",
+              maxAccrualDtSlots: "500",
+              maxAbsFundingE9PerSlot: "0",
+              minFundingLifetimeSlots: "500",
               maxAccountBSettlementChunks: "10",
               maxBankruptCloseChunks: "10",
               maxBankruptCloseLifetimeSlots: "500",
-              publicBChunkAtoms: "1000000",
+              publicBChunkAtoms: "1000000000000",
               maintenanceFeePerSlot: "0",
             };
             const initMarketData = encodeInitMarket(v17InitArgs);
@@ -751,6 +777,36 @@ export function useCreateMarket() {
             // v17: No pre-LP crank needed — oracle state is in UpdateAssetLifecycle (tag 66),
             // not in the slab bitmap. The crank will run server-side (keeper) after market creation.
             // Skip: encodeUpdateHyperpMark() throws removedInstruction() in v17 SDK.
+
+            // BUG FIX (devnet flow-test 2026-07-01): the wizard never created the per-market
+            // nft_registry PDA. MintPositionNft (useMintPositionNft.ts) and NftBurn both only
+            // READ the registry — nothing in the frontend ever initialized it — so the first
+            // "Mint NFT" attempt on ANY wizard-created market failed on-chain with Custom(26)
+            // "nft_registry not owned by the percolator program" (see flowtest/07-nft-mint
+            // .result.json's flag_for_flow_14 finding, reproduced+fixed in flowtest/14-create
+            // -market.ts). SetNftProgramId (tag 73) is marketauth-gated and creates the
+            // registry; marketauth == the creator wallet (accounts[0] passed to InitMarket
+            // above), so the creator can always call this themselves right after market
+            // creation — no separate admin bootstrap needed. Accounts/encoding verified against
+            // percolator-prog src/v16_program.rs:13106-13112 (handle_set_nft_program_id) and
+            // proven working on-chain via flowtest/_setup-nft-registry.ts on the 5 seeded
+            // markets, and now also via flowtest/14-create-market.ts on a wizard-created one.
+            // This was previously the ONLY instruction in this step for a v17+admin-oracle
+            // market, so Step 1 sent a functionally-empty (compute-budget-only) transaction —
+            // this fix also makes that transaction do useful work instead of nothing.
+            const [nftRegistryPda] = deriveNftRegistry(programId, slabPk);
+            instructions.push(
+              buildIx({
+                programId,
+                keys: [
+                  { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+                  { pubkey: slabPk, isSigner: false, isWritable: false },
+                  { pubkey: nftRegistryPda, isSigner: false, isWritable: true },
+                  { pubkey: WELL_KNOWN.systemProgram, isSigner: false, isWritable: false },
+                ],
+                data: encodeSetNftProgramId({ nftProgramId: PERCOLATOR_NFT_PROGRAM_ID }),
+              }),
+            );
           } else if (!isV17Slab && isHyperpOracle && params.dexPoolAddress) {
             // v12 hyperp oracle — encodeUpdateHyperpMark is removed; log a warning and skip.
             // v12 hyperp markets on the v17 binary are not supported.
@@ -782,10 +838,26 @@ export function useCreateMarket() {
 
         // Step 2: v17 LP init sequence:
         //   TX A — create portfolio account + InitPortfolio (tag 1)
-        //   TX B — createAccount(matcherCtx, MATCHER_CONTEXT_LEN, matcherProgramId)
-        //           + call matcher program: [delegate(ro), ctx(w)] + encodeMatcherInitPassive
+        //   TX B — createAccount(matcherCtx, MATCHER_CONTEXT_LEN, matcherProgramId) (account only)
         //   TX C — SetMatcherConfig (tag 68) on the LP portfolio
+        //   TX D — InitMatcherCtx (tag 83) on the WRAPPER (CPI-relays into the matcher program)
         // v12: encodeInitLP (tag 2) was used here but is REMOVED in v17 (throws removedInstruction).
+        //
+        // BUG FIX (devnet flow-test 2026-07-01, flowtest/debug-matcherinit-split.ts): TX B used
+        // to call the matcher program DIRECTLY with encodeMatcherInitPassive ([delegate(ro),
+        // ctx(w)]). That always failed on-chain with a raw ProgramError::MissingRequiredSignature
+        // at ~577 CU — confirmed (via an unsigned-simulate diagnostic) that the deployed matcher
+        // binary requires the matcher_delegate PDA to be isSigner:true in that call, which is
+        // impossible to satisfy with a plain client-side keypair (PDAs have no private key).
+        // The SDK's InitMatcherCtx (tag 83) doc comment confirms this is by design: "The wrapper
+        // calls derive_matcher_delegate and invoke_signed so the delegate PDA acts as a signer in
+        // the matcher CPI — this is what satisfies the matcher's lp_pda.is_signer check on the
+        // deployed binary. No client-side signer of the delegate is needed." Every wizard-created
+        // market's LP would have been stuck with an unusable (never-initialized) matcher context
+        // until this fix — TradeCpi against that LP would fail (matcher config present but
+        // matcher_ctx account uninitialized). PREREQUISITE ordering (per InitMatcherCtx's own doc
+        // comment) also changed: SetMatcherConfig (TX C) must land BEFORE InitMatcherCtx (TX D),
+        // since the wrapper cross-checks the LP portfolio's stored matcher config before CPI-ing.
         if (startStep <= 2) {
           setState((s) => ({ ...s, step: 2, stepLabel: STEP_LABELS[2] }));
 
@@ -831,7 +903,8 @@ export function useCreateMarket() {
             });
             setState((s) => ({ ...s, txSigs: [...s.txSigs, sigPortfolio] }));
 
-            // TX B: Create matcher context account + call matcher program to init passive vAMM
+            // TX B: Create matcher context account ONLY (empty, matcher-program-owned).
+            // No longer calls the matcher program directly here — see fix note above.
             const matcherCtxKp = Keypair.generate();
             const matcherCtxPk = matcherCtxKp.publicKey;
             const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(MATCHER_CONTEXT_LEN);
@@ -849,25 +922,15 @@ export function useCreateMarket() {
               programId, slabPk, lpPortfolioPk, wallet.publicKey, matcherProgramId, matcherCtxPk,
             );
 
-            // Call matcher program: [delegate(ro), ctx(w)] + encodeMatcherInitPassive
-            const matcherInitIx = new TransactionInstruction({
-              programId: matcherProgramId,
-              keys: [
-                { pubkey: delegatePk, isSigner: false, isWritable: false },
-                { pubkey: matcherCtxPk, isSigner: false, isWritable: true },
-              ],
-              data: Buffer.from(encodeMatcherInitPassive({ maxFillAbs: BigInt("340282366920938463463374607431768211455") })),
-            });
-
             const sigCtx = await sendTx({
               connection, wallet,
-              instructions: [createCtxIx, matcherInitIx],
+              instructions: [createCtxIx],
               signers: [matcherCtxKp],
-              computeUnits: 200_000,
+              computeUnits: 150_000,
             });
             setState((s) => ({ ...s, txSigs: [...s.txSigs, sigCtx] }));
 
-            // TX C: SetMatcherConfig (tag 68) on the LP portfolio
+            // TX C: SetMatcherConfig (tag 68) on the LP portfolio — MUST land before TX D.
             // Accounts: [lpOwner(s), market(ro), lpPortfolio(w), matcherProg(ro), matcherCtx(ro), delegate(ro)]
             const setMatcherConfigIx = buildIx({
               programId,
@@ -888,6 +951,42 @@ export function useCreateMarket() {
               computeUnits: 200_000,
             });
             setState((s) => ({ ...s, txSigs: [...s.txSigs, sigMatcherCfg] }));
+
+            // TX D: InitMatcherCtx (tag 83) on the WRAPPER — CPIs into the matcher program,
+            // invoke_signed-ing the delegate PDA so the matcher's process_init sees
+            // lp_pda.is_signer == true. This is the real fix (see note above).
+            // Accounts: [lpOwner(s), market(ro), lpPortfolio(ro), matcherCtx(w), matcherProg(ro), matcherDelegate(ro)]
+            const I128_MAX = 170141183460469231731687303715884105727n;
+            const initMatcherCtxIx = buildIx({
+              programId,
+              keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
+                wallet.publicKey,
+                slabPk,
+                lpPortfolioPk,
+                matcherCtxPk,
+                matcherProgramId,
+                delegatePk,
+              ]),
+              data: encodeInitMatcherCtx({
+                kind: 0, // Passive
+                tradingFeeBps: Number(params.tradingFeeBps),
+                baseSpreadBps: 50,
+                maxTotalBps: 200,
+                impactKBps: 0,
+                liquidityNotionalE6: 0n,
+                maxFillAbs: I128_MAX,
+                maxInventoryAbs: I128_MAX,
+                feeToInsuranceBps: 0,
+                skewSpreadMultBps: 0,
+              }),
+            });
+
+            const sigInitMatcherCtx = await sendTx({
+              connection, wallet,
+              instructions: [initMatcherCtxIx],
+              computeUnits: 200_000,
+            });
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, sigInitMatcherCtx] }));
             updateInFlightStep(slabPk.toBase58(), 3);
           } else {
             // v12 legacy: encodeInitLP (tag 2) is removed in v17 — skip for v17 slabs.
@@ -1060,8 +1159,38 @@ export function useCreateMarket() {
         // symbol, mainnet_ca, and oracle_authority are stored even if step 5 fails.
         // Previously this ran after step 5, so a step-5 timeout left the market on-chain
         // with no DB record → dashboard showed random chars (CCPHprPU) instead of symbol.
+        //
+        // PERC-8332: Attach nonce + ed25519 signature so the POST handler can verify
+        // deployer ownership without Supabase. Flow:
+        //   1. GET /api/markets/challenge?deployer=<pubkey> → { nonce }
+        //   2. Sign nonce bytes with wallet.signMessage (ed25519)
+        //   3. POST with { nonce, signature: base64 }
         if (startStep <= 4) {
           try {
+            const deployerStr = wallet.publicKey.toBase58();
+
+            // Step 1: fetch nonce challenge
+            let nonce: string | null = null;
+            let signature: string | null = null;
+            if (wallet.signMessage) {
+              try {
+                const challengeResp = await fetch(
+                  `/api/markets/challenge?deployer=${encodeURIComponent(deployerStr)}`,
+                );
+                if (challengeResp.ok) {
+                  const { nonce: n } = await challengeResp.json() as { nonce: string };
+                  nonce = n;
+                  // Step 2: sign the nonce bytes
+                  const nonceBytes = new TextEncoder().encode(nonce);
+                  const sigBytes = await wallet.signMessage(nonceBytes);
+                  signature = Buffer.from(sigBytes).toString("base64");
+                }
+              } catch (sigErr) {
+                console.warn("[useCreateMarket] Nonce challenge/sign failed (non-fatal):", sigErr);
+                // Fall through — POST will 400 if nonce/signature missing, but market is on-chain.
+              }
+            }
+
             await fetch("/api/markets", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1071,17 +1200,19 @@ export function useCreateMarket() {
                 symbol: params.symbol ?? "UNKNOWN",
                 name: params.name ?? "Unknown Token",
                 decimals: params.decimals ?? 6,
-                deployer: wallet.publicKey.toBase58(),
+                deployer: deployerStr,
                 oracle_mode: oracleMode,
                 dex_pool_address: params.dexPoolAddress ?? null,
                 oracle_authority: isAdminOracle
-                  ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : wallet.publicKey.toBase58())
+                  ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployerStr)
                   : null,
                 initial_price_e6: params.initialPriceE6.toString(),
                 max_leverage: params.initialMarginBps > 0 ? Math.floor(10000 / Number(params.initialMarginBps)) : 1,
                 trading_fee_bps: Number(params.tradingFeeBps),
                 lp_collateral: params.lpCollateral.toString(),
                 mainnet_ca: params.mainnetCA ?? null,
+                // PERC-8332: nonce + signature for deployer proof
+                ...(nonce && signature ? { nonce, signature } : {}),
               }),
             });
           } catch {

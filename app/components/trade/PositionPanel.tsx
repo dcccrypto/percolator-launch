@@ -208,10 +208,6 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const adlPositionIdx = userAccount ? userAccount.idx : null;
   const { rank: adlRank, adlNeeded } = useAdlRank(slabAddress, adlPositionIdx);
 
-  // 3.2: PnL flash on sign change
-  const [pnlFlash, setPnlFlash] = useState<"long" | "short" | null>(null);
-  const prevPnlSignRef = useRef<"positive" | "negative" | "zero" | null>(null);
-
   const lpEntry = useMemo(() => {
     return accounts.find(({ account }) => account.kind === AccountKind.LP) ?? null;
   }, [accounts]);

@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
-import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket } from "@percolatorct/sdk";
+import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, V17_HEADER_LEN, V17_WRAPPER_CONFIG_LEN } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
+import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { getClientIp } from "@/lib/get-client-ip";
+import { claimPlaygroundChallenge } from "@/lib/playground-nonce-store";
 import * as Sentry from "@sentry/nextjs";
 import nacl from "tweetnacl";
+import * as fs from "fs";
+import * as path from "path";
 import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeMarketFilter";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
@@ -153,6 +157,64 @@ const DEVNET_MARKET_DIRECTORY_FALLBACK: Record<string, unknown>[] = [
   },
 ];
 
+// PLAYGROUND_SLAB_META is imported from @/lib/playground-slab-meta (shared with [slab]/route.ts)
+
+/**
+ * Playground: only surface the curated/seeded markets (the ones with
+ * PLAYGROUND_SLAB_META) PLUS any markets registered via POST /api/markets in
+ * this session (playground-created-markets.json). On-chain discovery returns
+ * every v17 market ever created on the devnet program (~80 leftover test/PoC
+ * slabs with no metadata or live keeper price), which clutters the trader UI.
+ * Set PLAYGROUND_SHOW_ALL_MARKETS=true to show all.
+ */
+const PLAYGROUND_CURATED_ONLY = process.env.PLAYGROUND_SHOW_ALL_MARKETS !== "true";
+
+/** Path to the local JSON file that persists playground-created slab addresses. */
+const PLAYGROUND_REGISTRY_PATH = path.join(process.cwd(), "lib", "playground-created-markets.json");
+
+/**
+ * Process-local registry of playground-created slab addresses.
+ * Initialized from PLAYGROUND_SLAB_META (curated seeds) + any slabs previously
+ * written to playground-created-markets.json (user creations). Augmented on POST.
+ *
+ * Module-level singleton so additions survive within the same hot-reload cycle.
+ */
+const _playgroundAllowedSlabs: Set<string> = (() => {
+  const s = new Set(Object.keys(PLAYGROUND_SLAB_META));
+  try {
+    const raw = fs.readFileSync(PLAYGROUND_REGISTRY_PATH, "utf-8");
+    const arr: string[] = JSON.parse(raw);
+    if (Array.isArray(arr)) arr.forEach((v) => typeof v === "string" && s.add(v));
+  } catch { /* file missing or malformed — start with curated only */ }
+  return s;
+})();
+
+/** Returns the live allowed-slab set (curated seeds ∪ registered creations). */
+function getPlaygroundAllowedSlabs(): Set<string> {
+  return _playgroundAllowedSlabs;
+}
+
+/**
+ * Register a newly created slab in the playground registry.
+ * Persists to playground-created-markets.json so the set survives process restarts.
+ */
+function registerPlaygroundSlab(slabAddress: string): void {
+  _playgroundAllowedSlabs.add(slabAddress);
+  try {
+    // Write only the user-created addresses (not the curated seeds, which come from
+    // PLAYGROUND_SLAB_META at startup — no need to duplicate them in the JSON file).
+    const userCreated = [..._playgroundAllowedSlabs].filter(
+      (s) => !PLAYGROUND_SLAB_META[s],
+    );
+    fs.writeFileSync(PLAYGROUND_REGISTRY_PATH, JSON.stringify(userCreated, null, 2));
+  } catch (e) {
+    console.warn("[playground] Failed to persist registry:", e);
+  }
+}
+
+// Kept for back-compat with code that references PLAYGROUND_CURATED_SLABS.
+const PLAYGROUND_CURATED_SLABS = _playgroundAllowedSlabs;
+
 /**
  * Maximum valid funding rate in bps/slot (matches on-chain guard).
  * Raw DB values outside [-MAX, MAX] are garbage from uninitialized slabs.
@@ -208,18 +270,20 @@ function discoveredToApiRow(m: DiscoveredMarket): Record<string, unknown> {
     const cfg = m.configV17;
     const markPriceRaw = cfg.markEwmaE6;
     const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
+    const playgroundMeta = PLAYGROUND_SLAB_META[slabAddress];
     return {
       slab_address: slabAddress,
       program_id: programId,
       mint_address: cfg.collateralMint.toBase58(),
-      symbol: null,
-      name: null,
+      symbol: playgroundMeta?.symbol ?? null,
+      name: playgroundMeta?.name ?? null,
       decimals: 6,
       deployer: cfg.marketauth.toBase58(),
       oracle_authority: cfg.marketauth.toBase58(),
-      oracle_mode: cfg.oracleMode === 1 ? "hyperp" : "admin",
-      dex_pool_address: null,
-      mainnet_ca: null,
+      // oracleMode: 0=admin, 1=hyperp, 3=AUTH_MARK (keeper)
+      oracle_mode: cfg.oracleMode === 1 ? "hyperp" : cfg.oracleMode === 3 ? "keeper" : "admin",
+      dex_pool_address: playgroundMeta?.dex_pool_address ?? null,
+      mainnet_ca: playgroundMeta?.mainnet_ca ?? null,
       created_at: null,
       stats_updated_at: null,
       is_zombie: false,
@@ -329,6 +393,8 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
 
       const filtered = rows
         .filter(m => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string))
+        // Playground: hide the ~80 leftover devnet test markets — show curated seeds ∪ user-created.
+        .filter(m => !PLAYGROUND_CURATED_ONLY || getPlaygroundAllowedSlabs().has(m.slab_address as string))
         .filter(m => !programIdParam || m.program_id === programIdParam)
         .filter(m => {
           if (!searchTrimmed) return true;
@@ -340,8 +406,14 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
         });
 
       if (filtered.length > 0) {
+        // Count markets that have a live on-chain mark price (last_price non-null + sane).
+        // Previously hardcoded to 0; now computed so the playground status bar reflects
+        // keeper-pushed prices.
+        const marketsWithPrice = filtered.filter(
+          (m) => isSaneMarketValue(numericOrNull((m as Record<string, unknown>).last_price as number | null))
+        ).length;
         return NextResponse.json(
-          { total: filtered.length, activeTotal: filtered.length, marketsWithPrice: 0, zombieCount: 0, markets: filtered },
+          { total: filtered.length, activeTotal: filtered.length, marketsWithPrice, zombieCount: 0, markets: filtered },
           { headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "on-chain-discovery" } },
         );
       }
@@ -1159,25 +1231,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Atomically claim the nonce: single UPDATE filtered on all validity conditions.
-    // This eliminates the TOCTOU race window — if two concurrent requests arrive with
-    // the same nonce, only one UPDATE can match (used_at IS NULL), the other gets count=0.
+    // Atomically claim the nonce.
+    // Primary: Supabase market_challenges table (production).
+    // Fallback: playground-nonce-store in-process Map (local dev, no Supabase).
     // GH#2018: Safe to claim now — signature already verified above.
-    const supabaseAuth = getServiceClient();
-    const now = new Date();
-    const clientIp = getClientIp(req);
+    let nonceClaimed = false;
+    try {
+      const supabaseAuth = getServiceClient();
+      const now = new Date();
+      const clientIp = getClientIp(req);
 
-    const { count: consumed, error: claimErr } = await (supabaseAuth as ReturnType<typeof getServiceClient>)
-      .from("market_challenges" as never)
-      .update({ used_at: now.toISOString() } as never, { count: "exact" } as never)
-      .eq("nonce", nonce)
-      .eq("deployer", deployer)
-      .eq("client_ip", clientIp)
-      .is("used_at", null)
-      .gt("expires_at", now.toISOString())
-      .select("nonce" as never) as { count: number | null; error: unknown };
+      const { count: consumed, error: claimErr } = await (supabaseAuth as ReturnType<typeof getServiceClient>)
+        .from("market_challenges" as never)
+        .update({ used_at: now.toISOString() } as never, { count: "exact" } as never)
+        .eq("nonce", nonce)
+        .eq("deployer", deployer)
+        .eq("client_ip", clientIp)
+        .is("used_at", null)
+        .gt("expires_at", now.toISOString())
+        .select("nonce" as never) as { count: number | null; error: unknown };
 
-    if (claimErr || (consumed ?? 0) === 0) {
+      if (!claimErr && (consumed ?? 0) > 0) {
+        nonceClaimed = true;
+      }
+    } catch {
+      // Supabase not configured (local playground) — fall back to in-process store.
+      nonceClaimed = claimPlaygroundChallenge(nonce, deployer);
+    }
+
+    if (!nonceClaimed) {
       // Nonce is unknown, already used, or expired — single unified error to avoid oracle enumeration
       return NextResponse.json(
         { error: "Invalid, expired, or already-used nonce. Call GET /api/markets/challenge to get a fresh nonce." },
@@ -1200,9 +1282,13 @@ export async function POST(req: NextRequest) {
   }
 
   // #813: Validate oracle_mode enum
-  const VALID_ORACLE_MODES = ["pyth", "hyperp", "admin"] as const;
+  // "keeper" = AUTH_MARK oracle (oracleMode=3) with oracle_authority delegated to keeper service.
+  // Map "keeper" → "admin" for DB storage (both use AUTH_MARK path; "keeper" is a UI label).
+  const VALID_ORACLE_MODES = ["pyth", "hyperp", "admin", "keeper"] as const;
   type OracleMode = typeof VALID_ORACLE_MODES[number];
-  const resolvedOracleMode: OracleMode = oracle_mode ?? "admin";
+  // Store "keeper" as "admin" in the DB (same on-chain oracle mode enum value).
+  const rawOracleMode: OracleMode = oracle_mode ?? "admin";
+  const resolvedOracleMode: OracleMode = rawOracleMode === "keeper" ? "admin" : rawOracleMode;
   if (!VALID_ORACLE_MODES.includes(resolvedOracleMode)) {
     return NextResponse.json(
       { error: `Invalid oracle_mode. Must be one of: ${VALID_ORACLE_MODES.join(", ")}` },
@@ -1281,7 +1367,29 @@ export async function POST(req: NextRequest) {
     const cfg = getConfig();
     const connection = new Connection(cfg.rpcUrl, "confirmed");
     const slabPubkey = new PublicKey(slab_address);
-    const accountInfo = await connection.getAccountInfo(slabPubkey);
+    // Retry the on-chain read across transient RPC hiccups. A single 429 /
+    // rate-limit must NOT be mistaken for a missing slab — that would 400 a
+    // market the user just successfully created on-chain (observed with an
+    // exhausted RPC key: registration returned "Failed to verify slab on-chain"
+    // for a market that existed and was tradeable).
+    let accountInfo = null as Awaited<ReturnType<typeof connection.getAccountInfo>>;
+    let rpcReadFailed = false;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        accountInfo = await connection.getAccountInfo(slabPubkey);
+        rpcReadFailed = false;
+        break;
+      } catch {
+        rpcReadFailed = true;
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
+    if (rpcReadFailed) {
+      return NextResponse.json(
+        { error: "RPC temporarily unavailable — the market was created on-chain; please retry registration in a moment." },
+        { status: 503 },
+      );
+    }
     if (!accountInfo) {
       return NextResponse.json({ error: "Slab account does not exist on-chain" }, { status: 400 });
     }
@@ -1295,10 +1403,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Slab account not owned by a known percolator program" }, { status: 400 });
     }
 
-    // R2-S8: Verify deployer matches the on-chain admin
+    // R2-S8: Verify deployer matches the on-chain admin.
+    // BUG FIX (devnet flow-test 2026-07-01, flowtest/14-create-market.ts): this used to call
+    // parseHeader() unconditionally, which only understands the legacy v12 "PERCOLAT" magic
+    // header. Every market created today (all 5 seeded playground markets + anything made
+    // through the current wizard) is v17, which parseHeader() cannot parse — it always threw,
+    // so registration ALWAYS failed with "Failed to parse slab header" (HTTP 400) for every
+    // v17 market, with no v12 market able to hit this path anymore to mask it. Mirrors the
+    // same isV17Account()-first pattern already used by components/providers/SlabProvider.tsx
+    // and hooks/useCreateMarket.ts (admin = v17 wrapperConfig.marketauth).
     try {
-      const header = parseHeader(accountInfo.data);
-      if (header.admin.toBase58() !== deployer) {
+      const dataBytes = new Uint8Array(accountInfo.data);
+      const admin = isV17Account(dataBytes)
+        ? parseWrapperConfigV17(dataBytes, V17_HEADER_LEN).marketauth
+        : parseHeader(accountInfo.data).admin;
+      if (admin.toBase58() !== deployer) {
         return NextResponse.json(
           { error: "Deployer does not match slab admin" },
           { status: 403 },
@@ -1312,9 +1431,19 @@ export async function POST(req: NextRequest) {
     // Previously only the slab owner/admin was verified — a caller could pass any
     // mint_address string and it would be inserted into the DB, causing metadata
     // divergence from the on-chain collateral reality.
+    //
+    // BUG FIX (devnet flow-test 2026-07-01): same v12-only-parser bug as the admin check
+    // above — parseConfig() can't read v17 slabs, and this block "fails closed" (rejects
+    // registration) on any parse error, so this ALSO rejected every v17 market on its own.
+    // v17's collateralMint lives on wrapperConfig; oracleAuthority is PER-ASSET on
+    // AssetOracleProfileV17 (offset V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN) — mirrors
+    // flowtest/_common.ts buildV17MktConfigShim()'s exact shim logic.
     try {
-      const config = parseConfig(accountInfo.data);
-      const onChainMint = config.collateralMint.toBase58();
+      const dataBytes = new Uint8Array(accountInfo.data);
+      const isV17 = isV17Account(dataBytes);
+      const onChainMint = isV17
+        ? parseWrapperConfigV17(dataBytes, V17_HEADER_LEN).collateralMint.toBase58()
+        : parseConfig(accountInfo.data).collateralMint.toBase58();
       if (onChainMint !== mint_address) {
         return NextResponse.json(
           {
@@ -1329,11 +1458,30 @@ export async function POST(req: NextRequest) {
       // Without this, a deployer could register a false oracle_authority in the DB,
       // misleading off-chain tooling (admin dashboards, keeper configs) that reads
       // markets.oracle_authority instead of querying the chain directly.
-      const onChainOracleAuth = config.oracleAuthority.toBase58();
+      //
+      // BUG FIX (devnet flow-test 2026-07-01, flowtest/14-create-market.ts): a freshly
+      // InitMarket'd v17 market that has NEVER had its oracle explicitly delegated (no
+      // ConfigureAuthMark / UpdateAssetAuthority call — true for every plain "admin"-mode
+      // market the wizard creates, since useCreateMarket.ts's Step 1 only does that for
+      // "keeper" mode) has a non-zero, program-derived DEFAULT AssetOracleProfileV17.
+      // oracleAuthority that is NOT the system-program key and that the frontend has no
+      // way to predict client-side (useCreateMarket.ts only ever GUESSES crankWallet or
+      // deployer — it never reads the value back on-chain). That made this check reject
+      // registration for every plain-admin-mode market, wizard-created or not. "keeper"
+      // mode is unaffected — it DOES set a real, predictable on-chain oracle_authority via
+      // UpdateAssetAuthority, so this check stays fully enforced there.
+      const onChainOracleAuth = isV17
+        ? parseAssetOracleProfileV17(dataBytes, V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN).oracleAuthority.toBase58()
+        : parseConfig(accountInfo.data).oracleAuthority.toBase58();
       const resolvedOracleAuth = oracle_authority || deployer;
       const SYSTEM_PROGRAM = "11111111111111111111111111111111";
-      // Only enforce when on-chain authority is set (non-zero / non-system-program)
-      if (onChainOracleAuth !== SYSTEM_PROGRAM && onChainOracleAuth !== resolvedOracleAuth) {
+      // Only enforce when on-chain authority is set (non-zero / non-system-program) AND the
+      // mode is one where the frontend can actually know the real on-chain value in advance.
+      if (
+        rawOracleMode !== "admin" &&
+        onChainOracleAuth !== SYSTEM_PROGRAM &&
+        onChainOracleAuth !== resolvedOracleAuth
+      ) {
         return NextResponse.json(
           {
             error: `oracle_authority does not match on-chain oracle authority. ` +
@@ -1362,10 +1510,45 @@ export async function POST(req: NextRequest) {
       );
     }
   } catch (err) {
+    // Distinguish a transient RPC failure (retry-able → 503) from a genuine
+    // verification failure (→ 400). A 429 / rate-limit / network blip must not
+    // 400 a market that really exists on-chain.
+    const m = err instanceof Error ? err.message : String(err);
+    if (/429|rate.?limit|max usage|timeout|timed out|fetch failed|ECONNRESET|ENOTFOUND|socket hang up|50[234]\b/i.test(m)) {
+      return NextResponse.json(
+        { error: "RPC temporarily unavailable — please retry registration in a moment." },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: "Failed to verify slab on-chain" }, { status: 400 });
   }
 
-  const supabase = getServiceClient();
+  // Playground (no Supabase) path: register slab in the local registry and return immediately.
+  // The on-chain slab is already verified above — we just need to persist the address so
+  // GET /api/markets includes it alongside the curated seeds.
+  let supabase: ReturnType<typeof getServiceClient>;
+  try {
+    supabase = getServiceClient();
+  } catch {
+    // Supabase not configured — register in the playground-local registry.
+    registerPlaygroundSlab(slab_address);
+    // Return a synthetic market row so the client flow can continue.
+    const syntheticMarket = {
+      slab_address,
+      mint_address,
+      symbol: resolvedSymbol,
+      name: resolvedName,
+      decimals: decimals || 6,
+      deployer,
+      oracle_authority: oracle_authority || deployer,
+      oracle_mode: resolvedOracleMode,
+      dex_pool_address: dex_pool_address || null,
+      mainnet_ca: mainnet_ca || null,
+      max_leverage: max_leverage || 10,
+      trading_fee_bps: trading_fee_bps || 10,
+    };
+    return NextResponse.json({ market: syntheticMarket }, { status: 201 });
+  }
 
   // PERC-8195: tag every insert with the active network
   const insertNetwork = getServerNetwork();
@@ -1422,6 +1605,9 @@ export async function POST(req: NextRequest) {
   if (marketError) {
     return NextResponse.json({ error: marketError.message }, { status: 500 });
   }
+
+  // Playground: also add to local registry so GET immediately shows it.
+  registerPlaygroundSlab(slab_address);
 
   // Create initial stats row — tag with same network
   await supabase.from("market_stats").insert({

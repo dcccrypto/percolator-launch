@@ -28,7 +28,7 @@ export const SystemCapitalCard: FC = () => {
   if (loading || !engine) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <span className="text-[10px] text-[var(--text-dim)]">Loading...</span>
+        <span className="text-[10px] text-[var(--text-dim)]">{loading ? "Loading..." : "Not available on v17 markets yet"}</span>
       </div>
     );
   }

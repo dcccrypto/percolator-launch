@@ -34,6 +34,38 @@ describe("detectOracleMode", () => {
       indexFeedId: ZERO_KEY,
     })).toBe("hyperp");
   });
+
+  it("returns 'keeper' when oracleModeByte=3 (AUTH_MARK), regardless of key structure", () => {
+    // v17 AUTH_MARK: indexFeedId is ZERO (SlabProvider forces it), oracleAuthority is the LP registry key.
+    // Without oracleModeByte, key-based detection would return "hyperp" — wrong label.
+    expect(detectOracleMode({
+      oracleAuthority: NON_ZERO_KEY,
+      indexFeedId: ZERO_KEY,
+      oracleModeByte: 3,
+    })).toBe("keeper");
+  });
+
+  it("returns 'keeper' with oracleModeByte=3 even when both keys are non-zero", () => {
+    expect(detectOracleMode({
+      oracleAuthority: NON_ZERO_KEY,
+      indexFeedId: ANOTHER_KEY,
+      oracleModeByte: 3,
+    })).toBe("keeper");
+  });
+
+  it("ignores oracleModeByte=0 (falls through to key-based detection)", () => {
+    // byte=0 = MANUAL/ADMIN — key-based detection is authoritative
+    expect(detectOracleMode({
+      oracleAuthority: NON_ZERO_KEY,
+      indexFeedId: ZERO_KEY,
+      oracleModeByte: 0,
+    })).toBe("hyperp");
+    expect(detectOracleMode({
+      oracleAuthority: NON_ZERO_KEY,
+      indexFeedId: ANOTHER_KEY,
+      oracleModeByte: 0,
+    })).toBe("admin");
+  });
 });
 
 describe("resolveMarketPriceE6", () => {
@@ -85,6 +117,18 @@ describe("resolveMarketPriceE6", () => {
       authorityPriceE6: 0n,
     });
     expect(result).toBe(0n);
+  });
+
+  it("uses lastEffectivePriceE6 for keeper markets (oracleModeByte=3, AUTH_MARK)", () => {
+    // keeper: markEwmaE6 is in lastEffectivePriceE6 (set via PushAuthMark crank)
+    const result = resolveMarketPriceE6({
+      oracleAuthority: NON_ZERO_KEY,
+      indexFeedId: ZERO_KEY,   // SlabProvider forces ZERO for v17 AUTH_MARK markets
+      lastEffectivePriceE6: 148_500_000n, // ~$148.50 SOL
+      authorityPriceE6: 0n,
+      oracleModeByte: 3,
+    });
+    expect(result).toBe(148_500_000n);
   });
 });
 

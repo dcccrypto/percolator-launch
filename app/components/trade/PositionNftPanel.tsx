@@ -6,6 +6,7 @@ import { useMintPositionNft } from "@/hooks/useMintPositionNft";
 import { useBurnPositionNft } from "@/hooks/useBurnPositionNft";
 import { useTransferPositionNft } from "@/hooks/useTransferPositionNft";
 import { useUserAccount } from "@/hooks/useUserAccount";
+import { useNftWrappedPosition } from "@/hooks/useNftWrappedPosition";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
@@ -41,23 +42,29 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
 
   const [showSendModal, setShowSendModal] = useState(false);
 
-  const hasPosition = userAccount !== null && userAccount.account.positionSize !== 0n;
+  // Once a position is wrapped into an NFT, MintPositionNft escrows the
+  // portfolio away from the wallet, so useUserAccount returns null. Fall back to
+  // the NFT-escrowed position so this panel keeps showing status + Send/Burn.
+  const wrapped = useNftWrappedPosition(slabAddress, userAccount === null);
+  const effectiveAccount = userAccount ?? wrapped;
+
+  const hasPosition = effectiveAccount !== null && effectiveAccount.account.positionSize !== 0n;
   const mintAddress = nftMint?.toBase58() ?? null;
 
   // Summary line for the send modal — e.g. "LONG 0.3507 SOL".
   // Shown read-only so the user can double-check what they're about to transfer
   // before pasting an address.
-  const positionSummary = userAccount && userAccount.account.positionSize !== 0n
+  const positionSummary = effectiveAccount && effectiveAccount.account.positionSize !== 0n
     ? (() => {
-        const size = userAccount.account.positionSize;
+        const size = effectiveAccount.account.positionSize;
         const isLong = size > 0n;
         const absSize = size < 0n ? -size : size;
         return `${isLong ? "LONG" : "SHORT"} ${formatTokenAmount(absSize, decimals)} ${assetSymbol}`;
       })()
     : "No open position";
 
-  // State: no user account at all
-  if (!userAccount) {
+  // State: no position AND no minted NFT — nothing to show.
+  if (!effectiveAccount && !hasMintedNft) {
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex flex-col items-center py-4 text-center">

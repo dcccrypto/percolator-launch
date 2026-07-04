@@ -376,6 +376,20 @@ function isAllowedOrigin(req: NextRequest): boolean {
     return true;
   }
 
+  // Dev only: allow LAN / private-network hosts so the local playground works
+  // when opened via the machine's LAN IP (e.g. a phone on the same WiFi).
+  // Production stays locked to the apex domain below.
+  if (process.env.NODE_ENV !== "production") {
+    if (
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      hostname.endsWith(".local")
+    ) {
+      return true;
+    }
+  }
+
   // Accept the apex domain and its subdomains only.
   return hostname === "percolatorlaunch.com" || hostname.endsWith(".percolatorlaunch.com");
 }

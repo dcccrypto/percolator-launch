@@ -33,7 +33,7 @@ export const EngineHealthCard: FC = () => {
   if (loading || !engine) {
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">
-        <p className="text-[10px] text-[var(--text-secondary)]">{loading ? "Loading..." : "No engine"}</p>
+        <p className="text-[10px] text-[var(--text-secondary)]">{loading ? "Loading..." : "Not available on v17 markets yet"}</p>
       </div>
     );
   }

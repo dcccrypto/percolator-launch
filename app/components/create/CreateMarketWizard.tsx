@@ -592,6 +592,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       alert("Cannot create market: no DEX price available for this token. Try again or switch to Admin oracle.");
       return;
     }
+    // C-10: block admin/keeper launch if initial oracle price is 0 or unset.
+    // InitMarket rejects priceE6=0 on-chain; guard here for a cleaner error.
+    if ((wizard.oracleType === "admin" || wizard.oracleType === "keeper") && priceE6 === 0n) {
+      alert("Cannot create market: enter a valid initial oracle price greater than 0.");
+      return;
+    }
     const tier = SLAB_TIERS[wizard.slabTier];
     // On devnet, use the mirror mint for on-chain ops; keep mainnet CA for metadata
     const effectiveMint = devnetMintAddress ?? wizard.mintAddress;

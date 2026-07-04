@@ -423,6 +423,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setContractsInput("");
     setUsdcInput("");
     setLeverage(1);
+    setLeverageText("1"); // B-1: also reset the text input, not just the slider state
     setLastSig(null);
     setHumanError(null);
     setTradePhase("idle");
@@ -995,8 +996,8 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       )}
 
       {/* Coin-margined info — compact tooltip hint */}
+      {/* B-4: removed duplicate InfoIcon (was two overlapping "i" buttons) */}
       <div className="mt-3 flex items-center gap-1.5">
-        <InfoIcon tooltip={`This market is margined in ${collateralSymbol}, not USD. Position value and liq risk are affected by the collateral token's price. Effective USD leverage ≈ ${leverage > 0 ? `${leverage * 2}x` : "—"} (nominal ${leverage}x × 2 for coin exposure).`} />
         <InfoIcon tooltip={`This market is margined in ${symbol}, not USD. Position value and liq risk are affected by the collateral token's price. Selected leverage: ${leverage > 0 ? `${leverage}x` : "—"}.`} />
         <span className="text-[9px] text-[var(--text)] uppercase tracking-[0.1em]">Coin-margined market</span>
       </div>
@@ -1016,6 +1017,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           priceUsd={priceUsd}
           isLong={isOpenLong}
           loading={closeLoading}
+          tradingFeeBps={tradingFeeBps}
           oracleStale={oracleStale && !mockMode}
           onConfirm={async (percent) => {
             await closePosition(percent);

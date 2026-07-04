@@ -750,8 +750,11 @@ export default function StakePage() {
             const lpBalance = Number(lpAccount.amount) / Math.pow(10, lpDecimals);
 
             // Calculate estimated value: (user_lp / total_lp_supply) * vault_balance
-            const estimatedValue = pool.totalLpSupply > 0
-              ? (lpBalance / pool.totalLpSupply) * pool.tvl
+            // pool.totalLpSupply is raw (on-chain units); divide by 10^lpDecimals
+            // to match lpBalance which is already human-readable.
+            const lpSupplyHuman = pool.totalLpSupply / Math.pow(10, lpDecimals);
+            const estimatedValue = lpSupplyHuman > 0
+              ? (lpBalance / lpSupplyHuman) * pool.tvl
               : 0;
 
             // Fetch deposit PDA for cooldown info
@@ -763,7 +766,7 @@ export default function StakePage() {
             if (depInfo && depInfo.data.length >= 81) {
               const depData = Buffer.from(depInfo.data);
               if (depData[0] === 1) {
-                userDepositSlot = depData.readBigUInt64LE(65);
+                userDepositSlot = depData.readBigUInt64LE(72);
               }
             }
 

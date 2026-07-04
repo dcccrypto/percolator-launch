@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import useSWR from "swr";
 import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
@@ -10,59 +10,59 @@ type MarketsApiResponse = {
   error?: string;
 };
 
+/** Stable SWR cache key — shared across all mounting hook instances. */
+const SWR_KEY = "/api/markets?include_zombie=true&limit=500";
+
+async function fetchMarketStats(): Promise<Map<string, MarketWithStats>> {
+  const res = await fetch(SWR_KEY, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`Markets API returned ${res.status}`);
+  }
+  const body = (await res.json()) as MarketsApiResponse;
+  if (!Array.isArray(body.markets)) {
+    throw new Error(body.error ?? "Markets API returned no markets array");
+  }
+  const map = new Map<string, MarketWithStats>();
+  body.markets.forEach((market) => {
+    if (market.slab_address && !isBlockedSlab(market.slab_address)) {
+      map.set(market.slab_address, market);
+    }
+  });
+  return map;
+}
+
 /**
  * Hook to fetch all markets with their latest stats through the app API.
  * Returns a map of slab_address -> stats for easy lookup.
+ *
+ * Uses SWR to deduplicate concurrent fetches when multiple components mount
+ * this hook simultaneously (React Strict Mode double-invocation, multiple
+ * consumers on the markets page). All instances share a single in-flight
+ * request per 30-second dedup window and get stale-while-revalidate for
+ * instant paint on revisit.
  */
 export function useAllMarketStats() {
-  const [statsMap, setStatsMap] = useState<Map<string, MarketWithStats>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, error, isLoading } = useSWR<Map<string, MarketWithStats>, Error>(
+    SWR_KEY,
+    fetchMarketStats,
+    {
+      // Collapse all concurrent hook instances to 1 request per 30 s.
+      dedupingInterval: 30_000,
+      // Replace the manual setInterval — SWR refetches in the background.
+      refreshInterval: 30_000,
+      revalidateOnFocus: false,
+    },
+  );
 
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    const controller = new AbortController();
-
-    async function load() {
-      try {
-        const res = await fetch("/api/markets?include_zombie=true&limit=500", {
-          headers: { Accept: "application/json" },
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          throw new Error(`Markets API returned ${res.status}`);
-        }
-        const body = (await res.json()) as MarketsApiResponse;
-        if (!Array.isArray(body.markets)) {
-          throw new Error(body.error ?? "Markets API returned no markets array");
-        }
-
-        const map = new Map<string, MarketWithStats>();
-        body.markets.forEach((market) => {
-          if (market.slab_address && !isBlockedSlab(market.slab_address)) {
-            map.set(market.slab_address, market);
-          }
-        });
-        setStatsMap(map);
-        setError(null);
-      } catch (e) {
-        if (controller.signal.aborted) return;
-        setError(e instanceof Error ? e.message : "Failed to load market stats");
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }
-
-    load();
-
-    const pollInterval = setInterval(load, 30_000);
-
-    return () => {
-      controller.abort();
-      clearInterval(pollInterval);
-    };
-  }, []);
-
-  return { statsMap, loading, error };
+  return {
+    statsMap: data ?? new Map<string, MarketWithStats>(),
+    loading: isLoading,
+    error: error instanceof Error
+      ? error.message
+      : error
+        ? String(error)
+        : null,
+  };
 }

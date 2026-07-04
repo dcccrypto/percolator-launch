@@ -53,7 +53,7 @@ const tradeLinks: NavItem[] = [
 const buildLinks: NavItem[] = [
   { href: "/create", label: "Create a Market" },
   { href: "/developers", label: "Developers" },
-  { href: "/devnet-mint", label: "Faucet" },
+  { href: "/faucet", label: "Faucet" },
   { href: "/stake", label: "Stake" },
 ];
 

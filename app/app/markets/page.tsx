@@ -220,7 +220,12 @@ function MarketsPageInner() {
       const supabaseLev = Number(stats?.max_leverage ?? 0);
       const rawLev = (supabaseLev > 0) ? supabaseLev : (onChainMaxLev > 0 ? onChainMaxLev : 10);
       const maxLev = Math.min(MAX_DISPLAY_LEVERAGE, rawLev);
-      const oracleMode = detectOracleMode(d.config);
+      // For v17 markets, d.configV17?.oracleMode is the raw on-chain byte (3 = AUTH_MARK/keeper).
+      // Passing it lets detectOracleMode return "keeper" instead of the fallback "hyperp"
+      // that SlabProvider forces for AUTH_MARK markets (indexFeedId=ZERO → "hyperp" without byte).
+      const oracleMode = detectOracleMode({ ...d.config, oracleModeByte: d.configV17?.oracleMode });
+      // "keeper" (AUTH_MARK) is automated oracle — not manual admin entry. Only "hyperp" (DEX
+      // pool crank) and "admin" (manual push) show the "manual" badge.
       const isAdminOracle = oracleMode === "hyperp" || oracleMode === "admin";
       seenSlabs.add(addr);
       result.push({ slabAddress: addr, mintAddress: mint, symbol: null, name: null, maxLeverage: maxLev, isAdminOracle, onChain: d, supabase: stats });
@@ -232,8 +237,13 @@ function MarketsPageInner() {
       // Use Supabase fields for display
       const mint = stats.mint_address ?? "";
       const maxLev = Math.min(MAX_DISPLAY_LEVERAGE, Number(stats.max_leverage) || 10);
-      // Without on-chain data, we can't detect oracle mode — use Supabase oracle_authority hint
-      const isAdminOracle = stats.oracle_authority != null && stats.oracle_authority !== "";
+      // Derive from oracle_mode field (canonical); fall back to oracle_authority presence for
+      // old rows that predate the oracle_mode column (migration 035).
+      // "hyperp" markets use on-chain DEX pool — NOT admin-controlled.
+      // "admin" and "keeper" are both admin/auth-mark price sources — show price controls.
+      const isAdminOracle = stats.oracle_mode != null
+        ? stats.oracle_mode !== "hyperp" && stats.oracle_mode !== "pyth"
+        : (stats.oracle_authority != null && stats.oracle_authority !== "");
       result.push({
         slabAddress: slabAddr,
         mintAddress: mint,
@@ -385,9 +395,11 @@ function MarketsPageInner() {
     list = [...list].sort((a, b) => {
       switch (sortBy) {
         case "volume": {
-          // Prefer Supabase volume, fall back to OI
-          const volA = BigInt(a.supabase?.volume_24h ?? 0) || getOI(a);
-          const volB = BigInt(b.supabase?.volume_24h ?? 0) || getOI(b);
+          // Prefer Supabase volume, fall back to OI.
+          // Math.floor guards against fractional values from Supabase NUMERIC columns —
+          // BigInt() throws TypeError on non-integer input.
+          const volA = BigInt(Math.floor(a.supabase?.volume_24h ?? 0)) || getOI(a);
+          const volB = BigInt(Math.floor(b.supabase?.volume_24h ?? 0)) || getOI(b);
           return volB > volA ? 1 : volB < volA ? -1 : 0;
         }
         case "oi": {

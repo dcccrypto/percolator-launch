@@ -327,16 +327,17 @@ function calcPoolValue(p: ParsedStakePool): bigint {
 
 export async function GET() {
   try {
-    // Resolve lazily inside try/catch so mainnet builds don't crash
-    // when the stake program hasn't been deployed yet.
+    // Resolve stake program: devnet v17 vault program, else mainnet stake program.
     let stakeProgramId: PublicKey;
     try {
-      // Use the mainnet stake program directly. The SDK's env-based detection
-      // and getServerNetwork() both fail in Vercel API routes when
-      // NEXT_PUBLIC_DEFAULT_NETWORK is set to devnet or not inlined at build time.
-      stakeProgramId = new PublicKey("DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F");
+      const net = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
+      // v17 devnet: stake/vault program is 51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ
+      // mainnet: DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F
+      const programIdStr = net === "devnet"
+        ? (process.env.STAKE_PROGRAM_ID ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ")
+        : "DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F";
+      stakeProgramId = new PublicKey(programIdStr);
     } catch {
-      // Stake program not available on this network — return empty pools
       return NextResponse.json({ pools: [] }, {
         headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
       });
@@ -385,33 +386,43 @@ export async function GET() {
       }
     }
 
-    // 4. Cross-reference slab addresses with Supabase market data + APR
+    // 4. Cross-reference slab addresses with Supabase market data + APR (guarded)
     const slabAddresses = parsed.map((p) => p.pool.slab);
-    const supabase = getServiceClient();
-    // PERC-8195: filter by network so devnet/mainnet rows don't mix
-    const [marketsResult, aprBySlab] = await Promise.all([
-      supabase
-        .from("markets_with_stats")
-        .select("slab_address,symbol,name,logo_url,insurance_balance,vault_balance")
-        .in("slab_address", slabAddresses)
-        .eq("network", getServerNetwork()),
-      computeAprs(slabAddresses, supabase),
-    ]);
+    type _MarketRow = { slab_address: string | null; symbol: string; name: string; logo_url: string | null; insurance_balance: number | null; vault_balance: number | null };
+    let markets: _MarketRow[] | null = null;
+    let aprBySlab: Record<string, number> = {};
 
-    // GH#1904 / PERC-8215 / PERC-8256: network column fallback for markets_with_stats.
-    // If the migration hasn't been applied yet the .eq("network") causes a hard 500.
-    // Retry without filter so stake pools continue loading. Remove once migration applied.
-    let markets = marketsResult.data;
-    if (marketsResult.error && marketsResult.error.message?.includes("network")) {
-      console.warn(
-        "[/api/stake/pools] PERC-8256: network column missing on markets_with_stats — falling back to unfiltered query. " +
-        "Apply 20260329180000_add_network_column.sql to fix."
-      );
-      const fallback = await supabase
-        .from("markets_with_stats")
-        .select("slab_address,symbol,name,logo_url,insurance_balance,vault_balance")
-        .in("slab_address", slabAddresses);
-      markets = fallback.data;
+    let supabase: ReturnType<typeof getServiceClient> | null = null;
+    try {
+      supabase = getServiceClient();
+    } catch {
+      // Supabase unavailable — return pools with empty market metadata
+    }
+
+    if (supabase) {
+      try {
+        const [marketsResult, aprResult] = await Promise.all([
+          supabase
+            .from("markets_with_stats")
+            .select("slab_address,symbol,name,logo_url,insurance_balance,vault_balance")
+            .in("slab_address", slabAddresses)
+            .eq("network", getServerNetwork()),
+          computeAprs(slabAddresses, supabase),
+        ]);
+
+        let marketsData = marketsResult.data;
+        if (marketsResult.error && marketsResult.error.message?.includes("network")) {
+          const fallback = await supabase
+            .from("markets_with_stats")
+            .select("slab_address,symbol,name,logo_url,insurance_balance,vault_balance")
+            .in("slab_address", slabAddresses);
+          marketsData = fallback.data;
+        }
+        markets = marketsData as _MarketRow[] | null;
+        aprBySlab = aprResult;
+      } catch (sbErr) {
+        console.warn("[/api/stake/pools] supabase query failed (non-fatal):", sbErr instanceof Error ? sbErr.message : String(sbErr));
+      }
     }
 
     const marketBySlab: Record<string, {
@@ -421,9 +432,11 @@ export async function GET() {
       insurance_balance: number | null;
       vault_balance: number | null;
     }> = {};
-    for (const m of markets ?? []) {
-      if (m.slab_address) {
-        marketBySlab[m.slab_address] = m as typeof marketBySlab[string];
+    if (markets) {
+      for (const m of markets) {
+        if (m.slab_address) {
+          marketBySlab[m.slab_address] = m as typeof marketBySlab[string];
+        }
       }
     }
 

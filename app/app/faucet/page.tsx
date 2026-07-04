@@ -14,7 +14,7 @@
  * Rate-limited: 1 claim per wallet per hour.
  */
 
-import { FC, useState, useCallback } from "react";
+import { FC, useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
@@ -52,6 +52,15 @@ const FaucetPage: FC = () => {
   const [result, setResult] = useState<FaucetResult | null>(null);
   const [faucetError, setFaucetError] = useState<FaucetError | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+
+  // Re-enable the claim button once the per-wallet cooldown expires.
+  useEffect(() => {
+    if (!result?.nextClaimAt) return;
+    const ms = new Date(result.nextClaimAt).getTime() - Date.now();
+    if (ms <= 0) { setResult(null); return; }
+    const id = setTimeout(() => setResult(null), ms);
+    return () => clearTimeout(id);
+  }, [result]);
 
   const handleClaim = useCallback(async () => {
     if (!publicKey || loading) return;

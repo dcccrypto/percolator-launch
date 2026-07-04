@@ -137,9 +137,11 @@ export function useDeposit(slabAddress: string) {
         const isV17 = slabData ? isV17Account(slabData) : false;
 
         if (isV17) {
-          // v17: derive vault authority PDA to build the vault token ATA
+          // v17: derive vault authority PDA to build the vault token ATA.
+          // vaultPda is a program PDA (off the ed25519 curve) → allowOwnerOffCurve=true,
+          // else spl-token throws TokenOwnerOffCurveError.
           const [vaultPda] = deriveVaultAuthority(programId, slabPk);
-          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint);
+          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
           // ── v17 deposit path ────────────────────────────────────────────────
           // Portfolio accounts in v17 are standalone program-owned accounts.
           // We must find or create the user's portfolio account.

@@ -26,18 +26,29 @@ export async function GET(
   }
   const validSlab = new PublicKey(validation.slab).toBase58();
 
-  const supabase = getServiceClient();
-  const { data, error } = await supabase
-    .from("markets")
-    .select("logo_url")
-    .eq("slab_address", validSlab)
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: "Market not found" }, { status: 404 });
+  let supabase: ReturnType<typeof getServiceClient> | null = null;
+  try {
+    supabase = getServiceClient();
+  } catch {
+    // Supabase unavailable — return null logo gracefully
+    return NextResponse.json({ logo_url: null });
   }
 
-  return NextResponse.json({ logo_url: data.logo_url });
+  try {
+    const { data, error } = await supabase
+      .from("markets")
+      .select("logo_url")
+      .eq("slab_address", validSlab)
+      .single();
+
+    if (error) {
+      return NextResponse.json({ logo_url: null }, { status: 404 });
+    }
+
+    return NextResponse.json({ logo_url: data.logo_url });
+  } catch {
+    return NextResponse.json({ logo_url: null });
+  }
 }
 
 // POST /api/markets/[slab]/logo — Upload logo file to Supabase Storage
@@ -85,7 +96,12 @@ export async function POST(
     return NextResponse.json({ error: "File too large. Max 2MB." }, { status: 400 });
   }
 
-  const supabase = getServiceClient();
+  let supabase: ReturnType<typeof getServiceClient>;
+  try {
+    supabase = getServiceClient();
+  } catch {
+    return NextResponse.json({ error: "Storage backend unavailable" }, { status: 503 });
+  }
 
   // Check market exists
   const { data: market, error: marketError } = await supabase
