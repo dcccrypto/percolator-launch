@@ -486,6 +486,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <button
             key={t}
             onClick={() => setOrderType(t)}
+            aria-pressed={orderType === t}
             className={`flex-1 rounded-sm py-1 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors duration-150 ${
               orderType === t ? "bg-[var(--accent)]/10 text-[var(--accent)]" : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
             }`}
@@ -515,6 +516,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="mb-3 flex gap-1">
         <button
           onClick={() => setDirection("long")}
+          aria-pressed={direction === "long"}
           className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-all duration-150 ${
             direction === "long" ? "bg-green-500 border border-green-500 text-black" : "border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)]"
           }`}
@@ -523,6 +525,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </button>
         <button
           onClick={() => setDirection("short")}
+          aria-pressed={direction === "short"}
           className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-all duration-150 ${
             direction === "short" ? "bg-red-500 border border-red-500 text-white" : "border border-red-400/60 bg-red-500/[0.08] text-red-400 hover:bg-red-500/20"
           }`}

@@ -227,8 +227,8 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
   // Funding rate estimate — current bps-per-slot × position size,
   // annualised to "per day" as a rough trader-facing number. Engine
   // exposes the latest rate; positive rate = longs pay shorts.
-  // ~432_000 slots per day at 200 ms each.
-  const SLOTS_PER_DAY = 432_000n;
+  // 2.5 slots/sec (matches lib/format.ts formatFundingRate's assumption) → 216_000 slots/day.
+  const SLOTS_PER_DAY = 216_000n;
   const fundingRateBpsSlot = engine?.fundingRateBpsPerSlotLast ?? 0n;
   const fundingPerDayNative = useMemo(() => {
     if (!hasPosition || !hasValidMark || fundingRateBpsSlot === 0n) return 0n;
@@ -254,7 +254,7 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
     liqDistPct >= 50
       ? "var(--long)"
       : liqDistPct >= 20
-        ? "#fbbf24"
+        ? "var(--warning)"
         : "var(--short)";
 
   const pnlPositive = pnlTokens >= 0n;

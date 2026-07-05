@@ -206,15 +206,15 @@ export function formatStatValue(
 
 /**
  * Calculate time elapsed between two Solana slots and format as human-readable duration.
- * Assumes 2.5 second average block time on Solana.
- * 
+ * Assumes 2.5 slots/second (0.4s average block time), matching formatFundingRate's assumption.
+ *
  * @param currentSlot - Current blockchain slot number (or null/undefined)
  * @param targetSlot - Reference slot number (or null/undefined)
  * @returns Human-readable duration (e.g. "30s", "5.2m", "2.1h") or "—" if inputs invalid
- * 
+ *
  * @example
- * formatSlotAge(1000n, 995n) // → "1s" (5 slots * 2.5s/slot)
- * formatSlotAge(1000n, 976n) // → "10.0m" (24 slots * 2.5s/slot)
+ * formatSlotAge(1000n, 990n) // → "4s" (10 slots / 2.5 slots-per-sec)
+ * formatSlotAge(1000n, 750n) // → "1.7m" (250 slots / 2.5 slots-per-sec)
  * formatSlotAge(null, 500n) // → "—"
  */
 export function formatSlotAge(currentSlot: bigint | null | undefined, targetSlot: bigint | null | undefined): string {
