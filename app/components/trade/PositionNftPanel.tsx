@@ -28,11 +28,33 @@ import { explorerAccountUrl } from "@/lib/config";
  */
 export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = useUserAccount();
-  const { hasMintedNft, nftMint, pendingSettlement, isLoading } = usePositionNft(slabAddress);
+  const { hasMintedNft, nftMint, nftPdaAddress, pendingSettlement, isLoading } = usePositionNft(slabAddress);
   const { mint: mintNft, loading: mintLoading, error: mintError } = useMintPositionNft(slabAddress);
-  const { burn: burnNft, loading: burnLoading, error: burnError } = useBurnPositionNft(slabAddress);
+
+  // Once a position is wrapped into an NFT, MintPositionNft escrows the
+  // portfolio away from the wallet, so useUserAccount returns null. Fall back to
+  // the NFT-escrowed position so this panel keeps showing status + Send/Burn.
+  const wrapped = useNftWrappedPosition(slabAddress, userAccount === null);
+
+  // usePositionNft's v17 owner-scan and useNftWrappedPosition's last_holder
+  // scan answer different questions and can disagree: a wallet holding a
+  // Position NFT transferred in from someone else has no unwrapped portfolio
+  // of its own to find via owner-scan, so usePositionNft could still say
+  // "not minted" in edge cases even after the owner-scan/fallback fix in
+  // usePositionNft itself. Trust EITHER signal, and prefer wrapped's mint/PDA
+  // (from the more reliable last_holder scan) when both are present — this is
+  // what makes a RECEIVED NFT show "Minted" with Burn enabled.
+  const isNftPresent = hasMintedNft || wrapped !== null;
+  const effectiveNftMint = wrapped?.nftMint ?? nftMint;
+  const effectiveNftPdaAddress = wrapped?.nftPda.toBase58() ?? nftPdaAddress;
+  const nftOverride =
+    effectiveNftMint && effectiveNftPdaAddress
+      ? { nftMint: effectiveNftMint, nftPdaAddress: effectiveNftPdaAddress }
+      : undefined;
+
+  const { burn: burnNft, loading: burnLoading, error: burnError } = useBurnPositionNft(slabAddress, nftOverride);
   const { transfer: transferNft, loading: transferLoading, error: transferError } =
-    useTransferPositionNft(slabAddress);
+    useTransferPositionNft(slabAddress, nftOverride && { nftMint: nftOverride.nftMint });
 
   const { config: mktConfig } = useSlabState();
   const collateralMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
@@ -45,23 +67,19 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
   // Optimistically disable the Mint button the moment a mint is initiated, and
   // keep it disabled until the on-chain state actually reflects the mint. Without
   // this there's a stale window between "tx confirmed / refresh() fired" and
-  // usePositionNft re-scanning, during which hasMintedNft is still false and a
+  // usePositionNft re-scanning, during which isNftPresent is still false and a
   // user could click Mint again (double-mint into a failing tx).
   const [pendingMint, setPendingMint] = useState(false);
 
   // Clear the optimistic guard once the on-chain state confirms the mint.
   useEffect(() => {
-    if (hasMintedNft) setPendingMint(false);
-  }, [hasMintedNft]);
+    if (isNftPresent) setPendingMint(false);
+  }, [isNftPresent]);
 
-  // Once a position is wrapped into an NFT, MintPositionNft escrows the
-  // portfolio away from the wallet, so useUserAccount returns null. Fall back to
-  // the NFT-escrowed position so this panel keeps showing status + Send/Burn.
-  const wrapped = useNftWrappedPosition(slabAddress, userAccount === null);
   const effectiveAccount = userAccount ?? wrapped;
 
   const hasPosition = effectiveAccount !== null && effectiveAccount.account.positionSize !== 0n;
-  const mintAddress = nftMint?.toBase58() ?? null;
+  const mintAddress = effectiveNftMint?.toBase58() ?? null;
 
   // Summary line for the send modal — e.g. "LONG 0.3507 SOL".
   // Shown read-only so the user can double-check what they're about to transfer
@@ -79,7 +97,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
   // whatever height the parent rail gives this panel (see page.tsx's
   // OrderTicketRail — this panel absorbs the rail's remaining height rather
   // than leaving dead space below a small top-anchored card).
-  if (!effectiveAccount && !hasMintedNft) {
+  if (!effectiveAccount && !isNftPresent) {
     return (
       <div className="relative flex h-full min-h-[120px] w-full flex-col items-center justify-center p-3 text-center">
         <p className="text-[11px] font-medium text-[var(--text)]">Position NFT</p>
@@ -101,7 +119,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
         {isLoading && (
           <span className="ml-1 h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]/60" aria-hidden />
         )}
-        {hasMintedNft && (
+        {isNftPresent && (
           <span className="ml-auto text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--long)] bg-[var(--long)]/10 px-1.5 py-0.5">
             Active
           </span>
@@ -114,16 +132,16 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
           <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Status</span>
           <span
             className={`text-[11px] font-semibold ${
-              hasMintedNft ? "text-[var(--long)]" : "text-[var(--text-muted)]"
+              isNftPresent ? "text-[var(--long)]" : "text-[var(--text-muted)]"
             }`}
             style={{ fontFamily: "var(--font-mono)" }}
           >
-            {hasMintedNft ? "Minted" : "Not Minted"}
+            {isNftPresent ? "Minted" : "Not Minted"}
           </span>
         </div>
 
         {/* Mint address — shown when NFT exists */}
-        {hasMintedNft && mintAddress && (
+        {isNftPresent && mintAddress && (
           <div className="flex items-center justify-between py-1 border-t border-[var(--border)]/30">
             <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Mint</span>
             <a
@@ -155,16 +173,16 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
             onClick={async () => {
               setPendingMint(true);
               const sig = await mintNft();
-              // Keep the guard set on success (cleared once hasMintedNft flips
+              // Keep the guard set on success (cleared once isNftPresent flips
               // true via the useEffect above). On failure, release it so the
               // user can retry.
               if (!sig) setPendingMint(false);
             }}
-            disabled={!hasPosition || hasMintedNft || mintLoading || pendingMint}
+            disabled={!hasPosition || isNftPresent || mintLoading || pendingMint}
             title={
               !hasPosition
                 ? "Open a position first"
-                : hasMintedNft
+                : isNftPresent
                 ? "NFT already minted"
                 : mintLoading || pendingMint
                 ? "Minting…"
@@ -181,9 +199,9 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
               the position after the tx lands. */}
           <button
             onClick={() => setShowSendModal(true)}
-            disabled={!hasMintedNft || transferLoading}
+            disabled={!isNftPresent || transferLoading}
             title={
-              !hasMintedNft
+              !isNftPresent
                 ? "Mint the NFT first"
                 : transferLoading
                 ? "Sending…"
@@ -197,9 +215,9 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
           {/* Burn NFT — enabled when NFT exists and position is closed (pendingSettlement) */}
           <button
             onClick={() => burnNft()}
-            disabled={!hasMintedNft || burnLoading}
+            disabled={!isNftPresent || burnLoading}
             title={
-              !hasMintedNft
+              !isNftPresent
                 ? "No NFT to burn"
                 : burnLoading
                 ? "Burning…"
@@ -219,7 +237,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
         )}
       </div>
 
-      {showSendModal && hasMintedNft && mintAddress && (
+      {showSendModal && isNftPresent && mintAddress && (
         <SendPositionNftModal
           positionSummary={positionSummary}
           nftMintShort={`${mintAddress.slice(0, 8)}…${mintAddress.slice(-6)}`}

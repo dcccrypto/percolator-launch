@@ -45,7 +45,7 @@ import {
   formatPnl,
   formatPercent,
 } from "@/lib/format";
-import { computeMarkPnl, computeLiqPrice, computePnlPercent } from "@/lib/trading";
+import { computeMarkPnl, computeLiqPrice, computePnlPercent, estimateEntryFromPnl } from "@/lib/trading";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { ClosePositionModal } from "./ClosePositionModal";
@@ -133,7 +133,16 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const rawEntryPrice = account.entryPrice;
   const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, activeInfo.idx);
   const resolvedEntryPrice = rawEntryPrice > 0n ? rawEntryPrice : (savedEntryPrice > 0n ? savedEntryPrice : 0n);
-  const entryPriceE6 = resolvedEntryPrice > 0n ? resolvedEntryPrice : currentPriceE6;
+  // No on-chain entry price (v17) and no local cache — this is the ONLY path
+  // a Position NFT received via transfer ever takes (the recipient's browser
+  // never ran the trade that opened it, so getEntryPrice() has nothing
+  // saved). Derive an effective entry from the position's on-chain
+  // unrealized PnL instead of naively substituting the mark price, which
+  // silently implies zero PnL and cascades into a liq price clamped to
+  // "N/A" below. See estimateEntryFromPnl.
+  const entryPriceE6 = resolvedEntryPrice > 0n
+    ? resolvedEntryPrice
+    : estimateEntryFromPnl(account.positionSize, account.pnl, currentPriceE6);
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const hasValidMark = currentPriceE6 > 0n;
 
