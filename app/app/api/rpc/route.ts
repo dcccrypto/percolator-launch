@@ -390,7 +390,19 @@ function isAllowedOrigin(req: NextRequest): boolean {
     }
   }
 
-  // Accept the apex domain and its subdomains only.
+  // Same-origin: the browser-set Origin/Referer host matches the host actually
+  // serving this deployment. The browser always sets Origin to the real calling
+  // page, so Origin-host === serving-host is a genuine same-origin request — this
+  // makes /api/rpc work on ANY deployment domain (e.g. the devnet playground at
+  // percolator-playground.vercel.app, or a Vercel preview URL) without hardcoding
+  // each one. The no-Origin server path above still requires X-Internal-Token, so
+  // this does not reopen the anonymous-relay drain (PERC-8308).
+  const servingHost = req.headers.get("host")?.split(":")[0]?.toLowerCase();
+  if (servingHost && hostname === servingHost) {
+    return true;
+  }
+
+  // Accept the apex domain and its subdomains too.
   return hostname === "percolatorlaunch.com" || hostname.endsWith(".percolatorlaunch.com");
 }
 
