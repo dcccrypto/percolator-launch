@@ -1007,7 +1007,7 @@ function MarketsPageInner() {
                           {/* GH#1233: warn when admin-oracle market has no price — users cannot open positions */}
                           {m.isAdminOracle && lastPrice === null && (
                             <span
-                              title="No oracle price — new position opens are blocked for this market"
+                              title="No oracle price - new position opens are blocked for this market"
                               className="inline-block w-[52px] text-center border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider"
                               style={{ borderColor: "var(--short)", color: "var(--short)", backgroundColor: "rgba(255,60,60,0.06)" }}
                             >

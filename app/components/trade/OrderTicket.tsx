@@ -54,7 +54,7 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
-import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
+import { formatTokenAmount, formatUsdPriceE6, toE6 } from "@/lib/format";
 import { saveEntryPrice } from "@/lib/entry-price";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
@@ -62,15 +62,6 @@ import { useInitUser } from "@/hooks/useInitUser";
 const LEVERAGE_SNAP_POINTS = [1, 2, 5, 10, 20];
 const SIZE_PRESETS = [25, 50, 75, 100];
 const MAX_DISPLAY_LEVERAGE = 200;
-
-function formatPerc(native: bigint, decimals = 6): string {
-  const a = native < 0n ? -native : native;
-  const base = 10n ** BigInt(decimals);
-  const whole = a / base;
-  const frac = (a % base).toString().padStart(decimals, "0").replace(/0+$/, "");
-  const w = whole.toString();
-  return frac ? `${w}.${frac}` : w;
-}
 
 function parsePercToNative(input: string, decimals = 6): bigint {
   const parts = input.split(".");
@@ -118,7 +109,7 @@ function buildValidationIssues(ctx: TicketValidationCtx): ValidationIssue[] {
     issues.push({ severity: "error", title: "Risk reduction mode", message: "This market is in de-risking mode. Only closing trades are allowed right now." });
   }
   if (ctx.oracleUnavailable) {
-    issues.push({ severity: "error", title: "Oracle unavailable", message: "Oracle not yet active — keeper has not cranked this market." });
+    issues.push({ severity: "error", title: "Oracle unavailable", message: "Oracle not yet active - keeper has not cranked this market." });
   } else if (ctx.oracleStale) {
     issues.push({ severity: "error", title: "Oracle stale", message: "The oracle price for this market has not updated recently. Trading is temporarily disabled to prevent failed transactions." });
   }
@@ -360,7 +351,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       if (effectiveBalance <= 0n) return;
       let marginAmount = (effectiveBalance * BigInt(pct)) / 100n;
       if (marginAmount === 0n && pct > 0) marginAmount = 1n;
-      const marginStr = formatPerc(marginAmount, decimals);
+      const marginStr = formatTokenAmount(marginAmount, decimals);
       setMarginInput(marginStr);
       const marginNum = Number(marginAmount) / Math.pow(10, decimals);
       const notionalUsd = marginNum * leverage;
@@ -379,7 +370,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const exceedsBalance = marginNative > 0n && marginNative > effectiveBalance;
 
   // ── Receipt (before -> after) ──
-  const oracleE6 = priceUsd ? BigInt(Math.round(priceUsd * 1e6)) : 0n;
+  const oracleE6 = priceUsd ? toE6(priceUsd) : 0n;
   const hasOrder = marginNative > 0n && positionSize > 0n && !exceedsBalance;
   const estEntry = hasOrder ? computeEstimatedEntryPrice(oracleE6, tradingFeeBps, direction) : 0n;
   const fee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, tradingFeeBps) : 0n;
@@ -415,7 +406,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     hasPrice: priceUsd != null,
     mockMode,
     exceedsBalance,
-    balanceLabel: `${formatPerc(effectiveBalance, decimals)} ${collateralSymbol}`,
+    balanceLabel: `${formatTokenAmount(effectiveBalance, decimals)} ${collateralSymbol}`,
   });
   const blockingIssue = validationIssues.find((i) => i.severity === "error") ?? null;
 
@@ -446,7 +437,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // and let useTrade derive one from the live mark (its existing,
       // unchanged behaviour — see hooks/useTrade.ts).
       const explicitLimitE6 = orderType === "limit" && limitPriceInput
-        ? BigInt(Math.round(parseFloat(limitPriceInput) * 1_000_000))
+        ? toE6(parseFloat(limitPriceInput))
         : undefined;
       const sig = await withTransientRetry(
         async () => trade({ lpIdx, userIdx: userAccount!.idx, size, limitPriceE6: explicitLimitE6 }),
@@ -498,7 +489,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div className="mb-3">
           <label className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
             Limit price
-            <InfoIcon tooltip="Percolator executes immediately — this sets the worst price your order is allowed to fill at (slippage bound), not a resting order that waits to be matched." />
+            <InfoIcon tooltip="Percolator executes immediately - this sets the worst price your order is allowed to fill at (slippage bound), not a resting order that waits to be matched." />
           </label>
           <input
             type="text"
@@ -536,10 +527,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div className="mb-1.5 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
             Size
-            <InfoIcon tooltip="Position size in the toggled unit. Switch between token and USD — both stay in sync." />
+            <InfoIcon tooltip="Position size in the toggled unit. Switch between token and USD - both stay in sync." />
           </label>
           <span className="text-[10px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-            Account Bal: {userAccount ? formatPerc(capital, decimals) : "0"} {collateralSymbol}
+            Account Bal: {userAccount ? formatTokenAmount(capital, decimals) : "0"} {collateralSymbol}
           </span>
         </div>
         <div className="flex gap-1.5">
@@ -562,7 +553,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
         {exceedsBalance && (
           <p className="mt-1 text-[10px] text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
-            Exceeds balance ({formatPerc(effectiveBalance, decimals)} {collateralSymbol})
+            Exceeds balance ({formatTokenAmount(effectiveBalance, decimals)} {collateralSymbol})
           </p>
         )}
       </div>
@@ -642,12 +633,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             label="Slippage bound"
             before="—"
             after={slippageBoundE6 > 0n ? formatUsdPriceE6(slippageBoundE6) : "—"}
-            tooltip="Worst acceptable fill price sent on-chain — the trade reverts rather than fill worse than this."
+            tooltip="Worst acceptable fill price sent on-chain - the trade reverts rather than fill worse than this."
           />
           <DiffRow
             label="Margin req."
-            before={`${formatPerc(beforeMargin, decimals)} ${collateralSymbol}`}
-            after={`${formatPerc(afterMargin, decimals)} ${collateralSymbol}`}
+            before={`${formatTokenAmount(beforeMargin, decimals)} ${collateralSymbol}`}
+            after={`${formatTokenAmount(afterMargin, decimals)} ${collateralSymbol}`}
           />
         </div>
       )}
@@ -750,14 +741,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="mt-3 flex items-center justify-between border-t border-[var(--border)]/30 pt-2.5 text-[10px]">
         <div>
           <div className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Balance</div>
-          <div className="font-mono tabular-nums text-[var(--text)]">{formatPerc(effectiveBalance, decimals)} {collateralSymbol}</div>
+          <div className="font-mono tabular-nums text-[var(--text)]">{formatTokenAmount(effectiveBalance, decimals)} {collateralSymbol}</div>
         </div>
         <div className="text-right">
           <div className="flex items-center justify-end gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
             Buying power
-            <InfoIcon tooltip="Available balance x max leverage — the largest notional you could open right now." />
+            <InfoIcon tooltip="Available balance x max leverage - the largest notional you could open right now." />
           </div>
-          <div className="font-mono tabular-nums text-[var(--text)]">{formatPerc(buyingPower, decimals)} {collateralSymbol}</div>
+          <div className="font-mono tabular-nums text-[var(--text)]">{formatTokenAmount(buyingPower, decimals)} {collateralSymbol}</div>
         </div>
         {connected && !needsAccount && !needsDeposit && (
           <button

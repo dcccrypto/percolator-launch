@@ -11,11 +11,11 @@ import {
 import { DevelopersClient } from "./DevelopersClient";
 
 export const metadata: Metadata = {
-  title: "Developers — Percolator",
+  title: "Developers - Percolator",
   description:
     "Open-source repos powering Percolator permissionless perpetuals on Solana. Browse, fork, and contribute.",
   openGraph: {
-    title: "Developers — Percolator",
+    title: "Developers - Percolator",
     description:
       "Open-source repos powering Percolator permissionless perpetuals on Solana.",
     type: "website",

@@ -20,7 +20,7 @@ const LIGHTHOUSE_PROGRAM_ID_STR = LIGHTHOUSE_PROGRAM_ID;
 
 const LIGHTHOUSE_USER_MESSAGE =
   "Your wallet's transaction guard (Blowfish/Lighthouse) is blocking this transaction. " +
-  "This is a known compatibility issue — the transaction itself is valid. " +
+  "This is a known compatibility issue - the transaction itself is valid. " +
   "Try one of these workarounds:\n" +
   "1. Disable transaction simulation in your wallet settings\n" +
   "2. Use a wallet without Blowfish protection (e.g., Backpack, Solflare)\n" +
@@ -40,56 +40,56 @@ export { LIGHTHOUSE_USER_MESSAGE };
 // This was previously a stale v12 map whose codes were misaligned from ordinal 4
 // onward (e.g. 21 showed "Position size mismatch" but v17 21 = EngineLockActive).
 const ERROR_CODE_MAP: Record<number, string> = {
-  0: "Invalid market data (bad magic) — corrupted or not a Percolator market.",
+  0: "Invalid market data (bad magic) - corrupted or not a Percolator market.",
   1: "This market uses a different program version and needs migration.",
   2: "Market already initialized.",
   3: "Market not initialized.",
   4: "Wrong account type for this action.",
-  5: "Invalid account data length — corrupted account.",
+  5: "Invalid account data length - corrupted account.",
   6: "Missing required signature.",
   7: "An account that must be writable was passed as read-only.",
-  8: "Unauthorized — you don't have permission for this action.",
+  8: "Unauthorized - you don't have permission for this action.",
   9: "Invalid or unsupported instruction.",
   10: "Invalid mint account.",
   11: "Invalid token account.",
   12: "Invalid vault account.",
   13: "Invalid token program.",
   14: "Invalid engine configuration for this market.",
-  15: "Math overflow in engine calculation — try a smaller size.",
-  16: "Account provenance mismatch — wrong market or account passed.",
-  17: "Position has an unsettled leg — crank the market and retry.",
+  15: "Math overflow in engine calculation - try a smaller size.",
+  16: "Account provenance mismatch - wrong market or account passed.",
+  17: "Position has an unsettled leg - crank the market and retry.",
   18: "Invalid position leg.",
-  19: "Market data is stale — a fresh price/crank is needed. Try again in a moment.",
-  20: "Counterparty (backing) state is stale — crank the market, then retry.",
+  19: "Market data is stale - a fresh price/crank is needed. Try again in a moment.",
+  20: "Counterparty (backing) state is stale - crank the market, then retry.",
   21: "This market is temporarily locked while it recovers/cranks. Try again shortly, or trade another market.",
-  22: "Crank made no progress — the market may need attention. Try again shortly.",
+  22: "Crank made no progress - the market may need attention. Try again shortly.",
   23: "This market is in recovery mode and must be cranked before trading resumes.",
   24: "Engine counter overflow.",
   25: "Engine counter underflow.",
-  26: "Oracle is invalid — no price available for this market.",
-  27: "Oracle price is stale — a fresh price must be pushed before trading. Try again in a moment.",
-  28: "Oracle confidence interval too wide — price too uncertain to trade right now.",
+  26: "Oracle is invalid - no price available for this market.",
+  27: "Oracle price is stale - a fresh price must be pushed before trading. Try again in a moment.",
+  28: "Oracle confidence interval too wide - price too uncertain to trade right now.",
   29: "Invalid oracle account for this market.",
   30: "An LP vault already exists for this market.",
   31: "LP vault not found for this market.",
   32: "LP vault is paused.",
-  33: "LP vault still has shares outstanding — cannot proceed.",
+  33: "LP vault still has shares outstanding - cannot proceed.",
   34: "Amount must be greater than zero.",
   35: "Insufficient LP vault shares.",
-  36: "LP vault redemption cooldown is still active — wait before redeeming.",
+  36: "LP vault redemption cooldown is still active - wait before redeeming.",
   37: "Trade would exceed the market's open-interest cap. Try a smaller size.",
   38: "No LP vault fees available to crank yet.",
-  39: "LP vault share supply mismatch — please report this error.",
+  39: "LP vault share supply mismatch - please report this error.",
   40: "LP vault authority mismatch.",
-  41: "Deposit too small — it would mint zero LP shares. Deposit a larger amount.",
+  41: "Deposit too small - it would mint zero LP shares. Deposit a larger amount.",
   42: "Position-NFT registry not found for this market.",
   43: "This position can't be transferred as an NFT right now.",
-  44: "Invalid NFT transfer — cannot transfer to yourself or a zero address.",
+  44: "Invalid NFT transfer - cannot transfer to yourself or a zero address.",
   45: "Invalid NFT mint authority.",
   46: "Position-NFT provenance mismatch.",
   47: "Insurance withdrawal cooldown is still active.",
   48: "Insurance withdrawal exceeds the allowed ceiling (deposits-only limit).",
-  49: "Insufficient margin for this trade — deposit more collateral or reduce size/leverage.",
+  49: "Insufficient margin for this trade - deposit more collateral or reduce size/leverage.",
 };
 
 /** Legacy Anchor error map (unused but kept for compatibility) */
@@ -105,25 +105,25 @@ const CUSTOM_ERROR_MAP: Record<number, string> = {};
 const NFT_ERROR_CODE_MAP: Record<number, string> = {
   0: "Position is not open (size is zero).",
   1: "NFT already minted for this position.",
-  2: "NFT PDA does not match expected derivation — frontend/program version mismatch.",
+  2: "NFT PDA does not match expected derivation - frontend/program version mismatch.",
   3: "Slab account not owned by the Percolator program.",
-  4: "Slab data too short — corrupted or unsupported market.",
+  4: "Slab data too short - corrupted or unsupported market.",
   5: "User index out of range for this slab.",
   6: "Position has changed since NFT was minted (entry-price mismatch).",
   7: "Only the NFT holder can burn / settle this position.",
   8: "Funding settlement overflow.",
-  9: "Invalid mint authority — expected program PDA.",
-  10: "NFT program cannot parse this market's slab layout — the NFT program is out of date relative to the deployed main program. An on-chain NFT program upgrade is required.",
-  11: "Cannot transfer — position is being liquidated.",
+  9: "Invalid mint authority - expected program PDA.",
+  10: "NFT program cannot parse this market's slab layout - the NFT program is out of date relative to the deployed main program. An on-chain NFT program upgrade is required.",
+  11: "Cannot transfer - position is being liquidated.",
   12: "Funding must be settled before transfer.",
   13: "Transfer hook: unknown Percolator program.",
   14: "Position must be fully closed (size and collateral at zero) before burn.",
   15: "Transfer hook: extra-metas PDA does not match expected derivation.",
   16: "Transfer hook: source or destination token account invalid.",
   17: "Transfer hook was invoked directly, not via Token-2022 CPI.",
-  18: "This account is an LP account and cannot be wrapped as an NFT — only trading accounts are eligible.",
-  19: "Account id mismatch — slot was reallocated to a different account.",
-  20: "Slab slot was closed and reassigned to a different owner after this NFT was minted — the NFT no longer represents that position.",
+  18: "This account is an LP account and cannot be wrapped as an NFT - only trading accounts are eligible.",
+  19: "Account id mismatch - slot was reallocated to a different account.",
+  20: "Slab slot was closed and reassigned to a different owner after this NFT was minted - the NFT no longer represents that position.",
 };
 
 /** Hard-coded NFT program id. Matches app/lib/nft-program.ts. Kept here to
@@ -196,16 +196,16 @@ export function humanizeError(rawMsg: string): string {
   // These are string-form errors like "InvalidAccountData", "AccountAlreadyInitialized" etc.
   // They must NOT be confused with Percolator custom program error codes.
   if (rawMsg.includes('"InvalidAccountData"')) {
-    return "Invalid account data — one of the accounts has unexpected data. The transaction may need different accounts or the market state may have changed.";
+    return "Invalid account data - one of the accounts has unexpected data. The transaction may need different accounts or the market state may have changed.";
   }
   if (rawMsg.includes('"AccountAlreadyInitialized"')) {
-    return "Account already exists — this operation was already completed.";
+    return "Account already exists - this operation was already completed.";
   }
   if (rawMsg.includes('"AccountNotFound"') || rawMsg.includes("AccountNotFound")) {
     return "Account not found on-chain. It may have been closed or not yet created.";
   }
   if (rawMsg.includes("insufficient account keys")) {
-    return "Missing accounts in transaction — this is likely a frontend bug. Please report it.";
+    return "Missing accounts in transaction - this is likely a frontend bug. Please report it.";
   }
 
   const code = extractErrorCode(rawMsg);
@@ -228,7 +228,7 @@ export function humanizeError(rawMsg: string): string {
     return CUSTOM_ERROR_MAP[customIdx];
   }
   if (rawMsg.includes("Blockhash not found") || rawMsg.includes("block height exceeded") || rawMsg.includes("has expired")) {
-    return "Transaction expired — network was slow. Try again, it usually works on the second attempt.";
+    return "Transaction expired - network was slow. Try again, it usually works on the second attempt.";
   }
   if (rawMsg.includes("Insufficient SOL")) {
     return rawMsg; // Already a clear message from our pre-flight check
@@ -243,7 +243,7 @@ export function humanizeError(rawMsg: string): string {
   // spl-token throws these typed errors without any .message so they bubble
   // up as the raw class name. Give each one a human sentence.
   if (rawMsg.includes("TokenAccountNotFoundError")) {
-    return "Token account not found on the RPC this page is connected to. The wallet may hold the NFT from a different network, or the RPC may be out of sync — try refreshing the page.";
+    return "Token account not found on the RPC this page is connected to. The wallet may hold the NFT from a different network, or the RPC may be out of sync - try refreshing the page.";
   }
   if (rawMsg.includes("TokenInvalidAccountOwnerError")) {
     return "Token account has the wrong on-chain owner. This usually means the frontend is pointed at a cluster where this mint was not created.";
@@ -255,7 +255,7 @@ export function humanizeError(rawMsg: string): string {
     return "Transfer-hook metadata account missing. This NFT was minted before a recent hook-fix upgrade; open a support ticket so we can run RepairExtraAccountMetas on it.";
   }
   if (rawMsg.includes("timeout") || rawMsg.includes("Timeout")) {
-    return "Transaction timed out. It may still confirm — check your wallet.";
+    return "Transaction timed out. It may still confirm - check your wallet.";
   }
   // If we have a raw error code that wasn't recognized, show it
   if (rawMsg.includes("custom program error")) {

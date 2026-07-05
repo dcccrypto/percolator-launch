@@ -11,6 +11,7 @@ import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { SLAB_TIERS, type SlabTierKey } from "@/lib/slabTiers";
 import { getNetwork } from "@/lib/config";
+import { toE6 } from "@/lib/format";
 
 import { ModeSelector } from "./ModeSelector";
 import { WizardProgress } from "./WizardProgress";
@@ -574,12 +575,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         // Security: don't default to $1 — require a real price for hyperp mode
         return { oracleFeed: "0".repeat(64), priceE6: 0n };
       }
-      const priceE6 = BigInt(Math.round(dexPrice * 1_000_000));
+      const priceE6 = toE6(dexPrice);
       return { oracleFeed: "0".repeat(64), priceE6 };
     }
     // Admin oracle
     const price = parseFloat(wizard.adminPrice ?? "1");
-    const priceE6 = BigInt(Math.round((isNaN(price) ? 1 : price) * 1_000_000));
+    const priceE6 = toE6(isNaN(price) ? 1 : price);
     return { oracleFeed: "0".repeat(64), priceE6 };
   };
 

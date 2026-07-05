@@ -34,6 +34,15 @@ function abs(n: bigint): bigint {
 
 const PRESETS = [25, 50, 75, 100];
 
+/**
+ * Focusable-element selector for the focus trap. Excludes `[disabled]` controls:
+ * a disabled button can never be `document.activeElement`, so if it were the
+ * first/last boundary the Tab-wrap would never fire and focus would escape the
+ * dialog (Cancel/Confirm here are disabled while `loading`/`oracleStale`).
+ */
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   positionSize,
   entryPrice,
@@ -81,11 +90,31 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
       );
     }
 
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancelRef.current();
+    // Move initial focus inside the dialog (APG dialog pattern) so Tab starts trapped.
+    const focusable = modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+    focusable[0]?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onCancelRef.current();
+        return;
+      }
+      if (e.key === "Tab") {
+        const items = modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefersReduced]);
 

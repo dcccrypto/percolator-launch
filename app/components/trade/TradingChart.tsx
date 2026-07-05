@@ -605,7 +605,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       if (overlayPrefs.liq && liqPriceNum != null && liqPriceNum > 0) {
         liqLineRef.current = s.createPriceLine({
           price: liqPriceNum,
-          color: "#ef4444",
+          color: "#FF3B5C", // matches --short (canvas can't read CSS vars)
           lineWidth: 2,
           lineStyle: LineStyle.Solid,
           axisLabelVisible: true,
@@ -1067,7 +1067,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
                   strokeWidth="1.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="mb-2 text-[#475569]"
+                  className="mb-2 text-[var(--text-muted)]"
                   aria-hidden="true"
                 >
                   <line x1="18" y1="3" x2="18" y2="6" />
@@ -1081,13 +1081,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
                   <rect x="3" y="10" width="6" height="7" rx="1" />
                 </svg>
                 <div
-                  className="text-[15px] font-semibold text-[#94a3b8]"
+                  className="text-[15px] font-semibold text-[var(--text-secondary)]"
                   style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
                 >
                   No chart data yet
                 </div>
                 <div
-                  className="mt-1 text-xs text-[#475569]"
+                  className="mt-1 text-xs text-[var(--text-muted)]"
                   style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
                 >
                   Price history will appear once trading begins

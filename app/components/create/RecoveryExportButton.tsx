@@ -59,7 +59,7 @@ export function RecoveryExportButton({ className = "" }: { className?: string })
         disabled={busy}
         onClick={() => download(false)}
         className="border border-[var(--border)] bg-transparent px-3 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors disabled:opacity-50"
-        title="Pubkeys only — safe to share. Use with the in-UI recovery banner or the close-market-reclaim-all.ts script (admin-side close)."
+        title="Pubkeys only - safe to share. Use with the in-UI recovery banner or the close-market-reclaim-all.ts script (admin-side close)."
       >
         ⬇ DOWNLOAD RECOVERY JSON
       </button>
@@ -68,7 +68,7 @@ export function RecoveryExportButton({ className = "" }: { className?: string })
         disabled={busy}
         onClick={() => download(true)}
         className="border border-[var(--warning)]/40 bg-transparent px-3 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--warning)] hover:bg-[var(--warning)]/[0.06] transition-colors disabled:opacity-50"
-        title="Includes the slab keypair secret — required only for the slab-side ReclaimSlabRent path. Treat as sensitive."
+        title="Includes the slab keypair secret - required only for the slab-side ReclaimSlabRent path. Treat as sensitive."
       >
         ⬇ WITH SLAB SECRET (SENSITIVE)
       </button>

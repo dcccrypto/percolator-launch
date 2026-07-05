@@ -15,7 +15,7 @@ import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { formatUsdFromNumber } from "@/lib/format";
+import { formatUsdFromNumber, toE6 } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
@@ -431,7 +431,7 @@ function TradePageInner({ slab }: { slab: string }) {
           </span>
         )}
         <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={supabaseMarket ? !!supabaseMarket.mainnet_ca : true} />
-        <ShareButton slabAddress={slab} marketName={symbol} price={BigInt(Math.round((priceUsd ?? 0) * 1e6))} />
+        <ShareButton slabAddress={slab} marketName={symbol} price={toE6(priceUsd ?? 0)} />
         <UsdToggleButton />
         <a
           href={`/analytics/${slab}`}

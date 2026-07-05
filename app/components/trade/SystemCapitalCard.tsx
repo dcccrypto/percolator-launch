@@ -115,7 +115,7 @@ export const SystemCapitalCard: FC = () => {
       <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)] p-2">
         <div className="mb-2 flex items-center gap-1">
           <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">LP Exposure</span>
-          <InfoIcon tooltip="LP position aggregates — net exposure drives funding rates, concentration shows whale risk" />
+          <InfoIcon tooltip="LP position aggregates - net exposure drives funding rates, concentration shows whale risk" />
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="flex flex-col">

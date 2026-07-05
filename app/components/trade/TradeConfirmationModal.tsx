@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { formatLeverage, ORDER_LEVERAGE_LABEL, RISK_LEVERAGE_LABEL } from "@/lib/leverage-display";
+import { formatTokenAmount } from "@/lib/format";
 
 interface TradeConfirmationModalProps {
   direction: "long" | "short";
@@ -33,14 +34,13 @@ interface TradeConfirmationModalProps {
   onCancel: () => void;
 }
 
-function formatPerc(native: bigint, decimals = 6): string {
-  const abs = native < 0n ? -native : native;
-  const base = 10n ** BigInt(decimals);
-  const whole = abs / base;
-  const frac = (abs % base).toString().padStart(decimals, "0").replace(/0+$/, "");
-  const w = whole.toString();
-  return frac ? `${w}.${frac}` : w;
-}
+/**
+ * Focusable-element selector for the focus trap. Excludes `[disabled]` controls
+ * so a disabled boundary element can't break the Tab-wrap (keeps focus trapped
+ * even if a future variant disables Cancel/Confirm).
+ */
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   direction,
@@ -96,11 +96,31 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
       );
     }
 
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancelRef.current();
+    // Move initial focus inside the dialog (APG dialog pattern) so Tab starts trapped.
+    const focusable = modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+    focusable[0]?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onCancelRef.current();
+        return;
+      }
+      if (e.key === "Tab") {
+        const items = modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefersReduced]);
 
@@ -158,13 +178,13 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <div className="flex justify-between">
             <span className="text-[var(--text-dim)]">Position Size:</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatPerc(positionSize, decimals)} {symbol}
+              {formatTokenAmount(positionSize, decimals)} {symbol}
             </span>
           </div>
           <div className="flex justify-between">
             <span className="text-[var(--text-dim)]">Margin Required:</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatPerc(margin, decimals)} {settleSymbol}
+              {formatTokenAmount(margin, decimals)} {settleSymbol}
             </span>
           </div>
           <div className="flex justify-between">
@@ -180,13 +200,13 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <div className="flex justify-between">
             <span className="text-[var(--text-dim)]">Trading Fee:</span>
             <span className="font-mono font-medium text-[var(--text)]">
-              {formatPerc(tradingFee, decimals)} {settleSymbol}
+              {formatTokenAmount(tradingFee, decimals)} {settleSymbol}
             </span>
           </div>
           <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">
             <span className="text-[var(--text-dim)]">Est. Liquidation Price:</span>
             <span className="font-mono font-medium text-[var(--short)]">
-              {estimatedLiqPrice <= 0n ? "N/A" : `$${formatPerc(estimatedLiqPrice, 6)}`}
+              {estimatedLiqPrice <= 0n ? "N/A" : `$${formatTokenAmount(estimatedLiqPrice, 6)}`}
             </span>
           </div>
           {worstFillPriceE6 != null && worstFillPriceE6 > 0n && (
@@ -195,7 +215,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
                 {direction === "long" ? "Max Fill Price:" : "Min Fill Price:"}
               </span>
               <span className="font-mono font-medium text-[var(--text)]">
-                ${formatPerc(worstFillPriceE6, 6)}
+                ${formatTokenAmount(worstFillPriceE6, 6)}
               </span>
             </div>
           )}
