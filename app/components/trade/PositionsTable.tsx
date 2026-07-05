@@ -276,7 +276,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
                   onClick={() => setShowCloseModal(true)}
                   disabled={closeLoading || lpUnderfunded || !hasValidMark}
                   title={!hasValidMark ? "Waiting for price data…" : undefined}
-                  className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Close
                 </button>

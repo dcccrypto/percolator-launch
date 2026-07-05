@@ -75,14 +75,15 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
       })()
     : "No open position";
 
-  // State: no position AND no minted NFT — nothing to show.
+  // State: no position AND no minted NFT — nothing to show. Centered within
+  // whatever height the parent rail gives this panel (see page.tsx's
+  // OrderTicketRail — this panel absorbs the rail's remaining height rather
+  // than leaving dead space below a small top-anchored card).
   if (!effectiveAccount && !hasMintedNft) {
     return (
-      <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <div className="flex flex-col items-center py-4 text-center">
-          <p className="text-[11px] font-medium text-[var(--text)]">Position NFT</p>
-          <p className="mt-1 text-[10px] text-[var(--text-dim)]">Connect wallet to view NFT status.</p>
-        </div>
+      <div className="relative flex h-full min-h-[120px] w-full flex-col items-center justify-center p-3 text-center">
+        <p className="text-[11px] font-medium text-[var(--text)]">Position NFT</p>
+        <p className="mt-1 text-[10px] text-[var(--text-dim)]">Connect wallet to view NFT status.</p>
       </div>
     );
   }
@@ -92,7 +93,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
   // looking broken. Instead keep the full panel mounted and show a subtle
   // inline spinner in the header until the first fetch lands.
   return (
-    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
+    <div className="relative flex h-full w-full flex-col">
       {/* Header strip */}
       <div className="flex items-center gap-2 px-3 py-2 border-l-2 border-l-[var(--accent)] bg-[var(--accent)]/[0.06]">
         <span className="text-[13px] leading-none text-[var(--accent)]">◆</span>
@@ -169,7 +170,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
                 ? "Minting…"
                 : "Mint a position NFT"
             }
-            className="flex-1 rounded-none border border-[var(--long)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--long)] transition-all duration-150 hover:bg-[var(--long)]/8 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex-1 rounded-none border border-[var(--long)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--long)] transition-colors duration-150 hover:bg-[var(--long)]/8 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {mintLoading || pendingMint ? "Minting…" : "Mint NFT"}
           </button>
@@ -188,7 +189,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
                 ? "Sending…"
                 : "Transfer position to another wallet"
             }
-            className="flex-1 rounded-none border border-[var(--accent)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-150 hover:bg-[var(--accent)]/10 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex-1 rounded-none border border-[var(--accent)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:bg-[var(--accent)]/10 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {transferLoading ? "Sending…" : "Send NFT"}
           </button>
@@ -204,7 +205,7 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
                 ? "Burning…"
                 : "Burn the position NFT"
             }
-            className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {burnLoading ? "Burning…" : "Burn NFT"}
           </button>

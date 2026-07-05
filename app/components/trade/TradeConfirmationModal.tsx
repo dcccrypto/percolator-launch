@@ -241,7 +241,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <button
             onClick={handleConfirm}
             disabled={submitting}
-            className={`flex-1 rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:brightness-110 disabled:opacity-50 ${
+            className={`flex-1 rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[background-color,filter,opacity] duration-150 hover:brightness-110 disabled:opacity-50 ${
               direction === "long" ? "bg-[var(--long)]" : "bg-[var(--short)]"
             }`}
           >
