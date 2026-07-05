@@ -144,7 +144,16 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     : 0n;
   const pnlUsdRaw = priceUsd !== null && hasValidMark ? (Number(pnlTokens) / 10 ** decimals) * priceUsd : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
-  const roe = hasValidMark ? computePnlPercent(pnlTokens, account.capital) : 0;
+  // computePnlPercent throws when pnlTokens*10000/capital overflows
+  // MAX_SAFE_INTEGER (extreme dust-capital position); fall back to 0 so an
+  // outlier position can't blank the whole panel (mirrors the slippageBoundE6
+  // guard in OrderTicket.tsx).
+  let roe = 0;
+  try {
+    roe = hasValidMark ? computePnlPercent(pnlTokens, account.capital) : 0;
+  } catch {
+    roe = 0;
+  }
 
   // GMX-style pool-capped PnL: the LP vault is the real counterparty (not a
   // matched order book) — a winning position's paper PnL can't exceed what

@@ -286,8 +286,14 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
       cancelled = true;
     };
     // Deliberately excluding `connection` — object ref recreated on every poll.
+    // `raw` IS included so the NFT status re-scans on every slab update — after a
+    // mint/transfer/burn the portfolio is escrowed (owner != wallet), so `userIdx`
+    // stays null and would never re-trigger this effect on its own; without `raw`
+    // the panel showed stale "Minted/Active" after a Send and let the user re-click
+    // Send/Burn into a failing tx (mirrors useUserAccount / useNftWrappedPosition,
+    // which both key off `raw`).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isV17, walletPubkeyStr, userIdx, programIdStr, slabAddress, mockMode]);
+  }, [isV17, walletPubkeyStr, userIdx, programIdStr, slabAddress, mockMode, raw]);
 
   return state;
 }

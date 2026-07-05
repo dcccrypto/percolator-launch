@@ -22,7 +22,7 @@ export function useBurnPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
   const wallet = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { programId, raw } = useSlabState();
+  const { programId, raw, refresh } = useSlabState();
   const { nftMint, nftPdaAddress } = usePositionNft(slabAddress);
   const { toast } = useToast();
 
@@ -112,6 +112,10 @@ export function useBurnPositionNft(slabAddress: string) {
         computeUnits: 800_000,
       });
 
+      // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
+      // and the UI reflects the unwrapped position right after a confirmed burn.
+      refresh();
+
       toast("Position NFT burned!", "success");
       return sig;
     } catch (e) {
@@ -123,7 +127,7 @@ export function useBurnPositionNft(slabAddress: string) {
     } finally {
       setLoading(false);
     }
-  }, [walletPubkey, programId, raw, nftMint, nftPdaAddress, slabAddress, connection, wallet, toast]);
+  }, [walletPubkey, programId, raw, nftMint, nftPdaAddress, slabAddress, connection, wallet, toast, refresh]);
 
   return { burn, loading, error };
 }

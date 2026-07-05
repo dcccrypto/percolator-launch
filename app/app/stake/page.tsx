@@ -10,6 +10,7 @@ import {
   STAKE_POOL_SIZE,
   decodeStakePool,
 } from "@percolatorct/sdk";
+import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
 import { useStakeDepositJunior } from "@/hooks/useStakeDepositJunior";
@@ -717,13 +718,19 @@ export default function StakePage() {
 
     (async () => {
       try {
+        // Stake pools are owned by this deployment's vault program
+        // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
+        const stakeProgramId = new PublicKey(
+          (getConfig() as { vaultProgramId?: string }).vaultProgramId
+          ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
+        );
         // Check each pool for user's LP position
         for (const pool of pools) {
           if (!pool.slabAddress || !pool.collateralMint) continue;
           try {
             const slabPk = new PublicKey(pool.slabAddress);
-            const [poolPda] = deriveStakePool(slabPk);
-            const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey);
+            const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
+            const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey, stakeProgramId);
 
             // Fetch pool account to get lpMint using canonical StakePool layout
             const poolInfo = await connection.getAccountInfo(poolPda);

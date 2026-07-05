@@ -163,6 +163,25 @@ function OrderTicketRail({ slab }: { slab: string }) {
 
 function MobileOrderSheet({ slab }: { slab: string }) {
   const [open, setOpen] = useState(false);
+
+  // While the bottom-sheet (role="dialog" aria-modal) is open, lock background
+  // scroll and close it on Escape — otherwise the page scrolls behind the sheet
+  // and there's no keyboard dismissal. Restore overflow + detach the listener on
+  // cleanup (and whenever `open` flips back to false).
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
   return (
     <>
       {/* Raised above the global MobileBottomNav (components/layout/MobileBottomNav.tsx,
@@ -616,7 +635,14 @@ export default function TradePage({ params }: { params: Promise<{ slab: string }
   }
 
   return (
-    <SlabProvider slabAddress={slab}>
+    // key={slab} forces a clean remount of the whole trade subtree on a market
+    // switch. Next.js App Router reuses client components when only the [slab]
+    // param changes, so without this the terminal briefly shows the NEW market's
+    // name/URL but the PREVIOUS market's price/balance/positions/config until the
+    // RPC round-trip resolves — a trading-correctness risk (review numbers for SOL,
+    // submit on BONK). Remounting resets SlabProvider/useMarketInfo/OrderTicket to
+    // a clean loading state instead of leaking stale state across markets.
+    <SlabProvider key={slab} slabAddress={slab}>
       <UsdToggleProvider>
         <AutoDepositProvider slabAddress={slab}>
           <TradePageInner slab={slab} />

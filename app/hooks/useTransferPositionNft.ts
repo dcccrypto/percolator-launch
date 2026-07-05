@@ -17,6 +17,7 @@ import {
 } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { usePositionNft } from "@/hooks/usePositionNft";
+import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
@@ -152,6 +153,7 @@ export function useTransferPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey, signTransaction } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const { nftMint } = usePositionNft(slabAddress);
+  const { refresh } = useSlabState();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(false);
@@ -339,6 +341,11 @@ export function useTransferPositionNft(slabAddress: string) {
           "confirmed",
         );
 
+        // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
+        // and the UI reflects the transferred-away position without waiting for
+        // the next poll cycle.
+        refresh();
+
         toast(`Position NFT sent to ${destinationWallet.toBase58().slice(0, 8)}…`, "success");
         return sig;
       } catch (e) {
@@ -373,7 +380,7 @@ export function useTransferPositionNft(slabAddress: string) {
         setLoading(false);
       }
     },
-    [walletPubkey, nftMint, signTransaction, connection, toast],
+    [walletPubkey, nftMint, signTransaction, connection, toast, refresh],
   );
 
   return { transfer, loading, error };

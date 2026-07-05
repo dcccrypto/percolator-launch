@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useState } from "react";
+import { FC, useEffect, useState } from "react";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { useMintPositionNft } from "@/hooks/useMintPositionNft";
 import { useBurnPositionNft } from "@/hooks/useBurnPositionNft";
@@ -41,6 +41,18 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
   const assetSymbol = sanitizeSymbol(marketInfo.market?.symbol) ?? "SIZE";
 
   const [showSendModal, setShowSendModal] = useState(false);
+
+  // Optimistically disable the Mint button the moment a mint is initiated, and
+  // keep it disabled until the on-chain state actually reflects the mint. Without
+  // this there's a stale window between "tx confirmed / refresh() fired" and
+  // usePositionNft re-scanning, during which hasMintedNft is still false and a
+  // user could click Mint again (double-mint into a failing tx).
+  const [pendingMint, setPendingMint] = useState(false);
+
+  // Clear the optimistic guard once the on-chain state confirms the mint.
+  useEffect(() => {
+    if (hasMintedNft) setPendingMint(false);
+  }, [hasMintedNft]);
 
   // Once a position is wrapped into an NFT, MintPositionNft escrows the
   // portfolio away from the wallet, so useUserAccount returns null. Fall back to
@@ -139,20 +151,27 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
         <div className="flex gap-2 pt-1">
           {/* Mint NFT — enabled when user has a position but no NFT yet */}
           <button
-            onClick={() => mintNft()}
-            disabled={!hasPosition || hasMintedNft || mintLoading}
+            onClick={async () => {
+              setPendingMint(true);
+              const sig = await mintNft();
+              // Keep the guard set on success (cleared once hasMintedNft flips
+              // true via the useEffect above). On failure, release it so the
+              // user can retry.
+              if (!sig) setPendingMint(false);
+            }}
+            disabled={!hasPosition || hasMintedNft || mintLoading || pendingMint}
             title={
               !hasPosition
                 ? "Open a position first"
                 : hasMintedNft
                 ? "NFT already minted"
-                : mintLoading
+                : mintLoading || pendingMint
                 ? "Minting…"
                 : "Mint a position NFT"
             }
             className="flex-1 rounded-none border border-[var(--long)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--long)] transition-all duration-150 hover:bg-[var(--long)]/8 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {mintLoading ? "Minting…" : "Mint NFT"}
+            {mintLoading || pendingMint ? "Minting…" : "Mint NFT"}
           </button>
 
           {/* Send NFT — enabled when NFT exists. Token-2022 TransferChecked

@@ -156,29 +156,45 @@ function applyPatch(entry: SlabEntry, patch: Partial<PriceState>): void {
   notify(entry);
 }
 
+function flushEntry(entry: SlabEntry): void {
+  entry.flushScheduled = false;
+  const tick = entry.pendingTick;
+  entry.pendingTick = null;
+  if (tick) {
+    entry.source = "live";
+    const prevHigh = entry.snapshot.high24h;
+    const prevLow = entry.snapshot.low24h;
+    applyPatch(entry, {
+      price: tick.usd,
+      priceUsd: tick.usd,
+      priceE6: tick.priceE6,
+      high24h: prevHigh !== null ? Math.max(prevHigh, tick.usd) : prevHigh,
+      low24h: prevLow !== null ? Math.min(prevLow, tick.usd) : prevLow,
+      loading: false,
+    });
+  }
+  const finishSpan = entry.pendingSpanFinish;
+  entry.pendingSpanFinish = null;
+  finishSpan?.();
+}
+
 function scheduleFlush(entry: SlabEntry): void {
   if (entry.flushScheduled) return;
   entry.flushScheduled = true;
-  requestAnimationFrame(() => {
-    entry.flushScheduled = false;
-    const tick = entry.pendingTick;
-    entry.pendingTick = null;
-    if (tick) {
-      entry.source = "live";
-      const prevHigh = entry.snapshot.high24h;
-      const prevLow = entry.snapshot.low24h;
-      applyPatch(entry, {
-        price: tick.usd,
-        priceUsd: tick.usd,
-        priceE6: tick.priceE6,
-        high24h: prevHigh !== null ? Math.max(prevHigh, tick.usd) : prevHigh,
-        low24h: prevLow !== null ? Math.min(prevLow, tick.usd) : prevLow,
-        loading: false,
-      });
+  requestAnimationFrame(() => flushEntry(entry));
+}
+
+// When a tab is backgrounded, requestAnimationFrame is paused/throttled — a tick
+// that arrives while hidden buffers into `pendingTick` but its scheduled rAF
+// callback doesn't run, so the price looks frozen and the user "has to refresh".
+// Flush any pending ticks the instant the tab becomes visible again so the
+// displayed price is current on return, without waiting for the next rAF+tick.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    for (const entry of entries.values()) {
+      if (entry.pendingTick) flushEntry(entry);
     }
-    const finishSpan = entry.pendingSpanFinish;
-    entry.pendingSpanFinish = null;
-    finishSpan?.();
   });
 }
 

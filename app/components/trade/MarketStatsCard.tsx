@@ -41,7 +41,8 @@ function fundingRateBpsTo8h(rateBps: bigint): number {
 }
 
 export const MarketStatsCard: FC = () => {
-  const { engine, params, fundingRate, loading } = useEngineState();
+  // totalOI/oiLong/oiShort work on BOTH v12 and v17; vault is engine-only (null on v17).
+  const { engine, params, fundingRate, loading, totalOI: totalOIField, oiLong, oiShort, vault: vaultField } = useEngineState();
   const { config: mktConfig, slabAddress, wrapperConfigV17 } = useSlabState();
   const config = useMarketConfig();
   const { market: marketInfo } = useMarketInfo(slabAddress);
@@ -115,23 +116,29 @@ export const MarketStatsCard: FC = () => {
 
   const decimals = tokenMeta?.decimals ?? 6;
   const tokenDivisor = 10 ** decimals;
-  // Sanitize sentinel values (u64::MAX) from uninitialized on-chain fields
-  // v17: engine is null — fall back to 0n for OI/vault stats
-  const totalOI = sanitizeOnChainValue(engine?.totalOpenInterest ?? 0n);
-  const vault = sanitizeOnChainValue(engine?.vault ?? 0n);
-  const oiDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(totalOI) / tokenDivisor) * priceUsd)
-    : formatCompactTokenAmount(totalOI, decimals);
-  const vaultDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(vault) / tokenDivisor) * priceUsd)
-    : formatCompactTokenAmount(vault, decimals);
-  // Full-precision tooltips for truncated stat cells (D1/D2)
-  const oiFullDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(totalOI) / tokenDivisor) * priceUsd)
-    : formatTokenAmount(totalOI, decimals);
-  const vaultFullDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(vault) / tokenDivisor) * priceUsd)
-    : formatTokenAmount(vault, decimals);
+  // Sanitize sentinel values (u64::MAX) from uninitialized on-chain fields.
+  // totalOI/oiLong/oiShort come from useEngineState and work on v12 AND v17.
+  // vault is engine-only → null on v17 → renders "—".
+  const totalOI = sanitizeOnChainValue(totalOIField ?? 0n);
+  const vaultAtoms = vaultField != null ? sanitizeOnChainValue(vaultField) : null;
+  const oiLongAtoms = oiLong != null ? sanitizeOnChainValue(oiLong) : null;
+  const oiShortAtoms = oiShort != null ? sanitizeOnChainValue(oiShort) : null;
+  const fmtOI = (atoms: bigint): string =>
+    showUsd && priceUsd != null
+      ? formatNum((Number(atoms) / tokenDivisor) * priceUsd)
+      : formatCompactTokenAmount(atoms, decimals);
+  const fmtOIFull = (atoms: bigint): string =>
+    showUsd && priceUsd != null
+      ? formatNum((Number(atoms) / tokenDivisor) * priceUsd)
+      : formatTokenAmount(atoms, decimals);
+  const oiDisplay = fmtOI(totalOI);
+  const oiFullDisplay = fmtOIFull(totalOI);
+  const vaultDisplay = vaultAtoms != null ? fmtOI(vaultAtoms) : "—";
+  const vaultFullDisplay = vaultAtoms != null ? fmtOIFull(vaultAtoms) : "—";
+  const oiLongDisplay = oiLongAtoms != null ? fmtOI(oiLongAtoms) : "—";
+  const oiLongFullDisplay = oiLongAtoms != null ? fmtOIFull(oiLongAtoms) : "—";
+  const oiShortDisplay = oiShortAtoms != null ? fmtOI(oiShortAtoms) : "—";
+  const oiShortFullDisplay = oiShortAtoms != null ? fmtOIFull(oiShortAtoms) : "—";
 
   // Spread display: "+$0.06 (+0.03%)" or "—" for pyth-pinned / unavailable
   const showSpread = oracleMode !== "pyth-pinned" && markPriceE6 !== null && indexPriceE6 !== null;
@@ -196,6 +203,8 @@ export const MarketStatsCard: FC = () => {
     },
     // Row 2 — Market health
     { label: "Open Interest", value: oiDisplay, tooltip: oiFullDisplay },
+    { label: "OI Long", value: oiLongDisplay, tooltip: oiLongFullDisplay, valueClass: oiLongAtoms != null ? "text-[var(--long)]" : undefined },
+    { label: "OI Short", value: oiShortDisplay, tooltip: oiShortFullDisplay, valueClass: oiShortAtoms != null ? "text-[var(--short)]" : undefined },
     { label: "Vault", value: vaultDisplay, tooltip: vaultFullDisplay },
     {
       label: "Funding/8h",
