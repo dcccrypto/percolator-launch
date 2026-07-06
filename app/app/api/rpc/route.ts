@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRpcEndpoint } from "@/lib/config";
 import { createHash, timingSafeEqual } from "crypto";
+import { getClientIp } from "@/lib/get-client-ip";
+import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -444,33 +446,28 @@ function isAllowedOrigin(req: NextRequest): boolean {
  * #2210: best-effort per-IP rate limit. The Origin/Referer check is defense-in-depth
  * ONLY — Origin is a client-controlled header, so a non-browser caller can spoof an
  * allowed value (e.g. `Origin: https://percolatorlaunch.com`) and still pass. To bound
- * paid-Helius-quota drain we cap requests per source IP. In-memory + per-instance (not a
- * hard global guarantee — infra-level rate limiting should layer on top), but it removes
- * the "unbounded anonymous drain" property. Tunable via RPC_RATE_LIMIT_PER_WINDOW.
+ * paid-Helius-quota drain we cap requests per source IP.
+ *
+ * Uses the shared Upstash Redis limiter (app/lib/upstash-rate-limit.ts) so the count is
+ * consistent across Vercel's multiple serverless instances — an in-memory Map here would
+ * give every instance its own independent budget, which doesn't actually bound drain rate
+ * under real (multi-instance) production traffic. Falls back to an in-memory sliding
+ * window (same helper) when Upstash env vars are unconfigured (dev/CI).
+ * Tunable via RPC_RATE_LIMIT_PER_WINDOW.
  */
 const RATE_LIMIT_WINDOW_MS = 10_000;
 const RATE_LIMIT_MAX = Number(process.env.RPC_RATE_LIMIT_PER_WINDOW ?? "200"); // per IP / 10s
-const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+const rpcRateLimiter = createUpstashRateLimiter({
+  limit: RATE_LIMIT_MAX,
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  prefix: "rl:rpc-proxy",
+});
 
-function rateLimited(req: NextRequest): boolean {
+async function isRateLimited(req: NextRequest): Promise<boolean> {
   if (!Number.isFinite(RATE_LIMIT_MAX) || RATE_LIMIT_MAX <= 0) return false; // disabled
-  const ip = (
-    req.headers.get("x-forwarded-for")?.split(",")[0] ??
-    req.headers.get("x-real-ip") ??
-    "unknown"
-  ).trim();
-  const now = Date.now();
-  const b = rateBuckets.get(ip);
-  if (!b || now > b.resetAt) {
-    // Opportunistic cleanup of expired buckets to bound memory.
-    if (rateBuckets.size > 5000) {
-      for (const [k, v] of rateBuckets) if (now > v.resetAt) rateBuckets.delete(k);
-    }
-    rateBuckets.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return false;
-  }
-  b.count++;
-  return b.count > RATE_LIMIT_MAX;
+  const ip = getClientIp(req);
+  const result = await rpcRateLimiter.check(ip);
+  return !result.allowed;
 }
 
 export async function POST(req: NextRequest) {
@@ -483,7 +480,7 @@ export async function POST(req: NextRequest) {
   }
 
   // #2210: per-IP rate limit — Origin is spoofable, so cap drain rate regardless.
-  if (rateLimited(req)) {
+  if (await isRateLimited(req)) {
     return NextResponse.json(
       { jsonrpc: "2.0", error: { code: -32005, message: "Rate limit exceeded" }, id: null },
       { status: 429 }
