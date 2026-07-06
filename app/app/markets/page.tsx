@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef, Suspense } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback, useSyncExternalStore, Suspense, type FC } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -23,6 +23,7 @@ import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { MarketLogo } from "@/components/market/MarketLogo";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { detectOracleMode, resolveMarketPriceE6, priceE6ToUsd, sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
+import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { formatStatValue } from "@/lib/format";
 import { MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 
@@ -78,6 +79,19 @@ function resolveDiscoveredPriceE6(oc: DiscoveredMarket): bigint {
   if (!oc.config?.indexFeedId) return 0n;
   return resolveMarketPriceE6(oc.config);
 }
+
+/** Live-ticking price cell. Subscribes this row's slab to the shared price
+ *  store (the same WS feed the trade page ticks off), so list prices move in
+ *  real time instead of freezing at the discovery/stats snapshot. Falls back
+ *  to the static snapshot price until the first tick arrives — markets the
+ *  feed doesn't stream (or no WS configured) keep the previous behavior.
+ *  Isolated as a component so ticks re-render only this cell, not the list. */
+const LiveRowPrice: FC<{ slab: string; fallback: number | null }> = ({ slab, fallback }) => {
+  const subscribe = useCallback((cb: () => void) => subscribeSlab(slab, cb), [slab]);
+  const getSnap = useCallback(() => getSnapshot(slab).priceUsd, [slab]);
+  const live = useSyncExternalStore(subscribe, getSnap, () => null);
+  return <>{formatUsdFromNumber(live ?? fallback)}</>;
+};
 
 function isPlaceholderMarketSymbol(sym: string | null | undefined, addresses: Array<string | null | undefined>): boolean {
   if (!sym) return true;
@@ -264,9 +278,12 @@ function MarketsPageInner() {
       // Derive from oracle_mode field (canonical); fall back to oracle_authority presence for
       // old rows that predate the oracle_mode column (migration 035).
       // "hyperp" markets use on-chain DEX pool — NOT admin-controlled.
-      // "admin" and "keeper" are both admin/auth-mark price sources — show price controls.
+      // "keeper" (AUTH_MARK) is an automated keeper service — NOT manual admin
+      // entry; excluding it matches the on-chain branch above (which never
+      // badges keeper markets MANUAL). Only true "admin" (manual push) rows
+      // should show the manual badge.
       const isAdminOracle = stats.oracle_mode != null
-        ? stats.oracle_mode !== "hyperp" && stats.oracle_mode !== "pyth"
+        ? stats.oracle_mode !== "hyperp" && stats.oracle_mode !== "pyth" && stats.oracle_mode !== "keeper"
         : (stats.oracle_authority != null && stats.oracle_authority !== "");
       result.push({
         slabAddress: slabAddr,
@@ -1048,7 +1065,7 @@ function MarketsPageInner() {
                       </div>
                       <div className="text-right truncate">
                         <span className="text-sm text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                          {formatUsdFromNumber(lastPrice)}
+                          <LiveRowPrice slab={m.slabAddress} fallback={lastPrice} />
                         </span>
                       </div>
                       <div className="hidden sm:block text-right text-sm text-[var(--text-secondary)] truncate tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>{oiDisplay}</div>

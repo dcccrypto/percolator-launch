@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
-import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, V17_HEADER_LEN, V17_WRAPPER_CONFIG_LEN } from "@percolatorct/sdk";
+import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, parseMarketGroupV17OI, type V17MarketGroupOI, V17_HEADER_LEN, V17_WRAPPER_CONFIG_LEN } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
@@ -263,7 +263,7 @@ function numericOrNull(v: unknown): number | null {
  * For v17 markets, configV17 carries all config fields.
  * For v12 slabs, config has the fields; engine/params hold stats.
  */
-function discoveredToApiRow(m: DiscoveredMarket): Record<string, unknown> {
+function discoveredToApiRow(m: DiscoveredMarket, v17Oi?: V17MarketGroupOI): Record<string, unknown> {
   const slabAddress = m.slabAddress.toBase58();
   const programId = m.programId.toBase58();
 
@@ -272,6 +272,13 @@ function discoveredToApiRow(m: DiscoveredMarket): Record<string, unknown> {
     const markPriceRaw = cfg.markEwmaE6;
     const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
     const playgroundMeta = PLAYGROUND_SLAB_META[slabAddress];
+    // Live engine stats parsed from the raw market-group bytes (see the extra
+    // getMultipleAccountsInfo read in discoverMarketsOnChain). undefined when
+    // that read failed — fields then keep the previous zeroed placeholders.
+    const oiLong = v17Oi ? Number(v17Oi.totalLongOiQ) : 0;
+    const oiShort = v17Oi ? Number(v17Oi.totalShortOiQ) : 0;
+    const totalOi = oiLong + oiShort;
+    const insurance = v17Oi ? Number(v17Oi.insuranceBalance) : 0;
     return {
       slab_address: slabAddress,
       program_id: programId,
@@ -293,19 +300,23 @@ function discoveredToApiRow(m: DiscoveredMarket): Record<string, unknown> {
       index_price: null,
       volume_24h: 0,
       trade_count_24h: 0,
-      open_interest_long: 0,
-      open_interest_short: 0,
-      total_open_interest: 0,
-      total_open_interest_usd: 0,
-      insurance_fund: 0,
-      insurance_balance: 0,
+      open_interest_long: oiLong,
+      open_interest_short: oiShort,
+      total_open_interest: totalOi,
+      total_open_interest_usd: markPriceUsd != null ? (totalOi / 1_000_000) * markPriceUsd : 0,
+      insurance_fund: insurance,
+      insurance_balance: insurance,
       total_accounts: 0,
       funding_rate: null,
       net_lp_pos: 0,
       lp_sum_abs: 0,
-      c_tot: 0,
+      // Unknown on v17 (no cheap on-chain source for vault/capital yet) —
+      // null, NOT 0. A hard 0 here trips the phantom-OI vault guard
+      // (MIN_VAULT_FOR_OI) and health logic downstream; null reads as
+      // "no data" and degrades gracefully.
+      c_tot: null,
       volume_24h_usd: 0,
-      vault_balance: 0,
+      vault_balance: null,
     };
   }
 
@@ -364,14 +375,37 @@ async function discoverMarketsOnChain(): Promise<Record<string, unknown>[]> {
     if (found.length === 0) return [];
 
     const seen = new Set<string>();
-    return found
-      .filter(m => {
-        const key = m.slabAddress.toBase58();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .map(discoveredToApiRow);
+    const unique = found.filter(m => {
+      const key = m.slabAddress.toBase58();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Enrich v17 rows with live OI + insurance parsed from the raw account
+    // bytes (discoverMarkets returns parsed configs only, not raws) — one
+    // batched RPC read for all v17 slabs. Degrades gracefully: on failure the
+    // rows keep zeroed stats, which is exactly the pre-enrichment behavior.
+    const v17Stats = new Map<string, V17MarketGroupOI>();
+    const v17Markets = unique.filter((m) => m.configV17);
+    // getMultipleAccountsInfo caps at 100 accounts per call — chunk the reads.
+    const CHUNK = 100;
+    for (let start = 0; start < v17Markets.length; start += CHUNK) {
+      const chunk = v17Markets.slice(start, start + CHUNK);
+      try {
+        const infos = await connection.getMultipleAccountsInfo(chunk.map((m) => m.slabAddress));
+        infos.forEach((info, i) => {
+          if (!info?.data) return;
+          const data = new Uint8Array(info.data);
+          if (!isV17Account(data)) return;
+          v17Stats.set(chunk[i].slabAddress.toBase58(), parseMarketGroupV17OI(data));
+        });
+      } catch {
+        /* this chunk's stats stay zeroed */
+      }
+    }
+
+    return unique.map((m) => discoveredToApiRow(m, v17Stats.get(m.slabAddress.toBase58())));
   } catch {
     return [];
   }
