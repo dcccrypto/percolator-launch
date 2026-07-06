@@ -49,7 +49,9 @@ export function ProtocolStatsBar() {
       let { data, error: dbErr } = await getSupabase()
         .from("markets_with_stats")
         .select("slab_address, symbol, volume_24h, last_price, decimals, total_open_interest, open_interest_long, open_interest_short, vault_balance, total_accounts")
-        .neq("indexer_excluded", true)
+        // markets_with_stats runtime filter: generated Supabase types do not expose indexer_excluded.
+        // Keep excluding indexer-excluded rows without breaking TypeScript column narrowing.
+        .or("indexer_excluded.is.null,indexer_excluded.eq.false")
         .returns<{
           slab_address: string;
           symbol: string | null;
