@@ -792,7 +792,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             </button>
             <button
               onClick={() => toggleInlineDeposit("withdraw")}
-              className="text-[10px] uppercase tracking-[0.12em] text-[var(--warning)] transition-colors duration-150 hover:brightness-110"
+              className="text-[10px] uppercase tracking-[0.12em] text-[var(--long)] transition-colors duration-150 hover:brightness-110"
             >
               − Withdraw
             </button>
