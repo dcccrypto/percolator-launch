@@ -193,11 +193,16 @@ const CACHEABLE_METHODS: Record<string, number> = {
   getSlot: 2_000,
   getBlockHeight: 2_000,
   getEpochInfo: 10_000,
-  getAccountInfo: 3_000,
-  getMultipleAccounts: 3_000,
-  getBalance: 3_000,
-  getTokenAccountBalance: 3_000,
-  getProgramAccounts: 5_000,
+  // Account-data reads drive live balances/positions in a trading UI. Kept low
+  // so a post-trade refresh reflects the settled state within ~1-2s instead of
+  // showing a stale cached balance (a hard 3-5s cache made "my balance didn't
+  // update after I traded" — the portfolio is read via getProgramAccounts on
+  // v17). Still deduped enough to absorb burst polling.
+  getAccountInfo: 1_000,
+  getMultipleAccounts: 1_000,
+  getBalance: 1_000,
+  getTokenAccountBalance: 1_000,
+  getProgramAccounts: 1_500,
   getMinimumBalanceForRentExemption: 60_000,
   getSupply: 10_000,
   getRecentPrioritizationFees: 5_000,

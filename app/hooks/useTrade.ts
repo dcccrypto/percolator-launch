@@ -362,14 +362,17 @@ export function useTrade(slabAddress: string) {
         instructions.push(tradeIx);
 
         const sig = await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
-        // Re-fetch the slab so useUserAccount re-scans immediately: a trade
-        // opens/closes a leg AND changes capital, and the order-ticket balance
-        // reads userAccount.account.capital. Without this the balance stayed
-        // stale until the next background poll — the reported "close doesn't
-        // update balance" bug. Mirrors useDeposit/useWithdraw. The delayed
-        // second call catches the fully-settled state post-confirmation.
+        // Re-fetch the slab so useUserAccount re-scans: a trade opens/closes a
+        // leg AND changes capital, and the order-ticket balance reads
+        // userAccount.account.capital. sendTx already waited for confirmation,
+        // so the settled state is on-chain — but the /api/rpc account-data cache
+        // (~1-1.5s) means a single immediate refresh reads the pre-trade cached
+        // balance. Fire a short burst so one lands just past the cache window;
+        // the balance/position reflect the trade within ~1-2s instead of waiting
+        // on the (30s when WS-active) background poll. Fixes "balance doesn't
+        // update after I trade". Mirrors useDeposit/useWithdraw.
         refreshSlab();
-        setTimeout(() => refreshSlab(), 2000);
+        [1200, 2200, 3500].forEach((ms) => setTimeout(() => refreshSlab(), ms));
         return sig;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
