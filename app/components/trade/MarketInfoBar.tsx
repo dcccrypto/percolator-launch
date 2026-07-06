@@ -6,6 +6,7 @@ import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { MarketLogo } from "@/components/market/MarketLogo";
+import { MarketSwitcher } from "@/components/trade/MarketSwitcher";
 import { formatUsdFromNumber, formatMarkPrice } from "@/lib/format";
 
 interface MarketInfoBarProps {
@@ -143,14 +144,8 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
       data-testid="market-info-bar"
       className="sticky top-0 z-30 w-full border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm px-4 py-3 flex items-center gap-5 overflow-x-auto whitespace-nowrap scrollbar-none"
     >
-      {/* Symbol + Logo */}
-      <div className="flex items-center gap-2 shrink-0">
-        <MarketLogo logoUrl={logoUrl} mintAddress={mintAddress} symbol={symbol} size="sm" />
-        <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-          {symbol}/USD
-          <span className="ml-1.5 text-[9px] font-normal uppercase tracking-[0.12em] text-[var(--text-dim)]">PERP</span>
-        </span>
-      </div>
+      {/* Symbol + Logo — now a dropdown market switcher (top markets + search) */}
+      <MarketSwitcher slabAddress={slabAddress} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} />
 
       <span className="h-6 w-px bg-[var(--border)] shrink-0" />
 
