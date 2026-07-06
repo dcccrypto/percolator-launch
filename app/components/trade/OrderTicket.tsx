@@ -230,6 +230,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     worstFillPriceE6: bigint;
   } | null>(null);
   const [showInlineDeposit, setShowInlineDeposit] = useState(false);
+  // Which tab the inline card opens on. Clicking the active trigger closes the
+  // card; clicking the other trigger switches its tab in place.
+  const [inlineDepositMode, setInlineDepositMode] = useState<"deposit" | "withdraw">("deposit");
+  const toggleInlineDeposit = (target: "deposit" | "withdraw") => {
+    if (showInlineDeposit && inlineDepositMode === target) {
+      setShowInlineDeposit(false);
+      return;
+    }
+    setInlineDepositMode(target);
+    setShowInlineDeposit(true);
+  };
 
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
   const [initCtaError, setInitCtaError] = useState<string | null>(null);
@@ -772,17 +783,25 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <div className="font-mono tabular-nums text-[var(--text)]">{formatTokenAmount(buyingPower, decimals)} {collateralSymbol}</div>
         </div>
         {connected && !needsAccount && !needsDeposit && (
-          <button
-            onClick={() => setShowInlineDeposit((v) => !v)}
-            className="shrink-0 text-[10px] uppercase tracking-[0.12em] text-[var(--accent)] transition-colors duration-150 hover:brightness-110"
-          >
-            + Deposit
-          </button>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <button
+              onClick={() => toggleInlineDeposit("deposit")}
+              className="text-[10px] uppercase tracking-[0.12em] text-[var(--accent)] transition-colors duration-150 hover:brightness-110"
+            >
+              + Deposit
+            </button>
+            <button
+              onClick={() => toggleInlineDeposit("withdraw")}
+              className="text-[10px] uppercase tracking-[0.12em] text-[var(--warning)] transition-colors duration-150 hover:brightness-110"
+            >
+              − Withdraw
+            </button>
+          </div>
         )}
       </div>
       {connected && !needsAccount && !needsDeposit && showInlineDeposit && (
         <div className="mt-1.5" data-deposit-trigger>
-          <DepositWithdrawCard slabAddress={slabAddress} />
+          <DepositWithdrawCard slabAddress={slabAddress} initialMode={inlineDepositMode} />
         </div>
       )}
 
