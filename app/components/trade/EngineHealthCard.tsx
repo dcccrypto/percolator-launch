@@ -22,63 +22,132 @@ const HEALTH_COLORS: Record<string, string> = {
   empty: "text-[var(--text-secondary)]",
 };
 
+/**
+ * v17 markets carry no legacy engine block, so computeMarketHealth (which needs
+ * cTot/insurance/OI off the engine) can't run. Derive an equivalent 0–100 health
+ * score from what the v17 slab group exposes: insurance coverage (insurance/OI,
+ * clamped 0..1) and OI balance (1 − |long−short|/(long+short)). Maps to the same
+ * level → color buckets as the v12 path.
+ */
+function computeV17Health(
+  insurance: bigint | null,
+  totalOI: bigint | null,
+  oiLong: bigint | null,
+  oiShort: bigint | null,
+): { level: string; label: string } {
+  const ins = insurance != null ? Number(sanitizeOnChainValue(insurance)) : 0;
+  const oi = totalOI != null ? Number(sanitizeOnChainValue(totalOI)) : 0;
+  const long = oiLong != null ? Number(sanitizeOnChainValue(oiLong)) : 0;
+  const short = oiShort != null ? Number(sanitizeOnChainValue(oiShort)) : 0;
+
+  // No open interest → no exposure → fully healthy (matches v12 computeMarketHealth).
+  const coverage = oi > 0 ? Math.min(1, Math.max(0, ins / oi)) : 1;
+  const oiSum = long + short;
+  const oiBalance = oiSum > 0 ? 1 - Math.abs(long - short) / oiSum : 1;
+
+  const score = Math.round((coverage * 0.5 + oiBalance * 0.5) * 100);
+  if (score >= 66) return { level: "healthy", label: `Healthy · ${score}` };
+  if (score >= 33) return { level: "caution", label: `Caution · ${score}` };
+  return { level: "warning", label: `At Risk · ${score}` };
+}
+
 export const EngineHealthCard: FC = () => {
-  const { engine, loading } = useEngineState();
+  const { engine, loading, hasData, insuranceBalance, totalOI, oiLong, oiShort } = useEngineState();
   const { accounts, config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
   const { showUsd } = useUsdToggle();
   const { priceUsd } = useLivePrice();
 
-  if (loading || !engine) {
+  if (loading) {
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">
-        <p className="text-[10px] text-[var(--text-secondary)]">{loading ? "Loading..." : "Not available on v17 markets yet"}</p>
+        <p className="text-[10px] text-[var(--text-secondary)]">Loading...</p>
+      </div>
+    );
+  }
+  if (!hasData) {
+    return (
+      <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">
+        <p className="text-[10px] text-[var(--text-secondary)]">No engine data for this market</p>
       </div>
     );
   }
 
-  const health = computeMarketHealth(engine);
+  // Health: v12 uses the legacy engine block; v17 derives from insurance + OI.
+  const health = engine
+    ? computeMarketHealth(engine)
+    : computeV17Health(insuranceBalance, totalOI, oiLong, oiShort);
 
-  // Sanitize sentinel / corrupted on-chain values (u64::MAX or near-MAX garbage)
-  // before converting to display values. Matches the guard in SystemCapitalCard.tsx.
-  const cTot = sanitizeOnChainValue(engine.cTot ?? 0n);
-  const pnlPosTot = sanitizeOnChainValue(engine.pnlPosTot ?? 0n);
-  const netLpPos = sanitizeOnChainValue(engine.netLpPos ?? 0n);
-  const lpSumAbs = sanitizeOnChainValue(engine.lpSumAbs ?? 0n);
+  // Cross-version display helper (atoms bigint → USD/token string, "—" when null).
+  const fmtAtoms = (v: bigint | null): string => {
+    if (v == null) return "—";
+    const s = sanitizeOnChainValue(v);
+    return showUsd && priceUsd != null
+      ? formatNum((Number(s) / (10 ** decimals)) * priceUsd)
+      : formatTokenAmount(s, decimals);
+  };
 
-  const haircutDenom = cTot + pnlPosTot;
-  const haircutPct = haircutDenom > 0n
-    ? (Number(pnlPosTot * 10000n / haircutDenom) / 100).toFixed(2) + "%"
-    : "0%";
+  let metrics: Array<{ label: string; value: string }>;
 
-  const netLpPosDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(netLpPos < 0n ? -netLpPos : netLpPos) / (10 ** decimals)) * priceUsd)
-    : formatTokenAmount(netLpPos < 0n ? -netLpPos : netLpPos, decimals);
-  const lpSumAbsDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(lpSumAbs) / (10 ** decimals)) * priceUsd)
-    : formatTokenAmount(lpSumAbs, decimals);
-  const cTotDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(cTot) / (10 ** decimals)) * priceUsd)
-    : formatTokenAmount(cTot, decimals);
-  const pnlPosTotDisplay = showUsd && priceUsd != null
-    ? formatNum((Number(pnlPosTot) / (10 ** decimals)) * priceUsd)
-    : formatTokenAmount(pnlPosTot, decimals);
+  if (engine) {
+    // ── v12 legacy path (unchanged) ─────────────────────────────────────────
+    // Sanitize sentinel / corrupted on-chain values (u64::MAX or near-MAX garbage)
+    // before converting to display values. Matches the guard in SystemCapitalCard.tsx.
+    const cTot = sanitizeOnChainValue(engine.cTot ?? 0n);
+    const pnlPosTot = sanitizeOnChainValue(engine.pnlPosTot ?? 0n);
+    const netLpPos = sanitizeOnChainValue(engine.netLpPos ?? 0n);
+    const lpSumAbs = sanitizeOnChainValue(engine.lpSumAbs ?? 0n);
 
-  const metrics = [
-    { label: "Crank Age", value: formatSlotAge(engine.currentSlot ?? 0n, engine.lastCrankSlot ?? 0n) },
-    { label: "Current Slot", value: Number(engine.currentSlot ?? 0n).toLocaleString() },
-    { label: "Liquidations", value: (engine.lifetimeLiquidations ?? 0n).toLocaleString() },
-    { label: "Force Closes", value: (engine.lifetimeForceCloses ?? 0n).toLocaleString() },
-    { label: "Net LP Pos", value: netLpPosDisplay },
-    { label: "LP Sum |Pos|", value: lpSumAbsDisplay },
-    { label: "Total Capital", value: cTotDisplay },
-    { label: "Pos. PnL Tot", value: pnlPosTotDisplay },
-    { label: "Haircut Ratio", value: haircutPct },
-    { label: "Liq/GC Cursor", value: `${engine.liqCursor ?? "—"}/${engine.gcCursor ?? "—"}` },
-    { label: "Crank Cursor", value: engine.crankCursor?.toString() ?? "—" },
-    { label: "Sweep Start", value: engine.sweepStartIdx?.toString() ?? "—" },
-  ];
+    const haircutDenom = cTot + pnlPosTot;
+    const haircutPct = haircutDenom > 0n
+      ? (Number(pnlPosTot * 10000n / haircutDenom) / 100).toFixed(2) + "%"
+      : "0%";
+
+    const netLpPosDisplay = showUsd && priceUsd != null
+      ? formatNum((Number(netLpPos < 0n ? -netLpPos : netLpPos) / (10 ** decimals)) * priceUsd)
+      : formatTokenAmount(netLpPos < 0n ? -netLpPos : netLpPos, decimals);
+    const lpSumAbsDisplay = showUsd && priceUsd != null
+      ? formatNum((Number(lpSumAbs) / (10 ** decimals)) * priceUsd)
+      : formatTokenAmount(lpSumAbs, decimals);
+    const cTotDisplay = showUsd && priceUsd != null
+      ? formatNum((Number(cTot) / (10 ** decimals)) * priceUsd)
+      : formatTokenAmount(cTot, decimals);
+    const pnlPosTotDisplay = showUsd && priceUsd != null
+      ? formatNum((Number(pnlPosTot) / (10 ** decimals)) * priceUsd)
+      : formatTokenAmount(pnlPosTot, decimals);
+
+    metrics = [
+      { label: "Crank Age", value: formatSlotAge(engine.currentSlot ?? 0n, engine.lastCrankSlot ?? 0n) },
+      { label: "Current Slot", value: Number(engine.currentSlot ?? 0n).toLocaleString() },
+      { label: "Liquidations", value: (engine.lifetimeLiquidations ?? 0n).toLocaleString() },
+      { label: "Force Closes", value: (engine.lifetimeForceCloses ?? 0n).toLocaleString() },
+      { label: "Net LP Pos", value: netLpPosDisplay },
+      { label: "LP Sum |Pos|", value: lpSumAbsDisplay },
+      { label: "Total Capital", value: cTotDisplay },
+      { label: "Pos. PnL Tot", value: pnlPosTotDisplay },
+      { label: "Haircut Ratio", value: haircutPct },
+      { label: "Liq/GC Cursor", value: `${engine.liqCursor ?? "—"}/${engine.gcCursor ?? "—"}` },
+      { label: "Crank Cursor", value: engine.crankCursor?.toString() ?? "—" },
+      { label: "Sweep Start", value: engine.sweepStartIdx?.toString() ?? "—" },
+    ];
+  } else {
+    // ── v17 path: insurance + OI are real; legacy engine counters show "—" ────
+    metrics = [
+      { label: "Insurance", value: fmtAtoms(insuranceBalance) },
+      { label: "Open Interest", value: fmtAtoms(totalOI) },
+      { label: "OI Long", value: fmtAtoms(oiLong) },
+      { label: "OI Short", value: fmtAtoms(oiShort) },
+      { label: "Crank Age", value: "—" },
+      { label: "Current Slot", value: "—" },
+      { label: "Liquidations", value: "—" },
+      { label: "Force Closes", value: "—" },
+      { label: "Net LP Pos", value: "—" },
+      { label: "LP Sum |Pos|", value: "—" },
+      { label: "Total Capital", value: "—" },
+      { label: "Pos. PnL Tot", value: "—" },
+    ];
+  }
 
   return (
     <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">

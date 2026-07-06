@@ -522,6 +522,48 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 2px rgba(153, 69, 255, 0.2);
 }
 
+/* ─── Leverage slider (trade terminal OrderTicket) ───
+ * Higher-specificity override of the generic range-slider rules above,
+ * scoped to `.leverage-slider` only — every other range input in the app
+ * (unaffected here) keeps the plain outline-square thumb. This one gets a
+ * filled accent dot (the on-screen "current risk" indicator deserves more
+ * visual weight than a decorative slider) plus a filled-progress track —
+ * the track's filled portion is painted by the component via an inline
+ * `background: linear-gradient(...)` (computed from leverage/maxLeverage),
+ * which naturally wins over the flat `background` set below since inline
+ * styles outrank stylesheet rules. */
+input[type="range"].leverage-slider {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+input[type="range"].leverage-slider::-webkit-slider-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--accent);
+  transition: box-shadow 150ms ease;
+}
+input[type="range"].leverage-slider::-webkit-slider-thumb:hover {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 10px rgba(153, 69, 255, 0.45);
+}
+input[type="range"].leverage-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  cursor: pointer;
+}
+input[type="range"].leverage-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar { width: 16px; height: 16px; }
 ::-webkit-scrollbar-track {
@@ -1232,3 +1274,4 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
     pointer-events: none;
   }
 }
+

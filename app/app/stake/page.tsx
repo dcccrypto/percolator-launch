@@ -10,6 +10,7 @@ import {
   STAKE_POOL_SIZE,
   decodeStakePool,
 } from "@percolatorct/sdk";
+import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
 import { useStakeDepositJunior } from "@/hooks/useStakeDepositJunior";
@@ -229,8 +230,8 @@ function YourPositionPanel({
   if (!position) {
     return (
       <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-6 text-center">
-        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">No open positions</p>
-        <p className="mt-1 text-[10px] text-[var(--text-dim)]">Deposit into a pool to get started</p>
+        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No open positions</p>
+        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">Deposit into a pool to get started</p>
         <a
           href="#deposit"
           className="mt-3 inline-block text-[11px] font-medium text-[var(--accent)] transition-colors hover:text-[var(--text)]"
@@ -301,7 +302,7 @@ function YourPositionPanel({
           className={`w-full rounded-md py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
             position.cooldownElapsed && !withdrawLoading
               ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
-              : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] cursor-not-allowed"
+              : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
           }`}
         >
           {withdrawLoading
@@ -423,7 +424,7 @@ function DepositWidget({
               className={`flex-1 py-2 text-[11px] font-medium uppercase tracking-[0.1em] transition-colors duration-150 ${
                 tranche === "senior"
                   ? "bg-[var(--accent)]/[0.12] text-[var(--accent)] border-r border-[var(--border)]"
-                  : "bg-transparent text-[var(--text-muted)] border-r border-[var(--border)] hover:text-[var(--text-secondary)]"
+                  : "bg-transparent text-[var(--text-secondary)] border-r border-[var(--border)] hover:text-[var(--text)]"
               }`}
             >
               Senior
@@ -434,7 +435,7 @@ function DepositWidget({
               className={`flex-1 py-2 text-[11px] font-medium uppercase tracking-[0.1em] transition-colors duration-150 ${
                 tranche === "junior"
                   ? "bg-[var(--warning)]/[0.12] text-[var(--warning)]"
-                  : "bg-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  : "bg-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
               }`}
             >
               Junior
@@ -541,7 +542,7 @@ function DepositWidget({
 
         {/* CTA */}
         {!connected ? (
-          <button className="w-full rounded-md py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] cursor-not-allowed">
+          <button className="w-full rounded-md py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] cursor-not-allowed">
             Connect Wallet to Deposit
           </button>
         ) : (
@@ -551,7 +552,7 @@ function DepositWidget({
             className={`w-full rounded-md py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
               amountNum > 0 && !depositLoading
                 ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
-                : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] cursor-not-allowed"
+                : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
             }`}
           >
             {depositLoading ? "Depositing…" : "Deposit →"}
@@ -656,8 +657,8 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
     return (
       <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-10 text-center">
         <div className="mb-3 text-2xl text-[var(--text-muted)]">💧</div>
-        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">No pools available yet</p>
-        <p className="mt-1 text-[10px] text-[var(--text-dim)]">Check back soon.</p>
+        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No pools available yet</p>
+        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">Check back soon.</p>
       </div>
     );
   }
@@ -717,13 +718,19 @@ export default function StakePage() {
 
     (async () => {
       try {
+        // Stake pools are owned by this deployment's vault program
+        // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
+        const stakeProgramId = new PublicKey(
+          (getConfig() as { vaultProgramId?: string }).vaultProgramId
+          ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
+        );
         // Check each pool for user's LP position
         for (const pool of pools) {
           if (!pool.slabAddress || !pool.collateralMint) continue;
           try {
             const slabPk = new PublicKey(pool.slabAddress);
-            const [poolPda] = deriveStakePool(slabPk);
-            const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey);
+            const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
+            const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey, stakeProgramId);
 
             // Fetch pool account to get lpMint using canonical StakePool layout
             const poolInfo = await connection.getAccountInfo(poolPda);

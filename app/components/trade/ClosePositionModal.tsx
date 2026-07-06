@@ -234,7 +234,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
               <button
                 key={p}
                 onClick={() => setPercent(p)}
-                className={`flex-1 rounded-none py-1 text-[10px] font-medium transition-all duration-150 ${
+                className={`flex-1 rounded-none py-1 text-[10px] font-medium transition-colors duration-150 ${
                   percent === p
                     ? "bg-[var(--short)] text-white"
                     : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:border-[var(--short)]/30 hover:text-[var(--text-secondary)]"
@@ -312,7 +312,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           <button
             onClick={() => onConfirm(percent)}
             disabled={loading || oracleStale}
-            className="flex-1 rounded-none bg-[var(--short)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:brightness-110 disabled:opacity-50"
+            className="flex-1 rounded-none bg-[var(--short)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter,opacity] duration-150 hover:brightness-110 disabled:opacity-50"
           >
             {loading ? (
               <span className="inline-flex items-center gap-2">

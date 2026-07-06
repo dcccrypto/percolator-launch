@@ -23,7 +23,7 @@ export function useMintPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
   const wallet = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { programId, raw } = useSlabState();
+  const { programId, raw, refresh } = useSlabState();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(false);
@@ -189,6 +189,11 @@ export function useMintPositionNft(slabAddress: string) {
       // Wait for confirmation with blockhash-based expiry
       await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
 
+      // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
+      // and the UI reflects the just-minted NFT without waiting for the next
+      // poll cycle (closes the stale-window double-mint hazard).
+      refresh();
+
       toast("Position NFT minted!", "success");
       return sig;
     } catch (e) {
@@ -200,7 +205,7 @@ export function useMintPositionNft(slabAddress: string) {
     } finally {
       setLoading(false);
     }
-  }, [walletPubkey, programId, raw, slabAddress, connection, wallet, toast]);
+  }, [walletPubkey, programId, raw, slabAddress, connection, wallet, toast, refresh]);
 
   return { mint, loading, error };
 }

@@ -34,6 +34,9 @@ import { getServiceClient } from "@/lib/supabase";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
 import { validateTokenMetadata, validateDexScreenerResponse } from "@/lib/token-metadata-validators";
 import * as Sentry from "@sentry/nextjs";
+import { getClientIp } from "@/lib/get-client-ip";
+import { checkMintRateLimit } from "@/lib/devnet-mirror-mint-rate-limit";
+import { tryFaucetGate, releaseFaucetClaim } from "@/lib/faucet-rate-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -158,14 +161,40 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if we already have a devnet mint for this CA
+    // 1. Per-IP rate limit (same guard devnet-mirror-mint uses).
+    const clientIp = getClientIp(req);
+    const { allowed: ipAllowed, retryAfter } = await checkMintRateLimit(clientIp);
+    if (!ipAllowed) {
+      return NextResponse.json(
+        { error: "Too many mint requests. Please wait before retrying." },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
+
+    // 2. Per-wallet durable claim gate: one $500 grant per wallet per token per 24 hours.
     const supabase = getServiceClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: existing } = await supabase
-      .from("devnet_mints")
-      .select("devnet_mint")
-      .eq("mainnet_ca", mainnetCA)
-      .maybeSingle();
+    const gate = await tryFaucetGate(supabase, creatorWallet, `devnet-mint:${mainnetCA}`);
+    if (!gate.allowed) {
+      return NextResponse.json(
+        {
+          error: gate.nextClaimAt
+            ? "Already minted for this wallet/token in the last 24 hours"
+            : "Service temporarily unavailable",
+          nextClaimAt: gate.nextClaimAt,
+        },
+        { status: gate.nextClaimAt ? 429 : 503 },
+      );
+    }
+
+    let mintSucceeded = false;
+    try {
+      // Check if we already have a devnet mint for this CA
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: existing } = await supabase
+        .from("devnet_mints")
+        .select("devnet_mint")
+        .eq("mainnet_ca", mainnetCA)
+        .maybeSingle();
 
     // Load mint authority (needed for both already_exists airdrop and new mint creation)
     const mintSigner = getDevnetMintSigner();
@@ -256,6 +285,7 @@ export async function POST(req: NextRequest) {
         );
         await connection.confirmTransaction(airdropTxSig, "confirmed");
 
+        mintSucceeded = true;
         return NextResponse.json({
           status: "already_exists",
           devnetMint: existing.devnet_mint,
@@ -269,6 +299,7 @@ export async function POST(req: NextRequest) {
       } catch (airdropErr) {
         // Non-fatal — return existing mint even if airdrop fails
         console.warn("devnet-mint-token: airdrop to existing mint failed:", airdropErr);
+        mintSucceeded = true;
         return NextResponse.json({
           status: "already_exists",
           devnetMint: existing.devnet_mint,
@@ -359,63 +390,74 @@ export async function POST(req: NextRequest) {
       creator_wallet: creatorWallet,
     });
 
-    if (insertErr?.code === "23505") {
-      // Race lost — a concurrent request already created and inserted this CA's mint.
-      // The on-chain mint we just created is orphaned (devnet-only, ~0.002 SOL wasted).
-      // Return the winner's mint address so the caller still gets a valid devnetMint.
-      console.warn(
-        `devnet-mint-token: TOCTOU race for ${mainnetCA} — orphaned mint ${devnetMint}, fetching winner`,
-      );
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: winner } = await supabase
-        .from("devnet_mints")
-        .select("devnet_mint")
-        .eq("mainnet_ca", mainnetCA)
-        .maybeSingle();
+      if (insertErr?.code === "23505") {
+        // Race lost — a concurrent request already created and inserted this CA's mint.
+        // The on-chain mint we just created is orphaned (devnet-only, ~0.002 SOL wasted).
+        // Return the winner's mint address so the caller still gets a valid devnetMint.
+        console.warn(
+          `devnet-mint-token: TOCTOU race for ${mainnetCA} — orphaned mint ${devnetMint}, fetching winner`,
+        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: winner } = await supabase
+          .from("devnet_mints")
+          .select("devnet_mint")
+          .eq("mainnet_ca", mainnetCA)
+          .maybeSingle();
+        mintSucceeded = true;
+        return NextResponse.json({
+          status: "already_exists",
+          devnetMint: winner?.devnet_mint ?? devnetMint,
+          symbol: tokenInfo.symbol,
+          name: tokenInfo.name,
+          decimals,
+          priceUsd: tokenInfo.priceUsd,
+        });
+      }
+
+      if (insertErr) {
+        // Unexpected DB error — log and surface (mint exists on-chain but not in DB)
+        console.error("devnet-mint-token: DB insert failed:", insertErr.message);
+        Sentry.captureException(insertErr, {
+          tags: { endpoint: "/api/devnet-mint-token", phase: "db-insert" },
+        });
+      }
+
+      // FIX: Also upsert markets table so /api/airdrop can find the mint.
+      // The airdrop route looks up mint_address in the markets table, not devnet_mints.
+      // Best-effort: if this fails, airdrop can still fall back to devnet_mints.
+      if (marketAddress) {
+        const { error: upsertErr } = await supabase.from("markets")
+          .update({
+            mint_address: devnetMint,
+            symbol: tokenInfo.symbol,
+          })
+          .eq("slab_address", marketAddress);
+        if (upsertErr) {
+          console.warn("devnet-mint-token: markets upsert failed (non-fatal):", upsertErr.message);
+        }
+      }
+
+      mintSucceeded = true;
       return NextResponse.json({
-        status: "already_exists",
-        devnetMint: winner?.devnet_mint ?? devnetMint,
+        status: "created",
+        devnetMint,
         symbol: tokenInfo.symbol,
         name: tokenInfo.name,
         decimals,
         priceUsd: tokenInfo.priceUsd,
+        airdropTokens: tokensFloat,
+        airdropUsd: AIRDROP_USD_VALUE,
+        signature: sig,
       });
-    }
-
-    if (insertErr) {
-      // Unexpected DB error — log and surface (mint exists on-chain but not in DB)
-      console.error("devnet-mint-token: DB insert failed:", insertErr.message);
-      Sentry.captureException(insertErr, {
-        tags: { endpoint: "/api/devnet-mint-token", phase: "db-insert" },
-      });
-    }
-
-    // FIX: Also upsert markets table so /api/airdrop can find the mint.
-    // The airdrop route looks up mint_address in the markets table, not devnet_mints.
-    // Best-effort: if this fails, airdrop can still fall back to devnet_mints.
-    if (marketAddress) {
-      const { error: upsertErr } = await supabase.from("markets")
-        .update({
-          mint_address: devnetMint,
-          symbol: tokenInfo.symbol,
-        })
-        .eq("slab_address", marketAddress);
-      if (upsertErr) {
-        console.warn("devnet-mint-token: markets upsert failed (non-fatal):", upsertErr.message);
+    } finally {
+      if (!mintSucceeded && gate.claimId !== undefined) {
+        try {
+          await releaseFaucetClaim(supabase, gate.claimId);
+        } catch (releaseErr) {
+          console.warn("devnet-mint-token: release claim failed:", releaseErr);
+        }
       }
     }
-
-    return NextResponse.json({
-      status: "created",
-      devnetMint,
-      symbol: tokenInfo.symbol,
-      name: tokenInfo.name,
-      decimals,
-      priceUsd: tokenInfo.priceUsd,
-      airdropTokens: tokensFloat,
-      airdropUsd: AIRDROP_USD_VALUE,
-      signature: sig,
-    });
   } catch (error) {
     Sentry.captureException(error, {
       tags: { endpoint: "/api/devnet-mint-token", method: "POST" },

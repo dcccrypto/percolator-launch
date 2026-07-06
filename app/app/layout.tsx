@@ -86,10 +86,15 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
-    <html lang="en" suppressHydrationWarning className={`${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth" className={`${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
       <head>
+        {/* suppressHydrationWarning: browsers blank the nonce content attribute after
+            parsing (nonce hiding), so React's hydration diff always sees nonce="" vs
+            the server value and logs a mismatch error on every load. The nonce itself
+            still applies — only the noisy warning is suppressed. */}
         <script
           nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `
               try {

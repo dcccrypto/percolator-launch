@@ -18,34 +18,55 @@ function fmtCompact(n: number): string {
 }
 
 export const LiquidationAnalytics: FC = () => {
-  const { engine, params, loading } = useEngineState();
+  // insuranceBalance / totalOI work on BOTH v12 and v17; params (liq fee/buffer)
+  // is populated on both. Lifetime counters are engine-only → "—" on v17.
+  const { engine, params, loading, hasData, insuranceBalance: insuranceRaw, totalOI: totalOIRaw } = useEngineState();
   const { config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
   const divisor = 10 ** decimals;
 
-  if (loading || !engine) {
+  if (loading) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <span className="text-[10px] text-[var(--text-dim)]">{loading ? "Loading..." : "Not available on v17 markets yet"}</span>
+        <span className="text-[10px] text-[var(--text-dim)]">Loading...</span>
+      </div>
+    );
+  }
+  if (!hasData) {
+    return (
+      <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <span className="text-[10px] text-[var(--text-dim)]">No liquidation data for this market</span>
       </div>
     );
   }
 
-  // Sanitize sentinel values (u64::MAX from uninitialized on-chain fields)
-  const lifetimeLiquidations = Number(sanitizeOnChainValue(engine.lifetimeLiquidations ?? 0n));
-  const lifetimeForceCloses = Number(sanitizeOnChainValue(engine.lifetimeForceCloses ?? 0n));
-  const insuranceBalance = Number(sanitizeOnChainValue(engine.insuranceFund?.balance ?? 0n)) / divisor;
-  const totalOI = Number(sanitizeOnChainValue(engine.totalOpenInterest ?? 0n)) / divisor;
+  // Sanitize sentinel values (u64::MAX from uninitialized on-chain fields).
+  // Lifetime counters live in the legacy engine block → "—" when engine is null (v17).
+  const lifetimeLiquidationsStr = engine ? Number(sanitizeOnChainValue(engine.lifetimeLiquidations ?? 0n)).toLocaleString() : "—";
+  const lifetimeForceClosesStr = engine ? Number(sanitizeOnChainValue(engine.lifetimeForceCloses ?? 0n)).toLocaleString() : "—";
+  // Cross-version metrics (real on v12 AND v17).
+  const insuranceBalance = insuranceRaw != null ? Number(sanitizeOnChainValue(insuranceRaw)) / divisor : null;
+  const totalOI = totalOIRaw != null ? Number(sanitizeOnChainValue(totalOIRaw)) / divisor : null;
   const liqFeeBps = params ? Number(params.liquidationFeeBps ?? 0n) : 0;
   const bufferBps = params ? Number(params.liquidationBufferBps ?? 0n) : 0;
 
-  const coveragePercent = totalOI > 0 ? (insuranceBalance / totalOI) * 100 : Infinity;
+  // Coverage needs both insurance and OI. If either is unavailable → "—".
+  const coveragePercent =
+    insuranceBalance == null || totalOI == null
+      ? null
+      : totalOI > 0
+        ? (insuranceBalance / totalOI) * 100
+        : Infinity;
 
   let dotColor: string;
   let textColor: string;
   let coverageText: string;
-  if (coveragePercent === Infinity || coveragePercent > 100) {
+  if (coveragePercent == null) {
+    dotColor = "bg-[var(--text-dim)]";
+    textColor = "text-[var(--text-dim)]";
+    coverageText = "—";
+  } else if (coveragePercent === Infinity || coveragePercent > 100) {
     dotColor = "bg-[var(--long)]";
     textColor = "text-[var(--long)]";
     coverageText = coveragePercent === Infinity ? "∞" : `${coveragePercent.toFixed(1)}%`;
@@ -60,10 +81,10 @@ export const LiquidationAnalytics: FC = () => {
   }
 
   const stats = [
-    { label: "Liquidations", value: lifetimeLiquidations.toLocaleString(), tip: "Total lifetime liquidations on this market" },
-    { label: "Force Closes", value: lifetimeForceCloses.toLocaleString(), tip: "Emergency position closures by the risk engine" },
-    { label: "Liq. Fee", value: `${(liqFeeBps / 100).toFixed(2)}%`, tip: "Fee charged on liquidated positions" },
-    { label: "Buffer", value: `${(bufferBps / 100).toFixed(2)}%`, tip: "Margin buffer above maintenance to prevent re-liquidation" },
+    { label: "Liquidations", value: lifetimeLiquidationsStr, tip: "Total lifetime liquidations on this market" },
+    { label: "Force Closes", value: lifetimeForceClosesStr, tip: "Emergency position closures by the risk engine" },
+    { label: "Liq. Fee", value: params ? `${(liqFeeBps / 100).toFixed(2)}%` : "—", tip: "Fee charged on liquidated positions" },
+    { label: "Buffer", value: params ? `${(bufferBps / 100).toFixed(2)}%` : "—", tip: "Margin buffer above maintenance to prevent re-liquidation" },
   ];
 
   return (
@@ -99,8 +120,8 @@ export const LiquidationAnalytics: FC = () => {
           </div>
         </div>
         <div className="mt-1 flex items-center justify-between text-[9px] text-[var(--text-dim)]">
-          <span>Insurance: {fmtCompact(insuranceBalance)}</span>
-          <span>OI: {fmtCompact(totalOI)}</span>
+          <span>Insurance: {insuranceBalance != null ? fmtCompact(insuranceBalance) : "—"}</span>
+          <span>OI: {totalOI != null ? fmtCompact(totalOI) : "—"}</span>
         </div>
       </div>
     </div>

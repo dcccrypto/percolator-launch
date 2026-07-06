@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useEffect, useRef } from "react";
+import { FC, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
@@ -62,6 +62,11 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  // Local submit guard: a fast double-click on "Confirm Trade" would otherwise
+  // fire onConfirm twice, surfacing a confusing "Trade already in progress"
+  // banner. Latch on first click, disable the button, and only unlatch if the
+  // confirm action rejects (the modal normally unmounts on success).
+  const [submitting, setSubmitting] = useState(false);
   const notional = margin * BigInt(leverage);
   const riskLeverage = accountEquity != null && accountEquity > 0n
     ? Number(notional) / Number(accountEquity)
@@ -126,6 +131,19 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onCancel();
+  };
+
+  const handleConfirm = () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const result = onConfirm() as unknown;
+      if (result && typeof (result as { then?: unknown }).then === "function") {
+        (result as Promise<unknown>).catch(() => setSubmitting(false));
+      }
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   const content = (
@@ -241,8 +259,9 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
             Cancel
           </button>
           <button
-            onClick={onConfirm}
-            className={`flex-1 rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:brightness-110 ${
+            onClick={handleConfirm}
+            disabled={submitting}
+            className={`flex-1 rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[background-color,filter,opacity] duration-150 hover:brightness-110 disabled:opacity-50 ${
               direction === "long" ? "bg-[var(--long)]" : "bg-[var(--short)]"
             }`}
           >

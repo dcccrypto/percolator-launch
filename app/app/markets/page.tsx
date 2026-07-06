@@ -22,7 +22,7 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { MarketLogo } from "@/components/market/MarketLogo";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { detectOracleMode, resolveMarketPriceE6, priceE6ToUsd } from "@/lib/oraclePrice";
+import { detectOracleMode, resolveMarketPriceE6, priceE6ToUsd, sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
 import { formatStatValue } from "@/lib/format";
 import { MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 
@@ -64,6 +64,19 @@ interface MergedMarket {
   isAdminOracle: boolean;
   onChain: DiscoveredMarket | null;  // null for Supabase-only markets not yet discovered on-chain
   supabase: MarketWithStats | null;
+}
+
+/** Resolve the display price (E6) for a discovered market, oracle-mode aware.
+ *  v17 market group accounts carry no v12 config — the keeper-updated mark
+ *  (configV17.markEwmaE6) is the price source, the same mapping SlabProvider
+ *  uses for lastEffectivePriceE6 on v17 markets. Returns 0n when no on-chain
+ *  price source exists (e.g. partial mock objects). */
+function resolveDiscoveredPriceE6(oc: DiscoveredMarket): bigint {
+  if (oc.configV17) {
+    return applyInvert(sanitizePriceE6(oc.configV17.markEwmaE6), oc.configV17.invert);
+  }
+  if (!oc.config?.indexFeedId) return 0n;
+  return resolveMarketPriceE6(oc.config);
 }
 
 function isPlaceholderMarketSymbol(sym: string | null | undefined, addresses: Array<string | null | undefined>): boolean {
@@ -201,14 +214,18 @@ function MarketsPageInner() {
 
     // 1. On-chain discovered markets (enriched with Supabase stats)
     for (const d of discovered) {
-      if (!d?.slabAddress || !d?.config?.collateralMint || !d?.config?.indexFeedId || !d?.params) {
+      // v17 market group accounts carry no v12 header/config/engine/params — the
+      // wrapper config is the source of truth (see DiscoveredMarket.configV17).
+      const v17 = d?.configV17;
+      const isValidV16 = !!(d?.config?.collateralMint && d?.config?.indexFeedId && d?.params);
+      if (!d?.slabAddress || (!isValidV16 && !v17?.collateralMint)) {
         console.warn("[Markets] Skipping malformed market:", d);
         continue;
       }
       const addr = d.slabAddress.toBase58();
       // GH#1106: deduplicate — same slab can appear from multiple program scans
       if (seenSlabs.has(addr)) continue;
-      const mint = d.config.collateralMint.toBase58();
+      const mint = (v17?.collateralMint ?? d.config.collateralMint).toBase58();
       // GH#1480: Prefer Supabase max_leverage (indexed by keeper, always correct) over
       // on-chain initialMarginBps computation. The on-chain bps → leverage conversion can
       // give 0 when initialMarginBps is misread (e.g. layout mismatch on V1D slabs reads
@@ -216,14 +233,21 @@ function MarketsPageInner() {
       // the indexer, matching what /api/markets returns. Fall back to bps derivation only
       // when no Supabase record exists (new market not yet indexed).
       const stats = statsMap.get(addr) || null;
-      const onChainMaxLev = d.params.initialMarginBps > 0n ? Math.floor(10000 / Number(d.params.initialMarginBps)) : 0;
+      // v17: RiskParams are absent — rely on the Supabase max_leverage below (GH#1480).
+      const onChainMaxLev = !v17 && d.params.initialMarginBps > 0n ? Math.floor(10000 / Number(d.params.initialMarginBps)) : 0;
       const supabaseLev = Number(stats?.max_leverage ?? 0);
       const rawLev = (supabaseLev > 0) ? supabaseLev : (onChainMaxLev > 0 ? onChainMaxLev : 10);
       const maxLev = Math.min(MAX_DISPLAY_LEVERAGE, rawLev);
       // For v17 markets, d.configV17?.oracleMode is the raw on-chain byte (3 = AUTH_MARK/keeper).
       // Passing it lets detectOracleMode return "keeper" instead of the fallback "hyperp"
       // that SlabProvider forces for AUTH_MARK markets (indexFeedId=ZERO → "hyperp" without byte).
-      const oracleMode = detectOracleMode({ ...d.config, oracleModeByte: d.configV17?.oracleMode });
+      const oracleMode = detectOracleMode({
+        // v17 configs have no oracle keys — zero keys + the mode byte reproduce the
+        // same detection SlabProvider uses (byte 3 → "keeper", else → "hyperp").
+        oracleAuthority: d.config?.oracleAuthority ?? PublicKey.default,
+        indexFeedId: d.config?.indexFeedId ?? PublicKey.default,
+        oracleModeByte: v17?.oracleMode,
+      });
       // "keeper" (AUTH_MARK) is automated oracle — not manual admin entry. Only "hyperp" (DEX
       // pool crank) and "admin" (manual push) show the "manual" badge.
       const isAdminOracle = oracleMode === "hyperp" || oracleMode === "admin";
@@ -375,7 +399,8 @@ function MarketsPageInner() {
     // Helper to get OI (prefer on-chain, fall back to Supabase)
     // Sanitizes sentinel values (u64::MAX) to 0
     const getOI = (m: MergedMarket): bigint => {
-      if (m.onChain) return sanitizeOnChainValue(m.onChain.engine.totalOpenInterest ?? 0n);
+      // v17 discovery carries no engine state — use the Supabase stats branch below.
+      if (m.onChain && !m.onChain.configV17) return sanitizeOnChainValue(m.onChain.engine.totalOpenInterest ?? 0n);
       const supaOI = m.supabase?.total_open_interest
         ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0));
       return BigInt(isSentinelNum(supaOI) ? 0 : Math.max(0, supaOI));
@@ -384,7 +409,7 @@ function MarketsPageInner() {
     // Markets with no valid price return 0 so they sort to the bottom in USD mode.
     // Fixes #1327: no-price markets with huge raw token OI were floating above real USD markets.
     const getOIUsdSortKey = (m: MergedMarket): number => {
-      const onChainPriceE6 = m.onChain ? resolveMarketPriceE6(m.onChain.config) : 0n;
+      const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain) : 0n;
       const rawPrice = m.supabase?.last_price ?? priceE6ToUsd(onChainPriceE6);
       const price = rawPrice != null && rawPrice > 0 && rawPrice <= MAX_SANE_PRICE_USD ? rawPrice : null;
       if (price == null) return 0; // no price → sort to bottom
@@ -413,10 +438,11 @@ function MarketsPageInner() {
           return oiB > oiA ? 1 : oiB < oiA ? -1 : 0;
         }
         case "health": {
-          const ha = a.onChain
+          // v17: no engine state on-chain — fall back to Supabase stats for health.
+          const ha = a.onChain && !a.onChain.configV17
             ? computeMarketHealth(a.onChain.engine)
             : (a.supabase ? computeMarketHealthFromStats(a.supabase) : { level: "empty" as const });
-          const hb = b.onChain
+          const hb = b.onChain && !b.onChain.configV17
             ? computeMarketHealth(b.onChain.engine)
             : (b.supabase ? computeMarketHealthFromStats(b.supabase) : { level: "empty" as const });
           // GH#1637: oracle-down sort rank — below Warning but above Empty.
@@ -460,7 +486,7 @@ function MarketsPageInner() {
               return false;
             }
             if (m.onChain) {
-              const priceE6 = resolveMarketPriceE6(m.onChain.config);
+              const priceE6 = resolveDiscoveredPriceE6(m.onChain);
               // Primary: on-chain price is 0 → keeper not cranking
               if (priceE6 === 0n) return true;
               // GH#1646: Secondary: Supabase shows no mark_price + no index_price.
@@ -859,15 +885,16 @@ function MarketsPageInner() {
 
                 {displayedMarkets.map((m, i) => {
                   // Health: prefer on-chain data, fall back to Supabase stats
-                  const health = m.onChain
+                  // (v17 discovery carries no engine state — use Supabase stats)
+                  const health = m.onChain && !m.onChain.configV17
                     ? computeMarketHealth(m.onChain.engine)
                     : (m.supabase
                       ? computeMarketHealthFromStats(m.supabase)
                       : { level: "empty" as const, label: "No data", insuranceRatio: 0, capitalRatio: 0 });
-                  
+
                   // Price: prefer Supabase, fall back to oracle-mode-aware on-chain price
                   // Cap bogus prices (corrupted on-chain data can produce $4.2T values)
-                  const onChainPriceE6 = m.onChain ? resolveMarketPriceE6(m.onChain.config) : 0n;
+                  const onChainPriceE6 = m.onChain ? resolveDiscoveredPriceE6(m.onChain) : 0n;
 
                   // GH#1631: Override health to "oracle-down" for ALL markets without a valid
                   // oracle price — regardless of whether we have on-chain capital/insurance data.
@@ -938,14 +965,14 @@ function MarketsPageInner() {
                   // PERC-234: Supabase values are raw on-chain values (NOT human-readable).
                   // StatsCollector stores safeBigNum(engine.totalOpenInterest) etc. directly.
                   // Do NOT multiply by tokenDivisor — that double-counts decimals.
-                  const oiTokensRaw = m.onChain
+                  const oiTokensRaw = m.onChain && !m.onChain.configV17
                     ? sanitizeOnChainValue(m.onChain.engine.totalOpenInterest)
                     : (() => {
                         const v = m.supabase?.total_open_interest ?? ((m.supabase?.open_interest_long ?? 0) + (m.supabase?.open_interest_short ?? 0));
                         const safe = isSentinelNum(v) ? 0 : Math.max(0, v);
                         return BigInt(Math.round(safe));
                       })();
-                  const insuranceTokensRaw = m.onChain
+                  const insuranceTokensRaw = m.onChain && !m.onChain.configV17
                     ? sanitizeOnChainValue(m.onChain.engine.insuranceFund.balance)
                     : (() => {
                         const v = m.supabase?.insurance_balance ?? m.supabase?.insurance_fund ?? 0;

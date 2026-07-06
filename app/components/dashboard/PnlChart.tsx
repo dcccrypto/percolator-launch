@@ -26,7 +26,7 @@ export function PnlChart() {
     <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-        <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+        <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
           Portfolio PnL
         </p>
         <div className="flex gap-1">
@@ -37,7 +37,7 @@ export function PnlChart() {
               className={`px-2 py-0.5 text-[9px] font-medium transition-colors ${
                 range === r
                   ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                  : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
+                  : "text-[var(--text-secondary)] hover:text-[var(--text)]"
               }`}
             >
               {r}
@@ -49,11 +49,11 @@ export function PnlChart() {
       {/* Chart area */}
       <div className="flex h-[200px] items-center justify-center px-5">
         {loading ? (
-          <p className="text-[11px] text-[var(--text-muted)]">Loading...</p>
+          <p className="text-[11px] text-[var(--text-secondary)]">Loading...</p>
         ) : !hasData ? (
           <div className="text-center">
-            <p className="text-[11px] text-[var(--text-muted)]">No positions yet</p>
-            <p className="mt-1 text-[9px] text-[var(--text-dim)]">Open a trade to see your PnL</p>
+            <p className="text-[11px] text-[var(--text-secondary)]">No positions yet</p>
+            <p className="mt-1 text-[9px] text-[var(--text-secondary)]">Open a trade to see your PnL</p>
           </div>
         ) : (
           <div className="text-center">
@@ -61,7 +61,7 @@ export function PnlChart() {
                style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
               {isPositive ? "+" : ""}${Math.abs(pnlFloat).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
-            <p className="mt-1 text-[9px] text-[var(--text-dim)]">
+            <p className="mt-1 text-[9px] text-[var(--text-secondary)]">
               Across {positions.length} position{positions.length !== 1 ? "s" : ""} • Historical chart coming soon
             </p>
           </div>

@@ -897,7 +897,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   const showEmptyOverlay = totalDataPoints === 0 || effectiveSparse;
 
   return (
-    <div className="flex h-full flex-col rounded-none border border-[var(--border)] bg-[var(--bg)] p-3">
+    <div className="flex h-full flex-col rounded-none border border-[var(--border)] bg-[var(--panel-bg)] p-3">
       {/* Header — shows timeframe % change + data-source badge only.
           The DEX pool's last-close price used to live here too (e.g. "$84.20 DEX")
           but that contradicted the mark price shown in the market info bar above,

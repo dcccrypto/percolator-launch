@@ -26,6 +26,7 @@ import {
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
+import { humanizeError } from "@/lib/errorMessages";
 
 // v17 portfolio account size = SDK V17_PORTFOLIO_ACCOUNT_LEN (9347). MUST be the full length:
 // InitPortfolio reallocs up to 9347 and adds NO lamports, so funding rent for a smaller size
@@ -298,7 +299,7 @@ export function useDeposit(slabAddress: string) {
         setTimeout(() => refreshSlab(), 2000);
         return sig;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(humanizeError(e instanceof Error ? e.message : String(e)));
         throw e;
       } finally {
         inflightRef.current = false;

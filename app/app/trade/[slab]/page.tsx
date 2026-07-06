@@ -136,7 +136,20 @@ function CopyButton({ text }: { text: string }) {
 
 /* ── Order ticket rail (Phase 3 shell — Phase 4 replaces contents with a single OrderTicket) ── */
 
-function OrderTicketRail({ slab }: { slab: string }) {
+/**
+ * Design pass (visual-only): OrderTicket + PositionNftPanel used to be two
+ * separate small bordered boxes stacked with a gap — on desktop that left a
+ * tall dead void below them (the rail spans the full Chart+PositionsDock
+ * height, but the two cards together were much shorter than that). `framed`
+ * makes this a SINGLE elevated panel (matching the Chart/PositionsDock
+ * surface treatment) that stretches to fill the rail's height, with an
+ * interior divider instead of two separate borders — OrderTicket/
+ * PositionNftPanel no longer paint their own outer border+bg (see those
+ * files), so there's exactly one border here, not a stack of them. On mobile
+ * (`framed` false, inside the bottom sheet) the sheet itself already
+ * supplies the frame, so this just stacks the two with a plain divider.
+ */
+function OrderTicketRail({ slab, framed = false }: { slab: string; framed?: boolean }) {
   // Phase 4: DepositTrigger + AccountRiskSidebar + TradeForm consolidated
   // into the single new OrderTicket (its own "account row" now covers
   // balance/buying-power/deposit; its receipt covers the liq-price preview
@@ -144,13 +157,21 @@ function OrderTicketRail({ slab }: { slab: string }) {
   // distinct feature (position-as-NFT), not order-entry — candidate to move
   // into PositionsDock in Phase 5 alongside the rest of "position" UI.
   return (
-    <div className="flex h-full flex-col gap-1.5 overflow-y-auto">
+    <div
+      className={
+        framed
+          ? "flex h-full flex-col overflow-y-auto border border-[var(--border)] bg-[var(--panel-bg)]"
+          : "flex flex-col gap-3"
+      }
+    >
       <ErrorBoundary label="OrderTicket">
         <RenderProfiler id="OrderTicket">
           <OrderTicket slabAddress={slab} />
         </RenderProfiler>
       </ErrorBoundary>
-      <ErrorBoundary label="PositionNftPanel"><PositionNftPanel slabAddress={slab} /></ErrorBoundary>
+      <div className={framed ? "flex flex-1 border-t border-[var(--border)]/60" : "border-t border-[var(--border)]/40 pt-3"}>
+        <ErrorBoundary label="PositionNftPanel"><PositionNftPanel slabAddress={slab} /></ErrorBoundary>
+      </div>
     </div>
   );
 }
@@ -163,6 +184,25 @@ function OrderTicketRail({ slab }: { slab: string }) {
 
 function MobileOrderSheet({ slab }: { slab: string }) {
   const [open, setOpen] = useState(false);
+
+  // While the bottom-sheet (role="dialog" aria-modal) is open, lock background
+  // scroll and close it on Escape — otherwise the page scrolls behind the sheet
+  // and there's no keyboard dismissal. Restore overflow + detach the listener on
+  // cleanup (and whenever `open` flips back to false).
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
   return (
     <>
       {/* Raised above the global MobileBottomNav (components/layout/MobileBottomNav.tsx,
@@ -447,7 +487,7 @@ function TradePageInner({ slab }: { slab: string }) {
       {/* ════════════════ DESKTOP (≥ lg) — named grid ════════════════ */}
       {isLargeScreen && (
         <div
-          className="hidden lg:grid gap-3 px-4 lg:px-6 pb-3 pt-2 min-h-[calc(100dvh-140px)]"
+          className="hidden lg:grid gap-3 px-4 lg:px-6 pb-3 pt-2 min-h-[calc(100dvh-150px)]"
           style={gridStyle}
         >
           <div style={{ gridArea: "Chart" }} className="min-w-0 min-h-0">
@@ -461,18 +501,18 @@ function TradePageInner({ slab }: { slab: string }) {
           </div>
 
           {orderBookVisible && (
-            <div style={{ gridArea: "Orderbook" }} className="min-w-0 min-h-0 overflow-y-auto">
+            <div style={{ gridArea: "Orderbook" }} className="min-w-0 min-h-0 overflow-y-auto border border-[var(--border)] bg-[var(--panel-bg)]">
               <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
             </div>
           )}
 
           <div style={{ gridArea: "OrderTicket" }} className="min-w-0 min-h-0">
             <RenderProfiler id="OrderTicketRail">
-              <OrderTicketRail slab={slab} />
+              <OrderTicketRail slab={slab} framed />
             </RenderProfiler>
           </div>
 
-          <div style={{ gridArea: "PositionsDock" }} className="min-w-0 min-h-0 flex flex-col border border-[var(--border)]/50 bg-[var(--bg)]/80">
+          <div style={{ gridArea: "PositionsDock" }} className="min-w-0 min-h-0 flex flex-col border border-[var(--border)] bg-[var(--panel-bg)]">
             <div className="flex min-h-0 flex-1 items-stretch justify-between border-b border-[var(--border)]/30 px-1">
               <RenderProfiler id="PositionsDock">
                 <div className="min-h-0 min-w-0 flex-1">
@@ -482,7 +522,7 @@ function TradePageInner({ slab }: { slab: string }) {
               <button
                 type="button"
                 onClick={toggleOrderBook}
-                className="shrink-0 self-start px-2 pt-1.5 text-[9px] uppercase tracking-[0.12em] text-[var(--text-dim)] transition-colors duration-150 hover:text-[var(--text-secondary)]"
+                className="mr-1.5 mt-1.5 shrink-0 self-start rounded-sm border border-[var(--border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--text-dim)] transition-colors duration-150 hover:border-[var(--accent)]/40 hover:text-[var(--text-secondary)]"
               >
                 {orderBookVisible ? "Hide book" : "Show book"}
               </button>
@@ -504,7 +544,7 @@ function TradePageInner({ slab }: { slab: string }) {
             </RenderProfiler>
           </ErrorBoundary>
 
-          <div className="h-[45vh] min-h-[280px] border border-[var(--border)]/50 bg-[var(--bg)]/80">
+          <div className="h-[45vh] min-h-[280px] border border-[var(--border)] bg-[var(--panel-bg)]">
             <ErrorBoundary label="PositionsDock"><PositionsDock slabAddress={slab} /></ErrorBoundary>
           </div>
 
@@ -616,7 +656,14 @@ export default function TradePage({ params }: { params: Promise<{ slab: string }
   }
 
   return (
-    <SlabProvider slabAddress={slab}>
+    // key={slab} forces a clean remount of the whole trade subtree on a market
+    // switch. Next.js App Router reuses client components when only the [slab]
+    // param changes, so without this the terminal briefly shows the NEW market's
+    // name/URL but the PREVIOUS market's price/balance/positions/config until the
+    // RPC round-trip resolves — a trading-correctness risk (review numbers for SOL,
+    // submit on BONK). Remounting resets SlabProvider/useMarketInfo/OrderTicket to
+    // a clean loading state instead of leaking stale state across markets.
+    <SlabProvider key={slab} slabAddress={slab}>
       <UsdToggleProvider>
         <AutoDepositProvider slabAddress={slab}>
           <TradePageInner slab={slab} />

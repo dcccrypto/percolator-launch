@@ -8,6 +8,9 @@ can execute the whole thing top to bottom.
 > Anyone connects a wallet, gets test funds, and trades perps on real mainnet tokens
 > (SOL, BONK, JUP, TRUMP, PENGU) priced off live mainnet DEX pools. The trading app is
 > the **`app/`** directory of this repo.
+>
+> **▶ Live playground: https://percolator-playground.vercel.app** — connect a devnet
+> wallet and trade, no setup. (This guide is for contributing to it.)
 
 ## Contents
 
@@ -119,7 +122,8 @@ GitHub, pinned to a specific version — there's no second repo to clone and not
 build.
 
 ```bash
-git clone https://github.com/dcccrypto/percolator-launch.git
+# The playground lives on the `playground` branch (main is the marketing site)
+git clone -b playground https://github.com/dcccrypto/percolator-launch.git
 cd percolator-launch
 pnpm install
 ```

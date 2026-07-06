@@ -30,7 +30,7 @@ export function StatsBar() {
       label: "Today's PnL",
       value: "--",
       sub: "Last 24h",
-      color: "text-[var(--text-muted)]",
+      color: "text-[var(--text-secondary)]",
     },
     {
       label: "Win Rate",
@@ -53,7 +53,7 @@ export function StatsBar() {
           key={card.label}
           className="bg-[var(--panel-bg)] p-5 transition-all duration-200 hover:bg-[var(--bg-elevated)] hover:translate-y-[-1px]"
         >
-          <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+          <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
             {card.label}
           </p>
           <p
@@ -62,7 +62,7 @@ export function StatsBar() {
           >
             {card.value}
           </p>
-          <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{card.sub}</p>
+          <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{card.sub}</p>
         </div>
       ))}
     </div>

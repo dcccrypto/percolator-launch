@@ -133,7 +133,7 @@ export async function POST(
 
     if (uploadError) {
       console.error("Storage upload error:", uploadError);
-      return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 500 });
+      return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
     }
 
     const { data: urlData } = supabase.storage.from("logos").getPublicUrl(filePath);
@@ -146,7 +146,7 @@ export async function POST(
 
     if (updateError) {
       console.error("DB update error:", updateError);
-      return NextResponse.json({ error: `DB update failed: ${updateError.message}` }, { status: 500 });
+      return NextResponse.json({ error: "Failed to save logo URL. Please try again." }, { status: 500 });
     }
 
     uploadTimestamps.set(validSlab, Date.now());

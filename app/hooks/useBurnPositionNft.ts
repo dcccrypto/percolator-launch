@@ -18,12 +18,23 @@ import {
   isV17Account,
 } from "@percolatorct/sdk";
 
-export function useBurnPositionNft(slabAddress: string) {
+/** Lets a caller (e.g. PositionNftPanel) supply the NFT identity directly
+ *  instead of relying solely on this hook's own usePositionNft() scan — used
+ *  for a Position NFT received via transfer, where useNftWrappedPosition's
+ *  last_holder scan is the more reliable source (see PositionNftPanel). */
+export interface PositionNftOverride {
+  nftMint: PublicKey;
+  nftPdaAddress: string;
+}
+
+export function useBurnPositionNft(slabAddress: string, override?: PositionNftOverride) {
   const { publicKey: walletPubkey } = useWalletCompat();
   const wallet = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { programId, raw } = useSlabState();
-  const { nftMint, nftPdaAddress } = usePositionNft(slabAddress);
+  const { programId, raw, refresh } = useSlabState();
+  const scanned = usePositionNft(slabAddress);
+  const nftMint = override?.nftMint ?? scanned.nftMint;
+  const nftPdaAddress = override?.nftPdaAddress ?? scanned.nftPdaAddress;
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(false);
@@ -112,6 +123,10 @@ export function useBurnPositionNft(slabAddress: string) {
         computeUnits: 800_000,
       });
 
+      // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
+      // and the UI reflects the unwrapped position right after a confirmed burn.
+      refresh();
+
       toast("Position NFT burned!", "success");
       return sig;
     } catch (e) {
@@ -123,7 +138,7 @@ export function useBurnPositionNft(slabAddress: string) {
     } finally {
       setLoading(false);
     }
-  }, [walletPubkey, programId, raw, nftMint, nftPdaAddress, slabAddress, connection, wallet, toast]);
+  }, [walletPubkey, programId, raw, nftMint, nftPdaAddress, slabAddress, connection, wallet, toast, refresh]);
 
   return { burn, loading, error };
 }
