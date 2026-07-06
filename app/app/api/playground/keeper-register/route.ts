@@ -40,6 +40,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
+import { signKeeperRequest } from "@/lib/keeper-hmac";
 
 export const dynamic = "force-dynamic";
 
@@ -99,22 +100,28 @@ export async function POST(req: NextRequest) {
   let message = "Keeper unreachable — market will appear after next keeper restart (check KEEPER_INTERNAL_URL)";
 
   try {
+    const keeperBody = JSON.stringify({
+      marketAddress: slabAddress,
+      poolAddress: dexPoolAddress,
+      dexType,
+      assetIndex: 0,
+      label: resolvedLabel,
+      mainnetCA: mainnetCA ?? null,
+    });
+
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (KEEPER_SECRET) {
-      headers["x-shared-secret"] = KEEPER_SECRET;
+      // LAUNCH-16: sign instead of forwarding the raw shared secret (same HMAC-SHA256
+      // scheme as /api/oracle-keeper/register) — the credential never appears on the wire.
+      const { timestamp, signature } = signKeeperRequest(KEEPER_SECRET, keeperBody);
+      headers["x-keeper-timestamp"] = timestamp;
+      headers["x-keeper-signature"] = signature;
     }
 
     const keeperResp = await fetch(`${KEEPER_URL}/playground/register`, {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        marketAddress: slabAddress,
-        poolAddress: dexPoolAddress,
-        dexType,
-        assetIndex: 0,
-        label: resolvedLabel,
-        mainnetCA: mainnetCA ?? null,
-      }),
+      body: keeperBody,
       signal: AbortSignal.timeout(8_000),
     });
 

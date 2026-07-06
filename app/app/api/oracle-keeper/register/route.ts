@@ -16,13 +16,22 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
 import { getServiceClient } from "@/lib/supabase";
 import { PublicKey } from "@solana/web3.js";
+import { signKeeperRequest, verifyKeeperSignature } from "@/lib/keeper-hmac";
 
 export const dynamic = "force-dynamic";
 
-const KEEPER_URL = process.env.KEEPER_INTERNAL_URL ?? "http://localhost:8081";
+const _rawKeeperUrl = process.env.KEEPER_INTERNAL_URL ?? "http://localhost:8081";
+// LAUNCH-16: Allow http:// only for loopback (localhost / 127.0.0.1); remote targets must use https://.
+// Checked at module load so a misconfigured deployment surfaces at startup rather than at request time.
+const _isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?($|\/)/.test(_rawKeeperUrl);
+if (!_isLoopback && !_rawKeeperUrl.startsWith("https://")) {
+  throw new Error(
+    `KEEPER_INTERNAL_URL must be https:// or a loopback address — plaintext remote URL would expose KEEPER_REGISTER_SECRET: "${_rawKeeperUrl}"`,
+  );
+}
+const KEEPER_URL = _rawKeeperUrl;
 /** Trimmed — whitespace-only env counts as unset (same idea as set-price-cap / ADMIN_API_SECRET). */
 const REGISTER_SECRET = (process.env.KEEPER_REGISTER_SECRET ?? "").trim();
 
@@ -32,20 +41,28 @@ export async function POST(req: NextRequest) {
     console.error("[oracle-keeper/register] KEEPER_REGISTER_SECRET not configured — endpoint disabled");
     return NextResponse.json({ error: "Endpoint not configured" }, { status: 503 });
   }
-  // GH#1692: Use timing-safe comparison to prevent timing oracle attacks.
-  // Plain string equality leaks secret length via response-time side channels.
-  const authHeader = req.headers.get("x-keeper-secret") ?? "";
-  const aBytes = Buffer.from(authHeader, "utf8");
-  const bBytes = Buffer.from(REGISTER_SECRET, "utf8");
-  const unauthorized = aBytes.length !== bBytes.length || !timingSafeEqual(aBytes, bBytes);
-  if (unauthorized) {
+
+  // Read the raw body once — the HMAC signature (LAUNCH-16) is computed over the exact
+  // bytes the caller sent, so it must be verified before (and independently of) JSON.parse.
+  const rawBody = await req.text();
+
+  // LAUNCH-16: HMAC-SHA256(REGISTER_SECRET, "<timestamp>.<rawBody>") replaces the raw
+  // x-keeper-secret header — the credential itself never appears on the wire. Verification
+  // is timing-safe and rejects stale/replayed signatures (see verifyKeeperSignature).
+  const signed = verifyKeeperSignature(
+    REGISTER_SECRET,
+    req.headers.get("x-keeper-timestamp"),
+    rawBody,
+    req.headers.get("x-keeper-signature"),
+  );
+  if (!signed) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     let body: unknown;
     try {
-      body = await req.json();
+      body = JSON.parse(rawBody);
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
@@ -110,14 +127,20 @@ export async function POST(req: NextRequest) {
     let keeperRegistered = false;
     let keeperMessage = "Keeper unreachable — market will auto-discover on next cycle";
     try {
+      // LAUNCH-16: Sign the request with HMAC-SHA256 instead of forwarding the raw secret.
+      // The keeper verifies: HMAC-SHA256(REGISTER_SECRET, "<timestamp>.<body>") == x-keeper-signature.
+      // This means the raw credential is never sent on the wire regardless of URL scheme.
+      const keeperPayload = JSON.stringify({ slabAddress, mainnetCA });
+      const { timestamp: keeperTimestamp, signature: keeperSig } = signKeeperRequest(REGISTER_SECRET, keeperPayload);
+
       const keeperResp = await fetch(`${KEEPER_URL}/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Forward shared secret so keeper's defense-in-depth auth passes (#780)
-          "x-shared-secret": REGISTER_SECRET,
+          "x-keeper-timestamp": keeperTimestamp,
+          "x-keeper-signature": keeperSig,
         },
-        body: JSON.stringify({ slabAddress, mainnetCA }),
+        body: keeperPayload,
         signal: AbortSignal.timeout(8_000),
       });
       const keeperData = (await keeperResp.json()) as { success: boolean; message: string };

@@ -7,6 +7,7 @@ import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { getClientIp } from "@/lib/get-client-ip";
 import { claimPlaygroundChallenge } from "@/lib/playground-nonce-store";
+import { signKeeperRequest } from "@/lib/keeper-hmac";
 import * as Sentry from "@sentry/nextjs";
 import nacl from "tweetnacl";
 import * as fs from "fs";
@@ -1620,13 +1621,18 @@ export async function POST(req: NextRequest) {
   if (mainnet_ca && process.env.KEEPER_REGISTER_SECRET) {
     try {
       const keeperRegisterUrl = `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/oracle-keeper/register`;
+      const keeperBody = JSON.stringify({ slabAddress: slab_address, mainnetCA: mainnet_ca });
+      // LAUNCH-16: sign instead of forwarding KEEPER_REGISTER_SECRET as a raw header —
+      // /api/oracle-keeper/register verifies this same HMAC-SHA256 scheme.
+      const { timestamp, signature } = signKeeperRequest(process.env.KEEPER_REGISTER_SECRET, keeperBody);
       const res = await fetch(keeperRegisterUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-keeper-secret": process.env.KEEPER_REGISTER_SECRET,
+          "x-keeper-timestamp": timestamp,
+          "x-keeper-signature": signature,
         },
-        body: JSON.stringify({ slabAddress: slab_address, mainnetCA: mainnet_ca }),
+        body: keeperBody,
         signal: AbortSignal.timeout(5000),
       }).catch((e: unknown) => {
         console.warn("[api/markets POST] keeper hot-register fetch failed", e);
