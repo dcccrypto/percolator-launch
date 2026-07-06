@@ -199,7 +199,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
         </div>
         <div className="h-1 w-full rounded-full bg-[var(--border)]/40 overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-700 ${utilBarColor}`}
+            className={`h-full rounded-full transition-[width,background-color] duration-700 ${utilBarColor}`}
             style={{ width: `${Math.min(utilBps / 100, 100)}%` }}
           />
         </div>

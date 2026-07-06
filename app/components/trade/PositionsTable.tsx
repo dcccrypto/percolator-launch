@@ -129,7 +129,16 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
     ? (Number(pnlTokens) / (10 ** decimals)) * priceUsd
     : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
-  const roe = hasValidMark ? computePnlPercent(pnlTokens, account.capital) : 0;
+  // computePnlPercent throws when pnlTokens*10000/capital overflows
+  // MAX_SAFE_INTEGER (extreme dust-capital position); fall back to 0 so an
+  // outlier position can't blank the whole panel (mirrors the slippageBoundE6
+  // guard in OrderTicket.tsx).
+  let roe = 0;
+  try {
+    roe = hasValidMark ? computePnlPercent(pnlTokens, account.capital) : 0;
+  } catch {
+    roe = 0;
+  }
 
   const liqPriceE6 = computeLiqPrice(
     entryPriceE6,
@@ -267,7 +276,7 @@ export const PositionsTable: FC<{ slabAddress: string }> = ({ slabAddress }) => 
                   onClick={() => setShowCloseModal(true)}
                   disabled={closeLoading || lpUnderfunded || !hasValidMark}
                   title={!hasValidMark ? "Waiting for price data…" : undefined}
-                  className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Close
                 </button>

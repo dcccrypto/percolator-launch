@@ -29,6 +29,8 @@ const ALLOWED_SYMBOLS = new Set<string>([
   "Crypto.WIF/USD",
   "Crypto.BONK/USD",
   "Crypto.PYTH/USD",
+  "Crypto.TRUMP/USD",
+  "Crypto.PENGU/USD",
 ]);
 
 // Pyth accepts: 1, 5, 15, 30, 60, 240, D, W, M

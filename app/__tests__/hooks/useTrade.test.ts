@@ -41,13 +41,22 @@ vi.mock("@/lib/programAllowlist", () => ({
   assertKnownProgram: () => {},
 }));
 
-// Mock useLivePrice so the slippage-limit auto-compute has a valid mark.
+// Mock the price store's non-reactive snapshot reader so the slippage-limit
+// auto-compute has a valid mark. useTrade() reads price via
+// getLivePriceSnapshot() (a plain function, read fresh at submit time inside
+// the trade() callback) rather than the reactive useLivePrice() hook — see
+// hooks/useTrade.ts and BUILD-LOG.md Phase 1 for why: useLivePrice() is only
+// ever used for JSX display now; a hook subscription here would force every
+// component that calls useTrade() to re-render on every price tick.
 // Tests that exercise the no-mark abort path override this with priceE6: null.
-vi.mock("@/hooks/useLivePrice", () => ({
-  useLivePrice: vi.fn(() => ({
+vi.mock("@/lib/priceStore/priceStore", () => ({
+  getLivePriceSnapshot: vi.fn(() => ({
     priceUsd: 1.5,
     priceE6: 1_500_000n,
     price: 1.5,
+    change24h: null,
+    high24h: null,
+    low24h: null,
     loading: false,
   })),
 }));
@@ -349,8 +358,11 @@ describe("useTrade", () => {
       };
       const tradeIx = tx.instructions[tx.instructions.length - 1];
       const limit = decodeLimit(tradeIx.data);
-      // mark = 1_500_000, default 100 bps → 1_500_000 * 10_100 / 10_000 = 1_515_000
-      expect(limit).toBe(1_515_000n);
+      // BUG FIX (devnet flow-test 2026-07-01): DEFAULT_SLIPPAGE_BPS raised 100->500 (see
+      // app/lib/slippage.ts doc comment — devnet-verified matcher skew asymmetry also hits
+      // the long side once a market has real inventory skew, not just shorts).
+      // mark = 1_500_000, default 500 bps → 1_500_000 * 10_500 / 10_000 = 1_575_000
+      expect(limit).toBe(1_575_000n);
     });
 
     it("auto-computes a non-zero limit ≤ mark for a short (size < 0)", async () => {
@@ -362,8 +374,9 @@ describe("useTrade", () => {
         instructions: Array<{ data: Uint8Array }>;
       };
       const limit = decodeLimit(tx.instructions[tx.instructions.length - 1].data);
-      // mark = 1_500_000, default 100 bps → 1_500_000 * 9_900 / 10_000 = 1_485_000
-      expect(limit).toBe(1_485_000n);
+      // mark = 1_500_000, default 500 bps (DEFAULT_SHORT_SLIPPAGE_BPS, unchanged by the
+      // 2026-07-01 fix) → 1_500_000 * 9_500 / 10_000 = 1_425_000
+      expect(limit).toBe(1_425_000n);
       expect(limit).toBeLessThan(1_500_000n);
     });
 
@@ -402,13 +415,16 @@ describe("useTrade", () => {
     });
 
     it("aborts the trade if the live mark price is null (no oracle yet)", async () => {
-      const { useLivePrice } = await import("@/hooks/useLivePrice");
-      vi.mocked(useLivePrice).mockReturnValueOnce({
+      const { getLivePriceSnapshot } = await import("@/lib/priceStore/priceStore");
+      vi.mocked(getLivePriceSnapshot).mockReturnValueOnce({
         priceUsd: null,
         priceE6: null,
         price: null,
+        change24h: null,
+        high24h: null,
+        low24h: null,
         loading: true,
-      } as ReturnType<typeof useLivePrice>);
+      } as ReturnType<typeof getLivePriceSnapshot>);
 
       const { result } = renderHook(() => useTrade(mockSlabAddress));
       await act(async () => {
@@ -420,13 +436,16 @@ describe("useTrade", () => {
     });
 
     it("aborts the trade if the live mark price is 0n (broken oracle)", async () => {
-      const { useLivePrice } = await import("@/hooks/useLivePrice");
-      vi.mocked(useLivePrice).mockReturnValueOnce({
+      const { getLivePriceSnapshot } = await import("@/lib/priceStore/priceStore");
+      vi.mocked(getLivePriceSnapshot).mockReturnValueOnce({
         priceUsd: 0,
         priceE6: 0n,
         price: 0,
+        change24h: null,
+        high24h: null,
+        low24h: null,
         loading: false,
-      } as ReturnType<typeof useLivePrice>);
+      } as ReturnType<typeof getLivePriceSnapshot>);
 
       const { result } = renderHook(() => useTrade(mockSlabAddress));
       await act(async () => {

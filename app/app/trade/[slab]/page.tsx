@@ -1,50 +1,74 @@
 "use client";
 
-import { use, useState, useRef, useEffect } from "react";
+import { use, useState, useEffect, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import gsap from "gsap";
 import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
 import { UsdToggleProvider, useUsdToggle } from "@/components/providers/UsdToggleProvider";
-import { TradeForm } from "@/components/trade/TradeForm";
-import { PositionPanel } from "@/components/trade/PositionPanel";
+import { OrderTicket } from "@/components/trade/OrderTicket";
 import { PositionNftPanel } from "@/components/trade/PositionNftPanel";
-import { AccountRiskSidebar } from "@/components/trade/AccountRiskSidebar";
-import { PositionsTable } from "@/components/trade/PositionsTable";
-import { AccountsCard } from "@/components/trade/AccountsCard";
-import { DepositTrigger } from "@/components/trade/DepositTrigger";
-import { EngineHealthCard } from "@/components/trade/EngineHealthCard";
-import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
+import { PositionsDock } from "@/components/trade/PositionsDock";
 import { MarketBookCard } from "@/components/trade/MarketBookCard";
 import { TradingChart } from "@/components/trade/TradingChart";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
-import { TradeHistory } from "@/components/trade/TradeHistory";
-import { LiquidationAnalytics } from "@/components/trade/LiquidationAnalytics";
-import { AdlLeaderboard } from "@/components/trade/AdlLeaderboard";
-import { CrankHealthCard } from "@/components/trade/CrankHealthCard";
-import { SystemCapitalCard } from "@/components/trade/SystemCapitalCard";
-import { OpenInterestCard } from "@/components/market/OpenInterestCard";
-import { InsuranceDashboard } from "@/components/market/InsuranceDashboard";
-import { HealthBadge } from "@/components/market/HealthBadge";
-import { ShareButton } from "@/components/market/ShareCard";
-import { MarketLogo } from "@/components/market/MarketLogo";
-import { MarketSelector } from "@/components/trade/MarketSelector";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { computeMarketHealth } from "@/lib/health";
 import { formatUsdFromNumber } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
-import { OracleBadge } from "@/components/oracle/OracleBadge";
-import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
 // DevnetFaucetModal moved to WalletProvider (PERC-808: global placement on all pages)
 import { AirdropButton } from "@/components/trade/AirdropButton";
+import { ShareButton } from "@/components/market/ShareCard";
 import { getNetwork } from "@/lib/config";
+import { RenderProfiler } from "@/components/dev/RenderProfiler";
+
+/**
+ * Phase 3 (trade-terminal rebuild) layout notes:
+ *
+ * - Named CSS Grid areas (dYdX `--layout` pattern from perp-dex-reference-
+ *   patterns.md Area 1), expressed as React inline styles rather than a CSS
+ *   custom property + styled-components (this codebase has neither
+ *   styled-components nor a CSS-in-JS layer — Tailwind + plain `style` is
+ *   the native equivalent here). Areas: MarketBar (top strip) / Chart
+ *   (dominant center) / Orderbook (optional column, hidden by default) /
+ *   OrderTicket (~340px right rail) / PositionsDock (bottom-docked tabs).
+ * - Desktop vs. mobile is a JS boolean fork (`useIsLargeScreen`), not a CSS
+ *   dual-mount — same reasoning the pre-rebuild page already used for
+ *   `TradingChart` specifically (avoid double-mounting live-subscribing
+ *   components); Phase 3 extends that same discipline to every panel that
+ *   holds hooks, not just the chart, closing the "mobile + desktop both
+ *   always mounted" gap Phase 0 measured (12+ simultaneous component
+ *   instances for what should be ~5-8).
+ * - Analytics clutter (engine/crank/insurance/liquidation/system-capital/
+ *   ADL/open-interest cards, "all accounts" table, the quick-start guide)
+ *   moved OFF this page to a dedicated `/analytics/[slab]` route — see that
+ *   file. Linked from the utility row below MarketBar.
+ * - OrderTicket rail: Phase 4 replaced DepositTrigger + AccountRiskSidebar +
+ *   TradeForm with the single new `OrderTicket` component (its own "account
+ *   row" now covers balance/buying-power/deposit; its receipt covers the
+ *   liq-price preview AccountRiskSidebar used to show separately).
+ *   `PositionNftPanel` stays alongside it for now — a distinct feature
+ *   (position-as-NFT), not order-entry. PositionsDock (PositionsTable +
+ *   TradeHistory tabs) is still a TEMPORARY composition — Phase 5 replaces
+ *   it with a single new `PositionsDock` component. `PositionPanel` and
+ *   `PositionsTable` were
+ *   confirmed (by direct read) to be parallel desktop/mobile implementations
+ *   of the same "user's current position" data — kept only `PositionsTable`
+ *   here (fits the dock's tabular shape; `PositionPanel` was mobile-only in
+ *   the pre-rebuild page) to avoid mounting both redundantly. `AccountsCard`
+ *   ("all accounts on this market") moved to /analytics — it's a market-wide
+ *   view, not the trader's own position.
+ * - No "Open Orders" tab: Percolator has no resting limit-order book (trades
+ *   execute immediately against an LP portfolio via TradeCpi) — the task
+ *   brief's "Positions / Open Orders / Trades" tab set doesn't map 1:1 onto
+ *   this protocol's model, so PositionsDock ships with the two tabs that
+ *   actually correspond to real data: Positions, Trades.
+ */
 
 /* ── Reusable tiny components ─────────────────────────────── */
 
@@ -55,7 +79,7 @@ function UsdToggleButton() {
       <button
         onClick={() => setShowUsd(false)}
         className={[
-          "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-all duration-200",
+          "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-colors duration-150",
           !showUsd
             ? "bg-[var(--accent)]/10 text-[var(--accent)]"
             : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
@@ -66,7 +90,7 @@ function UsdToggleButton() {
       <button
         onClick={() => setShowUsd(true)}
         className={[
-          "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-all duration-200",
+          "rounded-sm px-2 py-0.5 text-[9px] font-medium transition-colors duration-150",
           showUsd
             ? "bg-[var(--accent)]/10 text-[var(--accent)]"
             : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]",
@@ -74,52 +98,6 @@ function UsdToggleButton() {
       >
         usd
       </button>
-    </div>
-  );
-}
-
-function Collapsible({ title, defaultOpen = true, badge, children }: { title: string; defaultOpen?: boolean; badge?: React.ReactNode; children: React.ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)] transition-colors hover:text-[var(--text-secondary)]"
-      >
-        <span className="flex items-center gap-2">
-          {title}
-          {badge}
-        </span>
-        <span className={`text-[9px] text-[var(--text-dim)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▾</span>
-      </button>
-      <div className={open ? "block" : "hidden"}>{children}</div>
-    </div>
-  );
-}
-
-function Tabs({ tabs, children, defaultTab }: { tabs: string[]; children: React.ReactNode[]; defaultTab?: number }) {
-  const [active, setActive] = useState(defaultTab ?? 0);
-  return (
-    <div>
-      {/* overflow-x-auto + whitespace-nowrap prevents 5-tab bar from overflowing at 375px (#860) */}
-      <div className="overflow-x-auto border-b border-[var(--border)]/50 bg-transparent">
-        <div className="flex whitespace-nowrap">
-          {tabs.map((label, i) => (
-            <button
-              key={label}
-              onClick={() => setActive(i)}
-              className={`shrink-0 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.15em] transition-colors border-b-2 ${
-                active === i
-                  ? "border-[var(--accent)] text-[var(--accent)]"
-                  : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)] hover:border-[var(--border)]"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div>{children[active]}</div>
     </div>
   );
 }
@@ -135,7 +113,7 @@ function CopyButton({ text }: { text: string }) {
         toast("Address copied to clipboard!", "success");
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="ml-1.5 inline-flex items-center text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"
+      className="inline-flex items-center text-[var(--text-dim)] transition-colors duration-150 hover:text-[var(--accent)]"
       title="Copy address"
     >
       {copied ? (
@@ -151,23 +129,135 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/* Phase 5: the page-local `Tabs` helper is gone — its only remaining
+ * consumer (the old PositionsDockShell) was replaced by
+ * components/trade/PositionsDock.tsx, which has its own internal tab strip
+ * (`DockTabs`, same shape) since it no longer depends on this page module. */
+
+/* ── Order ticket rail (Phase 3 shell — Phase 4 replaces contents with a single OrderTicket) ── */
+
+/**
+ * Design pass (visual-only): OrderTicket + PositionNftPanel used to be two
+ * separate small bordered boxes stacked with a gap — on desktop that left a
+ * tall dead void below them (the rail spans the full Chart+PositionsDock
+ * height, but the two cards together were much shorter than that). `framed`
+ * makes this a SINGLE elevated panel (matching the Chart/PositionsDock
+ * surface treatment) that stretches to fill the rail's height, with an
+ * interior divider instead of two separate borders — OrderTicket/
+ * PositionNftPanel no longer paint their own outer border+bg (see those
+ * files), so there's exactly one border here, not a stack of them. On mobile
+ * (`framed` false, inside the bottom sheet) the sheet itself already
+ * supplies the frame, so this just stacks the two with a plain divider.
+ */
+function OrderTicketRail({ slab, framed = false }: { slab: string; framed?: boolean }) {
+  // Phase 4: DepositTrigger + AccountRiskSidebar + TradeForm consolidated
+  // into the single new OrderTicket (its own "account row" now covers
+  // balance/buying-power/deposit; its receipt covers the liq-price preview
+  // AccountRiskSidebar used to show separately). PositionNftPanel stays —
+  // distinct feature (position-as-NFT), not order-entry — candidate to move
+  // into PositionsDock in Phase 5 alongside the rest of "position" UI.
+  return (
+    <div
+      className={
+        framed
+          ? "flex h-full flex-col overflow-y-auto border border-[var(--border)] bg-[var(--panel-bg)]"
+          : "flex flex-col gap-3"
+      }
+    >
+      <ErrorBoundary label="OrderTicket">
+        <RenderProfiler id="OrderTicket">
+          <OrderTicket slabAddress={slab} />
+        </RenderProfiler>
+      </ErrorBoundary>
+      <div className={framed ? "flex flex-1 border-t border-[var(--border)]/60" : "border-t border-[var(--border)]/40 pt-3"}>
+        <ErrorBoundary label="PositionNftPanel"><PositionNftPanel slabAddress={slab} /></ErrorBoundary>
+      </div>
+    </div>
+  );
+}
+
+/* Phase 5: PositionsDock is now the single new components/trade/PositionsDock.tsx
+ * (own internal Positions/Trades tabs, memoized, isolated live-price row —
+ * see that file). The page-local wrapper this used to need is gone. */
+
+/* ── Mobile order sheet — tap-to-open bottom sheet, 150ms functional slide (no decorative animation) ── */
+
+function MobileOrderSheet({ slab }: { slab: string }) {
+  const [open, setOpen] = useState(false);
+
+  // While the bottom-sheet (role="dialog" aria-modal) is open, lock background
+  // scroll and close it on Escape — otherwise the page scrolls behind the sheet
+  // and there's no keyboard dismissal. Restore overflow + detach the listener on
+  // cleanup (and whenever `open` flips back to false).
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <>
+      {/* Raised above the global MobileBottomNav (components/layout/MobileBottomNav.tsx,
+          fixed bottom-0, ~56px, md:hidden) below the md breakpoint, where both are
+          visible simultaneously; flush with bottom-0 at md+ where that nav hides
+          itself (its own md:hidden) but this trigger is still relevant up to lg. */}
+      <div className="fixed inset-x-0 bottom-16 z-40 border-t border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm md:bottom-0 lg:hidden">
+        <button
+          onClick={() => setOpen(true)}
+          className="flex w-full items-center justify-center gap-2 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text)]"
+        >
+          Trade
+        </button>
+      </div>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/40 lg:hidden"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <div
+        className={`fixed inset-x-0 bottom-0 z-[61] max-h-[85dvh] overflow-y-auto rounded-t-md border-t border-[var(--border)] bg-[var(--bg)] transition-transform duration-150 ease-out lg:hidden ${
+          open ? "translate-y-0" : "translate-y-full"
+        }`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Order ticket"
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border)]/50 bg-[var(--bg)] px-3 py-2">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Order ticket</span>
+          <button onClick={() => setOpen(false)} className="text-[var(--text-dim)] transition-colors duration-150 hover:text-[var(--text)]" aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <div className="space-y-1.5 p-3">
+          <OrderTicketRail slab={slab} />
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ── Main inner page ──────────────────────────────────────── */
 
 function TradePageInner({ slab }: { slab: string }) {
-  // Render TradingChart exactly once by tracking breakpoint in JS.
-  // CSS-only hidden/shown dual-mount caused two ChartEmptyState instances to stack
-  // during SSR/hydration before the responsive classes were applied (P0 render bug).
   const isLargeScreen = useIsLargeScreen();
   const [orderBookVisible, toggleOrderBook] = useOrderBookVisibility();
 
-  const { engine, config, header, accounts, loading: slabLoading, error: slabError } = useSlabState();
+  const { engine, config, header, loading: slabLoading, error: slabError } = useSlabState();
   useAdvanceOraclePhase(slab);
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const { priceUsd } = useLivePrice();
-  const health = engine ? computeMarketHealth(engine) : null;
-  const { mode: oracleMode, level: oracleLevel } = useOracleFreshness();
-  const oracleBadgeStatus = oracleLevel === "stale" ? "stale" : "healthy";
-  const pageRef = useRef<HTMLDivElement>(null);
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
   // Fetch Supabase market data (symbol, name, logo, mainnet_ca) as fallback for on-chain resolution
@@ -182,7 +272,6 @@ function TradePageInner({ slab }: { slab: string }) {
             symbol: d.market.symbol ?? undefined,
             name: d.market.name ?? undefined,
             logo_url: d.market.logo_url ?? undefined,
-            // GH#1210: used to determine whether Get Token button should be shown
             mainnet_ca: d.market.mainnet_ca ?? null,
           });
         }
@@ -192,83 +281,49 @@ function TradePageInner({ slab }: { slab: string }) {
   }, [slab]);
 
   // Resolve symbol: Supabase market symbol (trading pair) → on-chain (collateral) → truncated address
-  // BUG FIX: Supabase symbol represents the TRADING PAIR (e.g. "SOL"), while on-chain
-  // tokenMeta symbol is the COLLATERAL token (e.g. "USDC"). Previously on-chain was
-  // preferred, causing a USDC-collateralized SOL market to show as "USDC/USD".
   const collateralMintAddress = config?.collateralMint?.toBase58() ?? "";
-  // BUG FIX: Use the trading pair's base asset mint (mainnet_ca from Supabase) for the chart
-  // and logo, NOT the collateral mint. A SOL/USD perp collateralized in USDC should show
-  // SOL candles in the chart, not USDC candles.
   const mintAddress = supabaseMarket?.mainnet_ca ?? collateralMintAddress;
   const onChainSymbol = tokenMeta?.symbol ?? null;
   const supabaseSymbol = supabaseMarket?.symbol ?? null;
   const symbol = (() => {
-    // 1. Supabase symbol (market trading pair — authoritative for display)
     if (!isPlaceholderSymbol(supabaseSymbol, mintAddress)) return supabaseSymbol!;
-    // 2. On-chain symbol (collateral token — fallback when no DB entry)
     if (!isPlaceholderSymbol(onChainSymbol, mintAddress)) return onChainSymbol!;
-    // 3. Fallback: truncated mint address
     if (config?.collateralMint) {
       const b58 = config.collateralMint.toBase58();
       return `${b58.slice(0, 4)}…${b58.slice(-4)}`;
     }
     return "TOKEN";
   })();
-
-  // Logo URL from Supabase market data
   const logoUrl = supabaseMarket?.logo_url ?? null;
 
   // Dynamic page title and meta tags
   useEffect(() => {
     document.title = `Trade ${symbol} | Percolator`;
-    
-    // Update meta description
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
       const priceText = priceUsd != null ? `Current price: ${formatUsdFromNumber(priceUsd)}` : "";
       metaDesc.setAttribute("content", `Trade ${symbol} perpetual futures on Percolator. ${priceText}`);
     }
-
-    // Update OG tags dynamically
     const ogTitle = document.querySelector('meta[property="og:title"]');
     if (ogTitle) ogTitle.setAttribute("content", `Trade ${symbol} | Percolator`);
-    
     const ogDesc = document.querySelector('meta[property="og:description"]');
     if (ogDesc) {
       const priceText = priceUsd != null ? `Current price: ${formatUsdFromNumber(priceUsd)}` : "";
       ogDesc.setAttribute("content", `Trade ${symbol} perpetual futures on Percolator. ${priceText}`);
     }
-    
   }, [symbol, priceUsd]);
 
-  // Track whether the fade-in animation has already been applied
-  const animatedRef = useRef(false);
-
-  useEffect(() => {
-    if (!pageRef.current || animatedRef.current) return;
-    animatedRef.current = true;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      pageRef.current.style.opacity = "1";
-      return;
-    }
-    gsap.fromTo(pageRef.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
-  }); // No deps — runs every render until pageRef is available
-
-  // Loading state — show while slab data is being fetched
   if (slabLoading && !engine) {
     return (
       <div className="min-h-[calc(100dvh-48px)] flex flex-col items-center justify-center gap-3">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-        <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.15em]">Loading market data...</p>
+        <p className="text-[11px] text-[var(--text-secondary)] uppercase tracking-[0.15em]">Loading market data...</p>
         <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slab.slice(0, 8)}...{slab.slice(-8)}</p>
       </div>
     );
   }
 
-  // Error state — show when slab data fails to load
   if (slabError && !engine) {
-    // Detect "account not found on-chain" — show network-aware helpful message
-    // instead of a generic error (PERC-8375)
     const isNotFound =
       slabError.includes("not found on-chain") ||
       slabError.includes("Market not found") ||
@@ -279,13 +334,11 @@ function TradePageInner({ slab }: { slab: string }) {
       return (
         <div className="min-h-[calc(100dvh-48px)] flex flex-col items-center justify-center gap-3 px-4">
           <div className="border border-[var(--border)]/60 bg-[var(--bg-elevated)] p-6 text-center max-w-sm w-full">
-            {/* Icon */}
             <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)]/60 bg-[var(--bg)]/80">
               <svg className="h-5 w-5 text-[var(--text-dim)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
               </svg>
             </div>
-
             {network === "mainnet" ? (
               <>
                 <p className="text-sm font-semibold text-[var(--text)]">Market launching soon</p>
@@ -303,13 +356,13 @@ function TradePageInner({ slab }: { slab: string }) {
                         window.location.reload();
                       }
                     }}
-                    className="w-full border border-[var(--accent)]/40 bg-[var(--accent)]/5 px-4 py-2 text-[11px] font-medium text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors"
+                    className="w-full border border-[var(--accent)]/40 bg-[var(--accent)]/5 px-4 py-2 text-[11px] font-medium text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors duration-150"
                   >
                     Switch to Devnet &amp; Retry
                   </button>
                   <a
                     href="/markets"
-                    className="w-full border border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors"
+                    className="w-full border border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors duration-150"
                   >
                     Browse Live Markets
                   </a>
@@ -329,20 +382,19 @@ function TradePageInner({ slab }: { slab: string }) {
                         window.location.reload();
                       }
                     }}
-                    className="w-full border border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors"
+                    className="w-full border border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors duration-150"
                   >
                     Switch to Mainnet
                   </button>
                   <a
                     href="/markets"
-                    className="w-full border border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors"
+                    className="w-full border border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors duration-150"
                   >
                     Browse Markets
                   </a>
                 </div>
               </>
             )}
-
             <p className="mt-4 text-[9px] text-[var(--text-dim)] break-all font-mono opacity-60">{slab}</p>
           </div>
         </div>
@@ -357,7 +409,7 @@ function TradePageInner({ slab }: { slab: string }) {
           <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slab}</p>
           <button
             onClick={() => window.location.reload()}
-            className="mt-4 border border-[var(--border)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors"
+            className="mt-4 border border-[var(--border)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors duration-150"
           >
             Retry
           </button>
@@ -366,13 +418,33 @@ function TradePageInner({ slab }: { slab: string }) {
     );
   }
 
-  // #1155: Show warning banner when market has loaded but no oracle price available
-  const hasNoPriceData = !slabLoading && engine && priceUsd == null;
+  // Gate on `config` (populated for BOTH v12 and v17 once loaded), NOT `engine`
+  // — `engine` is always null for v17 markets, which made this permanently
+  // false there, so the "no oracle price" warning could never appear on a v17
+  // market even during a genuine price outage. `config` is the version-agnostic
+  // "market loaded" signal.
+  const hasNoPriceData = !slabLoading && !!config && priceUsd == null;
+
+  // Desktop grid — named areas (dYdX pattern, see file-header comment).
+  // Orderbook column width collapses to 0 when hidden; the area itself is
+  // still declared in the template (simpler than swapping two full
+  // template strings) but nothing is placed in it.
+  const gridStyle: CSSProperties = {
+    gridTemplateAreas: '"MarketBar MarketBar" "Chart OrderTicket" "PositionsDock OrderTicket"',
+    gridTemplateColumns: orderBookVisible ? "minmax(0,1fr) 340px" : "minmax(0,1fr) 340px",
+    gridTemplateRows: "auto minmax(0,1fr) minmax(220px,340px)",
+  };
+  // When the order book is visible it takes its own column between Chart and
+  // OrderTicket — swap in a 3-column template rather than trying to make one
+  // template string cover both states.
+  if (orderBookVisible) {
+    gridStyle.gridTemplateAreas = '"MarketBar MarketBar MarketBar" "Chart Orderbook OrderTicket" "PositionsDock PositionsDock OrderTicket"';
+    gridStyle.gridTemplateColumns = "minmax(0,1fr) 220px 340px";
+  }
 
   return (
-    <div ref={pageRef} className="mx-auto max-w-[1920px] overflow-x-hidden gsap-fade">
-
-      {/* #1155: No oracle price banner */}
+    <RenderProfiler id="TradePageInner">
+    <div className="mx-auto max-w-[1920px] overflow-x-hidden animate-fade-in">
       {hasNoPriceData && (
         <div className="border-b border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-2.5 text-center">
           <p className="text-[11px] font-medium text-[var(--warning)]">
@@ -381,239 +453,106 @@ function TradePageInner({ slab }: { slab: string }) {
         </div>
       )}
 
-      {/* ── MOBILE: Sticky header ── */}
-      <div className="sticky top-0 z-30 border-b border-[var(--border)]/50 bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">
-        <div className="flex items-center justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <MarketLogo logoUrl={logoUrl} mintAddress={config?.collateralMint?.toBase58()} symbol={symbol} size="sm" />
-              <h1 className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-display)" }}>
-                {symbol}/USD <span className="text-[10px] font-normal uppercase tracking-[0.15em] text-[var(--text-muted)]">PERP</span>
-              </h1>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-            <UsdToggleButton />
-            {health && <HealthBadge level={health.level} />}
-            {oracleMode && <OracleBadge mode={oracleMode} status={oracleBadgeStatus} />}
-          </div>
-        </div>
-        <div className="mt-1 flex items-center gap-2 flex-wrap">
-          <span className="flex items-center text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {shortAddress}
-            <CopyButton text={slab} />
+      {/* Utility row — market address, devnet faucet, share, analytics link.
+          Shown on all breakpoints (the pre-rebuild page only showed this on
+          mobile; desktop had no equivalent, which was inconsistent). */}
+      <div className="flex items-center gap-3 border-b border-[var(--border)]/30 px-3 py-1.5 overflow-x-auto whitespace-nowrap scrollbar-none">
+        <span className="flex items-center gap-1 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
+          {shortAddress}
+          <CopyButton text={slab} />
+        </span>
+        {header?.admin && (
+          <span className={`text-[9px] font-medium uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-sm border ${
+            header.admin.toBase58() === "11111111111111111111111111111111"
+              ? "border-[var(--long)]/30 bg-[var(--long)]/5 text-[var(--long)]"
+              : "border-[var(--warning)]/30 bg-[var(--warning)]/5 text-[var(--warning)]"
+          }`}>
+            {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
           </span>
-          {header?.admin && (
-            <span className={`text-[9px] font-medium uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-sm border ${
-              header.admin.toBase58() === "11111111111111111111111111111111"
-                ? "border-[var(--long)]/30 bg-[var(--long)]/5 text-[var(--long)]"
-                : "border-[var(--warning)]/30 bg-[var(--warning)]/5 text-[var(--warning)]"
-            }`}>
-              {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
-            </span>
-          )}
-          <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={supabaseMarket ? !!supabaseMarket.mainnet_ca : true} />
-          <ShareButton
-            slabAddress={slab}
-            marketName={symbol}
-            price={BigInt(Math.round((priceUsd ?? 0) * 1e6))}
-          />
-        </div>
+        )}
+        <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={supabaseMarket ? !!supabaseMarket.mainnet_ca : true} />
+        <ShareButton slabAddress={slab} marketName={symbol} price={BigInt(Math.round((priceUsd ?? 0) * 1e6))} />
+        <UsdToggleButton />
+        <a
+          href={`/analytics/${slab}`}
+          className="ml-auto shrink-0 text-[10px] uppercase tracking-[0.12em] text-[var(--text-dim)] transition-colors duration-150 hover:text-[var(--accent)]"
+        >
+          Analytics →
+        </a>
       </div>
 
-      {/* ── Market info bar (all breakpoints — horizontally scrollable on mobile) ── */}
+      {/* MarketBar — always mounted, already responsive/scrollable on mobile */}
       <MarketInfoBar slabAddress={slab} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} />
 
+      {/* ════════════════ DESKTOP (≥ lg) — named grid ════════════════ */}
+      {isLargeScreen && (
+        <div
+          className="hidden lg:grid gap-3 px-4 lg:px-6 pb-3 pt-2 min-h-[calc(100dvh-150px)]"
+          style={gridStyle}
+        >
+          <div style={{ gridArea: "Chart" }} className="min-w-0 min-h-0">
+            <ErrorBoundary label="TradingChart">
+              <RenderProfiler id="TradingChart">
+                <div className="h-full overflow-hidden">
+                  <TradingChart slabAddress={slab} mintAddress={mintAddress || undefined} />
+                </div>
+              </RenderProfiler>
+            </ErrorBoundary>
+          </div>
 
-      {/* ── Quick start guide — desktop only, hidden after first trade ── */}
-      {accounts.filter(a => a.account.capital > 0n || a.account.positionSize !== 0n).length === 0 && (
-      <div className="hidden md:flex mx-4 mb-2 mt-2 rounded-none border border-[var(--border)]/30 bg-[var(--bg)]/80 px-3 py-1.5 items-center gap-4 text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.1em]">
-        <span className="text-[var(--text-dim)]">quick start:</span>
-        <span><span className="text-[var(--long)]">1</span> connect wallet</span>
-        <span className="text-[var(--text-dim)]">&rarr;</span>
-        <span><span className="text-[var(--long)]">2</span> create account</span>
-        <span className="text-[var(--text-dim)]">&rarr;</span>
-        <span><span className="text-[var(--long)]">3</span> deposit collateral</span>
-        <span className="text-[var(--text-dim)]">&rarr;</span>
-        <span><span className="text-[var(--long)]">4</span> trade</span>
-      </div>
+          {orderBookVisible && (
+            <div style={{ gridArea: "Orderbook" }} className="min-w-0 min-h-0 overflow-y-auto border border-[var(--border)] bg-[var(--panel-bg)]">
+              <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
+            </div>
+          )}
+
+          <div style={{ gridArea: "OrderTicket" }} className="min-w-0 min-h-0">
+            <RenderProfiler id="OrderTicketRail">
+              <OrderTicketRail slab={slab} framed />
+            </RenderProfiler>
+          </div>
+
+          <div style={{ gridArea: "PositionsDock" }} className="min-w-0 min-h-0 flex flex-col border border-[var(--border)] bg-[var(--panel-bg)]">
+            <div className="flex min-h-0 flex-1 items-stretch justify-between border-b border-[var(--border)]/30 px-1">
+              <RenderProfiler id="PositionsDock">
+                <div className="min-h-0 min-w-0 flex-1">
+                  <ErrorBoundary label="PositionsDock"><PositionsDock slabAddress={slab} /></ErrorBoundary>
+                </div>
+              </RenderProfiler>
+              <button
+                type="button"
+                onClick={toggleOrderBook}
+                className="mr-1.5 mt-1.5 shrink-0 self-start rounded-sm border border-[var(--border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--text-dim)] transition-colors duration-150 hover:border-[var(--accent)]/40 hover:text-[var(--text-secondary)]"
+              >
+                {orderBookVisible ? "Hide book" : "Show book"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════
-          MOBILE LAYOUT  (< lg)
-          Single column, everything stacked
-          ════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col gap-1.5 px-2 pt-2 pb-4 lg:hidden min-w-0 w-full">
-        {/* Chart — only mount on mobile to prevent dual ChartEmptyState stacking */}
-        {!isLargeScreen && (
+      {/* ════════════════ MOBILE (< lg) — chart full-width, positions inline, order ticket as bottom sheet ════════════════ */}
+      {!isLargeScreen && (
+        // pb-32 clears both the order-sheet trigger bar (~48px) and, below
+        // md, the global MobileBottomNav stacked beneath it (~56px+safe-area).
+        <div className="flex flex-col gap-1.5 px-2 pt-2 pb-32 lg:hidden min-w-0 w-full">
           <ErrorBoundary label="TradingChart">
-            <div className="w-full overflow-hidden">
-              <TradingChart slabAddress={slab} mintAddress={mintAddress || undefined} />
-            </div>
-          </ErrorBoundary>
-        )}
-
-        {/* Deposit trigger */}
-        <ErrorBoundary label="DepositTrigger">
-          <DepositTrigger slabAddress={slab} />
-        </ErrorBoundary>
-
-        {/* Risk + account at-a-glance — hidden when there's no user account */}
-        <ErrorBoundary label="AccountRiskSidebar">
-          <AccountRiskSidebar slabAddress={slab} />
-        </ErrorBoundary>
-
-        {/* Trade form */}
-        <ErrorBoundary label="TradeForm">
-          <TradeForm slabAddress={slab} />
-        </ErrorBoundary>
-
-        {/* Position — collapsible */}
-        <ErrorBoundary label="PositionPanel">
-          <Collapsible title="Position" defaultOpen={true}>
-            <PositionPanel slabAddress={slab} />
-          </Collapsible>
-        </ErrorBoundary>
-
-        {/* Position NFT */}
-        <ErrorBoundary label="PositionNftPanel">
-          <Collapsible title="Position NFT" defaultOpen={false}>
-            <PositionNftPanel slabAddress={slab} />
-          </Collapsible>
-        </ErrorBoundary>
-
-        <ErrorBoundary label="AccountsCard">
-          <Collapsible title="Positions & Liqs" defaultOpen={false}>
-            <AccountsCard />
-          </Collapsible>
-        </ErrorBoundary>
-
-        {/* Bottom tabs — "Book" tab only appears when the user has opted-in.
-            Toggle persists via useOrderBookVisibility (localStorage). */}
-        <Tabs tabs={orderBookVisible
-          ? ["Stats", "Trades", "Health", "Risk", "ADL", "Book"]
-          : ["Stats", "Trades", "Health", "Risk", "ADL"]}>
-          <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
-          <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
-          <ErrorBoundary label="EngineHealthCard">
-            <EngineHealthCard />
-            <div className="mt-2"><CrankHealthCard /></div>
-          </ErrorBoundary>
-          <ErrorBoundary label="RiskAnalytics">
-            <OpenInterestCard slabAddress={slab} />
-            <div className="mt-2"><InsuranceDashboard slabAddress={slab} /></div>
-            <div className="mt-2"><CrankHealthCard /></div>
-            <div className="mt-2"><LiquidationAnalytics /></div>
-            <div className="mt-2"><SystemCapitalCard /></div>
-          </ErrorBoundary>
-          <ErrorBoundary label="AdlLeaderboard">
-            <AdlLeaderboard slabAddress={slab} />
-          </ErrorBoundary>
-          {orderBookVisible && (
-            <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
-          )}
-        </Tabs>
-        {!orderBookVisible && (
-          <button
-            type="button"
-            onClick={toggleOrderBook}
-            className="mt-2 w-full rounded-none border border-[var(--border)]/40 bg-[var(--bg)]/40 px-3 py-1.5 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)] hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)]"
-          >
-            ⟨ Show order book
-          </button>
-        )}
-      </div>
-
-      {/* ════════════════════════════════════════════════════════
-          DESKTOP LAYOUT  (≥ lg / 1024px)
-          Three columns when order book visible, two when collapsed.
-          Middle column (Book) can be toggled off via the × on the book
-          or the "Show order book" button rendered inline.
-          ════════════════════════════════════════════════════════ */}
-      <div className={`hidden lg:grid gap-4 px-4 lg:px-6 pb-3 pt-2 ${
-        orderBookVisible
-          ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,220px)_minmax(0,340px)]"
-          : "lg:grid-cols-[minmax(0,1fr)_minmax(0,340px)]"
-      }`}>
-        {/* ── Left column: Chart + Positions ── */}
-        <div className="min-w-0 flex flex-col gap-0">
-          {/* Chart — only mount on desktop to prevent dual ChartEmptyState stacking */}
-          {isLargeScreen && (
-            <ErrorBoundary label="TradingChart">
-              {/* Chart height bumped 500 → 640 so the time axis + price axis
-                  labels + volume pane can all render without clipping against
-                  the container edges. Component internals (TradingChart.tsx)
-                  also set w-full h-full so autoSize: true fills this wrapper. */}
-              <div className="h-[640px] overflow-hidden">
+            <RenderProfiler id="TradingChart">
+              <div className="w-full overflow-hidden">
                 <TradingChart slabAddress={slab} mintAddress={mintAddress || undefined} />
               </div>
-            </ErrorBoundary>
-          )}
+            </RenderProfiler>
+          </ErrorBoundary>
 
-          {/* My Positions / Account — tabbed */}
-          <Tabs tabs={["My Positions", "Positions & Liqs"]}>
-            <ErrorBoundary label="PositionsTable"><PositionsTable slabAddress={slab} /></ErrorBoundary>
-            <ErrorBoundary label="AccountsCard"><AccountsCard /></ErrorBoundary>
-          </Tabs>
-        </div>
-
-        {/* ── Middle column: Order Book (toggleable) ── */}
-        {orderBookVisible && (
-          <div className="min-w-0">
-            <ErrorBoundary label="MarketBookCard">
-              <MarketBookCard />
-            </ErrorBoundary>
-          </div>
-        )}
-
-        {/* ── Right column: Trade Panel ── */}
-        <div className="min-w-0 space-y-1.5">
-          <div className="sticky top-0 z-20 space-y-1.5">
-            <ErrorBoundary label="DepositTrigger">
-              <DepositTrigger slabAddress={slab} />
-            </ErrorBoundary>
-            <ErrorBoundary label="AccountRiskSidebar">
-              <AccountRiskSidebar slabAddress={slab} />
-            </ErrorBoundary>
-            <ErrorBoundary label="TradeForm">
-              <TradeForm slabAddress={slab} />
-            </ErrorBoundary>
-            <ErrorBoundary label="PositionNftPanel">
-              <PositionNftPanel slabAddress={slab} />
-            </ErrorBoundary>
+          <div className="h-[45vh] min-h-[280px] border border-[var(--border)] bg-[var(--panel-bg)]">
+            <ErrorBoundary label="PositionsDock"><PositionsDock slabAddress={slab} /></ErrorBoundary>
           </div>
 
-          {/* Market info tabs — Book removed (now in middle column) */}
-          <Tabs tabs={["Stats", "Trades", "Health", "Risk", "ADL"]}>
-            <ErrorBoundary label="MarketStatsCard"><MarketStatsCard /></ErrorBoundary>
-            <ErrorBoundary label="TradeHistory"><TradeHistory slabAddress={slab} /></ErrorBoundary>
-            <ErrorBoundary label="EngineHealthCard">
-              <EngineHealthCard />
-              <div className="mt-2"><CrankHealthCard /></div>
-            </ErrorBoundary>
-            <ErrorBoundary label="RiskAnalytics">
-              <OpenInterestCard slabAddress={slab} />
-              <div className="mt-1.5"><InsuranceDashboard slabAddress={slab} /></div>
-              <div className="mt-1.5"><LiquidationAnalytics /></div>
-              <div className="mt-1.5"><SystemCapitalCard /></div>
-            </ErrorBoundary>
-            <ErrorBoundary label="AdlLeaderboard">
-              <AdlLeaderboard slabAddress={slab} />
-            </ErrorBoundary>
-          </Tabs>
-          {!orderBookVisible && (
-            <button
-              type="button"
-              onClick={toggleOrderBook}
-              className="w-full rounded-none border border-[var(--border)]/40 bg-[var(--bg)]/40 px-3 py-1.5 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)] hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)]"
-            >
-              ⟨ Show order book
-            </button>
-          )}
+          <MobileOrderSheet slab={slab} />
         </div>
-      </div>
-
+      )}
     </div>
+    </RenderProfiler>
   );
 }
 
@@ -637,7 +576,7 @@ function InvalidAddressPage({ address }: { address: string }) {
         <p className="mt-2 text-[10px] text-[var(--text-dim)] break-all" style={{ fontFamily: "var(--font-mono)" }}>{address}</p>
         <a
           href="/markets"
-          className="mt-4 inline-block border border-[var(--border)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors"
+          className="mt-4 inline-block border border-[var(--border)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/40 hover:text-[var(--text)] transition-colors duration-150"
         >
           Browse Markets
         </a>
@@ -661,13 +600,8 @@ function SlugResolvePage({ slug }: { slug: string }) {
       .then((data) => {
         if (cancelled) return;
         const markets: Array<{ slab_address: string; symbol?: string; mint_address?: string; volume_24h?: number | null; total_open_interest?: number | null; created_at?: string }> = data.markets ?? [];
-        // Normalize: "SOL-PERP" → "SOL", then match against symbol
         const slugNorm = slug.toUpperCase().replace(/-PERP$/, "");
 
-        // Sort to prefer the most active slab when multiple markets share the same symbol / mint.
-        // Treat volume_24h=0 and null identically as "no volume" (-1) so a stale slab with
-        // explicit vol=0 never beats a fresh slab with vol=null (fixes issue #721).
-        // Tiebreakers: total_open_interest DESC, then created_at DESC (newest wins).
         const sorted = [...markets].sort((a, b) => {
           const va = typeof a.volume_24h === "number" && a.volume_24h > 0 ? a.volume_24h : -1;
           const vb = typeof b.volume_24h === "number" && b.volume_24h > 0 ? b.volume_24h : -1;
@@ -678,13 +612,11 @@ function SlugResolvePage({ slug }: { slug: string }) {
           return new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime();
         });
 
-        // 1. Try matching by symbol name
         let match = sorted.find((m) => {
           const sym = (m.symbol ?? "").toUpperCase().replace(/-PERP$/, "");
           return sym === slugNorm || (m.symbol ?? "").toUpperCase() === slug.toUpperCase();
         });
 
-        // 2. If no symbol match, try well-known slug aliases (e.g. SOL → mint address)
         if (!match) {
           const aliasMint = SLUG_ALIASES[slugNorm];
           if (aliasMint) {
@@ -710,7 +642,7 @@ function SlugResolvePage({ slug }: { slug: string }) {
   return (
     <div className="min-h-[calc(100dvh-48px)] flex flex-col items-center justify-center gap-3">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-      <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.15em]">Resolving market…</p>
+      <p className="text-[11px] text-[var(--text-secondary)] uppercase tracking-[0.15em]">Resolving market…</p>
       <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slug}</p>
     </div>
   );
@@ -719,14 +651,19 @@ function SlugResolvePage({ slug }: { slug: string }) {
 export default function TradePage({ params }: { params: Promise<{ slab: string }> }) {
   const { slab } = use(params);
 
-  // If not a valid pubkey, try resolving as a market slug (e.g. SOL-PERP)
   if (!isValidPublicKey(slab)) {
-    // Not a valid base58 pubkey — try slug resolution (e.g. "SOL-PERP" → actual slab address)
     return <SlugResolvePage slug={slab} />;
   }
 
   return (
-    <SlabProvider slabAddress={slab}>
+    // key={slab} forces a clean remount of the whole trade subtree on a market
+    // switch. Next.js App Router reuses client components when only the [slab]
+    // param changes, so without this the terminal briefly shows the NEW market's
+    // name/URL but the PREVIOUS market's price/balance/positions/config until the
+    // RPC round-trip resolves — a trading-correctness risk (review numbers for SOL,
+    // submit on BONK). Remounting resets SlabProvider/useMarketInfo/OrderTicket to
+    // a clean loading state instead of leaking stale state across markets.
+    <SlabProvider key={slab} slabAddress={slab}>
       <UsdToggleProvider>
         <AutoDepositProvider slabAddress={slab}>
           <TradePageInner slab={slab} />

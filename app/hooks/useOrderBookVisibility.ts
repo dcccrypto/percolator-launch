@@ -5,13 +5,19 @@ import { useCallback, useEffect, useState } from "react";
 const STORAGE_KEY = "perc.ui.orderBookVisible";
 
 function readInitial(): boolean {
-  if (typeof window === "undefined") return true;
+  // Default HIDDEN: Percolator has no resting limit-order book (trades execute
+  // against an LP portfolio), so MarketBookCard is a synthetic LP-depth display.
+  // On v17 markets it can't compute depth (the legacy engine block is null) and
+  // renders an empty "—" panel — a large dead box mid-layout. Keep it collapsed
+  // by default (users can still toggle it on); the terminal opens as a clean
+  // 2-column chart + order-ticket workstation.
+  if (typeof window === "undefined") return false;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return true; // default: visible
+    if (raw === null) return false; // default: hidden
     return raw !== "false";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -23,8 +29,8 @@ function readInitial(): boolean {
  * Returns [visible, toggle, setVisible].
  */
 export function useOrderBookVisibility(): [boolean, () => void, (v: boolean) => void] {
-  // SSR-safe: start with the default, then reconcile on client mount.
-  const [visible, setVisibleState] = useState<boolean>(true);
+  // SSR-safe: start with the default (hidden), then reconcile on client mount.
+  const [visible, setVisibleState] = useState<boolean>(false);
 
   useEffect(() => {
     setVisibleState(readInitial());

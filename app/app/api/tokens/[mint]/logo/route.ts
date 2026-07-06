@@ -24,21 +24,29 @@ export async function GET(
     return NextResponse.json({ error: "Invalid mint address" }, { status: 400 });
   }
 
-  const supabase = getServiceClient();
+  let supabase: ReturnType<typeof getServiceClient> | null = null;
+  try {
+    supabase = getServiceClient();
+  } catch {
+    return NextResponse.json({ logo_url: null });
+  }
 
   // Check all possible extensions
   const extensions = ["png", "jpg", "webp", "gif"];
-  for (const ext of extensions) {
-    const filePath = `token-logos/${canonicalMint}.${ext}`;
-    const { data } = supabase.storage.from("logos").getPublicUrl(filePath);
-    // Try a HEAD-like check by listing
-    const { data: files } = await supabase.storage.from("logos").list("token-logos", {
-      search: `${canonicalMint}.${ext}`,
-      limit: 1,
-    });
-    if (files && files.length > 0) {
-      return NextResponse.json({ logo_url: data.publicUrl });
+  try {
+    for (const ext of extensions) {
+      const filePath = `token-logos/${canonicalMint}.${ext}`;
+      const { data } = supabase.storage.from("logos").getPublicUrl(filePath);
+      const { data: files } = await supabase.storage.from("logos").list("token-logos", {
+        search: `${canonicalMint}.${ext}`,
+        limit: 1,
+      });
+      if (files && files.length > 0) {
+        return NextResponse.json({ logo_url: data.publicUrl });
+      }
     }
+  } catch {
+    return NextResponse.json({ logo_url: null });
   }
 
   return NextResponse.json({ logo_url: null });
@@ -84,7 +92,12 @@ export async function POST(
     return NextResponse.json({ error: "File too large. Max 2MB." }, { status: 400 });
   }
 
-  const supabase = getServiceClient();
+  let supabase: ReturnType<typeof getServiceClient>;
+  try {
+    supabase = getServiceClient();
+  } catch {
+    return NextResponse.json({ error: "Storage backend unavailable" }, { status: 503 });
+  }
 
   try {
     const arrayBuffer = await file.arrayBuffer();

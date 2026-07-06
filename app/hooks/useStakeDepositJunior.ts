@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
-  getStakeProgramId,
   STAKE_POOL_SIZE,
   deriveStakePool,
   deriveStakeVaultAuth,
@@ -18,6 +17,7 @@ import {
   createAssociatedTokenAccountInstruction,
 } from "@solana/spl-token";
 import { sendTx } from "@/lib/tx";
+import { getConfig } from "@/lib/config";
 
 export interface StakeDepositJuniorParams {
   /** The slab (market) address this pool belongs to. Used for PDA derivation. */
@@ -86,10 +86,17 @@ export function useStakeDepositJunior({ slabAddress, collateralMint }: StakeDepo
           );
         }
 
+        // Stake pools are owned by this deployment's vault program (getConfig().vaultProgramId),
+        // NOT the SDK's default stake program id. Derive all PDAs against the correct program.
+        const stakeProgramId = new PublicKey(
+          (getConfig() as { vaultProgramId?: string }).vaultProgramId
+          ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
+        );
+
         // Derive all PDAs
-        const [pool] = deriveStakePool(slabPk);
-        const [vaultAuth] = deriveStakeVaultAuth(pool);
-        const [depositPda] = deriveDepositPda(pool, wallet.publicKey);
+        const [pool] = deriveStakePool(slabPk, stakeProgramId);
+        const [vaultAuth] = deriveStakeVaultAuth(pool, stakeProgramId);
+        const [depositPda] = deriveDepositPda(pool, wallet.publicKey, stakeProgramId);
 
         // Fetch pool account to get lpMint and vault addresses
         const poolInfo = await connection.getAccountInfo(pool);
@@ -97,7 +104,6 @@ export function useStakeDepositJunior({ slabAddress, collateralMint }: StakeDepo
           throw new Error("Stake pool not initialized for this market. Contact admin.");
         }
 
-        const stakeProgramId = getStakeProgramId();
         if (!poolInfo.owner.equals(stakeProgramId)) {
           throw new Error(
             "Stake pool account owner mismatch — possible network misconfiguration."

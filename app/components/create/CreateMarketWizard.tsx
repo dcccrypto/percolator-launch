@@ -26,7 +26,7 @@ import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 import { useToast } from "@/hooks/useToast";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockTokenByMint } from "@/lib/mock-trade-data";
-import { StepReviewDemo } from "../create-demo/StepReviewDemo";
+
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -38,7 +38,7 @@ interface WizardState {
   tokenMeta: { name: string; symbol: string; decimals: number } | null;
   walletBalance: bigint | null;
   // Step 2
-  oracleType: "pyth" | "hyperp_ema" | "admin";
+  oracleType: "pyth" | "hyperp_ema" | "admin" | "keeper";
   oracleFeed: string;
   dexPool: DexPoolResult | null;
   pythFeed: { id: string; name: string } | null;
@@ -261,6 +261,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (wizard.oracleType === "admin") return true;
     if (wizard.oracleType === "pyth") return isValidHex64(wizard.oracleFeed);
     if (wizard.oracleType === "hyperp_ema") return isValidBase58Pubkey(wizard.oracleFeed);
+    if (wizard.oracleType === "keeper") return isValidBase58Pubkey(wizard.oracleFeed);
     return false;
   })();
   const step3Valid =
@@ -409,8 +410,20 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           adminPrice: quickLaunch.adminPrice,
         };
       }
-      // PERC-470: Hyperp EMA — auto-detected DEX pool as oracle
+      // PERC-470: Hyperp EMA — auto-detected DEX pool as oracle (mainnet only)
+      // On devnet: DEX pool detected → use keeper oracle instead (AUTH_MARK, keeper pushes from mainnet)
       if (quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress) {
+        // Devnet playground: keeper oracle delegates oracle_authority to our keeper service
+        // which reads the mainnet DEX pool and pushes prices via PushAuthMark.
+        if (isDevnet) {
+          return {
+            ...base,
+            oracleType: "keeper" as const,
+            oracleFeed: quickLaunch.dexPoolAddress,
+            adminPrice: quickLaunch.adminPrice,
+            dexPool: quickLaunch.poolInfo ?? null,
+          };
+        }
         return {
           ...base,
           oracleType: "hyperp_ema" as const,
@@ -502,7 +515,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   }, [mockBypass, wizard.mintAddress]);
 
   const setOracleType = useCallback(
-    (oracleType: "pyth" | "hyperp_ema" | "admin") => {
+    (oracleType: "pyth" | "hyperp_ema" | "admin" | "keeper") => {
       setWizard((prev) => ({ ...prev, oracleType }));
     },
     []
@@ -579,13 +592,21 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       alert("Cannot create market: no DEX price available for this token. Try again or switch to Admin oracle.");
       return;
     }
+    // C-10: block admin/keeper launch if initial oracle price is 0 or unset.
+    // InitMarket rejects priceE6=0 on-chain; guard here for a cleaner error.
+    if ((wizard.oracleType === "admin" || wizard.oracleType === "keeper") && priceE6 === 0n) {
+      alert("Cannot create market: enter a valid initial oracle price greater than 0.");
+      return;
+    }
     const tier = SLAB_TIERS[wizard.slabTier];
     // On devnet, use the mirror mint for on-chain ops; keep mainnet CA for metadata
     const effectiveMint = devnetMintAddress ?? wizard.mintAddress;
 
     // PERC-470: Map wizard oracle type to CreateMarketParams oracleMode
+    // "keeper" = AUTH_MARK oracle with oracle_authority delegated to keeper service
     const oracleMode = wizard.oracleType === "pyth" ? "pyth" as const
       : wizard.oracleType === "hyperp_ema" ? "hyperp" as const
+      : wizard.oracleType === "keeper" ? "keeper" as const
       : "admin" as const;
 
     // For hyperp markets the index asset is the DEX pool's base token (e.g. SOL),
@@ -624,6 +645,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         dexPoolAddress: wizard.dexPool?.poolAddress ??
           (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
       } : {}),
+      // Keeper oracle: pass mainnet pool address + dex type for keeper registration.
+      // The oracleFeed field holds the pool address in keeper mode (same as hyperp).
+      ...(oracleMode === "keeper" ? {
+        dexPoolAddress: wizard.dexPool?.poolAddress ??
+          (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
+        dexType: wizard.dexPool?.dexId ?? "raydium-clmm",
+      } : {}),
     };
     // PERC-513: If resuming from a stuck slab, skip slab creation (step 0).
     // The existing slab keypair is already in slabKpRef (loaded from localStorage).
@@ -645,6 +673,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     // PERC-470: Include oracleMode + dexPoolAddress in retry params (fixes #810)
     const oracleMode = wizard.oracleType === "pyth" ? "pyth" as const
       : wizard.oracleType === "hyperp_ema" ? "hyperp" as const
+      : wizard.oracleType === "keeper" ? "keeper" as const
       : "admin" as const;
 
     // Same symbol/name derivation as handleLaunch — hyperp uses DEX base/quote symbols.
@@ -677,6 +706,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       ...(oracleMode === "hyperp" ? {
         dexPoolAddress: wizard.dexPool?.poolAddress ??
           (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
+      } : {}),
+      ...(oracleMode === "keeper" ? {
+        dexPoolAddress: wizard.dexPool?.poolAddress ??
+          (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined),
+        dexType: wizard.dexPool?.dexId ?? "raydium-clmm",
       } : {}),
     };
     create(params, createState.step);
@@ -735,6 +769,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         devnetAirdropSymbol={createState.devnetAirdropSymbol}
         devnetMintError={createState.devnetMintError}
         insuranceMintFailed={createState.insuranceMintFailed}
+        keeperDelegated={createState.keeperDelegated}
+        keeperMessage={createState.keeperMessage}
       />
     );
   }
@@ -776,11 +812,15 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       ? wizard.pythFeed.name
       : wizard.oracleType === "hyperp_ema" && wizard.dexPool
         ? `${wizard.dexPool.pairLabel} (${wizard.dexPool.dexId})`
-        : wizard.oracleType === "admin"
-          ? "Admin Oracle"
-          : wizard.oracleFeed
-            ? `${wizard.oracleFeed.slice(0, 12)}...`
-            : "Not configured";
+        : wizard.oracleType === "keeper" && wizard.dexPool
+          ? `Keeper: ${wizard.dexPool.pairLabel} (${wizard.dexPool.dexId})`
+          : wizard.oracleType === "keeper" && wizard.oracleFeed
+            ? `Keeper: ${wizard.oracleFeed.slice(0, 12)}...`
+            : wizard.oracleType === "admin"
+              ? "Admin Oracle"
+              : wizard.oracleFeed
+                ? `${wizard.oracleFeed.slice(0, 12)}...`
+                : "Not configured";
 
   const detectedPrice = wizard.dexPool?.priceUsd ?? undefined;
 
@@ -927,6 +967,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
               <p className="text-[10px] text-[var(--long)]">
                 ✓ Pyth oracle detected — price feed will be used automatically
               </p>
+            ) : quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress && isDevnet ? (
+              <p className="text-[10px] text-[var(--long)]">
+                ✓ DEX pool detected — keeper will push mainnet prices to devnet (AUTH_MARK)
+              </p>
             ) : quickLaunch.oracleType === "hyperp_ema" && quickLaunch.dexPoolAddress ? (
               <p className="text-[10px] text-[var(--long)]">
                 ✓ DEX pool detected — permissionless on-chain pricing (no keeper needed)
@@ -1001,54 +1045,33 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             gates and shows a clean "LAUNCH MARKET →" CTA. Production uses
             the real StepReview which enforces SOL / token / mint validity. */}
         {wizard.step === 4 && (
-          mockBypass ? (
-            <StepReviewDemo
-              tokenSymbol={symbol}
-              tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
-              mintAddress={wizard.mintAddress}
-              tokenDecimals={decimals}
-              priceUsd={detectedPrice}
-              oracleType={wizard.oracleType}
-              oracleLabel={oracleLabel}
-              slabTier={wizard.slabTier}
-              tradingFeeBps={wizard.tradingFeeBps}
-              initialMarginBps={wizard.initialMarginBps}
-              lpCollateral={wizard.lpCollateral}
-              insuranceAmount={wizard.insuranceAmount}
-              logoUrl={mockLogoUrl}
-              walletBalanceSol={solBalance ?? 8.5}
-              onBack={goBack}
-              onLaunch={handleDemoLaunch}
-            />
-          ) : (
-            <StepReview
-              tokenSymbol={symbol}
-              tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
-              mintAddress={wizard.mintAddress}
-              tokenDecimals={decimals}
-              mintValid={mintValid}
-              mintExistsOnNetwork={mintExistsOnNetwork}
-              priceUsd={detectedPrice}
-              oracleType={wizard.oracleType}
-              oracleLabel={oracleLabel}
-              slabTier={wizard.slabTier}
-              tradingFeeBps={wizard.tradingFeeBps}
-              initialMarginBps={wizard.initialMarginBps}
-              lpCollateral={wizard.lpCollateral}
-              insuranceAmount={wizard.insuranceAmount}
-              walletConnected={!!publicKey}
-              walletBalanceSol={solBalance}
-              hasSufficientBalance={hasSufficientSol}
-              requiredSol={requiredSol}
-              hasTokens={hasTokens}
-              hasSufficientTokensForSeed={hasSufficientTokensForSeed}
-              feeConflict={feeConflict}
-              isPercolatorMirror={isPercolatorMirror}
-              onBack={goBack}
-              onLaunch={handleLaunch}
-              canLaunch={allValid && !!publicKey}
-            />
-          )
+          <StepReview
+            tokenSymbol={symbol}
+            tokenName={wizard.tokenMeta?.name ?? "Unknown Token"}
+            mintAddress={wizard.mintAddress}
+            tokenDecimals={decimals}
+            mintValid={mintValid}
+            mintExistsOnNetwork={mintExistsOnNetwork}
+            priceUsd={detectedPrice}
+            oracleType={wizard.oracleType}
+            oracleLabel={oracleLabel}
+            slabTier={wizard.slabTier}
+            tradingFeeBps={wizard.tradingFeeBps}
+            initialMarginBps={wizard.initialMarginBps}
+            lpCollateral={wizard.lpCollateral}
+            insuranceAmount={wizard.insuranceAmount}
+            walletConnected={!!publicKey}
+            walletBalanceSol={solBalance}
+            hasSufficientBalance={hasSufficientSol}
+            requiredSol={requiredSol}
+            hasTokens={hasTokens}
+            hasSufficientTokensForSeed={hasSufficientTokensForSeed}
+            feeConflict={feeConflict}
+            isPercolatorMirror={isPercolatorMirror}
+            onBack={goBack}
+            onLaunch={handleLaunch}
+            canLaunch={allValid && !!publicKey}
+          />
         )}
       </div>
     </div>

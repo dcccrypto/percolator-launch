@@ -13,6 +13,7 @@ import {
   deriveInsuranceLpMint,
   deriveLpVaultRegistry,
   deriveLpRedemption,
+  deriveLpEscrow,
   encodeCreateLpVaultV17,
   encodeDepositToLpVault,
   encodeRequestRedeemLpShares,
@@ -279,10 +280,14 @@ export function useInsuranceLP() {
       const depositorLpAta = await getAssociatedTokenAddress(lpMintPda, wallet.publicKey);
 
       const ixs = [];
-      // Create depositor LP ATA if it doesn't exist
-      try {
-        await connection.getAccountInfo(depositorLpAta);
-      } catch {
+      // Create depositor LP ATA if it doesn't exist.
+      // BUG FIX (devnet flow-test 2026-07-01): connection.getAccountInfo() resolves to `null`
+      // for a missing account — it does NOT throw. The previous try/catch here never entered
+      // its catch branch, so the create-ATA instruction was never added, and DepositToLpVault
+      // failed on-chain with Custom(11) InvalidTokenAccount for any depositor whose LP-token
+      // ATA didn't already exist (i.e. every first-time depositor into a given LP vault).
+      const depositorLpAtaInfo = await connection.getAccountInfo(depositorLpAta);
+      if (!depositorLpAtaInfo) {
         ixs.push(createAssociatedTokenAccountInstruction(
           wallet.publicKey, depositorLpAta, wallet.publicKey, lpMintPda,
         ));
@@ -340,17 +345,29 @@ export function useInsuranceLP() {
       const progPk = new PublicKey(programId);
       const [registryPda] = deriveLpVaultRegistry(progPk, marketPk);
       const [redemptionPda] = deriveLpRedemption(progPk, registryPda, wallet.publicKey);
+      const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
+      const [escrowPda] = deriveLpEscrow(progPk, marketPk);
 
       // Check if a redemption request already exists
       const redemptionInfo = await connection.getAccountInfo(redemptionPda);
       if (!redemptionInfo) {
         // Step 1: RequestRedeemLpShares (tag 76)
-        // Account list: [redeemer(signer,w), market(w), registry(w), redemption(w), systemProgram]
+        // BUG FIX (devnet flow-test 2026-07-01): this account list was missing lpMint,
+        // redeemerLpAta and the per-vault LP escrow PDA — and wrongly included `market`,
+        // which handle_request_redeem_lp_shares never reads — causing on-chain
+        // NotEnoughAccountKeys. Real account list per percolator-prog
+        // src/v16_program.rs handle_request_redeem_lp_shares (L12016-12028):
+        //   [redeemer(signer,w), registry(w), lpMint, redeemerLpAta(w), escrow(w),
+        //    redemption(w), tokenProgram, systemProgram]
+        const redeemerLpAta = await getAssociatedTokenAddress(lpMintPda, wallet.publicKey);
         const requestKeys = [
           { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
-          { pubkey: marketPk, isSigner: false, isWritable: true },
           { pubkey: registryPda, isSigner: false, isWritable: true },
+          { pubkey: lpMintPda, isSigner: false, isWritable: false },
+          { pubkey: redeemerLpAta, isSigner: false, isWritable: true },
+          { pubkey: escrowPda, isSigner: false, isWritable: true },
           { pubkey: redemptionPda, isSigner: false, isWritable: true },
+          { pubkey: WELL_KNOWN.tokenProgram, isSigner: false, isWritable: false },
           { pubkey: WELL_KNOWN.systemProgram, isSigner: false, isWritable: false },
         ];
         const requestIx = buildIx({
@@ -360,11 +377,19 @@ export function useInsuranceLP() {
         });
         await sendTx({ connection, wallet, instructions: [requestIx] });
       } else {
-        // Step 2: ExecuteRedemption (tag 77) — collect collateral after cooldown
-        // Account list: [redeemer(signer,w), market(w), registry(w), redemption(w),
-        //                redeemerAta(w), vaultToken(w), vaultAuthority, lpMint(w), tokenProgram]
+        // Step 2: ExecuteRedemption (tag 77) — collect collateral after cooldown.
+        // BUG FIX (devnet flow-test 2026-07-01): this account list was missing the LP
+        // escrow PDA and the per-domain backing ledger PDA, and had the remaining
+        // accounts in the wrong order — causing on-chain NotEnoughAccountKeys. Real
+        // account list per percolator-prog src/v16_program.rs handle_execute_redemption
+        // (L12153-12163): [cranker(signer,w), market(w), registry(w), redemption(w),
+        // lpMint(w), escrow(w), vaultToken(w), vaultAuthority, ledger(w), redeemerDest(w),
+        // tokenProgram]. `cranker` is permissionless (anyone may execute post-cooldown,
+        // and is directly credited the redemption PDA's reclaimed rent) — the UI always
+        // calls it as the redeemer themselves.
         const [vaultPda] = deriveVaultAuthority(progPk, marketPk);
-        const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
+        // Domain 0 — matches this hook's createMint()/deposit() hardcoded primary domain.
+        const [ledgerPda] = deriveLpBackingLedger(progPk, marketPk, 0);
         const collateralMint = slabState.config.collateralMint;
         const vaultTokenAta = await getAssociatedTokenAddress(collateralMint, vaultPda, true);
         const redeemerAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
@@ -374,10 +399,12 @@ export function useInsuranceLP() {
           { pubkey: marketPk, isSigner: false, isWritable: true },
           { pubkey: registryPda, isSigner: false, isWritable: true },
           { pubkey: redemptionPda, isSigner: false, isWritable: true },
-          { pubkey: redeemerAta, isSigner: false, isWritable: true },
+          { pubkey: lpMintPda, isSigner: false, isWritable: true },
+          { pubkey: escrowPda, isSigner: false, isWritable: true },
           { pubkey: vaultTokenAta, isSigner: false, isWritable: true },
           { pubkey: vaultPda, isSigner: false, isWritable: false },
-          { pubkey: lpMintPda, isSigner: false, isWritable: true },
+          { pubkey: ledgerPda, isSigner: false, isWritable: true },
+          { pubkey: redeemerAta, isSigner: false, isWritable: true },
           { pubkey: WELL_KNOWN.tokenProgram, isSigner: false, isWritable: false },
         ];
         const executeIx = buildIx({

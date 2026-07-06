@@ -34,7 +34,7 @@ const V17_PF_OWNER_OFF_UA = 80;
  *   feeCredits    → portfolio.feeCredits
  *   All other v12 fields → safe zero defaults
  */
-function portfolioV17ToAccount(
+export function portfolioV17ToAccount(
   portfolio: ReturnType<typeof parsePortfolioV17>,
 ): Account {
   const ZERO_PK = new PublicKey(new Uint8Array(32));

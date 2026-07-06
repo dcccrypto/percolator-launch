@@ -31,19 +31,37 @@ export function sanitizePriceE6(priceE6: bigint): bigint {
  * - 'admin': oracleAuthority != [0;32] && indexFeedId != [0;32]
  *   → off-chain authority pushes prices; authorityPriceE6 is the latest pushed price
  *   → use authorityPriceE6 (with optional staleness check via authorityTimestamp)
+ *
+ * - 'keeper': on-chain oracle_mode byte = 3 (AUTH_MARK, v17 only)
+ *   → automated keeper service pushes mark price via PushAuthMark instruction
+ *   → use lastEffectivePriceE6 (= markEwmaE6, keeper-updated every crank cycle)
+ *   → distinguished from 'admin' (manual push) by the oracle_mode byte, not key structure
  */
-export type OracleMode = "pyth-pinned" | "hyperp" | "admin";
+export type OracleMode = "pyth-pinned" | "hyperp" | "admin" | "keeper";
 
 const ZERO_KEY = new PublicKey(new Uint8Array(32));
 
 /**
- * Detect oracle mode from market config keys.
- * Centralizes mode detection for consistent behavior across the app.
+ * Detect oracle mode from market config keys plus the optional on-chain oracle_mode byte.
+ *
+ * The `oracleModeByte` (from WrapperConfigV17.oracleMode) takes precedence over key-based
+ * detection when present. This is necessary because v17 markets with AUTH_MARK (byte=3)
+ * have indexFeedId forced to ZERO by SlabProvider (to direct price reads to markEwmaE6),
+ * which would otherwise cause key-based detection to return "hyperp" instead of "keeper".
+ *
+ * Pass `oracleModeByte: d.configV17?.oracleMode` at call sites that have a DiscoveredMarket,
+ * or `oracleModeByte: wrapperConfigV17?.oracleMode` at call sites using useSlabState().
+ * Omitting it falls back to key-based detection (correct for v12 markets).
  */
 export function detectOracleMode(cfg: {
   oracleAuthority: PublicKey;
   indexFeedId: PublicKey;
+  /** On-chain oracle_mode byte from WrapperConfigV17 (v17 markets only).
+   *  3 = AUTH_MARK → returns "keeper". Omit for v12 markets (key-based detection). */
+  oracleModeByte?: number;
 }): OracleMode {
+  // v17 AUTH_MARK (byte=3): automated keeper service, NOT manual admin entry
+  if (cfg.oracleModeByte === 3) return "keeper";
   if (cfg.indexFeedId.equals(ZERO_KEY)) return "hyperp";
   if (cfg.oracleAuthority.equals(ZERO_KEY)) return "pyth-pinned";
   return "admin";
@@ -81,6 +99,8 @@ export function resolveMarketPriceE6(cfg: {
   authorityPriceE6: bigint;
   authorityTimestamp?: bigint;
   invert?: number;
+  /** See detectOracleMode. Pass wrapperConfigV17?.oracleMode for v17 markets. */
+  oracleModeByte?: number;
 }): bigint {
   const mode = detectOracleMode(cfg);
 
@@ -103,6 +123,14 @@ export function resolveMarketPriceE6(cfg: {
       // Admin oracle: authorityPriceE6 is the latest pushed price
       // Fall back to lastEffectivePriceE6 if authority price is 0
       raw = cfg.authorityPriceE6 > 0n ? cfg.authorityPriceE6 : cfg.lastEffectivePriceE6;
+      break;
+
+    case "keeper":
+      // Keeper oracle (v17 AUTH_MARK, byte=3): keeper pushes mark via PushAuthMark.
+      // lastEffectivePriceE6 = wrapperConfigV17.markEwmaE6 (keeper-updated every crank).
+      // authorityPriceE6 = assetProfile.oracleTargetPriceE6 (may not be set for all markets).
+      // Use lastEffectivePriceE6 as the canonical live price (same as hyperp path).
+      raw = cfg.lastEffectivePriceE6;
       break;
 
     default:

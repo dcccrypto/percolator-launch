@@ -9,17 +9,6 @@
  *   PositionNft state : ["position_nft",      slab_key, user_idx_u16_LE]
  *   PositionNft mint  : ["position_nft_mint", slab_key, user_idx_u16_LE]
  *   Mint authority    : ["mint_authority"]  (NFT program only)
- *
- * PositionNftState on-chain layout (128 bytes, PERC-608):
- *   [0..8]    magic             u64
- *   [8..40]   mint              [u8; 32]
- *   [40..72]  slab              [u8; 32]
- *   [72..104] owner             [u8; 32]
- *   [104..106] user_idx         u16 LE
- *   [106]     pending_settlement u8
- *   [107]     bump              u8
- *   [108]     mint_bump         u8
- *   [109..128] _reserved        [u8; 19]
  */
 
 import { PublicKey } from "@solana/web3.js";
@@ -28,9 +17,12 @@ import { PublicKey } from "@solana/web3.js";
 // Program ID
 // ---------------------------------------------------------------------------
 
-/** The standalone percolator-nft program (TransferHook + mint authority). */
+/** The standalone percolator-nft program (TransferHook + mint authority).
+ * v17 devnet-deployed program (matches lib/config.ts `nftProgramId`). The SDK
+ * default `FqhKJT9g…` is NOT deployed on devnet, which made position-NFT mint/
+ * burn/transfer fail with "Account not found on-chain" (program AccountNotFound). */
 export const PERCOLATOR_NFT_PROGRAM_ID = new PublicKey(
-  "FqhKJT9gtScjrmfUuRMjeg7cXNpif1fqsy5Jh65tJmTS"
+  "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP"
 );
 
 // ---------------------------------------------------------------------------

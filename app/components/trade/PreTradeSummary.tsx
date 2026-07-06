@@ -98,7 +98,11 @@ export const PreTradeSummary: FC<PreTradeSummaryProps> = ({
   // (USDC on a SOL/USDC market), not in the underlying asset. Use
   // collateralSymbol for the label; fall back to symbol for backwards compat.
   const settleSymbol = collateralSymbol ?? symbol;
-  const notionalDisplay = `${formatTokenAmount(notionalNative, decimals)} ${settleSymbol}`;
+  // B-10: notionalDisplay was always in token units even when showUsd was active.
+  // Match feeDisplay/marginDisplay: show USD when toggle is on and price is available.
+  const notionalDisplay = showUsd && priceUsd != null
+    ? formatNum((Number(notionalNative) / Math.pow(10, decimals)) * priceUsd)
+    : `${formatTokenAmount(notionalNative, decimals)} ${settleSymbol}`;
   const feeDisplay = showUsd && priceUsd != null
     ? formatNum((Number(fee) / Math.pow(10, decimals)) * priceUsd)
     : `${formatTokenAmount(fee, decimals)} ${settleSymbol}`;

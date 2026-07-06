@@ -28,6 +28,7 @@ import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
+import { humanizeError } from "@/lib/errorMessages";
 
 const INLINE_ORACLE_PUSH_REMOVED_ERROR =
   "Inline oracle price push was removed on-chain in beta.29. Migrate this flow to /api/oracle/advance-phase or another server-side oracle publisher before withdrawing as the oracle authority.";
@@ -99,11 +100,13 @@ export function useWithdraw(slabAddress: string) {
           // ── v17 withdraw path ─────────────────────────────────────────────
           // v17 Withdraw (tag 4): [owner(signer,w), market(w), portfolio(w), destToken(w), vaultToken(w), vaultAuthority, tokenProgram]
           // No clock, no oracle. crank is NOT prepended (v17 Withdraw is standalone).
-          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint);
+          // vaultPda is a program PDA (off-curve) → allowOwnerOffCurve=true (else TokenOwnerOffCurveError)
+          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
 
           // Find the user's portfolio account.
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
           let portfolioPk: PublicKey | null = null;
+          let portfolioData: Buffer | null = null;
           try {
             const portfolioAccounts = await connection.getProgramAccounts(programId, {
               filters: [
@@ -114,11 +117,43 @@ export function useWithdraw(slabAddress: string) {
             });
             if (portfolioAccounts.length > 0) {
               portfolioPk = portfolioAccounts[0].pubkey;
+              const d = portfolioAccounts[0].account.data;
+              portfolioData = d instanceof Buffer ? d : Buffer.from(d);
             }
-          } catch { /* fall through */ }
+          } catch { /* fall through — portfolio lookup is best-effort */ }
 
           if (!portfolioPk) {
             throw new Error("v17: No portfolio account found for this wallet. Please deposit first to create your portfolio.");
+          }
+
+          // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
+          // already blocks amount > capital, but this guards direct/other callers
+          // and turns a confusing on-chain failure into a clear message.
+          //
+          // NOTE: we can only bound against TOTAL capital here. When a position is
+          // open the true free (unreserved) collateral is lower — computing the
+          // exact reserved margin requires the engine's margin math, so the
+          // on-chain program remains the source of truth for that case (it rejects
+          // with "insufficient margin" if the withdrawal would under-collateralize
+          // the open position). This check never blocks a valid withdrawal; it only
+          // catches the unambiguous "more than the whole account" case early.
+          if (portfolioData) {
+            try {
+              const portfolio = parsePortfolioV17(portfolioData);
+              if (params.amount > portfolio.capital) {
+                throw new Error(
+                  "Withdrawal amount exceeds your account balance. Reduce the amount and try again.",
+                );
+              }
+            } catch (checkErr) {
+              // Re-throw our own validation error; ignore parse failures (best-effort).
+              if (
+                checkErr instanceof Error &&
+                checkErr.message.startsWith("Withdrawal amount exceeds")
+              ) {
+                throw checkErr;
+              }
+            }
           }
 
           instructions.push(buildIx({
@@ -163,7 +198,7 @@ export function useWithdraw(slabAddress: string) {
         setTimeout(() => refreshSlab(), 2000);
         return sig;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(humanizeError(e instanceof Error ? e.message : String(e)));
         throw e;
       } finally {
         inflightRef.current = false;

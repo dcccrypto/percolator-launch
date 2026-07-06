@@ -93,7 +93,7 @@ function PositionCard({ pos, symbol, decimals = 6 }: { pos: PortfolioPosition; s
                 </span>
               </>
             ) : (
-              <span className="text-[11px] font-bold text-[var(--text-dim)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+              <span className="text-[11px] font-bold text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
                 --
               </span>
             )}
@@ -103,25 +103,25 @@ function PositionCard({ pos, symbol, decimals = 6 }: { pos: PortfolioPosition; s
         {/* Row 2: Key metrics */}
         <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
           <div>
-            <span className="text-[var(--text-dim)]">Size: </span>
+            <span className="text-[var(--text-secondary)]">Size: </span>
             <span className="text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
               {formatTokenAmount(sizeAbs, decimals)}
             </span>
           </div>
           <div>
-            <span className="text-[var(--text-dim)]">Entry: </span>
+            <span className="text-[var(--text-secondary)]">Entry: </span>
             <span className="text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
               {pos.account?.entryPrice != null ? formatUsdPriceE6(pos.account.entryPrice) : "—"}
             </span>
           </div>
           <div>
-            <span className="text-[var(--text-dim)]">Mark: </span>
+            <span className="text-[var(--text-secondary)]">Mark: </span>
             <span className="text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
               {pos.oraclePriceE6 > 0n ? formatUsdPriceE6(pos.oraclePriceE6) : "—"}
             </span>
           </div>
           <div>
-            <span className="text-[var(--text-dim)]">Liq: </span>
+            <span className="text-[var(--text-secondary)]">Liq: </span>
             <span
               className={`${
                 severity === "danger" ? "font-semibold text-[var(--short)]" : severity === "warning" ? "text-[var(--warning)]" : "text-[var(--text-secondary)]"
@@ -136,7 +136,7 @@ function PositionCard({ pos, symbol, decimals = 6 }: { pos: PortfolioPosition; s
         {/* Margin health bar */}
         {hasPosition && pos.liquidationDistancePct < 100 && (
           <div className="mt-2">
-            <div className="flex items-center justify-between text-[8px] text-[var(--text-dim)]">
+            <div className="flex items-center justify-between text-[8px] text-[var(--text-secondary)]">
               <span>Margin Health</span>
               <span
                 className={
@@ -144,7 +144,7 @@ function PositionCard({ pos, symbol, decimals = 6 }: { pos: PortfolioPosition; s
                     ? "font-bold text-[var(--short)]"
                     : severity === "warning"
                     ? "font-bold text-[var(--warning)]"
-                    : "text-[var(--text-muted)]"
+                    : "text-[var(--text-secondary)]"
                 }
               >
                 {pos.liquidationDistancePct.toFixed(0)}%
@@ -186,10 +186,10 @@ export function PositionSummary() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
         <div className="flex items-center gap-2">
-          <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+          <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
             Open Positions
           </p>
-          <span className="text-[9px] font-bold text-[var(--text-muted)]">
+          <span className="text-[9px] font-bold text-[var(--text-secondary)]">
             ({positions.length})
           </span>
           {positions.length > 0 && (
@@ -210,7 +210,7 @@ export function PositionSummary() {
           <div className="flex h-full flex-col items-center justify-center p-6 text-center">
             <div className="mb-3 text-2xl opacity-30">📊</div>
             <p className="text-[13px] font-medium text-[var(--text-secondary)]">No open positions</p>
-            <p className="mt-1 text-[11px] text-[var(--text-muted)]">Start trading →</p>
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">Start trading →</p>
             <Link href="/markets" className="mt-3">
               <GlowButton>Browse Markets</GlowButton>
             </Link>

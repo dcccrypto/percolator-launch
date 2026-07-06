@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { getAssociatedTokenAddressSync, unpackAccount, unpackMint } from '@solana/spl-token';
-import { getStakeProgramId, deriveDepositPda } from '@percolatorct/sdk';
+import { deriveDepositPda } from '@percolatorct/sdk';
+import { getConfig } from '@/lib/config';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -130,8 +131,12 @@ export function useLpPositions(): LpPositionsState & { refresh: () => void } {
       }
 
       const walletPk = new PublicKey(walletKeyStr);
-      // Resolve stake program ID for current network
-      const stakeProgramPk = getStakeProgramId();
+      // Stake pools are owned by this deployment's vault program
+      // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
+      const stakeProgramPk = new PublicKey(
+        (getConfig() as { vaultProgramId?: string }).vaultProgramId
+        ?? '51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ'
+      );
 
       // 2a. Batch-fetch LP + collateral mint accounts to read per-mint decimals (PERC-8197).
       // Neither LP nor collateral tokens are guaranteed to have 6 decimals — hardcoding

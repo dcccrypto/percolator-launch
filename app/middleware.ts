@@ -481,6 +481,20 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
   //   When nonce is present, CSP2+ browsers ignore 'unsafe-inline' for scripts.
   // - style-src 'unsafe-inline': Required by Next.js for inline style injection.
   const scriptNonce = nonce ? `'nonce-${nonce}' ` : "";
+  // Next.js dev mode (Turbopack/RSC client) requires eval() to hydrate the app.
+  // Production chunks have zero eval() (issue #633), so gate 'unsafe-eval' to
+  // development only — prod CSP stays strict, dev renders instead of blanking.
+  const isDev = process.env.NODE_ENV !== "production";
+  const devEval = isDev ? "'unsafe-eval' " : "";
+  // Phase 1 trade-terminal rebuild: the local pool-price WS dev server
+  // (scripts/local-price-ws-server.ts, see BUILD-LOG.md) runs on
+  // ws://localhost:8787 and is NOT covered by any existing connect-src
+  // entry — every entry above is a specific https/wss remote host. Without
+  // this, the browser silently blocks the connection (no console error
+  // beyond a CSP violation notice; useLivePrice() falls back to REST/
+  // on-chain seed only, with no other visible symptom). Dev-only, gated the
+  // same way as devEval above — never present in a production CSP.
+  const devLocalWs = isDev ? "ws://localhost:* http://localhost:* " : "";
   const csp = [
     "default-src 'self'",
     // challenges.cloudflare.com: Turnstile widget script (api.js). Loaded
@@ -490,7 +504,7 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     // Analytics: googletagmanager.com loads gtag.js (GA4);
     // static.cloudflareinsights.com loads the Cloudflare Web Analytics beacon.
     // Vercel Web Analytics loads from same-origin /_vercel/* (covered by 'self').
-    `script-src 'self' ${scriptNonce}'unsafe-inline' https://cdn.vercel-insights.com https://challenges.cloudflare.com https://www.googletagmanager.com https://static.cloudflareinsights.com`,
+    `script-src 'self' ${scriptNonce}${devEval}'unsafe-inline' https://cdn.vercel-insights.com https://challenges.cloudflare.com https://www.googletagmanager.com https://static.cloudflareinsights.com`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https: blob:",
@@ -503,7 +517,7 @@ function addSecurityHeaders(response: NextResponse, nonce?: string) {
     // challenges.cloudflare.com is appended for the Turnstile widget's
     // XHR back-channel (telemetry + challenge-state checks). Same
     // origin as the script load.
-    "connect-src 'self' https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://api.geckoterminal.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app https://api.percolatorlaunch.com wss://api.percolatorlaunch.com https://lite.jup.ag https://token.jup.ag https://tokens.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org https://challenges.cloudflare.com https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com https://cloudflareinsights.com blob:",
+    `connect-src 'self' ${devLocalWs}https://*.solana.com wss://*.solana.com https://*.supabase.co wss://*.supabase.co https://*.vercel-insights.com https://api.coingecko.com https://api.geckoterminal.com https://*.helius-rpc.com wss://*.helius-rpc.com https://api.dexscreener.com https://hermes.pyth.network https://*.up.railway.app wss://*.up.railway.app https://api.percolatorlaunch.com wss://api.percolatorlaunch.com https://lite.jup.ag https://token.jup.ag https://tokens.jup.ag https://auth.privy.io https://embedded-wallets.privy.io https://*.privy.systems https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org https://challenges.cloudflare.com https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com https://cloudflareinsights.com blob:`,
     // Removed https://*.vercel.app wildcard (issue #635) — no legitimate use case for embedding
     // arbitrary Vercel-hosted content in iframes. frame-src controls outbound iframe embedding.
     // challenges.cloudflare.com is the iframe origin the Turnstile widget

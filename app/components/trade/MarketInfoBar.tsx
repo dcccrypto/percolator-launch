@@ -1,12 +1,12 @@
 "use client";
 
-import { FC } from "react";
+import { FC, useEffect, useRef, useState } from "react";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { MarketLogo } from "@/components/market/MarketLogo";
-import { formatUsdFromNumber } from "@/lib/format";
+import { formatUsdFromNumber, formatMarkPrice } from "@/lib/format";
 
 interface MarketInfoBarProps {
   slabAddress: string;
@@ -44,10 +44,10 @@ function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; va
   else state = "live";
 
   const cfg: Record<HealthBadgeState, { label: string; icon: string; cls: string; pulse: boolean; tooltip: string }> = {
-    live:          { label: "LIVE",         icon: "●",  cls: "text-green-400 bg-green-500/10 border-green-500/20",  pulse: false, tooltip: "Oracle healthy — market is live" },
-    "no-oracle":   { label: "NO ORACLE",    icon: "◉",  cls: "text-amber-400 bg-amber-500/10 border-amber-500/20",  pulse: true,  tooltip: "Oracle not cranked — market paused. Trades are blocked." },
-    "no-liquidity":{ label: "NO LIQUIDITY", icon: "⚠",  cls: "text-red-400 bg-red-500/10 border-red-500/20",        pulse: false, tooltip: "No vault liquidity — trades cannot execute until this market is funded." },
-    inactive:      { label: "INACTIVE",     icon: "⚠",  cls: "text-red-400 bg-red-500/10 border-red-500/20",        pulse: false, tooltip: "Oracle unavailable and no vault liquidity." },
+    live:          { label: "LIVE",         icon: "●",  cls: "text-[var(--long)] bg-[var(--long)]/10 border-[var(--long)]/20",       pulse: false, tooltip: "Oracle healthy — market is live" },
+    "no-oracle":   { label: "NO ORACLE",    icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: true,  tooltip: "Oracle not cranked — market paused. Trades are blocked." },
+    "no-liquidity":{ label: "NO LIQUIDITY", icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "No vault liquidity — trades cannot execute until this market is funded." },
+    inactive:      { label: "INACTIVE",     icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "Oracle unavailable and no vault liquidity." },
   };
 
   const { label, icon, cls, pulse, tooltip } = cfg[state];
@@ -63,19 +63,56 @@ function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; va
   );
 }
 
-export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, logoUrl, mintAddress }) => {
-  const { priceUsd, change24h, high24h, low24h } = useLivePrice();
-  const { market } = useMarketInfo(slabAddress);
-  const { fundingRate, engine } = useEngineState();
-  const { level: oracleLevel } = useOracleFreshness();
+/**
+ * Header mark price with a subtle up/down tick flash — the classic perp-DEX
+ * micro-interaction. On each price change we compare the new priceE6 against
+ * the previous one and briefly tint the text long-green (up) or short-red
+ * (down), easing back to the neutral resting color over ~300ms. The resting
+ * color is neutral so the semantic long/short flash reads clearly (the 24h
+ * direction is carried by the change badge, not this number). No layout shift.
+ */
+function MarkPrice({ priceUsd, priceE6 }: { priceUsd: number | null; priceE6: bigint | null }) {
+  const prevE6 = useRef<bigint | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [flash, setFlash] = useState<"up" | "down" | null>(null);
 
-  const priceDisplay = formatUsdFromNumber(priceUsd);
+  useEffect(() => {
+    if (priceE6 == null) return;
+    const prev = prevE6.current;
+    if (prev != null && priceE6 !== prev) {
+      setFlash(priceE6 > prev ? "up" : "down");
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setFlash(null), 300);
+    }
+    prevE6.current = priceE6;
+  }, [priceE6]);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const flashColor =
+    flash === "up" ? "text-[var(--long)]" : flash === "down" ? "text-[var(--short)]" : "text-[var(--text)]";
+
+  return (
+    <span
+      className={`text-2xl font-bold tabular-nums shrink-0 transition-colors duration-300 ease-out ${flashColor}`}
+      style={{ fontFamily: "var(--font-mono)" }}
+    >
+      {formatMarkPrice(priceUsd)}
+    </span>
+  );
+}
+
+export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, logoUrl, mintAddress }) => {
+  const { priceUsd, priceE6, change24h, high24h, low24h } = useLivePrice();
+  const { market } = useMarketInfo(slabAddress);
+  const { fundingRate, engine, totalOI } = useEngineState();
+  const { level: oracleLevel } = useOracleFreshness();
 
   const change24hDisplay = change24h ?? 0;
   const isUp = change24hDisplay >= 0;
 
   const funding8h = fundingRate != null ? fundingRateBpsTo8h(fundingRate) : null;
-  const fundingColor = funding8h != null ? (funding8h < 0 ? "text-orange-400" : "text-green-400") : "text-[var(--text)]";
+  const fundingColor = funding8h != null ? (funding8h < 0 ? "text-[var(--warning)]" : "text-[var(--long)]") : "text-[var(--text)]";
 
   // P3-3: oracle + vault status for health badge
   // oracleDown = unavailable (never cranked) or stale — oracleReady && unavailable is
@@ -86,10 +123,15 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
   const volume = market?.volume_24h as number | null | undefined;
 
-  // GH#1626: total_open_interest is raw on-chain atoms — convert to USD
+  // Open interest: prefer the authoritative on-chain figure (bigint atoms, quote
+  // units e6) from the engine/market-group — it's present locally even when the
+  // indexer isn't, so we never show a misleading "$0" from a null indexer row.
+  // Fall back to the indexer's total_open_interest (base-token atoms → USD via
+  // price, GH#1626) only when on-chain OI is unavailable, then to a quiet "—".
   const rawOiAtoms = market?.total_open_interest as number | null | undefined;
   const decimals = (market?.decimals as number | null | undefined) ?? 6;
-  const oi: number | null | undefined = (() => {
+  const oi: number | null = (() => {
+    if (totalOI != null) return Number(totalOI) / 1_000_000;
     if (rawOiAtoms == null) return null;
     const tokenAmount = rawOiAtoms / Math.pow(10, decimals);
     if (priceUsd != null && priceUsd > 0) return tokenAmount * priceUsd;
@@ -99,55 +141,54 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   return (
     <div
       data-testid="market-info-bar"
-      className="sticky top-0 z-30 w-full border-b border-[var(--border)]/50 bg-[var(--bg)]/95 backdrop-blur-sm px-4 py-2.5 flex items-center gap-5 overflow-x-auto whitespace-nowrap scrollbar-none"
+      className="sticky top-0 z-30 w-full border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm px-4 py-3 flex items-center gap-5 overflow-x-auto whitespace-nowrap scrollbar-none"
     >
       {/* Symbol + Logo */}
       <div className="flex items-center gap-2 shrink-0">
         <MarketLogo logoUrl={logoUrl} mintAddress={mintAddress} symbol={symbol} size="sm" />
         <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
           {symbol}/USD
-          <span className="ml-1.5 text-[9px] font-normal uppercase tracking-[0.12em] text-[var(--text)]">PERP</span>
+          <span className="ml-1.5 text-[9px] font-normal uppercase tracking-[0.12em] text-[var(--text-dim)]">PERP</span>
         </span>
       </div>
 
-      <span className="h-4 w-px bg-[var(--border)]/40 shrink-0" />
+      <span className="h-6 w-px bg-[var(--border)] shrink-0" />
 
-      {/* Mark Price — large, colored by direction */}
-      <span
-        className={`text-2xl font-bold tabular-nums shrink-0 ${isUp ? "text-green-400" : "text-red-400"}`}
-        style={{ fontFamily: "var(--font-mono)" }}
-      >
-        {priceDisplay}
-      </span>
+      {/* Mark Price — large; flashes long/short on each tick (see MarkPrice) */}
+      <MarkPrice priceUsd={priceUsd} priceE6={priceE6} />
 
-      {/* 24h change badge */}
+      {/* 24h change badge — semantic long/short tokens, same as the rest of
+          the terminal (was hardcoded Tailwind green/red before). */}
       <span
-        className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded ${
+        className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-sm ${
           change24h == null
             ? "bg-[var(--border)]/30 text-[var(--text-dim)]"
             : isUp
-              ? "bg-green-500/15 text-green-400 border border-green-500/20"
-              : "bg-red-500/15 text-red-400 border border-red-500/20"
+              ? "bg-[var(--long)]/15 text-[var(--long)] border border-[var(--long)]/20"
+              : "bg-[var(--short)]/15 text-[var(--short)] border border-[var(--short)]/20"
         }`}
       >
         {change24h == null ? "0.00%" : `${isUp ? "+" : ""}${change24hDisplay.toFixed(2)}%`}
       </span>
 
-      <span className="h-4 w-px bg-[var(--border)]/40 shrink-0" />
+      <span className="h-6 w-px bg-[var(--border)] shrink-0" />
 
       {/* Stats group — flex-1 fills remaining space so ml-auto on badge works correctly */}
-      <div className="flex flex-1 items-center gap-4 min-w-0">
+      <div className="flex flex-1 items-center gap-5 min-w-0">
         {/* Volume 24h */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">Vol 24h</span>
-          <span className="text-xs font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
-            {formatCompact(volume as number)}
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Vol 24h</span>
+          <span
+            className={`text-xs font-medium ${volume == null ? "text-[var(--text-dim)]" : "text-[var(--text)]"}`}
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            {volume == null ? "—" : formatCompact(volume as number)}
           </span>
         </div>
 
         {/* OI */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">Open Interest</span>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Open Interest</span>
           <span className="text-xs font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
             {formatCompact(oi as number)}
           </span>
@@ -155,7 +196,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* 5.6: 24h High */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">24h High</span>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h High</span>
           <span className="text-xs font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>
             {formatUsdFromNumber(high24h)}
           </span>
@@ -163,7 +204,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
 
         {/* 5.6: 24h Low */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">24h Low</span>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h Low</span>
           <span className="text-xs font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
             {formatUsdFromNumber(low24h)}
           </span>
@@ -172,7 +213,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
         {/* Funding Rate — P3-6: pr-2 padding prevents right-edge clipping */}
         {funding8h != null && (
           <div className="flex flex-col shrink-0 pr-2">
-            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text)]">Funding / 8h</span>
+            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Funding / 8h</span>
             <span className={`text-xs font-semibold ${fundingColor}`} style={{ fontFamily: "var(--font-mono)" }}>
               {funding8h >= 0 ? "+" : ""}{funding8h.toFixed(4)}%
             </span>
@@ -180,7 +221,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
         )}
 
         {/* P3-3: Market health badge — ml-auto pushes to far right within flex-1 group */}
-        <span className="ml-auto h-4 w-px bg-[var(--border)]/40 shrink-0" />
+        <span className="ml-auto h-6 w-px bg-[var(--border)] shrink-0" />
         <MarketHealthBadge oracleDown={oracleDown} vaultEmpty={vaultEmpty} />
       </div>
     </div>

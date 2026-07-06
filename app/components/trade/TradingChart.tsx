@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { FC, memo, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   createChart,
   IChartApi,
@@ -16,6 +16,8 @@ import {
 } from "lightweight-charts";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
+import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
+import { startPerfSpan } from "@/lib/perf/perfTiming";
 import { useTokenChart } from "@/hooks/useTokenChart";
 import { usePythChart } from "@/hooks/usePythChart";
 import { usePercolatorCandles } from "@/hooks/usePercolatorCandles";
@@ -133,6 +135,27 @@ function PositionSummary({ slabAddress }: PositionSummaryProps) {
 }
 
 /**
+ * Phase 2 (chart decoupling): isolated leaf that shows the live mark price
+ * as text in the chart's empty-state overlay. Subscribes to the price store
+ * reactively via useLivePrice() itself — so ONLY this ~10-line component
+ * re-renders on a price tick, not the ~1000-line TradingChart that owns the
+ * indicator/drawing/series lifecycle. Matches the reference doc's Area 2
+ * finding verbatim: "route the hottest data around your state library's
+ * default hook-subscribe path... push the visually-hot data to... a
+ * narrowly-scoped leaf component rather than letting it flow through a
+ * page-level [component] re-render."
+ */
+function LiveMarkPriceLabel() {
+  const { priceUsd } = useLivePrice();
+  if (priceUsd == null || priceUsd <= 0) return null;
+  return (
+    <div className="text-2xl font-bold text-[var(--text)] drop-shadow-sm" style={{ fontFamily: "var(--font-mono)" }}>
+      {formatUsdFromNumber(priceUsd)}
+    </div>
+  );
+}
+
+/**
  * Map a market's underlying-asset symbol to the Pyth Benchmarks feed symbol.
  * Pyth feeds follow `Crypto.<ASSET>/USD` naming. Keep the list tight — the
  * server-side API route has the same allowlist and will reject anything not
@@ -141,18 +164,46 @@ function PositionSummary({ slabAddress }: PositionSummaryProps) {
  */
 function pythSymbolForAsset(assetSymbol: string | null | undefined): string | null {
   if (!assetSymbol) return null;
-  const s = assetSymbol.trim().toUpperCase();
+  // Market symbols carry a display suffix (e.g. "JUP-PERP", "SOL/USD", "BONK-USDC");
+  // the Pyth Benchmarks feed is keyed on the bare underlying asset. Take the base
+  // token before the first "-" or "/". Without this, "JUP-PERP" never matched the
+  // allowlist below, so NO market resolved a Pyth feed and every chart was blank.
+  const s = assetSymbol.trim().toUpperCase().split(/[-/]/)[0].trim();
   if (!s) return null;
-  const supported = new Set(["SOL", "BTC", "ETH", "JUP", "JTO", "WIF", "BONK", "PYTH"]);
+  const supported = new Set(["SOL", "BTC", "ETH", "JUP", "JTO", "WIF", "BONK", "PYTH", "TRUMP", "PENGU"]);
   return supported.has(s) ? `Crypto.${s}/USD` : null;
 }
 
-export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = ({
+// Phase 2 (chart decoupling): memoized so a parent re-render (TradePageInner
+// re-renders ~4-5x/sec today, cascading into every non-memoized child — see
+// BUILD-LOG.md Phase 0/2) does NOT by itself re-render this ~1000-line
+// component. Removing TradingChart's own useLivePrice() call (above) was
+// necessary but not sufficient — without this memo, the parent's cascade
+// alone still re-rendered TradingChart on every tick, which is exactly what
+// measurement caught (see BUILD-LOG.md Phase 2 "second obstacle"). Safe
+// because both props are stable primitives (a market's slab/mint address
+// doesn't change except on an actual market switch) — the default shallow
+// (Object.is-per-prop) comparison React.memo uses is exactly correct here,
+// no custom comparator needed.
+const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   slabAddress,
   mintAddress,
 }) => {
   const { config } = useSlabState();
-  const { priceUsd } = useLivePrice();
+  // Phase 2 (chart decoupling): TradingChart no longer calls useLivePrice()
+  // reactively — it owns the ~1000-line indicator/drawing/series lifecycle,
+  // and a per-tick re-render here used to cascade into all of that. Live
+  // ticks now reach the chart via a direct lib/priceStore/priceStore.ts
+  // subscription (see the "Live tick -> chart" effect below), which calls
+  // series.update()/applyOptions() imperatively — bypassing React state
+  // entirely, per the reference doc's dYdX-pattern citation (Area 3). The
+  // two remaining reactive price needs (header %-change fallback when no
+  // candle data exists yet; empty-state placeholder price) are handled
+  // without a component-wide subscription: the header fallback reads a
+  // non-reactive store snapshot (rare edge case, doesn't need tick-level
+  // freshness — see `currentPrice` below), and the empty-state price is an
+  // isolated ~10-line leaf (`LiveMarkPriceLabel`, defined above) that
+  // subscribes to useLivePrice() itself so only IT re-renders on a tick.
   const chartTheme = useChartTheme();
   const [chartStyle, setChartStyle] = useChartStylePref();
   const [overlayPrefs, setOverlayPref] = useChartOverlayPrefs();
@@ -197,6 +248,15 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const priceLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const liqLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const entryLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
+  // Phase 2: the currently-forming bar/point, kept in sync by the structural
+  // series effect (on every setData) and merged into by live ticks (on
+  // every price-store notification) via series.update() — never setData().
+  const lastBarRef = useRef<{ time: import("lightweight-charts").UTCTimestamp; open: number; high: number; low: number; close: number } | null>(null);
+  const lastPointRef = useRef<{ time: import("lightweight-charts").UTCTimestamp; value: number } | null>(null);
+  // Mirrors chartStyle without being a dependency of the tick-subscription
+  // effect below (that effect should not resubscribe just because the user
+  // changed candle vs. line style — only the merge SHAPE changes).
+  const chartDataKindRef = useRef<"ohlc" | "single">("ohlc");
   // Track whether we've done the initial viewport fit for the current
   // timeframe/chart-type/data-source. Without this, calling fitContent() on
   // every poll (new bar arrives every ~30s for Pyth / 60s for GeckoTerminal)
@@ -299,16 +359,28 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
       .catch(() => {});
   }, [slabAddress]);
 
-  // Live price updates
+  // Live price updates — feeds the oracle-aggregated FALLBACK candle source
+  // (only actually used when Percolator/Pyth/DEX all have no data for this
+  // market — see hasPercolatorData/hasPythData/hasExternalData priority
+  // below). Phase 2: subscribes directly to the price store rather than the
+  // reactive useLivePrice() hook, so TradingChart only re-renders when this
+  // 5s gate actually calls setOraclePrices — not on every raw tick
+  // underneath it (ticks can arrive every ~300ms-2s; this preserves the
+  // exact same 5s-gated behaviour, just sourced non-reactively).
   useEffect(() => {
-    if (!config || !priceUsd) return;
-    const now = Date.now();
-    setOraclePrices((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && now - last.timestamp < 5000) return prev;
-      return [...prev, { timestamp: now, price: priceUsd }].slice(-1000);
+    if (!config || !slabAddress) return;
+    return subscribeSlab(slabAddress, () => {
+      const snap = getSnapshot(slabAddress);
+      if (snap.priceUsd == null) return;
+      const usd = snap.priceUsd;
+      const now = Date.now();
+      setOraclePrices((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && now - last.timestamp < 5000) return prev;
+        return [...prev, { timestamp: now, price: usd }].slice(-1000);
+      });
     });
-  }, [config, priceUsd]);
+  }, [config, slabAddress]);
 
   // Derive data. Memoed because oraclePrices only changes on the 5s-gated
   // live-price effect (line ~287), so the filtered slice is reference-stable
@@ -426,7 +498,8 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     chartRef.current = chart;
     // Preserve the default price pane when momentarily empty. The
     // price-series effect below remove-and-re-adds the price series on
-    // every dep change (priceUsd tick, theme switch, etc.), and v5
+    // every dep change (style/timeframe/data/theme switch — no longer a
+    // live price tick, see Phase 2), and v5
     // auto-destroys empty panes whenever any other panes exist. With
     // RSI / MACD oscillator panes active, the brief empty window
     // between removeSeries(price) and addSeries(price) was triggering
@@ -513,10 +586,13 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     // addOverlayLines() helper to keep each case body small. They use the
     // generic ISeriesApi.createPriceLine API which all series types support.
     const addOverlayLines = (s: ISeriesApi<ChartSeriesKind>) => {
-      // Mark price line
-      if (priceUsd != null) {
+      // Mark price line — initial value read non-reactively from the store
+      // (this effect no longer depends on priceUsd; the "Live tick -> chart"
+      // effect keeps this line fresh via applyOptions() afterward).
+      const initialPriceUsd = getSnapshot(slabAddress).priceUsd;
+      if (initialPriceUsd != null) {
         priceLineRef.current = s.createPriceLine({
-          price: priceUsd,
+          price: initialPriceUsd,
           color: "rgba(255,255,255,0.6)",
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
@@ -575,6 +651,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         }));
         series.setData(formatted);
         seriesRef.current = series;
+        // Phase 2: remember the last bar so live ticks can series.update() it
+        // in place instead of a full setData() — see the tick-subscription
+        // effect below.
+        lastBarRef.current = formatted[formatted.length - 1] ?? null;
+        lastPointRef.current = null;
+        chartDataKindRef.current = "ohlc";
 
         // Volume histogram — only render when the active data source has real
         // trade volume. Pyth Benchmarks returns v=0 for every bar (it's a price
@@ -629,6 +711,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         }));
         series.setData(formatted);
         seriesRef.current = series;
+        // Phase 2: see the candle-branch comment above.
+        lastBarRef.current = formatted[formatted.length - 1] ?? null;
+        lastPointRef.current = null;
+        chartDataKindRef.current = "ohlc";
         addOverlayLines(series);
         break;
       }
@@ -648,6 +734,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         }));
         series.setData(formatted);
         seriesRef.current = series;
+        // Phase 2: single-value shape — see the candle-branch comment above.
+        lastPointRef.current = formatted[formatted.length - 1] ?? null;
+        lastBarRef.current = null;
+        chartDataKindRef.current = "single";
         addOverlayLines(series);
         break;
       }
@@ -670,6 +760,10 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         }));
         series.setData(formatted);
         seriesRef.current = series;
+        // Phase 2: single-value shape — see the candle-branch comment above.
+        lastPointRef.current = formatted[formatted.length - 1] ?? null;
+        lastBarRef.current = null;
+        chartDataKindRef.current = "single";
         addOverlayLines(series);
         break;
       }
@@ -733,21 +827,67 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     return () => {
       chart.unsubscribeCrosshairMove(crosshairHandler);
     };
-  }, [chartStyle, timeframe, candleData, lineData, priceUsd, liqPriceE6, entryPriceNum, chartTheme, hasPercolatorData, hasPythData, hasExternalData, overlayPrefs.entry, overlayPrefs.liq]);
+    // Phase 2: priceUsd deliberately EXCLUDED from this dependency array.
+    // This effect does a full removeSeries()+addSeries()+setData() — before
+    // Phase 2, priceUsd being in these deps meant a full series
+    // teardown/recreate ran on EVERY price tick (every ~300ms-2s), a real,
+    // measured perf bug (see BUILD-LOG.md Phase 2). Live price now reaches
+    // the chart exclusively through the "Live tick -> chart" effect below,
+    // via series.update()/applyOptions() — cheap, no series recreation.
+  }, [chartStyle, timeframe, candleData, lineData, liqPriceE6, entryPriceNum, chartTheme, hasPercolatorData, hasPythData, hasExternalData, overlayPrefs.entry, overlayPrefs.liq]);
 
-  // Update mark price line when live price changes
+  // Phase 2: Live tick -> chart. Subscribes directly to the price store
+  // (bypassing React state/useLivePrice() entirely, per the reference doc's
+  // dYdX-pattern citation, Area 3: "ticks pushed directly into the chart
+  // API bypassing React/store state entirely"). Updates the mark price
+  // line via applyOptions() and merges the tick into the currently-forming
+  // bar/point via series.update() — NOT setData(), which would re-layout
+  // the whole series. Neither touches React state, so this effect causes
+  // zero re-renders of TradingChart by itself.
   useEffect(() => {
-    if (priceLineRef.current && priceUsd != null) {
-      priceLineRef.current.applyOptions({ price: priceUsd });
-    }
-  }, [priceUsd]);
+    if (!slabAddress) return;
+    return subscribeSlab(slabAddress, () => {
+      const snap = getSnapshot(slabAddress);
+      if (snap.priceUsd == null) return;
+      const finishSpan = startPerfSpan("chart-tick-to-paint");
+      const usd = snap.priceUsd;
+
+      if (priceLineRef.current) {
+        priceLineRef.current.applyOptions({ price: usd });
+      }
+
+      const series = seriesRef.current;
+      if (series) {
+        if (chartDataKindRef.current === "ohlc" && lastBarRef.current) {
+          const merged = {
+            ...lastBarRef.current,
+            high: Math.max(lastBarRef.current.high, usd),
+            low: Math.min(lastBarRef.current.low, usd),
+            close: usd,
+          };
+          lastBarRef.current = merged;
+          (series as ISeriesApi<"Candlestick">).update(merged);
+        } else if (chartDataKindRef.current === "single" && lastPointRef.current) {
+          const merged = { time: lastPointRef.current.time, value: usd };
+          lastPointRef.current = merged;
+          (series as ISeriesApi<"Line">).update(merged);
+        }
+      }
+
+      finishSpan();
+    });
+  }, [slabAddress]);
 
   // Header % change is ALWAYS trailing 24 h vs current — the industry
   // convention users expect, independent of what timeframe/zoom they picked.
   // Extracted into a pure helper so the daily-bar edge case (cutoff falls
   // inside the current day's bar, making the delta always 0) can be unit-tested.
   const activeData = lineData.length > 0 ? lineData : oracleFiltered;
-  const currentPrice = activeData[activeData.length - 1]?.price ?? priceUsd ?? 0;
+  // Fallback only (activeData is populated once any candle source has
+  // loaded) — read non-reactively rather than subscribing TradingChart to
+  // live price just for this rare edge case. See the top-of-component
+  // comment for the full Phase 2 rationale.
+  const currentPrice = activeData[activeData.length - 1]?.price ?? getSnapshot(slabAddress).priceUsd ?? 0;
   const ref24h = computeRef24h(activeData, timeframe, currentPrice);
   const { priceChange, priceChangePercent, isUp } = computePriceChange(currentPrice, ref24h);
 
@@ -757,12 +897,12 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
   const showEmptyOverlay = totalDataPoints === 0 || effectiveSparse;
 
   return (
-    <div className="rounded-none border border-[var(--border)] bg-[var(--bg)] p-3">
+    <div className="flex h-full flex-col rounded-none border border-[var(--border)] bg-[var(--panel-bg)] p-3">
       {/* Header — shows timeframe % change + data-source badge only.
           The DEX pool's last-close price used to live here too (e.g. "$84.20 DEX")
           but that contradicted the mark price shown in the market info bar above,
           and the only price on the chart should be the mark. */}
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-y-2">
+      <div className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-y-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-xs" style={{ color: isUp ? "var(--long)" : "var(--short)" }}>
@@ -771,7 +911,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             {hasPercolatorData ? (
               <span
                 className="text-[9px] font-medium uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm"
-                style={{ background: "var(--accent)/0.1", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
+                style={{ background: "color-mix(in srgb, var(--accent) 10%, transparent)", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
                 title="Source: Percolator match engine (internal trades)"
               >
                 PERC
@@ -779,7 +919,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             ) : hasPythData ? (
               <span
                 className="text-[9px] font-medium uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm"
-                style={{ background: "var(--accent)/0.1", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
+                style={{ background: "color-mix(in srgb, var(--accent) 10%, transparent)", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
                 title={`Source: Pyth Benchmarks · ${pythSymbol}`}
               >
                 PYTH
@@ -787,7 +927,7 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
             ) : hasExternalData ? (
               <span
                 className="text-[9px] font-medium uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-sm"
-                style={{ background: "var(--accent)/0.1", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
+                style={{ background: "color-mix(in srgb, var(--accent) 10%, transparent)", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)" }}
                 title={poolAddress ? `GeckoTerminal pool: ${poolAddress}` : "Source: GeckoTerminal"}
               >
                 DEX
@@ -845,13 +985,17 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
           GH#1660: `contain: paint` creates a new paint containment boundary so lw-charts
           absolutely-positioned nav buttons are painted within this element only,
           preventing them from bleeding into sibling DOM at 1440px desktop. */}
-      <div className="relative overflow-hidden [contain:paint]">
+      <div className="relative min-h-0 flex-1 overflow-hidden [contain:paint]">
         {/* GH#1652: always mount the container so lightweight-charts canvas initialises.
             The chart ref is always created in useEffect; empty-state is overlaid on top
             when candles=[] so the canvas element exists in the DOM on first render. */}
-        {/* Bumped desktop height 500 → 620 so the time axis has room to render
-            below the candles + volume pane without getting visually clipped. */}
-        <div ref={containerRef} className="w-full h-[45svh] lg:h-[620px]" />
+        {/* Phase 3: desktop now fills whatever height the grid's Chart area
+            gives it (lightweight-charts' `autoSize: true` handles the actual
+            canvas resize) instead of a hardcoded 620px — "TradeChart
+            dominant center" means it should use the space available, not be
+            capped below it. Mobile keeps a fixed 45svh (no grid row to fill
+            there — the mobile layout is a stacked flex column). */}
+        <div ref={containerRef} className="w-full h-[45svh] lg:h-full" />
 
         {/* User-drawing overlay: transparent canvas tracking the chart
             container's dimensions, layered above the chart canvas via DOM
@@ -899,14 +1043,15 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
         {/* GH#1652: empty-state overlay — shown when no data yet, sits above canvas */}
         {showEmptyOverlay && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center backdrop-blur-[1px]" style={{ background: `${chartTheme.bg}e8` }}>
-            {priceUsd != null && priceUsd > 0 ? (
+            {/* Branch choice read non-reactively (TradingChart no longer holds
+                priceUsd as reactive state — see Phase 2 comment at the top of
+                this component); good enough for a rare, usually-transient
+                empty-state overlay. The price TEXT itself, once this branch
+                is chosen, is the isolated LiveMarkPriceLabel leaf so it still
+                updates live if the overlay stays visible for a while. */}
+            {getSnapshot(slabAddress).priceUsd != null && getSnapshot(slabAddress).priceUsd! > 0 ? (
               <>
-                <div
-                  className="text-2xl font-bold text-[var(--text)] drop-shadow-sm"
-                  style={{ fontFamily: "var(--font-mono)" }}
-                >
-                  {formatUsdFromNumber(priceUsd)}
-                </div>
+                <LiveMarkPriceLabel />
                 <div className="mt-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
                   Price chart building…
                 </div>
@@ -997,3 +1142,5 @@ export const TradingChart: FC<{ slabAddress: string; mintAddress?: string }> = (
     </div>
   );
 };
+
+export const TradingChart = memo(TradingChartInner);
