@@ -124,7 +124,7 @@ async function findV17Portfolio(
 export function useTrade(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, accounts, raw, programId: slabProgramId } = useSlabState();
+  const { config: mktConfig, accounts, raw, programId: slabProgramId, refresh: refreshSlab } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
@@ -361,7 +361,16 @@ export function useTrade(slabAddress: string) {
         }
         instructions.push(tradeIx);
 
-        return await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
+        const sig = await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
+        // Re-fetch the slab so useUserAccount re-scans immediately: a trade
+        // opens/closes a leg AND changes capital, and the order-ticket balance
+        // reads userAccount.account.capital. Without this the balance stayed
+        // stale until the next background poll — the reported "close doesn't
+        // update balance" bug. Mirrors useDeposit/useWithdraw. The delayed
+        // second call catches the fully-settled state post-confirmation.
+        refreshSlab();
+        setTimeout(() => refreshSlab(), 2000);
+        return sig;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
@@ -371,7 +380,7 @@ export function useTrade(slabAddress: string) {
         setLoading(false);
       }
     },
-    [connection, wallet, mktConfig, accounts, raw, slabAddress, slabProgramId]
+    [connection, wallet, mktConfig, accounts, raw, slabAddress, slabProgramId, refreshSlab]
   );
 
   return { trade, loading, error };
