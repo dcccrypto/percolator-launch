@@ -291,7 +291,12 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     return Math.abs(Number(currentPriceE6) - Number(liqPriceE6)) / Number(currentPriceE6);
   })();
 
+  // Long-side clamp: liq at/below $0 with a resolved entry = cannot be
+  // liquidated by price (excess collateral) — a SAFE state, not a warning.
+  const liqUnliquidatable = liqPriceE6 <= 0n && entryPriceE6 > 0n && account.positionSize !== 0n;
+
   const liqPriceColor = (() => {
+    if (liqUnliquidatable) return "text-[var(--text-secondary)]";
     if (liqPriceE6 <= 0n || !hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
     if (liqDistPct < 0.05) return "text-[var(--short)]";   // <5% — critical red
     if (liqDistPct < 0.10) return "text-[var(--warning)]"; // <10% — amber
@@ -531,8 +536,12 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </div>
               <div className="flex items-center justify-between py-1.5">
                 <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Liq. Price</span>
-                <span className={`text-[11px] font-medium ${liqPriceColor}`} style={{ fontFamily: "var(--font-mono)" }}>
-                  {formatLiqPrice(liqPriceE6)}
+                <span
+                  className={`text-[11px] font-medium ${liqPriceColor}`}
+                  style={{ fontFamily: "var(--font-mono)" }}
+                  title={liqUnliquidatable ? "No liquidation price — collateral exceeds position notional; cannot be liquidated by price" : undefined}
+                >
+                  {formatLiqPrice(liqPriceE6, { hasPosition: liqUnliquidatable })}
                 </span>
               </div>
               <div className="flex items-center justify-between py-1.5">

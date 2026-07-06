@@ -155,10 +155,22 @@ export function formatMarkPrice(priceUsd: number | null | undefined, fallback = 
  * Returns "∞" when the position is unliquidatable (liqPrice === max u64),
  * "-" when zero/null, otherwise delegates to formatUsd.
  */
-export function formatLiqPrice(liqPriceE6: bigint | null | undefined): string {
+export function formatLiqPrice(
+  liqPriceE6: bigint | null | undefined,
+  opts?: {
+    /** Pass true when an open position with a resolved entry produced this
+     *  value. computeLiqPrice clamps a LONG's liq price to 0n when it falls
+     *  at/below $0 — the position holds more collateral than its notional
+     *  and cannot be liquidated by price. That's the same semantics as the
+     *  short-side u64::MAX sentinel, so with hasPosition it renders "∞"
+     *  instead of being conflated with "no data" ("N/A"). */
+    hasPosition?: boolean;
+  },
+): string {
   if (liqPriceE6 == null) return "N/A";
-  // 0n = no liq price (no position open, or position not yet priced). Show "N/A".
-  if (liqPriceE6 <= 0n) return "N/A";
+  // 0n = no liq price (no position / entry unresolved) — unless hasPosition
+  // says this is the long-side unliquidatable clamp (see opts doc).
+  if (liqPriceE6 <= 0n) return opts?.hasPosition ? "∞" : "N/A";
   // Sentinel = max u64: position is so overcollateralized it cannot be liquidated.
   if (liqPriceE6 >= LIQ_PRICE_UNLIQUIDATABLE) return "∞";
   return formatUsd(liqPriceE6);

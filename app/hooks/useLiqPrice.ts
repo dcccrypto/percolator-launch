@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { computeLiqPrice } from "@/lib/trading";
+import { getEntryPrice } from "@/lib/entry-price";
 
 /**
  * Phase 2: Returns the liquidation price (as bigint e6) for the current user's
@@ -12,7 +13,7 @@ import { computeLiqPrice } from "@/lib/trading";
  */
 export function useLiqPrice(): bigint | null {
   const realUserAccount = useUserAccount();
-  const { params } = useSlabState();
+  const { params, slabAddress } = useSlabState();
 
   return useMemo(() => {
     if (!realUserAccount) return null;
@@ -20,21 +21,26 @@ export function useLiqPrice(): bigint | null {
     if (account.positionSize === 0n) return null;
 
     // v17 (and NFT-wrapped v12) accounts do not store an entry price on-chain
-    // (entryPrice === 0n). computeLiqPrice needs a non-zero entry to produce a
-    // real number — without it, it returns 0n, which a consumer could otherwise
-    // misread as "liquidation at $0.00". Surface it as null ("no liq price
-    // available") instead. The position panels (PositionPanel / PositionsTable /
-    // AccountRiskSidebar) resolve the entry from the live mark for a usable
-    // figure; this hook only feeds the chart's liq overlay, which correctly
-    // hides the line when the value is null.
-    if (account.entryPrice === 0n) return null;
+    // (entryPrice === 0n) — every v17 position used to bail out here, so the
+    // chart's "Liquidation Price" display toggle never drew anything. Resolve
+    // the entry the same way ChartPnlBadge does: fall back to the client-side
+    // entry saved at trade-open time (lib/entry-price). Still null when
+    // neither source has it (e.g. a transferred-in position NFT) — the chart
+    // correctly hides the line for null.
+    const rawEntryPrice = account.entryPrice ?? 0n;
+    const entryPrice =
+      rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, realUserAccount.idx);
+    if (entryPrice <= 0n) return null;
 
     const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
-    return computeLiqPrice(
-      account.entryPrice,
+    const liq = computeLiqPrice(
+      entryPrice,
       account.capital,
       account.positionSize,
       maintenanceBps,
     );
-  }, [realUserAccount, params]);
+    // Long-side clamp (liq at/below $0): the position cannot be liquidated by
+    // price, so there is genuinely no line to draw.
+    return liq > 0n ? liq : null;
+  }, [realUserAccount, params, slabAddress]);
 }
