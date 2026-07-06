@@ -289,8 +289,14 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
       </div>
 
       {mode === "withdraw" && hasOpenPosition && (
-        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
+        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2 space-y-1">
           <p className="text-[10px] text-[var(--warning)]">⚠ Withdrawing margin with an open position may trigger liquidation</p>
+          <p className="text-[10px] text-[var(--text-secondary)]">
+            Part of your balance is locked as margin backing the position — the
+            program rejects withdrawals that would under-collateralize it, so
+            the full balance (MAX) may not be withdrawable until the position
+            is closed.
+          </p>
         </div>
       )}
 
