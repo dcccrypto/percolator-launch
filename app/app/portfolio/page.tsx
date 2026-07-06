@@ -69,10 +69,13 @@ export default function PortfolioPage() {
   const getDecimals = (pos: typeof positions[number]) =>
     tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.decimals ?? 6;
 
-  // Compute USD-normalized totals using each position's oracle price and correct decimals.
-  // Raw on-chain capital is in collateral token native units (e.g. lamports for SOL, 9 dec).
-  // Formula: usdValue = (rawCapital / 10^decimals) * (oraclePriceE6 / 10^6)
-  //                    = (rawCapital * oraclePriceE6) / (10^decimals * 10^6)
+  // Compute USD-normalized totals. Collateral across every market is sim-USDC
+  // (see PLAYGROUND.md) — `capital` is already collateral-scale dollars, so it
+  // only needs the decimals divisor, NOT an oracle-price multiplier (the oracle
+  // price prices the position's underlying asset, e.g. SOL, not the collateral).
+  // Formula: depositedUsd = rawCapital / 10^decimals
+  // Matches PositionsDock's pnlUsdRaw convention (divide by decimals only) and
+  // this hook's own usePortfolio totals (which never multiply capital by price).
   // Filter out empty/closed accounts (FLAT with zero capital) — they clutter the list
   const activePositions = positions.filter(
     (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n
@@ -89,16 +92,12 @@ export default function PortfolioPage() {
     for (const pos of activePositions) {
       const decimals = getDecimals(pos);
       const divisor = 10 ** decimals;
-      const oraclePrice = Number(pos.oraclePriceE6) / 1e6;
-      // Skip positions with no oracle price — don't fallback to 1 which treats raw capital as USD
-      const price = oraclePrice > 0 ? oraclePrice : 0;
       const capital = Number(pos.account.capital ?? 0n) / divisor;
-      depositedUsd += capital * price;
+      depositedUsd += capital;
       // pos.unrealizedPnl is already collateral-scale (usePortfolio.ts converts
       // the SDK's native computeMarkPnl output via computeMarkPnlCollateral) —
-      // divide by decimals only, same as PositionsDock's pnlUsdRaw. Multiplying
-      // by price again here would double-apply it (unlike raw capital above,
-      // which is still coin-margined native scale and needs the price factor).
+      // divide by decimals only, same as PositionsDock's pnlUsdRaw and raw
+      // capital above (collateral is sim-USDC dollars, no price factor).
       unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;
     }
     return { depositedUsd, unrealizedPnlUsd, valueUsd: depositedUsd + unrealizedPnlUsd };

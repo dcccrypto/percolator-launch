@@ -138,7 +138,11 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const onChainPriceE6 = config ? sanitizePriceE6(applyInvert(config.lastEffectivePriceE6, config.invert)) : null;
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
   const rawEntryPrice = account.entryPrice;
-  const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, activeInfo.idx);
+  // BUG 10 fix: scope the cache lookup to this account's own wallet (its
+  // on-chain `owner`) — the unscoped key collapsed to one slot per market
+  // shared by every wallet that traded it in this browser (v17 accountIdx is
+  // always 0), so switching wallets showed the previous wallet's entry price.
+  const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, activeInfo.idx, account.owner.toBase58());
   const resolvedEntryPrice = rawEntryPrice > 0n ? rawEntryPrice : (savedEntryPrice > 0n ? savedEntryPrice : 0n);
   // No on-chain entry price (v17) and no local cache — this is the ONLY path
   // a Position NFT received via transfer ever takes (the recipient's browser
@@ -220,7 +224,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const handleConfirmClose = async (percent: number) => {
     try {
       await closePosition(percent);
-      if (percent === 100) clearEntryPrice(slabAddress, activeInfo.idx);
+      if (percent === 100) clearEntryPrice(slabAddress, activeInfo.idx, account.owner.toBase58());
       setShowCloseModal(false);
     } catch {
       // error surfaced via hook state below
@@ -295,7 +299,18 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                         <InfoIcon tooltip={`Vault + insurance can currently pay up to ${formatTokenAmount(payableCapacity, decimals)} ${collateralSymbol} of profit on this market. Your paper PnL exceeds that — payout may be capped at close, same as any pool-backed perp.`} />
                       )}
                     </div>
-                    {pnlUsd !== null && <div className="text-[9px]">{pnlUsd >= 0 ? "+" : ""}${Math.abs(pnlUsd).toFixed(2)}</div>}
+                    {/* BUG 23 fix: was `pnlUsd >= 0 ? "+" : ""` — for a
+                        negative value that left the prefix EMPTY (not "-"),
+                        so -$5.30 rendered as "$5.30" with sign carried only
+                        by color. Sign from `pnlTokens` (the same
+                        collateral-scale bigint `formatPnl` above already
+                        signs correctly) rather than re-deriving it from the
+                        float. */}
+                    {pnlUsd !== null && (
+                      <div className="text-[9px]">
+                        {pnlTokens > 0n ? "+" : pnlTokens < 0n ? "-" : ""}${Math.abs(pnlUsd).toFixed(2)}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <span>--</span>

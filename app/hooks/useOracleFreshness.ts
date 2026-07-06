@@ -37,6 +37,37 @@ export interface OracleFreshnessState {
 const FRESH_THRESHOLD = 30;
 const AGING_THRESHOLD = 60;
 
+/**
+ * BUG 20 fix: previously every `useOracleFreshness()` call created its OWN
+ * `setInterval(tick, 1000)` (see the effect below). Trade pages mount this
+ * hook from OrderTicket, MarketInfoBar, PositionsDock, and PositionPanel
+ * simultaneously (plus OracleFreshnessIndicator / OracleDetailsPanel when
+ * open) — that's 4-6 independent 1s timers all recomputing the same
+ * elapsed-time math for the same market. Consolidate to a single shared 1s
+ * pulse; each hook instance still recomputes its own elapsedSecs/level from
+ * its own `lastUpdateMs` in response to the pulse, so per-consumer values and
+ * the hook's return shape are unchanged — only the timer is shared.
+ */
+let sharedTickListeners: Set<() => void> | null = null;
+let sharedTickTimer: ReturnType<typeof setInterval> | undefined;
+
+function subscribeSharedTick(listener: () => void): () => void {
+  if (sharedTickListeners === null) sharedTickListeners = new Set();
+  sharedTickListeners.add(listener);
+  if (sharedTickTimer === undefined) {
+    sharedTickTimer = setInterval(() => {
+      sharedTickListeners?.forEach((cb) => cb());
+    }, 1000);
+  }
+  return () => {
+    sharedTickListeners?.delete(listener);
+    if (sharedTickListeners?.size === 0 && sharedTickTimer !== undefined) {
+      clearInterval(sharedTickTimer);
+      sharedTickTimer = undefined;
+    }
+  };
+}
+
 function getFreshnessLevel(elapsedSecs: number): FreshnessLevel {
   if (elapsedSecs < FRESH_THRESHOLD) return "fresh";
   if (elapsedSecs <= AGING_THRESHOLD) return "aging";
@@ -81,7 +112,6 @@ export function useOracleFreshness(): OracleFreshnessState {
   const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
   const prevPriceRef = useRef<bigint | null>(null);
   const prevSlotRef = useRef<bigint | null>(null);
-  const tickRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   // Guard: detectOracleMode requires both PublicKey fields — skip if either is missing
   // (e.g. partial mock configs in test environments).
@@ -188,7 +218,9 @@ export function useOracleFreshness(): OracleFreshnessState {
     }
   }, [config, engine, wrapperConfigV17]);
 
-  // Tick every second to update elapsed time
+  // Tick every second to update elapsed time — subscribes to the single
+  // shared ticker (see subscribeSharedTick above) instead of running its own
+  // setInterval per hook instance.
   useEffect(() => {
     if (lastUpdateMs === null) return;
 
@@ -197,8 +229,7 @@ export function useOracleFreshness(): OracleFreshnessState {
       setElapsedSecs(elapsed);
     };
     tick();
-    tickRef.current = setInterval(tick, 1000);
-    return () => clearInterval(tickRef.current);
+    return subscribeSharedTick(tick);
   }, [lastUpdateMs]);
 
   // GH#1338: If mode is detected but we never got a lastUpdateMs, the oracle is unavailable

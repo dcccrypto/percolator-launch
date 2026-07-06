@@ -13,7 +13,7 @@ export interface LeaderboardEntry {
   rank: number;
   trader: string;
   tradeCount: number;
-  totalVolume: string; // Raw bigint as string (sum of abs(size))
+  totalVolume: string; // Raw bigint as string (sum of abs(size) * price — dollar notional, same scale as trader-stats)
   lastTradeAt: string;
 }
 
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from("trades")
-      .select("trader, size, created_at")
+      .select("trader, size, price, created_at")
       .eq("network", getServerNetwork());
 
     if (period === "24h") {
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
     let { data, error } = await query;
 
     if (error && error.message?.includes("network")) {
-      let fallbackQuery = supabase.from("trades").select("trader, size, created_at");
+      let fallbackQuery = supabase.from("trades").select("trader, size, price, created_at");
       if (period === "24h") fallbackQuery = fallbackQuery.gte("created_at", new Date(Date.now() - 86_400_000).toISOString());
       else if (period === "7d") fallbackQuery = fallbackQuery.gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString());
       fallbackQuery = fallbackQuery.limit(100_000);
@@ -85,12 +85,20 @@ export async function GET(request: Request) {
       const rowCreatedAt = row.created_at ?? new Date().toISOString();
       const entry = traderMap.get(row.trader) ?? { tradeCount: 0, totalVolume: 0n, lastTradeAt: rowCreatedAt };
       entry.tradeCount += 1;
+      // Dollar notional = abs(size) * price, computed BEFORE summing/ranking —
+      // otherwise Σabs(size) alone ranks by raw contract quantity across
+      // heterogeneous markets (a $50 PENGU trade would outrank a $10k SOL
+      // trade). Matches the trader-stats convention (absSize * priceE6 / 1e6)
+      // in /api/trader/[wallet]/stats/route.ts.
       try {
-        const raw = BigInt(String(row.size).split(".")[0]);
-        entry.totalVolume += raw < 0n ? -raw : raw;
+        const rawSize = BigInt(String(row.size).split(".")[0]);
+        const absSize = rawSize < 0n ? -rawSize : rawSize;
+        const priceE6 = BigInt(Math.round((Number(row.price) || 0) * 1_000_000));
+        entry.totalVolume += (absSize * priceE6) / 1_000_000n;
       } catch {
-        const n = Math.abs(parseFloat(String(row.size)) || 0);
-        entry.totalVolume += BigInt(Math.round(n));
+        const size = Math.abs(parseFloat(String(row.size)) || 0);
+        const price = Math.abs(parseFloat(String(row.price)) || 0);
+        entry.totalVolume += BigInt(Math.round(size * price));
       }
       if (rowCreatedAt > entry.lastTradeAt) entry.lastTradeAt = rowCreatedAt;
       traderMap.set(row.trader, entry);

@@ -60,11 +60,16 @@ import {
   saveInFlightMarket,
   updateInFlightStep,
   clearInFlightMarket,
+  loadLastInFlightMarket,
 } from "@/lib/inFlightMarket";
 // v17: max assets per portfolio (= the market's asset-slot capacity); program cap = 14.
 // The slab MUST be sized to exactly match this capacity or InitMarket reverts (dynamic-len validation).
-const V17_MAX_PORTFOLIO_ASSETS = 14;
-const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 26_364 bytes (cap-14)
+export const V17_MAX_PORTFOLIO_ASSETS = 14;
+// BUG 1 fix (2026-07-06): exported so callers (CreateMarketWizard, CostEstimate) size the
+// slab + rent estimate against the actual v17 requirement instead of the stale v12.19
+// tier.dataSize concept (96784/376432/1495024 bytes), which never equals this value for any
+// tier and made every InitMarket revert with InvalidSlabLen while over-charging ~0.67 SOL rent.
+export const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 26_364 bytes (cap-14)
 const ALL_ZEROS_FEED = "0".repeat(64);
 
 /**
@@ -124,7 +129,20 @@ export const MIN_INIT_MARKET_SEED = 500_000_000n;
  * hit this failure mode. If product wants to offer >6.67x leverage again, this needs a fresh
  * on-chain bisection first.
  */
-const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
+export const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
+
+/**
+ * BUG 16 fix (2026-07-06): create() floors the on-chain initial_margin_bps at
+ * MIN_SAFE_INITIAL_MARGIN_BPS, but every leverage display (success screen, StepReview,
+ * markets DB `max_leverage`) previously computed leverage from the raw, UNfloored bps the
+ * user requested — so a market "created" at 1000 bps (advertised 10x) was actually
+ * initialized on-chain at 1500 bps (~6.67x). This is a pure, deterministic mirror of the
+ * floor applied inside create() (same constant, same comparison) — safe to call anywhere
+ * BEFORE submission too, since the floor never depends on retry/session state.
+ */
+export function flooredInitialMarginBps(requestedBps: number): number {
+  return Math.max(requestedBps, Number(MIN_SAFE_INITIAL_MARGIN_BPS));
+}
 
 export interface VammParams {
   spreadBps: number;
@@ -227,11 +245,51 @@ export function useCreateMarket() {
     keeperMessage: null,
   });
 
-  // PERC-8329 / GH#1964: Slab keypair is kept in-memory ONLY — never in localStorage.
-  // Persisting a secret key in localStorage is unsafe: any same-origin script (including
-  // browser extensions) can read it. If the user refreshes mid-flow, they must start over.
-  // The in-memory ref is sufficient for the single-session retry path (step resume).
+  // PERC-8329 / GH#1964: Slab keypair is normally kept in-memory ONLY (this ref), not
+  // localStorage — persisting a secret key there is unsafe in general (any same-origin
+  // script, including browser extensions, can read it).
+  //
+  // BUG 7 fix (2026-07-06): that policy is INTENTIONALLY superseded for the in-flight
+  // recovery flow — saveInFlightMarket() (called from Step 0 below) DOES persist
+  // slabSecretKey to localStorage specifically so the ReclaimSlabRent / resume-creation
+  // path still works after a tab close (see lib/inFlightMarket.ts's header for the
+  // accepted trade-off). Nothing previously read that persisted secret back into this
+  // ref on mount, so a page refresh mid-flow always hit "Cannot retry: slab keypair
+  // lost" even though the secret was sitting in localStorage the whole time. The effect
+  // below hydrates it; restoreSlabKeypair lets RecoverSolBanner's onResume hand the
+  // keypair back in explicitly (belt-and-suspenders for the same-session resume path).
   const slabKpRef = useRef<Keypair | null>(null);
+
+  useEffect(() => {
+    if (slabKpRef.current) return; // already have a keypair this session — don't clobber it
+    if (!wallet.publicKey) return; // wait for wallet connection so we can verify ownership
+    const inFlight = loadLastInFlightMarket();
+    if (!inFlight) return;
+    // Wallet-match gate mirrors useStuckSlabs' security check — never attach another
+    // wallet's persisted slab secret to this session.
+    if (inFlight.adminAddress !== wallet.publicKey.toBase58()) return;
+    if (!inFlight.slabSecretKey || inFlight.slabSecretKey.length !== 64) return;
+    try {
+      const kp = Keypair.fromSecretKey(Uint8Array.from(inFlight.slabSecretKey));
+      slabKpRef.current = kp;
+      setState((s) => (s.slabAddress ? s : { ...s, slabAddress: inFlight.slabAddress }));
+    } catch (err) {
+      console.warn("[useCreateMarket] Failed to hydrate slab keypair from in-flight state:", err);
+    }
+  }, [wallet.publicKey]);
+
+  /**
+   * BUG 7 fix: explicit hydration entry point for the "Resume Creation" / "Retry
+   * Initialization" flow. RecoverSolBanner's onResume callback only forwards
+   * (slabAddress, fromStep), so the caller (CreateMarketWizard) independently calls
+   * useStuckSlabs() to get the already-reconstructed Keypair and hands it here — belt-
+   * and-suspenders alongside the mount effect above (which could race a fresh wallet
+   * connection on the same render).
+   */
+  const restoreSlabKeypair = useCallback((keypair: Keypair, slabAddress: string) => {
+    slabKpRef.current = keypair;
+    setState((s) => ({ ...s, slabAddress }));
+  }, []);
 
   const create = useCallback(
     async (params: CreateMarketParams, retryFromStep?: number) => {
@@ -1207,7 +1265,11 @@ export function useCreateMarket() {
                   ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployerStr)
                   : null,
                 initial_price_e6: params.initialPriceE6.toString(),
-                max_leverage: params.initialMarginBps > 0 ? Math.floor(10000 / Number(params.initialMarginBps)) : 1,
+                // BUG 16 fix: advertise the FLOORED margin (what's actually enforced
+                // on-chain), not the raw requested bps — see flooredInitialMarginBps doc.
+                max_leverage: params.initialMarginBps > 0
+                  ? Math.floor(10000 / flooredInitialMarginBps(params.initialMarginBps))
+                  : 1,
                 trading_fee_bps: Number(params.tradingFeeBps),
                 lp_collateral: params.lpCollateral.toString(),
                 mainnet_ca: params.mainnetCA ?? null,
@@ -1357,5 +1419,5 @@ export function useCreateMarket() {
     });
   }, []);
 
-  return { state, create, reset };
+  return { state, create, reset, restoreSlabKeypair };
 }

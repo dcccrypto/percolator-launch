@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
@@ -58,12 +58,24 @@ async function findV17PortfolioForInit(
       ],
     });
     if (accounts.length === 0) return null;
+    // BUG 11: with no cross-instance lock (OrderTicket / DepositWithdrawCard /
+    // useAutoDeposit each mount their own useInitUser and can race through this
+    // TOCTOU check concurrently), more than one portfolio can end up owned by
+    // the same wallet on this market. getProgramAccounts's result order is not
+    // guaranteed stable across calls/nodes, so picking accounts[0] as-is would
+    // let different hook instances (and later deposit/trade) converge on
+    // DIFFERENT accounts non-deterministically ("deposit disappeared"). Sort
+    // deterministically by pubkey so every caller lands on the same one.
+    const sorted =
+      accounts.length > 1
+        ? [...accounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()))
+        : accounts;
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
     // memcmp filters are advisory server-side; don't trust them blindly.
-    const data = accounts[0].account.data;
+    const data = sorted[0].account.data;
     const portfolio = parsePortfolioV17(data instanceof Buffer ? data : Buffer.from(data));
     if (!portfolio.owner.equals(ownerPk)) return null;
-    return accounts[0].pubkey;
+    return sorted[0].pubkey;
   } catch {
     return null;
   }
@@ -80,9 +92,19 @@ export function useInitUser(slabAddress: string) {
   const { config: mktConfig, programId: slabProgramId, raw: slabRaw, params, refresh: refreshSlab } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inflightRef = useRef(false);
 
   const initUser = useCallback(
     async (feePayment?: bigint) => {
+      // BUG 11: useInitUser is called from 3 independent instances (OrderTicket,
+      // DepositWithdrawCard, useAutoDeposit post-faucet) whose disabled-states
+      // don't share, so this only stops re-entrant calls through THIS hook
+      // instance (mirrors useTrade/useDeposit's inflightRef). The deterministic
+      // sort in findV17PortfolioForInit above is what keeps every instance
+      // converged on the same portfolio if a cross-instance race still slips
+      // a second one into existence.
+      if (inflightRef.current) throw new Error("Account setup already in progress");
+      inflightRef.current = true;
       setLoading(true);
       setError(null);
       try {
@@ -268,6 +290,7 @@ export function useInitUser(slabAddress: string) {
         setError(userMsg);
         throw new Error(userMsg);
       } finally {
+        inflightRef.current = false;
         setLoading(false);
       }
     },

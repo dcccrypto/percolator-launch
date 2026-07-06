@@ -5,6 +5,7 @@ import { type SlabTierKey, SLAB_TIERS } from "@/lib/slabTiers";
 import { CostEstimate } from "./CostEstimate";
 import Link from "next/link";
 import { getNetwork } from "@/lib/config";
+import { flooredInitialMarginBps } from "@/hooks/useCreateMarket";
 
 interface StepReviewProps {
   // Token
@@ -44,13 +45,54 @@ interface StepReviewProps {
   canLaunch: boolean;
 }
 
-const TX_STEPS = [
-  { label: "Create slab & initialize market", detail: "Atomic — rolls back if any part fails" },
-  { label: "Oracle setup & crank", detail: "Configure price feed, first crank" },
-  { label: "Initialize LP", detail: "Create liquidity provider pool" },
-  { label: "Deposit, insurance & finalize", detail: "Seed capital + insurance fund" },
-  { label: "Insurance LP mint", detail: "Enable permissionless insurance deposits" },
+interface TxStep {
+  label: string;
+  detail: string;
+  /** "tx" = a signed Solana transaction (costs a base fee); "signature" = an off-chain
+   *  wallet signature (signMessage), no SOL cost. Used to keep the summary line below
+   *  the list accurate about how many on-chain transactions vs. signatures are involved. */
+  kind: "tx" | "signature";
+}
+
+/**
+ * BUG 17 fix (2026-07-06): regenerated from the ACTUAL send sequence in
+ * useCreateMarket.ts's create() — previously this was a stale 5-item list (including an
+ * "Insurance LP mint" step that was removed; see create()'s "Insurance LP mint creation
+ * removed — moved to percolator-stake program" note) while the real happy path fires 7
+ * signed transactions:
+ *   1. createAccount(slab) + createATA(vault) + seed transfer + InitMarket   (atomic)
+ *   2. SetNftProgramId (registers the per-market NFT registry; v17 has no separate
+ *      oracle-setup/pre-LP crank step — that's embedded in InitMarket)
+ *   3. createAccount(LP portfolio) + InitPortfolio
+ *   4. createAccount(matcher context account)
+ *   5. SetMatcherConfig (on the LP portfolio)
+ *   6. InitMatcherCtx (wrapper CPIs into the matcher program)
+ *   7. DepositCollateral + TopUpInsurance + final PermissionlessCrank
+ * ...plus one off-chain wallet.signMessage() (nonce sign for the /api/markets dashboard
+ * registration POST, GH#1761/PERC-8332) — not a transaction, no SOL cost, but still a
+ * wallet approval the user will see.
+ */
+const BASE_TX_STEPS: readonly TxStep[] = [
+  { label: "Create slab & initialize market", detail: "Atomic — rolls back if any part fails", kind: "tx" },
+  { label: "Register NFT program", detail: "Creates this market's Position NFT registry", kind: "tx" },
+  { label: "Create LP portfolio", detail: "Opens the market-maker liquidity account", kind: "tx" },
+  { label: "Create matcher context account", detail: "Allocates on-chain matcher state", kind: "tx" },
+  { label: "Configure matcher", detail: "Attaches matcher config to the LP portfolio", kind: "tx" },
+  { label: "Initialize matcher context", detail: "Activates passive market-making", kind: "tx" },
+  { label: "Deposit, insurance & finalize", detail: "Seed capital + insurance fund + final crank", kind: "tx" },
+  { label: "Sign market registration", detail: "Off-chain signature — lists the market on the dashboard, no SOL cost", kind: "signature" },
 ] as const;
+
+/**
+ * Keeper-oracle markets (oracleType === "keeper") insert one extra signed transaction
+ * between steps 1 and 2 — the creator co-signs alongside the keeper to delegate oracle
+ * authority (see useCreateMarket.ts's ConfigureAuthMark + UpdateAssetAuthority block).
+ */
+const KEEPER_COSIGN_STEP: TxStep = {
+  label: "Delegate oracle authority to keeper",
+  detail: "Keeper co-signs; you approve the delegation",
+  kind: "tx",
+};
 
 /**
  * Step 4 — Review & Confirm.
@@ -83,8 +125,20 @@ export const StepReview: FC<StepReviewProps> = ({
   onLaunch,
   canLaunch,
 }) => {
-  const maxLeverage = Math.floor(10000 / initialMarginBps);
+  // BUG 16 fix: preview the FLOORED margin (MIN_SAFE_INITIAL_MARGIN_BPS applies inside
+  // create()) so what's shown here matches what actually lands on-chain — previously this
+  // showed unfloored leverage (e.g. "10x") for a market that would be created at ~6.67x.
+  const maxLeverage = Math.floor(10000 / flooredInitialMarginBps(initialMarginBps));
   const tier = SLAB_TIERS[slabTier];
+
+  // BUG 17 fix: keeper-oracle markets fire one extra signed tx (oracle authority
+  // delegation) between steps 1 and 2 — see KEEPER_COSIGN_STEP doc comment above.
+  const txSteps = useMemo<readonly TxStep[]>(() => {
+    if (oracleType !== "keeper") return BASE_TX_STEPS;
+    return [BASE_TX_STEPS[0], KEEPER_COSIGN_STEP, ...BASE_TX_STEPS.slice(1)];
+  }, [oracleType]);
+  const onChainTxCount = txSteps.filter((s) => s.kind === "tx").length;
+  const signatureCount = txSteps.length - onChainTxCount;
 
   const oracleTypeLabel =
     oracleType === "pyth"
@@ -238,11 +292,16 @@ export const StepReview: FC<StepReviewProps> = ({
           Transaction Steps
         </p>
         <div className="border border-[var(--border)] bg-[var(--bg)] px-4 py-3 space-y-2">
-          {TX_STEPS.map((step, i) => (
+          {txSteps.map((step, i) => (
             <div key={i} className="flex items-start gap-2 text-[12px]">
               <span className="text-[10px] font-mono text-[var(--text-secondary)] mt-0.5 flex-shrink-0">{i + 1}.</span>
               <div className="min-w-0">
                 <span className="text-[var(--text)]">{step.label}</span>
+                {step.kind === "signature" && (
+                  <span className="ml-1.5 border border-[var(--border)] px-1 py-0.5 text-[8px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                    off-chain
+                  </span>
+                )}
                 <span className="hidden sm:inline text-[10px] text-[var(--text-secondary)] ml-2">
                   — {step.detail}
                 </span>
@@ -251,7 +310,8 @@ export const StepReview: FC<StepReviewProps> = ({
           ))}
         </div>
         <p className="mt-2 text-[10px] text-[var(--text-secondary)]">
-          {TX_STEPS.length} transactions — each requires a wallet signature.
+          {onChainTxCount} transaction{onChainTxCount === 1 ? "" : "s"}
+          {signatureCount > 0 ? ` + ${signatureCount} wallet signature${signatureCount === 1 ? "" : "s"}` : ""} — each requires approval.
           {" "}Step 1 is atomic: if it fails, no SOL is lost.
         </p>
       </div>

@@ -1267,9 +1267,20 @@ export async function POST(req: NextRequest) {
     }
 
     // Atomically claim the nonce.
-    // Primary: Supabase market_challenges table (production).
-    // Fallback: playground-nonce-store in-process Map (local dev, no Supabase).
-    // GH#2018: Safe to claim now — signature already verified above.
+    // BUG 6 fix: the challenge ISSUER (GET /api/markets/challenge, see
+    // lib/playground-nonce-store.ts createPlaygroundChallenge) only ever writes
+    // nonces to the in-process Map — it does NOT insert into the Supabase
+    // market_challenges table (that table is no longer populated; see the doc
+    // comment in app/api/markets/challenge/route.ts). That means the UPDATE below
+    // always matches 0 rows whenever Supabase IS configured (prod), leaving
+    // nonceClaimed=false and every registration 401ing — the Map fallback was
+    // previously only reached inside the `catch` (i.e. only when Supabase is NOT
+    // configured at all), so it never ran in that case.
+    // Fix: attempt the Map claim whenever the DB path didn't already claim the
+    // nonce (0 rows OR Supabase absent), not only on a thrown exception. This
+    // makes the in-Map store the authoritative source for the playground's
+    // actual issuance path in both the Supabase-configured and no-Supabase cases,
+    // while still honoring a legitimate DB-side claim (count>0) if one exists.
     let nonceClaimed = false;
     try {
       const supabaseAuth = getServiceClient();
@@ -1290,7 +1301,14 @@ export async function POST(req: NextRequest) {
         nonceClaimed = true;
       }
     } catch {
-      // Supabase not configured (local playground) — fall back to in-process store.
+      // Supabase not configured (local playground) — DB path unavailable;
+      // fall through to the Map claim below.
+    }
+
+    if (!nonceClaimed) {
+      // Not claimed via Supabase (either not configured, or configured but the
+      // issuer never wrote a row there) — try the in-process Map, which is the
+      // store the issuer actually writes to.
       nonceClaimed = claimPlaygroundChallenge(nonce, deployer);
     }
 

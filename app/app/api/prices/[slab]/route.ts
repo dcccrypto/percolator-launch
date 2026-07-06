@@ -8,6 +8,15 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE = { "Cache-Control": "private, no-store" } as const;
 
+// BUG 18 fix: this route is force-dynamic and previously always sent no-store,
+// so under the hosted playground (no indexer backend) EVERY client poll (~10s,
+// per useLivePrice) fell through to pythStatsFallback() and hit
+// benchmarks.pyth.network fresh, fanned out across every viewer, and degraded
+// to { stats: null } on 429. Mirror the sibling /api/chart/pyth route: cache
+// the fallback response for a short TTL so repeated polls within the window
+// reuse one upstream fetch instead of re-hitting Pyth per viewer per poll.
+const FALLBACK_CACHE_HEADERS = { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } as const;
+
 /** Pyth Benchmarks — same public source /api/chart/pyth proxies for chart
  *  history. Used as the 24h-stats fallback when the indexer backend is not
  *  running (local playground, and the hosted playground deploy): without it
@@ -16,10 +25,22 @@ const PYTH_BASE = "https://benchmarks.pyth.network/v1/shims/tradingview/history"
 
 type Stats24h = { change24h: number; high24h: string; low24h: string };
 
+/** Short in-memory TTL cache for pythStatsFallback(), keyed by slab. Belt-and-
+ *  suspenders alongside FALLBACK_CACHE_HEADERS: on a warm serverless instance
+ *  (or local dev, where there's no CDN in front to honor s-maxage) this still
+ *  collapses repeated ~10s polls into one upstream fetch per TTL window per slab. */
+const FALLBACK_CACHE_TTL_MS = 60_000;
+const fallbackCache = new Map<string, { value: Stats24h | null; expiresAt: number }>();
+
 /** Compute 24h stats from Pyth Benchmarks hourly bars for a playground slab.
  *  Returns null when the slab has no playground meta or Pyth has no data —
  *  callers then respond `{ stats: null }` (dashes in the UI, no error spam). */
 async function pythStatsFallback(slab: string): Promise<Stats24h | null> {
+  const cached = fallbackCache.get(slab);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
   const meta = PLAYGROUND_SLAB_META[slab];
   if (!meta) return null;
   // "JUP-PERP" → "Crypto.JUP/USD". Guard the base so only sane symbols reach Pyth.
@@ -33,22 +54,35 @@ async function pythStatsFallback(slab: string): Promise<Stats24h | null> {
     headers: { "User-Agent": "percolator-prices-proxy/1.0" },
     signal: AbortSignal.timeout(10_000),
   });
-  if (!res.ok) return null;
+  // Cache negative results too (short TTL) — otherwise a rate-limited (429)
+  // upstream gets hammered again on the very next ~10s poll instead of backing off.
+  if (!res.ok) {
+    fallbackCache.set(slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+    return null;
+  }
   const data = (await res.json()) as { s?: string; o?: number[]; h?: number[]; l?: number[]; c?: number[] };
-  if (data.s !== "ok" || !data.o?.length || !data.h?.length || !data.l?.length || !data.c?.length) return null;
+  if (data.s !== "ok" || !data.o?.length || !data.h?.length || !data.l?.length || !data.c?.length) {
+    fallbackCache.set(slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+    return null;
+  }
 
   const high = Math.max(...data.h);
   const low = Math.min(...data.l);
   const first = data.o[0];
   const last = data.c[data.c.length - 1];
-  if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(first) || first <= 0) return null;
+  if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(first) || first <= 0) {
+    fallbackCache.set(slab, { value: null, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+    return null;
+  }
 
   const toE6Str = (v: number) => BigInt(Math.round(v * 1_000_000)).toString();
-  return {
+  const result: Stats24h = {
     change24h: ((last - first) / first) * 100,
     high24h: toE6Str(high),
     low24h: toE6Str(low),
   };
+  fallbackCache.set(slab, { value: result, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+  return result;
 }
 
 /**
@@ -106,7 +140,11 @@ export async function GET(
 
     if (prices.length === 0) {
       const stats = await pythStatsFallback(validSlab).catch(() => null);
-      return NextResponse.json({ stats }, { headers: NO_STORE });
+      // BUG 18 fix: was NO_STORE — this is the live path on the hosted playground
+      // (no indexer backend), polled every ~10s by every viewer. Cache it briefly
+      // so repeated polls within the window don't each re-hit Pyth (see
+      // FALLBACK_CACHE_HEADERS / fallbackCache above).
+      return NextResponse.json({ stats }, { headers: FALLBACK_CACHE_HEADERS });
     }
 
     // Prices are sorted desc (newest first). Find entries within last 24h.

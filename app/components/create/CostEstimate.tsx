@@ -2,6 +2,7 @@
 
 import { FC, useMemo } from "react";
 import { type SlabTierKey, SLAB_TIERS } from "@/lib/slabTiers";
+import { DEFAULT_SLAB_SIZE } from "@/hooks/useCreateMarket";
 
 interface CostEstimateProps {
   slabTier: SlabTierKey;
@@ -18,8 +19,9 @@ const RENT_PER_BYTE = 6960;
 const RENT_OVERHEAD_BYTES = 128;
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
-/** Estimated transaction fees for the 5-step creation process */
-const TX_FEE_ESTIMATE_SOL = 0.025; // ~5 transactions × 5000 lamports each + priority fees
+/** Estimated transaction fees for the ~7-8 signed-transaction creation flow (see
+ *  useCreateMarket's create() / StepReview's TX_STEPS for the exact sequence). */
+const TX_FEE_ESTIMATE_SOL = 0.025; // ~8 transactions × 5000 lamports each + priority fee headroom
 
 /**
  * Detailed cost breakdown for market creation.
@@ -36,7 +38,14 @@ export const CostEstimate: FC<CostEstimateProps> = ({
 }) => {
   const estimate = useMemo(() => {
     const tier = SLAB_TIERS[slabTier];
-    const dataSize = tier.dataSize;
+    // BUG 1 fix: the v17 slab account length is FIXED at v17MarketAccountLen(14)
+    // (DEFAULT_SLAB_SIZE) regardless of tier — InitMarket always encodes
+    // maxPortfolioAssets:14, so it always sizes/rents the slab the same way no matter
+    // which tier the user picks. Tier only selects which deployed program (trader-
+    // account capacity) InitMarket targets — it no longer scales the slab's byte size.
+    // Using the stale v12.19 tier.dataSize here grossly over-estimated rent (by ~0.67
+    // SOL) for a cost that was never actually charged this way.
+    const dataSize = DEFAULT_SLAB_SIZE;
 
     // Rent-exempt minimum for the slab account
     const slabRentLamports = Math.ceil((dataSize + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE);

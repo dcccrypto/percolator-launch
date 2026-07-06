@@ -70,6 +70,23 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
 
+  // BUG 22 fix: mark a dialog as open on a body-level counter for the whole
+  // time this modal is mounted — see the matching comment in
+  // TradeConfirmationModal.tsx. `MobileOrderSheet` (app/trade/[slab]/page.tsx)
+  // checks this counter and ignores its OWN Escape handler while it's > 0, so
+  // a single Escape keypress doesn't both cancel this modal AND collapse the
+  // sheet underneath it. Mount/unmount-once (empty deps) — independent of the
+  // animation effect below, which can re-run on a `prefersReduced` change.
+  useEffect(() => {
+    const current = Number(document.body.dataset.percOpenDialogs ?? "0");
+    document.body.dataset.percOpenDialogs = String(current + 1);
+    return () => {
+      const remaining = Number(document.body.dataset.percOpenDialogs ?? "1") - 1;
+      if (remaining <= 0) delete document.body.dataset.percOpenDialogs;
+      else document.body.dataset.percOpenDialogs = String(remaining);
+    };
+  }, []);
+
   useEffect(() => {
     const overlay = overlayRef.current;
     const modal = modalRef.current;
@@ -276,7 +293,13 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
               {formatTokenAmount(abs(preview.pnl), decimals)} {colSym}
               {preview.pnlUsd !== null && (
                 <span className="ml-1 text-[10px]">
-                  ({preview.pnlUsd >= 0 ? "+" : ""}${Math.abs(preview.pnlUsd).toFixed(2)})
+                  {/* BUG 23 fix: was `preview.pnlUsd >= 0 ? "+" : ""` — for a
+                      negative value that left the prefix EMPTY (not "-"), so
+                      -$5.30 rendered as "$5.30" with sign carried only by
+                      color. Sign from `preview.pnl` — the same collateral-
+                      scale bigint the line above already signs correctly —
+                      rather than re-deriving it from the float. */}
+                  ({preview.pnl > 0n ? "+" : preview.pnl < 0n ? "-" : ""}${Math.abs(preview.pnlUsd).toFixed(2)})
                 </span>
               )}
             </span>

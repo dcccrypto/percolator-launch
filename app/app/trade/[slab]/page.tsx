@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useEffect, type CSSProperties } from "react";
+import { use, useState, useEffect, useRef, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
@@ -182,8 +182,18 @@ function OrderTicketRail({ slab, framed = false }: { slab: string; framed?: bool
 
 /* ── Mobile order sheet — tap-to-open bottom sheet, 150ms functional slide (no decorative animation) ── */
 
+/**
+ * Focusable-element selector for the sheet's focus trap. Mirrors
+ * ClosePositionModal.tsx / TradeConfirmationModal.tsx's own copy of this
+ * exact selector (excludes `[disabled]` controls so a disabled boundary
+ * element can't break the Tab-wrap).
+ */
+const SHEET_FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 function MobileOrderSheet({ slab }: { slab: string }) {
   const [open, setOpen] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   // While the bottom-sheet (role="dialog" aria-modal) is open, lock background
   // scroll and close it on Escape — otherwise the page scrolls behind the sheet
@@ -193,8 +203,44 @@ function MobileOrderSheet({ slab }: { slab: string }) {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+
+    // BUG 21 fix: move initial focus into the dialog (APG dialog pattern —
+    // mirrors ClosePositionModal/TradeConfirmationModal) so Tab starts
+    // trapped inside it instead of leaving focus on the "Trade" trigger
+    // button underneath.
+    const sheet = sheetRef.current;
+    const focusable = sheet?.querySelectorAll<HTMLElement>(SHEET_FOCUSABLE_SELECTOR);
+    focusable?.[0]?.focus();
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        // BUG 22 fix: this is a document-level listener, same as
+        // TradeConfirmationModal's / ClosePositionModal's own Escape
+        // handlers — when the order ticket inside this sheet opens one of
+        // those (or PositionsDock/PositionPanel opens ClosePositionModal
+        // while this sheet is open), a single Escape keypress used to fire
+        // BOTH: the dialog cancelled AND this sheet collapsed underneath it.
+        // Those modals mark `document.body.dataset.percOpenDialogs` while
+        // mounted (see their own mount effects) — if one is up, let IT own
+        // this keypress and leave the sheet alone.
+        const childDialogOpen = Number(document.body.dataset.percOpenDialogs ?? "0") > 0;
+        if (childDialogOpen) return;
+        setOpen(false);
+        return;
+      }
+      if (e.key === "Tab") {
+        const items = sheetRef.current?.querySelectorAll<HTMLElement>(SHEET_FOCUSABLE_SELECTOR);
+        if (!items || items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => {
@@ -227,6 +273,14 @@ function MobileOrderSheet({ slab }: { slab: string }) {
       )}
 
       <div
+        ref={sheetRef}
+        // BUG 21 fix: `inert` when closed — previously the sheet stayed fully
+        // mounted off-screen (`translate-y-full`) with no `inert`/
+        // `aria-hidden`, so its inputs/buttons stayed in the Tab order and
+        // the accessibility tree even though invisible. Native `inert`
+        // removes both without unmounting the form (unmounting would lose
+        // in-progress input on every close).
+        inert={!open ? true : undefined}
         className={`fixed inset-x-0 bottom-0 z-[61] max-h-[85dvh] overflow-y-auto rounded-t-md border-t border-[var(--border)] bg-[var(--bg)] transition-transform duration-150 ease-out lg:hidden ${
           open ? "translate-y-0" : "translate-y-full"
         }`}

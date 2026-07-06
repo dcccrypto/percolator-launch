@@ -370,7 +370,16 @@ export function usePortfolio(): PortfolioData {
                 filters: [
                   { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_P.toString("base64"), encoding: "base64" } },
                   { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
-                  { memcmp: { offset: 80, bytes: publicKey!.toBase58() } },
+                  // Mutable owner (SDK PF_OWNER_OFF) is at offset 116, NOT offset 80
+                  // (offset 80 is provenanceOwner — IMMUTABLE). MintPositionNft moves
+                  // the mutable owner to the escrow PDA on wrap but leaves provenance
+                  // pointing at the original wallet, so filtering on 80 would still
+                  // match a wrapped (NFT-escrowed) portfolio here — it would render as
+                  // a plain owned row whose Close then fails on-chain (owner mismatch),
+                  // and it would poison the seenSlabs dedup below so the NFT-recovery
+                  // scan skips re-adding it with nftWrapped: true. Mirrors
+                  // useUserAccount.ts / useDeposit.ts (commit 3ae16309).
+                  { memcmp: { offset: 116, bytes: publicKey!.toBase58() } },
                 ],
               });
 
@@ -378,6 +387,10 @@ export function usePortfolio(): PortfolioData {
                 if (cancelled) return;
                 const portData = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
                 const portfolio = parsePortfolioV17(portData);
+                // Defense-in-depth: re-verify the mutable owner actually matches after
+                // fetch — memcmp filters are advisory server-side; don't trust them
+                // blindly (same re-verify as useUserAccount.ts / useDeposit.ts).
+                if (!portfolio.owner.equals(publicKey!)) continue;
 
                 const pos = buildV17Position(
                   portfolio,

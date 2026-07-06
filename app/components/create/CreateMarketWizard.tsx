@@ -4,7 +4,14 @@ import { FC, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
-import { useCreateMarket, MIN_INIT_MARKET_SEED, type CreateMarketParams } from "@/hooks/useCreateMarket";
+import {
+  useCreateMarket,
+  MIN_INIT_MARKET_SEED,
+  DEFAULT_SLAB_SIZE,
+  flooredInitialMarginBps,
+  type CreateMarketParams,
+} from "@/hooks/useCreateMarket";
+import { useStuckSlabs } from "@/hooks/useStuckSlabs";
 import { clearInFlightMarket } from "@/lib/inFlightMarket";
 import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
@@ -80,7 +87,12 @@ const DEFAULT_STATE: WizardState = {
 export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }) => {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { state: createState, create, reset: resetCreate } = useCreateMarket();
+  const { state: createState, create, reset: resetCreate, restoreSlabKeypair } = useCreateMarket();
+  // BUG 7 fix: RecoverSolBanner's onResume callback only forwards (slabAddress, fromStep) —
+  // it's a shared component out of this fix's scope, so rather than changing its signature,
+  // call useStuckSlabs() here too (same hook RecoverSolBanner uses internally) to get our own
+  // reference to the reconstructed slab Keypair and hand it to restoreSlabKeypair below.
+  const { stuckSlab } = useStuckSlabs();
 
   // PERC-516: Persist wizard state to localStorage so form survives page refresh.
   // This fixes the "Continue button does nothing" bug — without persisted state,
@@ -241,7 +253,10 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   // Derived values
   const mintValid = isValidBase58Pubkey(wizard.mintAddress) && wizard.mintAddress.length >= 32;
-  const maxLeverage = Math.floor(10000 / wizard.initialMarginBps);
+  // BUG 16 fix: use the FLOORED margin (what create() actually enforces on-chain via
+  // MIN_SAFE_INITIAL_MARGIN_BPS) so the success screen advertises real leverage, not the
+  // raw requested value the user typed in Step 3.
+  const maxLeverage = Math.floor(10000 / flooredInitialMarginBps(wizard.initialMarginBps));
   const feeConflict = wizard.tradingFeeBps >= wizard.initialMarginBps;
   const hasTokens = wizard.walletBalance !== null && wizard.walletBalance > 0n;
   const decimals = wizard.tokenMeta?.decimals ?? 6;
@@ -272,17 +287,21 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     !feeConflict &&
     parseFloat(wizard.lpCollateral || "0") > 0 &&
     parseFloat(wizard.insuranceAmount) >= 100;
-  // Calculate actual SOL required based on slab tier (matching CostEstimate logic)
+  // BUG 1 fix: rent estimate must be sized off the actual v17 slab length
+  // (DEFAULT_SLAB_SIZE = v17MarketAccountLen(14)), not the stale v12.19 tier.dataSize —
+  // every tier used to grossly over-estimate (and InitMarket itself always used the
+  // v17 size regardless of tier, via the DEFAULT_SLAB_SIZE fallback). The v17 slab size
+  // does NOT vary by tier — tier only selects which deployed program (max concurrent
+  // trader accounts) InitMarket targets, so this is now a constant, not a per-tier memo.
   const requiredSol = useMemo(() => {
-    const tier = SLAB_TIERS[wizard.slabTier];
     const RENT_PER_BYTE = 6960;
     const RENT_OVERHEAD_BYTES = 128;
     const LAMPORTS_PER_SOL = 1_000_000_000;
     const TX_FEE_ESTIMATE_SOL = 0.025;
-    const slabRentSol = Math.ceil((tier.dataSize + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+    const slabRentSol = Math.ceil((DEFAULT_SLAB_SIZE + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
     const tokenAccountRentSol = (165 * 3 + 82 * 2) * RENT_PER_BYTE / LAMPORTS_PER_SOL;
     return slabRentSol + tokenAccountRentSol + TX_FEE_ESTIMATE_SOL;
-  }, [wizard.slabTier]);
+  }, []);
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
   const isDevnet = getNetwork() === "devnet";
   // GH#1117: True only when the selected token is a Percolator mirror mint
@@ -631,7 +650,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       tradingFeeBps: wizard.tradingFeeBps,
       initialMarginBps: wizard.initialMarginBps,
       maxAccounts: tier.maxAccounts,
-      slabDataSize: tier.dataSize,
+      // BUG 1 fix: don't override the DEFAULT_SLAB_SIZE fallback with the stale v12.19
+      // tier.dataSize — InitMarket always encodes maxPortfolioAssets:14, so the slab MUST
+      // be exactly v17MarketAccountLen(14) regardless of tier, or InitMarket reverts with
+      // InvalidSlabLen (and over-charges ~0.67 SOL rent in the process).
+      slabDataSize: DEFAULT_SLAB_SIZE,
       symbol: marketSymbol,
       name: marketName,
       decimals,
@@ -695,7 +718,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       tradingFeeBps: wizard.tradingFeeBps,
       initialMarginBps: wizard.initialMarginBps,
       maxAccounts: tier.maxAccounts,
-      slabDataSize: tier.dataSize,
+      // BUG 1 fix: same rationale as handleLaunch above — always the real v17 slab size.
+      slabDataSize: DEFAULT_SLAB_SIZE,
       symbol: retryMarketSymbol,
       name: retryMarketName,
       decimals,
@@ -858,10 +882,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       {/* Stuck slab recovery banner */}
       <RecoverSolBanner
         onReset={handleReset}
-        onResume={(_slabAddress, fromStep) => {
+        onResume={(slabAddress, fromStep) => {
           // PERC-513 fix: DO NOT call resetCreate() here — that clears slabKpRef
           // and removes the localStorage keypair, making the Continue button a no-op.
-          // The keypair is already loaded into slabKpRef by useCreateMarket's useEffect.
+          // BUG 7 fix: useCreateMarket's mount effect already hydrates slabKpRef from
+          // localStorage in the common case, but hand our own useStuckSlabs()-reconstructed
+          // keypair (see above) to the hook too — belt-and-suspenders against any race where
+          // the mount effect hasn't run yet (e.g. wallet just connected this render).
+          if (stuckSlab?.keypair && stuckSlab.publicKey.toBase58() === slabAddress) {
+            restoreSlabKeypair(stuckSlab.keypair, slabAddress);
+          }
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
         }}

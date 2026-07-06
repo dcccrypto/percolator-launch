@@ -410,12 +410,12 @@ export async function queryLeaderboard(
       SELECT
         trader,
         COUNT(*)::text            AS trade_count,
-        SUM(ABS(size::numeric))::text AS total_volume,
+        SUM(ABS(size::numeric) * price::numeric / 1e6)::text AS total_volume,
         MAX(created_at)           AS last_trade_at
       FROM trades
       WHERE created_at >= NOW() - INTERVAL '24 hours'
       GROUP BY trader
-      ORDER BY SUM(ABS(size::numeric)) DESC
+      ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
     `;
   } else if (period === "7d") {
@@ -423,12 +423,12 @@ export async function queryLeaderboard(
       SELECT
         trader,
         COUNT(*)::text            AS trade_count,
-        SUM(ABS(size::numeric))::text AS total_volume,
+        SUM(ABS(size::numeric) * price::numeric / 1e6)::text AS total_volume,
         MAX(created_at)           AS last_trade_at
       FROM trades
       WHERE created_at >= NOW() - INTERVAL '7 days'
       GROUP BY trader
-      ORDER BY SUM(ABS(size::numeric)) DESC
+      ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
     `;
   } else {
@@ -436,11 +436,11 @@ export async function queryLeaderboard(
       SELECT
         trader,
         COUNT(*)::text            AS trade_count,
-        SUM(ABS(size::numeric))::text AS total_volume,
+        SUM(ABS(size::numeric) * price::numeric / 1e6)::text AS total_volume,
         MAX(created_at)           AS last_trade_at
       FROM trades
       GROUP BY trader
-      ORDER BY SUM(ABS(size::numeric)) DESC
+      ORDER BY SUM(ABS(size::numeric) * price::numeric / 1e6) DESC
       LIMIT ${limit}
     `;
   }

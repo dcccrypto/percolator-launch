@@ -2,6 +2,7 @@
 
 import { FC, useEffect, useMemo, useRef, useState } from "react";
 import { computeLiqPrice, computeMarkPnl, computePnlPercent } from "@percolatorct/sdk";
+import { computeMarkPnlCollateral, computePositionInitialMargin } from "@/lib/trading";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useEngineState } from "@/hooks/useEngineState";
@@ -162,10 +163,14 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
 
   // Prefer on-chain entryPrice (V12_1_EP) when present; fall back to
   // localStorage entry saved at trade time for old V12_1 markets.
+  // BUG 10 fix: scope the cache lookup to this account's own wallet (its
+  // on-chain `owner`) — the unscoped key collapsed to one slot per market
+  // shared by every wallet that traded it in this browser (v17 accountIdx is
+  // always 0), so switching wallets showed the previous wallet's entry price.
   const resolvedEntry =
     entryPriceRaw > 0n
       ? entryPriceRaw
-      : (slabAddress ? getEntryPrice(slabAddress, idx) : null) ?? 0n;
+      : (slabAddress ? getEntryPrice(slabAddress, idx, account?.owner.toBase58()) : null) ?? 0n;
 
   const liqPriceE6 = useMemo(
     () => computeLiqPrice(resolvedEntry, capital, positionSize, maintBps),
@@ -179,10 +184,33 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
         : 0n,
     [positionSize, resolvedEntry, oracleE6, hasPosition, hasValidMark],
   );
-  const pnlPct = useMemo(
-    () => (hasPosition ? computePnlPercent(pnlTokens, capital) : 0),
-    [pnlTokens, capital, hasPosition],
+  // BUG 14 fix: ROE must compare a collateral-scale PnL against a
+  // collateral-scale denominator. `pnlTokens` above is native/coin-margined
+  // scale (see computeMarkPnl's doc comment) — convert via
+  // computeMarkPnlCollateral first (same conversion PositionsDock/
+  // ChartPnlBadge/PositionPanel apply), and standardize the denominator on
+  // this position's OWN locked initial margin (matches PositionsDock/
+  // ChartPnlBadge/PositionPanel), not `capital` — capital includes
+  // collateral not backing this specific position, which produced a
+  // DIFFERENT ROE% here than the positions dock showed for the identical
+  // position.
+  const initialMarginBps = params?.initialMarginBps ?? 1000n;
+  const positionInitialMargin = useMemo(
+    () => computePositionInitialMargin(positionSize, resolvedEntry, initialMarginBps),
+    [positionSize, resolvedEntry, initialMarginBps],
   );
+  const pnlCollateral = useMemo(
+    () => (hasPosition && hasValidMark ? computeMarkPnlCollateral(pnlTokens, oracleE6) : 0n),
+    [pnlTokens, oracleE6, hasPosition, hasValidMark],
+  );
+  const pnlPct = useMemo(() => {
+    if (!hasPosition || positionInitialMargin <= 0n) return 0;
+    try {
+      return computePnlPercent(pnlCollateral, positionInitialMargin);
+    } catch {
+      return 0;
+    }
+  }, [hasPosition, pnlCollateral, positionInitialMargin]);
 
   // Distance to liquidation as a percent of current price. Saturates to
   // 100% for the unliquidatable sentinel value.

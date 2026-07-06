@@ -3,7 +3,7 @@
 /**
  * Phase 4 (trade-terminal rebuild): the new order ticket.
  *
- * Field order per the brief: Market/Limit tabs -> Long/Short segmented ->
+ * Field order per the brief: Long/Short segmented ->
  * size input (unit toggle + 25/50/75/Max chips) -> leverage slider+input ->
  * receipt (entry, liq price, fees, slippage, margin req, before->after) ->
  * ONE big full-width Long(green)/Short(red) button -> account row (balance,
@@ -23,13 +23,16 @@
  * The on-chain instruction this submits (`trade()` -> `TradeCpi`) is
  * byte-identical to what TradeForm sends today.
  *
- * "Limit" tab: Percolator's `TradeCpi` has no resting/pending order concept
- * — `trade()` always executes immediately; `limitPriceE6` is a worst-
- * acceptable-fill-price bound (slippage protection), already a supported,
- * proven parameter of `useTrade`. The Limit tab here means "market order,
- * reverts if the fill would be worse than this price" — not a CEX-style
- * resting limit order. Documented explicitly (see the tab's own copy) so
- * this isn't oversold as something the protocol doesn't do.
+ * Market-only: this ticket no longer offers a Limit tab (removed — it
+ * shipped with a defect cluster: a receipt/confirm-modal "worst fill price"
+ * that was actually always mark-derived regardless of the typed limit, a
+ * sub-micro-price sentinel that could silently disable slippage protection,
+ * and broken sub-$1 formatting). Percolator's `TradeCpi` has no resting/
+ * pending order concept anyway — `trade()` always executes immediately;
+ * `limitPriceE6` is purely a worst-acceptable-fill-price bound (slippage
+ * protection). `useTrade` is left to derive that bound from the live mark
+ * (via `computeLimitPriceE6`, unchanged) exactly as it already did for a
+ * market order — nothing about that path changes here.
  */
 
 import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
@@ -55,7 +58,7 @@ import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6, toE6 } from "@/lib/format";
-import { saveEntryPrice, getEntryPrice } from "@/lib/entry-price";
+import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 
@@ -87,17 +90,6 @@ interface TicketValidationCtx {
   mockMode: boolean;
   exceedsBalance: boolean;
   balanceLabel: string;
-  /** Limit tab with no (or unparseable / non-positive) limit price. Without
-   *  this gate an empty limit input submitted `limitPriceE6: undefined`,
-   *  which useTrade fills with a mark-derived slippage bound — i.e. the
-   *  "limit" order silently executed as a market order. */
-  limitMissing: boolean;
-  /** Limit tab with the limit on the WRONG side of the mark (long below /
-   *  short above). Percolator has no resting orders — trade() executes
-   *  immediately and reverts when the fill breaches the bound, so this
-   *  order can only fail on-chain. Block it client-side. */
-  limitWouldRevert: boolean;
-  direction: "long" | "short";
 }
 interface ValidationIssue {
   severity: "error" | "warning";
@@ -126,16 +118,6 @@ function buildValidationIssues(ctx: TicketValidationCtx): ValidationIssue[] {
   }
   if (!ctx.hasPrice) {
     issues.push({ severity: "error", title: "No oracle price", message: "Waiting for price feed. Trades will be enabled once oracle data is available." });
-  }
-  if (ctx.limitMissing) {
-    issues.push({ severity: "error", title: "Limit price required", message: "Enter the worst fill price you'll accept, or switch to the Market tab." });
-  }
-  if (ctx.limitWouldRevert) {
-    issues.push(
-      ctx.direction === "long"
-        ? { severity: "error", title: "Limit below market", message: "Percolator has no resting orders — trades execute immediately. A long's limit is your MAXIMUM fill price; the market is already above it, so this order would only revert on-chain. Set the limit at or above the current price." }
-        : { severity: "error", title: "Limit above market", message: "Percolator has no resting orders — trades execute immediately. A short's limit is your MINIMUM fill price; the market is already below it, so this order would only revert on-chain. Set the limit at or below the current price." },
-    );
   }
   if (ctx.exceedsBalance) {
     issues.push({ severity: "error", title: "Exceeds balance", message: `Order size exceeds your available balance (${ctx.balanceLabel}).` });
@@ -245,8 +227,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       ? liveInsuranceBalance === 0n && liveTotalOI === 0n && !isHyperp && !mockMode
       : false;
 
-  const [orderType, setOrderType] = useState<"market" | "limit">("market");
-  const [limitPriceInput, setLimitPriceInput] = useState("");
   const [direction, setDirection] = useState<"long" | "short">("long");
   // USD is the default sizing unit — traders think in dollar notional first;
   // the chip next to the input switches to token units for those who don't.
@@ -321,7 +301,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const existingPositionSize = userAccount?.account.positionSize ?? 0n;
   const rawExistingEntryPrice = userAccount?.account.entryPrice ?? 0n;
   const cachedExistingEntryPrice = userAccount && rawExistingEntryPrice === 0n
-    ? getEntryPrice(slabAddress, userAccount.idx)
+    ? getEntryPrice(slabAddress, userAccount.idx, publicKey?.toBase58())
     : 0n;
   const existingEntryPriceE6 = rawExistingEntryPrice > 0n
     ? rawExistingEntryPrice
@@ -378,8 +358,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setMarginInput("");
     setLeverage(1);
     setLeverageText("1");
-    setLimitPriceInput("");
-    setOrderType("market");
     setLastSig(null);
     setHumanError(null);
     setTradePhase("idle");
@@ -488,12 +466,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   // ── Validation (single banner, priority-ordered) ──
-  const parsedLimit = orderType === "limit" && limitPriceInput ? parseFloat(limitPriceInput) : NaN;
-  const limitMissing =
-    orderType === "limit" && (!limitPriceInput || !Number.isFinite(parsedLimit) || parsedLimit <= 0);
-  const limitWouldRevert =
-    orderType === "limit" && !limitMissing && priceUsd != null && priceUsd > 0 &&
-    (direction === "long" ? parsedLimit < priceUsd : parsedLimit > priceUsd);
   const validationIssues = buildValidationIssues({
     marketPaused: !!header?.paused,
     vaultEmpty,
@@ -505,9 +477,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     mockMode,
     exceedsBalance,
     balanceLabel: `${formatTokenAmount(effectiveBalance, decimals)} ${collateralSymbol}`,
-    limitMissing,
-    limitWouldRevert,
-    direction,
   });
   const blockingIssue = validationIssues.find((i) => i.severity === "error") ?? null;
 
@@ -518,10 +487,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   async function handleTrade(snapshotSize?: bigint) {
     const effectiveSize = snapshotSize ?? positionSize;
     if (!marginInput || !userAccount || effectiveSize <= 0n || exceedsBalance) return;
-    // Belt-and-braces: the submit button is disabled on these, but handleTrade
-    // is also reachable via the confirm modal — never send a "limit" order
-    // without a valid, right-side-of-market bound.
-    if (orderType === "limit" && (limitMissing || limitWouldRevert)) return;
 
     if (mockMode) {
       setTradePhase("submitting");
@@ -538,14 +503,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setTradePhase("submitting");
     try {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
-      // Limit tab: pass the user's explicit worst-price. Market tab: omit it
-      // and let useTrade derive one from the live mark (its existing,
-      // unchanged behaviour — see hooks/useTrade.ts).
-      const explicitLimitE6 = orderType === "limit" && limitPriceInput
-        ? toE6(parseFloat(limitPriceInput))
-        : undefined;
+      // limitPriceE6 omitted — useTrade derives it from the live mark (its
+      // existing, unchanged market-order behaviour — see hooks/useTrade.ts).
       const sig = await withTransientRetry(
-        async () => trade({ lpIdx, userIdx: userAccount!.idx, size, limitPriceE6: explicitLimitE6 }),
+        async () => trade({ lpIdx, userIdx: userAccount!.idx, size }),
         { maxRetries: 2, delayMs: 3000 },
       );
       setTradePhase("confirming");
@@ -553,7 +514,23 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setMarginInput("");
       setSizeInput("");
       if (livePriceE6 && livePriceE6 > 0n && userAccount) {
-        saveEntryPrice(slabAddress, userAccount.idx, livePriceE6, leverage);
+        const wallet = publicKey?.toBase58();
+        // BUG 9 fix: this fired unconditionally on every successful open, so
+        // scaling INTO (or reducing/flipping through) an EXISTING position
+        // overwrote the cached entry with this trade's raw fill price — not
+        // a blended cost basis — corrupting Entry/Liq/PnL/ROE everywhere that
+        // reads the cache. Only a genuinely NEW position (flat -> open) has
+        // "this fill IS the entry" be true. When a position already existed
+        // pre-trade, clear the now-stale cache instead: every consumer's
+        // existing `cachedEntry > 0 ? cached : estimateEntryFromPnl(...)`
+        // fallback then recovers the correct basis from the refreshed
+        // on-chain size/pnl (accurate once refreshSlab() below lands)
+        // instead of showing this trade's fill price mislabeled as "Entry".
+        if (existingPositionSize === 0n) {
+          saveEntryPrice(slabAddress, userAccount.idx, livePriceE6, leverage, wallet);
+        } else {
+          clearEntryPrice(slabAddress, userAccount.idx, wallet);
+        }
       }
       setTimeout(() => {
         refreshSlab();
@@ -576,47 +553,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   return (
     <div className="relative p-3.5">
-      {/* Market / Limit tabs */}
-      <div className="mb-3 flex gap-0.5 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
-        {(["market", "limit"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setOrderType(t)}
-            aria-pressed={orderType === t}
-            className={`flex-1 rounded-sm py-1 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors duration-150 ${
-              orderType === t ? "bg-[var(--accent)]/10 text-[var(--accent)]" : "text-[var(--text-secondary)] hover:text-[var(--text)]"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      {orderType === "limit" && (
-        <div className="mb-3">
-          <label className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
-            Limit price
-            <InfoIcon tooltip="Percolator executes immediately - this sets the worst price your order is allowed to fill at (slippage bound), not a resting order that waits to be matched." />
-          </label>
-          <input
-            type="text"
-            value={limitPriceInput}
-            onChange={(e) => setLimitPriceInput(e.target.value.replace(/[^0-9.]/g, ""))}
-            placeholder={priceUsd ? priceUsd.toFixed(4) : "0.0000"}
-            style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
-            className="w-full rounded-none border border-[var(--border)]/40 bg-[var(--bg)] px-2 py-1.5 text-right text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
-          />
-          {/* Marketable-limit reality check: with a valid bound on the right
-              side of the mark, the order fills NOW at ~mark (like a marketable
-              limit on a CEX) — say so before the user signs, or a "limit buy
-              above market" filling instantly reads as a bug. */}
-          {!limitMissing && !limitWouldRevert && priceUsd != null && priceUsd > 0 && (
-            <p className="mt-1 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
-              Executes now at ~${priceUsd.toFixed(4)} — reverts only if the fill lands {direction === "long" ? "above" : "below"} ${parsedLimit.toFixed(4)}.
-            </p>
-          )}
-        </div>
-      )}
-
       {/* Long / Short segmented — semantic long/short tokens only, symmetric
           unselected states (both read as neutral until chosen — previously
           Short's idle state was tinted red even when not selected, which

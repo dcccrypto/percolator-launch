@@ -1,10 +1,10 @@
 "use client";
 
 import { FC } from "react";
-import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useLivePrice } from "@/hooks/useLivePrice";
-import { useMarketConfig } from "@/hooks/useMarketConfig";
+import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
@@ -31,7 +31,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
-  const marketConfig = useMarketConfig();
+  const { config: marketConfig, params } = useSlabState();
   const tokenMeta = useTokenMeta(marketConfig?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
 
@@ -44,9 +44,13 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   // accounts created via the position-NFT path have account.entryPrice == 0n.
   // Fall back to the locally-saved entry from when the position was opened —
   // mirrors the resolution PositionPanel does for the same reason.
+  // BUG 10 fix: scope the cache lookup to this account's own wallet (its
+  // on-chain `owner`) — the unscoped key collapsed to one slot per market
+  // shared by every wallet that traded it in this browser (v17 accountIdx is
+  // always 0), so switching wallets showed the previous wallet's entry price.
   const rawEntryPrice = account.entryPrice ?? 0n;
   const resolvedEntryPrice =
-    rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, userAccount.idx);
+    rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, userAccount.idx, account.owner.toBase58());
   if (resolvedEntryPrice <= 0n) return null;
 
   const pnlTokens = computeMarkPnl(account.positionSize, resolvedEntryPrice, livePriceE6);
@@ -54,9 +58,23 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
   // pnlTokens is coin-margined native scale (same units as positionSize), not
   // collateral — convert via computeMarkPnlCollateral before it's the basis
   // for ROE% (computePnlPercent expects a collateral-scale numerator to
-  // compare against collateral-scale account.capital).
+  // compare against a collateral-scale denominator).
   const pnlCollateral = computeMarkPnlCollateral(pnlTokens, livePriceE6);
-  const roe = computePnlPercent(pnlCollateral, account.capital);
+  // BUG 14 fix: standardize the ROE denominator on this position's OWN locked
+  // initial margin (matches PositionsDock/PositionPanel/AccountRiskSidebar),
+  // not `account.capital` — capital includes collateral not backing this
+  // specific position, which produced a DIFFERENT (smaller) ROE% here than
+  // PositionsDock showed for the identical position. `computePnlPercent` can
+  // throw on an extreme dust-margin position (mirrors the guard PositionsDock
+  // already has around this same call).
+  const initialMarginBps = params?.initialMarginBps ?? 1000n;
+  const positionInitialMargin = computePositionInitialMargin(account.positionSize, resolvedEntryPrice, initialMarginBps);
+  let roe = 0;
+  try {
+    roe = positionInitialMargin > 0n ? computePnlPercent(pnlCollateral, positionInitialMargin) : 0;
+  } catch {
+    roe = 0;
+  }
 
   if (!Number.isFinite(pnlUsd) || !Number.isFinite(roe)) return null;
 

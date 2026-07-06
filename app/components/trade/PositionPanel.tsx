@@ -14,8 +14,10 @@ import { formatTokenAmount, formatUsdPriceE6, formatLiqPrice } from "@/lib/forma
 import { useLivePrice } from "@/hooks/useLivePrice";
 import {
   computeMarkPnl,
+  computeMarkPnlCollateral,
   computeLiqPrice,
   computePnlPercent,
+  computePositionInitialMargin,
 } from "@/lib/trading";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
@@ -257,8 +259,12 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const currentPriceE6 = livePriceE6 ?? onChainPriceE6 ?? 0n;
 
   // V12_1: entry_price removed from on-chain struct. Fall back to saved entry price.
+  // BUG 10 fix: scope the cache lookup to this account's own wallet (its
+  // on-chain `owner`) — the unscoped key collapsed to one slot per market
+  // shared by every wallet that traded it in this browser (v17 accountIdx is
+  // always 0), so switching wallets showed the previous wallet's entry price.
   const rawEntryPrice = account.entryPrice;
-  const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, userAccount.idx);
+  const savedEntryPrice = rawEntryPrice > 0n ? 0n : getEntryPrice(slabAddress, userAccount.idx, account.owner.toBase58());
   const resolvedEntryPrice = rawEntryPrice > 0n ? rawEntryPrice : (savedEntryPrice > 0n ? savedEntryPrice : 0n);
   const entryPriceE6 = resolvedEntryPrice > 0n ? resolvedEntryPrice : currentPriceE6;
 
@@ -275,7 +281,24 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const pnlUsdRaw =
     priceUsd !== null && hasValidMark ? (Number(pnlTokens) / 10 ** decimals) * priceUsd : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
-  const roe = hasValidMark ? computePnlPercent(pnlTokens, account.capital) : 0;
+  // BUG 14 fix: ROE must compare a collateral-scale PnL against a
+  // collateral-scale denominator. `pnlTokens` above is native/coin-margined
+  // scale (see computeMarkPnl's doc comment) — convert via
+  // computeMarkPnlCollateral first (same conversion PositionsDock/
+  // ChartPnlBadge apply), and standardize the denominator on this position's
+  // OWN locked initial margin (matches PositionsDock/ChartPnlBadge/
+  // AccountRiskSidebar), not `account.capital` — capital includes collateral
+  // not backing this specific position, which produced a DIFFERENT ROE% here
+  // than the positions dock showed for the identical position.
+  const initialMarginBps = params?.initialMarginBps ?? 1000n;
+  const pnlCollateral = hasValidMark ? computeMarkPnlCollateral(pnlTokens, currentPriceE6) : 0n;
+  const positionInitialMargin = computePositionInitialMargin(account.positionSize, entryPriceE6, initialMarginBps);
+  let roe = 0;
+  try {
+    roe = hasValidMark && positionInitialMargin > 0n ? computePnlPercent(pnlCollateral, positionInitialMargin) : 0;
+  } catch {
+    roe = 0;
+  }
 
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
   const liqPriceE6 = computeLiqPrice(
@@ -321,7 +344,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const accountLeverage = hasPosition && account.capital > 0n && currentPriceE6 > 0n
     ? Number(notionalE6 / 1_000_000n) / Number(account.capital)
     : 0;
-  const savedOrderLeverage = getEntryLeverage(slabAddress, userAccount.idx);
+  const savedOrderLeverage = getEntryLeverage(slabAddress, userAccount.idx, account.owner.toBase58());
   const displayLeverage = savedOrderLeverage ?? accountLeverage;
   const displayLeverageKind = savedOrderLeverage != null ? "Order" : "Risk";
   const leverageTitle = savedOrderLeverage != null
@@ -393,7 +416,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const handleConfirmClose = async (percent: number) => {
     try {
       await closePosition(percent);
-      if (percent === 100 && userAccount) clearEntryPrice(slabAddress, userAccount.idx);
+      if (percent === 100 && userAccount) clearEntryPrice(slabAddress, userAccount.idx, account.owner.toBase58());
       setShowCloseModal(false);
     } catch {
       // error shown via hook state
@@ -766,7 +789,7 @@ const PnlSection: FC<PnlSectionProps> = ({
                   className={`text-[10px] ${pnlColor}`}
                   style={{ fontFamily: "var(--font-mono)" }}
                 >
-                  ({pnlUsd >= 0 ? "+" : ""}$
+                  ({pnlUsd >= 0 ? "+" : "-"}$
                   {Math.abs(pnlUsd).toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,

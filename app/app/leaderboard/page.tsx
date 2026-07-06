@@ -84,7 +84,9 @@ function useCollateralDecimals(): number {
 const DEFAULT_DIVISOR = IS_MAINNET ? 1_000_000 : 1_000_000_000;
 
 /** Format raw bigint volume as a compact human-readable string.
- * @param raw - raw token amount as string (sum of abs(size) from on-chain trades)
+ * @param raw - dollar-notional volume as string (sum of abs(size) * price across
+ * trades, same scale/convention as trader-stats' totalVolume — NOT raw contract
+ * quantity, so heterogeneous markets like SOL and sub-$1 tokens rank fairly)
  * @param divisor - 10^decimals for the collateral token (default: network-based heuristic)
  */
 function fmtVolume(raw: string, divisor = DEFAULT_DIVISOR): string {

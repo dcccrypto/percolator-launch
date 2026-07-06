@@ -4,8 +4,23 @@ import { useMemo, useEffect, useState, useRef, useCallback } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "./useMarketDiscovery";
-import { parseAllAccounts, AccountKind, type DiscoveredMarket } from "@percolatorct/sdk";
+import {
+  parseAllAccounts,
+  parsePortfolioV17,
+  isV17Account,
+  AccountKind,
+  type DiscoveredMarket,
+} from "@percolatorct/sdk";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
+
+// v17 portfolios are standalone program-owned accounts — mirrors
+// findV17Portfolio in useDeposit.ts/useUserAccount.ts. market_group_id at
+// offset 16; mutable owner (SDK PF_OWNER_OFF) at offset 116. NOTE: offset 80
+// is provenanceOwner — IMMUTABLE — filtering on it would still match a
+// wrapped (NFT-escrowed) portfolio (commit 3ae16309).
+const V17_PORTFOLIO_MAGIC_MM = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
+const V17_PF_MARKET_OFF_MM = 16;
+const V17_PF_OWNER_OFF_MM = 116;
 
 export interface MyMarket extends DiscoveredMarket {
   /** Formatted label for display (token symbol or truncated address) */
@@ -129,20 +144,48 @@ export function useMyMarkets() {
           const result = results[j];
           if (result.status !== "fulfilled" || !result.value) continue;
 
-          const data = new Uint8Array(result.value.data);
+          const accountInfo = result.value;
+          const data = new Uint8Array(accountInfo.data);
+          const market = batch[j];
           try {
-            const accounts = parseAllAccounts(data);
             let role: "trader" | "lp" | null = null;
 
-            for (const { account } of accounts) {
-              if (account.owner.toBase58() === walletStr) {
-                if (account.kind === AccountKind.User) { role = "trader"; break; }
-                if (account.kind === AccountKind.LP) { role = role ?? "lp"; }
+            if (isV17Account(data)) {
+              // v17: portfolios are standalone program-owned accounts, NOT
+              // embedded in the slab — parseAllAccounts finds nothing here.
+              // Scan getProgramAccounts for this wallet's portfolio on this
+              // market, filtered by the mutable owner (offset 116), same
+              // approach as usePortfolio.ts.
+              const v17ProgramId = accountInfo.owner;
+              const portfolioResults = await connection.getProgramAccounts(v17ProgramId, {
+                filters: [
+                  { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_MM.toString("base64"), encoding: "base64" } },
+                  { memcmp: { offset: V17_PF_MARKET_OFF_MM, bytes: market.slabAddress.toBase58() } },
+                  { memcmp: { offset: V17_PF_OWNER_OFF_MM, bytes: walletStr } },
+                ],
+              });
+              for (const { account: portAcct } of portfolioResults) {
+                const portData = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
+                const portfolio = parsePortfolioV17(portData);
+                // Defense-in-depth: re-verify the mutable owner actually matches
+                // after fetch — memcmp filters are advisory server-side.
+                if (portfolio.owner.toBase58() === walletStr) { role = "trader"; break; }
+              }
+              // v17 has no embedded LP account to detect here — LP positions
+              // are tracked via LP-token balances (see useLpPositions.ts), not
+              // a slab-scanned role.
+            } else {
+              // v12.x legacy path: accounts embedded in the slab.
+              const accounts = parseAllAccounts(data);
+              for (const { account } of accounts) {
+                if (account.owner.toBase58() === walletStr) {
+                  if (account.kind === AccountKind.User) { role = "trader"; break; }
+                  if (account.kind === AccountKind.LP) { role = role ?? "lp"; }
+                }
               }
             }
 
             if (role) {
-              const market = batch[j];
               found.push({
                 ...market,
                 label: await resolveLabel(market),

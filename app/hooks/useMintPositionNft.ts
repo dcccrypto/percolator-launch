@@ -51,7 +51,16 @@ export function useMintPositionNft(slabAddress: string) {
       // market_group_id + owner (same filter as useTrade findV17Portfolio).
       const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
       const PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF = 16;
-      const PORTFOLIO_PROVENANCE_OWNER_OFF = 80;
+      // Mutable owner (SDK PF_OWNER_OFF) sits at offset 116, NOT provenance
+      // offset 80 (IMMUTABLE, set at creation). MintPositionNft moves the
+      // mutable owner to the escrow PDA on wrap but leaves provenance pointing
+      // at the original wallet, so filtering on 80 would ALSO match an
+      // already-wrapped/escrowed portfolio here. With one wrapped + one fresh
+      // portfolio on this market, the @80 filter returns both and picking
+      // allPortfolios[0] non-deterministically can target the already-minted
+      // portfolio, failing pre-send simulation and intermittently blocking
+      // mint of the genuinely-open position (mirrors useDeposit/usePositionNft).
+      const PORTFOLIO_OWNER_OFF = 116;
 
       let portfolioPk: PublicKey;
       let marketId: bigint;
@@ -61,14 +70,20 @@ export function useMintPositionNft(slabAddress: string) {
           filters: [
             { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
             { memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: slabPk.toBase58() } },
-            { memcmp: { offset: PORTFOLIO_PROVENANCE_OWNER_OFF, bytes: walletPubkey.toBase58() } },
+            { memcmp: { offset: PORTFOLIO_OWNER_OFF, bytes: walletPubkey.toBase58() } },
           ],
         });
         if (allPortfolios.length === 0) {
           throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
         }
-        portfolioPk = allPortfolios[0].pubkey;
+        // Defense-in-depth: re-verify the mutable owner actually matches after
+        // fetch — memcmp filters are advisory server-side; don't trust them
+        // blindly (mirrors useDeposit/usePositionNft's re-verify).
         const pf = parsePortfolioV17(new Uint8Array(allPortfolios[0].account.data));
+        if (!pf.owner.equals(walletPubkey)) {
+          throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
+        }
+        portfolioPk = allPortfolios[0].pubkey;
         const activeLeg = pf.legs.find((l) => l.active);
         if (!activeLeg) {
           throw new Error("No active position to mint an NFT for. Open a position first.");

@@ -81,6 +81,26 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
 
+  // BUG 22 fix: mark a dialog as open on a body-level counter for the whole
+  // time this modal is mounted. `MobileOrderSheet` (app/trade/[slab]/page.tsx)
+  // registers its OWN document-level Escape handler when the order ticket
+  // sheet opens — since that happens strictly before this modal can ever
+  // mount (you have to open the sheet to reach the order ticket that opens
+  // this), a single Escape keypress used to fire BOTH handlers: this modal
+  // cancelled AND the sheet collapsed underneath it. The sheet's handler
+  // checks this counter and ignores Escape while it's > 0. Mount/unmount-once
+  // (empty deps) — independent of the animation effect below, which can
+  // re-run on a `prefersReduced` change.
+  useEffect(() => {
+    const current = Number(document.body.dataset.percOpenDialogs ?? "0");
+    document.body.dataset.percOpenDialogs = String(current + 1);
+    return () => {
+      const remaining = Number(document.body.dataset.percOpenDialogs ?? "1") - 1;
+      if (remaining <= 0) delete document.body.dataset.percOpenDialogs;
+      else document.body.dataset.percOpenDialogs = String(remaining);
+    };
+  }, []);
+
   useEffect(() => {
     const overlay = overlayRef.current;
     const modal = modalRef.current;
