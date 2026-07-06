@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
+import gsap from "gsap";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 /* ── Constants ────────────────────────────────────────────── */
-/** S2 devnet trading competition end: March 21, 2026 00:00 UTC */
-const COMPETITION_END = new Date("2026-03-21T00:00:00Z");
-
 /** True when deployed against mainnet-beta (GH#1572, GH#1573) */
 const IS_MAINNET =
   process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() === "mainnet-beta" ||
@@ -26,14 +25,6 @@ interface LeaderboardEntry {
 
 type Period = "24h" | "7d" | "alltime";
 
-interface TimeLeft {
-  days: number;
-  hours: number;
-  minutes: number;
-  seconds: number;
-  ended: boolean;
-}
-
 /* ── Helpers ──────────────────────────────────────────────── */
 function shortenAddr(addr: string): string {
   if (addr.length <= 12) return addr;
@@ -49,22 +40,6 @@ function timeSince(iso: string): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
-}
-
-function getTimeLeft(): TimeLeft {
-  const now = Date.now();
-  const diff = COMPETITION_END.getTime() - now;
-  if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0, ended: true };
-  const totalSec = Math.floor(diff / 1000);
-  const days = Math.floor(totalSec / 86400);
-  const hours = Math.floor((totalSec % 86400) / 3600);
-  const minutes = Math.floor((totalSec % 3600) / 60);
-  const seconds = totalSec % 60;
-  return { days, hours, minutes, seconds, ended: false };
-}
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
 }
 
 /**
@@ -125,186 +100,41 @@ function fmtVolume(raw: string, divisor = DEFAULT_DIVISOR): string {
   }
 }
 
-const RANK_MEDALS: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
-
 const PERIOD_LABELS: Record<Period, string> = {
-  "24h": "24 Hours",
-  "7d": "7 Days",
-  alltime: "All-Time",
+  "24h": "24H",
+  "7d": "7D",
+  alltime: "ALL-TIME",
 };
 
-/* ── CompetitionBanner ────────────────────────────────────── */
-function CompetitionBanner() {
-  const [timeLeft, setTimeLeft] = useState<TimeLeft>(() => getTimeLeft());
-
-  useEffect(() => {
-    const id = setInterval(() => setTimeLeft(getTimeLeft()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  if (timeLeft.ended) {
-    return (
-      <div
-        className="mb-6 px-5 py-4 border font-mono text-center text-sm"
-        style={{
-          background: "rgba(153,69,255,0.06)",
-          borderColor: "rgba(153,69,255,0.25)",
-          color: "var(--text-secondary)",
-        }}
-      >
-        <span className="text-xs uppercase tracking-widest" style={{ color: "var(--accent)" }}>
-          S2 Devnet Competition
-        </span>
-        <span className="ml-3" style={{ color: "var(--text-muted)" }}>
-          Competition ended — results are final.
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="mb-6 border"
-      style={{
-        background: "rgba(153,69,255,0.06)",
-        borderColor: "rgba(153,69,255,0.2)",
-      }}
-    >
-      {/* Top strip */}
-      <div
-        className="flex items-center justify-between px-5 py-2 border-b"
-        style={{ borderColor: "rgba(153,69,255,0.15)" }}
-      >
-        <div className="flex items-center gap-2">
-          <span
-            className="text-[10px] font-bold uppercase tracking-[0.2em] px-1.5 py-0.5 rounded-sm"
-            style={{ background: "var(--accent)", color: "#fff" }}
-          >
-            LIVE
-          </span>
-          <span
-            className="text-xs font-mono font-semibold uppercase tracking-widest"
-            style={{ color: "var(--text)" }}
-          >
-            S2 Devnet Trading Competition
-          </span>
-        </div>
-        <span className="text-[11px] font-mono" style={{ color: "var(--text-muted)" }}>
-          Ends Mar 21, 2026
-        </span>
-      </div>
-
-      {/* Body */}
-      <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        {/* Prizes */}
-        <div className="flex items-start gap-6">
-          <div>
-            <p
-              className="text-[10px] font-mono uppercase tracking-[0.18em] mb-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              #1 Prize
-            </p>
-            <p className="text-sm font-bold tabular-nums" style={{ color: "var(--text)" }}>
-              🥇 Early Access
-            </p>
-            <p className="text-[11px] font-mono mt-0.5" style={{ color: "var(--text-secondary)" }}>
-              Beta whitelist spot
-            </p>
-          </div>
-          <div>
-            <p
-              className="text-[10px] font-mono uppercase tracking-[0.18em] mb-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Top 10
-            </p>
-            <p className="text-sm font-bold tabular-nums" style={{ color: "var(--text)" }}>
-              🎖️ Beta Badge
-            </p>
-            <p className="text-[11px] font-mono mt-0.5" style={{ color: "var(--text-secondary)" }}>
-              Pioneer role on Discord
-            </p>
-          </div>
-          <div>
-            <p
-              className="text-[10px] font-mono uppercase tracking-[0.18em] mb-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Ranked
-            </p>
-            <p className="text-sm font-bold tabular-nums" style={{ color: "var(--text)" }}>
-              📊 On-Chain Record
-            </p>
-            <p className="text-[11px] font-mono mt-0.5" style={{ color: "var(--text-secondary)" }}>
-              Volume logged forever
-            </p>
-          </div>
-        </div>
-
-        {/* Countdown */}
-        <div
-          className="shrink-0 flex gap-3 items-end"
-          aria-label="Time remaining in competition"
-        >
-          {[
-            { value: timeLeft.days, label: "DAYS" },
-            { value: timeLeft.hours, label: "HRS" },
-            { value: timeLeft.minutes, label: "MIN" },
-            { value: timeLeft.seconds, label: "SEC" },
-          ].map(({ value, label }, i) => (
-            <div key={label} className="flex items-center gap-3">
-              {i > 0 && (
-                <span
-                  className="text-lg font-mono font-bold mb-3"
-                  style={{ color: "rgba(153,69,255,0.5)" }}
-                >
-                  :
-                </span>
-              )}
-              <div className="flex flex-col items-center">
-                <span
-                  className="text-2xl font-bold font-mono tabular-nums"
-                  style={{ color: "var(--accent)", lineHeight: 1.1 }}
-                >
-                  {pad(value)}
-                </span>
-                <span
-                  className="text-[8px] font-mono uppercase tracking-[0.15em] mt-0.5"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {label}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+/** Rank accent per podium slot — accent intensity instead of medal emoji.
+ *  The site's palette has no gold/silver/bronze; a fading accent reads as
+ *  hierarchy without breaking the terminal theme. */
+function rankColor(rank: number): string {
+  if (rank === 1) return "var(--accent)";
+  if (rank === 2) return "var(--cyan)";
+  if (rank === 3) return "var(--text)";
+  return "var(--text-secondary)";
 }
 
 /* ── Share helpers ────────────────────────────────────────── */
-const LEADERBOARD_URL = "https://percolatorlaunch.com/leaderboard";
+/** Current deploy's leaderboard URL — never a hardcoded domain. */
+function leaderboardUrl(): string {
+  return `${window.location.origin}/leaderboard`;
+}
 
 function buildShareText(entry: LeaderboardEntry, divisor = DEFAULT_DIVISOR): string {
-  const medal = RANK_MEDALS[entry.rank];
-  const rankStr = medal ? `${medal} #${entry.rank}` : `#${entry.rank}`;
   const vol = fmtVolume(entry.totalVolume, divisor);
   const network = IS_MAINNET ? "mainnet" : "devnet";
   return (
-    `I'm ${rankStr} on the @percolatorlaunch ${network} leaderboard with ${vol} volume!\n\n` +
-    `Permissionless perps on Solana — join the beta 🚀\n\n` +
-    LEADERBOARD_URL
+    `I'm #${entry.rank} on the Percolator ${network} leaderboard with ${vol} volume.\n\n` +
+    `Permissionless perps on Solana:\n${leaderboardUrl()}`
   );
 }
 
 function buildGenericShareText(): string {
   const network = IS_MAINNET ? "mainnet" : "devnet";
   return (
-    `Check out the @percolatorlaunch ${network} trading leaderboard!\n\n` +
-    `Permissionless perps on Solana — join the beta 🚀\n\n` +
-    LEADERBOARD_URL
+    `Percolator ${network} trading leaderboard — permissionless perps on Solana:\n${leaderboardUrl()}`
   );
 }
 
@@ -328,7 +158,7 @@ function MyRankCard({ entry, walletConnected, divisor = DEFAULT_DIVISOR }: MyRan
 
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(LEADERBOARD_URL);
+      await navigator.clipboard.writeText(leaderboardUrl());
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -342,118 +172,66 @@ function MyRankCard({ entry, walletConnected, divisor = DEFAULT_DIVISOR }: MyRan
   if (!entry) {
     // Connected but not ranked — show generic share
     return (
-      <div
-        className="mb-6 px-4 py-3 border flex items-center justify-between gap-4"
-        style={{
-          background: "var(--panel-bg)",
-          borderColor: "var(--border)",
-        }}
-      >
-        <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+      <div className="mb-6 flex items-center justify-between gap-4 border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-3">
+        <p className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
           Not ranked yet — start trading to appear on the board
         </p>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           <button
             onClick={handleShare}
-            className="px-3 py-1.5 text-xs font-mono tracking-wide transition-all"
-            style={{
-              background: "transparent",
-              color: "var(--text-secondary)",
-              border: "1px solid var(--border)",
-            }}
+            className="border border-[var(--border)] bg-transparent px-3 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--text)]"
           >
-            SHARE 𝕏
+            Share
           </button>
           <button
             onClick={handleCopy}
-            className="px-3 py-1.5 text-xs font-mono transition-all"
-            style={{
-              background: "transparent",
-              color: copied ? "var(--accent)" : "var(--text-muted)",
-              border: "1px solid var(--border)",
-            }}
+            className={`border border-[var(--border)] bg-transparent px-3 py-1.5 text-[10px] uppercase tracking-[0.12em] transition-colors hover:border-[var(--accent)]/30 ${copied ? "text-[var(--accent)]" : "text-[var(--text-secondary)] hover:text-[var(--text)]"}`}
           >
-            {copied ? "COPIED!" : "COPY LINK"}
+            {copied ? "Copied ✓" : "Copy Link"}
           </button>
         </div>
       </div>
     );
   }
 
-  const medal = RANK_MEDALS[entry.rank];
-
   return (
-    <div
-      className="mb-6 px-4 py-4 border"
-      style={{
-        background: "rgba(153,69,255,0.06)",
-        borderColor: "rgba(153,69,255,0.3)",
-      }}
-    >
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+    <div className="mb-6 border border-[var(--accent)]/30 bg-[var(--accent)]/[0.05] px-4 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         {/* Rank info */}
         <div>
-          <p
-            className="text-[10px] font-mono uppercase tracking-[0.18em] mb-1.5"
-            style={{ color: "var(--text-muted)" }}
-          >
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--text-secondary)]">
             Your Rank
           </p>
           <div className="flex items-center gap-3">
             <span
-              className="text-2xl leading-none"
-              aria-label={medal ? `Rank ${entry.rank}` : undefined}
+              className="text-xl font-bold tabular-nums text-[var(--accent)]"
+              style={{ fontFamily: "var(--font-heading)" }}
             >
-              {medal ?? (
-                <span
-                  className="text-xl font-bold tabular-nums"
-                  style={{ color: "var(--accent)" }}
-                >
-                  #{entry.rank}
-                </span>
-              )}
+              #{entry.rank}
             </span>
-            {medal && (
-              <span
-                className="text-lg font-bold tabular-nums"
-                style={{ color: "var(--accent)" }}
-              >
-                #{entry.rank}
-              </span>
-            )}
-            <div className="text-xs font-mono" style={{ color: "var(--text-secondary)" }}>
+            <div className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
               <span className="tabular-nums">{entry.tradeCount.toLocaleString()} trades</span>
-              <span className="mx-2" style={{ color: "var(--text-muted)" }}>·</span>
+              <span className="mx-2">·</span>
               <span className="tabular-nums">{fmtVolume(entry.totalVolume, divisor)} vol</span>
             </div>
           </div>
         </div>
 
         {/* Share buttons */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           <button
             onClick={handleShare}
-            className="px-4 py-1.5 text-xs font-mono font-semibold tracking-wide transition-all hover:opacity-90"
-            style={{
-              background: "var(--accent)",
-              color: "#fff",
-              border: "1px solid var(--accent)",
-            }}
-            title="Share your rank on X / Twitter"
+            className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--accent)] transition-all hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.15]"
+            title="Share your rank on X"
           >
-            SHARE 𝕏
+            Share on 𝕏
           </button>
           <button
             onClick={handleCopy}
-            className="px-3 py-1.5 text-xs font-mono transition-all"
-            style={{
-              background: "var(--panel-bg)",
-              color: copied ? "var(--accent)" : "var(--text-secondary)",
-              border: "1px solid var(--border)",
-            }}
+            className={`border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-1.5 text-[10px] uppercase tracking-[0.12em] transition-colors hover:border-[var(--accent)]/30 ${copied ? "text-[var(--accent)]" : "text-[var(--text-secondary)] hover:text-[var(--text)]"}`}
             title="Copy leaderboard link"
           >
-            {copied ? "✓ COPIED" : "COPY LINK"}
+            {copied ? "Copied ✓" : "Copy Link"}
           </button>
         </div>
       </div>
@@ -473,6 +251,9 @@ export default function LeaderboardPage() {
   // GH#1833: use per-network market decimals instead of hardcoded constant
   const collateralDecimals = useCollateralDecimals();
   const divisor = useMemo(() => Math.pow(10, collateralDecimals), [collateralDecimals]);
+
+  const prefersReduced = usePrefersReducedMotion();
+  const rowsRef = useRef<HTMLDivElement | null>(null);
 
   const fetchLeaderboard = useCallback(async (p: Period) => {
     setLoading(true);
@@ -503,6 +284,23 @@ export default function LeaderboardPage() {
     fetchLeaderboard(period);
   }, [period, fetchLeaderboard]);
 
+  // Staggered row entrance — same gsap-on-mount pattern the rest of the site
+  // uses (ShareButton dropdown, ScrollReveal). Skipped entirely for
+  // prefers-reduced-motion users: rows are visible by default and only
+  // animate FROM hidden when motion is allowed, so there's no flash either way.
+  useEffect(() => {
+    if (loading || prefersReduced || !rowsRef.current) return;
+    const rows = rowsRef.current.children;
+    if (rows.length === 0) return;
+    gsap.fromTo(
+      rows,
+      { opacity: 0, y: 8 },
+      // clearProps must list ONLY what gsap set — "all" would wipe React's
+      // inline gridTemplateColumns/fontFamily and collapse the row grid.
+      { opacity: 1, y: 0, duration: 0.35, ease: "power2.out", stagger: 0.03, clearProps: "opacity,transform" },
+    );
+  }, [loading, entries, prefersReduced]);
+
   const noData = !loading && !error && entries.length === 0;
 
   /** Find connected wallet in the current leaderboard entries */
@@ -512,78 +310,84 @@ export default function LeaderboardPage() {
       ) ?? null
     : null;
 
+  /** Largest volume in the current view — drives the relative depth bars. */
+  const maxVolume = useMemo(() => {
+    let max = 0;
+    for (const e of entries) {
+      const n = Number(e.totalVolume);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    return max;
+  }, [entries]);
+
   return (
     <main className="min-h-screen pt-20 pb-24">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6">
+      {/* Page-scoped keyframes: the slow light sweep across the #1 row.
+          Reduced-motion users get a static row (media query below). */}
+      <style>{`
+        @keyframes lb-sweep {
+          0% { background-position: 250% 0; }
+          100% { background-position: -150% 0; }
+        }
+        .lb-rank1-sweep {
+          background-image: linear-gradient(105deg, transparent 44%, rgba(153, 69, 255, 0.09) 50%, transparent 56%);
+          background-size: 250% 100%;
+          background-repeat: no-repeat;
+          animation: lb-sweep 4.5s linear infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .lb-rank1-sweep { animation: none; background-image: none; }
+        }
+      `}</style>
+
+      <div className="mx-auto max-w-3xl px-4 sm:px-6">
 
         {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="mb-6">
-          <div className="flex items-center gap-3 mb-1">
-            <span className="text-2xl">🏆</span>
+        <div className="mb-8">
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+            // leaderboard
+          </div>
+          <div className="mb-1 flex items-center gap-3">
             <h1
-              className="text-3xl font-bold tracking-tight"
-              style={{ fontFamily: "var(--font-display)", color: "var(--text)" }}
+              className="text-3xl font-medium tracking-[-0.02em] text-[var(--text)]"
+              style={{ fontFamily: "var(--font-heading)" }}
             >
-              Leaderboard
+              Top Traders
             </h1>
             {/* Network badge: hidden on mainnet (GH#1572) */}
             {!IS_MAINNET && (
-              <span
-                className="text-xs font-mono px-2 py-0.5 rounded-sm border"
-                style={{
-                  color: "var(--accent)",
-                  borderColor: "var(--accent)",
-                  background: "rgba(153,69,255,0.07)",
-                }}
-              >
-                DEVNET
+              <span className="border border-[var(--accent)]/40 bg-[var(--accent)]/[0.07] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--accent)]" style={{ fontFamily: "var(--font-mono)" }}>
+                Devnet
               </span>
             )}
           </div>
-          <p style={{ color: "var(--text-secondary)" }} className="text-sm font-mono">
-            {IS_MAINNET
-              ? "Top traders by volume on Percolator (trade count as tiebreaker)"
-              : "Top traders by trade volume on the Percolator devnet (trade count as tiebreaker)"}
+          <p className="text-[13px] text-[var(--text-secondary)]">
+            Ranked by trade volume{IS_MAINNET ? "" : " on the Percolator devnet playground"} — trade count breaks ties.
           </p>
         </div>
 
-        {/* ── Competition Banner ──────────────────────────────────── */}
-        {/* S2 devnet competition banner: only shown on devnet (GH#1572) */}
-        {!IS_MAINNET && <CompetitionBanner />}
-
         {/* ── Period Switcher ─────────────────────────────────────── */}
-        <div className="flex gap-1 mb-6">
-          {(["24h", "7d", "alltime"] as Period[]).map((p) => (
+        <div className="mb-6 flex gap-0 border border-[var(--border)] p-0 w-fit">
+          {(["24h", "7d", "alltime"] as Period[]).map((p, i) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className="px-4 py-1.5 text-xs font-mono tracking-wider transition-all"
-              style={
+              className={`px-4 py-1.5 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors duration-150 ${
+                i > 0 ? "border-l border-[var(--border)]" : ""
+              } ${
                 period === p
-                  ? {
-                      background: "var(--accent)",
-                      color: "#fff",
-                      border: "1px solid var(--accent)",
-                    }
-                  : {
-                      background: "var(--panel-bg)",
-                      color: "var(--text-secondary)",
-                      border: "1px solid var(--border)",
-                    }
-              }
+                  ? "bg-[var(--accent)]/[0.12] text-[var(--accent)]"
+                  : "bg-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
+              }`}
+              style={{ fontFamily: "var(--font-mono)" }}
             >
-              {PERIOD_LABELS[p].toUpperCase()}
+              {PERIOD_LABELS[p]}
             </button>
           ))}
           <button
             onClick={() => fetchLeaderboard(period)}
-            className="ml-auto px-3 py-1.5 text-xs font-mono transition-all"
+            className="border-l border-[var(--border)] px-3 py-1.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
             title="Refresh"
-            style={{
-              background: "var(--panel-bg)",
-              color: "var(--text-secondary)",
-              border: "1px solid var(--border)",
-            }}
           >
             ↻
           </button>
@@ -596,16 +400,12 @@ export default function LeaderboardPage() {
 
         {/* ── Loading skeleton ────────────────────────────────────── */}
         {loading && (
-          <div className="space-y-1">
+          <div className="space-y-px">
             {Array.from({ length: 8 }).map((_, i) => (
               <div
                 key={i}
-                className="h-14 animate-pulse border"
-                style={{
-                  background: "var(--panel-bg)",
-                  borderColor: "var(--border)",
-                  opacity: 1 - i * 0.08,
-                }}
+                className="h-12 animate-pulse border border-[var(--border)] bg-[var(--panel-bg)]"
+                style={{ opacity: 1 - i * 0.08 }}
               />
             ))}
           </div>
@@ -613,34 +413,21 @@ export default function LeaderboardPage() {
 
         {/* ── Error ───────────────────────────────────────────────── */}
         {error && !loading && (
-          <div
-            className="px-4 py-6 text-center font-mono text-sm border"
-            style={{
-              background: "rgba(239,68,68,0.06)",
-              borderColor: "rgba(239,68,68,0.3)",
-              color: "#f87171",
-            }}
-          >
+          <div className="border border-[var(--short)]/30 bg-[var(--short)]/[0.06] px-4 py-6 text-center text-[13px] text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
             {error}
           </div>
         )}
 
         {/* ── Empty state ─────────────────────────────────────────── */}
         {noData && (
-          <div
-            className="px-4 py-12 text-center font-mono text-sm border"
-            style={{
-              background: "var(--panel-bg)",
-              borderColor: "var(--border)",
-              color: "var(--text-muted)",
-            }}
-          >
-            No trades found for this period.
-            <br />
+          <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-12 text-center">
+            <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No trades this period</p>
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+              Be first on the board.
+            </p>
             <Link
-              href="/trade"
-              className="mt-2 inline-block underline"
-              style={{ color: "var(--accent)" }}
+              href="/markets"
+              className="mt-3 inline-block text-[11px] font-medium text-[var(--accent)] transition-colors hover:text-[var(--text)]"
             >
               Start trading →
             </Link>
@@ -649,97 +436,86 @@ export default function LeaderboardPage() {
 
         {/* ── Table ───────────────────────────────────────────────── */}
         {!loading && !error && entries.length > 0 && (
-          <div className="space-y-px">
+          <div className="border border-[var(--border)]">
             {/* Header row */}
             <div
-              className="grid text-xs font-mono tracking-widest uppercase px-4 py-2"
-              style={{
-                gridTemplateColumns: "3rem 1fr 6rem 6rem 6rem",
-                color: "var(--text-muted)",
-                background: "var(--panel-bg)",
-                borderBottom: "1px solid var(--border)",
-              }}
+              className="grid border-b border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]"
+              style={{ gridTemplateColumns: "3.5rem 1fr 6rem 7rem 6rem", fontFamily: "var(--font-mono)" }}
             >
-              <span>#</span>
+              <span>Rank</span>
               <span>Trader</span>
               <span className="text-right">Trades</span>
               <span className="text-right">Volume</span>
-              <span className="text-right hidden sm:block">Last Active</span>
+              <span className="hidden text-right sm:block">Active</span>
             </div>
 
             {/* Data rows */}
-            {entries.map((entry) => {
-              const isTop3 = entry.rank <= 3;
-              const medal = RANK_MEDALS[entry.rank];
-              return (
-                <div
-                  key={entry.trader}
-                  className={`grid items-center px-4 py-3 font-mono text-sm transition-colors border ${
-                    isTop3
-                      ? "border-[rgba(153,69,255,0.2)] hover:border-[rgba(153,69,255,0.35)]"
-                      : "border-[var(--border)] hover:border-[var(--border-hover)]"
-                  }`}
-                  style={{
-                    gridTemplateColumns: "3rem 1fr 6rem 6rem 6rem",
-                    background: isTop3
-                      ? "rgba(153,69,255,0.04)"
-                      : "var(--panel-bg)",
-                    color: "var(--text)",
-                  }}
-                >
-                  {/* Rank */}
-                  <span
-                    className="text-sm"
-                    style={{ color: isTop3 ? "var(--accent)" : "var(--text-muted)" }}
+            <div ref={rowsRef}>
+              {entries.map((entry) => {
+                const isTop3 = entry.rank <= 3;
+                const isMe = myEntry != null && entry.trader === myEntry.trader;
+                const volNum = Number(entry.totalVolume);
+                const volPct = maxVolume > 0 && Number.isFinite(volNum)
+                  ? Math.max(2, Math.round((volNum / maxVolume) * 100))
+                  : 0;
+                return (
+                  <div
+                    key={entry.trader}
+                    className={`relative grid items-center border-b border-[var(--border)]/40 px-4 py-2.5 text-[13px] transition-colors last:border-b-0 hover:bg-[var(--bg-elevated)] ${
+                      entry.rank === 1 ? "lb-rank1-sweep bg-[var(--accent)]/[0.04]" : isTop3 ? "bg-[var(--accent)]/[0.02]" : ""
+                    } ${isMe ? "border-l-2 border-l-[var(--accent)]" : ""}`}
+                    style={{ gridTemplateColumns: "3.5rem 1fr 6rem 7rem 6rem", fontFamily: "var(--font-mono)" }}
                   >
-                    {medal ?? entry.rank}
-                  </span>
+                    {/* Relative-volume depth bar — quiet, right-aligned under the
+                        volume column region, terminal order-book style. */}
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 right-0 bg-gradient-to-l from-[var(--accent)]/[0.06] to-transparent"
+                      style={{ width: `${Math.round(volPct * 0.45)}%` }}
+                    />
 
-                  {/* Trader address */}
-                  <span
-                    className="truncate"
-                    style={{ color: isTop3 ? "var(--text)" : "var(--text-secondary)" }}
-                    title={entry.trader}
-                  >
-                    {shortenAddr(entry.trader)}
-                  </span>
+                    {/* Rank */}
+                    <span
+                      className="text-[12px] font-bold tabular-nums"
+                      style={{ color: rankColor(entry.rank) }}
+                    >
+                      {String(entry.rank).padStart(2, "0")}
+                    </span>
 
-                  {/* Trade count */}
-                  <span
-                    className="text-right tabular-nums"
-                    style={{ color: "var(--text)" }}
-                  >
-                    {entry.tradeCount.toLocaleString()}
-                  </span>
+                    {/* Trader address */}
+                    <span
+                      className={`truncate tabular-nums ${isTop3 ? "text-[var(--text)]" : "text-[var(--text-secondary)]"}`}
+                      title={entry.trader}
+                    >
+                      {shortenAddr(entry.trader)}
+                      {isMe && <span className="ml-2 text-[9px] uppercase tracking-[0.12em] text-[var(--accent)]">you</span>}
+                    </span>
 
-                  {/* Volume */}
-                  <span
-                    className="text-right tabular-nums"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    {fmtVolume(entry.totalVolume, divisor)}
-                  </span>
+                    {/* Trade count */}
+                    <span className="text-right tabular-nums text-[var(--text)]">
+                      {entry.tradeCount.toLocaleString()}
+                    </span>
 
-                  {/* Last active */}
-                  <span
-                    className="text-right hidden sm:block"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    {timeSince(entry.lastTradeAt)}
-                  </span>
-                </div>
-              );
-            })}
+                    {/* Volume */}
+                    <span className={`relative text-right tabular-nums ${isTop3 ? "text-[var(--text)]" : "text-[var(--text-secondary)]"}`}>
+                      {fmtVolume(entry.totalVolume, divisor)}
+                    </span>
+
+                    {/* Last active */}
+                    <span className="hidden text-right text-[11px] text-[var(--text-secondary)] sm:block">
+                      {timeSince(entry.lastTradeAt)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
         {/* ── Footer ──────────────────────────────────────────────── */}
-        <div
-          className="mt-6 flex items-center justify-between text-xs font-mono"
-          style={{ color: "var(--text-muted)" }}
-        >
+        <div className="mt-4 flex items-center justify-between text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
           <span>
-            {entries.length > 0 ? `Showing top ${entries.length} traders` : ""}
+            {entries.length > 0 ? `Top ${entries.length} traders` : ""}
           </span>
           {generatedAt && (
             <span>Updated {timeSince(generatedAt)}</span>
@@ -748,24 +524,18 @@ export default function LeaderboardPage() {
 
         {/* ── CTA ─────────────────────────────────────────────────── */}
         {entries.length > 0 && (
-          <div
-            className="mt-8 px-6 py-5 border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
-            style={{
-              background: "rgba(153,69,255,0.04)",
-              borderColor: "rgba(153,69,255,0.2)",
-            }}
-          >
+          <div className="mt-8 flex flex-col gap-4 border border-[var(--accent)]/20 bg-[var(--accent)]/[0.04] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold mb-1" style={{ color: "var(--text)" }}>
+              <p className="mb-1 text-sm font-semibold text-[var(--text)]">
                 Want to climb the board?
               </p>
-              <p className="text-xs font-mono" style={{ color: "var(--text-secondary)" }}>
+              <p className="text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
                 {IS_MAINNET
-                  ? "Start trading permissionless perps across 126+ markets."
-                  : "Get free devnet tokens and start trading across 126+ markets."}
+                  ? "Trade permissionless perps on any live market."
+                  : "Grab devnet funds from the faucet and trade any live market."}
               </p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex shrink-0 items-center gap-2">
               {/* Generic share for unranked / not-connected visitors */}
               {!myEntry && (
                 <button
@@ -776,27 +546,16 @@ export default function LeaderboardPage() {
                       "noopener,noreferrer"
                     )
                   }
-                  className="px-4 py-2 text-xs font-mono tracking-wide transition-all hover:opacity-80"
-                  style={{
-                    background: "transparent",
-                    color: "var(--text-secondary)",
-                    border: "1px solid var(--border)",
-                  }}
+                  className="border border-[var(--border)] bg-transparent px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--text)]"
                 >
-                  SHARE 𝕏
+                  Share
                 </button>
               )}
-              {/* On mainnet link to trade; on devnet link to faucet (GH#1572) */}
               <Link
-                href={IS_MAINNET ? "/trade" : "/devnet-mint"}
-                className="shrink-0 px-4 py-2 text-xs font-mono font-semibold tracking-wide transition-all"
-                style={{
-                  background: "var(--accent)",
-                  color: "#fff",
-                  border: "1px solid var(--accent)",
-                }}
+                href={IS_MAINNET ? "/markets" : "/faucet"}
+                className="shrink-0 border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--accent)] transition-all hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.15]"
               >
-                {IS_MAINNET ? "TRADE NOW →" : "GET TOKENS →"}
+                {IS_MAINNET ? "Browse Markets →" : "Get Funds →"}
               </Link>
             </div>
           </div>
