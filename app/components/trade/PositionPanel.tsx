@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useMemo, useState, useRef, useEffect, useCallback } from "react";
+import { FC, useMemo, useState, useRef, useEffect } from "react";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
 import { useClosePosition } from "@/hooks/useClosePosition";
@@ -49,28 +49,37 @@ interface AdlRankResult {
 function useAdlRank(slabAddress: string, positionIdx: number | null): AdlRankResult {
   const [result, setResult] = useState<AdlRankResult>({ rank: null, adlNeeded: false });
 
-  const fetch_ = useCallback(async () => {
-    if (positionIdx === null) return;
-    try {
-      const base = getBackendUrl();
-      const res = await fetch(`${base}/api/adl/rankings?slab=${encodeURIComponent(slabAddress)}`);
-      if (!res.ok) return;
-      const json = await res.json() as {
-        adlNeeded: boolean;
-        rankings: { rank: number; idx: number }[];
-      };
-      const entry = json.rankings.find((r) => r.idx === positionIdx);
-      setResult({ rank: entry?.rank ?? null, adlNeeded: json.adlNeeded });
-    } catch {
-      // non-critical — leave last known value
-    }
-  }, [slabAddress, positionIdx]);
-
   useEffect(() => {
-    fetch_();
-    const id = setInterval(fetch_, 30_000);
-    return () => clearInterval(id);
-  }, [fetch_]);
+    if (positionIdx === null) return;
+    // Guards against a slow response landing after slabAddress/positionIdx has
+    // already changed (market switch mid-flight), which would otherwise
+    // overwrite the new market's rank with the old market's stale response.
+    let cancelled = false;
+
+    const fetchRank = async () => {
+      try {
+        const base = getBackendUrl();
+        const res = await fetch(`${base}/api/adl/rankings?slab=${encodeURIComponent(slabAddress)}`);
+        if (!res.ok || cancelled) return;
+        const json = await res.json() as {
+          adlNeeded: boolean;
+          rankings: { rank: number; idx: number }[];
+        };
+        if (cancelled) return;
+        const entry = json.rankings.find((r) => r.idx === positionIdx);
+        setResult({ rank: entry?.rank ?? null, adlNeeded: json.adlNeeded });
+      } catch {
+        // non-critical — leave last known value
+      }
+    };
+
+    fetchRank();
+    const id = setInterval(fetchRank, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [slabAddress, positionIdx]);
 
   return result;
 }
@@ -123,6 +132,7 @@ const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol,
           <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-[var(--text)]">Add Margin</span>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors"
           >
             ×
@@ -445,6 +455,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               onClick={() => setShowCloseModal(true)}
               disabled={closeLoading || lpUnderfunded || !hasValidMark}
               title={!hasValidMark ? "Waiting for price data…" : "Close position"}
+              aria-label="Close position"
               className="text-[11px] text-[var(--short)]/70 transition-colors hover:text-[var(--short)] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ×
