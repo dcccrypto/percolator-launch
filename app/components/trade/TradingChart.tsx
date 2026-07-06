@@ -243,6 +243,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // hooks (useIndicatorOverlays) that need to attach series to the chart
   // — refs alone can't drive an effect since they don't trigger re-runs.
   const [chartReady, setChartReady] = useState(false);
+  // Bumped after every price-series remove+re-add so ChartDrawingOverlay
+  // repaints against the NEW series (the swap-time redraw runs against the
+  // disposed one and leaves committed drawings invisible until a pan).
+  const [seriesEpoch, setSeriesEpoch] = useState(0);
   const seriesRef = useRef<ISeriesApi<ChartSeriesKind> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const priceLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
@@ -824,6 +828,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       fitKeyRef.current = fitKey;
     }
 
+    // Signal the drawing overlay that the series it projects through was
+    // just swapped — see seriesEpoch's declaration comment.
+    setSeriesEpoch((e) => e + 1);
+
     return () => {
       chart.unsubscribeCrosshairMove(crosshairHandler);
     };
@@ -1017,6 +1025,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
             seriesRef={seriesRef}
             containerRef={containerRef}
             chartReady={chartReady}
+            seriesEpoch={seriesEpoch}
             drawings={drawings}
             addDrawing={addDrawing}
             deleteDrawing={deleteDrawing}

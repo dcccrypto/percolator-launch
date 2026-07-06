@@ -195,6 +195,7 @@ interface HarnessProps {
   setTool?: (next: DrawingTool) => void;
   slabAddress?: string;
   series?: PriceConverter | null;
+  seriesEpoch?: number;
 }
 
 const Harness: FC<HarnessProps> = ({
@@ -207,6 +208,7 @@ const Harness: FC<HarnessProps> = ({
   setTool = () => {},
   slabAddress = SLAB_A,
   series = idSeries,
+  seriesEpoch = 0,
 }) => {
   const chartRef = useRef<IChartApi | null>(null);
   chartRef.current = chart;
@@ -226,6 +228,7 @@ const Harness: FC<HarnessProps> = ({
         tool={tool}
         setTool={setTool}
         slabAddress={slabAddress}
+        seriesEpoch={seriesEpoch}
       />
     </div>
   );
@@ -372,6 +375,24 @@ describe("ChartDrawingOverlay", () => {
       const sizeHandler = ch.subscribeSize.mock.calls[0][0];
       sizeHandler();
       expect(clearRect.mock.calls.length).toBe(initial + 3);
+    });
+
+    it("repaints when seriesEpoch bumps (price series was recreated)", () => {
+      // Regression: TradingChart's series effect does a full removeSeries +
+      // addSeries when candle data changes. The swap-time range-change redraw
+      // runs against the disposed series and leaves the canvas blank; the
+      // seriesEpoch dep must trigger one repaint against the new series.
+      const { clearRect } = stubCanvasContext();
+      const ch = fakeChart();
+      const stableDrawings = [horiz("h1", 100)];
+      const { rerender } = render(
+        <Harness chart={ch.chart} ready={true} drawings={stableDrawings} />,
+      );
+      const initial = clearRect.mock.calls.length;
+      rerender(
+        <Harness chart={ch.chart} ready={true} drawings={stableDrawings} seriesEpoch={1} />,
+      );
+      expect(clearRect.mock.calls.length).toBe(initial + 1);
     });
   });
 

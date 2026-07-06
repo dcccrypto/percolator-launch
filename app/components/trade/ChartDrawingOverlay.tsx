@@ -61,6 +61,15 @@ interface ChartDrawingOverlayProps {
   /** The slab whose drawings these are. Used to reset overlay-local
    *  selection state when the user navigates between markets. */
   slabAddress: string;
+  /** Bumped by TradingChart after each price-series remove+re-add (its
+   *  series effect fully recreates the series when candle data / style /
+   *  timeframe change). The swap fires a visible-range change while the
+   *  OLD series is already disposed — that redraw clears the canvas and
+   *  projects zero drawings — and nothing else repaints afterwards, so
+   *  committed drawings silently vanish (state and localStorage intact)
+   *  until the next pan/zoom. A dep on this counter repaints once the
+   *  NEW series is in place. */
+  seriesEpoch: number;
 }
 
 /**
@@ -103,6 +112,7 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
   tool,
   setTool,
   slabAddress,
+  seriesEpoch,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   /** Currently selected drawing's id, or null. Overlay-local state —
@@ -516,9 +526,13 @@ export const ChartDrawingOverlay: FC<ChartDrawingOverlayProps> = ({
   // pendingP1 in the deps so the preview anchor dot appears the
   // moment the first trend click lands (without waiting for the next
   // crosshair move to repaint).
+  //
+  // seriesEpoch repaints after TradingChart recreates the price series
+  // (see the prop doc) — the swap-time redraw ran against the disposed
+  // series and left the canvas blank.
   useEffect(() => {
     redrawRef.current();
-  }, [drawings, selectedId, pendingP1]);
+  }, [drawings, selectedId, pendingP1, seriesEpoch]);
 
   // Rectangle creation: drag-driven (mouse-down inside the chart sets
   // p1, mouse-move tracks the opposite corner, mouse-up commits).
