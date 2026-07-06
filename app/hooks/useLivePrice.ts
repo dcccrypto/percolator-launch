@@ -84,6 +84,24 @@ interface PriceState {
   loading: boolean;
 }
 
+interface InternalPriceState extends PriceState {
+  slabAddress: string | null;
+}
+
+function emptyPriceState(slabAddress: string | null): InternalPriceState {
+  return {
+    price: null,
+    priceUsd: null,
+    priceE6: null,
+    change24h: null,
+    high24h: null,
+    low24h: null,
+    loading: Boolean(slabAddress),
+    slabAddress,
+  };
+}
+
+
 type PricesApiJson = {
   stats?: { change24h?: number; high24h?: string; low24h?: string } | null;
 };
@@ -98,19 +116,17 @@ type MarketApiJson = { market?: { last_price?: number | null } };
  *
  */
 export function useLivePrice(): PriceState {
-  const [state, setState] = useState<PriceState>({
-    price: null,
-    priceUsd: null,
-    priceE6: null,
-    change24h: null,
-    high24h: null,
-    low24h: null,
-    loading: true,
-  });
+  const [state, setState] = useState<InternalPriceState>(() => emptyPriceState(null));
 
   const { config: mktConfig, slabAddress } = useSlabState();
   // Use the slab address from SlabProvider context — works for both /trade/[slab] and ?market= URLs
   const slabAddr = slabAddress || null;
+  const dbRawE6Ref = useRef<bigint | null>(null);
+
+  useEffect(() => {
+    dbRawE6Ref.current = null;
+    setState(emptyPriceState(slabAddr));
+  }, [slabAddr]);
 
   const pricesKey = slabAddr ? `/api/prices/${slabAddr}` : null;
   const { data: pricesJson } = useSWR<PricesApiJson>(pricesKey, livePriceJsonFetcher, SWR_REST_OPTS);
@@ -121,13 +137,11 @@ export function useLivePrice(): PriceState {
   // Merge 24h stats from deduped REST
   useEffect(() => {
     if (!pricesJson?.stats) return;
-    setState((prev) => ({
-      ...prev,
-      change24h: pricesJson.stats?.change24h ?? null,
+    setState((prev) => ({ ...prev, slabAddress: slabAddr, change24h: pricesJson.stats?.change24h ?? null,
       high24h: pricesJson.stats?.high24h ? Number(pricesJson.stats.high24h) / 1_000_000 : null,
       low24h: pricesJson.stats?.low24h ? Number(pricesJson.stats.low24h) / 1_000_000 : null,
     }));
-  }, [pricesJson]);
+  }, [pricesJson, slabAddr]);
 
   // PERC-1232: DB last_price display-only fallback (deduped REST)
   // GH#1990: The DB stores raw (non-inverted) oracle price. For inverted markets
@@ -137,7 +151,6 @@ export function useLivePrice(): PriceState {
   //
   // CR fix: track dbRawE6 separately so re-runs recompute when mktConfig?.invert
   // arrives after the initial render (avoids stale invert on first DB-fallback paint).
-  const dbRawE6Ref = useRef<bigint | null>(null);
   useEffect(() => {
     const dbPrice = marketJson?.market?.last_price;
     if (dbPrice == null || dbPrice <= 0) return;
@@ -156,7 +169,7 @@ export function useLivePrice(): PriceState {
         // Price already correct — no update needed
         return prev;
       }
-      return { ...prev, price: usd, priceUsd: usd, priceE6: e6, loading: false };
+      return { ...prev, price: usd, priceUsd: usd, priceE6: e6, loading: false, slabAddress: slabAddr };
     });
   }, [marketJson, mktConfig?.invert]);
 
@@ -170,7 +183,7 @@ export function useLivePrice(): PriceState {
     const usd = Number(onChainE6) / 1_000_000;
     setState((prev) => {
       if (prev.price !== null) return prev;
-      return { ...prev, price: usd, priceUsd: usd, priceE6: onChainE6, loading: false };
+      return { ...prev, price: usd, priceUsd: usd, priceE6: onChainE6, loading: false, slabAddress: slabAddr };
     });
   }, [mktConfig]);
 
@@ -190,7 +203,7 @@ export function useLivePrice(): PriceState {
   useEffect(() => {
     mountedRef.current = true;
     // Only set loading if we don't already have a price
-    setState((prev) => (prev.price !== null ? prev : { ...prev, loading: true }));
+    setState((prev) => (prev.slabAddress === slabAddr && prev.price !== null ? prev : emptyPriceState(slabAddr)));
 
     if (!slabAddr) return;
 
@@ -281,7 +294,7 @@ export function useLivePrice(): PriceState {
                 change24h: prev.change24h,
                 high24h: prev.high24h !== null ? Math.max(prev.high24h, usd) : usd,
                 low24h: prev.low24h !== null ? Math.min(prev.low24h, usd) : usd,
-                loading: false,
+                loading: false, slabAddress: slabAddr,
               }));
             }
           } else if (isLegacy) {
@@ -305,7 +318,7 @@ export function useLivePrice(): PriceState {
                 change24h: prev.change24h,
                 high24h: prev.high24h !== null ? Math.max(prev.high24h, usd) : usd,
                 low24h: prev.low24h !== null ? Math.min(prev.low24h, usd) : usd,
-                loading: false,
+                loading: false, slabAddress: slabAddr,
               }));
             }
           }
@@ -371,5 +384,5 @@ export function useLivePrice(): PriceState {
     };
   }, [slabAddr]);
 
-  return state;
+  return state.slabAddress === slabAddr ? state : emptyPriceState(slabAddr);
 }
