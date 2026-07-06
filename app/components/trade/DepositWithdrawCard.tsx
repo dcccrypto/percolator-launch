@@ -80,10 +80,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
     const hasTokens = walletBalance !== null && walletBalance > 0n;
     return (
       <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <p className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Create Account</p>
+        <p className="mb-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Create Account</p>
         {walletBalance !== null && (
-          <p className="mb-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>
-            Wallet: {formatTokenAmount(walletBalance, decimals)} {symbol}
+          <p className="mb-2 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+            Wallet: {formatTokenAmount(walletBalance, decimals, 3)} {symbol}
           </p>
         )}
         {!hasTokens && (
@@ -137,7 +137,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
           </>
         )}
         {initError && <p className="mt-2 text-[10px] text-[var(--short)]">{initError}</p>}
-        {lastSig && <p className="mt-2 text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>Tx: {lastSig.slice(0, 12)}...</p>}
+        {lastSig && <p className="mt-2 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>Tx: {lastSig.slice(0, 12)}...</p>}
       </div>
     );
   }
@@ -210,11 +210,12 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
       <div className="mb-3 grid grid-cols-2 gap-px border border-[var(--border)]/20">
         <div className="p-2">
           <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Account Balance</p>
-          <p className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(capital, decimals)} <span className="text-[10px] font-normal text-[var(--text-secondary)]">{symbol}</span></p>
+          {/* 3dp display only — the MAX buttons below still use full raw precision */}
+          <p className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{formatTokenAmount(capital, decimals, 3)} <span className="text-[10px] font-normal text-[var(--text-secondary)]">{symbol}</span></p>
         </div>
         <div className="p-2 border-l border-[var(--border)]/20">
           <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Wallet Balance</p>
-          <p className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{walletBalance !== null ? formatTokenAmount(walletBalance, decimals) : "—"} <span className="text-[10px] font-normal text-[var(--text-secondary)]">{symbol}</span></p>
+          <p className="text-sm font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{walletBalance !== null ? formatTokenAmount(walletBalance, decimals, 3) : "—"} <span className="text-[10px] font-normal text-[var(--text-secondary)]">{symbol}</span></p>
         </div>
       </div>
       {mode === "deposit" && walletBalance !== null && walletBalance === 0n && mktConfig?.collateralMint && (
@@ -236,7 +237,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
               Mint more →
             </a>
           )}
-          <p className="text-[9px] text-[var(--text-dim)] break-all" style={{ fontFamily: "var(--font-mono)" }}>
+          <p className="text-[9px] text-[var(--text-secondary)] break-all" style={{ fontFamily: "var(--font-mono)" }}>
             Mint: {mktConfig.collateralMint.toBase58()}
           </p>
         </div>

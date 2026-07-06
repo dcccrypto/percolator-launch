@@ -159,13 +159,13 @@ function DiffRow({
   const changed = before !== after;
   return (
     <div className="flex items-center justify-between py-1 text-[10px]">
-      <span className="flex items-center gap-1 text-[var(--text-dim)] uppercase tracking-[0.08em]">
+      <span className="flex items-center gap-1 text-[var(--text-secondary)] uppercase tracking-[0.08em]">
         {label}
         {tooltip && <InfoIcon tooltip={tooltip} />}
       </span>
       <span className="flex items-center gap-1 font-mono tabular-nums">
-        {changed && <span className="text-[var(--text-dim)] line-through decoration-[var(--text-dim)]/50">{before}</span>}
-        {changed && <span className="text-[var(--text-dim)]">→</span>}
+        {changed && <span className="text-[var(--text-secondary)] line-through decoration-[var(--text-secondary)]/50">{before}</span>}
+        {changed && <span className="text-[var(--text-secondary)]">→</span>}
         <span className={valueClass}>{after}</span>
       </span>
     </div>
@@ -584,7 +584,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             onClick={() => setOrderType(t)}
             aria-pressed={orderType === t}
             className={`flex-1 rounded-sm py-1 text-[10px] font-medium uppercase tracking-[0.12em] transition-colors duration-150 ${
-              orderType === t ? "bg-[var(--accent)]/10 text-[var(--accent)]" : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
+              orderType === t ? "bg-[var(--accent)]/10 text-[var(--accent)]" : "text-[var(--text-secondary)] hover:text-[var(--text)]"
             }`}
           >
             {t}
@@ -890,14 +890,14 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Account row: balance / buying power / deposit link */}
       <div className="mt-3 flex items-center justify-between border-t border-[var(--border)]/30 pt-2.5 text-[10px]">
         <div>
-          <div className="flex items-center gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
+          <div className="flex items-center gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
             Avail Bal
             <InfoIcon tooltip="Account balance minus margin already locked by an open position on this market." />
           </div>
           <div className="font-mono tabular-nums text-[var(--text)]">{formatTokenAmount(effectiveBalance, decimals)} {collateralSymbol}</div>
         </div>
         <div className="text-right">
-          <div className="flex items-center justify-end gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
+          <div className="flex items-center justify-end gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
             Buying power
             <InfoIcon tooltip="Available balance x max leverage - the largest notional you could open right now." />
           </div>
