@@ -5,6 +5,15 @@ import { createPortal } from "react-dom";
 import { PublicKey } from "@solana/web3.js";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
+
+/**
+ * Focusable-element selector for the focus trap. Excludes `[disabled]` controls
+ * so a disabled boundary element can't break the Tab-wrap — same selector the
+ * other trade modals (ClosePositionModal / TradeConfirmationModal) use.
+ */
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface SendPositionNftModalProps {
   /** Human summary of the position being transferred — e.g. "LONG 0.3507 SOL" */
@@ -37,6 +46,7 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  useLockBodyScroll();
 
   const [destInput, setDestInput] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
@@ -45,14 +55,39 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
   const pubkeyInvalid = destInput.length > 0 && !parsedDest;
   const canConfirm = parsedDest !== null && acknowledged && !loading;
 
-  // Trap Escape to cancel, match the other modals
+  // Trap Escape + Tab, match the other modals (ClosePositionModal /
+  // TradeConfirmationModal). Without the Tab-wrap, focus escaped the dialog
+  // into the page behind it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !loading) onCancel();
+      if (e.key === "Escape" && !loading) {
+        onCancel();
+        return;
+      }
+      if (e.key === "Tab" && modalRef.current) {
+        const items = modalRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onCancel, loading]);
+
+  // Move initial focus inside the dialog on open (APG dialog pattern) so Tab
+  // starts trapped — runs once on mount, regardless of reduced-motion.
+  useEffect(() => {
+    const first = modalRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)[0];
+    first?.focus();
+  }, []);
 
   // Enter/scale animation matching ClosePositionModal
   useEffect(() => {
