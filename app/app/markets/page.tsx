@@ -1083,9 +1083,28 @@ function MarketsPageInner() {
 
               {/* P-MED-3: Infinite scroll trigger / end-of-list */}
               {displayCount < filtered.length ? (
-                <div ref={observerTarget} className="flex items-center justify-center gap-2 py-4">
-                  <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-                  <span className="text-xs text-[var(--text-muted)]">Loading more…</span>
+                <div className="divide-y divide-[var(--border)]/40 border-t border-[var(--border)]/40">
+                  {[1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="grid w-full min-w-[500px] sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(50px,0.6fr)_minmax(75px,0.8fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 items-center px-3 sm:px-5 py-3"
+                    >
+                      <div className="flex items-center gap-2">
+                        <ShimmerSkeleton className="h-8 w-8 rounded-full shrink-0" />
+                        <div className="space-y-1">
+                          <ShimmerSkeleton className="h-4 w-20" />
+                          <ShimmerSkeleton className="h-3 w-32" />
+                        </div>
+                      </div>
+                      <div className="flex justify-end"><ShimmerSkeleton className="h-4 w-16" /></div>
+                      <div className="hidden sm:flex justify-end"><ShimmerSkeleton className="h-4 w-12" /></div>
+                      <div className="hidden sm:flex justify-end"><ShimmerSkeleton className="h-4 w-16" /></div>
+                      <div className="hidden sm:flex justify-end"><ShimmerSkeleton className="h-4 w-14" /></div>
+                      <div className="flex justify-end"><ShimmerSkeleton className="h-4 w-8" /></div>
+                      <div className="flex justify-end"><ShimmerSkeleton className="h-5 w-12 rounded-sm" /></div>
+                    </div>
+                  ))}
+                  <div ref={observerTarget} className="h-2 w-full" />
                 </div>
               ) : filtered.length > 20 ? (
                 <div className="flex items-center justify-center gap-3 py-4">

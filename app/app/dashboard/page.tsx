@@ -1,10 +1,13 @@
 "use client";
 
+
+
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { isMockMode } from "@/lib/mock-mode";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
@@ -14,43 +17,197 @@ const ConnectButton = dynamic(
 // Lazy load heavy components
 const DashboardHeader = dynamic(
   () => import("@/components/dashboard/DashboardHeader").then((m) => m.DashboardHeader),
-  { ssr: false, loading: () => <div className="h-14 animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-14 bg-[var(--panel-bg)] border border-[var(--border)] px-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <ShimmerSkeleton className="h-8 w-8 rounded-full" />
+          <ShimmerSkeleton className="h-4 w-32" />
+        </div>
+        <ShimmerSkeleton className="h-5 w-24" />
+      </div>
+    )
+  }
 );
 
 const PnlChart = dynamic(
   () => import("@/components/dashboard/PnlChart").then((m) => m.PnlChart),
-  { ssr: false, loading: () => <div className="h-[380px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[380px] bg-[var(--panel-bg)] border border-[var(--border)] p-4 flex flex-col justify-between">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1.5">
+            <ShimmerSkeleton className="h-4 w-24" />
+            <ShimmerSkeleton className="h-6 w-32" />
+          </div>
+          <div className="flex gap-1.5">
+            {[1, 2, 3, 4].map(i => <ShimmerSkeleton key={i} className="h-6 w-10" />)}
+          </div>
+        </div>
+        <div className="flex-1 mt-6 flex items-end gap-1.5 pb-4">
+          {[...Array(12)].map((_, i) => (
+            <ShimmerSkeleton key={i} className="flex-1" style={{ height: `${20 + Math.sin(i) * 15 + Math.cos(i) * 15}%` }} />
+          ))}
+        </div>
+        <div className="flex justify-between border-t border-[var(--border)]/30 pt-3">
+          {[...Array(6)].map((_, i) => <ShimmerSkeleton key={i} className="h-3 w-10" />)}
+        </div>
+      </div>
+    )
+  }
 );
 
 const PositionSummary = dynamic(
   () => import("@/components/dashboard/PositionSummary").then((m) => m.PositionSummary),
-  { ssr: false, loading: () => <div className="h-[380px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[380px] bg-[var(--panel-bg)] border border-[var(--border)] p-4 flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <ShimmerSkeleton className="h-4 w-32" />
+          <ShimmerSkeleton className="h-4 w-16" />
+        </div>
+        <div className="flex-1 space-y-3">
+          {[1, 2].map(i => (
+            <div key={i} className="p-3 border border-[var(--border)]/50 rounded-sm space-y-2">
+              <div className="flex justify-between">
+                <ShimmerSkeleton className="h-4 w-20" />
+                <ShimmerSkeleton className="h-4 w-12" />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 2, 3].map(j => (
+                  <div key={j} className="space-y-1">
+                    <ShimmerSkeleton className="h-2.5 w-10" />
+                    <ShimmerSkeleton className="h-3.5 w-14" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 );
 
 const StatsBar = dynamic(
   () => import("@/components/dashboard/StatsBar").then((m) => m.StatsBar),
-  { ssr: false, loading: () => <div className="h-20 animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] lg:grid-cols-4">
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className="bg-[var(--panel-bg)] p-4 space-y-2">
+            <ShimmerSkeleton className="h-2.5 w-24" />
+            <ShimmerSkeleton className="h-5 w-16" />
+          </div>
+        ))}
+      </div>
+    )
+  }
 );
 
 // PERC-808: Live protocol-wide Volume + OI strip
 const ProtocolStatsBar = dynamic(
   () => import("@/components/dashboard/ProtocolStatsBar").then((m) => m.ProtocolStatsBar),
-  { ssr: false, loading: () => <div className="h-12 animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-12 bg-[var(--panel-bg)] border border-[var(--border)] px-4 flex items-center justify-between gap-4 overflow-hidden">
+        <div className="flex items-center gap-2 shrink-0">
+          <ShimmerSkeleton className="h-2 w-2 rounded-full" />
+          <ShimmerSkeleton className="h-3.5 w-24" />
+        </div>
+        <div className="flex gap-8 overflow-hidden">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="flex gap-2 items-center shrink-0">
+              <ShimmerSkeleton className="h-3 w-16" />
+              <ShimmerSkeleton className="h-3 w-12" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 );
 
 const TradeHistory = dynamic(
   () => import("@/components/dashboard/TradeHistory").then((m) => m.TradeHistory),
-  { ssr: false, loading: () => <div className="h-[400px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[400px] bg-[var(--panel-bg)] border border-[var(--border)] p-4 flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <ShimmerSkeleton className="h-4 w-28" />
+          <div className="flex gap-2">
+            <ShimmerSkeleton className="h-6 w-16" />
+            <ShimmerSkeleton className="h-6 w-16" />
+          </div>
+        </div>
+        <div className="flex-1 space-y-2">
+          <div className="flex gap-4 border-b border-[var(--border)]/30 pb-2 mb-2">
+            {[1, 2, 3, 4, 5].map(i => <ShimmerSkeleton key={i} className="h-3 flex-1" />)}
+          </div>
+          {[1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="flex gap-4 items-center py-1">
+              {[1, 2, 3, 4, 5].map(j => <ShimmerSkeleton key={j} className="h-3.5 flex-1" />)}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 );
 
 const Watchlist = dynamic(
   () => import("@/components/dashboard/Watchlist").then((m) => m.Watchlist),
-  { ssr: false, loading: () => <div className="h-[200px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[200px] bg-[var(--panel-bg)] border border-[var(--border)] p-4 flex flex-col">
+        <ShimmerSkeleton className="h-4 w-24 mb-4" />
+        <div className="flex-1 space-y-3">
+          {[1, 2].map(i => (
+            <div key={i} className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <ShimmerSkeleton className="h-6 w-6 rounded-full" />
+                <div className="space-y-1">
+                  <ShimmerSkeleton className="h-3.5 w-16" />
+                  <ShimmerSkeleton className="h-2.5 w-24" />
+                </div>
+              </div>
+              <ShimmerSkeleton className="h-4 w-12" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 );
 
 const FundingRates = dynamic(
   () => import("@/components/dashboard/FundingRates").then((m) => m.FundingRates),
-  { ssr: false, loading: () => <div className="h-[200px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" /> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[200px] bg-[var(--panel-bg)] border border-[var(--border)] p-4 flex flex-col">
+        <ShimmerSkeleton className="h-4 w-28 mb-4" />
+        <div className="flex-1 space-y-3">
+          {[1, 2].map(i => (
+            <div key={i} className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <ShimmerSkeleton className="h-5 w-12" />
+                <ShimmerSkeleton className="h-3 w-16" />
+              </div>
+              <ShimmerSkeleton className="h-3 w-16" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 );
 
 // Mobile tab type

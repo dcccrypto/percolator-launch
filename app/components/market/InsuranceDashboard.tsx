@@ -1,6 +1,8 @@
 "use client";
 
 import { FC, useState, useEffect, useMemo } from "react";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -179,7 +181,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
           <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
             Insurance Fund
           </span>
-          <div className="h-4 w-16 animate-pulse rounded-none bg-[var(--border)]" />
+          <ShimmerSkeleton className="h-4 w-16" rounded="none" />
         </div>
       </div>
     );

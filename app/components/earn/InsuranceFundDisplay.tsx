@@ -2,6 +2,7 @@
 
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import type { EarnStats } from '@/hooks/useEarnStats';
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 
 interface InsuranceFundDisplayProps {
   stats: EarnStats;
@@ -18,9 +19,29 @@ export function InsuranceFundDisplay({
 }: InsuranceFundDisplayProps) {
   if (loading) {
     return (
-      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-6 animate-pulse">
-        <div className="h-6 w-40 bg-[var(--border)] rounded mb-4" />
-        <div className="h-24 bg-[var(--border)] rounded" />
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners">
+        <div className="flex items-center gap-2 mb-4">
+          <ShimmerSkeleton className="w-6 h-6 rounded-sm shrink-0" />
+          <ShimmerSkeleton className="h-4 w-28" />
+        </div>
+        <div className="mb-4 space-y-1">
+          <ShimmerSkeleton className="h-7 w-20" />
+          <ShimmerSkeleton className="h-3 w-40" />
+        </div>
+        <div className="border-t border-[var(--border)] pt-4 mb-4 space-y-3">
+          <ShimmerSkeleton className="h-3 w-16" />
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex gap-2">
+                <ShimmerSkeleton className="w-4 h-4 rounded-full shrink-0" />
+                <div className="flex-1 space-y-1">
+                  <ShimmerSkeleton className="h-3.5 w-24" />
+                  <ShimmerSkeleton className="h-3 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

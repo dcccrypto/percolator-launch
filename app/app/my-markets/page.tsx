@@ -5,6 +5,7 @@ import Link from "next/link";
 import gsap from "gsap";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { PublicKey } from "@solana/web3.js";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { useMyMarkets, type MyMarket } from "@/hooks/useMyMarkets";
 import { useAdminActions } from "@/hooks/useAdminActions";
 import { useToast } from "@/hooks/useToast";
@@ -414,11 +415,40 @@ const LoadingSkeleton: FC = () => (
   <div className="min-h-[calc(100dvh-48px)] relative">
     <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
     <main className="relative mx-auto max-w-4xl px-4 py-10">
-      <div className="mb-2 h-3 w-16 animate-pulse bg-[var(--border)]/20" />
-      <div className="mb-2 h-7 w-48 animate-pulse bg-[var(--border)]/20" />
-      <div className="mb-8 h-4 w-64 animate-pulse bg-[var(--border)]/20" />
-      <div className="mb-8 h-12 w-full animate-pulse bg-[var(--border)]/20" />
-      {[1, 2].map((i) => <div key={i} className="mb-4 h-64 animate-pulse bg-[var(--border)]/20" />)}
+      <div className="mb-2">
+        <ShimmerSkeleton className="h-3 w-16" />
+      </div>
+      <div className="mb-2">
+        <ShimmerSkeleton className="h-7 w-48" />
+      </div>
+      <div className="mb-8">
+        <ShimmerSkeleton className="h-4 w-64" />
+      </div>
+      <div className="mb-8">
+        <ShimmerSkeleton className="h-12 w-full" />
+      </div>
+      {[1, 2].map((i) => (
+        <div key={i} className="mb-4 border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <ShimmerSkeleton className="h-8 w-8 rounded-full" />
+              <div>
+                <ShimmerSkeleton className="h-4 w-24 mb-1" />
+                <ShimmerSkeleton className="h-3 w-32" />
+              </div>
+            </div>
+            <ShimmerSkeleton className="h-5 w-20" />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
+            {[1, 2, 3, 4].map(j => (
+              <div key={j} className="space-y-1">
+                <ShimmerSkeleton className="h-2.5 w-16" />
+                <ShimmerSkeleton className="h-4 w-20" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </main>
   </div>
 );
