@@ -87,6 +87,17 @@ interface TicketValidationCtx {
   mockMode: boolean;
   exceedsBalance: boolean;
   balanceLabel: string;
+  /** Limit tab with no (or unparseable / non-positive) limit price. Without
+   *  this gate an empty limit input submitted `limitPriceE6: undefined`,
+   *  which useTrade fills with a mark-derived slippage bound — i.e. the
+   *  "limit" order silently executed as a market order. */
+  limitMissing: boolean;
+  /** Limit tab with the limit on the WRONG side of the mark (long below /
+   *  short above). Percolator has no resting orders — trade() executes
+   *  immediately and reverts when the fill breaches the bound, so this
+   *  order can only fail on-chain. Block it client-side. */
+  limitWouldRevert: boolean;
+  direction: "long" | "short";
 }
 interface ValidationIssue {
   severity: "error" | "warning";
@@ -115,6 +126,16 @@ function buildValidationIssues(ctx: TicketValidationCtx): ValidationIssue[] {
   }
   if (!ctx.hasPrice) {
     issues.push({ severity: "error", title: "No oracle price", message: "Waiting for price feed. Trades will be enabled once oracle data is available." });
+  }
+  if (ctx.limitMissing) {
+    issues.push({ severity: "error", title: "Limit price required", message: "Enter the worst fill price you'll accept, or switch to the Market tab." });
+  }
+  if (ctx.limitWouldRevert) {
+    issues.push(
+      ctx.direction === "long"
+        ? { severity: "error", title: "Limit below market", message: "Percolator has no resting orders — trades execute immediately. A long's limit is your MAXIMUM fill price; the market is already above it, so this order would only revert on-chain. Set the limit at or above the current price." }
+        : { severity: "error", title: "Limit above market", message: "Percolator has no resting orders — trades execute immediately. A short's limit is your MINIMUM fill price; the market is already below it, so this order would only revert on-chain. Set the limit at or below the current price." },
+    );
   }
   if (ctx.exceedsBalance) {
     issues.push({ severity: "error", title: "Exceeds balance", message: `Order size exceeds your available balance (${ctx.balanceLabel}).` });
@@ -400,6 +421,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   // ── Validation (single banner, priority-ordered) ──
+  const parsedLimit = orderType === "limit" && limitPriceInput ? parseFloat(limitPriceInput) : NaN;
+  const limitMissing =
+    orderType === "limit" && (!limitPriceInput || !Number.isFinite(parsedLimit) || parsedLimit <= 0);
+  const limitWouldRevert =
+    orderType === "limit" && !limitMissing && priceUsd != null && priceUsd > 0 &&
+    (direction === "long" ? parsedLimit < priceUsd : parsedLimit > priceUsd);
   const validationIssues = buildValidationIssues({
     marketPaused: !!header?.paused,
     vaultEmpty,
@@ -411,6 +438,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     mockMode,
     exceedsBalance,
     balanceLabel: `${formatTokenAmount(effectiveBalance, decimals)} ${collateralSymbol}`,
+    limitMissing,
+    limitWouldRevert,
+    direction,
   });
   const blockingIssue = validationIssues.find((i) => i.severity === "error") ?? null;
 
@@ -421,6 +451,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   async function handleTrade(snapshotSize?: bigint) {
     const effectiveSize = snapshotSize ?? positionSize;
     if (!marginInput || !userAccount || effectiveSize <= 0n || exceedsBalance) return;
+    // Belt-and-braces: the submit button is disabled on these, but handleTrade
+    // is also reachable via the confirm modal — never send a "limit" order
+    // without a valid, right-side-of-market bound.
+    if (orderType === "limit" && (limitMissing || limitWouldRevert)) return;
 
     if (mockMode) {
       setTradePhase("submitting");
@@ -504,6 +538,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
             className="w-full rounded-none border border-[var(--border)]/40 bg-[var(--bg)] px-2 py-1.5 text-right text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
           />
+          {/* Marketable-limit reality check: with a valid bound on the right
+              side of the mark, the order fills NOW at ~mark (like a marketable
+              limit on a CEX) — say so before the user signs, or a "limit buy
+              above market" filling instantly reads as a bug. */}
+          {!limitMissing && !limitWouldRevert && priceUsd != null && priceUsd > 0 && (
+            <p className="mt-1 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
+              Executes now at ~${priceUsd.toFixed(4)} — reverts only if the fill lands {direction === "long" ? "above" : "below"} ${parsedLimit.toFixed(4)}.
+            </p>
+          )}
         </div>
       )}
 
