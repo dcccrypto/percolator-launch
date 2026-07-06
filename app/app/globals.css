@@ -7,7 +7,7 @@
   --bg: #0A0A0F;
   --bg-elevated: #0F1018;
   --bg-surface: #141820;
-  --panel-bg: #0D0E15;
+  --panel-bg: rgba(13, 14, 21, 0.75);
   --border: #1C1F2E;
   --border-subtle: #14161F;
   --border-hover: #2A2E42;
@@ -114,7 +114,7 @@
   --bg:           #F8F8FC;
   --bg-elevated:  #FFFFFF;
   --bg-surface:   #F2F2F8;
-  --panel-bg:     #FAFAFD;
+  --panel-bg:     rgba(250, 250, 253, 0.85);
 
   /* Borders */
   --border:        #E0E0EC;
@@ -199,10 +199,10 @@ html {
   --color-theme-nav-text: var(--text);
   --color-theme-panel: var(--panel-bg);
 
-  --font-sans: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
+  --font-sans: var(--font-jakarta), var(--font-outfit), var(--font-space-grotesk), system-ui;
   --font-mono: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
   --font-display: var(--font-outfit), var(--font-space-grotesk), system-ui;
-  --font-heading: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
+  --font-heading: var(--font-jakarta), var(--font-outfit), var(--font-space-grotesk), system-ui;
 
   /* Custom Animations & Keyframes for Tailwind v4 */
   --animate-shimmer-sweep: shimmer-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
@@ -377,6 +377,8 @@ body::before {
 /* ─── HUD Corner Brackets (cards) ─── */
 .hud-corners {
   position: relative;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .hud-corners::before {
   content: "";
@@ -1169,6 +1171,39 @@ input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
 
 /* ─── Button Component Layer ─── */
 @layer components {
+  /* ─── Typography Scales ─── */
+  .label-small {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-secondary);
+  }
+  @media (min-width: 640px) {
+    .label-small {
+      font-size: 11px;
+    }
+  }
+
+  .label-caption {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .heading-page {
+    font-family: var(--font-display);
+    font-size: 1.5rem; /* 24px */
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  @media (min-width: 640px) {
+    .heading-page {
+      font-size: 1.875rem; /* 30px */
+    }
+  }
+
   .btn {
     display: inline-flex;
     align-items: center;
@@ -1290,6 +1325,26 @@ input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
     box-shadow: var(--btn-disabled-shadow) !important;
     cursor: var(--btn-disabled-cursor);
     pointer-events: none;
+  }
+
+  /* Global Inputs Focus Glow */
+  input[type="text"],
+  input[type="number"],
+  input[type="password"],
+  input[type="email"],
+  textarea,
+  select {
+    transition: border-color var(--timing-fast) ease, box-shadow var(--timing-fast) ease;
+  }
+  input[type="text"]:focus-visible,
+  input[type="number"]:focus-visible,
+  input[type="password"]:focus-visible,
+  input[type="email"]:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    border-color: rgba(153, 69, 255, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(153, 69, 255, 0.15) !important;
+    outline: none !important;
   }
 }
 

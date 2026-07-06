@@ -637,8 +637,8 @@ function MarketsPageInner() {
               <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
                 // browse
               </div>
-              <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl" style={{ fontFamily: "var(--font-heading)" }}>
-                <span className="font-normal text-[var(--text)]">All </span>Markets
+              <h1 className="heading-page">
+                <span className="font-normal">All </span>Markets
               </h1>
               <p className="mt-2 text-[13px] text-[var(--text-secondary)]">perpetual futures, pick your poison.</p>
             </div>
