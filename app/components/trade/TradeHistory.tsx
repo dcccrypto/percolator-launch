@@ -1,6 +1,8 @@
 "use client";
 
 import { FC, useEffect, useState, useCallback } from "react";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
 import { formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
 import { explorerTxUrl } from "@/lib/config";
 import { isMockMode } from "@/lib/mock-mode";
@@ -71,7 +73,7 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       <div className="p-3">
         <div className="space-y-1">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-6 animate-pulse bg-[var(--border)]/20" />
+            <ShimmerSkeleton key={i} className="h-6" rounded="none" />
           ))}
         </div>
       </div>

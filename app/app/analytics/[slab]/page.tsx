@@ -27,6 +27,8 @@ import { AdlLeaderboard } from "@/components/trade/AdlLeaderboard";
 import { AccountsCard } from "@/components/trade/AccountsCard";
 import { MarketStatsCard } from "@/components/trade/MarketStatsCard";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -44,8 +46,31 @@ function AnalyticsPageInner({ slab }: { slab: string }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-[calc(100dvh-48px)] items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+      <div className="mx-auto max-w-[1400px] px-4 py-4 lg:px-6">
+        <div className="mb-4 flex items-center justify-between">
+          <ShimmerSkeleton className="h-5 w-36" />
+          <ShimmerSkeleton className="h-8 w-24" />
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 animate-fade-in">
+          {[...Array(9)].map((_, i) => (
+            <div key={i} className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
+              <div className="border-b border-[var(--border)]/40 px-3 py-1.5">
+                <ShimmerSkeleton className="h-3 w-24" />
+              </div>
+              <div className="p-3 space-y-3">
+                <div className="flex justify-between items-center">
+                  <ShimmerSkeleton className="h-4.5 w-16" />
+                  <ShimmerSkeleton className="h-4.5 w-20" />
+                </div>
+                <ShimmerSkeleton className="h-12 w-full" />
+                <div className="space-y-1.5">
+                  <ShimmerSkeleton className="h-3 w-full" />
+                  <ShimmerSkeleton className="h-3 w-4/5" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

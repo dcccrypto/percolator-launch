@@ -16,7 +16,7 @@ import { BLOCKED_SLAB_ADDRESSES as BLOCKED_MARKET_ADDRESSES } from '@/lib/blockl
 import { OiCapMeter } from '@/components/earn/OiCapMeter';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
-
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 const DepositWithdrawPanel = dynamic(
   () =>
     import('@/components/earn/DepositWithdrawPanel').then(
@@ -25,7 +25,25 @@ const DepositWithdrawPanel = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[400px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)] rounded-sm" />
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm overflow-hidden p-5 space-y-5">
+        <div className="flex border-b border-[var(--border)] -mx-5 -mt-5">
+          <ShimmerSkeleton className="flex-1 h-11" />
+          <ShimmerSkeleton className="flex-1 h-11 border-l border-[var(--border)]" />
+        </div>
+        <div className="space-y-2">
+          <div className="flex justify-between">
+            <ShimmerSkeleton className="h-3 w-28" />
+            <ShimmerSkeleton className="h-3 w-16" />
+          </div>
+          <ShimmerSkeleton className="h-12 w-full" />
+        </div>
+        <div className="flex gap-2">
+          {[25, 50, 75, 100].map(pct => (
+            <ShimmerSkeleton key={pct} className="h-7 flex-1" />
+          ))}
+        </div>
+        <ShimmerSkeleton className="h-10 w-full mt-2" />
+      </div>
     ),
   },
 );
@@ -38,11 +56,30 @@ const LpPositionDashboard = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[300px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)] rounded-sm" />
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 space-y-5">
+        <div className="flex items-center justify-between">
+          <ShimmerSkeleton className="h-4 w-32" />
+          <ShimmerSkeleton className="h-4.5 w-12" />
+        </div>
+        <div className="p-4 bg-[var(--bg)] border border-[var(--border)] rounded-sm space-y-2">
+          <ShimmerSkeleton className="h-3 w-24" />
+          <div className="flex items-baseline gap-2">
+            <ShimmerSkeleton className="h-7 w-32" />
+            <ShimmerSkeleton className="h-4 w-8" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="space-y-1.5">
+              <ShimmerSkeleton className="h-3 w-20" />
+              <ShimmerSkeleton className="h-4 w-24" />
+            </div>
+          ))}
+        </div>
+      </div>
     ),
   },
 );
-
 /** Wrapper that provides SlabProvider context for the vault detail inner component. */
 export default function VaultDetailPage() {
   const params = useParams();
@@ -142,7 +179,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const insuranceFund = marketInfo?.insuranceFund ?? 0;
 
   return (
-    <div className="min-h-[calc(100dvh-48px)]">
+    <div className="min-h-[calc(100dvh-48px)] animate-fade-in">
       {/* Background */}
       <div className="absolute inset-x-0 top-0 h-48 bg-grid pointer-events-none" />
 
@@ -354,8 +391,9 @@ function StatCell({
       <div className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-secondary)] mb-1">
         {label}
       </div>
+
       {loading ? (
-        <div className="h-5 w-16 animate-pulse rounded bg-[var(--border)]" />
+        <ShimmerSkeleton className="h-5 w-16" />
       ) : (
         children
       )}
