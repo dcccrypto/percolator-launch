@@ -20,9 +20,13 @@ import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 interface DepositWithdrawCardProps {
   slabAddress: string;
   isDevnetMirror?: boolean;
+  /** Tab to show; the parent can change it while the card is open (e.g. the
+   *  order-ticket footer's separate Deposit / Withdraw triggers). The in-card
+   *  tabs still switch modes locally. */
+  initialMode?: "deposit" | "withdraw";
 }
 
-export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress, isDevnetMirror = false }) => {
+export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress, isDevnetMirror = false, initialMode = "deposit" }) => {
   const { connected: walletConnected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const realUserAccount = useUserAccount();
@@ -36,7 +40,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
-  const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
+  const [mode, setMode] = useState<"deposit" | "withdraw">(initialMode);
+
+  // Follow the parent's trigger while open (footer Deposit vs Withdraw links).
+  useEffect(() => { setMode(initialMode); }, [initialMode]);
   const [amount, setAmount] = useState("");
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<bigint | null>(mockMode ? 500_000_000n : null);
