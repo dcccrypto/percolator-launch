@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 /* ── Constants ────────────────────────────────────────────── */
 /** S2 devnet trading competition end: March 21, 2026 00:00 UTC */
@@ -591,19 +592,19 @@ export default function LeaderboardPage() {
 
         {/* ── My Rank / Share ─────────────────────────────────────── */}
         {!loading && (
-          <MyRankCard entry={myEntry} walletConnected={connected} divisor={divisor} />
+          <div className="animate-fade-in">
+            <MyRankCard entry={myEntry} walletConnected={connected} divisor={divisor} />
+          </div>
         )}
 
         {/* ── Loading skeleton ────────────────────────────────────── */}
         {loading && (
           <div className="space-y-1">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div
+              <ShimmerSkeleton
                 key={i}
-                className="h-14 animate-pulse border"
+                className="h-14 bg-[var(--panel-bg)] border border-[var(--border)]"
                 style={{
-                  background: "var(--panel-bg)",
-                  borderColor: "var(--border)",
                   opacity: 1 - i * 0.08,
                 }}
               />
@@ -628,7 +629,7 @@ export default function LeaderboardPage() {
         {/* ── Empty state ─────────────────────────────────────────── */}
         {noData && (
           <div
-            className="px-4 py-12 text-center font-mono text-sm border"
+            className="px-4 py-12 text-center font-mono text-sm border animate-fade-in"
             style={{
               background: "var(--panel-bg)",
               borderColor: "var(--border)",
@@ -649,7 +650,7 @@ export default function LeaderboardPage() {
 
         {/* ── Table ───────────────────────────────────────────────── */}
         {!loading && !error && entries.length > 0 && (
-          <div className="space-y-px">
+          <div className="space-y-px animate-fade-in">
             {/* Header row */}
             <div
               className="grid text-xs font-mono tracking-widest uppercase px-4 py-2"

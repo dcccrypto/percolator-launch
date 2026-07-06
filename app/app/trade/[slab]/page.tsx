@@ -26,6 +26,7 @@ import { AirdropButton } from "@/components/trade/AirdropButton";
 import { ShareButton } from "@/components/market/ShareCard";
 import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
+import TradingPageLoading from "./loading";
 
 /**
  * Phase 3 (trade-terminal rebuild) layout notes:
@@ -314,13 +315,7 @@ function TradePageInner({ slab }: { slab: string }) {
   }, [symbol, priceUsd]);
 
   if (slabLoading && !engine) {
-    return (
-      <div className="min-h-[calc(100dvh-48px)] flex flex-col items-center justify-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-        <p className="text-[11px] text-[var(--text-secondary)] uppercase tracking-[0.15em]">Loading market data...</p>
-        <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slab.slice(0, 8)}...{slab.slice(-8)}</p>
-      </div>
-    );
+    return <TradingPageLoading />;
   }
 
   if (slabError && !engine) {
@@ -639,13 +634,7 @@ function SlugResolvePage({ slug }: { slug: string }) {
     return <InvalidAddressPage address={slug} />;
   }
 
-  return (
-    <div className="min-h-[calc(100dvh-48px)] flex flex-col items-center justify-center gap-3">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-      <p className="text-[11px] text-[var(--text-secondary)] uppercase tracking-[0.15em]">Resolving market…</p>
-      <p className="text-[10px] text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)" }}>{slug}</p>
-    </div>
-  );
+  return <TradingPageLoading />;
 }
 
 export default function TradePage({ params }: { params: Promise<{ slab: string }> }) {

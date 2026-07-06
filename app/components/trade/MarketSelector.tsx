@@ -1,6 +1,8 @@
 "use client";
 
 import { FC, useState, useRef, useEffect, useMemo } from "react";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
 import { useRouter } from "next/navigation";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { useLivePrice } from "@/hooks/useLivePrice";
@@ -247,11 +249,11 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
               <div className="divide-y divide-[var(--border)]/10">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="flex items-center gap-2 px-3 py-2.5">
-                    <div className="h-3.5 w-3.5 animate-pulse bg-[var(--border)]/20 rounded-none" />
-                    <div className="flex-1 h-3 animate-pulse bg-[var(--border)]/20 rounded-none" />
-                    <div className="w-16 h-3 animate-pulse bg-[var(--border)]/20 rounded-none" />
-                    <div className="w-12 h-3 animate-pulse bg-[var(--border)]/20 rounded-none" />
-                    <div className="w-12 h-3 animate-pulse bg-[var(--border)]/20 rounded-none" />
+                    <ShimmerSkeleton className="h-3.5 w-3.5" rounded="none" />
+                    <ShimmerSkeleton className="flex-1 h-3" rounded="none" />
+                    <ShimmerSkeleton className="w-16 h-3" rounded="none" />
+                    <ShimmerSkeleton className="w-12 h-3" rounded="none" />
+                    <ShimmerSkeleton className="w-12 h-3" rounded="none" />
                   </div>
                 ))}
               </div>

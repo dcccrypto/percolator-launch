@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { VaultCard } from './VaultCard';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 
 type SortKey = 'apy' | 'tvl' | 'volume' | 'utilization';
 
@@ -139,10 +140,34 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div
-              key={i}
-              className="h-[280px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)] rounded-sm"
-            />
+            <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <ShimmerSkeleton className="w-8 h-8 rounded-full" />
+                  <div>
+                    <ShimmerSkeleton className="h-4 w-20 mb-1" />
+                    <ShimmerSkeleton className="h-3 w-16" />
+                  </div>
+                </div>
+                <div className="text-right space-y-1">
+                  <ShimmerSkeleton className="h-2.5 w-12" />
+                  <ShimmerSkeleton className="h-5 w-16" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[1, 2, 3, 4].map(j => (
+                  <div key={j} className="space-y-1">
+                    <ShimmerSkeleton className="h-2 w-10" />
+                    <ShimmerSkeleton className="h-4.5 w-16" />
+                  </div>
+                ))}
+              </div>
+              <ShimmerSkeleton className="h-2 w-full mt-2" />
+              <div className="flex justify-between items-center pt-2 border-t border-[var(--border)]/30">
+                <ShimmerSkeleton className="h-3.5 w-16" />
+                <ShimmerSkeleton className="h-3.5 w-12" />
+              </div>
+            </div>
           ))}
         </div>
       ) : sorted.length === 0 ? (
@@ -162,9 +187,40 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
             ))}
           </div>
           {displayCount < sorted.length ? (
-            <div ref={observerTarget} className="flex items-center justify-center gap-2 py-6">
-              <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-              <span className="text-xs text-[var(--text-muted)]">Loading more…</span>
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <ShimmerSkeleton className="w-8 h-8 rounded-full" />
+                        <div>
+                          <ShimmerSkeleton className="h-4 w-20 mb-1" />
+                          <ShimmerSkeleton className="h-3 w-16" />
+                        </div>
+                      </div>
+                      <div className="text-right space-y-1">
+                        <ShimmerSkeleton className="h-2.5 w-12" />
+                        <ShimmerSkeleton className="h-5 w-16" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[1, 2, 3, 4].map(j => (
+                        <div key={j} className="space-y-1">
+                          <ShimmerSkeleton className="h-2 w-10" />
+                          <ShimmerSkeleton className="h-4.5 w-16" />
+                        </div>
+                      ))}
+                    </div>
+                    <ShimmerSkeleton className="h-2 w-full mt-2" />
+                    <div className="flex justify-between items-center pt-2 border-t border-[var(--border)]/30">
+                      <ShimmerSkeleton className="h-3.5 w-16" />
+                      <ShimmerSkeleton className="h-3.5 w-12" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div ref={observerTarget} className="h-2 w-full" />
             </div>
           ) : sorted.length > PAGE_SIZE ? (
             <div className="flex items-center justify-center gap-3 py-4">

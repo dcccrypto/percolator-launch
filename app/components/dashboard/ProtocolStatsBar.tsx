@@ -12,6 +12,8 @@ import { useEffect, useRef, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
 import { isBlockedSlab } from "@/lib/blocklist";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
 
 interface ProtocolStats {
   volume24h: number;
@@ -196,7 +198,7 @@ export function ProtocolStatsBar() {
               {item.value}
             </span>
           ) : (
-            <span className="h-4 w-12 animate-pulse rounded bg-[var(--border)]" />
+            <ShimmerSkeleton className="h-4 w-12 rounded" />
           )}
         </div>
       ))}

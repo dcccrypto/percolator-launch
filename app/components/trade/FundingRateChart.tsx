@@ -3,6 +3,7 @@
 import { FC, useState, useEffect, useMemo } from "react";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 interface FundingHistoryPoint {
   slot: number;
@@ -230,8 +231,34 @@ export const FundingRateChart: FC<{ slabAddress: string }> = ({ slabAddress }) =
 
   if (loading) {
     return (
-      <div className="flex h-[300px] items-center justify-center rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
-        <div className="h-8 w-8 animate-spin border-2 border-[var(--accent)] border-t-transparent" />
+      <div className="h-[300px] rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-4 flex flex-col justify-between">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1.5">
+            <ShimmerSkeleton className="h-4.5 w-28" />
+            <ShimmerSkeleton className="h-3 w-16" />
+          </div>
+          <div className="flex gap-1.5">
+            <ShimmerSkeleton className="h-6 w-12" />
+            <ShimmerSkeleton className="h-6 w-12" />
+          </div>
+        </div>
+        <div className="flex-1 mt-6 flex items-end gap-1.5 pb-4">
+          {[...Array(20)].map((_, i) => (
+            <ShimmerSkeleton
+              key={i}
+              className="flex-1"
+              style={{
+                height: `${30 + Math.sin(i * 0.5) * 20 + Math.cos(i * 0.8) * 15}%`,
+                opacity: 0.4 + (i / 20) * 0.4
+              }}
+            />
+          ))}
+        </div>
+        <div className="flex justify-between border-t border-[var(--border)]/30 pt-3">
+          {[...Array(5)].map((_, i) => (
+            <ShimmerSkeleton key={i} className="h-3 w-12" />
+          ))}
+        </div>
       </div>
     );
   }

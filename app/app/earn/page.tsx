@@ -4,13 +4,26 @@ import { useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useEarnStats } from '@/hooks/useEarnStats';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 
 const EarnHeader = dynamic(
   () => import('@/components/earn/EarnHeader').then((m) => m.EarnHeader),
   {
     ssr: false,
     loading: () => (
-      <div className="h-[280px] animate-pulse bg-[var(--panel-bg)]" />
+      <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
+        <ShimmerSkeleton className="mb-2 h-3 w-16" />
+        <ShimmerSkeleton className="h-7 w-48" />
+        <ShimmerSkeleton className="mt-2 h-4 w-96 max-w-full" />
+        <div className="mt-6 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4 animate-fade-in">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-[var(--panel-bg)] p-4 sm:p-5 space-y-2">
+              <ShimmerSkeleton className="h-3 w-24" />
+              <ShimmerSkeleton className="h-6 w-16" />
+            </div>
+          ))}
+        </div>
+      </div>
     ),
   },
 );
@@ -20,7 +33,20 @@ const OiCapMeter = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-20 animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" />
+      <div className="space-y-3 p-5">
+        <div className="flex justify-between items-center">
+          <ShimmerSkeleton className="h-3 w-20" />
+          <ShimmerSkeleton className="h-4.5 w-16 rounded-sm" />
+        </div>
+        <ShimmerSkeleton className="h-3 w-full" />
+        <div className="flex justify-between items-center">
+          <div className="flex gap-4">
+            <ShimmerSkeleton className="h-3 w-28" />
+            <ShimmerSkeleton className="h-3 w-20" />
+          </div>
+          <ShimmerSkeleton className="h-3 w-8" />
+        </div>
+      </div>
     ),
   },
 );
@@ -30,7 +56,43 @@ const VaultGrid = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[400px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" />
+      <div>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
+          <ShimmerSkeleton className="h-9 w-full sm:w-64" />
+          <div className="flex items-center gap-1">
+            <ShimmerSkeleton className="h-3 w-10 mr-2" />
+            {[1, 2, 3, 4].map(i => <ShimmerSkeleton key={i} className="h-8 w-16" />)}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <ShimmerSkeleton className="w-8 h-8 rounded-full" />
+                  <div>
+                    <ShimmerSkeleton className="h-4 w-20 mb-1" />
+                    <ShimmerSkeleton className="h-3 w-16" />
+                  </div>
+                </div>
+                <div className="text-right space-y-1">
+                  <ShimmerSkeleton className="h-2.5 w-12" />
+                  <ShimmerSkeleton className="h-5 w-16" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[1, 2, 3, 4].map(j => (
+                  <div key={j} className="space-y-1">
+                    <ShimmerSkeleton className="h-2 w-10" />
+                    <ShimmerSkeleton className="h-4.5 w-16" />
+                  </div>
+                ))}
+              </div>
+              <ShimmerSkeleton className="h-2 w-full mt-2" />
+            </div>
+          ))}
+        </div>
+      </div>
     ),
   },
 );
@@ -43,7 +105,30 @@ const InsuranceFundDisplay = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[300px] animate-pulse bg-[var(--panel-bg)] border border-[var(--border)]" />
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <ShimmerSkeleton className="w-6 h-6 rounded-sm shrink-0" />
+          <ShimmerSkeleton className="h-4 w-28" />
+        </div>
+        <div className="space-y-1">
+          <ShimmerSkeleton className="h-7 w-20" />
+          <ShimmerSkeleton className="h-3 w-40" />
+        </div>
+        <div className="border-t border-[var(--border)] pt-4 space-y-3">
+          <ShimmerSkeleton className="h-3 w-16" />
+          <div className="space-y-3">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex gap-2">
+                <ShimmerSkeleton className="w-4 h-4 rounded-full shrink-0" />
+                <div className="flex-1 space-y-1">
+                  <ShimmerSkeleton className="h-3.5 w-24" />
+                  <ShimmerSkeleton className="h-3 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     ),
   },
 );
@@ -56,7 +141,7 @@ export default function EarnPage() {
   const { stats, loading, error } = useEarnStats();
 
   return (
-    <div className="min-h-[calc(100dvh-48px)]">
+    <div className="min-h-[calc(100dvh-48px)] animate-fade-in">
       {/* Header with stats banner */}
       <EarnHeader stats={stats} loading={loading} />
 
