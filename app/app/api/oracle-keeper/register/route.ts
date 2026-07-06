@@ -16,9 +16,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { getServiceClient } from "@/lib/supabase";
 import { PublicKey } from "@solana/web3.js";
+import { signKeeperRequest, verifyKeeperSignature } from "@/lib/keeper-hmac";
 
 export const dynamic = "force-dynamic";
 
@@ -41,20 +41,28 @@ export async function POST(req: NextRequest) {
     console.error("[oracle-keeper/register] KEEPER_REGISTER_SECRET not configured — endpoint disabled");
     return NextResponse.json({ error: "Endpoint not configured" }, { status: 503 });
   }
-  // GH#1692: Use timing-safe comparison to prevent timing oracle attacks.
-  // Plain string equality leaks secret length via response-time side channels.
-  const authHeader = req.headers.get("x-keeper-secret") ?? "";
-  const aBytes = Buffer.from(authHeader, "utf8");
-  const bBytes = Buffer.from(REGISTER_SECRET, "utf8");
-  const unauthorized = aBytes.length !== bBytes.length || !timingSafeEqual(aBytes, bBytes);
-  if (unauthorized) {
+
+  // Read the raw body once — the HMAC signature (LAUNCH-16) is computed over the exact
+  // bytes the caller sent, so it must be verified before (and independently of) JSON.parse.
+  const rawBody = await req.text();
+
+  // LAUNCH-16: HMAC-SHA256(REGISTER_SECRET, "<timestamp>.<rawBody>") replaces the raw
+  // x-keeper-secret header — the credential itself never appears on the wire. Verification
+  // is timing-safe and rejects stale/replayed signatures (see verifyKeeperSignature).
+  const signed = verifyKeeperSignature(
+    REGISTER_SECRET,
+    req.headers.get("x-keeper-timestamp"),
+    rawBody,
+    req.headers.get("x-keeper-signature"),
+  );
+  if (!signed) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     let body: unknown;
     try {
-      body = await req.json();
+      body = JSON.parse(rawBody);
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
@@ -123,10 +131,7 @@ export async function POST(req: NextRequest) {
       // The keeper verifies: HMAC-SHA256(REGISTER_SECRET, "<timestamp>.<body>") == x-keeper-signature.
       // This means the raw credential is never sent on the wire regardless of URL scheme.
       const keeperPayload = JSON.stringify({ slabAddress, mainnetCA });
-      const keeperTimestamp = Date.now().toString();
-      const keeperSig = createHmac("sha256", REGISTER_SECRET)
-        .update(`${keeperTimestamp}.${keeperPayload}`)
-        .digest("hex");
+      const { timestamp: keeperTimestamp, signature: keeperSig } = signKeeperRequest(REGISTER_SECRET, keeperPayload);
 
       const keeperResp = await fetch(`${KEEPER_URL}/register`, {
         method: "POST",
