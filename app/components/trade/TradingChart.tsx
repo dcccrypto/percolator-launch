@@ -127,9 +127,75 @@ function PositionSummary({ slabAddress }: PositionSummaryProps) {
   const dirColor = isLong ? "text-green-400" : "text-red-400";
 
   return (
-    <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 backdrop-blur-sm">
+    <div className="flex items-center gap-1.5 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 backdrop-blur-sm">
       <span className={`text-[9px] font-bold uppercase tracking-[0.12em] ${dirColor}`}>{direction}</span>
-      <span className="text-[9px] text-[var(--text-dim)]">position open</span>
+      <span className="text-[9px] text-[var(--text-secondary)]">position open</span>
+    </div>
+  );
+}
+
+/** Draggable stack for the position + PnL badges.
+ *
+ *  The badges default to the chart's top-right, exactly where the price axis
+ *  labels and recent candles live — they routinely cover the very data the
+ *  user is watching. This wrapper keeps them as ONE unit (they always move
+ *  together) and lets the user drag the pair anywhere inside the chart.
+ *  Position is chart-local state: it resets to top-right on market switch,
+ *  which is the sane default for a fresh layout.
+ *
+ *  Pointer events (not mouse) so touch dragging works; the container uses
+ *  touch-none while dragging targets it so the browser doesn't hijack the
+ *  gesture for scrolling. Children keep their own pointer handlers (none —
+ *  the badges are display-only), so a drag can start anywhere on the stack. */
+function DraggableChartBadges({ children }: { children: React.ReactNode }) {
+  const elRef = useRef<HTMLDivElement | null>(null);
+  // null → default CSS position (top-right). Set on first drag.
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = elRef.current;
+    const parent = el?.offsetParent as HTMLElement | null;
+    if (!el || !parent) return;
+    const rect = el.getBoundingClientRect();
+    const prect = parent.getBoundingClientRect();
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      baseX: rect.left - prect.left,
+      baseY: rect.top - prect.top,
+    };
+    el.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    const el = elRef.current;
+    const parent = el?.offsetParent as HTMLElement | null;
+    if (!d || !el || !parent) return;
+    // Clamp inside the chart container so the badges can't be lost off-canvas.
+    const x = Math.max(0, Math.min(d.baseX + (e.clientX - d.startX), parent.clientWidth - el.offsetWidth));
+    const y = Math.max(0, Math.min(d.baseY + (e.clientY - d.startY), parent.clientHeight - el.offsetHeight));
+    setPos({ x, y });
+  };
+
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    elRef.current?.releasePointerCapture(e.pointerId);
+  };
+
+  return (
+    <div
+      ref={elRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      title="Drag to move"
+      className="absolute z-10 flex cursor-grab touch-none select-none flex-col items-end gap-1 active:cursor-grabbing"
+      style={pos ? { left: pos.x, top: pos.y } : { top: 8, right: 8 }}
+    >
+      {children}
     </div>
   );
 }
@@ -1145,8 +1211,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           </div>
         )}
 
-        {overlayPrefs.position && <PositionSummary slabAddress={slabAddress} />}
-        {overlayPrefs.pnl && <ChartPnlBadge slabAddress={slabAddress} />}
+        {(overlayPrefs.position || overlayPrefs.pnl) && (
+          <DraggableChartBadges>
+            {overlayPrefs.position && <PositionSummary slabAddress={slabAddress} />}
+            {overlayPrefs.pnl && <ChartPnlBadge slabAddress={slabAddress} />}
+          </DraggableChartBadges>
+        )}
       </div>
     </div>
   );
