@@ -15,14 +15,13 @@ import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { formatUsdFromNumber, toE6 } from "@/lib/format";
+import { formatUsdFromNumber } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
 // DevnetFaucetModal moved to WalletProvider (PERC-808: global placement on all pages)
-import { AirdropButton } from "@/components/trade/AirdropButton";
 import { ShareButton } from "@/components/market/ShareCard";
 import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
@@ -470,8 +469,7 @@ function TradePageInner({ slab }: { slab: string }) {
             {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
           </span>
         )}
-        <AirdropButton mintAddress={mintAddress} symbol={symbol} isDevnetMirror={supabaseMarket ? !!supabaseMarket.mainnet_ca : true} />
-        <ShareButton slabAddress={slab} marketName={symbol} price={toE6(priceUsd ?? 0)} />
+        <ShareButton slabAddress={slab} />
         <UsdToggleButton />
         <a
           href={`/analytics/${slab}`}
