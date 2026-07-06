@@ -2,6 +2,8 @@
 
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import type { EarnStats } from '@/hooks/useEarnStats';
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+
 
 interface EarnHeaderProps {
   stats: EarnStats;
@@ -109,7 +111,7 @@ function StatCell({
         {label}
       </div>
       {loading ? (
-        <div className="h-7 w-24 animate-pulse rounded bg-[var(--border)]" />
+        <ShimmerSkeleton className="h-7 w-24 rounded" />
       ) : (
         children
       )}

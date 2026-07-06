@@ -7,6 +7,8 @@ import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 
 import { GlowButton } from "@/components/ui/GlowButton";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
 
 function formatPnl(pnl: bigint | undefined | null, decimals = 6): string {
   const safePnl = pnl ?? 0n;
@@ -203,7 +205,7 @@ export function PositionSummary() {
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-24 animate-pulse rounded-sm bg-[var(--border)]" />
+              <ShimmerSkeleton key={i} className="h-24" />
             ))}
           </div>
         ) : positions.length === 0 ? (

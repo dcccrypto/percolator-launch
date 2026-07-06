@@ -1,6 +1,8 @@
 'use client';
 
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
+import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+
 
 interface LpPositionDashboardProps {
   /** User's LP token balance (raw) */
@@ -53,13 +55,13 @@ export function LpPositionDashboard({
 
   if (loading) {
     return (
-      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners animate-pulse">
-        <div className="h-5 w-36 bg-[var(--border)] rounded mb-6" />
+      <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners">
+        <ShimmerSkeleton className="h-5 w-36 mb-6" />
         <div className="grid grid-cols-2 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i}>
-              <div className="h-3 w-20 bg-[var(--border)] rounded mb-2" />
-              <div className="h-6 w-24 bg-[var(--border)] rounded" />
+            <div key={i} className="space-y-2">
+              <ShimmerSkeleton className="h-3 w-20" />
+              <ShimmerSkeleton className="h-6 w-24" />
             </div>
           ))}
         </div>

@@ -2,6 +2,8 @@
 
 import { FC, useState, useEffect, useMemo } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+
 import { useEngineState } from "@/hooks/useEngineState";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { InfoIcon } from "@/components/ui/Tooltip";
@@ -240,7 +242,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center justify-between">
           <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Funding Rate</span>
-          <div className="h-4 w-16 animate-pulse rounded-none bg-[var(--border)]" />
+          <ShimmerSkeleton className="h-4 w-16" rounded="none" />
         </div>
       </div>
     );

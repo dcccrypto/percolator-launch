@@ -203,7 +203,42 @@ html {
   --font-mono: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
   --font-display: var(--font-outfit), var(--font-space-grotesk), system-ui;
   --font-heading: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
+
+  /* Custom Animations & Keyframes for Tailwind v4 */
+  --animate-shimmer-sweep: shimmer-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  --animate-fade-in: fade-in 0.4s ease-out both;
+  --animate-fade-in-up: fade-in-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-float: float 5s ease-in-out infinite;
+  --animate-scale-in: scale-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both;
+  --animate-flow-line: flow-line 3s linear infinite;
+
+  @keyframes shimmer-sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(24px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-6px); }
+  }
+  @keyframes scale-in {
+    0% { transform: scale(0); opacity: 0; }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes flow-line {
+    0% { background-position: -30% 0; }
+    100% { background-position: 130% 0; }
+  }
 }
+
 
 body {
   background: var(--bg);
@@ -264,40 +299,9 @@ body::before {
   100% { opacity: 0.5; }
 }
 
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes blurIn {
-  from { opacity: 0; filter: blur(8px); }
-  to { opacity: 1; filter: blur(0); }
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-6px); }
-}
-
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 20px rgba(153, 69, 255, 0.08); }
   50% { box-shadow: 0 0 40px rgba(153, 69, 255, 0.15); }
-}
-
-@keyframes gradient-shift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-@keyframes shimmer-sweep {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
 }
 
 @keyframes blink {
@@ -310,31 +314,26 @@ body::before {
   100% { opacity: 0; }
 }
 
-@keyframes scale-in {
-  0% { transform: scale(0); opacity: 0; }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-@keyframes flow-line {
-  0% { background-position: -30% 0; }
-  100% { background-position: 130% 0; }
-}
-
-@keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(24px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 
 .shimmer {
   background: var(--border);
   animation: shimmer 1.5s ease-in-out infinite;
 }
+
+/* ponytail: explicit class bypasses tailwind v4 @theme compilation bug */
+.animate-shimmer-sweep {
+  animation: shimmer-sweep 1.6s linear infinite !important;
+}
+
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 
 .deposit-shimmer {
   animation: pulse-glow 2s ease-in-out infinite;
@@ -349,12 +348,7 @@ body::before {
   animation: shimmer-sweep 2s ease-in-out infinite;
 }
 
-/* ─── Animation Classes ─── */
-.animate-fade-in-up { animation: fade-in-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-fade-in { animation: fade-in 0.4s ease-out both; }
-.animate-float { animation: float 5s ease-in-out infinite; }
-.animate-scale-in { animation: scale-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both; }
-.animate-flow-line { background-size: 30% 100%; background-repeat: no-repeat; animation: flow-line 3s linear infinite; }
+
 .gsap-fade { opacity: 0; animation: gsap-fade-fallback 0.3s ease-out 0.5s forwards; }
 @keyframes gsap-fade-fallback { to { opacity: 1; } }
 

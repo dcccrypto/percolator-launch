@@ -5,6 +5,7 @@ import Link from "next/link";
 import gsap from "gsap";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 /* ── Constants ────────────────────────────────────────────── */
 /** True when deployed against mainnet-beta (GH#1572, GH#1573) */
@@ -395,16 +396,18 @@ export default function LeaderboardPage() {
 
         {/* ── My Rank / Share ─────────────────────────────────────── */}
         {!loading && (
-          <MyRankCard entry={myEntry} walletConnected={connected} divisor={divisor} />
+          <div className="animate-fade-in">
+            <MyRankCard entry={myEntry} walletConnected={connected} divisor={divisor} />
+          </div>
         )}
 
         {/* ── Loading skeleton ────────────────────────────────────── */}
         {loading && (
           <div className="space-y-px">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div
+              <ShimmerSkeleton
                 key={i}
-                className="h-12 animate-pulse border border-[var(--border)] bg-[var(--panel-bg)]"
+                className="h-12 border border-[var(--border)] bg-[var(--panel-bg)]"
                 style={{ opacity: 1 - i * 0.08 }}
               />
             ))}
@@ -420,7 +423,7 @@ export default function LeaderboardPage() {
 
         {/* ── Empty state ─────────────────────────────────────────── */}
         {noData && (
-          <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-12 text-center">
+          <div className="border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-12 text-center animate-fade-in">
             <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No trades this period</p>
             <p className="mt-1 text-[11px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
               Be first on the board.
@@ -436,7 +439,7 @@ export default function LeaderboardPage() {
 
         {/* ── Table ───────────────────────────────────────────────── */}
         {!loading && !error && entries.length > 0 && (
-          <div className="border border-[var(--border)]">
+          <div className="border border-[var(--border)] animate-fade-in">
             {/* Header row */}
             <div
               className="grid border-b border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]"
