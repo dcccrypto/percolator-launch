@@ -29,14 +29,14 @@ export const LiquidationAnalytics: FC = () => {
   if (loading) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <span className="text-[10px] text-[var(--text-dim)]">Loading...</span>
+        <span className="text-[10px] text-[var(--text-secondary)]">Loading...</span>
       </div>
     );
   }
   if (!hasData) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <span className="text-[10px] text-[var(--text-dim)]">No liquidation data for this market</span>
+        <span className="text-[10px] text-[var(--text-secondary)]">No liquidation data for this market</span>
       </div>
     );
   }
@@ -64,7 +64,7 @@ export const LiquidationAnalytics: FC = () => {
   let coverageText: string;
   if (coveragePercent == null) {
     dotColor = "bg-[var(--text-dim)]";
-    textColor = "text-[var(--text-dim)]";
+    textColor = "text-[var(--text-secondary)]";
     coverageText = "—";
   } else if (coveragePercent === Infinity || coveragePercent > 100) {
     dotColor = "bg-[var(--long)]";
@@ -90,7 +90,7 @@ export const LiquidationAnalytics: FC = () => {
   return (
     <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
       <div className="mb-3 flex items-center gap-1">
-        <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+        <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">
           Liquidation Analytics
         </span>
         <InfoIcon tooltip="Liquidation metrics and insurance coverage for this market" />
@@ -100,7 +100,7 @@ export const LiquidationAnalytics: FC = () => {
         {stats.map((s) => (
           <div key={s.label} className="flex flex-col">
             <div className="mb-1 flex items-center gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">{s.label}</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">{s.label}</span>
               <InfoIcon tooltip={s.tip} />
             </div>
             <span className="text-sm font-bold text-[var(--text)] font-mono">{s.value}</span>
@@ -111,7 +111,7 @@ export const LiquidationAnalytics: FC = () => {
       <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)] p-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">Insurance Coverage</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">Insurance Coverage</span>
             <InfoIcon tooltip="Insurance balance as % of open interest. Green = >100%, Yellow = 10-100%, Red = <10%" />
           </div>
           <div className="flex items-center gap-2">
@@ -119,7 +119,7 @@ export const LiquidationAnalytics: FC = () => {
             <span className={`text-sm font-bold font-mono ${textColor}`}>{coverageText}</span>
           </div>
         </div>
-        <div className="mt-1 flex items-center justify-between text-[9px] text-[var(--text-dim)]">
+        <div className="mt-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
           <span>Insurance: {insuranceBalance != null ? fmtCompact(insuranceBalance) : "—"}</span>
           <span>OI: {totalOI != null ? fmtCompact(totalOI) : "—"}</span>
         </div>

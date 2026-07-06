@@ -27,7 +27,7 @@ export const CrankHealthCard: FC = () => {
   if (loading || !engine) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">
-        <span className="text-[10px] text-[var(--text-dim)]">{loading ? "Loading..." : "Not available on v17 markets yet"}</span>
+        <span className="text-[10px] text-[var(--text-secondary)]">{loading ? "Loading..." : "Not available on v17 markets yet"}</span>
       </div>
     );
   }
@@ -64,7 +64,7 @@ export const CrankHealthCard: FC = () => {
     <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">
       <div className="mb-1.5 flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             Crank Health
           </span>
           <InfoIcon tooltip="The crank processes funding accrual, liquidation checks, and position updates every slot" />
@@ -77,7 +77,7 @@ export const CrankHealthCard: FC = () => {
 
       {/* Staleness progress bar */}
       <div className="mb-1.5">
-        <div className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-dim)]">
+        <div className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
           <span>Last update: {secondsBehind}s ago ({slotsBehind.toLocaleString()} slots)</span>
           <span>Max: {maxStaleness.toLocaleString()} slots</span>
         </div>
@@ -92,7 +92,7 @@ export const CrankHealthCard: FC = () => {
       {/* Stats */}
       <div className="grid grid-cols-2 gap-px">
         <div className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(2n)]:border-r-0 [&:nth-last-child(-n+2)]:border-b-0">
-          <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             Lifetime Liquidations
           </span>
           <p className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
@@ -100,7 +100,7 @@ export const CrankHealthCard: FC = () => {
           </p>
         </div>
         <div className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(2n)]:border-r-0 [&:nth-last-child(-n+2)]:border-b-0">
-          <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             Force Closes
           </span>
           <p className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>

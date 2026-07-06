@@ -155,12 +155,12 @@ export const MarketStatsCard: FC = () => {
   })();
   // Color spread amber if abs spread > 0.5% (50 bps)
   const spreadColor = (() => {
-    if (!showSpread || spreadBps === null) return "text-[var(--text-dim)]";
+    if (!showSpread || spreadBps === null) return "text-[var(--text-secondary)]";
     const absBps = Math.abs(spreadBps);
     if (absBps > 50) return "text-amber-400";
     if (spreadAbs !== null && spreadAbs > 0n) return "text-[var(--long)]";
     if (spreadAbs !== null && spreadAbs < 0n) return "text-[var(--short)]";
-    return "text-[var(--text-dim)]";
+    return "text-[var(--text-secondary)]";
   })();
 
   // Funding rate display: "+0.0081%/8h" — consistent with MarketInfoBar label
@@ -168,12 +168,12 @@ export const MarketStatsCard: FC = () => {
     ? `${fundingHourlyPct >= 0 ? "+" : ""}${fundingHourlyPct.toFixed(4)}%/8h`
     : "—";
   const fundingColor = fundingHourlyPct === null
-    ? "text-[var(--text-dim)]"
+    ? "text-[var(--text-secondary)]"
     : fundingHourlyPct > 0
       ? "text-[var(--short)]" // longs pay shorts → short favorable
       : fundingHourlyPct < 0
         ? "text-[var(--long)]" // shorts pay longs → long favorable
-        : "text-[var(--text-dim)]";
+        : "text-[var(--text-secondary)]";
 
   type StatCell = {
     label: string;
