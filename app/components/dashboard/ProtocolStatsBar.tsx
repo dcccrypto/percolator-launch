@@ -49,7 +49,9 @@ export function ProtocolStatsBar() {
       let { data, error: dbErr } = await getSupabase()
         .from("markets_with_stats")
         .select("slab_address, symbol, volume_24h, last_price, decimals, total_open_interest, open_interest_long, open_interest_short, vault_balance, total_accounts")
-        .neq("indexer_excluded", true)
+        // markets_with_stats runtime filter: generated Supabase types do not expose indexer_excluded.
+        // Keep excluding indexer-excluded rows without breaking TypeScript column narrowing.
+        .or("indexer_excluded.is.null,indexer_excluded.eq.false")
         .returns<{
           slab_address: string;
           symbol: string | null;
@@ -157,13 +159,13 @@ export function ProtocolStatsBar() {
       label: "24h Volume",
       value: loading ? null : formatUsd(stats?.volume24h ?? 0),
       live: true,
-      color: (stats?.volume24h ?? 0) > 0 ? "text-[var(--long)]" : "text-[var(--text-muted)]",
+      color: (stats?.volume24h ?? 0) > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]",
     },
     {
       label: "Open Interest",
       value: loading ? null : formatUsd(stats?.openInterest ?? 0),
       live: false,
-      color: (stats?.openInterest ?? 0) > 0 ? "text-[var(--text)]" : "text-[var(--text-muted)]",
+      color: (stats?.openInterest ?? 0) > 0 ? "text-[var(--text)]" : "text-[var(--text-secondary)]",
     },
     {
       label: "Active Markets",
@@ -182,7 +184,7 @@ export function ProtocolStatsBar() {
         >
           <div className="flex items-center gap-1.5">
             {item.live && <Pulse />}
-            <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+            <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
               {item.label}
             </span>
           </div>

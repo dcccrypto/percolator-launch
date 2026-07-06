@@ -10,6 +10,7 @@ import {
   parseConfig,
   parseParams,
   parsePortfolioV17,
+  parsePositionNftAccount,
   parseWrapperConfigV17,
   isV17Account,
   AccountKind,
@@ -25,6 +26,7 @@ import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
 import { discoverMarketsViaProgramDirectory } from "@/lib/market-directory-discovery";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 
 const MAINNET_STATIC_MARKETS = [
   {
@@ -91,6 +93,12 @@ export interface PortfolioPosition {
   leverage: number;
   /** Maintenance margin bps for this market */
   maintenanceMarginBps: bigint;
+  /**
+   * True when this position is escrowed inside a Position NFT (v17). Minting an
+   * NFT B-3-transfers `portfolio.owner` to the NFT program's escrow PDA, so the
+   * owner-scan can't find it — it's recovered via the NFT last_holder scan.
+   */
+  nftWrapped?: boolean;
 }
 
 export type LiquidationSeverity = "safe" | "warning" | "danger";
@@ -99,6 +107,112 @@ export function getLiquidationSeverity(distancePct: number): LiquidationSeverity
   if (distancePct <= 10) return "danger";
   if (distancePct <= 30) return "warning";
   return "safe";
+}
+
+/**
+ * Map a parsed v17 portfolio into an enriched PortfolioPosition (liq price, PnL,
+ * leverage). Shared by the owner-scan path and the NFT-wrapped recovery scan so
+ * both surface identical rows. `nftWrapped` flags escrowed positions for the UI.
+ */
+function buildV17Position(
+  portfolio: ReturnType<typeof parsePortfolioV17>,
+  oraclePriceE6: bigint,
+  maintenanceMarginBps: bigint,
+  slabAddrStr: string,
+  market: DiscoveredMarket,
+  nftWrapped = false,
+): PortfolioPosition {
+  // Map v17 portfolio to the Account shape used by the rest of usePortfolio
+  const ZERO_PK = new PublicKey(new Uint8Array(32));
+  const activeLeg = portfolio.legs.find((l) => l.active);
+  const positionSize = activeLeg ? activeLeg.basisPosQ : 0n;
+
+  const account: Account = {
+    kind: AccountKind.User,
+    accountId: 0n,
+    capital: portfolio.capital,
+    pnl: portfolio.pnl,
+    reservedPnl: portfolio.reservedPnl,
+    warmupStartedAtSlot: 0n,
+    warmupSlopePerStep: 0n,
+    positionSize,
+    entryPrice: 0n,
+    fundingIndex: 0n,
+    matcherProgram: ZERO_PK,
+    matcherContext: ZERO_PK,
+    owner: portfolio.owner,
+    feeCredits: portfolio.feeCredits,
+    lastFeeSlot: portfolio.lastFeeSlot,
+    feesEarnedTotal: 0n,
+    exactReserveCohorts: null,
+    exactCohortCount: null,
+    overflowOlder: null,
+    overflowOlderPresent: null,
+    overflowNewest: null,
+    overflowNewestPresent: null,
+    fSnap: 0n,
+    adlABasis: 0n,
+    adlKSnap: 0n,
+    adlEpochSnap: 0n,
+    schedPresent: null,
+    schedRemainingQ: null,
+    schedAnchorQ: null,
+    schedStartSlot: null,
+    schedHorizon: null,
+    schedReleaseQ: null,
+    pendingPresent: null,
+    pendingRemainingQ: null,
+    pendingHorizon: null,
+    pendingCreatedSlot: null,
+  } as Account;
+
+  const effectiveEntryPrice = getEntryPrice(slabAddrStr, 0);
+  const liquidationPriceE6 = computeLiqPrice(
+    effectiveEntryPrice,
+    account.capital,
+    account.positionSize,
+    maintenanceMarginBps,
+  );
+  const unrealizedPnl = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
+    ? computeMarkPnl(account.positionSize, effectiveEntryPrice, oraclePriceE6)
+    : (isSentinelValue(account.pnl) ? 0n : account.pnl);
+  const pnlPercent = computePnlPercent(unrealizedPnl, account.capital);
+
+  let liquidationDistancePct = 100;
+  if (oraclePriceE6 > 0n && liquidationPriceE6 > 0n && account.positionSize !== 0n) {
+    if (account.positionSize > 0n) {
+      liquidationDistancePct = oraclePriceE6 > liquidationPriceE6
+        ? Number(((oraclePriceE6 - liquidationPriceE6) * 10000n) / oraclePriceE6) / 100
+        : 0;
+    } else {
+      liquidationDistancePct = liquidationPriceE6 > oraclePriceE6
+        ? Number(((liquidationPriceE6 - oraclePriceE6) * 10000n) / liquidationPriceE6) / 100
+        : 0;
+    }
+  }
+
+  const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
+  let leverage = 0;
+  if (account.capital > 0n && oraclePriceE6 > 0n) {
+    leverage = Number((absPos * oraclePriceE6 / 1_000_000n) * 100n / account.capital) / 100;
+  }
+
+  return {
+    slabAddress: slabAddrStr,
+    symbol: null,
+    account,
+    idx: 0,
+    market,
+    effectiveEntryPrice,
+    oraclePriceE6,
+    liquidationPriceE6,
+    liquidationDistancePct,
+    unrealizedPnl,
+    pnlPercent,
+    leverage,
+    maintenanceMarginBps,
+    nftWrapped,
+  };
 }
 
 export interface PortfolioData {
@@ -176,6 +290,13 @@ export function usePortfolio(): PortfolioData {
         );
         const markets = marketArrays.flat();
         const allPositions: PortfolioPosition[] = [];
+        // v17 markets keyed by slab address → oracle price + margin, so the
+        // NFT-wrapped recovery scan below can enrich escrowed portfolios using
+        // the same market context the owner-scan used.
+        const marketMetaBySlab = new Map<
+          string,
+          { market: DiscoveredMarket; oraclePriceE6: bigint; maintenanceMarginBps: bigint }
+        >();
         let pnlSum = 0n;
         let depositSum = 0n;
         let unrealizedPnlSum = 0n;
@@ -233,6 +354,10 @@ export function usePortfolio(): PortfolioData {
                 // Use defaults if parse fails
               }
 
+              // Remember this v17 market's context so the NFT-wrapped recovery
+              // scan below can enrich escrowed portfolios the same way.
+              marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps });
+
               const V17_PORTFOLIO_MAGIC_P = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
               const portfolioResults = await connection.getProgramAccounts(v17ProgramId, {
                 filters: [
@@ -247,103 +372,22 @@ export function usePortfolio(): PortfolioData {
                 const portData = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
                 const portfolio = parsePortfolioV17(portData);
 
-                // Map v17 portfolio to the Account shape used by the rest of usePortfolio
-                const ZERO_PK = new PublicKey(new Uint8Array(32));
-                const activeLeg = portfolio.legs.find((l) => l.active);
-                const positionSize = activeLeg ? activeLeg.basisPosQ : 0n;
-
-                const account: Account = {
-                  kind: AccountKind.User,
-                  accountId: 0n,
-                  capital: portfolio.capital,
-                  pnl: portfolio.pnl,
-                  reservedPnl: portfolio.reservedPnl,
-                  warmupStartedAtSlot: 0n,
-                  warmupSlopePerStep: 0n,
-                  positionSize,
-                  entryPrice: 0n,
-                  fundingIndex: 0n,
-                  matcherProgram: ZERO_PK,
-                  matcherContext: ZERO_PK,
-                  owner: portfolio.owner,
-                  feeCredits: portfolio.feeCredits,
-                  lastFeeSlot: portfolio.lastFeeSlot,
-                  feesEarnedTotal: 0n,
-                  exactReserveCohorts: null,
-                  exactCohortCount: null,
-                  overflowOlder: null,
-                  overflowOlderPresent: null,
-                  overflowNewest: null,
-                  overflowNewestPresent: null,
-                  fSnap: 0n,
-                  adlABasis: 0n,
-                  adlKSnap: 0n,
-                  adlEpochSnap: 0n,
-                  schedPresent: null,
-                  schedRemainingQ: null,
-                  schedAnchorQ: null,
-                  schedStartSlot: null,
-                  schedHorizon: null,
-                  schedReleaseQ: null,
-                  pendingPresent: null,
-                  pendingRemainingQ: null,
-                  pendingHorizon: null,
-                  pendingCreatedSlot: null,
-                } as Account;
-
-                const effectiveEntryPrice = getEntryPrice(slabAddrStr, 0);
-                const liquidationPriceE6 = computeLiqPrice(
-                  effectiveEntryPrice,
-                  account.capital,
-                  account.positionSize,
+                const pos = buildV17Position(
+                  portfolio,
+                  oraclePriceE6,
                   maintenanceMarginBps,
+                  slabAddrStr,
+                  market,
                 );
-                const unrealizedPnl = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
-                  ? computeMarkPnl(account.positionSize, effectiveEntryPrice, oraclePriceE6)
-                  : (isSentinelValue(account.pnl) ? 0n : account.pnl);
-                const pnlPercent = computePnlPercent(unrealizedPnl, account.capital);
 
-                let liquidationDistancePct = 100;
-                if (oraclePriceE6 > 0n && liquidationPriceE6 > 0n && account.positionSize !== 0n) {
-                  if (account.positionSize > 0n) {
-                    liquidationDistancePct = oraclePriceE6 > liquidationPriceE6
-                      ? Number(((oraclePriceE6 - liquidationPriceE6) * 10000n) / oraclePriceE6) / 100
-                      : 0;
-                  } else {
-                    liquidationDistancePct = liquidationPriceE6 > oraclePriceE6
-                      ? Number(((liquidationPriceE6 - oraclePriceE6) * 10000n) / liquidationPriceE6) / 100
-                      : 0;
-                  }
-                }
-
-                const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
-                let leverage = 0;
-                if (account.capital > 0n && oraclePriceE6 > 0n) {
-                  leverage = Number((absPos * oraclePriceE6 / 1_000_000n) * 100n / account.capital) / 100;
-                }
-
-                if (liquidationDistancePct <= 30 && account.positionSize !== 0n) {
+                if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
                   riskCount++;
                 }
 
-                allPositions.push({
-                  slabAddress: slabAddrStr,
-                  symbol: null,
-                  account,
-                  idx: 0,
-                  market,
-                  effectiveEntryPrice,
-                  oraclePriceE6,
-                  liquidationPriceE6,
-                  liquidationDistancePct,
-                  unrealizedPnl,
-                  pnlPercent,
-                  leverage,
-                  maintenanceMarginBps,
-                });
-                pnlSum += isSentinelValue(account.pnl) ? 0n : account.pnl;
-                depositSum += account.capital;
-                unrealizedPnlSum += unrealizedPnl;
+                allPositions.push(pos);
+                pnlSum += isSentinelValue(pos.account.pnl) ? 0n : pos.account.pnl;
+                depositSum += pos.account.capital;
+                unrealizedPnlSum += pos.unrealizedPnl;
               }
             } else {
               // ── v12.x legacy path ──────────────────────────────────────────
@@ -449,6 +493,70 @@ export function usePortfolio(): PortfolioData {
           } catch {
             // Skip markets that fail to parse
           }
+        }
+
+        // ── NFT-wrapped position recovery (v17) ──────────────────────────────
+        // Minting a Position NFT B-3-transfers `portfolio.owner` to the NFT
+        // program's escrow PDA, so the owner-scans above (memcmp offset 80 ==
+        // wallet) never match a wrapped portfolio — the position vanishes from
+        // /portfolio after wrapping. Recover it the only way still possible:
+        // scan the NFT program for PositionNfts this wallet still holds
+        // (last_holder == wallet, offset 167) and load the escrowed portfolio
+        // each one wraps. Best-effort: a failure here must never break the load.
+        try {
+          const POSITION_NFT_V17_LEN = 199;
+          const NFT_LAST_HOLDER_OFF = 167;
+          // Dedup guard: markets that already surfaced a (non-wrapped) position.
+          const seenSlabs = new Set(allPositions.map((p) => p.slabAddress));
+          const nfts = await connection.getProgramAccounts(PERCOLATOR_NFT_PROGRAM_ID, {
+            filters: [
+              { dataSize: POSITION_NFT_V17_LEN },
+              { memcmp: { offset: NFT_LAST_HOLDER_OFF, bytes: pkStr } },
+            ],
+          });
+          for (const nft of nfts) {
+            if (cancelled) return;
+            try {
+              const parsed = parsePositionNftAccount(new Uint8Array(nft.account.data as Buffer));
+              const pfInfo = await connection.getAccountInfo(parsed.portfolioAccount);
+              if (cancelled) return;
+              if (!pfInfo || !pfInfo.data) continue;
+              const portfolio = parsePortfolioV17(new Uint8Array(pfInfo.data));
+              // Only surface a wrapped position that still has an active leg
+              // (a closed-but-unburned NFT wraps a size-0 leg).
+              const activeLeg = portfolio.legs.find((l) => l.active);
+              if (!activeLeg || activeLeg.basisPosQ === 0n) continue;
+              const slabAddrStr = portfolio.marketGroupId?.toBase58();
+              if (!slabAddrStr) continue;
+              // Skip if this market already produced a position, and only surface
+              // markets we actually discovered (so we have oracle/margin context).
+              if (seenSlabs.has(slabAddrStr)) continue;
+              const meta = marketMetaBySlab.get(slabAddrStr);
+              if (!meta) continue;
+
+              const pos = buildV17Position(
+                portfolio,
+                meta.oraclePriceE6,
+                meta.maintenanceMarginBps,
+                slabAddrStr,
+                meta.market,
+                true, // nftWrapped
+              );
+
+              if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
+                riskCount++;
+              }
+              allPositions.push(pos);
+              seenSlabs.add(slabAddrStr);
+              pnlSum += isSentinelValue(pos.account.pnl) ? 0n : pos.account.pnl;
+              depositSum += pos.account.capital;
+              unrealizedPnlSum += pos.unrealizedPnl;
+            } catch {
+              // Resilient per-NFT: skip on any parse / RPC error.
+            }
+          }
+        } catch {
+          // NFT scan is best-effort — never break the core portfolio load.
         }
 
         if (!cancelled) {

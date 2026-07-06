@@ -30,6 +30,10 @@ interface LaunchSuccessProps {
    * Shows a soft warning on the success screen; does not block trading.
    */
   insuranceMintFailed?: boolean;
+  /** Keeper oracle: true when oracle_authority was delegated to the keeper service */
+  keeperDelegated?: boolean;
+  /** Keeper registration message */
+  keeperMessage?: string | null;
 }
 
 /**
@@ -50,6 +54,8 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   devnetAirdropSymbol,
   devnetMintError,
   insuranceMintFailed,
+  keeperDelegated,
+  keeperMessage,
 }) => {
   const [copied, setCopied] = useState(false);
   const [copiedDevnet, setCopiedDevnet] = useState(false);
@@ -137,6 +143,19 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           Explorer ↗
         </a>
       </div>
+
+      {/* Keeper oracle delegation badge */}
+      {keeperDelegated && (
+        <div className="mb-4 border border-[var(--long)]/30 bg-[var(--long)]/[0.06] px-4 py-2.5 text-[11px] text-[var(--long)]">
+          Keeper oracle active — oracle_authority delegated to the Percolator keeper.
+          Mainnet DEX prices will flow to this market within ~30s.
+        </div>
+      )}
+      {!keeperDelegated && keeperMessage && (
+        <div className="mb-4 border border-[var(--warning)]/30 bg-[var(--warning)]/[0.04] px-4 py-2.5 text-[11px] text-[var(--text-secondary)]">
+          Keeper registration: {keeperMessage}
+        </div>
+      )}
 
       {/* Market preview card */}
       <div className="border border-[var(--accent)]/20 bg-[var(--accent)]/[0.02] p-4 mb-6 inline-block text-left w-full max-w-sm mx-auto">

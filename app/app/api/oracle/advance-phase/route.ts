@@ -115,10 +115,15 @@ export async function POST(req: NextRequest) {
     const connection = new Connection(cfg.rpcUrl, "confirmed");
     const slab = new PublicKey(slabAddress);
 
-    // Determine program ID — try NEXT_PUBLIC_PROGRAM_ID, fall back to known large-tier program
-    const programIdStr =
-      process.env.NEXT_PUBLIC_PROGRAM_ID ??
-      "FxfD37s1NC7CDPMPzqgSfLsiJxjYRjfQDsV1CRuW9dBH"; // large-tier devnet default
+    // BUG FIX (devnet flow-test 2026-07-01, flowtest/15-advance-oracle.ts): the previous
+    // fallback "FxfD37s1NC7CDPMPzqgSfLsiJxjYRjfQDsV1CRuW9dBH" doesn't exist on devnet at all
+    // (`solana account` returns AccountNotFound) — a stale value from an old deployment.
+    // Since NEXT_PUBLIC_PROGRAM_ID isn't set in this environment's .env.local, every call
+    // silently failed (the route swallows on-chain errors into a generic
+    // {success:false,skipped:true} response, so this was invisible from the client). Use
+    // getConfig().programId (the canonical source of truth used everywhere else in the app,
+    // already correctly network-aware) as the fallback instead of a hardcoded string.
+    const programIdStr = process.env.NEXT_PUBLIC_PROGRAM_ID ?? cfg.programId;
     const programId = new PublicKey(programIdStr);
 
     const data = encodeAdvanceOraclePhase();
@@ -150,12 +155,26 @@ export async function POST(req: NextRequest) {
       msg.includes("0x") ||
       msg.includes("Transaction simulation failed");
 
-    if (!isExpected) {
+    // BUG FINDING (devnet flow-test 2026-07-01, flowtest/15-advance-oracle.ts): encodeAdvanceOraclePhase()
+    // is marked @deprecated in the SDK and unconditionally calls removedInstruction() — AdvanceOraclePhase
+    // (v12 tag 92) does not exist in v17 at all, so this ALWAYS throws before any network call, on every
+    // v17 market, regardless of program ID or crank keypair config. This is an architectural removal, not
+    // a bug this route can work around — v17 has no phase-advancement concept to crank. Surface that
+    // distinctly so it isn't confused with a real (fixable) on-chain/config failure during debugging.
+    const isRemovedInV17 = msg.includes("removed") || msg.includes("not in v17") || msg.includes("Removed");
+
+    if (!isExpected && !isRemovedInV17) {
       Sentry.captureException(err, {
         extra: { slabAddress, context: "advance-phase-crank" },
       });
     }
 
-    return NextResponse.json({ success: false, skipped: true, reason: "Oracle phase advance failed." });
+    return NextResponse.json({
+      success: false,
+      skipped: true,
+      reason: isRemovedInV17
+        ? "AdvanceOraclePhase does not exist in v17 (removed; was v12 tag 92) — nothing to crank."
+        : "Oracle phase advance failed.",
+    });
   }
 }

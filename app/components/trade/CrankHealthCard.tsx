@@ -27,7 +27,7 @@ export const CrankHealthCard: FC = () => {
   if (loading || !engine) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-2">
-        <span className="text-[10px] text-[var(--text-dim)]">Loading...</span>
+        <span className="text-[10px] text-[var(--text-dim)]">{loading ? "Loading..." : "Not available on v17 markets yet"}</span>
       </div>
     );
   }
@@ -83,7 +83,7 @@ export const CrankHealthCard: FC = () => {
         </div>
         <div className="h-1 w-full rounded-none bg-[var(--border)]">
           <div
-            className={`h-1 rounded-none transition-all duration-500 ${barColor}`}
+            className={`h-1 rounded-none transition-[width,background-color] duration-500 ${barColor}`}
             style={{ width: `${progressPercent}%` }}
           />
         </div>

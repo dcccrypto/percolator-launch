@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { fetchSlab, parseAccount, parseEngine, parseParams } from "@percolatorct/sdk";
-import { getConfig } from "@/lib/config";
+import { getConfig, getAllProgramIds } from "@/lib/config";
+
+// v17 wrapper program IDs — parseEngine does not support v17 account format.
+const V17_PROGRAM_IDS = new Set([
+  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+]);
+
+function isV17Account(cfg: ReturnType<typeof getConfig>): boolean {
+  // If the configured wrapper program is a v17 ID, all slabs are v17 format.
+  return V17_PROGRAM_IDS.has(cfg.programId);
+}
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +35,16 @@ export async function GET(
 
   try {
     const cfg = getConfig();
+
+    // Guard: v17 account format is not supported by parseEngine from the current SDK.
+    // Return 501 (Not Implemented) rather than a generic 500 so callers can handle gracefully.
+    if (isV17Account(cfg)) {
+      return NextResponse.json(
+        { error: "Warmup endpoint not yet available for v17 program accounts" },
+        { status: 501 },
+      );
+    }
+
     const connection = new Connection(cfg.rpcUrl, "confirmed");
     const data = await fetchSlab(connection, slabPk);
     const engine = parseEngine(data);

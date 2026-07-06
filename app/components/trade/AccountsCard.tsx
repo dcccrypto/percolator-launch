@@ -138,7 +138,7 @@ export const AccountsCard: FC = () => {
       <div className="mb-2 flex items-center gap-1">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`rounded-none px-2 py-1 text-[9px] font-medium uppercase tracking-[0.15em] transition-all ${
+            className={`rounded-none px-2 py-1 text-[9px] font-medium uppercase tracking-[0.15em] transition-colors ${
               tab === t.key ? "border-b border-[var(--accent)] text-[var(--accent)]" : "text-[var(--text-secondary)] hover:text-[var(--text)]"
             }`}>
             {t.label} ({t.count})

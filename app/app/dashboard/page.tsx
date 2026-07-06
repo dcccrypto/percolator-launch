@@ -77,7 +77,7 @@ export default function DashboardPage() {
             className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl"
             style={{ fontFamily: "var(--font-heading)" }}
           >
-            <span className="font-normal text-[var(--text-muted)]">Trader </span>Dashboard
+            <span className="font-normal text-[var(--text-secondary)]">Trader </span>Dashboard
           </h1>
           <p className="mt-2 mb-8 text-[13px] text-[var(--text-secondary)]">
             Your personal command centre for trading on Percolator
@@ -129,7 +129,7 @@ export default function DashboardPage() {
               className="text-xl font-medium tracking-[-0.01em] text-[var(--text)] sm:text-2xl"
               style={{ fontFamily: "var(--font-heading)" }}
             >
-              <span className="font-normal text-[var(--text-muted)]">Trader </span>Dashboard
+              <span className="font-normal text-[var(--text-secondary)]">Trader </span>Dashboard
             </h1>
           </div>
         </ScrollReveal>
@@ -202,7 +202,7 @@ export default function DashboardPage() {
                   "rounded-sm px-2 py-2 text-center text-[10px] font-bold transition-all",
                   mobileTab === tab.key
                     ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-                    : "text-[var(--text-muted)]",
+                    : "text-[var(--text-secondary)]",
                 ].join(" ")}
               >
                 <span className="block text-sm">{tab.icon}</span>

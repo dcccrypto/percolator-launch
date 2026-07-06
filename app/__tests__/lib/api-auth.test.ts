@@ -23,31 +23,25 @@ describe("requireAuth", () => {
     process.env = { ...originalEnv };
   });
 
-  describe("dev mode (no INDEXER_API_KEY set)", () => {
-    it("allows all requests in non-production", () => {
-      delete process.env.INDEXER_API_KEY;
-      process.env.NODE_ENV = "development";
-      expect(requireAuth(mockRequest())).toBe(true);
-    });
+  // Differential (anti-hollow): confirm the exact FAIL direction, then the PASS direction.
+  // Without INDEXER_API_KEY, every call must be rejected regardless of NODE_ENV — staging
+  // and preview deployments run as NODE_ENV=development but serve real data.
+  describe("fail-closed when INDEXER_API_KEY is not configured", () => {
+    for (const env of ["production", "development", "test", undefined] as const) {
+      const label = env ?? "(unset)";
+      it(`rejects all requests in NODE_ENV=${label} — wrong path`, () => {
+        delete process.env.INDEXER_API_KEY;
+        if (env === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = env;
+        expect(requireAuth(mockRequest())).toBe(false);
+        expect(requireAuth(mockRequest({ "x-api-key": "anything" }))).toBe(false);
+      });
+    }
 
-    it("allows requests with any header in dev", () => {
-      delete process.env.INDEXER_API_KEY;
-      process.env.NODE_ENV = "development";
-      expect(requireAuth(mockRequest({ "x-api-key": "anything" }))).toBe(true);
-    });
-  });
-
-  describe("production without key configured (R2-S9)", () => {
-    it("rejects all requests when INDEXER_API_KEY is not set", () => {
-      delete process.env.INDEXER_API_KEY;
-      process.env.NODE_ENV = "production";
-      expect(requireAuth(mockRequest())).toBe(false);
-    });
-
-    it("rejects even requests with an x-api-key header", () => {
-      delete process.env.INDEXER_API_KEY;
-      process.env.NODE_ENV = "production";
-      expect(requireAuth(mockRequest({ "x-api-key": "some-key" }))).toBe(false);
+    it("passes once INDEXER_API_KEY is set — right path", () => {
+      delete process.env.NODE_ENV; // not production
+      process.env.INDEXER_API_KEY = "dev-local-key";
+      expect(requireAuth(mockRequest({ "x-api-key": "dev-local-key" }))).toBe(true);
     });
   });
 

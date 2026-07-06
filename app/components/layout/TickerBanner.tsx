@@ -1,7 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { type Network, getConfig } from "@/lib/config";
+
+// Routes where the marketing marquee is suppressed: the trading "workstation"
+// pages, where a scrolling slogan strip reads as unserious and eats vertical
+// space. It stays on landing / browse pages, where the devnet branding fits.
+const WORKSTATION_ROUTES = [
+  "/trade",
+  "/analytics",
+  "/portfolio",
+  "/my-markets",
+  "/stake",
+  "/earn",
+  "/create",
+  "/dashboard",
+];
 
 const DEVNET_ITEMS = [
   "not real money.",
@@ -49,6 +64,11 @@ function TickerContent({ items, colorClass, dotClass }: { items: string[]; color
 export function TickerBanner() {
   const [network, setNetwork] = useState<Network>("mainnet");
   useEffect(() => { setNetwork(getConfig().network); }, []);
+
+  const pathname = usePathname();
+  if (pathname && WORKSTATION_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"))) {
+    return null;
+  }
 
   const isMainnet = network === "mainnet";
   const items = isMainnet ? MAINNET_ITEMS : DEVNET_ITEMS;

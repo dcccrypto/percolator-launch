@@ -26,6 +26,7 @@ import {
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
+import { humanizeError } from "@/lib/errorMessages";
 
 // v17 portfolio account size = SDK V17_PORTFOLIO_ACCOUNT_LEN (9347). MUST be the full length:
 // InitPortfolio reallocs up to 9347 and adds NO lamports, so funding rent for a smaller size
@@ -137,9 +138,11 @@ export function useDeposit(slabAddress: string) {
         const isV17 = slabData ? isV17Account(slabData) : false;
 
         if (isV17) {
-          // v17: derive vault authority PDA to build the vault token ATA
+          // v17: derive vault authority PDA to build the vault token ATA.
+          // vaultPda is a program PDA (off the ed25519 curve) → allowOwnerOffCurve=true,
+          // else spl-token throws TokenOwnerOffCurveError.
           const [vaultPda] = deriveVaultAuthority(programId, slabPk);
-          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint);
+          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
           // ── v17 deposit path ────────────────────────────────────────────────
           // Portfolio accounts in v17 are standalone program-owned accounts.
           // We must find or create the user's portfolio account.
@@ -296,7 +299,7 @@ export function useDeposit(slabAddress: string) {
         setTimeout(() => refreshSlab(), 2000);
         return sig;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(humanizeError(e instanceof Error ? e.message : String(e)));
         throw e;
       } finally {
         inflightRef.current = false;

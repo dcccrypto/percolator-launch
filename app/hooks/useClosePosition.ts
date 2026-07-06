@@ -6,7 +6,7 @@ import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
 import { useTrade } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
-import { useLivePrice } from "@/hooks/useLivePrice";
+import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
 import { isMockMode } from "@/lib/mock-mode";
@@ -38,7 +38,6 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   const { publicKey } = useWalletCompat();
   const userAccount = useUserAccount();
   const { trade } = useTrade(slabAddress);
-  const { priceE6: livePriceE6 } = useLivePrice();
   const { accounts, raw, programId } = useSlabState();
   const mockMode = isMockMode() && isMockSlab(slabAddress);
 
@@ -141,9 +140,15 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           closeSize = freshIsLong ? -partialAbs : partialAbs;
         }
 
-        // useTrade derives limit_price_e6 from livePriceE6 and throws
-        // SlippageError when the live mark is unavailable. Short-circuit here
-        // so the user sees the real reason immediately.
+        // Read the current mark price NON-reactively, at call time — not via
+        // the useLivePrice() hook (same rationale as useTrade.ts: this hook
+        // is called from PositionPanel/ClosePositionModal at top level, so a
+        // reactive subscription here would re-render those components on
+        // every price tick just to source a value only used inside this
+        // callback). useTrade derives limit_price_e6 from livePriceE6 and
+        // throws SlippageError when the live mark is unavailable —
+        // short-circuit here so the user sees the real reason immediately.
+        const { priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
         if (livePriceE6 == null) {
           throw new Error(
             "Live mark price unavailable — wait for the price feed to reconnect, then try again.",
@@ -173,7 +178,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         setLoading(false);
       }
     },
-    [connection, publicKey, userAccount, trade, lpIdx, slabAddress, mockMode, livePriceE6, isV17Market, programId],
+    [connection, publicKey, userAccount, trade, lpIdx, slabAddress, mockMode, isV17Market, programId],
   );
 
   return { closePosition, loading, error, phase, lastSig, resetPhase };

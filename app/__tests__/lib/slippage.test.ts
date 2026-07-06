@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeLimitPriceE6,
   DEFAULT_SLIPPAGE_BPS,
+  DEFAULT_SHORT_SLIPPAGE_BPS,
   MAX_SLIPPAGE_BPS,
   SlippageError,
 } from "@/lib/slippage";
@@ -9,9 +10,9 @@ import {
 const MARK = 200_000_000n; // $200.000000 in e6
 
 describe("computeLimitPriceE6 — long side (size > 0)", () => {
-  it("default 100 bps → mark * 1.01 (ceil-rounded)", () => {
-    // 200_000_000 * 10_100 = 2_020_000_000_000 / 10_000 = 202_000_000 (exact)
-    expect(computeLimitPriceE6({ markE6: MARK, size: 1n })).toBe(202_000_000n);
+  it("default 500 bps → mark * 1.05 (ceil-rounded)", () => {
+    // 200_000_000 * 10_500 = 2_100_000_000_000 / 10_000 = 210_000_000 (exact)
+    expect(computeLimitPriceE6({ markE6: MARK, size: 1n })).toBe(210_000_000n);
   });
 
   it("explicit 250 bps tolerance", () => {
@@ -35,9 +36,18 @@ describe("computeLimitPriceE6 — long side (size > 0)", () => {
 });
 
 describe("computeLimitPriceE6 — short side (size < 0)", () => {
-  it("default 100 bps → mark * 0.99", () => {
-    // 200_000_000 * 9_900 = 1_980_000_000_000 / 10_000 = 198_000_000
-    expect(computeLimitPriceE6({ markE6: MARK, size: -1n })).toBe(198_000_000n);
+  it("default (DEFAULT_SHORT_SLIPPAGE_BPS = 500) bps → mark * 0.95", () => {
+    // Short/sell-side default is wider than the long/buy-side default — see
+    // DEFAULT_SHORT_SLIPPAGE_BPS doc comment (devnet-verified matcher spread
+    // asymmetry; symmetric 100bps reliably failed on-chain for shorts).
+    // 200_000_000 * 9_500 = 1_900_000_000_000 / 10_000 = 190_000_000
+    expect(computeLimitPriceE6({ markE6: MARK, size: -1n })).toBe(190_000_000n);
+  });
+
+  it("explicit 100 bps override → mark * 0.99 (old symmetric behavior still available)", () => {
+    expect(
+      computeLimitPriceE6({ markE6: MARK, size: -1n, slippageBps: 100n }),
+    ).toBe(198_000_000n);
   });
 
   it("limit is always ≤ mark for shorts", () => {
@@ -106,8 +116,14 @@ describe("computeLimitPriceE6 — error cases", () => {
 });
 
 describe("computeLimitPriceE6 — invariants", () => {
-  it("DEFAULT_SLIPPAGE_BPS matches the on-chain default band (100 bps)", () => {
-    expect(DEFAULT_SLIPPAGE_BPS).toBe(100n);
+  it("DEFAULT_SLIPPAGE_BPS and DEFAULT_SHORT_SLIPPAGE_BPS both clear the devnet-verified failure threshold (>200bps) with margin", () => {
+    // Both sides were devnet-verified (2026-07-01) to fail on-chain at the old
+    // symmetric 100bps once the matcher's inventory skew moves against the
+    // trade direction (long on SLABS.JUP, short on SLABS.TRUMP) — see doc
+    // comments in lib/slippage.ts. 500bps is used for both, for margin.
+    expect(DEFAULT_SLIPPAGE_BPS).toBeGreaterThan(200n);
+    expect(DEFAULT_SHORT_SLIPPAGE_BPS).toBeGreaterThan(200n);
+    expect(DEFAULT_SLIPPAGE_BPS).toBe(DEFAULT_SHORT_SLIPPAGE_BPS);
   });
 
   it("never returns 0n (the on-chain disable sentinel) for a valid mark", () => {

@@ -21,8 +21,6 @@ const ConnectButton = dynamic(
 const MAINNET_HIDDEN_PATHS = new Set([
   "/devnet-mint",
   "/faucet",
-  "/openclaw",
-  "/pitch",
 ]);
 
 function filterForNetwork(items: NavItem[], network: string): NavItem[] {
@@ -34,9 +32,9 @@ function filterForNetwork(items: NavItem[], network: string): NavItem[] {
  * Waitlist-host nav filter.  When the page is served from
  * percolator.trade, hide trading-product surfaces (Trade group entirely;
  * /create, /devnet-mint, /stake from Build) and keep only the
- * dev/community-facing routes.  Trading lives at mainnet.percolatorlaunch.com.
+ * dev/community-facing routes.  Trading lives on the playground.
  */
-const WAITLIST_HOST_BUILD_KEEP = new Set(["/developers", "/guide"]);
+const WAITLIST_HOST_BUILD_KEEP = new Set(["/developers"]);
 function filterForWaitlistHost(items: NavItem[], group: "trade" | "build" | "community", isWaitlistHost: boolean): NavItem[] {
   if (!isWaitlistHost) return items;
   if (group === "trade") return [];
@@ -55,16 +53,12 @@ const tradeLinks: NavItem[] = [
 const buildLinks: NavItem[] = [
   { href: "/create", label: "Create a Market" },
   { href: "/developers", label: "Developers" },
-  { href: "/guide", label: "Guide" },
-  { href: "/devnet-mint", label: "Faucet" },
+  { href: "/faucet", label: "Faucet" },
   { href: "/stake", label: "Stake" },
 ];
 
 const communityLinks: NavItem[] = [
   { href: "/leaderboard", label: "Leaderboard" },
-  { href: "/join", label: "Join Us" },
-  { href: "/agents", label: "Agents" },
-  { href: "/report-bug", label: "Report Bug" },
 ];
 
 /* ── All links flat (for mobile) ── */

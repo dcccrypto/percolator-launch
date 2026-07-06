@@ -237,13 +237,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid mainnetCA" }, { status: 400 });
     }
 
-    // 1. Check for existing mapping
-    const supabase = getServiceClient();
-    const { data: existing } = await supabase
-      .from("devnet_mints")
-      .select("devnet_mint, name, symbol, decimals, logo_url")
-      .eq("mainnet_ca", mainnetCA)
-      .maybeSingle();
+    // 1. Check for existing mapping (guarded — Supabase may be absent in playground)
+    let supabase: ReturnType<typeof getServiceClient> | null = null;
+    try {
+      supabase = getServiceClient();
+    } catch {
+      // Supabase unavailable — skip DB lookup, proceed to create mint
+    }
+    const existing = supabase
+      ? (await supabase.from("devnet_mints").select("devnet_mint, name, symbol, decimals, logo_url").eq("mainnet_ca", mainnetCA).maybeSingle()).data
+      : null;
 
     if (existing?.devnet_mint) {
       return NextResponse.json({
@@ -367,43 +370,37 @@ export async function POST(req: NextRequest) {
 
     const devnetMint = mintKeypair.publicKey.toBase58();
 
-    // 4. Store mapping — upsert with ignoreDuplicates to handle concurrent requests
-    // (TOCTOU: two simultaneous requests can both pass the SELECT check above;
-    //  upsert ON CONFLICT (mainnet_ca) DO NOTHING prevents duplicate rows and
-    //  avoids a second createMint call winning a race that corrupts the table.)
-    // GH#1476: include creator_wallet so the column constraint is satisfied.
-    const { error: upsertError } = await supabase.from("devnet_mints").upsert(
-      {
-        mainnet_ca: mainnetCA,
-        devnet_mint: devnetMint,
-        symbol: tokenInfo.symbol,
-        name: tokenInfo.name,
-        decimals: tokenInfo.decimals,
-        logo_url: tokenInfo.logoUrl ?? null,
-        creator_wallet: walletAddress,
-      },
-      { onConflict: "mainnet_ca", ignoreDuplicates: true },
-    );
+    // 4. Store mapping — best-effort when Supabase available
+    let canonicalMint = devnetMint;
+    if (supabase) {
+      const { error: upsertError } = await supabase.from("devnet_mints").upsert(
+        {
+          mainnet_ca: mainnetCA,
+          devnet_mint: devnetMint,
+          symbol: tokenInfo.symbol,
+          name: tokenInfo.name,
+          decimals: tokenInfo.decimals,
+          logo_url: tokenInfo.logoUrl ?? null,
+          creator_wallet: walletAddress,
+        },
+        { onConflict: "mainnet_ca", ignoreDuplicates: true },
+      );
 
-    if (upsertError) {
-      Sentry.captureException(upsertError, {
-        tags: { endpoint: "/api/devnet-mirror-mint", step: "upsert" },
-        extra: { mainnetCA, walletAddress, devnetMint },
-      });
-      // Non-fatal: mint was created on-chain. Log and continue — re-SELECT will
-      // return the canonical row even if this upsert lost a race.
+      if (upsertError) {
+        Sentry.captureException(upsertError, {
+          tags: { endpoint: "/api/devnet-mirror-mint", step: "upsert" },
+          extra: { mainnetCA, walletAddress, devnetMint },
+        });
+      }
+
+      // Re-SELECT the canonical row to handle TOCTOU races
+      const { data: canonical } = await supabase
+        .from("devnet_mints")
+        .select("devnet_mint")
+        .eq("mainnet_ca", mainnetCA)
+        .single();
+      canonicalMint = canonical?.devnet_mint ?? devnetMint;
     }
-
-    // Re-SELECT the canonical row from DB to handle TOCTOU races (#772):
-    // If two concurrent requests both created mints, only one wins the upsert.
-    // Return the DB-canonical devnetMint so all callers get the same address.
-    const { data: canonical } = await supabase
-      .from("devnet_mints")
-      .select("devnet_mint")
-      .eq("mainnet_ca", mainnetCA)
-      .single();
-
-    const canonicalMint = canonical?.devnet_mint ?? devnetMint;
 
     return NextResponse.json({
       status: canonicalMint === devnetMint ? "created" : "existing",

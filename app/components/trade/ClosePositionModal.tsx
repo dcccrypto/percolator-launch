@@ -20,6 +20,8 @@ interface ClosePositionModalProps {
   priceUsd: number | null;
   isLong: boolean;
   loading: boolean;
+  /** B-3: Trading fee basis points — subtracted from Est. Receive so the preview matches on-chain. */
+  tradingFeeBps?: bigint;
   /** GH#1842: Block submission when oracle price is stale or unavailable */
   oracleStale?: boolean;
   onConfirm: (percent: number) => void;
@@ -43,6 +45,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   priceUsd,
   isLong,
   loading,
+  tradingFeeBps = 0n,
   oracleStale = false,
   onConfirm,
   onCancel,
@@ -110,16 +113,21 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
       ? capital
       : (capital * BigInt(percent)) / 100n;
 
-    // Estimated receive = proportional capital + PnL (clamped to 0)
-    const rawReceive = closeCapital + pnl;
+    // B-3: Compute the trading fee charged on close (notional * feeBps / 10_000).
+    // Without this, "Est. Receive" overstates what the user actually receives on-chain.
+    const closeNotional = currentPrice > 0n ? (closeAbs * currentPrice) / 1_000_000n : 0n;
+    const closeFee = tradingFeeBps > 0n ? (closeNotional * tradingFeeBps) / 10_000n : 0n;
+
+    // Estimated receive = proportional capital + PnL − trading fee (clamped to 0)
+    const rawReceive = closeCapital + pnl - closeFee;
     const receive = rawReceive > 0n ? rawReceive : 0n;
 
     const pnlUsd = priceUsd !== null && currentPrice > 0n
       ? (Number(pnl) / (10 ** decimals)) * priceUsd
       : null;
 
-    return { closeAbs, remainingAbs, pnl, pnlUsd, receive };
-  }, [percent, absPosition, isLong, entryPrice, currentPrice, capital, priceUsd]);
+    return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, receive };
+  }, [percent, absPosition, isLong, entryPrice, currentPrice, capital, priceUsd, tradingFeeBps]);
 
   const pnlColor =
     preview.pnl === 0n
@@ -197,7 +205,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
               <button
                 key={p}
                 onClick={() => setPercent(p)}
-                className={`flex-1 rounded-none py-1 text-[10px] font-medium transition-all duration-150 ${
+                className={`flex-1 rounded-none py-1 text-[10px] font-medium transition-colors duration-150 ${
                   percent === p
                     ? "bg-[var(--short)] text-white"
                     : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:border-[var(--short)]/30 hover:text-[var(--text-secondary)]"
@@ -235,6 +243,14 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
               )}
             </span>
           </div>
+          {preview.closeFee > 0n && (
+            <div className="flex justify-between">
+              <span className="text-[var(--text-dim)]">Trading Fee:</span>
+              <span className="font-mono font-medium text-[var(--text-secondary)]">
+                −{formatTokenAmount(preview.closeFee, decimals)} {colSym}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-[var(--text-dim)]">Est. Receive:</span>
             <span className="font-mono font-medium text-[var(--text)]">
@@ -267,7 +283,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
           <button
             onClick={() => onConfirm(percent)}
             disabled={loading || oracleStale}
-            className="flex-1 rounded-none bg-[var(--short)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:brightness-110 disabled:opacity-50"
+            className="flex-1 rounded-none bg-[var(--short)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter,opacity] duration-150 hover:brightness-110 disabled:opacity-50"
           >
             {loading ? (
               <span className="inline-flex items-center gap-2">

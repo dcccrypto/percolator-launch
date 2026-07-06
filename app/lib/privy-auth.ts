@@ -41,6 +41,24 @@ export type PrivyAuthError =
 
 export type PrivyAuthOk = { ok: true } & PrivyAuthResult;
 
+function getCanonicalPrivyUserId(user: User): string | null {
+  const candidate = (user as { id?: unknown; user_id?: unknown; privy_id?: unknown });
+
+  if (typeof candidate.id === "string" && candidate.id.trim()) {
+    return candidate.id.trim();
+  }
+
+  if (typeof candidate.user_id === "string" && candidate.user_id.trim()) {
+    return candidate.user_id.trim();
+  }
+
+  if (typeof candidate.privy_id === "string" && candidate.privy_id.trim()) {
+    return candidate.privy_id.trim();
+  }
+
+  return null;
+}
+
 /**
  * Verify a Privy session from request headers.
  *
@@ -79,19 +97,22 @@ export async function verifyPrivyAuth(
     return { ok: false, status: 401, reason: "invalid-token" };
   }
 
-  // Optional id-token parse for linked accounts. If absent or invalid
-  // we return DID only — the caller can still match on privy_did, just
-  // not on email/pubkey backfill.
+  // Optional id-token parse for linked accounts. When supplied, it must
+  // belong to the same Privy user as the verified access token before any
+  // linked email or wallet attributes can be trusted for authorization.
   const idToken = req.headers.get("x-privy-id-token")?.trim() ?? "";
   let user: User | null = null;
   if (idToken) {
     try {
       user = await authUtils.verifyIdentityToken(idToken);
+      const identityUserId = getCanonicalPrivyUserId(user);
+      if (!identityUserId || identityUserId !== userId) {
+        console.warn("[privy-auth] identity token subject mismatch");
+        return { ok: false, status: 401, reason: "invalid-token" };
+      }
     } catch (err) {
-      console.warn(
-        "[privy-auth] verifyIdentityToken failed, returning DID only",
-        err,
-      );
+      console.warn("[privy-auth] verifyIdentityToken failed", err);
+      return { ok: false, status: 401, reason: "invalid-token" };
     }
   }
 

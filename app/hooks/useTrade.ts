@@ -15,6 +15,8 @@ import {
   derivePythPushOraclePDA,
   deriveMatcherDelegate,
   WELL_KNOWN,
+  isV17Account,
+  parsePortfolioV17,
 } from "@percolatorct/sdk";
 // TODO(oracle-migration): encodePushOraclePrice/ACCOUNTS_PUSH_ORACLE_PRICE removed in beta.29.
 // The DEX oracle inline push path needs to migrate to /api/oracle/advance-phase.
@@ -26,7 +28,7 @@ import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
-import { useLivePrice } from "@/hooks/useLivePrice";
+import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { computeLimitPriceE6 } from "@/lib/slippage";
 
 const INLINE_ORACLE_PUSH_REMOVED_ERROR =
@@ -70,7 +72,11 @@ function readPortfolioMatcherConfig(data: Buffer): {
 } | null {
   if (data.length < PORTFOLIO_MATCHER_CONFIG_LEN) return null;
   const off = data.length - PORTFOLIO_MATCHER_CONFIG_LEN;
-  const enabled = data.readBigUInt64LE(off + 96);
+  // `data` is a Uint8Array in the browser (web3.js) — it has no Buffer.readBigUInt64LE,
+  // and Next's Buffer polyfill is missing the BigInt read methods. Use DataView (works
+  // for both Buffer and Uint8Array). LE = true.
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const enabled = dv.getBigUint64(off + 96, true);
   if (enabled !== 1n) return null;
   return {
     matcherProgram: new PublicKey(data.subarray(off, off + 32)),
@@ -118,8 +124,7 @@ async function findV17Portfolio(
 export function useTrade(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, accounts, programId: slabProgramId } = useSlabState();
-  const { priceE6: livePriceE6 } = useLivePrice();
+  const { config: mktConfig, accounts, raw, programId: slabProgramId } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
@@ -139,6 +144,19 @@ export function useTrade(slabAddress: string) {
 
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
+
+        // Read the current mark price NON-reactively, at submit time — not
+        // via the useLivePrice() hook. useTrade() is called from the trade
+        // form's top level, so subscribing here would force that component
+        // to re-render on every price tick just to source a value that's
+        // only ever used inside this callback (see BUILD-LOG Phase 0
+        // finding #3 / Phase 1). getLivePriceSnapshot() is a plain,
+        // non-subscribing read of the same store useLivePrice() reads from
+        // — same freshness guarantee (in fact fresher: read at the instant
+        // of submit, not at the instant of last render), same values, zero
+        // render cost. This changes only *where* the price value is read
+        // from, not the tx-building logic below.
+        const { priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
 
         // Slippage protection. The on-chain handler treats limit_price_e6 == 0
         // as a "no limit" sentinel and skips the slippage check entirely
@@ -190,9 +208,10 @@ export function useTrade(slabAddress: string) {
         // v12 stale accounts removed: lpOwner (signer), clock, oracle, lpPda.
         // See v16_program.rs::handle_trade_cpi (line ~7338).
 
-        // Detect whether this is a v17 market (accounts bitmap is empty in SlabProvider
-        // for v17 slabs — v17 does not embed accounts in the slab data).
-        const isV17Market = accounts.length === 0;
+        // B-6: Detect v17 using the same SDK isV17Account check as useClosePosition,
+        // rather than the `accounts.length === 0` heuristic which misidentifies v12
+        // markets with no LP yet (empty bitmap) as v17 markets.
+        const isV17Market = raw != null && raw.length > 0 && isV17Account(raw);
 
         let accountA: PublicKey;
         let accountB: PublicKey;
@@ -304,20 +323,42 @@ export function useTrade(slabAddress: string) {
         });
         // v17 PermissionlessCrank (tag 5): [owner(s,w), market(w), portfolio(w)] + oracle tail.
         // Build after accountA is resolved — portfolio = accountA (taker's portfolio).
-        const crankPortfolio = isV17Market ? accountA : slabPk;
-        const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
-          wallet.publicKey, slabPk, crankPortfolio,
-        ]);
-        // For Pyth mode, append oracle feed account as tail
-        if (!useAdminOracle) {
-          crankKeys.push({ pubkey: oracleAccount, isSigner: false, isWritable: false });
+        // Only prepend PermissionlessCrank(FeeSweep) when the taker already has active legs.
+        // Cranking an empty portfolio returns EngineNonProgress (0x16) and aborts the tx.
+        // Bug fix: do NOT unconditionally prepend the crank instruction.
+        let hasActiveLegs = false;
+        if (isV17Market) {
+          try {
+            const portInfo = await connection.getAccountInfo(accountA, "confirmed");
+            if (portInfo) {
+              const pf = parsePortfolioV17(new Uint8Array(portInfo.data));
+              hasActiveLegs = pf.legs.some((l) => l.active);
+            }
+          } catch {
+            // If portfolio read fails, skip the crank rather than aborting the trade
+            hasActiveLegs = false;
+          }
+        } else {
+          // v12: always include the crank (v12 crank is on the slab, not the portfolio)
+          hasActiveLegs = true;
         }
-        const crankIx = buildIx({
-          programId,
-          keys: crankKeys,
-          data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 }),
-        });
-        instructions.unshift(crankIx); // prepend crank before trade
+
+        if (hasActiveLegs) {
+          const crankPortfolio = isV17Market ? accountA : slabPk;
+          const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
+            wallet.publicKey, slabPk, crankPortfolio,
+          ]);
+          // For Pyth mode, append oracle feed account as tail
+          if (!useAdminOracle) {
+            crankKeys.push({ pubkey: oracleAccount, isSigner: false, isWritable: false });
+          }
+          const crankIx = buildIx({
+            programId,
+            keys: crankKeys,
+            data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 }),
+          });
+          instructions.unshift(crankIx);
+        }
         instructions.push(tradeIx);
 
         return await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
@@ -330,7 +371,7 @@ export function useTrade(slabAddress: string) {
         setLoading(false);
       }
     },
-    [connection, wallet, mktConfig, accounts, slabAddress, slabProgramId, livePriceE6]
+    [connection, wallet, mktConfig, accounts, raw, slabAddress, slabProgramId]
   );
 
   return { trade, loading, error };

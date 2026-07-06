@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRpcEndpoint } from "@/lib/config";
 import { createHash, timingSafeEqual } from "crypto";
+import { getClientIp } from "@/lib/get-client-ip";
+import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -265,6 +267,36 @@ function validateRequest(req: Record<string, unknown>): { jsonrpc: string; error
       id: req?.id ?? null,
     };
   }
+  // #2204: getProgramAccounts must be bounded. An unfiltered getProgramAccounts over a busy
+  // program returns every account and is fully materialized in this Node process — a single
+  // request can exhaust memory regardless of the per-IP rate limit. Require a non-empty
+  // `filters` array containing at least one `dataSize` or `memcmp` so the upstream node bounds
+  // the result set. (The app always queries with a dataSize + market memcmp; only an abusive
+  // caller omits them.)
+  if (method === "getProgramAccounts") {
+    const params = req?.params;
+    const cfg = Array.isArray(params) ? (params[1] as Record<string, unknown> | undefined) : undefined;
+    const filters = cfg?.filters;
+    const bounded =
+      Array.isArray(filters) &&
+      filters.some(
+        (f) =>
+          f != null &&
+          typeof f === "object" &&
+          ("dataSize" in (f as object) || "memcmp" in (f as object)),
+      );
+    if (!bounded) {
+      console.warn("[/api/rpc] Blocked unbounded getProgramAccounts (no dataSize/memcmp filter)");
+      return {
+        jsonrpc: "2.0",
+        error: {
+          code: -32602,
+          message: "getProgramAccounts requires a bounding filter (dataSize or memcmp)",
+        },
+        id: req?.id ?? null,
+      };
+    }
+  }
   return null;
 }
 
@@ -373,11 +405,69 @@ function isAllowedOrigin(req: NextRequest): boolean {
   if (!hostname) return false;
 
   if (hostname === "localhost" || hostname === "127.0.0.1") {
+    // #2210: only trust a localhost Origin in DEVELOPMENT. In production this was an
+    // unconditional bypass — any non-browser caller could send `Origin: http://localhost`
+    // and drain the paid Helius key. Origin is client-controlled/spoofable, so localhost
+    // is accepted only on a non-production deployment (local dev / preview).
+    return process.env.NODE_ENV !== "production";
+  }
+
+  // Dev only: allow LAN / private-network hosts so the local playground works
+  // when opened via the machine's LAN IP (e.g. a phone on the same WiFi).
+  // Production stays locked to the apex domain below.
+  if (process.env.NODE_ENV !== "production") {
+    if (
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      hostname.endsWith(".local")
+    ) {
+      return true;
+    }
+  }
+
+  // Same-origin: the browser-set Origin/Referer host matches the host actually
+  // serving this deployment. The browser always sets Origin to the real calling
+  // page, so Origin-host === serving-host is a genuine same-origin request — this
+  // makes /api/rpc work on ANY deployment domain (e.g. the devnet playground at
+  // percolator-playground.vercel.app, or a Vercel preview URL) without hardcoding
+  // each one. The no-Origin server path above still requires X-Internal-Token, so
+  // this does not reopen the anonymous-relay drain (PERC-8308).
+  const servingHost = req.headers.get("host")?.split(":")[0]?.toLowerCase();
+  if (servingHost && hostname === servingHost) {
     return true;
   }
 
-  // Accept the apex domain and its subdomains only.
+  // Accept the apex domain and its subdomains too.
   return hostname === "percolatorlaunch.com" || hostname.endsWith(".percolatorlaunch.com");
+}
+
+/**
+ * #2210: best-effort per-IP rate limit. The Origin/Referer check is defense-in-depth
+ * ONLY — Origin is a client-controlled header, so a non-browser caller can spoof an
+ * allowed value (e.g. `Origin: https://percolatorlaunch.com`) and still pass. To bound
+ * paid-Helius-quota drain we cap requests per source IP.
+ *
+ * Uses the shared Upstash Redis limiter (app/lib/upstash-rate-limit.ts) so the count is
+ * consistent across Vercel's multiple serverless instances — an in-memory Map here would
+ * give every instance its own independent budget, which doesn't actually bound drain rate
+ * under real (multi-instance) production traffic. Falls back to an in-memory sliding
+ * window (same helper) when Upstash env vars are unconfigured (dev/CI).
+ * Tunable via RPC_RATE_LIMIT_PER_WINDOW.
+ */
+const RATE_LIMIT_WINDOW_MS = 10_000;
+const RATE_LIMIT_MAX = Number(process.env.RPC_RATE_LIMIT_PER_WINDOW ?? "200"); // per IP / 10s
+const rpcRateLimiter = createUpstashRateLimiter({
+  limit: RATE_LIMIT_MAX,
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  prefix: "rl:rpc-proxy",
+});
+
+async function isRateLimited(req: NextRequest): Promise<boolean> {
+  if (!Number.isFinite(RATE_LIMIT_MAX) || RATE_LIMIT_MAX <= 0) return false; // disabled
+  const ip = getClientIp(req);
+  const result = await rpcRateLimiter.check(ip);
+  return !result.allowed;
 }
 
 export async function POST(req: NextRequest) {
@@ -386,6 +476,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { jsonrpc: "2.0", error: { code: -32600, message: "Forbidden" }, id: null },
       { status: 403 }
+    );
+  }
+
+  // #2210: per-IP rate limit — Origin is spoofable, so cap drain rate regardless.
+  if (await isRateLimited(req)) {
+    return NextResponse.json(
+      { jsonrpc: "2.0", error: { code: -32005, message: "Rate limit exceeded" }, id: null },
+      { status: 429 }
     );
   }
 

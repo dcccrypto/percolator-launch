@@ -111,7 +111,7 @@ export const MarketBrowser: FC = () => {
                     </a>
                   </td>
                   <td className="px-4 py-3">
-                    <OracleBadge mode={detectOracleMode(m.config)} pulse={false} />
+                    <OracleBadge mode={detectOracleMode({ ...m.config, oracleModeByte: m.configV17?.oracleMode })} pulse={false} />
                   </td>
                   <td className="px-4 py-3 text-right text-[var(--text)]">
                     {formatTokenAmount(m.engine.totalOpenInterest, decimals)} {symbol}
@@ -159,7 +159,7 @@ export const MarketBrowser: FC = () => {
                     <div className="font-medium text-sm text-[var(--text)]">{symbol}/USD PERP</div>
                     <div className="font-mono text-[10px] text-[var(--text-muted)]">{shortenAddress(slab, 4)}</div>
                   </div>
-                  <OracleBadge mode={detectOracleMode(m.config)} pulse={false} />
+                  <OracleBadge mode={detectOracleMode({ ...m.config, oracleModeByte: m.configV17?.oracleMode })} pulse={false} />
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <HealthBadge level={health.level} />

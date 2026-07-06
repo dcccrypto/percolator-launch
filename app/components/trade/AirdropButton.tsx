@@ -153,7 +153,7 @@ export function AirdropButton({ mintAddress, symbol, isUserCreated = true, isDev
                    bg-[var(--accent)]/10 border border-[var(--accent)]/30
                    text-[var(--accent)] text-[11px] font-medium
                    hover:bg-[var(--accent)]/20 hover:border-[var(--accent)]/50
-                   active:scale-95 transition-all duration-150
+                   active:scale-95 transition-[transform,background-color,border-color,opacity] duration-150
                    disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {loading ? (
