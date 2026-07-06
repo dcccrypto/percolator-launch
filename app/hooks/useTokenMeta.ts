@@ -20,6 +20,9 @@ export function useTokenMeta(mint: PublicKey | null): TokenMeta | null {
       return;
     }
 
+    // Clear previous token metadata immediately while loading a new mint.
+    setMeta(null);
+
     // Check if this mint belongs to a mock slab (design testing)
     const mintStr = mint.toBase58();
     const mockSym = getMockSymbol(mintStr);
