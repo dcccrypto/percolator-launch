@@ -3,6 +3,13 @@
  *
  * The admin gate must not combine the authenticated Privy DID from one
  * access token with linked email attributes from another user's identity token.
+ *
+ * Exercised via requireAdminSession() (app/lib/admin-session.ts), the actual
+ * caller of verifyPrivyAuth() (app/lib/privy-auth.ts) in this branch — the
+ * marketing-site /api/admin/whoami route this regression was originally filed
+ * against isn't part of the playground (devnet trading app) tree, but the
+ * shared auth helper it called from is, and is still live (gates every
+ * /api/admin/* route via the middleware's admin matcher).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,8 +58,8 @@ function identityUser(id: string, email: string) {
   };
 }
 
-async function callWhoami(accessToken: string, identityToken?: string) {
-  const { GET } = await import("@/app/api/admin/whoami/route");
+async function callRequireAdminSession(accessToken: string, identityToken?: string) {
+  const { requireAdminSession } = await import("@/lib/admin-session");
 
   const headers = new Headers({
     authorization: `Bearer ${accessToken}`,
@@ -62,7 +69,7 @@ async function callWhoami(accessToken: string, identityToken?: string) {
     headers.set("x-privy-id-token", identityToken);
   }
 
-  return GET(
+  return requireAdminSession(
     new Request("http://localhost/api/admin/whoami", {
       method: "GET",
       headers,
@@ -85,9 +92,10 @@ describe("admin Privy token subject binding", () => {
   it("rejects a non-admin access token without an identity token", async () => {
     privy.verifyAccessToken.mockResolvedValue(accessClaims(ATTACKER_DID));
 
-    const response = await callWhoami("attacker-access-token");
+    const result = await callRequireAdminSession("attacker-access-token");
 
-    expect(response.status).toBe(403);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
     expect(privy.verifyIdentityToken).not.toHaveBeenCalled();
   });
 
@@ -97,13 +105,12 @@ describe("admin Privy token subject binding", () => {
       identityUser(ADMIN_DID, ADMIN_EMAIL),
     );
 
-    const response = await callWhoami(
+    const result = await callRequireAdminSession(
       "admin-access-token",
       "admin-identity-token",
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(result).toEqual({
       ok: true,
       userId: ADMIN_DID,
       email: ADMIN_EMAIL,
@@ -111,19 +118,22 @@ describe("admin Privy token subject binding", () => {
   });
 
   it("rejects when identity token verification fails", async () => {
-  privy.verifyAccessToken.mockResolvedValue(accessClaims(ADMIN_DID));
-  privy.verifyIdentityToken.mockRejectedValue(new Error("invalid signature"));
+    privy.verifyAccessToken.mockResolvedValue(accessClaims(ADMIN_DID));
+    privy.verifyIdentityToken.mockRejectedValue(new Error("invalid signature"));
 
-  const response = await callWhoami(
-    "admin-access-token",
-    "bad-identity-token",
-  );
+    const result = await callRequireAdminSession(
+      "admin-access-token",
+      "bad-identity-token",
+    );
 
-  expect(response.status).toBe(401);
-  expect(await response.json()).toEqual({
-    error: "Session expired or invalid — sign in again",
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+      expect(await result.response.json()).toEqual({
+        error: "Session expired or invalid — sign in again",
+      });
+    }
   });
-});
 
   it("still permits DID-based admin authorization without an identity token", async () => {
     process.env.PRIVY_ADMIN_DIDS = ADMIN_DID;
@@ -131,10 +141,9 @@ describe("admin Privy token subject binding", () => {
 
     privy.verifyAccessToken.mockResolvedValue(accessClaims(ADMIN_DID));
 
-    const response = await callWhoami("admin-access-token");
+    const result = await callRequireAdminSession("admin-access-token");
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(result).toEqual({
       ok: true,
       userId: ADMIN_DID,
       email: null,
