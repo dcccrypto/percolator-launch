@@ -7,6 +7,7 @@ import { isBlockedSlab } from "@/lib/blocklist";
 import * as Sentry from "@sentry/nextjs";
 import {
   parseWrapperConfigV17,
+  parseMarketGroupV17OI,
   isV17Account,
   V17_HEADER_LEN,
 } from "@percolatorct/sdk";
@@ -46,6 +47,16 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
     const playgroundMeta = PLAYGROUND_SLAB_META[slab];
 
+    // Live engine stats from the same raw bytes (mirrors the list route's
+    // v17 enrichment). Degrades to zeros if the parse throws.
+    let oiLong = 0, oiShort = 0, insurance = 0;
+    try {
+      const oi = parseMarketGroupV17OI(data);
+      oiLong = Number(oi.totalLongOiQ);
+      oiShort = Number(oi.totalShortOiQ);
+      insurance = Number(oi.insuranceBalance);
+    } catch { /* stats stay zeroed */ }
+
     const market = {
       slab_address: slab,
       program_id: info.owner.toBase58(),
@@ -64,21 +75,25 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
       last_price: markPriceUsd,
       mark_price: markPriceUsd,
       index_price: null,
-      volume_24h: 0,
+      // Volume needs the trade-tape indexer — null ("no data"), NOT 0.
+      // MarketInfoBar renders null as "—"; a hard $0 reads as "market is dead".
+      volume_24h: null,
       trade_count_24h: 0,
-      open_interest_long: 0,
-      open_interest_short: 0,
-      total_open_interest: 0,
-      total_open_interest_usd: 0,
-      insurance_fund: 0,
-      insurance_balance: 0,
+      open_interest_long: oiLong,
+      open_interest_short: oiShort,
+      total_open_interest: oiLong + oiShort,
+      total_open_interest_usd: markPriceUsd != null ? ((oiLong + oiShort) / 1_000_000) * markPriceUsd : 0,
+      insurance_fund: insurance,
+      insurance_balance: insurance,
       total_accounts: 0,
       funding_rate: null,
       net_lp_pos: 0,
       lp_sum_abs: 0,
-      c_tot: 0,
-      volume_24h_usd: 0,
-      vault_balance: 0,
+      // Unknown on v17 (no cheap on-chain source) — null, not 0, to avoid the
+      // phantom-OI vault guard downstream (same rationale as the list route).
+      c_tot: null,
+      volume_24h_usd: null,
+      vault_balance: null,
     };
 
     return NextResponse.json(
