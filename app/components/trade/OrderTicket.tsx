@@ -213,7 +213,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
   const [limitPriceInput, setLimitPriceInput] = useState("");
   const [direction, setDirection] = useState<"long" | "short">("long");
-  const [sizeUnit, setSizeUnit] = useState<"token" | "usd">("token");
+  // USD is the default sizing unit — traders think in dollar notional first;
+  // the chip next to the input switches to token units for those who don't.
+  const [sizeUnit, setSizeUnit] = useState<"token" | "usd">("usd");
   const [sizeInput, setSizeInput] = useState("");
   const [marginInput, setMarginInput] = useState("");
   const [leverage, setLeverage] = useState(1);
@@ -544,8 +546,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             Size
             <InfoIcon tooltip="Position size in the toggled unit. Switch between token and USD - both stay in sync." />
           </label>
+          {/* Both balances up top — users deposit from the wallet into the
+              account and trade from the account; showing only one confused
+              people about where their funds "went". 3dp keeps the row tight. */}
           <span className="text-[10px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-            Account Bal: {userAccount ? formatTokenAmount(capital, decimals) : "0"} {collateralSymbol}
+            <span className="text-[var(--text-secondary)]">Acc Bal </span>
+            {userAccount ? formatTokenAmount(capital, decimals, 3) : "0"}
+            <span className="text-[var(--text-secondary)]"> · Wal Bal </span>
+            {walletAtaBalance != null ? formatTokenAmount(walletAtaBalance, decimals, 3) : "—"}
+            <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
           </span>
         </div>
         <div className="flex gap-1.5">
