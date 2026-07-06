@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { PublicKey, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   parseHeader,
   parseConfig,
+  parseWrapperConfigV17,
+  isV17Account,
+  V17_HEADER_LEN,
   encodeCloseSlab,
   ACCOUNTS_CLOSE_SLAB,
   buildAccountMetas,
@@ -73,13 +76,21 @@ export function useCloseMarket() {
           return null;
         }
 
-        // --- SECURITY GUARD: parse header and verify admin before sending any tx ---
+        // --- SECURITY GUARD: parse header/config and verify admin before sending any tx ---
         let slabAdmin: PublicKey;
         try {
-          const header = parseHeader(accountInfo.data);
-          slabAdmin = header.admin;
+          const data = new Uint8Array(accountInfo.data);
+          if (isV17Account(data)) {
+            // v17: admin is in WrapperConfigV17.marketauth (at V17_HEADER_LEN offset)
+            const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
+            slabAdmin = cfg.marketauth;
+          } else {
+            // v12: admin is in the slab header
+            const header = parseHeader(accountInfo.data);
+            slabAdmin = header.admin;
+          }
         } catch {
-          // parseHeader throws when magic bytes are wrong (uninitialised slab).
+          // parseHeader / parseWrapperConfigV17 throws when magic bytes are wrong (uninitialised slab).
           // CloseSlab (tag 13) requires an initialised slab — use ReclaimSlabRent
           // (tag 52 / useReclaimSlabRent) for uninitialised slabs instead.
           setError(
@@ -107,9 +118,22 @@ export function useCloseMarket() {
 
         // beta.32: ACCOUNTS_CLOSE_SLAB expanded to 6 accounts:
         // dest (admin/signer), slab, vault, vaultAuthority, destAta, tokenProgram
-        const slabConfig = parseConfig(accountInfo.data);
-        const vaultPubkey = slabConfig.vaultPubkey;
-        const collateralMint = slabConfig.collateralMint;
+        const data = new Uint8Array(accountInfo.data);
+        let vaultPubkey: PublicKey;
+        let collateralMint: PublicKey;
+        if (isV17Account(data)) {
+          // v17: vaultPubkey is derived (not stored), collateralMint from WrapperConfigV17
+          const v17cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
+          collateralMint = v17cfg.collateralMint;
+          // vault ATA is derived from vaultAuthority PDA
+          const [va] = deriveVaultAuthority(programId, slabPk);
+          const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
+          vaultPubkey = getAssociatedTokenAddressSync(collateralMint, va, true);
+        } else {
+          const slabConfig = parseConfig(accountInfo.data);
+          vaultPubkey = slabConfig.vaultPubkey;
+          collateralMint = slabConfig.collateralMint;
+        }
         const [vaultAuthority] = deriveVaultAuthority(programId, slabPk);
         const destAta = await getAssociatedTokenAddress(collateralMint, walletCompat.publicKey);
 
@@ -132,6 +156,10 @@ export function useCloseMarket() {
           recentBlockhash: blockhash,
           feePayer: walletCompat.publicKey,
         });
+        // v17 wrapper installs a custom 128KB heap allocator and aborts unless the
+        // tx requests the full heap frame. Must be the FIRST instruction. (issue #176)
+        tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+        tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
         tx.add(ix);
 
         const signed = await walletCompat.signTransaction(tx);

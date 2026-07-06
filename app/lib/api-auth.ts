@@ -5,15 +5,14 @@ import { NextRequest, NextResponse } from "next/server";
  * Simple API key auth for internal/indexer routes.
  * Checks `x-api-key` header against INDEXER_API_KEY env var.
  * Uses timing-safe comparison (PERC-597) to prevent timing-oracle attacks.
- * R2-S9: In production without a configured key, rejects all requests.
+ * Fail-closed: when INDEXER_API_KEY is not configured, all requests are
+ * rejected in every environment. Staging/preview deployments are not
+ * "production" but serve real data, so NODE_ENV cannot gate this check.
+ * Set any non-empty INDEXER_API_KEY value for local development.
  */
 export function requireAuth(req: NextRequest): boolean {
   const expectedKey = process.env.INDEXER_API_KEY?.trim() || undefined;
-  if (!expectedKey) {
-    // R2-S9: In production, reject all requests if auth key is not configured
-    if (process.env.NODE_ENV === "production") return false;
-    return true; // No key configured = open (dev mode only)
-  }
+  if (!expectedKey) return false;
   const providedKey = req.headers.get("x-api-key");
   if (!providedKey) return false;
 

@@ -14,8 +14,8 @@ interface StepOracleSelectProps {
   mintValid: boolean;
   tokenSymbol: string | null;
   mode: "quick" | "manual";
-  oracleType: "pyth" | "hyperp_ema" | "admin";
-  onOracleTypeChange: (type: "pyth" | "hyperp_ema" | "admin") => void;
+  oracleType: "pyth" | "hyperp_ema" | "admin" | "keeper";
+  onOracleTypeChange: (type: "pyth" | "hyperp_ema" | "admin" | "keeper") => void;
   oracleFeed: string;
   onOracleFeedChange: (feed: string) => void;
   onDexPoolDetected: (pool: DexPoolResult | null) => void;
@@ -33,7 +33,7 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
   mintAddress,
   mintValid,
   tokenSymbol,
-  mode,
+  mode: _mode,
   oracleType,
   onOracleTypeChange,
   oracleFeed,
@@ -44,11 +44,13 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
   onBack,
   canContinue,
 }) => {
+  const mode = _mode; // restore from renamed param
   // ?mock=1 bypasses the mainnet DEX-pool-depth gate so screenshot
   // captures can pick HYPERP regardless of which specific pool
   // the auto-detector surfaced for the chosen token.
   const mockBypass = isMockMode();
   const isMainnet = getNetwork() === "mainnet" && !mockBypass;
+  const isDevnet = getNetwork() === "devnet";
   // MUST stay in sync with on-chain MIN_DEX_QUOTE_LIQUIDITY in
   // percolator-prog. Lowered to 200_000_000_000 (200K USDC) in
   // v12.19.1 to admit creator-led mid-tier Meteora DLMM and Raydium
@@ -62,8 +64,8 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
   const pythQuery = mode === "manual" && oracleType === "pyth" && tokenSymbol ? tokenSymbol : "";
   const { feeds: pythFeeds, loading: pythLoading } = usePythFeedSearch(pythQuery);
 
-  // DEX pools (manual mode)
-  const dexSearchMint = mode === "manual" && oracleType === "hyperp_ema" && mintValid ? mintAddress : null;
+  // DEX pools (manual mode + keeper mode)
+  const dexSearchMint = (mode === "manual" && (oracleType === "hyperp_ema" || oracleType === "keeper")) && mintValid ? mintAddress : null;
   const { pools: dexPools, loading: dexPoolsLoading } = useDexPoolSearch(dexSearchMint);
 
   const [selectedPythFeedName, setSelectedPythFeedName] = useState<string | null>(null);
@@ -120,6 +122,15 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
       detail: "Best for: new/long-tail tokens",
       note: "● Auto-selected if DEX pool detected",
     },
+    // Keeper delegated oracle — devnet playground only.
+    // oracle_authority = keeper keypair; keeper pushes mainnet DEX price via PushAuthMark.
+    ...(isDevnet ? [{
+      key: "keeper" as const,
+      label: "KEEPER DELEGATED",
+      desc: "Keeper pushes mainnet DEX price",
+      detail: "Best for: devnet playground — any mainnet token",
+      note: "● Requires mainnet DEX pool address",
+    }] : []),
   ] as const;
 
   // Determine badge type
@@ -359,9 +370,102 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
         </div>
       )}
 
+      {/* Keeper delegated mode: mainnet DEX pool selector (same input as hyperp_ema) */}
+      {oracleType === "keeper" && (
+        <div className="space-y-2">
+          <label
+            htmlFor="keeper-dex-pool"
+            className="block text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text)]"
+          >
+            Mainnet DEX Pool Address
+          </label>
+          <p className="text-[11px] text-[var(--text-secondary)]">
+            The keeper service reads live prices from this mainnet pool and pushes them to your devnet market via PushAuthMark every ~30s.
+          </p>
+          {dexPools.length > 0 && !dexPoolInput && (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {dexPools.map((pool) => (
+                <button
+                  key={pool.poolAddress}
+                  type="button"
+                  onClick={() => {
+                    onOracleFeedChange(pool.poolAddress);
+                    setSelectedDexPool(pool);
+                    setDexPoolInput(pool.poolAddress);
+                    onDexPoolDetected(pool);
+                  }}
+                  className="flex w-full items-center justify-between border border-[var(--border)] px-3 py-2 text-left text-[12px] hover:border-[var(--accent)]/30 hover:bg-[var(--accent)]/[0.04] transition-colors"
+                >
+                  <div>
+                    <span className="font-medium text-[var(--text)]">{pool.pairLabel}</span>
+                    <span className="ml-2 text-[10px] text-[var(--text-secondary)] capitalize">
+                      {pool.dexId}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-[var(--text-secondary)]">
+                    ${pool.liquidityUsd.toLocaleString()} liq
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {dexPoolsLoading && (
+            <p className="text-[10px] text-[var(--text-dim)]">Searching mainnet DEX pools...</p>
+          )}
+          {selectedDexPool && dexPoolInput && (
+            <div className="flex items-center justify-between border border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] p-2.5">
+              <span className="text-[12px] font-medium text-[var(--accent)]">
+                {selectedDexPool.pairLabel}{" "}
+                <span className="capitalize text-[10px]">{selectedDexPool.dexId}</span>
+                {selectedDexPool.priceUsd && (
+                  <span className="ml-2 text-[10px] text-[var(--text-secondary)]">
+                    ${selectedDexPool.priceUsd.toLocaleString(undefined, { maximumSignificantDigits: 6 })}
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  onOracleFeedChange("");
+                  setSelectedDexPool(null);
+                  setDexPoolInput("");
+                  onDexPoolDetected(null);
+                }}
+                className="text-[10px] text-[var(--accent)] hover:underline"
+              >
+                Change
+              </button>
+            </div>
+          )}
+          <input
+            id="keeper-dex-pool"
+            type="text"
+            value={dexPoolInput || oracleFeed}
+            onChange={(e) => {
+              const val = e.target.value.trim();
+              setDexPoolInput(val);
+              onOracleFeedChange(val);
+              setSelectedDexPool(null);
+            }}
+            placeholder="Paste mainnet Raydium/Meteora/PumpSwap pool address..."
+            className={`w-full border px-3 py-2.5 text-[12px] font-mono transition-colors focus:outline-none ${
+              (dexPoolInput || oracleFeed) && !isValidBase58Pubkey(dexPoolInput || oracleFeed)
+                ? "border-[var(--short)]/40 bg-[var(--short)]/[0.04]"
+                : "border-[var(--border)] bg-[var(--bg)]"
+            } text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)]/40`}
+          />
+          <div className="border border-[var(--accent)]/20 bg-[var(--accent)]/[0.04] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+            Keeper oracle: oracle_authority will be delegated to the Percolator keeper service.
+            Market admin (you) stays unchanged. Price flow starts within ~30s of creation.
+          </div>
+        </div>
+      )}
+
       {/* Navigation */}
       {(() => {
-        const poolDepthOk = !isMainnet || oracleType !== "hyperp_ema" || !selectedDexPool || selectedDexPool.liquidityUsd >= MIN_MAINNET_POOL_DEPTH_USD;
+        // keeper mode requires a valid pool address
+        const keeperPoolOk = oracleType !== "keeper" || isValidBase58Pubkey(dexPoolInput || oracleFeed);
+        const poolDepthOk = (!isMainnet || oracleType !== "hyperp_ema" || !selectedDexPool || selectedDexPool.liquidityUsd >= MIN_MAINNET_POOL_DEPTH_USD) && keeperPoolOk;
         return (
       <div className="flex items-center gap-3">
         <button

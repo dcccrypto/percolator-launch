@@ -64,6 +64,8 @@ function getModeLabel(mode: OracleMode): string {
       return "PYTH";
     case "admin":
       return "ADMIN";
+    case "keeper":
+      return "KEEPER";
   }
 }
 
@@ -74,10 +76,11 @@ function getModeLabel(mode: OracleMode): string {
  * For hyperp/pyth modes: tracks when lastEffectivePriceE6 last changed.
  */
 export function useOracleFreshness(): OracleFreshnessState {
-  const { config, engine } = useSlabState();
+  const { config, engine, wrapperConfigV17 } = useSlabState();
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [lastUpdateMs, setLastUpdateMs] = useState<number | null>(null);
   const prevPriceRef = useRef<bigint | null>(null);
+  const prevSlotRef = useRef<bigint | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   // Guard: detectOracleMode requires both PublicKey fields — skip if either is missing
@@ -116,23 +119,46 @@ export function useOracleFreshness(): OracleFreshnessState {
         }
       }
     } else {
-      // Hyperp: track authorityPriceE6 (updated by UpdateHyperpMark instruction).
-      // Pyth-pinned: track lastEffectivePriceE6 (updated by KeeperCrank).
+      // Both hyperp and pyth-pinned: track lastEffectivePriceE6 (= markEwmaE6 for hyperp,
+      // updated by the keeper every ~10s via KeeperCrank / UpdateHyperpMark).
+      // For hyperp markets, authorityPriceE6 == oracleTargetPriceE6 — a static constant
+      // that never changes — so tracking it would prevent freshness from ever resetting
+      // and the oracle would always appear stale after 60s. lastEffectivePriceE6 is the
+      // live keeper-pushed mark value and is the correct liveness signal.
       // NOTE: Do NOT use authorityTimestamp here — for Hyperp mode that field
       // stores the funding rate, not a unix timestamp.
-      const currentPrice = currentMode === "hyperp"
-        ? config.authorityPriceE6
-        : config.lastEffectivePriceE6;
+      const currentPrice = config.lastEffectivePriceE6;
+
+      // v17 keeper/hyperp: the reliable liveness signal is the last-push SLOT
+      // (markEwmaLastSlot), which the keeper advances on EVERY push (~10s) even
+      // when the price VALUE is unchanged. Tracking the value alone falsely goes
+      // stale on a flat/slow market — the EWMA doesn't move between pushes, so
+      // the change never fires and trading gets disabled despite a live oracle.
+      const pushSlot = wrapperConfigV17?.markEwmaLastSlot ?? null;
 
       // GH#1338: For hyperp mode, also check lastEffectivePriceE6 (index price from
       // on-chain crank). If it's 0, the oracle-keeper has never cranked this market —
       // the oracle is genuinely unavailable, not just stale. Don't assume "first load = fresh".
-      if (currentMode === "hyperp" && config.lastEffectivePriceE6 === 0n) {
+      if (currentMode === "hyperp" && config.lastEffectivePriceE6 === 0n && (pushSlot === null || pushSlot === 0n)) {
         // Oracle has never been cranked — mark as unavailable (lastUpdateMs stays null)
         prevPriceRef.current = currentPrice;
         return;
       }
 
+      // Preferred path (v17): reset the freshness timer whenever the push slot
+      // advances. The keeper bumps it every ~10s, well under the stale threshold,
+      // so a live-but-flat market never falsely reads stale.
+      if (pushSlot !== null && pushSlot > 0n) {
+        if (prevSlotRef.current === null || pushSlot !== prevSlotRef.current) {
+          // First observation OR the keeper pushed again → treat as just-updated.
+          setLastUpdateMs(Date.now());
+        }
+        prevSlotRef.current = pushSlot;
+        prevPriceRef.current = currentPrice;
+        return;
+      }
+
+      // Legacy fallback (v12, no push-slot available): value-change detection.
       if (prevPriceRef.current !== null && currentPrice !== prevPriceRef.current) {
         setLastUpdateMs(Date.now());
       } else if (prevPriceRef.current === null && currentPrice > 0n) {
@@ -155,7 +181,7 @@ export function useOracleFreshness(): OracleFreshnessState {
       }
       prevPriceRef.current = currentPrice;
     }
-  }, [config, engine]);
+  }, [config, engine, wrapperConfigV17]);
 
   // Tick every second to update elapsed time
   useEffect(() => {

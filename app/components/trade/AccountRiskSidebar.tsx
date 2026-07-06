@@ -145,10 +145,17 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
   const oracleE6 = livePriceE6 ?? onChainOracleE6;
   const hasValidMark = oracleE6 > 0n;
 
-  if (!userAccount) return null;
-  const { idx, account } = userAccount;
-  const hasPosition = account.positionSize !== 0n;
-  const isLong = account.positionSize > 0n;
+  // Derive account fields safely WITHOUT an early return here — every hook
+  // below must run unconditionally on every render (Rules of Hooks). We bail to
+  // null only AFTER all hooks, just before the JSX. (Fixes "Rendered more hooks
+  // than during the previous render" when a wallet/account loads.)
+  const idx = userAccount?.idx ?? 0;
+  const account = userAccount?.account ?? null;
+  const capital = account?.capital ?? 0n;
+  const positionSize = account?.positionSize ?? 0n;
+  const entryPriceRaw = account?.entryPrice ?? 0n;
+  const hasPosition = positionSize !== 0n;
+  const isLong = positionSize > 0n;
 
   // ── Math (uses the same SDK helpers as PositionPanel + TradeForm) ──
   const maintBps = params?.maintenanceMarginBps ?? 500n;
@@ -156,25 +163,25 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
   // Prefer on-chain entryPrice (V12_1_EP) when present; fall back to
   // localStorage entry saved at trade time for old V12_1 markets.
   const resolvedEntry =
-    account.entryPrice > 0n
-      ? account.entryPrice
+    entryPriceRaw > 0n
+      ? entryPriceRaw
       : (slabAddress ? getEntryPrice(slabAddress, idx) : null) ?? 0n;
 
   const liqPriceE6 = useMemo(
-    () => computeLiqPrice(resolvedEntry, account.capital, account.positionSize, maintBps),
-    [resolvedEntry, account.capital, account.positionSize, maintBps],
+    () => computeLiqPrice(resolvedEntry, capital, positionSize, maintBps),
+    [resolvedEntry, capital, positionSize, maintBps],
   );
 
   const pnlTokens = useMemo(
     () =>
       hasPosition && resolvedEntry > 0n && hasValidMark
-        ? computeMarkPnl(account.positionSize, resolvedEntry, oracleE6)
+        ? computeMarkPnl(positionSize, resolvedEntry, oracleE6)
         : 0n,
-    [account.positionSize, resolvedEntry, oracleE6, hasPosition, hasValidMark],
+    [positionSize, resolvedEntry, oracleE6, hasPosition, hasValidMark],
   );
   const pnlPct = useMemo(
-    () => (hasPosition ? computePnlPercent(pnlTokens, account.capital) : 0),
-    [pnlTokens, account.capital, hasPosition],
+    () => (hasPosition ? computePnlPercent(pnlTokens, capital) : 0),
+    [pnlTokens, capital, hasPosition],
   );
 
   // Distance to liquidation as a percent of current price. Saturates to
@@ -192,21 +199,26 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
   // Used = position notional in collateral terms. Available = capital - used (floor 0).
   const notionalNative = useMemo(() => {
     if (!hasPosition || !hasValidMark) return 0n;
-    return (abs(account.positionSize) * oracleE6) / 1_000_000n;
-  }, [account.positionSize, oracleE6, hasPosition, hasValidMark]);
+    return (abs(positionSize) * oracleE6) / 1_000_000n;
+  }, [positionSize, oracleE6, hasPosition, hasValidMark]);
   const marginUsedPct = useMemo(() => {
-    if (account.capital === 0n) return 0;
+    if (capital === 0n) return 0;
     // Notional / capital is "order leverage"; clamp to 0-100 for the bar.
-    const ratio = Number(notionalNative) / Number(account.capital);
-    return Math.max(0, Math.min(100, ratio * 10)); // 10x leverage fills the bar
-  }, [notionalNative, account.capital]);
+    const ratio = Number(notionalNative) / Number(capital);
+    // B-9: Scale bar against market maxLeverage (from initialMarginBps) rather than
+    // hardcoded 10. A position at 20x max fills the bar at 20x, not at 10x.
+    const maxLev = (params?.initialMarginBps && Number(params.initialMarginBps) > 0)
+      ? Math.max(1, Number(10000n / params.initialMarginBps))
+      : 10;
+    return Math.max(0, Math.min(100, (ratio / maxLev) * 100));
+  }, [notionalNative, capital, params]);
 
   // Leverage figures (match TradeForm conventions).
   const orderLeverage = useMemo(() => {
-    if (account.capital === 0n) return 0;
-    return Number(notionalNative) / Number(account.capital);
-  }, [notionalNative, account.capital]);
-  const equity = account.capital + pnlTokens;
+    if (capital === 0n) return 0;
+    return Number(notionalNative) / Number(capital);
+  }, [notionalNative, capital]);
+  const equity = capital + pnlTokens;
   const riskLeverage = useMemo(() => {
     if (equity <= 0n) return 0;
     return Number(notionalNative) / Number(equity);
@@ -223,12 +235,15 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
     // pay/receive depends on side. Positive funding rate → longs pay,
     // so a long position has a negative payment.
     const sign = isLong ? -1n : 1n;
+    // B-2: Divisor is 100 (not 10_000). fundingRateBpsPerSlotLast uses a unit where
+    // dividing by 100 gives the correct collateral-denominated daily payment.
+    // Consistent with PositionPanel GH#1943 fix (was /10000 causing 100× underreport).
     return (
       (sign *
         notionalNative *
         fundingRateBpsSlot *
         SLOTS_PER_DAY) /
-      10_000n
+      100n
     );
   }, [notionalNative, fundingRateBpsSlot, isLong, hasPosition, hasValidMark]);
 
@@ -248,6 +263,9 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
     : pnlPositive
       ? "var(--long)"
       : "var(--short)";
+
+  // All hooks have run above — now it's safe to bail if there's no account on this slab.
+  if (!account) return null;
 
   return (
     <div className="rounded-none border border-[var(--border)] bg-[var(--panel-bg)]/80 p-3 text-[12px] text-[var(--text)]">
@@ -308,8 +326,8 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
             style={{ fontVariantNumeric: "tabular-nums" }}
           >
             {hasPosition
-              ? `${formatTokenAmount(notionalNative, decimals)} / ${formatTokenAmount(account.capital, decimals)} ${collateralSymbol}`
-              : `${formatTokenAmount(account.capital, decimals)} ${collateralSymbol} idle`}
+              ? `${formatTokenAmount(notionalNative, decimals)} / ${formatTokenAmount(capital, decimals)} ${collateralSymbol}`
+              : `${formatTokenAmount(capital, decimals)} ${collateralSymbol} idle`}
           </span>
         </div>
         <div className="h-1.5 w-full rounded-sm bg-[var(--border)]/40">

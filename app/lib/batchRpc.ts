@@ -373,8 +373,13 @@ export function getBatchRpc(): ReturnType<typeof createBatchRpc> {
     }
     _batchRpc = createBatchRpc({
       endpoint: new URL("/api/rpc", window.location.origin).toString(),
-      batchWindowMs: 50,
-      maxBatchSize: 30,
+      // 100ms window (up from 50ms) gives more time for concurrent hook mounts
+      // on the trade page to coalesce into fewer batch requests. The wider window
+      // reduces the ~6 sequential batch flushes per render cycle to ~3.
+      batchWindowMs: 100,
+      // 50 slots (up from 30) accommodates the ~40 RPC calls per trade page mount
+      // in a single batch when they all arrive within the 100ms window.
+      maxBatchSize: 50,
     });
   }
   return _batchRpc;

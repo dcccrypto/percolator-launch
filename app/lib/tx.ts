@@ -393,6 +393,10 @@ export async function sendTx({
       );
 
       const tx = new Transaction();
+      // v17 wrapper installs a custom 128KB heap allocator and aborts ("Access
+      // violation in heap section") on its first heap allocation unless the tx
+      // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+      tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFee }));
       for (const ix of cleanInstructions) {

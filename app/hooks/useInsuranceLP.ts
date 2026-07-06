@@ -4,14 +4,31 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import { PublicKey } from '@solana/web3.js';
 import {
+  createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
   unpackMint,
   unpackAccount,
 } from '@solana/spl-token';
 import {
   deriveInsuranceLpMint,
+  deriveLpVaultRegistry,
+  deriveLpRedemption,
+  deriveLpEscrow,
+  encodeCreateLpVaultV17,
+  encodeDepositToLpVault,
+  encodeRequestRedeemLpShares,
+  encodeExecuteRedemption,
+  ACCOUNTS_CREATE_LP_VAULT,
+  ACCOUNTS_LP_VAULT_DEPOSIT,
+  buildAccountMetas,
+  buildIx,
+  WELL_KNOWN,
+  deriveVaultAuthority,
+  deriveLpBackingLedger,
 } from '@percolatorct/sdk';
+import { sendTx } from '@/lib/tx';
 import { useSlabState } from '../components/providers/SlabProvider';
+import { assertKnownProgram } from '@/lib/programAllowlist';
 import { useParams } from 'next/navigation';
 
 export interface InsuranceLPState {
@@ -163,19 +180,249 @@ export function useInsuranceLP() {
     return () => clearInterval(interval);
   }, []); // Empty deps safe now — ref always points to latest refreshState
 
-  // Insurance LP operations moved to percolator-stake program.
-  // These stubs prevent runtime crashes until the UI is updated to use the new program.
+  // v17 LP Vault operations via the wrapper program.
+  // CreateLpVault (tag 74), DepositToLpVault (tag 75),
+  // RequestRedeemLpShares (tag 76), ExecuteRedemption (tag 77).
+
+  /**
+   * CreateLpVault (tag 74) — creates the LP vault registry PDA and LP mint.
+   * Must be called by the market admin (marketauth) before any deposits.
+   *
+   * Account list (ACCOUNTS_CREATE_LP_VAULT):
+   *   [0] admin (signer, writable)
+   *   [1] market (readonly)
+   *   [2] registry (writable, PDA: ["lp_vault_registry", market])
+   *   [3] lpMint (writable, PDA: ["lp_vault_mint", market])
+   *   [4] systemProgram
+   *   [5] tokenProgram
+   */
   const createMint = useCallback(async () => {
-    throw new Error('Insurance LP mint creation has moved to the percolator-stake program');
-  }, []);
+    if (!wallet.publicKey || !wallet.signTransaction) {
+      throw new Error('Wallet not connected');
+    }
+    if (!slabAddress || !programId) {
+      throw new Error('Market not loaded');
+    }
+    assertKnownProgram(new PublicKey(programId));
 
-  const deposit = useCallback(async (_amount: bigint) => {
-    throw new Error('Insurance LP deposits have moved to the percolator-stake program');
-  }, []);
+    setLoading(true);
+    setError(null);
+    try {
+      const marketPk = new PublicKey(slabAddress);
+      const progPk = new PublicKey(programId);
+      const [registryPda] = deriveLpVaultRegistry(progPk, marketPk);
+      const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
 
-  const withdraw = useCallback(async (_lpAmount: bigint) => {
-    throw new Error('Insurance LP withdrawals have moved to the percolator-stake program');
-  }, []);
+      const keys = buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, [
+        wallet.publicKey,
+        marketPk,
+        registryPda,
+        lpMintPda,
+        WELL_KNOWN.systemProgram,
+        WELL_KNOWN.tokenProgram,
+      ]);
+      const data = encodeCreateLpVaultV17({
+        feeShareBps: 2000,          // 20% of insurance earnings to LP providers
+        oiReservationThresholdBps: 5000, // 50% OI reservation threshold
+        redemptionCooldownSlots: 86400n, // ~1 day in slots (~2 days on devnet ~400ms/slot)
+        domain: 0,                  // Primary insurance domain
+      });
+      const ix = buildIx({ programId: progPk, keys, data });
+      await sendTx({ connection, wallet, instructions: [ix] });
+      await refreshState();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet, connection, slabAddress, programId, refreshState]);
+
+  /**
+   * DepositToLpVault (tag 75) — deposit collateral to receive LP shares.
+   *
+   * Account list (ACCOUNTS_LP_VAULT_DEPOSIT):
+   *   [0] depositor (signer, writable)
+   *   [1] market (writable)
+   *   [2] registry (writable)
+   *   [3] lpMint (writable)
+   *   [4] depositorLpAta (writable)
+   *   [5] sourceToken (writable)
+   *   [6] vaultToken (writable)
+   *   [7] ledger (writable, PDA: ["lp_backing_ledger", market, domain_le])
+   *   [8] tokenProgram
+   *   [9] systemProgram
+   */
+  const deposit = useCallback(async (amount: bigint) => {
+    if (!wallet.publicKey || !wallet.signTransaction) {
+      throw new Error('Wallet not connected');
+    }
+    if (!slabAddress || !programId || !slabState.config) {
+      throw new Error('Market not loaded');
+    }
+    assertKnownProgram(new PublicKey(programId));
+
+    setLoading(true);
+    setError(null);
+    try {
+      const marketPk = new PublicKey(slabAddress);
+      const progPk = new PublicKey(programId);
+      const [vaultPda] = deriveVaultAuthority(progPk, marketPk);
+      const [registryPda] = deriveLpVaultRegistry(progPk, marketPk);
+      const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
+      // Domain 0 = primary insurance domain
+      const [ledgerPda] = deriveLpBackingLedger(progPk, marketPk, 0);
+
+      const collateralMint = slabState.config.collateralMint;
+      const vaultTokenAta = await getAssociatedTokenAddress(collateralMint, vaultPda, true);
+      const sourceTokenAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
+      const depositorLpAta = await getAssociatedTokenAddress(lpMintPda, wallet.publicKey);
+
+      const ixs = [];
+      // Create depositor LP ATA if it doesn't exist.
+      // BUG FIX (devnet flow-test 2026-07-01): connection.getAccountInfo() resolves to `null`
+      // for a missing account — it does NOT throw. The previous try/catch here never entered
+      // its catch branch, so the create-ATA instruction was never added, and DepositToLpVault
+      // failed on-chain with Custom(11) InvalidTokenAccount for any depositor whose LP-token
+      // ATA didn't already exist (i.e. every first-time depositor into a given LP vault).
+      const depositorLpAtaInfo = await connection.getAccountInfo(depositorLpAta);
+      if (!depositorLpAtaInfo) {
+        ixs.push(createAssociatedTokenAccountInstruction(
+          wallet.publicKey, depositorLpAta, wallet.publicKey, lpMintPda,
+        ));
+      }
+
+      const keys = buildAccountMetas(ACCOUNTS_LP_VAULT_DEPOSIT, [
+        wallet.publicKey,
+        marketPk,
+        registryPda,
+        lpMintPda,
+        depositorLpAta,
+        sourceTokenAta,
+        vaultTokenAta,
+        ledgerPda,
+        WELL_KNOWN.tokenProgram,
+        WELL_KNOWN.systemProgram,
+      ]);
+      ixs.push(buildIx({
+        programId: progPk,
+        keys,
+        data: encodeDepositToLpVault({ amount: amount.toString() }),
+      }));
+      const sig = await sendTx({ connection, wallet, instructions: ixs });
+      await refreshState();
+      return sig;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet, connection, slabAddress, programId, slabState, refreshState]);
+
+  /**
+   * RequestRedeemLpShares (tag 76) — begin LP share redemption (starts cooldown).
+   * Then call withdraw() which calls ExecuteRedemption (tag 77) after cooldown.
+   *
+   * For simplicity the UI may call withdraw() which runs both steps in sequence
+   * if the redemption is past cooldown, or just RequestRedeem if not yet requested.
+   */
+  const withdraw = useCallback(async (lpAmount: bigint) => {
+    if (!wallet.publicKey || !wallet.signTransaction) {
+      throw new Error('Wallet not connected');
+    }
+    if (!slabAddress || !programId || !slabState.config) {
+      throw new Error('Market not loaded');
+    }
+    assertKnownProgram(new PublicKey(programId));
+
+    setLoading(true);
+    setError(null);
+    try {
+      const marketPk = new PublicKey(slabAddress);
+      const progPk = new PublicKey(programId);
+      const [registryPda] = deriveLpVaultRegistry(progPk, marketPk);
+      const [redemptionPda] = deriveLpRedemption(progPk, registryPda, wallet.publicKey);
+      const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
+      const [escrowPda] = deriveLpEscrow(progPk, marketPk);
+
+      // Check if a redemption request already exists
+      const redemptionInfo = await connection.getAccountInfo(redemptionPda);
+      if (!redemptionInfo) {
+        // Step 1: RequestRedeemLpShares (tag 76)
+        // BUG FIX (devnet flow-test 2026-07-01): this account list was missing lpMint,
+        // redeemerLpAta and the per-vault LP escrow PDA — and wrongly included `market`,
+        // which handle_request_redeem_lp_shares never reads — causing on-chain
+        // NotEnoughAccountKeys. Real account list per percolator-prog
+        // src/v16_program.rs handle_request_redeem_lp_shares (L12016-12028):
+        //   [redeemer(signer,w), registry(w), lpMint, redeemerLpAta(w), escrow(w),
+        //    redemption(w), tokenProgram, systemProgram]
+        const redeemerLpAta = await getAssociatedTokenAddress(lpMintPda, wallet.publicKey);
+        const requestKeys = [
+          { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+          { pubkey: registryPda, isSigner: false, isWritable: true },
+          { pubkey: lpMintPda, isSigner: false, isWritable: false },
+          { pubkey: redeemerLpAta, isSigner: false, isWritable: true },
+          { pubkey: escrowPda, isSigner: false, isWritable: true },
+          { pubkey: redemptionPda, isSigner: false, isWritable: true },
+          { pubkey: WELL_KNOWN.tokenProgram, isSigner: false, isWritable: false },
+          { pubkey: WELL_KNOWN.systemProgram, isSigner: false, isWritable: false },
+        ];
+        const requestIx = buildIx({
+          programId: progPk,
+          keys: requestKeys,
+          data: encodeRequestRedeemLpShares({ shares: lpAmount.toString() }),
+        });
+        await sendTx({ connection, wallet, instructions: [requestIx] });
+      } else {
+        // Step 2: ExecuteRedemption (tag 77) — collect collateral after cooldown.
+        // BUG FIX (devnet flow-test 2026-07-01): this account list was missing the LP
+        // escrow PDA and the per-domain backing ledger PDA, and had the remaining
+        // accounts in the wrong order — causing on-chain NotEnoughAccountKeys. Real
+        // account list per percolator-prog src/v16_program.rs handle_execute_redemption
+        // (L12153-12163): [cranker(signer,w), market(w), registry(w), redemption(w),
+        // lpMint(w), escrow(w), vaultToken(w), vaultAuthority, ledger(w), redeemerDest(w),
+        // tokenProgram]. `cranker` is permissionless (anyone may execute post-cooldown,
+        // and is directly credited the redemption PDA's reclaimed rent) — the UI always
+        // calls it as the redeemer themselves.
+        const [vaultPda] = deriveVaultAuthority(progPk, marketPk);
+        // Domain 0 — matches this hook's createMint()/deposit() hardcoded primary domain.
+        const [ledgerPda] = deriveLpBackingLedger(progPk, marketPk, 0);
+        const collateralMint = slabState.config.collateralMint;
+        const vaultTokenAta = await getAssociatedTokenAddress(collateralMint, vaultPda, true);
+        const redeemerAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
+
+        const executeKeys = [
+          { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+          { pubkey: marketPk, isSigner: false, isWritable: true },
+          { pubkey: registryPda, isSigner: false, isWritable: true },
+          { pubkey: redemptionPda, isSigner: false, isWritable: true },
+          { pubkey: lpMintPda, isSigner: false, isWritable: true },
+          { pubkey: escrowPda, isSigner: false, isWritable: true },
+          { pubkey: vaultTokenAta, isSigner: false, isWritable: true },
+          { pubkey: vaultPda, isSigner: false, isWritable: false },
+          { pubkey: ledgerPda, isSigner: false, isWritable: true },
+          { pubkey: redeemerAta, isSigner: false, isWritable: true },
+          { pubkey: WELL_KNOWN.tokenProgram, isSigner: false, isWritable: false },
+        ];
+        const executeIx = buildIx({
+          programId: progPk,
+          keys: executeKeys,
+          data: encodeExecuteRedemption(),
+        });
+        await sendTx({ connection, wallet, instructions: [executeIx] });
+      }
+      await refreshState();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet, connection, slabAddress, programId, slabState, refreshState]);
 
   return {
     state,

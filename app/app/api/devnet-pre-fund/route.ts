@@ -31,9 +31,25 @@ import {
   getMint,
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
-import { getServiceClient } from "@/lib/supabase";
-import { tryFaucetGate, releaseFaucetClaim } from "@/lib/faucet-rate-gate";
 import * as Sentry from "@sentry/nextjs";
+
+// ── In-memory rate limiter (fallback when Supabase unavailable) ───────────────
+const _preFundClaims = new Map<string, number>();
+const _PRE_FUND_RATE_MS = 24 * 60 * 60 * 1000;
+
+function _preFundIsLimited(key: string): { limited: boolean; nextClaimAt: string | null } {
+  const last = _preFundClaims.get(key);
+  if (last === undefined) return { limited: false, nextClaimAt: null };
+  const elapsed = Date.now() - last;
+  if (elapsed < _PRE_FUND_RATE_MS) {
+    return { limited: true, nextClaimAt: new Date(last + _PRE_FUND_RATE_MS).toISOString() };
+  }
+  return { limited: false, nextClaimAt: null };
+}
+
+function _preFundRecord(key: string): void {
+  _preFundClaims.set(key, Date.now());
+}
 
 export const dynamic = "force-dynamic";
 
@@ -171,7 +187,8 @@ export async function POST(req: NextRequest) {
       } else {
         // Not in static list — check dynamic mirror-mint table as fallback
         try {
-          const supabase = getServiceClient();
+          const { getServiceClient: _gsc } = await import("@/lib/supabase");
+          const supabase = _gsc();
           const { data: mirrorRows, error: mirrorErr } = await supabase
             .from("devnet_mints")
             .select("devnet_mint")
@@ -202,7 +219,8 @@ export async function POST(req: NextRequest) {
     } else {
       // #873: No static allowlist — ALWAYS query DB (never default to permitted=true)
       try {
-        const supabase = getServiceClient();
+        const { getServiceClient: _gsc } = await import("@/lib/supabase");
+        const supabase = _gsc();
         const { data: mirrorRows, error: mirrorErr } = await supabase
           .from("devnet_mints")
           .select("devnet_mint")
@@ -257,18 +275,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid walletAddress" }, { status: 400 });
     }
 
-    // GH#1601: per-wallet rate limit using INSERT-as-gate on faucet_claims.
-    // fund_type = `devnet-pre-fund:<mintAddress>` so each mint is gated independently.
-    // Concurrent requests for the same wallet+mint race on INSERT — loser gets 23505.
-    const supabaseForGate = getServiceClient();
+    // Rate limit: DB-backed when Supabase available, in-memory fallback otherwise.
     const fundType = `devnet-pre-fund:${mintAddress}`;
-    const gate = await tryFaucetGate(supabaseForGate, walletAddress, fundType);
+    const rateKey = `${walletAddress}:${fundType}`;
+    let supabaseForGate: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
+    let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
+    try {
+      const sbMod = await import("@/lib/supabase");
+      const gateMod = await import("@/lib/faucet-rate-gate");
+      supabaseForGate = sbMod.getServiceClient();
+      gate = await gateMod.tryFaucetGate(supabaseForGate, walletAddress, fundType);
+    } catch {
+      const { limited, nextClaimAt } = _preFundIsLimited(rateKey);
+      gate = { allowed: !limited, nextClaimAt };
+    }
     if (!gate.allowed) {
       return NextResponse.json(
-        {
-          error: "Already pre-funded recently",
-          nextClaimAt: gate.nextClaimAt,
-        },
+        { error: "Already pre-funded recently", nextClaimAt: gate.nextClaimAt },
         { status: 429 },
       );
     }
@@ -366,7 +389,12 @@ export async function POST(req: NextRequest) {
 
     if (currentBalance >= FULL_MARKET_TOKEN_REQUIREMENT) {
       // Release gate so concurrent requests (and future calls) aren't locked out
-      if (gate.claimId != null) await releaseFaucetClaim(supabaseForGate, gate.claimId);
+      if (supabaseForGate && gate.claimId != null) {
+        try {
+          const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate");
+          await releaseFaucetClaim(supabaseForGate, gate.claimId);
+        } catch { /* best-effort */ }
+      }
       return NextResponse.json({
         status: "sufficient",
         balance: currentBalance.toString(),
@@ -405,13 +433,20 @@ export async function POST(req: NextRequest) {
     try {
       sig = await withTimeout(
         sendAndConfirmTransaction(connection, tx, [mintAuthority], { commitment: "confirmed" }),
-        30_000, // 30s — devnet RPC should confirm well within this
+        30_000,
       );
     } catch (txErr) {
-      // TX failed — release gate so user can retry
-      if (gate.claimId != null) await releaseFaucetClaim(supabaseForGate, gate.claimId);
-      throw txErr; // re-throw to outer catch for Sentry + 500 response
+      // TX failed — release DB gate if available, else in-memory is already set
+      if (supabaseForGate && gate.claimId != null) {
+        try {
+          const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate");
+          await releaseFaucetClaim(supabaseForGate, gate.claimId);
+        } catch { /* best-effort */ }
+      }
+      throw txErr;
     }
+    // On success, record in-memory claim
+    _preFundRecord(rateKey);
 
     return NextResponse.json({
       status: "funded",

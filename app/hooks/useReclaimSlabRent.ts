@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Keypair, PublicKey, Transaction, SendTransactionError } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, Transaction, SendTransactionError } from "@solana/web3.js";
 import {
   parseHeader,
-  encodeReclaimSlabRent,
-  ACCOUNTS_RECLAIM_SLAB_RENT,
-  buildAccountMetas,
-  buildIx,
+  // v17: encodeReclaimSlabRent (tag 99) was removed from the on-chain program.
+  // Uninitialized slab rent recovery is now done via SystemProgram.transfer signed by
+  // the slab keypair (proves keypair ownership). The slab account must NOT have been
+  // initialized (magic bytes absent) for this path to be valid.
 } from "@percolatorct/sdk";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getConfig } from "@/lib/config";
@@ -174,14 +174,20 @@ export function useReclaimSlabRent(): UseReclaimSlabRentResult {
           // Expected: uninitialised slab has wrong/absent magic — proceed with reclaim.
         }
 
-        // Build ReclaimSlabRent instruction via SDK encode helpers (tag 52)
-        const ix = buildIx({
-          programId,
-          keys: buildAccountMetas(ACCOUNTS_RECLAIM_SLAB_RENT, {
-            dest,
-            slab,
-          }),
-          data: encodeReclaimSlabRent(),
+        // v17: ReclaimSlabRent (tag 99/52) was removed from the on-chain program.
+        // For uninitialized slabs, reclaim lamports via SystemProgram.transfer,
+        // signed by the slab keypair (proves keypair ownership).
+        // The slab account must be uninitialized (no magic bytes) for this path.
+        const lamports = accountInfo.lamports;
+        if (lamports === 0) {
+          setError("Slab account has no SOL to reclaim — it may already be closed.");
+          setStatus("error");
+          return;
+        }
+        const ix = SystemProgram.transfer({
+          fromPubkey: slab,
+          toPubkey: dest,
+          lamports,
         });
 
         // GH#1488: Fetch a fresh blockhash IMMEDIATELY before building the tx so

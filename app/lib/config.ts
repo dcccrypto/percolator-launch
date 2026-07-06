@@ -5,6 +5,13 @@
 export type Network = "mainnet" | "devnet";
 
 export function getNetwork(): Network {
+  // NEXT_PUBLIC_DEFAULT_NETWORK is baked into the client bundle at build time.
+  // On mainnet deployments this check is enforced before localStorage is read,
+  // so an XSS payload calling localStorage.setItem("percolator-network","devnet")
+  // cannot redirect a mainnet frontend to devnet config or devnet program IDs.
+  const deploymentNet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
+  if (deploymentNet === "mainnet") return "mainnet";
+
   if (typeof window !== "undefined") {
     try {
       const override = localStorage.getItem("percolator-network") as Network | null;
@@ -13,9 +20,7 @@ export function getNetwork(): Network {
       // localStorage may be unavailable (SSR, iframes, or test environments)
     }
   }
-  // Trim env var to handle trailing whitespace/newlines (Vercel env var copy-paste issue)
-  const envNet = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
-  if (envNet === "mainnet" || envNet === "devnet") return envNet;
+  if (deploymentNet === "devnet") return "devnet";
   // Default fail-closed to mainnet; prevents devnet-only features (pre-fund, faucet)
   // from activating on misconfigured production deployments.
   // Set NEXT_PUBLIC_DEFAULT_NETWORK=devnet explicitly for devnet environments.
@@ -115,25 +120,26 @@ const CONFIGS = {
   },
   devnet: {
     get rpcUrl() { return getRpcEndpoint(); },
-    programId: "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",
-    matcherProgramId: "GTRgyTDfrMvBubALAqtHuQwT8tbGyXid7svXZKtWfC9k",
+    // v17 deployed devnet programs (2026-06-26)
+    programId: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+    matcherProgramId: "4seJWjv3R5qfXY8R5ntuPHWsoqcVvaxvfFSnU2AnGMhT",
+    nftProgramId: "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP",
+    vaultProgramId: "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",
     crankWallet: "FF7KFfU5Bb3Mze2AasDHCCZuyhdaSLjUZy2K3JvjdB7x",
     explorerUrl: "https://explorer.solana.com",
-    // Multiple program deployments for different slab sizes (PERC-286).
-    // Each tier has its own on-chain program compiled with the appropriate --features flag.
-    // small:  256 slots  (~0.44 SOL rent) — --features small
-    // medium: 1024 slots (~1.8 SOL rent)  — --features medium
-    // large:  4096 slots (~7 SOL rent)    — default build (no features)
-    // v12.17: micro tier removed — only small/medium/large
+    // v17 uses a single unified wrapper — no slab-tier program splits.
+    // All tiers use the same program ID.
     programsBySlabTier: {
-      small:  "FwfBKZXbYr4vTK23bMFkbgKq3npJ3MSDxEaKmq9Aj4Qn",  // 256 slots
-      medium: "g9msRSV3sJmmE3r5Twn9HuBsxzuuRGTjKCVTKudm9in",   // 1024 slots
-      large:  "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD",  // 4096 slots (confirmed working)
+      small:  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+      medium: "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
+      large:  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",
     } satisfies Record<string, string>,
-    // PERC-356: Test USDC mint for auto-fund on wallet connect
+    // Playground: canonical Sim-USDC mint (6 decimals).
+    // Overridable via NEXT_PUBLIC_TEST_USDC_MINT env var.
+    // Default: DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC (mint authority: GRMMNsNP...)
     testUsdcMint:
       process.env.NEXT_PUBLIC_TEST_USDC_MINT?.trim() ||
-      "EqDqqRzRwA5xnZYu7oJ6LfJbcFuwkTKs7KBSTu2xaG66",
+      "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC",
   },
 } as const;
 
@@ -191,6 +197,18 @@ export function getConfig() {
   };
 }
 
+// v17 program placeholder IDs (declare_id! values from v16_program.rs).
+// These are NOT yet deployed; real on-chain addresses will be set at cutover (Phase 7).
+// Listed here so the known-program gate is ready for v17 cutover without a code change.
+// IMPORTANT: Do NOT add production keys here until they are audited and deployed.
+// v17 deployed devnet program IDs (2026-06-26) — pre-listed for allowlist gate
+const V17_PROGRAM_ID_PLACEHOLDERS = [
+  "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9",  // v17 wrapper
+  "4seJWjv3R5qfXY8R5ntuPHWsoqcVvaxvfFSnU2AnGMhT",  // v17 matcher
+  "5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP",  // v17 nft
+  "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",  // v17 vault
+] as const;
+
 /**
  * Get all unique program ID strings from config (default + all slab tier programs).
  * Shared utility — avoids duplicating this logic across hooks.
@@ -208,6 +226,8 @@ export function getAllProgramIds(): string[] {
   if (byTier) {
     Object.values(byTier).forEach((id) => { if (id) ids.add(id); });
   }
+  // v17 placeholder IDs — pre-listed so cutover only requires swapping deployed addresses in CONFIGS.
+  V17_PROGRAM_ID_PLACEHOLDERS.forEach((id) => ids.add(id));
   return [...ids];
 }
 

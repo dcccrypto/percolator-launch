@@ -1,12 +1,13 @@
 /**
  * useInsuranceLP Hook Tests
- * 
+ *
  * Critical Test Cases:
  * - H3: Infinite loop fix in auto-refresh mechanism
  * - Insurance fund balance calculations
  * - LP token minting and redemption
  * - User share percentage calculations
  * - Redemption rate with edge cases (zero supply, overflow)
+ * - v17 LP Vault flow (CreateLpVault / DepositToLpVault / RequestRedeemLpShares / ExecuteRedemption)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -33,26 +34,51 @@ vi.mock("@/lib/tx", () => ({
   sendTx: vi.fn(),
 }));
 
+// Allow the test program ID through the program allowlist gate.
+// The real gate is tested in programAllowlist.test.ts.
+vi.mock("@/lib/programAllowlist", () => ({
+  isKnownProgram: () => true,
+  assertKnownProgram: () => {},
+}));
+
 vi.mock("@percolatorct/sdk", async () => {
   const { PublicKey: PK } = await import("@solana/web3.js");
+  // NOTE: vi.mock factories are hoisted — we must use dynamic import for external deps.
   const lpMint = new PK("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
-  const vaultAuth = PK.default; // All-zeros is valid
+  const vaultAuth = new PK("11111111111111111111111111111111"); // all-zeros via string (valid)
+  const registryPda = new PK("7pXnR8Eg2g7YDtPkUeEmcYNpPN5yzGLbNHREeHJMzNhq"); // stable 32-byte pubkey
+  const redemptionPda = new PK("6UwgpB4FBfQpKW8ACFv7EW5vXg1NiHRQijYzGBaXJSHJ"); // stable 32-byte pubkey
+  const ledgerPda = new PK("5YNmS1R9nNSCDzb5a7mMJ1dwK9uH27bN3i2JK1eGfwCM"); // stable 32-byte pubkey
+  const escrowPda = new PK("4mB4qULhrn1PcDCTVfE3XPfKvGiCTiXhbmzuUwrQZzJj"); // stable 32-byte pubkey
   const progId = new PK("5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf");
   return {
     deriveInsuranceLpMint: vi.fn().mockReturnValue([lpMint, 255]),
     deriveVaultAuthority: vi.fn().mockReturnValue([vaultAuth, 254]),
-    encodeCreateInsuranceMint: vi.fn().mockReturnValue(Buffer.alloc(8)),
-    encodeDepositInsuranceLP: vi.fn().mockReturnValue(Buffer.alloc(16)),
-    encodeWithdrawInsuranceLP: vi.fn().mockReturnValue(Buffer.alloc(16)),
+    deriveLpVaultRegistry: vi.fn().mockReturnValue([registryPda, 253]),
+    deriveLpRedemption: vi.fn().mockReturnValue([redemptionPda, 252]),
+    deriveLpBackingLedger: vi.fn().mockReturnValue([ledgerPda, 251]),
+    // BUG FIX (devnet flow-test 2026-07-01): added when useInsuranceLP.ts's withdraw() was
+    // fixed to include the escrow account (see hook's inline fix comment) — the mock didn't
+    // know about this new SDK import, so both withdraw() tests failed with
+    // "No 'deriveLpEscrow' export is defined on the mock".
+    deriveLpEscrow: vi.fn().mockReturnValue([escrowPda, 250]),
+    encodeCreateLpVaultV17: vi.fn().mockReturnValue(Buffer.alloc(32)),
+    encodeDepositToLpVault: vi.fn().mockReturnValue(Buffer.alloc(16)),
+    encodeRequestRedeemLpShares: vi.fn().mockReturnValue(Buffer.alloc(16)),
+    encodeExecuteRedemption: vi.fn().mockReturnValue(Buffer.alloc(8)),
     buildAccountMetas: vi.fn().mockReturnValue([]),
     buildIx: vi.fn().mockReturnValue({
       programId: progId,
       keys: [],
       data: Buffer.alloc(8),
     }),
-    ACCOUNTS_CREATE_INSURANCE_MINT: [],
-    ACCOUNTS_DEPOSIT_INSURANCE_LP: [],
-    ACCOUNTS_WITHDRAW_INSURANCE_LP: [],
+    ACCOUNTS_CREATE_LP_VAULT: [],
+    ACCOUNTS_LP_VAULT_DEPOSIT: [],
+    WELL_KNOWN: {
+      systemProgram: new PK("11111111111111111111111111111111"),
+      tokenProgram: new PK("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      clock: new PK("SysvarC1ock11111111111111111111111111111111"),
+    },
   };
 });
 
@@ -78,7 +104,8 @@ describe("useInsuranceLP", () => {
   const mockLpMintPubkey = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
   const mockCollateralMint = new PublicKey("So11111111111111111111111111111111111111112");
   const mockVault = new PublicKey("EfgWMhW4VeL1CyP8nvkmsXduF1Uf9KmRgy6F1c3GEyWr");
-  
+  const mockAtaPk = new PublicKey("ATA1111111111111111111111111111111111111111");
+
   let mockConnection: any;
   let mockWallet: any;
   let mockSlabState: any;
@@ -120,9 +147,7 @@ describe("useInsuranceLP", () => {
     vi.mocked(useSlabState).mockReturnValue(mockSlabState);
     vi.mocked(useParams).mockReturnValue({ slab: mockSlabAddress });
     vi.mocked(sendTx).mockResolvedValue("mock-signature");
-    vi.mocked(getAssociatedTokenAddress).mockResolvedValue(
-      new PublicKey("ATA1111111111111111111111111111111111111111")
-    );
+    vi.mocked(getAssociatedTokenAddress).mockResolvedValue(mockAtaPk);
   });
 
   afterEach(() => {
@@ -179,7 +204,7 @@ describe("useInsuranceLP", () => {
       // Mock wallet with new PublicKey instance on each call (simulating unstable reference)
       let callCount = 0;
       vi.mocked(useWalletCompat).mockImplementation(() => ({
-        publicKey: callCount++ < 5 
+        publicKey: callCount++ < 5
           ? new PublicKey(mockWalletPubkey.toBase58()) // New instance each time
           : mockWalletPubkey, // Stable after 5 calls
         signTransaction: vi.fn(),
@@ -304,7 +329,7 @@ describe("useInsuranceLP", () => {
     it("should calculate redemption rate with existing supply", async () => {
       const insuranceBalance = 2000000n; // 2 SOL
       const lpSupply = 1000000n; // 1 million LP tokens
-      
+
       mockSlabState.engine.insuranceFund.balance = insuranceBalance;
       mockConnection.getAccountInfo.mockResolvedValue({
         data: Buffer.alloc(82),
@@ -470,8 +495,10 @@ describe("useInsuranceLP", () => {
     });
   });
 
-  describe("Create Mint", () => {
-    it("should throw — moved to percolator-stake", async () => {
+  describe("Create Mint (v17 LP Vault — CreateLpVault tag 74)", () => {
+    // v17: createMint() is now CreateLpVault (tag 74) — a real on-chain tx.
+    // The old "stub throws percolator-stake" behavior is gone.
+    it("should call sendTx when wallet and market are loaded", async () => {
       mockConnection.getAccountInfo.mockResolvedValue(null);
 
       const { result } = renderHook(() => useInsuranceLP());
@@ -481,27 +508,111 @@ describe("useInsuranceLP", () => {
       });
 
       await act(async () => {
-        await expect(result.current.createMint()).rejects.toThrow("percolator-stake");
+        await result.current.createMint();
+      });
+
+      // v17 CreateLpVault should have dispatched a transaction
+      expect(sendTx).toHaveBeenCalledTimes(1);
+    });
+
+    it("should throw if wallet not connected", async () => {
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+      vi.mocked(useWalletCompat).mockReturnValue({
+        publicKey: null,
+        connected: false,
+        signTransaction: undefined,
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await act(async () => {
+        await expect(result.current.createMint()).rejects.toThrow("Wallet not connected");
       });
     });
   });
 
-  describe("Deposit", () => {
-    it("should throw — moved to percolator-stake", async () => {
+  describe("Deposit (v17 LP Vault — DepositToLpVault tag 75)", () => {
+    // v17: deposit() is now DepositToLpVault (tag 75) — a real on-chain tx.
+    it("should call sendTx with deposit amount", async () => {
+      // ATA exists — no createATA needed
+      mockConnection.getAccountInfo.mockResolvedValue({
+        data: Buffer.alloc(165),
+        lamports: 2_000_000,
+        executable: false,
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      });
+
       const { result } = renderHook(() => useInsuranceLP());
 
       await act(async () => {
-        await expect(result.current.deposit(500000n)).rejects.toThrow("percolator-stake");
+        await result.current.deposit(500_000n);
+      });
+
+      expect(sendTx).toHaveBeenCalledTimes(1);
+    });
+
+    it("should throw if wallet not connected", async () => {
+      vi.mocked(useWalletCompat).mockReturnValue({
+        publicKey: null,
+        connected: false,
+        signTransaction: undefined,
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await act(async () => {
+        await expect(result.current.deposit(500_000n)).rejects.toThrow("Wallet not connected");
       });
     });
   });
 
-  describe("Withdraw", () => {
-    it("should throw — moved to percolator-stake", async () => {
+  describe("Withdraw (v17 LP Vault — RequestRedeemLpShares tag 76 / ExecuteRedemption tag 77)", () => {
+    // v17: withdraw() is now a 2-step flow. Step 1 = RequestRedeemLpShares if no pending
+    // redemption, Step 2 = ExecuteRedemption after cooldown.
+    it("should call RequestRedeemLpShares when no redemption exists (getAccountInfo returns null)", async () => {
+      // All getAccountInfo calls return null (no LP mint, no redemption PDA)
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+
       const { result } = renderHook(() => useInsuranceLP());
 
       await act(async () => {
-        await expect(result.current.withdraw(250000n)).rejects.toThrow("percolator-stake");
+        await result.current.withdraw(250_000n);
+      });
+
+      // Step 1: RequestRedeemLpShares should be dispatched
+      expect(sendTx).toHaveBeenCalledTimes(1);
+    });
+
+    it("should call ExecuteRedemption when redemption account already exists", async () => {
+      // Redemption PDA exists → skip to step 2 (ExecuteRedemption)
+      mockConnection.getAccountInfo.mockResolvedValue({
+        data: Buffer.alloc(64),
+        lamports: 1_000_000,
+        executable: false,
+        owner: new PublicKey("5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf"),
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await act(async () => {
+        await result.current.withdraw(250_000n);
+      });
+
+      // Step 2: ExecuteRedemption should be dispatched
+      expect(sendTx).toHaveBeenCalledTimes(1);
+    });
+
+    it("should throw if wallet not connected", async () => {
+      vi.mocked(useWalletCompat).mockReturnValue({
+        publicKey: null,
+        connected: false,
+        signTransaction: undefined,
+      });
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      await act(async () => {
+        await expect(result.current.withdraw(250_000n)).rejects.toThrow("Wallet not connected");
       });
     });
   });
@@ -543,24 +654,10 @@ describe("useInsuranceLP", () => {
         expect(result.current.state.mintExists).toBe(false);
       });
     });
-
-    it("should throw on createMint — moved to percolator-stake", async () => {
-      mockConnection.getAccountInfo.mockResolvedValue(null);
-
-      const { result } = renderHook(() => useInsuranceLP());
-
-      await waitFor(() => {
-        expect(result.current.state.mintExists).toBe(false);
-      });
-
-      await act(async () => {
-        await expect(result.current.createMint()).rejects.toThrow("percolator-stake");
-      });
-    });
   });
 
   describe("Loading State", () => {
-    it("loading stays false — stubs throw immediately without async work", async () => {
+    it("loading should be false when not executing a tx", async () => {
       mockConnection.getAccountInfo.mockResolvedValue(null);
 
       const { result } = renderHook(() => useInsuranceLP());
@@ -569,13 +666,40 @@ describe("useInsuranceLP", () => {
         expect(result.current.state.mintExists).toBe(false);
       });
 
+      // Loading is false when hook is idle (no active tx)
       expect(result.current.loading).toBe(false);
+    });
 
-      await act(async () => {
-        await expect(result.current.createMint()).rejects.toThrow("percolator-stake");
+    it("loading transitions to true during createMint then back to false", async () => {
+      mockConnection.getAccountInfo.mockResolvedValue(null);
+
+      let resolveSendTx: any;
+      vi.mocked(sendTx).mockReturnValue(
+        new Promise((resolve) => {
+          resolveSendTx = resolve;
+        }),
+      );
+
+      const { result } = renderHook(() => useInsuranceLP());
+
+      // Start createMint (async, don't await yet)
+      let createMintPromise: Promise<void> | undefined;
+      act(() => {
+        createMintPromise = result.current.createMint();
       });
 
-      // Stubs throw synchronously — loading never transitions
+      // loading should flip to true
+      await waitFor(() => {
+        expect(result.current.loading).toBe(true);
+      });
+
+      // Resolve sendTx
+      await act(async () => {
+        resolveSendTx("mock-sig");
+        await createMintPromise;
+      });
+
+      // loading should return to false
       expect(result.current.loading).toBe(false);
     });
   });

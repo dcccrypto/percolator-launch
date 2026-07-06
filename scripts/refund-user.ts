@@ -25,6 +25,9 @@ async function main() {
   // Step 1: WithdrawInsurance from wrapper (tag 20) — admin gets USDC from vault
   console.log("Step 1: WithdrawInsurance (10 USDC from vault → admin ATA)...");
   const tx1 = new Transaction();
+  // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+  // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+  tx1.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
   tx1.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
   tx1.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
   tx1.add(new TransactionInstruction({

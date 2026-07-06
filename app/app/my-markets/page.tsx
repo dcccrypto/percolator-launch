@@ -130,6 +130,12 @@ const MarketCard: FC<{
   const cfg = getConfig();
 
   const slab = market.slabAddress.toBase58();
+  // v17 markets expose a parsed wrapperConfigV17 and carry empty header/config/
+  // engine/params ({}). Several v12 admin instructions (pause/unpause, burn admin,
+  // create insurance mint, admin-oracle push) are removed/changed on-chain in v17
+  // and their exact v17 replacements are unconfirmed, so we hide those controls
+  // for v17 markets rather than surfacing buttons that always throw.
+  const isV17 = !!market.configV17;
   const oi = market.engine?.totalOpenInterest ?? 0n;
   const vault = market.engine?.vault ?? 0n;
   const insurance = market.engine?.insuranceFund?.balance ?? 0n;
@@ -180,7 +186,8 @@ const MarketCard: FC<{
             </a>
           </div>
           <div className="flex items-center gap-2">
-            {market.header?.paused && (
+            {/* v17 has no pause state and header is {} — only read header.paused for v12. */}
+            {!isV17 && market.header?.paused && (
               <span className="border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">
                 PAUSED
               </span>
@@ -223,26 +230,33 @@ const MarketCard: FC<{
           </span>
           {market.role === "admin" && (
             <>
-              <button onClick={() => setShowOracleInput(true)} disabled={actions.loading === "setOracleAuthority"} className={actionBtnClass}>
-                set oracle authority
-              </button>
-              {isOracleAuthority ? (
-                <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className={actionBtnClass} title="On devnet, you push prices manually. On mainnet, prices come from live oracle feeds automatically.">
-                  push price
-                </button>
-              ) : crankIsAuthority ? (
-                <span className="text-[10px] text-[var(--text-dim)]" title={`Oracle: crank (${shortAddr(oracleAuthority)})`}>auto-price (crank)</span>
-              ) : hasOracleAuthority ? (
-                <span className="text-[10px] text-[var(--text-dim)]" title={`Oracle: ${oracleAuthority}`}>delegated</span>
-              ) : null}
-              {isOracleAuthority && cfg.crankWallet && (
-                <button
-                  onClick={() => handleAction("Delegate to Crank", () => actions.setOracleAuthority(market, cfg.crankWallet!))}
-                  disabled={actions.loading === "setOracleAuthority"}
-                  className={actionBtnClass}
-                >
-                  delegate to crank
-                </button>
+              {/* Admin-oracle controls (set authority / push price / delegate) use the
+                  v12 admin-oracle instructions that were removed on-chain in v17.
+                  Hide them for v17 markets — no confirmed replacement exists. */}
+              {!isV17 && (
+                <>
+                  <button onClick={() => setShowOracleInput(true)} disabled={actions.loading === "setOracleAuthority"} className={actionBtnClass}>
+                    set oracle authority
+                  </button>
+                  {isOracleAuthority ? (
+                    <button onClick={() => setShowPriceInput(true)} disabled={actions.loading === "pushPrice"} className={actionBtnClass} title="On devnet, you push prices manually. On mainnet, prices come from live oracle feeds automatically.">
+                      push price
+                    </button>
+                  ) : crankIsAuthority ? (
+                    <span className="text-[10px] text-[var(--text-dim)]" title={`Oracle: crank (${shortAddr(oracleAuthority)})`}>auto-price (crank)</span>
+                  ) : hasOracleAuthority ? (
+                    <span className="text-[10px] text-[var(--text-dim)]" title={`Oracle: ${oracleAuthority}`}>delegated</span>
+                  ) : null}
+                  {isOracleAuthority && cfg.crankWallet && (
+                    <button
+                      onClick={() => handleAction("Delegate to Crank", () => actions.setOracleAuthority(market, cfg.crankWallet!))}
+                      disabled={actions.loading === "setOracleAuthority"}
+                      className={actionBtnClass}
+                    >
+                      delegate to crank
+                    </button>
+                  )}
+                </>
               )}
               <button onClick={() => setShowTopUpInput(true)} disabled={actions.loading === "topUpInsurance"} className={actionBtnClass}>
                 top up insurance
@@ -256,41 +270,54 @@ const MarketCard: FC<{
                   {actions.loading === "resetRiskGate" ? "resetting..." : "reset risk gate"}
                 </button>
               )}
-              {insuranceMintChecking ? (
-                <span className="text-[10px] text-[var(--text-dim)]">checking insurance mint...</span>
-              ) : !insuranceMintExists ? (
-                <button
-                  onClick={() => handleAction("Create Insurance Mint", () => actions.createInsuranceMint(market))}
-                  disabled={actions.loading === "createInsuranceMint"}
-                  className={actionBtnClass}
-                >
-                  {actions.loading === "createInsuranceMint" ? "creating..." : "create insurance mint"}
-                </button>
-              ) : null}
-              {!market.header?.paused ? (
-                <button
-                  onClick={() => handleAction("Pause Market", () => actions.pauseMarket(market))}
-                  disabled={actions.loading === "pauseMarket"}
-                  className="text-[10px] uppercase tracking-[0.1em] text-[var(--warning)] hover:brightness-125 transition-colors disabled:opacity-40"
-                >
-                  {actions.loading === "pauseMarket" ? "pausing..." : "pause market"}
-                </button>
-              ) : (
-                <button
-                  onClick={() => handleAction("Unpause Market", () => actions.unpauseMarket(market))}
-                  disabled={actions.loading === "unpauseMarket"}
-                  className="text-[10px] uppercase tracking-[0.1em] text-[var(--long)] hover:brightness-125 transition-colors disabled:opacity-40"
-                >
-                  {actions.loading === "unpauseMarket" ? "unpausing..." : "unpause market"}
-                </button>
+              {/* Insurance-LP mint creation moved to the stake program and the
+                  create/pause/unpause/burn-admin instructions were removed or changed
+                  on-chain in v17. Gate all of them to v12 markets; hiding the RPC-heavy
+                  insurance-mint check for v17 also avoids wasted getAccountInfo calls. */}
+              {!isV17 && (
+                <>
+                  {insuranceMintChecking ? (
+                    <span className="text-[10px] text-[var(--text-dim)]">checking insurance mint...</span>
+                  ) : !insuranceMintExists ? (
+                    <button
+                      onClick={() => handleAction("Create Insurance Mint", () => actions.createInsuranceMint(market))}
+                      disabled={actions.loading === "createInsuranceMint"}
+                      className={actionBtnClass}
+                    >
+                      {actions.loading === "createInsuranceMint" ? "creating..." : "create insurance mint"}
+                    </button>
+                  ) : null}
+                  {!market.header?.paused ? (
+                    <button
+                      onClick={() => handleAction("Pause Market", () => actions.pauseMarket(market))}
+                      disabled={actions.loading === "pauseMarket"}
+                      className="text-[10px] uppercase tracking-[0.1em] text-[var(--warning)] hover:brightness-125 transition-colors disabled:opacity-40"
+                    >
+                      {actions.loading === "pauseMarket" ? "pausing..." : "pause market"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleAction("Unpause Market", () => actions.unpauseMarket(market))}
+                      disabled={actions.loading === "unpauseMarket"}
+                      className="text-[10px] uppercase tracking-[0.1em] text-[var(--long)] hover:brightness-125 transition-colors disabled:opacity-40"
+                    >
+                      {actions.loading === "unpauseMarket" ? "unpausing..." : "unpause market"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowBurnConfirm(true)}
+                    disabled={actions.loading === "renounceAdmin"}
+                    className="text-[10px] uppercase tracking-[0.1em] text-[var(--short)]/70 hover:text-[var(--short)] transition-colors disabled:opacity-40"
+                  >
+                    burn admin key
+                  </button>
+                </>
               )}
-              <button
-                onClick={() => setShowBurnConfirm(true)}
-                disabled={actions.loading === "renounceAdmin"}
-                className="text-[10px] uppercase tracking-[0.1em] text-[var(--short)]/70 hover:text-[var(--short)] transition-colors disabled:opacity-40"
-              >
-                burn admin key
-              </button>
+              {isV17 && (
+                <span className="text-[10px] text-[var(--text-dim)]" title="Pause/unpause, create insurance mint, admin-oracle push, and burn-admin are not available on v17 markets.">
+                  some admin actions not available on v17
+                </span>
+              )}
             </>
           )}
           <Link href={`/trade/${slab}`} className="text-[10px] uppercase tracking-[0.1em] text-[var(--long)] hover:brightness-125 transition-all">
@@ -324,7 +351,18 @@ const MarketCard: FC<{
         description="enter the amount of collateral tokens to add."
         placeholder="100"
         confirmLabel="top up"
-        onConfirm={(v) => { setShowTopUpInput(false); const parsed = parseFloat(v); if (isNaN(parsed) || parsed <= 0) return; const amount = BigInt(Math.round(parsed * 1e6)); handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount)); }}
+        onConfirm={(v) => {
+          setShowTopUpInput(false);
+          const parsed = parseFloat(v);
+          if (isNaN(parsed) || parsed <= 0) return;
+          // C-08: derive token decimals from on-chain unitScale (1_000_000 → 6dp, etc.)
+          // unitScale is stored in both v17 (configV17.unitScale) and v12 (config.unitScale).
+          // Math.log10(1_000_000) = 6; Math.log10(1_000_000_000) = 9. Default 6 if unknown.
+          const unitScaleRaw = Number(market.configV17?.unitScale ?? market.config?.unitScale ?? 1_000_000);
+          const collateralDecimals = unitScaleRaw > 1 ? Math.round(Math.log10(unitScaleRaw)) : 6;
+          const amount = BigInt(Math.round(parsed * Math.pow(10, collateralDecimals)));
+          handleAction("Top Up Insurance", () => actions.topUpInsurance(market, amount));
+        }}
         onCancel={() => setShowTopUpInput(false)}
       />
       {/* Burn admin key - requires typing BURN to confirm */}
@@ -387,7 +425,7 @@ const LoadingSkeleton: FC = () => (
 
 /* main page */
 const MyMarketsPage: FC = () => {
-  const { myMarkets: realMyMarkets, loading: realLoading, error, connected: walletConnected } = useMyMarkets();
+  const { myMarkets: realMyMarkets, loading: realLoading, error, connected: walletConnected, refetch: refetchMarkets } = useMyMarkets();
   const mockMode = isMockMode();
   const connected = walletConnected || mockMode;
   const mockMarkets = useMemo(() => mockMode ? getMockMyMarkets() : [], [mockMode]);
@@ -412,8 +450,13 @@ const MyMarketsPage: FC = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     setInsuranceMintChecking(true);
-    if (myMarkets.length > 0) {
-      const pdas = myMarkets.map((m) => ({
+    // C-07: actually re-fetch market data (not just insurance mint map)
+    await refetchMarkets?.();
+    // v17 markets have no per-market insurance-LP mint (moved to the stake program)
+    // and the create-insurance-mint control is hidden for them — skip the RPC.
+    const v12Markets = myMarkets.filter((m) => !m.configV17);
+    if (v12Markets.length > 0) {
+      const pdas = v12Markets.map((m) => ({
         key: m.slabAddress.toBase58(),
         pda: deriveInsuranceLpMint(m.programId, m.slabAddress)[0],
       }));
@@ -427,6 +470,8 @@ const MyMarketsPage: FC = () => {
       }
       setInsuranceMintMap(map);
       setInsuranceMintChecking(false);
+    } else {
+      setInsuranceMintChecking(false);
     }
     setTimeout(() => setRefreshing(false), 500);
   };
@@ -439,10 +484,14 @@ const MyMarketsPage: FC = () => {
     let cancelled = false;
     setInsuranceMintChecking(true);
     async function check() {
-      const pdas = myMarkets.map((m) => ({
-        key: m.slabAddress.toBase58(),
-        pda: deriveInsuranceLpMint(m.programId, m.slabAddress)[0],
-      }));
+      // v17 markets carry no per-market insurance-LP mint (moved to the stake
+      // program) and hide the create-insurance-mint control — skip their RPC.
+      const pdas = myMarkets
+        .filter((m) => !m.configV17)
+        .map((m) => ({
+          key: m.slabAddress.toBase58(),
+          pda: deriveInsuranceLpMint(m.programId, m.slabAddress)[0],
+        }));
       const results = await Promise.allSettled(
         pdas.map((p) => connection.getAccountInfo(p.pda))
       );
@@ -535,8 +584,12 @@ const MyMarketsPage: FC = () => {
   }
 
   const totalMarkets = myMarkets.length;
-  const totalVault = myMarkets.reduce((acc, m) => acc + m.engine.vault, 0n);
-  const totalInsurance = myMarkets.reduce((acc, m) => acc + m.engine.insuranceFund.balance, 0n);
+  // v17 markets carry an empty engine ({}) — optional-chain so the summary
+  // reducer doesn't throw "Cannot mix BigInt and other types" (was crashing the
+  // whole page whenever a v17 market was owned). v17 vault/insurance aren't on
+  // the discovered object, so they contribute 0 to these v12-oriented totals.
+  const totalVault = myMarkets.reduce((acc, m) => acc + (m.engine?.vault ?? 0n), 0n);
+  const totalInsurance = myMarkets.reduce((acc, m) => acc + (m.engine?.insuranceFund?.balance ?? 0n), 0n);
 
   return (
     <div className="min-h-[calc(100dvh-48px)] relative">

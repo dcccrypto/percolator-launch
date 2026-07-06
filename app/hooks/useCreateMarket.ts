@@ -5,6 +5,7 @@ import {
   Keypair,
   PublicKey,
   SystemProgram,
+  Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -16,43 +17,42 @@ import {
 } from "@solana/spl-token";
 import {
   encodeInitMarket,
-  encodeInitLP,
+  type InitMarketV17Args,
   encodeDepositCollateral,
   encodeTopUpInsurance,
-  deriveInsuranceLpMint,
-  ACCOUNTS_CREATE_INSURANCE_MINT,
-  encodeKeeperCrank,
-  encodeSetOraclePriceCap,
-  encodeUpdateConfig,
-  encodeUpdateHyperpMark,
+  encodePermissionlessCrank,
+  encodeInitMatcherCtx,
+  encodeSetMatcherConfig,
+  encodeInitUser,
+  encodeSetNftProgramId,
+  CrankAction,
   detectDexType,
   parseDexPool,
   ACCOUNTS_INIT_MARKET,
-  ACCOUNTS_INIT_LP,
   ACCOUNTS_DEPOSIT_COLLATERAL,
   ACCOUNTS_TOPUP_INSURANCE,
-  ACCOUNTS_KEEPER_CRANK,
-  ACCOUNTS_SET_ORACLE_PRICE_CAP,
-  ACCOUNTS_UPDATE_CONFIG,
+  ACCOUNTS_PERMISSIONLESS_CRANK_BASE,
+  ACCOUNTS_SET_MATCHER_CONFIG,
+  ACCOUNTS_INIT_MATCHER_CTX,
+  ACCOUNTS_INIT_USER,
   buildAccountMetas,
   WELL_KNOWN,
   buildIx,
   deriveVaultAuthority,
   derivePythPushOraclePDA,
+  deriveMatcherDelegate,
+  deriveNftRegistry,
   parseHeader,
-  SLAB_TIERS,
-  slabDataSize,
-  deriveLpPda,
+  isV17Account,
+  v17MarketAccountLen,
+  V17_PORTFOLIO_ACCOUNT_LEN,
+  MATCHER_CONTEXT_LEN,
 } from "@percolatorct/sdk";
-// TODO(oracle-migration): encodeSetOracleAuthority/encodePushOraclePrice and their
-// account lists were removed in beta.29. CreateMarket oracle init/push path needs
-// migration to /api/oracle/advance-phase or equivalent server-side crank flow.
-import {
-  encodeSetOracleAuthority,
-  encodePushOraclePrice,
-  ACCOUNTS_SET_ORACLE_AUTHORITY,
-  ACCOUNTS_PUSH_ORACLE_PRICE,
-} from "@/lib/sdk-compat";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+// v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
+// and UpdateConfig (tag 14) do not exist in v17. All oracle + risk params are embedded
+// in InitMarket (extended tail). The sdk-compat stubs throw at runtime if called.
+// We guard all callsites with isAdminOracle && !isV17Slab before using these.
 import { sendTx } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
@@ -61,7 +61,10 @@ import {
   updateInFlightStep,
   clearInFlightMarket,
 } from "@/lib/inFlightMarket";
-const DEFAULT_SLAB_SIZE = SLAB_TIERS.large.dataSize;
+// v17: max assets per portfolio (= the market's asset-slot capacity); program cap = 14.
+// The slab MUST be sized to exactly match this capacity or InitMarket reverts (dynamic-len validation).
+const V17_MAX_PORTFOLIO_ASSETS = 14;
+const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 26_364 bytes (cap-14)
 const ALL_ZEROS_FEED = "0".repeat(64);
 
 /**
@@ -107,6 +110,22 @@ async function fetchJupiterPriceE6(ca: string): Promise<bigint | null> {
 /** Minimum vault seed required by percolator-prog before InitMarket (500_000_000 raw tokens). */
 export const MIN_INIT_MARKET_SEED = 500_000_000n;
 
+/**
+ * BUG FIX (devnet flow-test 2026-07-01, flowtest/debug-maxassets-bisect.ts): the deployed
+ * wrapper program rejects InitMarket with a raw ProgramError::InvalidAccountData ("invalid
+ * account data for instruction" — no Custom error code, so parseMarketCreationError can't give
+ * the user a useful message) whenever initial_margin_bps/maintenance_margin_bps are too low.
+ * Bisected on-chain: 1000/500 bps (10x leverage) and 1100/550 both fail; 1200/600 (~8.33x) and
+ * MARKET_PARAMS' proven values consistently succeed. This means EVERY market ever created
+ * through this wizard at the previous default leverage range would have silently failed Step 0
+ * with a cryptic error. 1500 bps (~6.67x max leverage) is enforced as a floor here — comfortably
+ * above the proven-good 1200 boundary (the exact edge between 1100 and 1200 wasn't bisected
+ * further) — regardless of what leverage the caller requests, so no create-market attempt can
+ * hit this failure mode. If product wants to offer >6.67x leverage again, this needs a fresh
+ * on-chain bisection first.
+ */
+const MIN_SAFE_INITIAL_MARGIN_BPS = 1500n;
+
 export interface VammParams {
   spreadBps: number;
   impactKBps: number;
@@ -140,13 +159,18 @@ export interface CreateMarketParams {
   /** Mainnet token CA — used by oracle keeper to fetch real-time prices (PERC-465) */
   mainnetCA?: string;
   /** PERC-470: Oracle mode — determines how price is fed to the market */
-  oracleMode?: "pyth" | "hyperp" | "admin";
+  oracleMode?: "pyth" | "hyperp" | "admin" | "keeper";
   /** PERC-470: DEX pool address for hyperp mode (PumpSwap/Raydium/Meteora) */
   dexPoolAddress?: string;
   /** PERC-470: Base vault address for hyperp mode (PumpSwap) */
   dexBaseVault?: string;
   /** PERC-470: Quote vault address for hyperp mode (PumpSwap) */
   dexQuoteVault?: string;
+  /**
+   * Keeper oracle: DEX pool type (raydium-clmm / meteora-dlmm / pumpswap).
+   * Used by the keeper registration call after market creation.
+   */
+  dexType?: string;
 }
 
 export interface CreateMarketState {
@@ -170,6 +194,10 @@ export interface CreateMarketState {
    * independently later. Success screen shows a soft warning rather than hard error.
    */
   insuranceMintFailed: boolean;
+  /** Keeper oracle mode: true when oracle_authority was delegated to keeper */
+  keeperDelegated: boolean;
+  /** Keeper registration result message */
+  keeperMessage: string | null;
 }
 
 const STEP_LABELS = [
@@ -195,6 +223,8 @@ export function useCreateMarket() {
     devnetAirdropSymbol: null,
     devnetMintError: null,
     insuranceMintFailed: false,
+    keeperDelegated: false,
+    keeperMessage: null,
   });
 
   // PERC-8329 / GH#1964: Slab keypair is kept in-memory ONLY — never in localStorage.
@@ -229,9 +259,12 @@ export function useCreateMarket() {
       // Force admin oracle mode for all devnet mirror markets (params.mainnetCA is set).
       const isDevnetMirror = !!params.mainnetCA;
       const resolvedOracleMode = params.oracleMode ?? (params.oracleFeed === ALL_ZEROS_FEED ? "admin" : "pyth");
-      const oracleMode: "pyth" | "hyperp" | "admin" = (resolvedOracleMode === "hyperp" && isDevnetMirror) ? "admin" : resolvedOracleMode;
+      // "keeper" mode: AUTH_MARK oracle with oracle_authority delegated to our keeper service.
+      // On devnet mirrors, hyperp falls back to admin; keeper stays keeper (it's designed for devnet).
+      const oracleMode: "pyth" | "hyperp" | "admin" | "keeper" = (resolvedOracleMode === "hyperp" && isDevnetMirror) ? "admin" : resolvedOracleMode as "pyth" | "hyperp" | "admin" | "keeper";
       const isAdminOracle = oracleMode === "admin";
       const isHyperpOracle = oracleMode === "hyperp";
+      const isKeeperOracle = oracleMode === "keeper";
       // PERC-devnet: isDevnetEnv must be runtime-detected, not build-time.
       // Users toggle devnet via localStorage — NEXT_PUBLIC_DEFAULT_NETWORK is always "mainnet" on Vercel prod.
       // Use getNetwork() which reads localStorage("percolator-network") first, then env var, then defaults
@@ -300,6 +333,12 @@ export function useCreateMarket() {
 
       let [vaultPda] = deriveVaultAuthority(programId, slabPk);
 
+      // v17: PushOraclePrice (tag 16) and SetOracleAuthority (tag 17) do not exist.
+      // For devnet bring-up, the v17 program is always assumed — detect lazily per-step
+      // if needed. Setting isLegacyOracle = false skips all removed oracle instructions.
+      // TODO: When v12 legacy support is needed, detect from on-chain magic bytes (like Step 1 does).
+      const isLegacyOracle = false;
+
       try {
         // Step 0: Create slab + vault ATA + InitMarket (ATOMIC — all-or-nothing)
         // Merged into a single transaction to prevent SOL lock if InitMarket fails.
@@ -350,12 +389,17 @@ export function useCreateMarket() {
             existingAccount = null; // treat as fresh creation
           }
           if (existingAccount) {
-            // Slab already created — check if market is initialized via SDK parseHeader.
-            // parseHeader throws when magic bytes are absent/wrong (uninitialised slab).
+            // Slab already created — check if market is initialized via v17 or v12 magic.
+            // isV17Account handles the v17 magic; v12 parseHeader handles the PERCOLAT magic.
             let isInitialized: boolean;
             try {
-              parseHeader(existingAccount.data);
-              isInitialized = true;
+              const existingData = new Uint8Array(existingAccount.data);
+              if (isV17Account(existingData)) {
+                isInitialized = true;
+              } else {
+                parseHeader(existingAccount.data);
+                isInitialized = true;
+              }
             } catch {
               isInitialized = false;
             }
@@ -417,31 +461,35 @@ export function useCreateMarket() {
                 userCollateralAtaRecovery, vaultAta, wallet.publicKey, MIN_INIT_MARKET_SEED,
               );
 
-              const initialMarginBps = BigInt(params.initialMarginBps);
-              const initMarketData = encodeInitMarket({
-                admin: wallet.publicKey,
-                collateralMint: params.mint,
-                indexFeedId: params.oracleFeed,
-                maxStalenessSecs: "86400",
-                confFilterBps: 0,
-                invert: params.invert ? 1 : 0,
-                unitScale: 0,
-                initialMarkPriceE6: params.initialPriceE6.toString(),
-                warmupPeriodSlots: "100",
+              const requestedMarginBps = BigInt(params.initialMarginBps);
+              const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
+                ? MIN_SAFE_INITIAL_MARGIN_BPS
+                : requestedMarginBps;
+              const v17InitArgs: InitMarketV17Args = {
+                maxPortfolioAssets: V17_MAX_PORTFOLIO_ASSETS,
+                hMin: "1000",
+                hMax: "100000",
+                initialPrice: params.initialPriceE6.toString(),
+                minNonzeroMmReq: "1000000",
+                minNonzeroImReq: "2000000",
                 maintenanceMarginBps: (initialMarginBps / 2n).toString(),
                 initialMarginBps: initialMarginBps.toString(),
-                tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
-                maxAccounts: (params.maxAccounts ?? 4096).toString(),
-                newAccountFee: "1000000",
+                maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
+                tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
+                liquidationFeeBps: "50",
+                liquidationFeeCap: "10000000000",
+                minLiquidationAbs: "0",
+                maxPriceMoveBpsPerSlot: "1",
+                maxAccrualDtSlots: "500",
+                maxAbsFundingE9PerSlot: "0",
+                minFundingLifetimeSlots: "500",
+                maxAccountBSettlementChunks: "10",
+                maxBankruptCloseChunks: "10",
+                maxBankruptCloseLifetimeSlots: "500",
+                publicBChunkAtoms: "1000000000000",
                 maintenanceFeePerSlot: "0",
-                maxCrankStalenessSlots: "400",
-                liquidationFeeBps: "100",
-                liquidationFeeCap: "100000000000",
-                minLiquidationAbs: "1000000",
-                minInitialDeposit: "1000000",
-                minNonzeroMmReq: "0",
-                minNonzeroImReq: "0",
-              });
+              };
+              const initMarketData = encodeInitMarket(v17InitArgs);
 
               const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
                 wallet.publicKey, slabPk, params.mint, vaultAta,
@@ -563,31 +611,35 @@ export function useCreateMarket() {
               userCollateralAta, vaultAta, wallet.publicKey, MIN_INIT_MARKET_SEED,
             );
 
-            const initialMarginBps = BigInt(params.initialMarginBps);
-            const initMarketData = encodeInitMarket({
-              admin: wallet.publicKey,
-              collateralMint: params.mint,
-              indexFeedId: params.oracleFeed,
-              maxStalenessSecs: "86400",
-              confFilterBps: 0,
-              invert: params.invert ? 1 : 0,
-              unitScale: 0,
-              initialMarkPriceE6: params.initialPriceE6.toString(),
-              warmupPeriodSlots: "100",
+            const requestedMarginBps = BigInt(params.initialMarginBps);
+            const initialMarginBps = requestedMarginBps < MIN_SAFE_INITIAL_MARGIN_BPS
+              ? MIN_SAFE_INITIAL_MARGIN_BPS
+              : requestedMarginBps;
+            const v17InitArgs: InitMarketV17Args = {
+              maxPortfolioAssets: 14,
+              hMin: "1000",
+              hMax: "100000",
+              initialPrice: params.initialPriceE6.toString(),
+              minNonzeroMmReq: "1000000",
+              minNonzeroImReq: "2000000",
               maintenanceMarginBps: (initialMarginBps / 2n).toString(),
               initialMarginBps: initialMarginBps.toString(),
-              tradingFeeBps: BigInt(params.tradingFeeBps).toString(),
-              maxAccounts: (params.maxAccounts ?? 4096).toString(),
-              newAccountFee: "1000000",
+              maxTradingFeeBps: BigInt(params.tradingFeeBps).toString(),
+              tradeFeeBaseBps: BigInt(params.tradingFeeBps).toString(),
+              liquidationFeeBps: "50",
+              liquidationFeeCap: "10000000000",
+              minLiquidationAbs: "0",
+              maxPriceMoveBpsPerSlot: "1",
+              maxAccrualDtSlots: "500",
+              maxAbsFundingE9PerSlot: "0",
+              minFundingLifetimeSlots: "500",
+              maxAccountBSettlementChunks: "10",
+              maxBankruptCloseChunks: "10",
+              maxBankruptCloseLifetimeSlots: "500",
+              publicBChunkAtoms: "1000000000000",
               maintenanceFeePerSlot: "0",
-              maxCrankStalenessSlots: "400",
-              liquidationFeeBps: "100",
-              liquidationFeeCap: "100000000000",
-              minLiquidationAbs: "1000000",
-              minInitialDeposit: "1000000",
-              minNonzeroMmReq: "0",
-              minNonzeroImReq: "0",
-            });
+            };
+            const initMarketData = encodeInitMarket(v17InitArgs);
 
             const initMarketKeys = buildAccountMetas(ACCOUNTS_INIT_MARKET, [
               wallet.publicKey, slabPk, params.mint, vaultAta,
@@ -616,29 +668,40 @@ export function useCreateMarket() {
           vaultAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
         }
 
-        // Step 1: Oracle setup + UpdateConfig + pre-LP crank
-        // MidTermDev does this BEFORE InitLP — market must be cranked first
+        // Step 1: Oracle setup + pre-LP crank
+        // v17: SetOracleAuthority (tag 17), PushOraclePrice (tag 16), SetOraclePriceCap (tag 16),
+        // and UpdateConfig (tag 14) do not exist. All oracle + risk params are embedded in InitMarket.
+        // For v17, Step 1 only runs the pre-LP crank (no oracle setup needed).
+        //
+        // v12: full oracle setup + UpdateConfig + crank is still required.
+        //
+        // We detect v17 by reading the newly created slab account and checking V17_MAGIC.
         if (startStep <= 1) {
           setState((s) => ({ ...s, step: 1, stepLabel: STEP_LABELS[1] }));
 
           const instructions: TransactionInstruction[] = [];
 
-          if (isAdminOracle) {
-            // After InitMarket, oracle_authority = PublicKey::default (all zeros)
-            // IMPORTANT: SetOracleAuthority CLEARS authority_price_e6 to 0!
-            // So we must: SetAuth(user) → Push → Cap → Config → Crank → THEN SetAuth(crank) last
+          // Detect if this is a v17 slab (v17 magic at bytes 0-7).
+          let isV17Slab = false;
+          try {
+            const newSlabInfo = await connection.getAccountInfo(slabPk);
+            if (newSlabInfo?.data) {
+              isV17Slab = isV17Account(new Uint8Array(newSlabInfo.data));
+            }
+          } catch { /* fall through — conservative: assume v12 */ }
 
-            // 1. SetOracleAuthority → user becomes authority
+          if (!isV17Slab && isAdminOracle) {
+            // v12 admin oracle setup (removed in v17):
+            // SetOracleAuthority → PushOraclePrice → SetOraclePriceCap → UpdateConfig
+            // These are only included for legacy v12 programs — v17 embeds this in InitMarket.
+            const { encodeSetOracleAuthority, encodePushOraclePrice, ACCOUNTS_SET_ORACLE_AUTHORITY, ACCOUNTS_PUSH_ORACLE_PRICE } = await import("@/lib/sdk-compat");
+
             const setAuthToUserData = encodeSetOracleAuthority({ newAuthority: wallet.publicKey });
             const setAuthToUserKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_AUTHORITY, [
               wallet.publicKey, slabPk,
             ]);
             instructions.push(buildIx({ programId, keys: setAuthToUserKeys, data: setAuthToUserData }));
 
-            // 2. PushOraclePrice (user is now authority)
-            // PERC-465: Fetch fresh Jupiter price so we push the real market price,
-            // not the pre-fetched (possibly stale or fallback $1) initialPriceE6.
-            // Use mainnetCA if available (devnet mirror markets), else params.mint.
             const jupiterCA = params.mainnetCA ?? params.mint.toBase58();
             const freshPriceE6 = await fetchJupiterPriceE6(jupiterCA);
             const resolvedPriceE6 = freshPriceE6 ?? params.initialPriceE6;
@@ -653,51 +716,112 @@ export function useCreateMarket() {
             ]);
             instructions.push(buildIx({ programId, keys: pushKeys, data: pushData }));
 
-            // 3. SetOraclePriceCap — circuit breaker (10_000 = 1% max change per update)
-            const priceCapData = encodeSetOraclePriceCap({ maxChangeE2bps: BigInt(10_000) });
-            const priceCapKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_PRICE_CAP, [
-              wallet.publicKey, slabPk,
-            ]);
-            instructions.push(buildIx({ programId, keys: priceCapKeys, data: priceCapData }));
+            // NOTE: SetOraclePriceCap (tag 16) and UpdateConfig (tag 14) were removed in v17.
+            // They are not called here — oracle parameters are embedded in InitMarket for v17
+            // and this block is only reached for !isV17Slab (legacy v12). In the v17 SDK
+            // both functions throw `removedInstruction()` so they cannot be safely imported.
+            // v12 circuit-breaker and funding params are omitted in this fallback path.
+          }
+          // v17 note: isAdminOracle for v17 slabs → oracle params already in InitMarket;
+          // no SetOracleAuthority / PushOraclePrice / SetOraclePriceCap / UpdateConfig needed.
+
+          // Keeper oracle mode (v17): ConfigureAuthMark + UpdateAssetAuthority(Oracle → keeper).
+          // The backend co-signs UpdateAssetAuthority (as the new oracle_authority = keeper).
+          // After this tx: oracle_mode=3 (AUTH_MARK), oracle_authority=keeperPubkey.
+          if (isKeeperOracle && isV17Slab) {
+            setState((s) => ({ ...s, stepLabel: "Delegating oracle authority to keeper..." }));
+            const cosignResp = await fetch("/api/playground/keeper-cosign", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                deployer: wallet.publicKey.toBase58(),
+                slabAddress: slabPk.toBase58(),
+                initialPriceE6: params.initialPriceE6.toString(),
+                assetIndex: 0,
+              }),
+            });
+            if (!cosignResp.ok) {
+              const errData = await cosignResp.json().catch(() => ({ error: "co-sign failed" }));
+              throw new Error(
+                `Keeper co-sign failed (${cosignResp.status}): ${(errData as { error?: string }).error ?? cosignResp.statusText}. ` +
+                `Is PLAYGROUND_KEEPER_KEYPAIR set in server env?`,
+              );
+            }
+            const { partialTxBase64 } = await cosignResp.json() as { partialTxBase64: string };
+
+            // Deserialize the partially-signed tx (keeper has signed UpdateAssetAuthority)
+            const partialTxBytes = Buffer.from(partialTxBase64, "base64");
+            const partialTx = Transaction.from(partialTxBytes);
+
+            // Wallet signs (adds creator sig for ConfigureAuthMark + UpdateAssetAuthority)
+            if (!wallet.signTransaction) throw new Error("Wallet does not support signTransaction");
+            const signedTx = await wallet.signTransaction(partialTx);
+
+            // Send the fully-signed tx
+            const keeperDelegateSig = await connection.sendRawTransaction(signedTx.serialize(), {
+              skipPreflight: false,
+            });
+            const keeperDelegateConfirm = await connection.confirmTransaction(keeperDelegateSig, "confirmed");
+            if (keeperDelegateConfirm.value.err) {
+              throw new Error(
+                `Keeper delegate tx failed on-chain: ${JSON.stringify(keeperDelegateConfirm.value.err)}`,
+              );
+            }
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, keeperDelegateSig] }));
           }
 
-          // UpdateConfig — set funding rate parameters (MidTermDev Step 6)
-          // v12.17: UpdateConfig only accepts 4 funding params (threshold/insurance set at InitMarket)
-          const updateConfigData = encodeUpdateConfig({
-            fundingHorizonSlots: "3600",
-            fundingKBps: "100",
-            fundingMaxPremiumBps: "1000",
-            fundingMaxBpsPerSlot: "10",
-          });
-          const updateConfigKeys = buildAccountMetas(ACCOUNTS_UPDATE_CONFIG, [
-            wallet.publicKey, slabPk,
-          ]);
-          instructions.push(buildIx({ programId, keys: updateConfigKeys, data: updateConfigData }));
+          // Pre-LP crank — v17 PermissionlessCrank requires a portfolio at accounts[2].
+          // For v17 slabs, we skip the pre-LP crank (oracle is managed by UpdateAssetLifecycle
+          // server-side; no oracle account required here). For v12 legacy slabs, use the old path.
+          if (isV17Slab) {
+            // v17: No pre-LP crank needed — oracle state is in UpdateAssetLifecycle (tag 66),
+            // not in the slab bitmap. The crank will run server-side (keeper) after market creation.
+            // Skip: encodeUpdateHyperpMark() throws removedInstruction() in v17 SDK.
 
-          // Pre-LP crank — UpdateHyperpMark for hyperp mode, KeeperCrank otherwise
-          if (isHyperpOracle && params.dexPoolAddress) {
-            // PERC-470: UpdateHyperpMark reads DEX pool directly — no keeper needed
-            const hyperpData = encodeUpdateHyperpMark();
-            const hyperpKeys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [
-              { pubkey: slabPk, isSigner: false, isWritable: true },
-              { pubkey: new PublicKey(params.dexPoolAddress), isSigner: false, isWritable: false },
-              { pubkey: WELL_KNOWN.clock, isSigner: false, isWritable: false },
-            ];
-            // PumpSwap pools need vault0 + vault1 as remaining accounts
-            if (params.dexBaseVault) {
-              hyperpKeys.push({ pubkey: new PublicKey(params.dexBaseVault), isSigner: false, isWritable: false });
-            }
-            if (params.dexQuoteVault) {
-              hyperpKeys.push({ pubkey: new PublicKey(params.dexQuoteVault), isSigner: false, isWritable: false });
-            }
-            instructions.push(new TransactionInstruction({ programId, keys: hyperpKeys, data: Buffer.from(hyperpData) }));
-          } else {
-            // KeeperCrank for Pyth and admin modes
-            const crankData = encodeKeeperCrank({ callerIdx: 65535 });
+            // BUG FIX (devnet flow-test 2026-07-01): the wizard never created the per-market
+            // nft_registry PDA. MintPositionNft (useMintPositionNft.ts) and NftBurn both only
+            // READ the registry — nothing in the frontend ever initialized it — so the first
+            // "Mint NFT" attempt on ANY wizard-created market failed on-chain with Custom(26)
+            // "nft_registry not owned by the percolator program" (see flowtest/07-nft-mint
+            // .result.json's flag_for_flow_14 finding, reproduced+fixed in flowtest/14-create
+            // -market.ts). SetNftProgramId (tag 73) is marketauth-gated and creates the
+            // registry; marketauth == the creator wallet (accounts[0] passed to InitMarket
+            // above), so the creator can always call this themselves right after market
+            // creation — no separate admin bootstrap needed. Accounts/encoding verified against
+            // percolator-prog src/v16_program.rs:13106-13112 (handle_set_nft_program_id) and
+            // proven working on-chain via flowtest/_setup-nft-registry.ts on the 5 seeded
+            // markets, and now also via flowtest/14-create-market.ts on a wizard-created one.
+            // This was previously the ONLY instruction in this step for a v17+admin-oracle
+            // market, so Step 1 sent a functionally-empty (compute-budget-only) transaction —
+            // this fix also makes that transaction do useful work instead of nothing.
+            const [nftRegistryPda] = deriveNftRegistry(programId, slabPk);
+            instructions.push(
+              buildIx({
+                programId,
+                keys: [
+                  { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+                  { pubkey: slabPk, isSigner: false, isWritable: false },
+                  { pubkey: nftRegistryPda, isSigner: false, isWritable: true },
+                  { pubkey: WELL_KNOWN.systemProgram, isSigner: false, isWritable: false },
+                ],
+                data: encodeSetNftProgramId({ nftProgramId: PERCOLATOR_NFT_PROGRAM_ID }),
+              }),
+            );
+          } else if (!isV17Slab && isHyperpOracle && params.dexPoolAddress) {
+            // v12 hyperp oracle — encodeUpdateHyperpMark is removed; log a warning and skip.
+            // v12 hyperp markets on the v17 binary are not supported.
+            console.warn("[useCreateMarket] v12 hyperp oracle mode not supported on v17 binary; skipping pre-LP crank");
+          } else if (!isV17Slab) {
+            // v12 legacy: KeeperCrank for Pyth and admin modes
+            const crankData = encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 });
             const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
-            const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
-              wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
+            const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
+              wallet.publicKey, slabPk, slabPk,
             ]);
+            // Append oracle tail for Pyth mode
+            if (!isAdminOracle) {
+              crankKeys.push({ pubkey: oracleAccount, isSigner: false, isWritable: false });
+            }
             instructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
           }
 
@@ -712,70 +836,164 @@ export function useCreateMarket() {
           updateInFlightStep(slabPk.toBase58(), 2);
         }
 
-        // Step 2: InitLP with matcher program (atomic: create ctx + init vAMM + init LP)
+        // Step 2: v17 LP init sequence:
+        //   TX A — create portfolio account + InitPortfolio (tag 1)
+        //   TX B — createAccount(matcherCtx, MATCHER_CONTEXT_LEN, matcherProgramId) (account only)
+        //   TX C — SetMatcherConfig (tag 68) on the LP portfolio
+        //   TX D — InitMatcherCtx (tag 83) on the WRAPPER (CPI-relays into the matcher program)
+        // v12: encodeInitLP (tag 2) was used here but is REMOVED in v17 (throws removedInstruction).
+        //
+        // BUG FIX (devnet flow-test 2026-07-01, flowtest/debug-matcherinit-split.ts): TX B used
+        // to call the matcher program DIRECTLY with encodeMatcherInitPassive ([delegate(ro),
+        // ctx(w)]). That always failed on-chain with a raw ProgramError::MissingRequiredSignature
+        // at ~577 CU — confirmed (via an unsigned-simulate diagnostic) that the deployed matcher
+        // binary requires the matcher_delegate PDA to be isSigner:true in that call, which is
+        // impossible to satisfy with a plain client-side keypair (PDAs have no private key).
+        // The SDK's InitMatcherCtx (tag 83) doc comment confirms this is by design: "The wrapper
+        // calls derive_matcher_delegate and invoke_signed so the delegate PDA acts as a signer in
+        // the matcher CPI — this is what satisfies the matcher's lp_pda.is_signer check on the
+        // deployed binary. No client-side signer of the delegate is needed." Every wizard-created
+        // market's LP would have been stuck with an unusable (never-initialized) matcher context
+        // until this fix — TradeCpi against that LP would fail (matcher config present but
+        // matcher_ctx account uninitialized). PREREQUISITE ordering (per InitMatcherCtx's own doc
+        // comment) also changed: SetMatcherConfig (TX C) must land BEFORE InitMatcherCtx (TX D),
+        // since the wrapper cross-checks the LP portfolio's stored matcher config before CPI-ing.
         if (startStep <= 2) {
           setState((s) => ({ ...s, step: 2, stepLabel: STEP_LABELS[2] }));
 
-          const userAta = await getAssociatedTokenAddress(params.mint, wallet.publicKey);
           const matcherProgramId = new PublicKey(getConfig().matcherProgramId);
 
-          // Check if LP is already initialized for this slab — skip step 3 if so
-          const lpIdx = 0;
-          const [lpPdaCheck] = deriveLpPda(programId, slabPk, lpIdx);
-          const existingLp = await connection.getAccountInfo(lpPdaCheck);
-          if (existingLp && existingLp.data.length > 0) {
-            // LP already initialized — skip to avoid orphaned matcher context
-            setState((s) => ({ ...s, step: 3, stepLabel: STEP_LABELS[3] }));
+          // ── v17 LP init ──────────────────────────────────────────────────────
+          // Check if a v17 slab — LP init path differs between v17 and v12.
+          const slabInfoForStep2 = await connection.getAccountInfo(slabPk);
+          const isV17SlabStep2 = slabInfoForStep2?.data
+            ? isV17Account(new Uint8Array(slabInfoForStep2.data))
+            : false;
+
+          if (isV17SlabStep2) {
+            // TX A: Create LP portfolio account + InitPortfolio (tag 1).
+            // Size + fund rent for the FULL portfolio length (9347): InitPortfolio reallocs up to it
+            // and adds no lamports, so an undersized account fails with InsufficientFundsForRent.
+            const lpPortfolioKp = Keypair.generate();
+            const lpPortfolioPk = lpPortfolioKp.publicKey;
+            const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_LEN);
+
+            const createPortfolioIx = SystemProgram.createAccount({
+              fromPubkey: wallet.publicKey,
+              newAccountPubkey: lpPortfolioPk,
+              lamports: portfolioRent,
+              space: V17_PORTFOLIO_ACCOUNT_LEN,
+              programId,
+            });
+            const initPortfolioIx = buildIx({
+              programId,
+              keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
+                wallet.publicKey,
+                slabPk,
+                lpPortfolioPk,
+              ]),
+              data: encodeInitUser({}),
+            });
+
+            const sigPortfolio = await sendTx({
+              connection, wallet,
+              instructions: [createPortfolioIx, initPortfolioIx],
+              signers: [lpPortfolioKp],
+              computeUnits: 200_000,
+            });
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, sigPortfolio] }));
+
+            // TX B: Create matcher context account ONLY (empty, matcher-program-owned).
+            // No longer calls the matcher program directly here — see fix note above.
+            const matcherCtxKp = Keypair.generate();
+            const matcherCtxPk = matcherCtxKp.publicKey;
+            const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(MATCHER_CONTEXT_LEN);
+
+            const createCtxIx = SystemProgram.createAccount({
+              fromPubkey: wallet.publicKey,
+              newAccountPubkey: matcherCtxPk,
+              lamports: matcherCtxRent,
+              space: MATCHER_CONTEXT_LEN,
+              programId: matcherProgramId,
+            });
+
+            // Derive matcher delegate PDA: seeds = ["matcher", market, lpPortfolio, lpOwner, matcherProg, ctx]
+            const [delegatePk] = deriveMatcherDelegate(
+              programId, slabPk, lpPortfolioPk, wallet.publicKey, matcherProgramId, matcherCtxPk,
+            );
+
+            const sigCtx = await sendTx({
+              connection, wallet,
+              instructions: [createCtxIx],
+              signers: [matcherCtxKp],
+              computeUnits: 150_000,
+            });
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, sigCtx] }));
+
+            // TX C: SetMatcherConfig (tag 68) on the LP portfolio — MUST land before TX D.
+            // Accounts: [lpOwner(s), market(ro), lpPortfolio(w), matcherProg(ro), matcherCtx(ro), delegate(ro)]
+            const setMatcherConfigIx = buildIx({
+              programId,
+              keys: buildAccountMetas(ACCOUNTS_SET_MATCHER_CONFIG, [
+                wallet.publicKey,
+                slabPk,
+                lpPortfolioPk,
+                matcherProgramId,
+                matcherCtxPk,
+                delegatePk,
+              ]),
+              data: encodeSetMatcherConfig({ enabled: 1 }),
+            });
+
+            const sigMatcherCfg = await sendTx({
+              connection, wallet,
+              instructions: [setMatcherConfigIx],
+              computeUnits: 200_000,
+            });
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, sigMatcherCfg] }));
+
+            // TX D: InitMatcherCtx (tag 83) on the WRAPPER — CPIs into the matcher program,
+            // invoke_signed-ing the delegate PDA so the matcher's process_init sees
+            // lp_pda.is_signer == true. This is the real fix (see note above).
+            // Accounts: [lpOwner(s), market(ro), lpPortfolio(ro), matcherCtx(w), matcherProg(ro), matcherDelegate(ro)]
+            const I128_MAX = 170141183460469231731687303715884105727n;
+            const initMatcherCtxIx = buildIx({
+              programId,
+              keys: buildAccountMetas(ACCOUNTS_INIT_MATCHER_CTX, [
+                wallet.publicKey,
+                slabPk,
+                lpPortfolioPk,
+                matcherCtxPk,
+                matcherProgramId,
+                delegatePk,
+              ]),
+              data: encodeInitMatcherCtx({
+                kind: 0, // Passive
+                tradingFeeBps: Number(params.tradingFeeBps),
+                baseSpreadBps: 50,
+                maxTotalBps: 200,
+                impactKBps: 0,
+                liquidityNotionalE6: 0n,
+                maxFillAbs: I128_MAX,
+                maxInventoryAbs: I128_MAX,
+                feeToInsuranceBps: 0,
+                skewSpreadMultBps: 0,
+              }),
+            });
+
+            const sigInitMatcherCtx = await sendTx({
+              connection, wallet,
+              instructions: [initMatcherCtxIx],
+              computeUnits: 200_000,
+            });
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, sigInitMatcherCtx] }));
+            updateInFlightStep(slabPk.toBase58(), 3);
           } else {
-
-          const matcherCtxKp = Keypair.generate();
-          const matcherCtxRent = await connection.getMinimumBalanceForRentExemption(cfg.matcherCtxSize);
-
-          const [lpPda] = deriveLpPda(programId, slabPk, lpIdx);
-
-          // 1. Create matcher context account (skip if already exists)
-          const existingCtx = await connection.getAccountInfo(matcherCtxKp.publicKey);
-          const createCtxIx = existingCtx
-            ? null
-            : SystemProgram.createAccount({
-                fromPubkey: wallet.publicKey,
-                newAccountPubkey: matcherCtxKp.publicKey,
-                lamports: matcherCtxRent,
-                space: cfg.matcherCtxSize,
-                programId: matcherProgramId,
-              });
-
-          // 2. Initialize LP
-          // NOTE: The new reference AMM matcher (GTRgy...) does NOT have an
-          // InitVamm (Tag 2) instruction. It only has Tag 0 (CPI matcher call).
-          // The AMM reads LP config from context bytes 64..68 (spread_bps u16 +
-          // max_fill_pct u16), using defaults (30 bps spread, 100% fill) when
-          // zeroed. No separate initialization instruction is needed.
-          const initLpData = encodeInitLP({
-            matcherProgram: matcherProgramId,
-            matcherContext: matcherCtxKp.publicKey,
-            feePayment: "1000000",
-          });
-          // beta.32: ACCOUNTS_INIT_LP expanded to 6 accounts — added clock
-          const initLpKeys = buildAccountMetas(ACCOUNTS_INIT_LP, [
-            wallet.publicKey, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram, WELL_KNOWN.clock,
-          ]);
-          const initLpIx = buildIx({ programId, keys: initLpKeys, data: initLpData });
-
-          const lpInstructions = createCtxIx
-            ? [createCtxIx, initLpIx]
-            : [initLpIx];
-          const lpSigners = createCtxIx ? [matcherCtxKp] : [];
-
-          const sig = await sendTx({
-            connection, wallet,
-            instructions: lpInstructions,
-            computeUnits: 300_000,
-            signers: lpSigners,
-          });
-          setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
-          updateInFlightStep(slabPk.toBase58(), 3);
-          } // end else (LP not yet initialized)
+            // v12 legacy: encodeInitLP (tag 2) is removed in v17 — skip for v17 slabs.
+            // For v12 slabs on the old binary, this path would be used but is no longer supported.
+            console.warn("[useCreateMarket] v12 InitLP is removed in v17. Skipping LP init for non-v17 slab.");
+            updateInFlightStep(slabPk.toBase58(), 3);
+          }
         }
 
         // Step 3: DepositCollateral + TopUpInsurance + Final Crank (merged)
@@ -824,14 +1042,50 @@ export function useCreateMarket() {
             }
           }
 
+          // v17 Deposit: [owner, market, portfolio, sourceToken, vaultToken, tokenProgram] — no clock.
+          // Must find or create the LP portfolio first.
+          // Note: vaultPda is declared in outer scope; use the derived value here for vaultTokenAta.
+          const vaultTokenAta = await getAssociatedTokenAddress(params.mint, vaultPda, true);
+          // Find the LP portfolio created in Step 2 (v17 only).
+          // For v12, fall back to the vault ATA as the portfolio placeholder (v12 layout had no portfolio).
+          const slabInfoForDeposit = await connection.getAccountInfo(slabPk);
+          const isV17SlabDeposit = slabInfoForDeposit?.data
+            ? isV17Account(new Uint8Array(slabInfoForDeposit.data))
+            : false;
+
+          let depositPortfolioPk: PublicKey;
+          if (isV17SlabDeposit) {
+            // Scan for LP portfolio (owner = wallet, market = slabPk) — created in Step 2
+            // V17 magic bytes at offset 0: PERCV16\0
+            const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
+            const portfolioAccounts = await connection.getProgramAccounts(programId, {
+              filters: [
+                { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES.toString("base64"), encoding: "base64" } },
+                { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
+                { memcmp: { offset: 80, bytes: wallet.publicKey.toBase58() } },
+              ],
+            });
+            if (portfolioAccounts.length === 0) {
+              throw new Error("LP portfolio not found — Step 2 (LP init) may not have completed. Please retry from step 2.");
+            }
+            depositPortfolioPk = portfolioAccounts[0].pubkey;
+          } else {
+            // v12 fallback — old deposit layout used vault ATA at [2], not a portfolio
+            depositPortfolioPk = vaultAta; // kept for legacy compatibility
+          }
+
           const depositData = encodeDepositCollateral({
-            userIdx: 0,
             amount: params.lpCollateral.toString(),
           });
-          const depositKeys = buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
-            wallet.publicKey, slabPk, userAta, vaultAta,
-            WELL_KNOWN.tokenProgram, WELL_KNOWN.clock,
-          ]);
+          const depositKeys = isV17SlabDeposit
+            ? buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
+                wallet.publicKey, slabPk, depositPortfolioPk, userAta, vaultTokenAta,
+                WELL_KNOWN.tokenProgram,
+              ])
+            : buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
+                wallet.publicKey, slabPk, userAta, vaultAta,
+                WELL_KNOWN.tokenProgram, WELL_KNOWN.clock,
+              ]);
           const depositIx = buildIx({ programId, keys: depositKeys, data: depositData });
 
           const topupData = encodeTopUpInsurance({ amount: params.insuranceAmount.toString() });
@@ -840,7 +1094,7 @@ export function useCreateMarket() {
           // the deployed binary. SDK 2.0.9 has the right shape; we just need
           // to supply the matching 6th pubkey here.
           const topupKeys = buildAccountMetas(ACCOUNTS_TOPUP_INSURANCE, [
-            wallet.publicKey, slabPk, userAta, vaultAta, WELL_KNOWN.tokenProgram, WELL_KNOWN.clock,
+            wallet.publicKey, slabPk, userAta, isV17SlabDeposit ? vaultTokenAta : vaultAta, WELL_KNOWN.tokenProgram,
           ]);
           const topupIx = buildIx({ programId, keys: topupKeys, data: topupData });
 
@@ -848,68 +1102,48 @@ export function useCreateMarket() {
           // Must push fresh price first (user is still oracle authority at this point)
           const finalInstructions = [depositIx, topupIx];
 
-          if (isAdminOracle) {
-            // PERC-465: Push fresh price again in the final crank bundle.
+          if (isAdminOracle && isLegacyOracle) {
+            // PERC-465: Push fresh price again in the final crank bundle (v12 legacy path only).
+            // v17: PushOraclePrice (tag 16) does not exist — oracle state is updated by the keeper.
             // Fetch from Jupiter first; fall back to the resolvedPriceE6 from step 1.
             const jupiterCA2 = params.mainnetCA ?? params.mint.toBase58();
             const freshPrice2 = await fetchJupiterPriceE6(jupiterCA2);
             const finalPriceE6 = freshPrice2 ?? params.initialPriceE6;
 
             const now2 = Math.floor(Date.now() / 1000);
-            const pushData2 = encodePushOraclePrice({
-              priceE6: finalPriceE6.toString(),
-              timestamp: now2.toString(),
-            });
-            const pushKeys2 = buildAccountMetas(ACCOUNTS_PUSH_ORACLE_PRICE, [
-              wallet.publicKey, slabPk,
-            ]);
-            finalInstructions.push(buildIx({ programId, keys: pushKeys2, data: pushData2 }));
+            // NOTE: encodePushOraclePrice and ACCOUNTS_PUSH_ORACLE_PRICE are not imported
+            // in the v17 SDK. This block is unreachable when isLegacyOracle = false.
+            // To restore v12 support, re-import from @/lib/sdk-compat and set isLegacyOracle = true.
+            void jupiterCA2; void freshPrice2; void finalPriceE6; void now2;
           }
 
-          // PERC-470: Final crank — UpdateHyperpMark for hyperp, KeeperCrank otherwise
-          if (isHyperpOracle && params.dexPoolAddress) {
-            const hyperpData = encodeUpdateHyperpMark();
-            const hyperpKeys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [
-              { pubkey: slabPk, isSigner: false, isWritable: true },
-              { pubkey: new PublicKey(params.dexPoolAddress), isSigner: false, isWritable: false },
-              { pubkey: WELL_KNOWN.clock, isSigner: false, isWritable: false },
-            ];
-            if (params.dexBaseVault) {
-              hyperpKeys.push({ pubkey: new PublicKey(params.dexBaseVault), isSigner: false, isWritable: false });
-            }
-            if (params.dexQuoteVault) {
-              hyperpKeys.push({ pubkey: new PublicKey(params.dexQuoteVault), isSigner: false, isWritable: false });
-            }
-            finalInstructions.push(new TransactionInstruction({ programId, keys: hyperpKeys, data: Buffer.from(hyperpData) }));
-          } else {
-            const oracleAccount = isAdminOracle ? slabPk : derivePythPushOraclePDA(params.oracleFeed)[0];
-            const crankData = encodeKeeperCrank({ callerIdx: 65535 });
-            const crankKeys = buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [
-              wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount,
+          // v17: UpdateHyperpMark (encodeUpdateHyperpMark) is REMOVED — throws removedInstruction().
+          // Hyperp oracle in v17 uses ConfigureHybridOracle (tag 34) managed server-side by keeper.
+          // Final crank uses PermissionlessCrank for all oracle modes.
+          // v17 PermissionlessCrank: [owner(s,w), market(w), portfolio(w)] + optional oracle tail.
+          {
+            const crankData = encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 });
+            const crankPortfolioPk = isV17SlabDeposit ? depositPortfolioPk : slabPk;
+            const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
+              wallet.publicKey, slabPk, crankPortfolioPk,
             ]);
+            // For Pyth mode, append oracle feed account as tail
+            if (!isAdminOracle && !isHyperpOracle) {
+              crankKeys.push({ pubkey: derivePythPushOraclePDA(params.oracleFeed)[0], isSigner: false, isWritable: false });
+            }
             finalInstructions.push(buildIx({ programId, keys: crankKeys, data: crankData }));
           }
 
-          // PERC-465: On devnet, delegate oracle authority to the crank keypair so the
-          // oracle keeper can continuously push live prices for this new market.
-          // SetOracleAuthority is added AFTER the final crank — it clears authority_price_e6
-          // but that's fine here since the crank has already processed the current price.
-          // PERC-470: Skip for hyperp mode — oracle_authority stays zeros (permissionless).
-          if (isDevnetEnv && isAdminOracle) {
-            const crankPubkey = getConfig().crankWallet;
-            if (crankPubkey && crankPubkey.trim() !== "") {
-              try {
-                const crankPk = new PublicKey(crankPubkey);
-                const setAuthToCrankData = encodeSetOracleAuthority({ newAuthority: crankPk });
-                const setAuthToCrankKeys = buildAccountMetas(ACCOUNTS_SET_ORACLE_AUTHORITY, [
-                  wallet.publicKey, slabPk,
-                ]);
-                finalInstructions.push(buildIx({ programId, keys: setAuthToCrankKeys, data: setAuthToCrankData }));
-              } catch {
-                // Non-fatal: invalid crankWallet config — market still works, keeper just can't push prices
-                console.warn("PERC-465: Invalid crankWallet config — skipping oracle authority delegation");
-              }
-            }
+          // PERC-465: Oracle authority delegation (v12 legacy path only).
+          // v17: SetOracleAuthority (tag 17) does not exist. Oracle authority in v17 is
+          // managed via UpdateAssetAuthority (tag 65) by the market admin AFTER market creation.
+          // The keeper bot picks up new v17 markets automatically via the config oracle mode.
+          // PERC-470: Hyperp mode needs no delegation (oracle_authority stays zeros, permissionless).
+          if (isDevnetEnv && isAdminOracle && isLegacyOracle) {
+            // v12-only: SetOracleAuthority → crank wallet
+            // NOTE: encodeSetOracleAuthority and ACCOUNTS_SET_ORACLE_AUTHORITY are not imported
+            // in the v17 SDK. This block is unreachable when isLegacyOracle = false.
+            void getConfig;
           }
 
           const sig = await sendTx({
@@ -925,8 +1159,38 @@ export function useCreateMarket() {
         // symbol, mainnet_ca, and oracle_authority are stored even if step 5 fails.
         // Previously this ran after step 5, so a step-5 timeout left the market on-chain
         // with no DB record → dashboard showed random chars (CCPHprPU) instead of symbol.
+        //
+        // PERC-8332: Attach nonce + ed25519 signature so the POST handler can verify
+        // deployer ownership without Supabase. Flow:
+        //   1. GET /api/markets/challenge?deployer=<pubkey> → { nonce }
+        //   2. Sign nonce bytes with wallet.signMessage (ed25519)
+        //   3. POST with { nonce, signature: base64 }
         if (startStep <= 4) {
           try {
+            const deployerStr = wallet.publicKey.toBase58();
+
+            // Step 1: fetch nonce challenge
+            let nonce: string | null = null;
+            let signature: string | null = null;
+            if (wallet.signMessage) {
+              try {
+                const challengeResp = await fetch(
+                  `/api/markets/challenge?deployer=${encodeURIComponent(deployerStr)}`,
+                );
+                if (challengeResp.ok) {
+                  const { nonce: n } = await challengeResp.json() as { nonce: string };
+                  nonce = n;
+                  // Step 2: sign the nonce bytes
+                  const nonceBytes = new TextEncoder().encode(nonce);
+                  const sigBytes = await wallet.signMessage(nonceBytes);
+                  signature = Buffer.from(sigBytes).toString("base64");
+                }
+              } catch (sigErr) {
+                console.warn("[useCreateMarket] Nonce challenge/sign failed (non-fatal):", sigErr);
+                // Fall through — POST will 400 if nonce/signature missing, but market is on-chain.
+              }
+            }
+
             await fetch("/api/markets", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -936,17 +1200,19 @@ export function useCreateMarket() {
                 symbol: params.symbol ?? "UNKNOWN",
                 name: params.name ?? "Unknown Token",
                 decimals: params.decimals ?? 6,
-                deployer: wallet.publicKey.toBase58(),
+                deployer: deployerStr,
                 oracle_mode: oracleMode,
                 dex_pool_address: params.dexPoolAddress ?? null,
                 oracle_authority: isAdminOracle
-                  ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : wallet.publicKey.toBase58())
+                  ? (isDevnetEnv && getConfig().crankWallet ? getConfig().crankWallet : deployerStr)
                   : null,
                 initial_price_e6: params.initialPriceE6.toString(),
                 max_leverage: params.initialMarginBps > 0 ? Math.floor(10000 / Number(params.initialMarginBps)) : 1,
                 trading_fee_bps: Number(params.tradingFeeBps),
                 lp_collateral: params.lpCollateral.toString(),
                 mainnet_ca: params.mainnetCA ?? null,
+                // PERC-8332: nonce + signature for deployer proof
+                ...(nonce && signature ? { nonce, signature } : {}),
               }),
             });
           } catch {
@@ -1010,6 +1276,37 @@ export function useCreateMarket() {
           }
         }
 
+        // Keeper registration — non-fatal; market is live regardless.
+        // Registers { marketAddress, poolAddress, dexType } with the keeper service so
+        // PushAuthMark price-push starts within the next keeper cycle (~30s).
+        let keeperDelegated = false;
+        let keeperMessage: string | null = null;
+        if (isKeeperOracle && params.dexPoolAddress) {
+          try {
+            const keeperRegResp = await fetch("/api/playground/keeper-register", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                slabAddress: slabPk.toBase58(),
+                mainnetCA: params.mainnetCA ?? null,
+                dexPoolAddress: params.dexPoolAddress,
+                dexType: params.dexType ?? "raydium-clmm",
+                symbol: params.symbol ?? null,
+              }),
+            });
+            const keeperRegData = await keeperRegResp.json() as {
+              registered?: boolean;
+              message?: string;
+            };
+            keeperDelegated = keeperRegData.registered ?? false;
+            keeperMessage = keeperRegData.message ?? null;
+            console.log("[useCreateMarket] Keeper registration:", keeperRegData);
+          } catch (keeperErr) {
+            console.warn("[useCreateMarket] Keeper registration failed (non-fatal):", keeperErr);
+            keeperMessage = "Keeper registration failed — prices will start on next keeper discovery cycle";
+          }
+        }
+
         // Done! Clear in-memory keypair ref + in-flight recovery state.
         slabKpRef.current = null;
         clearInFlightMarket(slabPk.toBase58());
@@ -1018,6 +1315,8 @@ export function useCreateMarket() {
           loading: false,
           step: 5,
           stepLabel: "Market created!",
+          keeperDelegated,
+          keeperMessage,
           // GH#1266: Defensively re-set slabAddress from slabPk at completion to guard
           // against any state-update race where a prior step's address is stale.
           slabAddress: slabPk.toBase58(),
@@ -1053,6 +1352,8 @@ export function useCreateMarket() {
       devnetAirdropSymbol: null,
       devnetMintError: null,
       insuranceMintFailed: false,
+      keeperDelegated: false,
+      keeperMessage: null,
     });
   }, []);
 

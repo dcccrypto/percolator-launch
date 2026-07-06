@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import {
   createAssociatedTokenAccountInstruction,
   getAccount,
@@ -18,10 +18,53 @@ import {
   getAta,
   parseAllAccounts,
   AccountKind,
+  isV17Account,
+  parsePortfolioV17,
+  V17_PORTFOLIO_ACCOUNT_LEN,
+  deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
+import { humanizeError } from "@/lib/errorMessages";
+
+// v17 portfolio account size = SDK V17_PORTFOLIO_ACCOUNT_LEN (9347). MUST be the full length:
+// InitPortfolio reallocs up to 9347 and adds NO lamports, so funding rent for a smaller size
+// leaves the account below rent-exempt and InitPortfolio fails with InsufficientFundsForRent.
+const V17_PORTFOLIO_ACCOUNT_SIZE = V17_PORTFOLIO_ACCOUNT_LEN;
+
+/**
+ * Find the user's v17 portfolio account for a given market.
+ * v17 portfolios are standalone accounts (not embedded in the slab bitmap).
+ * We scan getProgramAccounts filtered by owner-program + data magic to find
+ * the user's portfolio for this market.
+ *
+ * Returns null if no portfolio exists yet.
+ */
+async function findV17Portfolio(
+  connection: Parameters<typeof import("@solana/web3.js")["Connection"]["prototype"]["getProgramAccounts"]>[0] extends never ? never : import("@solana/web3.js").Connection,
+  programId: PublicKey,
+  marketPk: PublicKey,
+  ownerPk: PublicKey,
+): Promise<PublicKey | null> {
+  try {
+    // V17 magic bytes at offset 0: 0x5045524356313600 in LE = [0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]
+    const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
+    const accounts = await connection.getProgramAccounts(programId, {
+      filters: [
+        { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES.toString("base64"), encoding: "base64" } },
+        // marketGroupId is at HEADER_LEN(16) in the portfolio = offset 16
+        { memcmp: { offset: 16, bytes: marketPk.toBase58() } },
+        // owner is at HEADER_LEN(16) + 32 + 32 = offset 80 (portfolioAccountId at 16+32, owner at 16+32+32)
+        { memcmp: { offset: 80, bytes: ownerPk.toBase58() } },
+      ],
+    });
+    if (accounts.length === 0) return null;
+    return accounts[0].pubkey;
+  } catch {
+    return null;
+  }
+}
 
 export function useDeposit(slabAddress: string) {
   const { connection } = useConnectionCompat();
@@ -87,86 +130,166 @@ export function useDeposit(slabAddress: string) {
           // RPC error — fall through, let the tx surface any on-chain failure
         }
 
-        let resolvedUserIdx = params.userIdx;
         const instructions: TransactionInstruction[] = [];
 
-        // Only run auto-init check if the caller hasn't confirmed the account exists.
-        // When accountExists=true, the caller (DepositWithdrawCard) already verified
-        // the account via useUserAccount() — skip the stale-slab re-check that would
-        // incorrectly try to InitUser a second time.
-        if (slabData && !params.accountExists) {
+        // v17 vs v12 deposit path diverge on the account list shape.
+        // v17: [owner, market, portfolio, sourceToken, vaultToken, tokenProgram] (6 accounts, no clock)
+        // v12: [owner, market, userAta, vault, tokenProgram, clock] (6 accounts, has clock)
+        const isV17 = slabData ? isV17Account(slabData) : false;
+
+        if (isV17) {
+          // v17: derive vault authority PDA to build the vault token ATA.
+          // vaultPda is a program PDA (off the ed25519 curve) → allowOwnerOffCurve=true,
+          // else spl-token throws TokenOwnerOffCurveError.
+          const [vaultPda] = deriveVaultAuthority(programId, slabPk);
+          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
+          // ── v17 deposit path ────────────────────────────────────────────────
+          // Portfolio accounts in v17 are standalone program-owned accounts.
+          // We must find or create the user's portfolio account.
+
+          // Ensure user ATA exists (prevents token transfer failure)
           try {
-            const slabAccounts = parseAllAccounts(slabData);
-            const pkStr = wallet.publicKey.toBase58();
-            const userAcct = slabAccounts.find(
-              ({ account }) =>
-                account.kind === AccountKind.User &&
-                account.owner.toBase58() === pkStr,
+            await getAccount(connection, userAta);
+          } catch {
+            instructions.push(
+              createAssociatedTokenAccountInstruction(
+                wallet.publicKey,
+                userAta,
+                wallet.publicKey,
+                mktConfig.collateralMint,
+              ),
             );
+          }
 
-            if (!userAcct) {
-              // No sub-account for this wallet — new slot index = current count
-              resolvedUserIdx = slabAccounts.length;
+          // Find or create the user's portfolio account.
+          let portfolioPk = await findV17Portfolio(connection, programId, slabPk, wallet.publicKey);
 
-              // Ensure user ATA exists (prevents program error 24)
-              try {
-                await getAccount(connection, userAta);
-              } catch {
+          if (!portfolioPk && !params.accountExists) {
+            // No portfolio for this user — create one and run InitPortfolio (tag 1).
+            // InitPortfolio account list: [owner(signer,w), market(w), portfolio(w)]
+            // The portfolio is a client-generated keypair that the program will initialize.
+            const portfolioKp = Keypair.generate();
+            portfolioPk = portfolioKp.publicKey;
+
+            const portfolioRent = await connection.getMinimumBalanceForRentExemption(V17_PORTFOLIO_ACCOUNT_SIZE);
+            const createPortfolioIx = SystemProgram.createAccount({
+              fromPubkey: wallet.publicKey,
+              newAccountPubkey: portfolioPk,
+              lamports: portfolioRent,
+              space: V17_PORTFOLIO_ACCOUNT_SIZE,
+              programId,
+            });
+            const initPortfolioIx = buildIx({
+              programId,
+              keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
+                wallet.publicKey,
+                slabPk,
+                portfolioPk,
+              ]),
+              data: encodeInitUser({}),
+            });
+            instructions.push(createPortfolioIx, initPortfolioIx);
+            // Send portfolio init in a separate tx so Deposit can reference the initialized account.
+            const initSig = await sendTx({ connection, wallet, instructions: [createPortfolioIx, initPortfolioIx], signers: [portfolioKp] });
+            if (process.env.NODE_ENV === "development") {
+              console.log("[useDeposit] v17 portfolio initialized:", portfolioPk.toBase58(), "sig:", initSig);
+            }
+            instructions.length = 0; // Clear — we sent the init above; deposit is a separate tx.
+          }
+
+          if (!portfolioPk) {
+            throw new Error("v17: Could not find or create portfolio account. Please try again.");
+          }
+
+          // v17 Deposit (tag 3): [owner(signer,w), market(w), portfolio(w), sourceToken(w), vaultToken(w), tokenProgram]
+          instructions.push(
+            buildIx({
+              programId,
+              keys: buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
+                wallet.publicKey,
+                slabPk,
+                portfolioPk,
+                userAta,
+                vaultTokenAta,
+                WELL_KNOWN.tokenProgram,
+              ]),
+              data: encodeDepositCollateral({ amount: params.amount.toString() }),
+            }),
+          );
+        } else {
+          // ── v12 legacy deposit path ──────────────────────────────────────────
+          let resolvedUserIdx = params.userIdx;
+
+          if (slabData && !params.accountExists) {
+            try {
+              const slabAccounts = parseAllAccounts(slabData);
+              const pkStr = wallet.publicKey.toBase58();
+              const userAcct = slabAccounts.find(
+                ({ account }) =>
+                  account.kind === AccountKind.User &&
+                  account.owner.toBase58() === pkStr,
+              );
+
+              if (!userAcct) {
+                resolvedUserIdx = slabAccounts.length;
+
+                try {
+                  await getAccount(connection, userAta);
+                } catch {
+                  instructions.push(
+                    createAssociatedTokenAccountInstruction(
+                      wallet.publicKey,
+                      userAta,
+                      wallet.publicKey,
+                      mktConfig.collateralMint,
+                    ),
+                  );
+                }
+
+                const naf = slabParams?.newAccountFee ?? 0n;
+                const mid = slabParams?.minInitialDeposit ?? 0n;
+                const accountFee = naf > mid ? naf : mid;
                 instructions.push(
-                  createAssociatedTokenAccountInstruction(
-                    wallet.publicKey,
-                    userAta,
-                    wallet.publicKey,
-                    mktConfig.collateralMint,
-                  ),
+                  buildIx({
+                    programId,
+                    keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
+                      wallet.publicKey,
+                      slabPk,
+                      userAta,
+                      mktConfig.vaultPubkey,
+                      WELL_KNOWN.tokenProgram,
+                      WELL_KNOWN.clock,
+                    ]),
+                    data: encodeInitUser({ feePayment: accountFee.toString() }),
+                  }),
                 );
               }
-
-              // InitUser (tag 1) — must pay max(newAccountFee, minInitialDeposit)
-              const naf = slabParams?.newAccountFee ?? 0n;
-              const mid = slabParams?.minInitialDeposit ?? 0n;
-              const accountFee = naf > mid ? naf : mid;
-              instructions.push(
-                buildIx({
-                  programId,
-                  keys: buildAccountMetas(ACCOUNTS_INIT_USER, [
-                    wallet.publicKey,
-                    slabPk,
-                    userAta,
-                    mktConfig.vaultPubkey,
-                    WELL_KNOWN.tokenProgram,
-                    WELL_KNOWN.clock,
-                  ]),
-                  data: encodeInitUser({ feePayment: accountFee.toString() }),
-                }),
-              );
-            }
-          } catch (parseErr) {
-            // Unexpected slab layout — fall through with original userIdx
-            if (process.env.NODE_ENV === "development") {
-              console.warn("[useDeposit] sub-account check failed:", parseErr);
+            } catch (parseErr) {
+              if (process.env.NODE_ENV === "development") {
+                console.warn("[useDeposit] sub-account check failed:", parseErr);
+              }
             }
           }
-        }
 
-        // DepositCollateral (tag 3)
-        instructions.push(
-          buildIx({
-            programId,
-            keys: buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
-              wallet.publicKey,
-              slabPk,
-              userAta,
-              mktConfig.vaultPubkey,
-              WELL_KNOWN.tokenProgram,
-              WELL_KNOWN.clock,
-            ]),
-            data: encodeDepositCollateral({
-              userIdx: resolvedUserIdx,
-              amount: params.amount.toString(),
+          // v12 DepositCollateral (tag 3)
+          instructions.push(
+            buildIx({
+              programId,
+              keys: buildAccountMetas(ACCOUNTS_DEPOSIT_COLLATERAL, [
+                wallet.publicKey,
+                slabPk,
+                userAta,
+                mktConfig.vaultPubkey,
+                WELL_KNOWN.tokenProgram,
+                WELL_KNOWN.clock,
+              ]),
+              data: encodeDepositCollateral({
+                userIdx: resolvedUserIdx,
+                amount: params.amount.toString(),
+              }),
             }),
-          }),
-        );
+          );
+        }
 
         const sig = await sendTx({ connection, wallet, instructions });
 
@@ -176,7 +299,7 @@ export function useDeposit(slabAddress: string) {
         setTimeout(() => refreshSlab(), 2000);
         return sig;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(humanizeError(e instanceof Error ? e.message : String(e)));
         throw e;
       } finally {
         inflightRef.current = false;

@@ -106,22 +106,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid decimals (must be integer 0-18)" }, { status: 400 });
     }
 
-    const supabase = getServiceClient();
-
-    // Upsert: use mintAddress as both mainnet_ca and devnet_mint for native devnet mints.
-    // This allows devnet-airdrop to look up by devnet_mint and find the row.
-    const { error } = await supabase.from("devnet_mints").upsert(
-      {
-        mainnet_ca: mintAddress, // self-referencing for devnet-native mints
-        devnet_mint: mintAddress,
-        name: safeName,
-        symbol: rawSymbol,
-        decimals: safeDecimals,
-      },
-      { onConflict: "mainnet_ca", ignoreDuplicates: true },
-    );
-
-    if (error) throw error;
+    // Best-effort DB upsert — guarded when Supabase unavailable
+    try {
+      const supabase = getServiceClient();
+      const { error } = await supabase.from("devnet_mints").upsert(
+        {
+          mainnet_ca: mintAddress,
+          devnet_mint: mintAddress,
+          name: safeName,
+          symbol: rawSymbol,
+          decimals: safeDecimals,
+        },
+        { onConflict: "mainnet_ca", ignoreDuplicates: true },
+      );
+      if (error) throw error;
+    } catch (dbErr) {
+      // If Supabase unavailable, return success anyway — endpoint is best-effort
+      console.warn("[devnet-register-mint] DB upsert failed (non-fatal):", dbErr instanceof Error ? dbErr.message : String(dbErr));
+    }
 
     return NextResponse.json({ status: "registered", mintAddress });
   } catch (error) {

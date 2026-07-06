@@ -15,7 +15,12 @@ import "@testing-library/jest-dom";
 
 const mockReturns = vi.fn();
 const mockNeq = vi.fn(() => ({ returns: mockReturns }));
-const mockSelect = vi.fn(() => ({ neq: mockNeq }));
+// GH#2239: the real query switched from .neq("indexer_excluded", true) to
+// .or("indexer_excluded.is.null,indexer_excluded.eq.false") — the generated Supabase
+// types don't expose indexer_excluded as a filterable column via .neq(). Keep the
+// .neq mock too in case another code path still uses it.
+const mockOr = vi.fn(() => ({ returns: mockReturns }));
+const mockSelect = vi.fn(() => ({ neq: mockNeq, or: mockOr }));
 const mockFrom = vi.fn(() => ({ select: mockSelect }));
 
 vi.mock("@/lib/supabase", () => ({

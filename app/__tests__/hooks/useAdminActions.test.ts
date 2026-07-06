@@ -115,38 +115,43 @@ describe("useAdminActions — PERC-8311 authority pre-flight checks", () => {
   });
 
   describe("pauseMarket", () => {
-    it("throws when wallet is not admin", async () => {
+    // v17: PauseMarket (tag 56) was removed. The instruction no longer exists in the
+    // v17 on-chain program (tag 56 is now TopUpInsuranceDomain). Both admin and
+    // stranger wallets now receive the same "removed in v17" error regardless of authority.
+    it("throws v17 removed-instruction error for any wallet (stranger)", async () => {
       mockWallet(STRANGER_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
         result.current.pauseMarket(makeMarket()),
-      ).rejects.toThrow(/not the market admin/i);
+      ).rejects.toThrow(/PauseMarket was removed in v17/i);
     });
 
-    it("succeeds when wallet IS admin", async () => {
+    it("throws v17 removed-instruction error for admin wallet too", async () => {
       mockWallet(ADMIN_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
         result.current.pauseMarket(makeMarket()),
-      ).resolves.not.toThrow();
+      ).rejects.toThrow(/PauseMarket was removed in v17/i);
     });
   });
 
   describe("unpauseMarket", () => {
-    it("throws when wallet is not admin", async () => {
+    // v17: UnpauseMarket (tag 58) was removed. Tag 58 is now UpdateFeeRedirectPolicy.
+    // Both admin and stranger wallets now receive the same "removed in v17" error.
+    it("throws v17 removed-instruction error for any wallet (stranger)", async () => {
       mockWallet(STRANGER_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
         result.current.unpauseMarket(makeMarket()),
-      ).rejects.toThrow(/not the market admin/i);
+      ).rejects.toThrow(/UnpauseMarket was removed in v17/i);
     });
 
-    it("succeeds when wallet IS admin", async () => {
+    it("throws v17 removed-instruction error for admin wallet too", async () => {
       mockWallet(ADMIN_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
         result.current.unpauseMarket(makeMarket()),
-      ).resolves.not.toThrow();
+      ).rejects.toThrow(/UnpauseMarket was removed in v17/i);
     });
   });
 
@@ -169,12 +174,14 @@ describe("useAdminActions — PERC-8311 authority pre-flight checks", () => {
   });
 
   describe("resetRiskGate", () => {
-    it("throws when wallet is not admin", async () => {
+    // v17: SetRiskThreshold (tag 11) was removed. The stub throws immediately with a
+    // descriptive "removed in v17" error for any caller, regardless of admin authority.
+    it("throws v17 removed-instruction error for any wallet", async () => {
       mockWallet(STRANGER_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
         result.current.resetRiskGate(makeMarket()),
-      ).rejects.toThrow(/not the market admin/i);
+      ).rejects.toThrow(/SetRiskThreshold.*removed in v17/i);
     });
   });
 
@@ -203,19 +210,21 @@ describe("useAdminActions — PERC-8311 authority pre-flight checks", () => {
   });
 
   describe("error message quality", () => {
-    it("includes truncated wallet address in error message", async () => {
+    // Use renounceAdmin (authority check still present in v17) to verify error quality.
+    // pauseMarket/unpauseMarket were removed in v17 and no longer run authority checks.
+    it("includes truncated wallet address in error message (via renounceAdmin)", async () => {
       mockWallet(STRANGER_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
-        result.current.pauseMarket(makeMarket()),
+        result.current.renounceAdmin(makeMarket()),
       ).rejects.toThrow(STRANGER_PK.toBase58().slice(0, 8));
     });
 
-    it("includes truncated admin address in error message", async () => {
+    it("includes truncated admin address in error message (via renounceAdmin)", async () => {
       mockWallet(STRANGER_PK);
       const { result } = renderHook(() => useAdminActions());
       await expect(
-        result.current.pauseMarket(makeMarket()),
+        result.current.renounceAdmin(makeMarket()),
       ).rejects.toThrow(ADMIN_PK.toBase58().slice(0, 8));
     });
   });

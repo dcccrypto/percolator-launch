@@ -99,19 +99,21 @@ describe("Market Creation — Failure Scenarios", () => {
     });
   });
 
-  describe("Program error flows (corrected enum mapping — PERC-509)", () => {
-    // Error codes match percolator-prog/src/percolator.rs PercolatorError enum order:
+  describe("Program error flows (v17 enum mapping)", () => {
+    // v17 PercolatorError enum order (ordinals 0-46):
     // 0=InvalidMagic, 1=InvalidVersion, 2=AlreadyInitialized, 3=NotInitialized,
-    // 4=InvalidSlabLen, 5=InvalidOracleKey, 6=OracleStale, 7=OracleConfTooWide,
-    // 8=InvalidVaultAta, 9=InvalidMint, 10=ExpectedSigner, 11=ExpectedWritable,
-    // 12=OracleInvalid, 13=EngineInsufficientBalance, ...
-    // 18=InsufficientSeed
+    // 4=InvalidAccountKind, 5=InvalidAccountLen, 6=ExpectedSigner, 7=ExpectedWritable,
+    // 8=Unauthorized, 9=InvalidInstruction, 10=InvalidMint, 11=InvalidTokenAccount,
+    // 12=InvalidVaultAccount, 13=InvalidTokenProgram, 14=EngineInvalidConfig,
+    // 15=EngineArithmeticOverflow, 16=EngineProvenanceMismatch, 17=EngineHiddenLeg,
+    // 18=EngineInvalidLeg, 19=EngineStale, ...
+    // 30-41=LP-vault; 42-46=NFT/B-3.
 
     it("handles InvalidMagic (code 0x0)", () => {
       const msg = parseMarketCreationError(
         new Error("custom program error: 0x0")
       );
-      expect(msg).toContain("magic number");
+      expect(msg).toContain("magic");
     });
 
     it("handles InvalidVersion (code 0x1)", () => {
@@ -135,39 +137,45 @@ describe("Market Creation — Failure Scenarios", () => {
       expect(msg).toContain("not initialized");
     });
 
-    it("handles InvalidSlabLen (code 0x4)", () => {
+    it("handles InvalidAccountKind (code 0x4)", () => {
+      // v17: code 4 = InvalidAccountKind (v12 had InvalidSlabLen here)
       const msg = parseMarketCreationError(
         new Error("custom program error: 0x4")
       );
-      expect(msg).toContain("slab length");
+      expect(msg).toContain("account kind");
     });
 
-    it("handles OracleStale (code 0x6)", () => {
+    it("handles ExpectedSigner (code 0x6)", () => {
+      // v17: code 6 = ExpectedSigner (v12 had OracleStale here)
       const msg = parseMarketCreationError(
         new Error("custom program error: 0x6")
       );
-      expect(msg).toContain("stale");
+      // SDK hint: "Missing required signature. Ensure the correct authority wallet is signing."
+      expect(msg).toMatch(/signature|signer/i);
     });
 
-    it("handles InvalidVaultAta (code 0x8)", () => {
+    it("handles Unauthorized (code 0x8)", () => {
+      // v17: code 8 = Unauthorized (v12 had InvalidVaultAta here)
       const msg = parseMarketCreationError(
         new Error("custom program error: 0x8")
       );
-      expect(msg).toContain("vault token account");
+      expect(msg).toContain("authorized");
     });
 
-    it("handles EngineInsufficientBalance (code 0xd)", () => {
+    it("handles EngineInvalidConfig (code 0xe)", () => {
+      // v17: code 14 = EngineInvalidConfig; code 13 = InvalidTokenProgram.
       const msg = parseMarketCreationError(
-        new Error("custom program error: 0xd")
+        new Error("custom program error: 0xe")
       );
-      expect(msg).toContain("Insufficient balance");
+      expect(msg).toContain("config");
     });
 
-    it("handles InsufficientSeed (code 0x12)", () => {
+    it("handles EngineInvalidLeg (code 0x12)", () => {
+      // v17: code 18 = EngineInvalidLeg (v12 had InsufficientSeed here)
       const msg = parseMarketCreationError(
         new Error("custom program error: 0x12")
       );
-      expect(msg).toContain("seed deposit");
+      expect(msg).toContain("leg");
     });
 
     it("handles unknown program error code", () => {
@@ -178,11 +186,12 @@ describe("Market Creation — Failure Scenarios", () => {
       expect(msg).toContain("57005"); // 0xDEAD = 57005
     });
 
-    it("handles InstructionError format with Custom: 8 (InvalidVaultAta)", () => {
+    it("handles InstructionError format with Custom: 8 (v17 Unauthorized)", () => {
+      // v17: code 8 = Unauthorized (v12 had InvalidVaultAta here)
       const msg = parseMarketCreationError(
         new Error('InstructionError: [2, { Custom: 8 }]')
       );
-      expect(msg).toContain("vault token account");
+      expect(msg).toContain("authorized");
     });
   });
 

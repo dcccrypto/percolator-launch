@@ -64,6 +64,13 @@ function getBadgeStyle(mode: OracleMode | "pool", status?: OracleBadgeStatus): B
         label: "ADMIN",
         icon: "⬡",
       };
+    case "keeper":
+      return {
+        borderColor: "#34d399",
+        bgColor: "rgba(52,211,153,0.10)",
+        label: "KEEPER",
+        icon: "⬡",
+      };
     case "pool":
       return {
         borderColor: "#38bdf8",

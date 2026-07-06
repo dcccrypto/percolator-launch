@@ -32,21 +32,27 @@ describe("parseMarketCreationError", () => {
     expect(msg).toContain("Retry");
   });
 
-  it("parses custom program error hex code 0x8 (InvalidVaultAta)", () => {
+  // v17 error codes — completely different mapping from v12.
+  // Source: @percolatorct/sdk errors.ts PERCOLATOR_ERRORS (ordinals 0-46).
+
+  it("parses custom program error hex code 0x8 — v17 Unauthorized", () => {
+    // v17 code 8 = Unauthorized (v12 had InvalidVaultAta at 8)
     const msg = parseMarketCreationError(
       new Error("Transaction simulation failed: custom program error: 0x8")
     );
-    expect(msg).toContain("vault token account");
+    expect(msg).toContain("authorized");
   });
 
-  it("parses InvalidSlabLen error (0x4)", () => {
+  it("parses v17 InvalidAccountKind error (0x4)", () => {
+    // v17 code 4 = InvalidAccountKind (v12 had InvalidSlabLen at 4)
     const msg = parseMarketCreationError(
       new Error("custom program error: 0x4")
     );
-    expect(msg).toContain("slab length");
+    expect(msg).toContain("account kind");
   });
 
   it("parses AlreadyInitialized error (0x2)", () => {
+    // v17 code 2 = AlreadyInitialized (same as v12)
     const msg = parseMarketCreationError(
       new Error("custom program error: 0x2")
     );
@@ -54,24 +60,27 @@ describe("parseMarketCreationError", () => {
   });
 
   it("parses InvalidMagic error (0x0)", () => {
+    // v17 code 0 = InvalidMagic (same meaning as v12)
     const msg = parseMarketCreationError(
       new Error("custom program error: 0x0")
     );
-    expect(msg).toContain("magic number");
+    expect(msg).toContain("magic");
   });
 
-  it("parses EngineInsufficientBalance error (0xd)", () => {
+  it("parses v17 EngineInvalidConfig error (0xe)", () => {
+    // v17 code 14 = EngineInvalidConfig; code 13 = InvalidTokenProgram.
     const msg = parseMarketCreationError(
-      new Error("custom program error: 0xd")
+      new Error("custom program error: 0xe")
     );
-    expect(msg).toContain("Insufficient balance");
+    expect(msg).toContain("config");
   });
 
-  it("parses InsufficientSeed error (0x12)", () => {
+  it("parses v17 EngineInvalidLeg error (0x12)", () => {
+    // v17 code 18 = EngineInvalidLeg (v12 had InsufficientSeed at 18)
     const msg = parseMarketCreationError(
       new Error("custom program error: 0x12")
     );
-    expect(msg).toContain("seed deposit");
+    expect(msg).toContain("leg");
   });
 
   it("parses network error", () => {

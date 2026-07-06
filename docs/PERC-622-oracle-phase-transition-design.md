@@ -139,6 +139,12 @@ Total: 1,024 + 96 = 1,120 bytes. Within 10KB account limit comfortably. Needs `r
 - Existing markets (pre-PERC-622) default to `oracle_phase = 2` (Phase 3 / mature) via a fallback: if `market_created_slot` is from before the protocol upgrade slot, treat as Phase 3.
 - New markets start at `oracle_phase = 0` (Phase 1) from InitMarket.
 
+### 4.4 GH#2097 — do not pack into `_insurance_isolation_padding`
+
+Oracle Phase fields must **not** share bytes `[4..14]` of `_insurance_isolation_padding` with VRAM fields (`ewmv`, `last_vol_price`, `vol_margin_scale_bps`). That packed layout collides on `cumulative_volume` and `phase2_delta_slots` (see [GH-2097-vram-oracle-phase-layout.md](./GH-2097-vram-oracle-phase-layout.md)).
+
+Use the explicit typed fields in §4.1, or the disjoint byte map in `app/lib/market-config-padding-layout.ts`. Never alias both subsystems into the same padding window.
+
 ---
 
 ## 5. Oracle Source Logic Per Phase

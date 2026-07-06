@@ -48,9 +48,39 @@ import {
   getMinimumBalanceForRentExemptMint,
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
-import { getServiceClient } from "@/lib/supabase";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
+import type { getServiceClient as _GetServiceClient } from "@/lib/supabase";
 import * as Sentry from "@sentry/nextjs";
+
+type SupabaseClient = ReturnType<typeof _GetServiceClient>;
+
+// ── In-memory claim gate (fallback when Supabase unavailable) ─────────────────
+// Key: `${wallet}:${mint}`
+const _airdropClaims = new Map<string, number>();
+const _AIRDROP_RATE_MS = 24 * 60 * 60 * 1000;
+
+function _tryAirdropClaimInMemory(wallet: string, mint: string): { allowed: boolean; retryAfterSecs: number } {
+  const key = `${wallet}:${mint}`;
+  const last = _airdropClaims.get(key);
+  if (last !== undefined) {
+    const elapsed = Date.now() - last;
+    if (elapsed < _AIRDROP_RATE_MS) {
+      return { allowed: false, retryAfterSecs: Math.ceil((_AIRDROP_RATE_MS - elapsed) / 1000) };
+    }
+  }
+  _airdropClaims.set(key, Date.now());
+  return { allowed: true, retryAfterSecs: 0 };
+}
+
+/** Try to get a Supabase service client; returns null when env vars are absent. */
+async function _tryGetServiceClient() {
+  try {
+    const { getServiceClient } = await import("@/lib/supabase");
+    return getServiceClient();
+  } catch {
+    return null;
+  }
+}
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +115,7 @@ const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
  *   { allowed: false, retryAfterSecs } — already claimed within 24h
  */
 async function tryClaimGate(
-  supabase: ReturnType<typeof getServiceClient>,
+  supabase: SupabaseClient,
   walletAddress: string,
   mintAddress: string,
 ): Promise<{ allowed: boolean; retryAfterSecs: number | null; claimId?: number }> {
@@ -180,7 +210,7 @@ async function tryClaimGate(
  * so the user isn't locked out for 24h due to a transient network/RPC error.
  */
 async function releaseClaim(
-  supabase: ReturnType<typeof getServiceClient>,
+  supabase: SupabaseClient,
   claimId: number,
 ): Promise<void> {
   const { error } = await supabase
@@ -241,7 +271,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * if the server keypair is not configured.
  */
 async function resolveServerOwnedDevnetMint(
-  supabase: ReturnType<typeof getServiceClient>,
+  supabase: SupabaseClient,
   connection: Connection,
   mainnetCa: string,
   mintSigner: ReturnType<typeof getDevnetMintSigner>,
@@ -421,96 +451,105 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Validate mintAddress exists in devnet_mints table → get mainnet_ca + metadata
-    //    GH#1703: Also fall back to markets table (mint_address) for market mints that
-    //    were created directly (not via the mainnet mirror flow) so users can get test
-    //    tokens for any active market without hitting the misleading "not a known devnet
-    //    mirror mint" error. The server API (/api/faucet) already accepts these mints —
-    //    the client-side gating was the only blocker.
-    //    GH#1769: When devnet_mints has a self-referencing row (mainnet_ca = devnet_mint =
-    //    mintAddress, registered via devnet-register-mint for native devnet tokens), look
-    //    up the markets table to find the real mainnet_ca for DexScreener price lookup.
-    const supabase = getServiceClient();
-    // GH#1771: devnet_mints.devnet_mint should be unique, but add .limit(1) as a defensive
-    // guard against any duplicate rows that could cause .maybeSingle() to throw.
-    const { data: mintRow, error: dbErr } = await supabase
-      .from("devnet_mints")
-      .select("mainnet_ca, symbol, decimals")
-      .eq("devnet_mint", mintAddress)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const supabase = await _tryGetServiceClient();
 
-    let mainnetCa: string | null;
-    let symbol: string | null;
-    let decimals: number;
-    // GH#1769: Track whether this is a server-created mirror (can MintTo) or
-    // a user-created native devnet token (needs resolveServerOwnedDevnetMint).
+    // Static allowed mints — accepted even when Supabase is unavailable
+    const STATIC_ALLOWED_MINTS: Set<string> = new Set(
+      (process.env.DEVNET_ALLOWED_MINTS ?? "")
+        .split(",").map((m) => m.trim()).filter(Boolean)
+    );
+
+    let mainnetCa: string | null = null;
+    let symbol: string | null = null;
+    let decimals = 6;
     let isSelfReferencingNativeMint = false;
 
-    if (!dbErr && mintRow) {
-      // Found in devnet_mints (mirror flow or native devnet registration)
-      mainnetCa = mintRow.mainnet_ca;
-      symbol = mintRow.symbol;
-      decimals = mintRow.decimals ?? 6;
+    if (supabase) {
+      // DB path: look up devnet_mints table
+      const { data: mintRow, error: dbErr } = await supabase
+        .from("devnet_mints")
+        .select("mainnet_ca, symbol, decimals")
+        .eq("devnet_mint", mintAddress)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      // GH#1769: Self-referencing row = native devnet token registered by devnet-register-mint.
-      // In this case mainnet_ca === devnet_mint === mintAddress — meaning the "mainnetCa"
-      // we have is actually the devnet address, not a real mainnet CA. Try to find the
-      // real mainnet_ca from the markets table for better price lookup and mirror resolution.
-      if (mainnetCa === mintAddress) {
-        isSelfReferencingNativeMint = true;
-        // GH#1771: mint_address can appear in multiple markets rows (shared mints).
-        // Use .limit(1) to avoid .maybeSingle() multi-row error; prefer rows with a non-null
-        // mainnet_ca by ordering newest first so we get the most useful row.
-        const { data: _nativeRows } = await supabase
+      if (!dbErr && mintRow) {
+        mainnetCa = mintRow.mainnet_ca;
+        symbol = mintRow.symbol;
+        decimals = mintRow.decimals ?? 6;
+
+        if (mainnetCa === mintAddress) {
+          isSelfReferencingNativeMint = true;
+          const { data: _nativeRows } = await supabase
+            .from("markets")
+            .select("mainnet_ca, symbol, decimals")
+            .eq("mint_address", mintAddress)
+            .order("created_at", { ascending: false })
+            .limit(5);
+          const marketForNative =
+            (_nativeRows as Array<{ mainnet_ca: string | null; symbol: string | null; decimals: number | null }> | null)
+              ?.find((r) => r.mainnet_ca && r.mainnet_ca !== mintAddress) ??
+            (_nativeRows?.[0] ?? null);
+          if (marketForNative?.mainnet_ca && marketForNative.mainnet_ca !== mintAddress) {
+            mainnetCa = marketForNative.mainnet_ca;
+            if (!symbol && marketForNative.symbol) symbol = marketForNative.symbol;
+            if (!decimals && marketForNative.decimals) decimals = marketForNative.decimals ?? 6;
+          }
+        }
+      } else {
+        // Fallback: check markets table
+        const { data: marketRows, error: marketErr } = await supabase
           .from("markets")
           .select("mainnet_ca, symbol, decimals")
           .eq("mint_address", mintAddress)
           .order("created_at", { ascending: false })
-          .limit(5);
-        // Pick the first row that has a real mainnet_ca (not null, not self-referencing)
-        const marketForNative =
-          (_nativeRows as Array<{ mainnet_ca: string | null; symbol: string | null; decimals: number | null }> | null)
-            ?.find((r) => r.mainnet_ca && r.mainnet_ca !== mintAddress) ??
-          (_nativeRows?.[0] ?? null);
-        if (marketForNative?.mainnet_ca && marketForNative.mainnet_ca !== mintAddress) {
-          // Found a real mainnet CA — use it for DexScreener price lookup
-          mainnetCa = marketForNative.mainnet_ca;
-          if (!symbol && marketForNative.symbol) symbol = marketForNative.symbol;
-          if (!decimals && marketForNative.decimals) decimals = marketForNative.decimals ?? 6;
+          .limit(1);
+        const marketRow = marketRows?.[0] ?? null;
+
+        if (marketErr || !marketRow) {
+          if (!STATIC_ALLOWED_MINTS.has(mintAddress)) {
+            return NextResponse.json(
+              { error: "This address is not a Percolator devnet market mint. Paste the mint address of an active market from /markets." },
+              { status: 400 },
+            );
+          }
+          // Allowed by static list even though not in DB — proceed with defaults
+          mainnetCa = null;
+          symbol = null;
+          decimals = 6;
+        } else {
+          mainnetCa = marketRow.mainnet_ca;
+          symbol = marketRow.symbol;
+          decimals = marketRow.decimals ?? 6;
+          isSelfReferencingNativeMint = !mainnetCa || mainnetCa === mintAddress;
         }
-        // mainnetCa may still equal mintAddress if no real CA found; that's fine —
-        // DexScreener will return no price and we'll use the 1000-token fallback.
       }
     } else {
-      // Fallback: check markets table for mint_address match (direct-created market mints)
-      // GH#1771: Use .limit(1) instead of .maybeSingle() — a mint can appear
-      // in multiple markets rows (shared mints), causing a PGRST116 multi-row error.
-      const { data: marketRows, error: marketErr } = await supabase
-        .from("markets")
-        .select("mainnet_ca, symbol, decimals")
-        .eq("mint_address", mintAddress)
-        .order("created_at", { ascending: false })
-        .limit(1);
-      const marketRow = marketRows?.[0] ?? null;
-
-      if (marketErr || !marketRow) {
+      // Supabase unavailable — validate against static allowlist only
+      if (!STATIC_ALLOWED_MINTS.has(mintAddress)) {
         return NextResponse.json(
-          { error: "This address is not a Percolator devnet market mint. Paste the mint address of an active market from /markets." },
+          { error: "This address is not a known devnet mint. Set DEVNET_ALLOWED_MINTS to enable it." },
           { status: 400 },
         );
       }
-
-      mainnetCa = marketRow.mainnet_ca;
-      symbol = marketRow.symbol;
-      decimals = marketRow.decimals ?? 6;
-      // Markets table entry without a devnet_mints row = native devnet mint or unregistered mirror
-      isSelfReferencingNativeMint = !mainnetCa || mainnetCa === mintAddress;
     }
 
-    // 2. INSERT-as-gate: atomically reserve the claim slot BEFORE minting.
-    //    This eliminates the TOCTOU race in the previous SELECT→UPSERT flow.
-    const { allowed, retryAfterSecs, claimId } = await tryClaimGate(supabase, walletAddress, mintAddress);
+    // 2. Rate-limit gate: DB-backed when Supabase available, in-memory fallback otherwise.
+    let allowed: boolean;
+    let retryAfterSecs: number | null;
+    let claimId: number | undefined;
+    if (supabase) {
+      const gateResult = await tryClaimGate(supabase, walletAddress, mintAddress);
+      allowed = gateResult.allowed;
+      retryAfterSecs = gateResult.retryAfterSecs;
+      claimId = gateResult.claimId;
+    } else {
+      const memResult = _tryAirdropClaimInMemory(walletAddress, mintAddress);
+      allowed = memResult.allowed;
+      retryAfterSecs = memResult.retryAfterSecs;
+      claimId = undefined;
+    }
     if (!allowed) {
       if (retryAfterSecs === null) {
         return NextResponse.json(
@@ -616,14 +655,16 @@ export async function POST(req: NextRequest) {
                 `(authority=${onChainAuthority.toBase58().slice(0, 8)}). ` +
                 `Resolving server-owned mirror for mainnetCa=${mainnetCa}`,
               );
-              const resolvedMint = await resolveServerOwnedDevnetMint(
-                supabase,
-                connection,
-                mainnetCa,
-                mintSigner,
-                symbol,
-                decimals,
-              );
+              const resolvedMint = supabase
+                ? await resolveServerOwnedDevnetMint(
+                    supabase,
+                    connection,
+                    mainnetCa,
+                    mintSigner,
+                    symbol,
+                    decimals,
+                  )
+                : null;
               if (!resolvedMint) {
                 return NextResponse.json(
                   {
@@ -738,7 +779,7 @@ export async function POST(req: NextRequest) {
       // Release the claim slot on ANY failure so user isn't locked out 24h.
       // Wrapped in try/catch so a releaseClaim() throw doesn't mask the original
       // mint error and lose its stack trace from Sentry.
-      if (!mintSucceeded && claimId !== undefined) {
+      if (!mintSucceeded && claimId !== undefined && supabase) {
         try {
           await releaseClaim(supabase, claimId);
         } catch (releaseErr) {

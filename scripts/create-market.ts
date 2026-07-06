@@ -465,6 +465,9 @@ async function main() {
   );
 
   const tx1 = new Transaction();
+  // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+  // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+  tx1.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
   tx1.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
   tx1.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   // Create the slab account (program-owned, rent-exempt)
@@ -530,6 +533,9 @@ async function main() {
   console.log("TX2: SetDexPool (pin DEX pool for Hyperp oracle)...");
 
   const tx2 = new Transaction();
+  // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+  // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+  tx2.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
   tx2.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
   tx2.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   tx2.add(
@@ -573,6 +579,10 @@ async function main() {
   const ctxRent = await conn.getMinimumBalanceForRentExemption(MATCHER_CTX_SIZE);
 
   const tx3 = new Transaction();
+  // Contains a wrapper instruction. The v17 wrapper installs a custom 128KB heap
+  // allocator and aborts unless the tx requests the full heap frame. Must be the
+  // FIRST instruction. (issue #176)
+  tx3.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
   tx3.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
   tx3.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   // Pre-allocate the matcher context account (InitMatcherCtx in TX4 will fill it)
@@ -640,6 +650,9 @@ async function main() {
   console.log("TX4: InitMatcherCtx (initialize matcher for LP slot 0)...");
 
   const tx4 = new Transaction();
+  // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+  // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+  tx4.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
   tx4.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
   tx4.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   tx4.add(
@@ -690,6 +703,9 @@ async function main() {
     );
 
     const tx5 = new Transaction();
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    tx5.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
     tx5.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
     tx5.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
     tx5.add(

@@ -59,7 +59,7 @@
 
 ### [01:35 — SCREEN: traction slide or short montage]
 
-> Seventy-one creators have already seeded LP vaults across 220 markets on devnet, all verifiable on-chain. We shipped to mainnet closed beta. And the waitlist is past 7,900 verified signups, with 4,500 bot signups caught and purged on top of that.
+> Seventy-one creators have already seeded LP vaults across 220 markets on devnet, all verifiable on-chain. We shipped to mainnet closed beta. And the waitlist is past 8,000 verified signups, with 4,500 bot signups caught and purged on top of that. (Check the live number on the deck before recording — it auto-updates.)
 
 ### [01:50 — ON CAMERA, Khubair, eye contact]
 

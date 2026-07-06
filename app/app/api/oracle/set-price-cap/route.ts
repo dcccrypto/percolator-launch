@@ -166,13 +166,40 @@ export async function POST(req: NextRequest) {
       }
 
       const ourPubkey = keypair.publicKey.toBase58();
-      slabAddresses = (data ?? [])
-        .filter((m: { oracle_authority: string | null }) =>
-          m.oracle_authority === ourPubkey,
-        )
-        .map((m: { slab_address: string }) => m.slab_address);
+      // Safety cap: prevent a DB row injection from triggering unbounded
+      // CRANK_KEYPAIR transactions and draining the keeper wallet.
+      const MAX_SLAB_BATCH = 50;
+      const rawAddresses = (data ?? [])
+        .filter((m: { oracle_authority: string | null }) => m.oracle_authority === ourPubkey)
+        .map((m: { slab_address: string }) => m.slab_address)
+        .slice(0, MAX_SLAB_BATCH);
 
-      console.info(`[set-price-cap] Found ${slabAddresses.length} admin-oracle markets to cap`);
+      // Validate each slab address against on-chain account ownership before signing.
+      // An injected row pointing to an attacker-controlled account would be rejected
+      // here instead of producing a signed transaction that exposes the crank key.
+      const candidatePubkeys: PublicKey[] = [];
+      for (const addr of rawAddresses) {
+        try {
+          candidatePubkeys.push(new PublicKey(addr));
+        } catch {
+          console.warn(`[set-price-cap] Invalid pubkey format, skipping: ${addr}`);
+        }
+      }
+      if (candidatePubkeys.length > 0) {
+        const accountInfos = await connection.getMultipleAccountsInfo(candidatePubkeys, "confirmed");
+        slabAddresses = candidatePubkeys
+          .filter((pk, i) => {
+            const info = accountInfos[i];
+            if (!info || !info.owner.equals(programId)) {
+              console.warn(`[set-price-cap] ${pk.toBase58()} not owned by program -- skipping`);
+              return false;
+            }
+            return true;
+          })
+          .map((pk) => pk.toBase58());
+      }
+
+      console.info(`[set-price-cap] Found ${slabAddresses.length} validated admin-oracle markets to cap`);
     } catch (err) {
       console.error("[set-price-cap] Error fetching markets:", err);
       return NextResponse.json({ error: "Failed to fetch markets" }, { status: 500 });
@@ -202,6 +229,9 @@ export async function POST(req: NextRequest) {
 
       const tx = new Transaction();
       tx.add(
+        // v17 wrapper installs a custom 128KB heap allocator and aborts unless the
+        // tx requests the full heap frame. Must be the FIRST instruction. (issue #176)
+        ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }),
         ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }),
         ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
         ix,

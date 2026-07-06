@@ -4,32 +4,37 @@
  * and Percolator program-specific error codes.
  */
 
-// Percolator program custom error codes (from percolator-prog/src/percolator.rs PercolatorError enum)
-// IMPORTANT: These must match the exact order of the enum variants in the Rust program.
-// Last verified: 2026-03-08 against percolator-prog main.
-const PERCOLATOR_ERRORS: Record<number, string> = {
-  0: "Invalid magic number. The slab account data is corrupted.",                          // InvalidMagic
-  1: "Invalid version — program upgrade may be needed.",                                   // InvalidVersion
-  2: "Market is already initialized. Cannot re-initialize.",                               // AlreadyInitialized
-  3: "Market is not initialized. The slab account may not have been set up correctly.",     // NotInitialized
-  4: "Invalid slab length. This market uses an older program version — its account size "   // InvalidSlabLen (PERC-698)
-   + "is incompatible with the current deployed program. The market may need to be "
-   + "re-initialized by the market creator. If you are the creator, please contact support. "
-   + "Otherwise, try a newer market or a different slab tier.",
-  5: "Invalid oracle key. The oracle feed ID doesn't match.",                              // InvalidOracleKey
-  6: "Oracle price is stale. The oracle hasn't been updated recently enough.",              // OracleStale
-  7: "Oracle confidence interval too wide. Price may be unreliable.",                       // OracleConfTooWide
-  8: "Invalid vault token account. The ATA doesn't match the expected address.",            // InvalidVaultAta
-  9: "Invalid collateral mint. The token mint doesn't match the market's collateral.",      // InvalidMint
-  10: "Expected signer. A required account was not a signer on the transaction.",           // ExpectedSigner
-  11: "Expected writable. A required account was not marked as writable.",                  // ExpectedWritable
-  12: "Oracle data is invalid or malformed.",                                               // OracleInvalid
-  13: "Insufficient balance — deposit more collateral.",                                    // EngineInsufficientBalance
-  14: "Math overflow — values are too large for safe computation.",                         // MathOverflow
-  15: "Margin requirement not met. Increase collateral or reduce position size.",           // MarginInsufficient
-  16: "Account not found in the market.",                                                   // AccountNotFound
-  17: "Market is paused by admin.",                                                         // MarketPaused
-  18: "Insufficient seed deposit. The vault needs collateral before market initialization.",// InsufficientSeed
+import { decodeError } from "@percolatorct/sdk";
+
+// v17 error codes are sourced from the SDK (PERCOLATOR_ERRORS in @percolatorct/sdk).
+// The SDK exports decodeError(code) → { name, hint } | undefined for codes 0-46.
+// This local map is kept for error codes that need launch-specific user messages
+// (e.g. code 5 — InvalidAccountLen — gets a slab-tier-specific message).
+// All other codes fall through to decodeError() for the SDK hint.
+const LAUNCH_ERROR_OVERRIDES: Record<number, string> = {
+  // 0: InvalidMagic
+  0: "Invalid magic number. The market account data is corrupted. Check the market address.",
+  // 1: InvalidVersion
+  1: "Account version mismatch (expected v17). The program may need upgrading or the market was created with an older program.",
+  // 2: AlreadyInitialized
+  2: "Market is already initialized. Cannot re-initialize.",
+  // 3: NotInitialized
+  3: "Market is not initialized. The slab account may not have been set up correctly.",
+  // 4: InvalidAccountKind
+  4: "Wrong account kind. A market group, portfolio, or insurance-ledger address was used in the wrong position.",
+  // 5: InvalidAccountLen — include slab-tier guidance
+  5: "Invalid account length. This market uses an incompatible account size — it may have been created with an older program version. " +
+     "The market may need re-initialization by the market creator, or try a different slab tier.",
+  // 8: Unauthorized
+  8: "Not authorized for this operation. Ensure the correct authority wallet (marketauth or asset_admin) is connected.",
+  // 15: EngineArithmeticOverflow
+  15: "Math overflow — values are too large for safe computation. Try a smaller amount or position size.",
+  // 16: EngineProvenanceMismatch
+  16: "Portfolio provenance mismatch. This portfolio was not created for this market group.",
+  // 18: EngineInvalidLeg
+  18: "Invalid trade leg. Check asset_index and size parameters.",
+  // 19: EngineStale — direct user action
+  19: "Market is stale. A permissionless crank was prepended to your transaction — retry or wait a few seconds for the oracle to update.",
 };
 
 export function parseMarketCreationError(error: unknown): string {
@@ -84,13 +89,16 @@ export function parseMarketCreationError(error: unknown): string {
     return "Transaction expired before confirmation. The network may be congested. Click Retry to try again.";
   }
 
-  // Simulation failed — try to extract program error
+  // Simulation failed — try to extract program error.
+  // Use launch-specific overrides first, then SDK decodeError() for v17 codes 0-46.
   if (msg.includes("custom program error")) {
     const match = msg.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
     if (match) {
       const code = parseInt(match[1], 16);
-      const friendly = PERCOLATOR_ERRORS[code];
-      if (friendly) return friendly;
+      const override = LAUNCH_ERROR_OVERRIDES[code];
+      if (override) return override;
+      const sdkErr = decodeError(code);
+      if (sdkErr) return `${sdkErr.hint}`;
       return `Program error (code ${code}). The on-chain program rejected the transaction.`;
     }
   }
@@ -100,8 +108,10 @@ export function parseMarketCreationError(error: unknown): string {
     const match = msg.match(/InstructionError.*?(\d+).*?Custom.*?(\d+)/);
     if (match) {
       const code = parseInt(match[2]);
-      const friendly = PERCOLATOR_ERRORS[code];
-      if (friendly) return `Step failed: ${friendly}`;
+      const override = LAUNCH_ERROR_OVERRIDES[code];
+      if (override) return `Step failed: ${override}`;
+      const sdkErr = decodeError(code);
+      if (sdkErr) return `Step failed: ${sdkErr.hint}`;
     }
   }
 

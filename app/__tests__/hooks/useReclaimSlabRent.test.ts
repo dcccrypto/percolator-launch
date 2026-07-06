@@ -35,10 +35,23 @@ vi.mock("@solana/web3.js", async () => {
     Object.assign(this, args);
   }
   /* eslint-enable prefer-arrow-callback */
+
+  // Mock SystemProgram.transfer to avoid @solana/buffer-layout Uint8Array encoding
+  // failures in the vitest test environment (bigint-buffer CJS/ESM mismatch).
+  const MockSystemProgram = {
+    ...(actual.SystemProgram as object),
+    transfer: vi.fn().mockReturnValue({
+      keys: [],
+      programId: actual.SystemProgram.programId,
+      data: Buffer.from([]),
+    }),
+  };
+
   return {
     ...actual,
     Transaction: MockTransaction,
     TransactionInstruction: MockTransactionInstruction,
+    SystemProgram: MockSystemProgram,
   };
 });
 

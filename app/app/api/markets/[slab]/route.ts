@@ -1,15 +1,94 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { validateSlabParam } from "@/lib/route-validators";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
 import { isBlockedSlab } from "@/lib/blocklist";
 import * as Sentry from "@sentry/nextjs";
+import {
+  parseWrapperConfigV17,
+  isV17Account,
+  V17_HEADER_LEN,
+} from "@percolatorct/sdk";
+import { getRpcEndpoint } from "@/lib/config";
+import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 
 /** Success responses only — matches GET /api/markets (errors omit this to avoid caching 404/500). */
 const MARKETS_CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
 } as const;
+
+/**
+ * On-chain fallback: fetch the slab account directly and parse it.
+ * Used when Supabase is not configured (e.g. devnet playground).
+ * Uses a single getAccountInfo call — fast (~100ms) and sufficient.
+ *
+ * Returns 404 when the slab doesn't exist or isn't a recognised v17 account.
+ */
+async function onChainSlabFallback(slab: string): Promise<NextResponse> {
+  try {
+    const slabPk = new PublicKey(slab);
+    const rpcUrl = getRpcEndpoint();
+    const connection = new Connection(rpcUrl, "confirmed");
+    const info = await connection.getAccountInfo(slabPk);
+
+    if (!info) {
+      return NextResponse.json({ error: "Market not found" }, { status: 404 });
+    }
+
+    const data = new Uint8Array(info.data);
+    if (!isV17Account(data)) {
+      return NextResponse.json({ error: "Market not found" }, { status: 404 });
+    }
+
+    const cfg = parseWrapperConfigV17(data, V17_HEADER_LEN);
+    const markPriceRaw = cfg.markEwmaE6;
+    const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
+    const playgroundMeta = PLAYGROUND_SLAB_META[slab];
+
+    const market = {
+      slab_address: slab,
+      program_id: info.owner.toBase58(),
+      mint_address: cfg.collateralMint.toBase58(),
+      symbol: playgroundMeta?.symbol ?? null,
+      name: playgroundMeta?.name ?? null,
+      decimals: 6,
+      deployer: cfg.marketauth.toBase58(),
+      oracle_authority: cfg.marketauth.toBase58(),
+      oracle_mode: cfg.oracleMode === 1 ? "hyperp" : "admin",
+      dex_pool_address: playgroundMeta?.dex_pool_address ?? null,
+      mainnet_ca: playgroundMeta?.mainnet_ca ?? null,
+      created_at: null,
+      stats_updated_at: null,
+      is_zombie: false,
+      last_price: markPriceUsd,
+      mark_price: markPriceUsd,
+      index_price: null,
+      volume_24h: 0,
+      trade_count_24h: 0,
+      open_interest_long: 0,
+      open_interest_short: 0,
+      total_open_interest: 0,
+      total_open_interest_usd: 0,
+      insurance_fund: 0,
+      insurance_balance: 0,
+      total_accounts: 0,
+      funding_rate: null,
+      net_lp_pos: 0,
+      lp_sum_abs: 0,
+      c_tot: 0,
+      volume_24h_usd: 0,
+      vault_balance: 0,
+    };
+
+    return NextResponse.json(
+      { market },
+      { headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "on-chain-direct" } },
+    );
+  } catch {
+    return NextResponse.json({ error: "Market not found" }, { status: 404 });
+  }
+}
 
 /**
  * GH#1405: Sanitize price fields from the DB. Returns null for corrupt/garbage values.
@@ -65,8 +144,17 @@ export async function GET(
     return NextResponse.json({ error: "Market not found" }, { status: 404 });
   }
 
+  // Degrade gracefully when Supabase is not configured (e.g. devnet playground without DB).
+  let supabaseClient: ReturnType<typeof getServiceClient>;
   try {
-    const supabase = getServiceClient();
+    supabaseClient = getServiceClient();
+  } catch {
+    // Supabase not configured — fall back to on-chain direct fetch.
+    return await onChainSlabFallback(slab);
+  }
+
+  try {
+    const supabase = supabaseClient;
     let data: Record<string, unknown> | null = null;
 
     // PERC-8195: filter by network so devnet/mainnet rows don't mix

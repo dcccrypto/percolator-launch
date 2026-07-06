@@ -5,7 +5,8 @@ import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   encodeWithdrawCollateral,
-  encodeKeeperCrank,
+  encodePermissionlessCrank,
+  CrankAction,
   ACCOUNTS_WITHDRAW_COLLATERAL,
   ACCOUNTS_KEEPER_CRANK,
   buildAccountMetas,
@@ -14,6 +15,8 @@ import {
   getAta,
   deriveVaultAuthority,
   derivePythPushOraclePDA,
+  isV17Account,
+  parsePortfolioV17,
 } from "@percolatorct/sdk";
 // TODO(oracle-migration): encodePushOraclePrice/ACCOUNTS_PUSH_ORACLE_PRICE removed in beta.29.
 // The DEX oracle inline push path needs to migrate to /api/oracle/advance-phase.
@@ -25,6 +28,7 @@ import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
+import { humanizeError } from "@/lib/errorMessages";
 
 const INLINE_ORACLE_PUSH_REMOVED_ERROR =
   "Inline oracle price push was removed on-chain in beta.29. Migrate this flow to /api/oracle/advance-phase or another server-side oracle publisher before withdrawing as the oracle authority.";
@@ -83,21 +87,110 @@ export function useWithdraw(slabAddress: string) {
           throw new Error(INLINE_ORACLE_PUSH_REMOVED_ERROR);
         }
 
-        // Always prepend permissionless crank before withdraw
-        // Market goes stale after 400 slots (~3 min)
-        instructions.push(buildIx({
-          programId,
-          keys: buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount]),
-          data: encodeKeeperCrank({ callerIdx: 65535 }),
-        }));
+        // Fetch slab data to detect v17 vs v12 layout.
+        let slabDataForLayout: Uint8Array | null = null;
+        try {
+          const slabInfo = await connection.getAccountInfo(slabPk);
+          if (slabInfo?.data) slabDataForLayout = new Uint8Array(slabInfo.data);
+        } catch { /* fall through — layout detection best-effort */ }
 
-        instructions.push(buildIx({
-          programId,
-          keys: buildAccountMetas(ACCOUNTS_WITHDRAW_COLLATERAL, [
-            wallet.publicKey, slabPk, mktConfig.vaultPubkey, userAta, vaultPda, WELL_KNOWN.tokenProgram, WELL_KNOWN.clock, oracleAccount,
-          ]),
-          data: encodeWithdrawCollateral({ userIdx: params.userIdx, amount: params.amount.toString() }),
-        }));
+        const isV17 = slabDataForLayout ? isV17Account(slabDataForLayout) : false;
+
+        if (isV17) {
+          // ── v17 withdraw path ─────────────────────────────────────────────
+          // v17 Withdraw (tag 4): [owner(signer,w), market(w), portfolio(w), destToken(w), vaultToken(w), vaultAuthority, tokenProgram]
+          // No clock, no oracle. crank is NOT prepended (v17 Withdraw is standalone).
+          // vaultPda is a program PDA (off-curve) → allowOwnerOffCurve=true (else TokenOwnerOffCurveError)
+          const vaultTokenAta = await getAta(vaultPda, mktConfig.collateralMint, true);
+
+          // Find the user's portfolio account.
+          const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
+          let portfolioPk: PublicKey | null = null;
+          let portfolioData: Buffer | null = null;
+          try {
+            const portfolioAccounts = await connection.getProgramAccounts(programId, {
+              filters: [
+                { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES.toString("base64"), encoding: "base64" } },
+                { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
+                { memcmp: { offset: 80, bytes: wallet.publicKey.toBase58() } },
+              ],
+            });
+            if (portfolioAccounts.length > 0) {
+              portfolioPk = portfolioAccounts[0].pubkey;
+              const d = portfolioAccounts[0].account.data;
+              portfolioData = d instanceof Buffer ? d : Buffer.from(d);
+            }
+          } catch { /* fall through — portfolio lookup is best-effort */ }
+
+          if (!portfolioPk) {
+            throw new Error("v17: No portfolio account found for this wallet. Please deposit first to create your portfolio.");
+          }
+
+          // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
+          // already blocks amount > capital, but this guards direct/other callers
+          // and turns a confusing on-chain failure into a clear message.
+          //
+          // NOTE: we can only bound against TOTAL capital here. When a position is
+          // open the true free (unreserved) collateral is lower — computing the
+          // exact reserved margin requires the engine's margin math, so the
+          // on-chain program remains the source of truth for that case (it rejects
+          // with "insufficient margin" if the withdrawal would under-collateralize
+          // the open position). This check never blocks a valid withdrawal; it only
+          // catches the unambiguous "more than the whole account" case early.
+          if (portfolioData) {
+            try {
+              const portfolio = parsePortfolioV17(portfolioData);
+              if (params.amount > portfolio.capital) {
+                throw new Error(
+                  "Withdrawal amount exceeds your account balance. Reduce the amount and try again.",
+                );
+              }
+            } catch (checkErr) {
+              // Re-throw our own validation error; ignore parse failures (best-effort).
+              if (
+                checkErr instanceof Error &&
+                checkErr.message.startsWith("Withdrawal amount exceeds")
+              ) {
+                throw checkErr;
+              }
+            }
+          }
+
+          instructions.push(buildIx({
+            programId,
+            keys: buildAccountMetas(ACCOUNTS_WITHDRAW_COLLATERAL, [
+              wallet.publicKey, slabPk, portfolioPk, userAta, vaultTokenAta, vaultPda, WELL_KNOWN.tokenProgram,
+            ]),
+            data: encodeWithdrawCollateral({ amount: params.amount.toString() }),
+          }));
+        } else {
+          // ── v12 legacy withdraw path ─────────────────────────────────────
+          // Always prepend permissionless crank before withdraw.
+          // v17: encodePermissionlessCrank replaces encodeKeeperCrank (fundingRateE9 hardcoded 0n).
+          instructions.push(buildIx({
+            programId,
+            keys: buildAccountMetas(ACCOUNTS_KEEPER_CRANK, [wallet.publicKey, slabPk, WELL_KNOWN.clock, oracleAccount]),
+            data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 }),
+          }));
+
+          // v12 withdraw: [owner(signer,w), market(w), vault(w), destToken(w), vaultAuthority, tokenProgram, clock, oracle]
+          // NOTE: ACCOUNTS_WITHDRAW_COLLATERAL in the v17 SDK is the 7-account v17 shape.
+          // The v12 shape has 8 accounts (adds clock + oracle). Build metas manually for v12.
+          instructions.push(buildIx({
+            programId,
+            keys: [
+              { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+              { pubkey: slabPk, isSigner: false, isWritable: true },
+              { pubkey: mktConfig.vaultPubkey, isSigner: false, isWritable: true },
+              { pubkey: userAta, isSigner: false, isWritable: true },
+              { pubkey: vaultPda, isSigner: false, isWritable: false },
+              { pubkey: WELL_KNOWN.tokenProgram, isSigner: false, isWritable: false },
+              { pubkey: WELL_KNOWN.clock, isSigner: false, isWritable: false },
+              { pubkey: oracleAccount, isSigner: false, isWritable: false },
+            ],
+            data: encodeWithdrawCollateral({ userIdx: params.userIdx, amount: params.amount.toString() }),
+          }));
+        }
 
         const sig = await sendTx({ connection, wallet, instructions, computeUnits: 300_000 });
         // Force immediate slab re-read so balance updates without waiting for the next poll.
@@ -105,7 +198,7 @@ export function useWithdraw(slabAddress: string) {
         setTimeout(() => refreshSlab(), 2000);
         return sig;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(humanizeError(e instanceof Error ? e.message : String(e)));
         throw e;
       } finally {
         inflightRef.current = false;

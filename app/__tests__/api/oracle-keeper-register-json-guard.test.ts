@@ -9,7 +9,9 @@ describe("POST /api/oracle-keeper/register JSON guard", () => {
       "utf8",
     );
 
-    expect(source).toContain("body = await req.json()");
+    // LAUNCH-16: body is read once as raw text (rawBody) so the HMAC signature can be
+    // verified over the exact bytes sent, then JSON.parse'd — no longer `req.json()`.
+    expect(source).toContain("body = JSON.parse(rawBody)");
     expect(source).toContain('return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })');
   });
 });

@@ -9,16 +9,20 @@
     "test": "vitest run",
     "test:unit": "vitest run --reporter=verbose --coverage",
     "test:coverage": "vitest run --coverage",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dev:price-ws": "tsx scripts/local-price-ws-server.ts"
   },
   "dependencies": {
-    "@percolatorct/sdk": "2.0.9",
+    "@percolatorct/sdk": "github:dcccrypto/percolator-sdk#32a7c5bead09274fe245c92ad2170b66d39ce888",
     "@privy-io/node": "^0.18.0",
     "@privy-io/react-auth": "^3.14.1",
     "@sentry/nextjs": "^10.39.0",
     "@solana-program/memo": "^0.11.0",
     "@solana/kit": "^6.1.0",
     "@solana/spl-token": "^0.4.14",
+    "@solana/wallet-adapter-base": "^0.9.27",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/wallet-adapter-wallets": "^0.19.38",
     "@solana/web3.js": "^1.98.4",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.97.0",
@@ -29,10 +33,10 @@
     "buffer": "^6.0.3",
     "gsap": "^3.14.2",
     "lightweight-charts": "^5.2.0",
-    "next": "16.2.3",
+    "next": "16.2.9",
+    "postgres": "^3.4.9",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "resend": "^6.12.3",
     "swr": "^2.4.0",
     "tweetnacl": "^1.0.3"
   },
@@ -45,14 +49,16 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.4",
     "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^9",
-    "eslint-config-next": "16.2.3",
+    "eslint-config-next": "16.2.9",
     "happy-dom": "^20.8.8",
     "jsdom": "^28.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "ws": "^8.21.0"
   }
 }

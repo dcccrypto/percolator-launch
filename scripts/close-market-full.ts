@@ -100,6 +100,9 @@ async function main() {
       closeData.writeUInt16LE(idx, 1);
 
       const tx = new Transaction();
+      // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+      // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+      tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
 
@@ -145,6 +148,9 @@ async function main() {
       const adminAta = getAssociatedTokenAddressSync(USDC_MINT, admin.publicKey);
 
       const tx = new Transaction();
+      // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+      // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+      tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       tx.add(new TransactionInstruction({
@@ -177,6 +183,9 @@ async function main() {
       console.log("  Slab already closed");
     } else {
       const tx = new Transaction();
+      // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+      // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+      tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }));
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       tx.add(new TransactionInstruction({

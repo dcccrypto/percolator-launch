@@ -11,18 +11,33 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   createMintToInstruction,
-  TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
-import { getServiceClient } from "@/lib/supabase";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
-import { tryFaucetGate, releaseFaucetClaim } from "@/lib/faucet-rate-gate";
 import * as Sentry from "@sentry/nextjs";
+
+// ── In-memory rate limiter (fallback when Supabase unavailable) ───────────────
+const _autoFundClaims = new Map<string, number>();
+const _AUTO_FUND_RATE_MS = 24 * 60 * 60 * 1000;
+
+function _autoFundIsLimited(wallet: string): { limited: boolean; nextClaimAt: string | null } {
+  const last = _autoFundClaims.get(wallet);
+  if (last === undefined) return { limited: false, nextClaimAt: null };
+  const elapsed = Date.now() - last;
+  if (elapsed < _AUTO_FUND_RATE_MS) {
+    return { limited: true, nextClaimAt: new Date(last + _AUTO_FUND_RATE_MS).toISOString() };
+  }
+  return { limited: false, nextClaimAt: null };
+}
+
+function _autoFundRecord(wallet: string): void {
+  _autoFundClaims.set(wallet, Date.now());
+}
 
 export const dynamic = "force-dynamic";
 
@@ -71,9 +86,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // GH#1595: INSERT-as-gate rate limit — eliminates SELECT→INSERT TOCTOU window.
-    const supabase = getServiceClient();
-    const gate = await tryFaucetGate(supabase, walletAddress, "auto-fund");
+    // Rate limit: DB-backed when Supabase available, in-memory fallback otherwise.
+    let supabase: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
+    let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
+    try {
+      const { getServiceClient, tryFaucetGate: _tryGate } = await Promise.resolve(
+        { getServiceClient: (await import("@/lib/supabase")).getServiceClient,
+          tryFaucetGate: (await import("@/lib/faucet-rate-gate")).tryFaucetGate }
+      );
+      supabase = getServiceClient();
+      gate = await _tryGate(supabase, walletAddress, "auto-fund");
+    } catch {
+      // Supabase unavailable — use in-memory limiter
+      const { limited, nextClaimAt } = _autoFundIsLimited(walletAddress);
+      gate = { allowed: !limited, nextClaimAt };
+    }
 
     if (!gate.allowed) {
       return NextResponse.json(
@@ -175,25 +202,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Log the funding event (analytics — gate handles rate limiting). Best-effort:
-    // do not 500 after successful on-chain funding if logging fails (same as /api/faucet USDC path).
+    // Record in-memory claim on success
     if (results.sol_airdropped || results.usdc_minted) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await supabase.from("auto_fund_log").insert({
-          wallet: walletAddress,
-          sol_airdropped: results.sol_airdropped,
-          usdc_minted: results.usdc_minted,
-        });
-      } catch (logErr) {
-        Sentry.captureException(logErr, {
-          tags: { endpoint: "/api/auto-fund", step: "auto_fund_log" },
-          extra: { wallet: walletAddress },
-        });
+      _autoFundRecord(walletAddress);
+      // Analytics-only DB insert — best-effort, skip when supabase unavailable
+      if (supabase) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase as any).from("auto_fund_log").insert({
+            wallet: walletAddress,
+            sol_airdropped: results.sol_airdropped,
+            usdc_minted: results.usdc_minted,
+          });
+        } catch (logErr) {
+          Sentry.captureException(logErr, {
+            tags: { endpoint: "/api/auto-fund", step: "auto_fund_log" },
+            extra: { wallet: walletAddress },
+          });
+        }
       }
     } else {
-      // Nothing funded (already had sufficient balance) — release gate so user can retry
-      if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+      // Nothing funded — release gate so user can retry
+      if (supabase && gate.claimId) {
+        try {
+          const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate");
+          await releaseFaucetClaim(supabase, gate.claimId);
+        } catch { /* best-effort */ }
+      }
     }
 
     return NextResponse.json({

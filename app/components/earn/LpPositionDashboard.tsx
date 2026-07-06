@@ -128,7 +128,7 @@ export function LpPositionDashboard({
               />
               <MetricCell
                 label="Share Value"
-                value={`${(Number(shareValue) / Number(divisor)).toFixed(4)} ${collateralSymbol}`}
+                value={`${shareValue.toFixed(4)} ${collateralSymbol}`}
               />
               <MetricCell
                 label="Est. APY"

@@ -4,12 +4,20 @@
 // (Security issue #1031)
 
 import { NextRequest, NextResponse } from "next/server";
+import { Connection, PublicKey } from "@solana/web3.js";
+import { parseEngine, isV17Account } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { isPhantomOpenInterest } from "@/lib/phantom-oi";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createMemoryRateLimiter } from "@/lib/memory-rate-limit";
+import { getRpcEndpoint } from "@/lib/config";
+import {
+  hasIndexerDb,
+  queryStatsAggregate,
+  queryKnownSlabs,
+} from "@/lib/indexer-db";
 import type { Database } from "@/lib/database.types";
 export const dynamic = "force-dynamic";
 
@@ -23,8 +31,108 @@ type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 // ---------------------------------------------------------------------------
 const rateLimiter = createMemoryRateLimiter({ limit: 60, windowMs: 60_000 });
 
+// ---------------------------------------------------------------------------
+// Playground self-contained stats path (no Supabase required)
+// ---------------------------------------------------------------------------
+
+const STATS_CACHE_HEADERS = {
+  "Cache-Control": "public, s-maxage=15, stale-while-revalidate=45",
+} as const;
+
+/** Empty / zero stats response shape — returned when no data source is available. */
+function zeroStats() {
+  return {
+    totalMarkets: 0,
+    activeTotal: 0,
+    totalListedMarkets: 0,
+    totalVolume24h: 0,
+    totalOpenInterest: 0,
+    totalTraders: 0,
+    trades24h: 0,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Compute protocol stats from the local indexer Postgres + on-chain engine state.
+ *
+ * Data sources:
+ *  - Market count, trader count, 24h trade count, 24h raw volume
+ *    → queryStatsAggregate() (single SQL query on the indexer trades table)
+ *  - Total open interest (USD) → batch getMultipleAccountsInfo for known slabs,
+ *    parseEngine() per slab, sum (longOi + shortOi).
+ *    Assumes 6-decimal USDC collateral for USD conversion (devnet playground invariant).
+ *  - Volume 24h (USD) → raw collateral-unit sum divided by 1e6 (same 6-decimal assumption).
+ *
+ * All sub-steps degrade gracefully: a failed RPC/DB call yields zeros for that
+ * sub-component rather than propagating an error.
+ */
+async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> {
+  const [agg, knownSlabs] = await Promise.all([
+    queryStatsAggregate(),
+    queryKnownSlabs(),
+  ]);
+
+  // On-chain OI — batch RPC fetch for all known slabs
+  const COLLATERAL_DECIMALS = 6; // Sim-USDC (6-decimal) for devnet playground
+  const COLLATERAL_FACTOR = 10 ** COLLATERAL_DECIMALS;
+  let totalOpenInterest = 0;
+
+  if (knownSlabs.length > 0) {
+    try {
+      const connection = new Connection(getRpcEndpoint(), "confirmed");
+      const pubkeys = knownSlabs.map((s) => new PublicKey(s));
+      const accountInfos = await connection.getMultipleAccountsInfo(pubkeys, "confirmed");
+      for (const info of accountInfos) {
+        if (!info) continue;
+        try {
+          const bytes = new Uint8Array(info.data);
+          // v17 accounts (PERCV16\0 magic) don't embed a v12-style engine block;
+          // their aggregate OI is not yet parsed server-side.  Skip them.
+          if (isV17Account(bytes)) continue;
+          const engine = parseEngine(bytes);
+          const rawOi = engine.longOi + engine.shortOi;
+          // Guard against overflow when converting bigint to Number
+          const rawOiNum = rawOi > BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number.MAX_SAFE_INTEGER
+            : Number(rawOi);
+          totalOpenInterest += rawOiNum / COLLATERAL_FACTOR;
+        } catch {
+          // Skip unparseable accounts (wrong magic / unknown layout)
+        }
+      }
+    } catch (err) {
+      console.warn("[/api/stats] on-chain OI fetch failed (continuing with 0):", err);
+    }
+  }
+
+  // Volume: raw collateral units → USD (assumes 6-decimal USDC collateral)
+  const totalVolume24h =
+    agg.volume24hRaw > BigInt(Number.MAX_SAFE_INTEGER)
+      ? Number.MAX_SAFE_INTEGER / COLLATERAL_FACTOR
+      : Number(agg.volume24hRaw) / COLLATERAL_FACTOR;
+
+  return {
+    totalMarkets: agg.marketCount,
+    activeTotal: agg.marketCount,
+    totalListedMarkets: agg.marketCount,
+    totalVolume24h,
+    totalOpenInterest,
+    totalTraders: agg.uniqueTraders,
+    trades24h: agg.trades24h,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 /**
  * GET /api/stats — Platform-wide aggregated statistics
+ *
+ * Read path (in priority order):
+ *  1. Direct indexer Postgres + on-chain engine state when INDEXER_DATABASE_URL is set
+ *     (playground self-contained mode — no Supabase/Railway required).
+ *  2. Supabase (production path — existing implementation).
+ *  3. Zero-stats graceful degrade — returned when neither data source is configured,
+ *     so the endpoint never returns 500 due to missing env vars.
  *
  * Uses isActiveMarket() from shared activeMarketFilter for consistent
  * market counts across homepage, /api/stats, and markets page.
@@ -39,6 +147,29 @@ export async function GET(request: NextRequest) {
       { status: 429, headers: { "Retry-After": "60" } },
     );
   }
+
+  // ── PRIMARY PATH: indexer Postgres + chain (playground self-contained) ───
+  if (hasIndexerDb()) {
+    try {
+      return NextResponse.json(await computeStatsFromIndexer(), {
+        headers: STATS_CACHE_HEADERS,
+      });
+    } catch (err) {
+      console.error("[/api/stats] indexer DB path failed, falling through to Supabase:", err);
+    }
+  }
+
+  // ── SECONDARY PATH: Supabase (production) ────────────────────────────────
+  // Guard: if Supabase isn't configured, return zeros instead of crashing with
+  // "Supabase env vars not set" (the failure mode the playground self-containment
+  // task was opened to fix).
+  const supabaseConfigured =
+    !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  if (!supabaseConfigured) {
+    console.warn("[/api/stats] No data source configured — returning zero stats.");
+    return NextResponse.json(zeroStats(), { headers: STATS_CACHE_HEADERS });
+  }
+
   const supabase = getServiceClient();
 
   const [statsRes, tradersRes] = await Promise.all([

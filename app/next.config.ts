@@ -12,6 +12,10 @@ if (!API_URL && process.env.NODE_ENV === "production") {
 }
 
 const nextConfig: NextConfig = {
+  // Allow loading the dev server from the LAN IP (e.g. phone on the same WiFi).
+  // Next 16 blocks /_next/* dev resources from non-localhost origins by default,
+  // which makes the page render blank when accessed via an IP. Dev-only setting.
+  allowedDevOrigins: ["192.168.1.42", "192.168.1.*", "localhost", "127.0.0.1"],
   // @solana/kit must be transpiled: its browser export resolves to an ESM .mjs file
   // that webpack includes verbatim, causing "Unexpected token 'export'" in production bundles.
   transpilePackages: ["@percolator/sdk", "@solana/kit"],
@@ -59,9 +63,19 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
+    // When INDEXER_DATABASE_URL is set (playground / local devnet), skip rewrites for the
+    // indexer-backed routes so their route.ts handlers (which check hasIndexerDb()) can run.
+    // These routes proxy to Railway only when the local indexer DB is NOT configured.
+    const useLocalIndexer = !!process.env.INDEXER_DATABASE_URL;
     return [
       // Data routes → API service
-      { source: "/api/markets/:slab/trades", destination: `${API_URL}/markets/:slab/trades` },
+      // NOTE: skipped when INDEXER_DATABASE_URL is set — route.ts handles them via local DB
+      ...(useLocalIndexer ? [] : [
+        { source: "/api/markets/:slab/trades", destination: `${API_URL}/markets/:slab/trades` },
+        { source: "/api/funding/:slab/history", destination: `${API_URL}/funding/:slab/history` },
+        // NOTE: /api/funding/global has its own route.ts with local-indexer fallback;
+        // skip the generic /api/funding/:slab rewrite that would shadow it.
+      ]),
       // NOTE: Do NOT rewrite /api/markets/:slab/prices — route.ts handles it (proxies to /prices/:slab).
       // A rewrite here would bypass route.ts and hit the wrong Railway path (/markets/:slab/prices → 404→500).
       // GH#1936 / PERC-8302 root cause fix.
@@ -69,7 +83,6 @@ const nextConfig: NextConfig = {
       { source: "/api/markets/:slab/volume", destination: `${API_URL}/markets/:slab/volume` },
       // NOTE: Do NOT rewrite /api/markets/:slab/logo — that stays in Next.js (file upload)
       // NOTE: Do NOT rewrite /api/markets/:slab (single market) — keep in Next.js for now (uses markets_with_stats view)
-      { source: "/api/funding/:slab/history", destination: `${API_URL}/funding/:slab/history` },
       { source: "/api/funding/:slab", destination: `${API_URL}/funding/:slab` },
       { source: "/api/insurance/:slab", destination: `${API_URL}/insurance/:slab` },
       // GH#1462: Moved to app/api/open-interest/[slab]/route.ts for defense-in-depth phantom OI filtering.

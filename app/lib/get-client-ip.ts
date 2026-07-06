@@ -21,10 +21,10 @@ export function getClientIp(req: NextRequest): string {
     const forwarded = req.headers.get("x-forwarded-for");
     if (forwarded) {
       const ips = forwarded.split(",").map((s) => s.trim()).filter(Boolean);
-      // Peel PROXY_DEPTH trusted hops from the right.
-      // Correct index: length - 1 - PROXY_DEPTH
-      const clientIdx = ips.length - 1 - PROXY_DEPTH;
-      if (clientIdx >= 0) {
+      // Peel PROXY_DEPTH trusted hops from the right (rightmost = most-trusted,
+      // see file doc comment). Correct index: length - PROXY_DEPTH, clamped to 0.
+      if (ips.length > 0) {
+        const clientIdx = Math.max(0, ips.length - PROXY_DEPTH);
         const candidate = ips[clientIdx];
         if (candidate && isValidIp(candidate)) return candidate;
       }

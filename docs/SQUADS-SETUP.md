@@ -1,6 +1,8 @@
 # Squads Multisig Setup — Percolator Program Upgrade Authority
 
-**Purpose:** Transfer the Percolator mainnet program upgrade authority from a single keypair (`7JVQvrAfzj3aasLxCkoLYX5KQcrb5nEZhUe5Qa8PvV5G`) to a Squads V4 multisig vault. This is a **mainnet go/no-go blocker** (GH#1823, PERC-8168).
+**Purpose:** Transfer the Percolator mainnet program upgrade authority from a single keypair (`7JVQvrAfzj3aasLxCkoLYX5KQcrb5nEZhUe5Qa8PvV5G`) to a Squads V4 multisig vault. This is a **mainnet go/no-go blocker** (GH#1823, GH#2014, PERC-8168).
+
+After transfer, verify with `npx tsx scripts/check-upgrade-authority.ts --network mainnet` (see [GH-2014-upgrade-authority-governance.md](./GH-2014-upgrade-authority-governance.md)).
 
 **Risk:** This is a one-way operation on mainnet. Test on devnet first. Once transferred, program upgrades require multisig approval — you cannot undo this without another approved multisig transaction.
 
