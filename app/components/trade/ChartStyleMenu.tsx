@@ -94,7 +94,11 @@ export const ChartStyleMenu: FC<ChartStyleMenuProps> = ({ value, onChange }) => 
         role="listbox"
         aria-hidden={!open || undefined}
         className={[
-          "absolute left-0 top-full z-20 mt-1 min-w-[180px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)] transition-opacity duration-[120ms] ease-out",
+          // z-[60] so the dropdown sits above the sticky MarketInfoBar (z-30)
+          // and MobileBottomNav (z-50) — matching the sibling ChartIndicatorMenu.
+          // At z-20 it was painting behind the sticky market bar when the chart
+          // header scrolled up beneath it on mobile.
+          "absolute left-0 top-full z-[60] mt-1 min-w-[180px] rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[0_8px_32px_rgba(0,0,0,0.48)] transition-opacity duration-[120ms] ease-out",
           open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
         ].join(" ")}
       >

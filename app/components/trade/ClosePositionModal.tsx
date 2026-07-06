@@ -4,6 +4,7 @@ import { FC, useEffect, useRef, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import { computeMarkPnl, computeMarkPnlCollateral } from "@/lib/trading";
 
@@ -62,6 +63,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  useLockBodyScroll();
   const [percent, setPercent] = useState(100);
 
   // Ref-based callback to prevent WS price ticks from replaying the GSAP animation
@@ -234,7 +236,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
             style={{
               background: `linear-gradient(to right, var(--short) 0%, var(--short) ${percent}%, rgba(255,255,255,0.03) ${percent}%, rgba(255,255,255,0.03) 100%)`,
             }}
-            className="mb-2 h-1 w-full cursor-pointer appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:bg-[var(--short)]"
+            className="mb-2 h-1 w-full cursor-pointer appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:bg-[var(--short)] [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-none [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--short)] [&::-moz-range-track]:bg-transparent"
           />
           <div className="flex gap-1">
             {PRESETS.map((p) => (

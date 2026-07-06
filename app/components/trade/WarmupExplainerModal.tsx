@@ -4,6 +4,7 @@ import { FC, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 
 interface WarmupExplainerModalProps {
   onClose: () => void;
@@ -15,6 +16,7 @@ export const WarmupExplainerModal: FC<WarmupExplainerModalProps> = ({
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  useLockBodyScroll();
 
   // Keep the onClose callback in a ref so the mount effect never re-runs on parent
   // re-renders. Trade-page parents re-render frequently (countdown ticks, WS price

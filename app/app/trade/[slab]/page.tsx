@@ -431,7 +431,7 @@ function TradePageInner({ slab }: { slab: string }) {
   // template strings) but nothing is placed in it.
   const gridStyle: CSSProperties = {
     gridTemplateAreas: '"MarketBar MarketBar" "Chart OrderTicket" "PositionsDock OrderTicket"',
-    gridTemplateColumns: orderBookVisible ? "minmax(0,1fr) 340px" : "minmax(0,1fr) 340px",
+    gridTemplateColumns: "minmax(0,1fr) 340px",
     gridTemplateRows: "auto minmax(0,1fr) minmax(220px,340px)",
   };
   // When the order book is visible it takes its own column between Chart and

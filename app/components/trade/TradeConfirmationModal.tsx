@@ -4,6 +4,7 @@ import { FC, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { formatLeverage, ORDER_LEVERAGE_LABEL, RISK_LEVERAGE_LABEL } from "@/lib/leverage-display";
 import { formatTokenAmount } from "@/lib/format";
 
@@ -62,6 +63,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
   const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const prefersReduced = usePrefersReducedMotion();
+  useLockBodyScroll();
   // Local submit guard: a fast double-click on "Confirm Trade" would otherwise
   // fire onConfirm twice, surfacing a confusing "Trade already in progress"
   // banner. Latch on first click, disable the button, and only unlatch if the
