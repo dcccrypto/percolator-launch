@@ -84,7 +84,6 @@ export async function POST(req: NextRequest) {
         .from("markets")
         .update({
           mainnet_ca: mainnetCA,
-          ...(devnetMint ? { devnet_mint: devnetMint } : {}),
         })
         .eq("slab_address", slabAddress)
         .select("slab_address, mainnet_ca, symbol")

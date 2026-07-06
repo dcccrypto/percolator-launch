@@ -175,6 +175,9 @@ async function sendTx(
   computeUnits = 400_000,
 ): Promise<string> {
   const tx = new Transaction();
+  // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+  // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+  tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
   for (const ix of ixs) tx.add(ix);
   return sendAndConfirmTransaction(connection, tx, signers, {

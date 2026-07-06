@@ -153,7 +153,7 @@ export const WarmupProgress: FC<{
           {/* Thin progress bar */}
           <div className="flex-1 h-1 overflow-hidden rounded-full bg-[var(--border)]/20">
             <div
-              className="h-full rounded-full bg-[var(--accent)]/60 transition-all duration-1000 ease-linear"
+              className="h-full rounded-full bg-[var(--accent)]/60 transition-[width] duration-1000 ease-linear"
               style={{ width: `${progress}%` }}
             />
           </div>

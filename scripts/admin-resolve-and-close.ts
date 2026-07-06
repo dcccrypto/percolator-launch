@@ -21,7 +21,7 @@
  *   7: oracle
  */
 
-import { Connection, PublicKey, Keypair, TransactionInstruction, SYSVAR_CLOCK_PUBKEY, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Connection, PublicKey, Keypair, TransactionInstruction, SYSVAR_CLOCK_PUBKEY, Transaction, sendAndConfirmTransaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { fetchSlab, parseAllAccounts, parseConfig, parseHeader } from "@percolatorct/sdk";
 import fs from "fs";
@@ -87,7 +87,12 @@ async function main() {
   });
 
   try {
-    const resolveTx = new Transaction().add(resolveIx);
+    const resolveTx = new Transaction();
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    resolveTx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+    resolveTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
+    resolveTx.add(resolveIx);
     const resolveSig = await sendAndConfirmTransaction(conn, resolveTx, [adminKey]);
     console.log("ResolveMarket OK:", resolveSig);
   } catch (e) {
@@ -132,7 +137,12 @@ async function main() {
     });
 
     try {
-      const closeTx = new Transaction().add(closeIx);
+      const closeTx = new Transaction();
+      // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+      // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+      closeTx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+      closeTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
+      closeTx.add(closeIx);
       const closeSig = await sendAndConfirmTransaction(conn, closeTx, [adminKey]);
       console.log(`  ForceClose #${idx} OK:`, closeSig);
     } catch (e) {

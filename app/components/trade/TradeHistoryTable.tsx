@@ -278,7 +278,7 @@ export function TradeHistoryTable({
           <button
             onClick={loadMore}
             disabled={loading}
-            className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/40 hover:text-[var(--text)] disabled:opacity-40"
+            className="rounded-sm border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-1.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/40 hover:text-[var(--text)] disabled:opacity-40"
           >
             {loading ? "Loading…" : "Load more"}
           </button>

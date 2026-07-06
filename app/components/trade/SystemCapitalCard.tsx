@@ -19,30 +19,50 @@ function fmtCompact(n: number): string {
 }
 
 export const SystemCapitalCard: FC = () => {
-  const { engine, loading } = useEngineState();
+  // insuranceBalance / totalOI / oiLong / oiShort work on BOTH v12 and v17.
+  // engine-only fields (vault, cTot, pnlPosTot, numUsedAccounts, LP aggregates)
+  // are null on v17 → those rows render "—".
+  const { engine, loading, hasData, insuranceBalance, totalOI, oiLong, oiShort } = useEngineState();
   const { config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
   const divisor = 10 ** decimals;
 
-  if (loading || !engine) {
+  if (loading) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <span className="text-[10px] text-[var(--text-dim)]">Loading...</span>
       </div>
     );
   }
+  if (!hasData) {
+    return (
+      <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <span className="text-[10px] text-[var(--text-dim)]">No capital data for this market</span>
+      </div>
+    );
+  }
 
-  // Sanitize sentinel values (u64::MAX from uninitialized on-chain fields)
-  const vault = Number(sanitizeOnChainValue(engine.vault ?? 0n)) / divisor;
-  const cTot = Number(sanitizeOnChainValue(engine.cTot ?? 0n)) / divisor;
-  const pnlPosTot = Number(sanitizeOnChainValue(engine.pnlPosTot ?? 0n)) / divisor;
-  const insurance = Number(sanitizeOnChainValue(engine.insuranceFund?.balance ?? 0n)) / divisor;
-  const totalOI = Number(sanitizeOnChainValue(engine.totalOpenInterest ?? 0n)) / divisor;
-  const netLp = Number(sanitizeOnChainValue(engine.netLpPos ?? 0n)) / divisor;
-  const lpSum = Number(sanitizeOnChainValue(engine.lpSumAbs ?? 0n)) / divisor;
-  const lpMax = Number(sanitizeOnChainValue(engine.lpMaxAbs ?? 0n)) / divisor;
-  const accounts = sanitizeAccountCount(engine.numUsedAccounts ?? 0);
+  // Cross-version metrics (real on v12 AND v17). Null → "—".
+  const fmtAtoms = (v: bigint | null): string =>
+    v == null ? "—" : fmtCompact(Number(sanitizeOnChainValue(v)) / divisor);
+  const insuranceStr = fmtAtoms(insuranceBalance);
+  const totalOIStr = fmtAtoms(totalOI);
+  const oiLongStr = fmtAtoms(oiLong);
+  const oiShortStr = fmtAtoms(oiShort);
+
+  // Legacy-only (v12 engine block) — "—" when engine is null (v17).
+  const vaultStr = engine ? fmtCompact(Number(sanitizeOnChainValue(engine.vault ?? 0n)) / divisor) : "—";
+  const cTotStr = engine ? fmtCompact(Number(sanitizeOnChainValue(engine.cTot ?? 0n)) / divisor) : "—";
+  const pnlPosTotStr = engine ? fmtCompact(Number(sanitizeOnChainValue(engine.pnlPosTot ?? 0n)) / divisor) : "—";
+  const accountsStr = engine ? sanitizeAccountCount(engine.numUsedAccounts ?? 0).toString() : "—";
+
+  // LP aggregates (v12-only). Kept as numbers for the LP Exposure section below.
+  const vault = engine ? Number(sanitizeOnChainValue(engine.vault ?? 0n)) / divisor : 0;
+  const pnlPosTot = engine ? Number(sanitizeOnChainValue(engine.pnlPosTot ?? 0n)) / divisor : 0;
+  const netLp = engine ? Number(sanitizeOnChainValue(engine.netLpPos ?? 0n)) / divisor : 0;
+  const lpSum = engine ? Number(sanitizeOnChainValue(engine.lpSumAbs ?? 0n)) / divisor : 0;
+  const lpMax = engine ? Number(sanitizeOnChainValue(engine.lpMaxAbs ?? 0n)) / divisor : 0;
 
   // LP concentration: how much of total LP exposure is one whale
   const lpConcentration = lpSum > 0 ? (lpMax / lpSum) * 100 : 0;
@@ -59,33 +79,45 @@ export const SystemCapitalCard: FC = () => {
   const stats = [
     {
       label: "Vault",
-      value: fmtCompact(vault),
+      value: vaultStr,
       tip: "Total collateral deposited in this market's vault",
     },
     {
       label: "Total Capital",
-      value: fmtCompact(cTot),
+      value: cTotStr,
       tip: "Sum of all account capital (C_tot). Used for haircut calculations",
     },
     {
       label: "Positive PnL",
-      value: fmtCompact(pnlPosTot),
+      value: pnlPosTotStr,
       tip: "Sum of all winning positions. If this exceeds vault, winners get a proportional haircut",
-      color: haircutRisk > 80 ? "text-[var(--short)]" : undefined,
+      color: engine && haircutRisk > 80 ? "text-[var(--short)]" : undefined,
     },
     {
       label: "Insurance",
-      value: fmtCompact(insurance),
+      value: insuranceStr,
       tip: "Insurance fund balance — absorbs losses from liquidations",
     },
     {
       label: "Open Interest",
-      value: fmtCompact(totalOI),
+      value: totalOIStr,
       tip: "Total open interest across all positions",
     },
     {
+      label: "OI Long",
+      value: oiLongStr,
+      tip: "Open interest held by long positions",
+      color: oiLong != null ? "text-[var(--long)]" : undefined,
+    },
+    {
+      label: "OI Short",
+      value: oiShortStr,
+      tip: "Open interest held by short positions",
+      color: oiShort != null ? "text-[var(--short)]" : undefined,
+    },
+    {
       label: "Active Accounts",
-      value: accounts.toString(),
+      value: accountsStr,
       tip: "Number of active accounts (traders + LPs) in this market",
     },
   ];
@@ -120,16 +152,16 @@ export const SystemCapitalCard: FC = () => {
         <div className="grid grid-cols-3 gap-2">
           <div className="flex flex-col">
             <span className="text-[9px] text-[var(--text-dim)]">Net</span>
-            <span className={`text-xs font-bold font-mono ${netLpColor}`}>{fmtCompact(netLp)}</span>
+            <span className={`text-xs font-bold font-mono ${engine ? netLpColor : "text-[var(--text)]"}`}>{engine ? fmtCompact(netLp) : "—"}</span>
           </div>
           <div className="flex flex-col">
             <span className="text-[9px] text-[var(--text-dim)]">Total</span>
-            <span className="text-xs font-bold font-mono text-[var(--text)]">{fmtCompact(lpSum)}</span>
+            <span className="text-xs font-bold font-mono text-[var(--text)]">{engine ? fmtCompact(lpSum) : "—"}</span>
           </div>
           <div className="flex flex-col">
             <span className="text-[9px] text-[var(--text-dim)]">Concentration</span>
-            <span className={`text-xs font-bold font-mono ${lpConcentration > 80 ? "text-[var(--short)]" : "text-[var(--text)]"}`}>
-              {lpConcentration.toFixed(1)}%
+            <span className={`text-xs font-bold font-mono ${engine && lpConcentration > 80 ? "text-[var(--short)]" : "text-[var(--text)]"}`}>
+              {engine ? `${lpConcentration.toFixed(1)}%` : "—"}
             </span>
           </div>
         </div>

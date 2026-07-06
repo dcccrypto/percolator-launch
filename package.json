@@ -45,7 +45,7 @@
     "tsx": "^4.21.0"
   },
   "dependencies": {
-    "@percolatorct/sdk": "file:/Users/khubair/percolator-sdk",
+    "@percolatorct/sdk": "github:dcccrypto/percolator-sdk#1a174d3",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "dotenv": "^17.3.1"
@@ -75,7 +75,21 @@
       "socket.io-parser": ">=4.2.6",
       "flatted": ">=3.4.0",
       "defu": ">=6.1.5",
-      "vite": ">=7.3.2"
+      "fast-uri": ">=3.1.2 <4",
+      "form-data": ">=4.0.6",
+      "hono": ">=4.12.25",
+      "js-cookie": ">=3.0.7",
+      "vite": ">=7.3.2",
+      "@walletconnect/jsonrpc-ws-connection>ws": "7.5.11",
+      "jayson>ws": "7.5.11",
+      "isomorphic-ws>ws": "7.5.11",
+      "@supabase/realtime-js>ws": "8.21.0",
+      "@solana/rpc-subscriptions-channel-websocket>ws": "8.21.0",
+      "engine.io-client>ws": "8.21.0",
+      "happy-dom>ws": "8.21.0",
+      "rpc-websockets>ws": "8.21.0",
+      "viem>ws": "8.21.0",
+      "isows>ws": "8.21.0"
     }
   }
 }

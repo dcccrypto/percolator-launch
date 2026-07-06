@@ -112,3 +112,9 @@ docs/MAINNET-ENV.md
 app/.env.vercel-prod
 .env.prod
 .env.vercel
+
+# session / temp artifacts + internal docs (do not publish)
+/_*.mjs
+*.preseed.bak
+docs/NORTH-STAR.md
+docs/superpowers/

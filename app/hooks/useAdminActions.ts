@@ -9,6 +9,7 @@ import {
   encodeUpdateAuthority,
   buildAccountMetas,
   buildIx,
+  deriveVaultAuthority,
   ACCOUNTS_TOPUP_INSURANCE,
   ACCOUNTS_UPDATE_AUTHORITY,
 } from "@percolatorct/sdk";
@@ -44,7 +45,17 @@ function requireAdminAuthority(
   market: DiscoveredMarket,
   action: string,
 ): void {
-  const admin = market.header.admin.toBase58();
+  // v17 markets carry an empty header ({}); the market authority lives in
+  // configV17.marketauth. Dereferencing header.admin on a v17 market throws a
+  // TypeError before any tx, so read marketauth first and fall back to the v12
+  // header admin. (Mirrors the discovery pattern in useMyMarkets.)
+  const admin = (market.configV17?.marketauth ?? market.header?.admin)?.toBase58();
+  if (!admin) {
+    throw new Error(
+      `[${action}] Could not determine the market admin authority. ` +
+      `This action is unavailable for this market.`,
+    );
+  }
   const wallet = walletKey.toBase58();
   if (admin !== wallet) {
     throw new Error(
@@ -63,6 +74,16 @@ function requireOracleAuthority(
   market: DiscoveredMarket,
   action: string,
 ): void {
+  // v17 markets have no admin-oracle authority in the v12 MarketConfig shape
+  // (market.config is {} on v17, so config.oracleAuthority.toBase58() throws a
+  // TypeError before any tx). v17 has no equivalent single admin-oracle key —
+  // treat it as unavailable and surface a clear error instead of crashing.
+  if (market.configV17) {
+    throw new Error(
+      `[${action}] The admin-oracle authority is not available on v17 markets. ` +
+      `This action is unavailable for this market.`,
+    );
+  }
   const oracle = market.config.oracleAuthority.toBase58();
   const wallet = walletKey.toBase58();
   if (oracle !== wallet) {
@@ -110,14 +131,32 @@ export function useAdminActions() {
       // out-of-band profile data not present in DiscoveredMarket.
       setLoading("topUpInsurance");
       try {
-        const { getAssociatedTokenAddress } = await import("@solana/spl-token");
-        const userAta = await getAssociatedTokenAddress(market.config.collateralMint, wallet.publicKey);
+        const { getAssociatedTokenAddress, getAssociatedTokenAddressSync } =
+          await import("@solana/spl-token");
+
+        // Resolve the collateral mint + vault token account. On v17 the config is
+        // {} — collateralMint lives in configV17 and the vault is DERIVED (not
+        // stored): vaultAuthority = deriveVaultAuthority(programId, slab), vault
+        // token = ATA(mint, vaultAuthority, allowOwnerOffCurve). This mirrors
+        // useCloseMarket.ts. v12 markets keep reading config.
+        let collateralMint: PublicKey;
+        let vaultPubkey: PublicKey;
+        if (market.configV17) {
+          collateralMint = market.configV17.collateralMint;
+          const [vaultAuthority] = deriveVaultAuthority(market.programId, market.slabAddress);
+          vaultPubkey = getAssociatedTokenAddressSync(collateralMint, vaultAuthority, true);
+        } else {
+          collateralMint = market.config.collateralMint;
+          vaultPubkey = market.config.vaultPubkey;
+        }
+
+        const userAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
         const data = encodeTopUpInsurance({ amount: amount.toString() });
         const keys = buildAccountMetas(ACCOUNTS_TOPUP_INSURANCE, [
           wallet.publicKey,
           market.slabAddress,
           userAta,
-          market.config.vaultPubkey,
+          vaultPubkey,
           TOKEN_PROGRAM_ID,
         ]);
         const ix = buildIx({ programId: market.programId, keys, data });

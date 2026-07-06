@@ -59,6 +59,9 @@ async function main() {
   // Step 1: ResolveMarket
   console.log("\n--- ResolveMarket (tag 19) ---");
   const resolveTx = new Transaction();
+  // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+  // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+  resolveTx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
   resolveTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
   resolveTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   resolveTx.add(new TransactionInstruction({
@@ -91,6 +94,9 @@ async function main() {
     closeData.writeUInt16LE(idx, 1);
 
     const closeTx = new Transaction();
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    closeTx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
     closeTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
     closeTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
 
@@ -125,6 +131,9 @@ async function main() {
   // Step 3: Close slab to recover rent
   console.log("\n--- CloseOrphanSlab (tag 29) ---");
   const closeSlab = new Transaction();
+  // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+  // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+  closeSlab.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
   closeSlab.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
   closeSlab.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
   closeSlab.add(new TransactionInstruction({

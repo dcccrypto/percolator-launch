@@ -49,6 +49,7 @@ vi.mock("@percolatorct/sdk", async () => {
   const registryPda = new PK("7pXnR8Eg2g7YDtPkUeEmcYNpPN5yzGLbNHREeHJMzNhq"); // stable 32-byte pubkey
   const redemptionPda = new PK("6UwgpB4FBfQpKW8ACFv7EW5vXg1NiHRQijYzGBaXJSHJ"); // stable 32-byte pubkey
   const ledgerPda = new PK("5YNmS1R9nNSCDzb5a7mMJ1dwK9uH27bN3i2JK1eGfwCM"); // stable 32-byte pubkey
+  const escrowPda = new PK("4mB4qULhrn1PcDCTVfE3XPfKvGiCTiXhbmzuUwrQZzJj"); // stable 32-byte pubkey
   const progId = new PK("5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf");
   return {
     deriveInsuranceLpMint: vi.fn().mockReturnValue([lpMint, 255]),
@@ -56,6 +57,11 @@ vi.mock("@percolatorct/sdk", async () => {
     deriveLpVaultRegistry: vi.fn().mockReturnValue([registryPda, 253]),
     deriveLpRedemption: vi.fn().mockReturnValue([redemptionPda, 252]),
     deriveLpBackingLedger: vi.fn().mockReturnValue([ledgerPda, 251]),
+    // BUG FIX (devnet flow-test 2026-07-01): added when useInsuranceLP.ts's withdraw() was
+    // fixed to include the escrow account (see hook's inline fix comment) — the mock didn't
+    // know about this new SDK import, so both withdraw() tests failed with
+    // "No 'deriveLpEscrow' export is defined on the mock".
+    deriveLpEscrow: vi.fn().mockReturnValue([escrowPda, 250]),
     encodeCreateLpVaultV17: vi.fn().mockReturnValue(Buffer.alloc(32)),
     encodeDepositToLpVault: vi.fn().mockReturnValue(Buffer.alloc(16)),
     encodeRequestRedeemLpShares: vi.fn().mockReturnValue(Buffer.alloc(16)),

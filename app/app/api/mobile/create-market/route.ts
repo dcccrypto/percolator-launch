@@ -29,6 +29,7 @@ import {
   Transaction,
   TransactionInstruction,
   Connection,
+  ComputeBudgetProgram,
 } from "@solana/web3.js";
 import {
   createAssociatedTokenAccountInstruction,
@@ -322,6 +323,10 @@ export async function POST(req: NextRequest) {
     const initMarketIx = buildIx({ programId, keys: initMarketKeys, data: initMarketData });
 
     const tx0 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    tx0.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+    tx0.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
     tx0.add(createSlabIx, createVaultAtaIx, seedTransferIx, initMarketIx);
     tx0.partialSign(slabKp); // server co-signs as the new slab account
 
@@ -356,6 +361,10 @@ export async function POST(req: NextRequest) {
     });
 
     const tx1 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    tx1.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+    tx1.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
     tx1.add(createPortfolioIx, initPortfolioIx);
     tx1.partialSign(lpPortfolioKp); // server co-signs as the new portfolio account
 
@@ -406,6 +415,11 @@ export async function POST(req: NextRequest) {
     });
 
     const tx2 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });
+    // Contains SetMatcherConfig (wrapper tag 68). The v17 wrapper installs a custom
+    // 128KB heap allocator and aborts unless the tx requests the full heap frame.
+    // Must be the FIRST instruction. (issue #176)
+    tx2.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+    tx2.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
     tx2.add(createCtxIx, matcherInitIx, setMatcherConfigIx);
     tx2.partialSign(matcherCtxKp); // server co-signs as the new matcher context account
 
@@ -459,6 +473,10 @@ export async function POST(req: NextRequest) {
     });
 
     const tx3 = new Transaction({ recentBlockhash: blockhash, feePayer: deployerPk });
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    tx3.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+    tx3.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
     tx3.add(depositIx, topupIx, crankIx3);
 
     // Insurance LP mint creation removed — moved to percolator-stake program.

@@ -22,6 +22,7 @@ import {
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
+import { humanizeError } from "@/lib/errorMessages";
 
 // ---------------------------------------------------------------------------
 // v17 portfolio discovery helper — mirrors useDeposit's findV17Portfolio.
@@ -253,7 +254,7 @@ export function useInitUser(slabAddress: string) {
           ? "Your wallet's transaction guard (Blowfish/Lighthouse) is blocking this transaction. " +
             "Try disabling transaction simulation in your wallet settings, or use a wallet without " +
             "Blowfish protection (e.g. Backpack). We're working on a permanent fix."
-          : raw;
+          : humanizeError(raw);
         setError(userMsg);
         throw new Error(userMsg);
       } finally {

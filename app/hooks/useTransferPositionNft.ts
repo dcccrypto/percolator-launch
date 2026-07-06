@@ -16,8 +16,8 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
-import { useUserAccount } from "@/hooks/useUserAccount";
 import { usePositionNft } from "@/hooks/usePositionNft";
+import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
@@ -149,11 +149,20 @@ function deriveExtraAccountMetasPda(mint: PublicKey): PublicKey {
  * would have to hand-roll that list and keep it in sync with
  * percolator-nft/src/processor.rs — not worth it.
  */
-export function useTransferPositionNft(slabAddress: string) {
+/** Lets a caller (e.g. PositionNftPanel) supply the NFT mint directly instead
+ *  of relying solely on this hook's own usePositionNft() scan — used for a
+ *  Position NFT received via transfer, where useNftWrappedPosition's
+ *  last_holder scan is the more reliable source (see PositionNftPanel). */
+export interface TransferNftOverride {
+  nftMint: PublicKey;
+}
+
+export function useTransferPositionNft(slabAddress: string, override?: TransferNftOverride) {
   const { publicKey: walletPubkey, signTransaction } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const userAccount = useUserAccount();
-  const { nftMint } = usePositionNft(slabAddress);
+  const scanned = usePositionNft(slabAddress);
+  const nftMint = override?.nftMint ?? scanned.nftMint;
+  const { refresh } = useSlabState();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(false);
@@ -162,8 +171,8 @@ export function useTransferPositionNft(slabAddress: string) {
   const transfer = useCallback(
     async (destinationWallet: PublicKey): Promise<string | null> => {
       setError(null);
-      if (!walletPubkey || !userAccount || !nftMint) {
-        setError("Wallet not connected, no position, or NFT not minted");
+      if (!walletPubkey || !nftMint) {
+        setError("Wallet not connected or NFT not minted");
         return null;
       }
       if (!signTransaction) {
@@ -295,6 +304,10 @@ export function useTransferPositionNft(slabAddress: string) {
 
         stage = "assembling transaction";
         const tx = new Transaction();
+        // The TransferChecked hook CPIs the v17 wrapper (TransferOwnershipCpi tag 69),
+        // which installs a custom 128KB heap allocator and aborts unless the tx
+        // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+        tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
         tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
         tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
         tx.add(createDestAtaIx);
@@ -337,6 +350,11 @@ export function useTransferPositionNft(slabAddress: string) {
           "confirmed",
         );
 
+        // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
+        // and the UI reflects the transferred-away position without waiting for
+        // the next poll cycle.
+        refresh();
+
         toast(`Position NFT sent to ${destinationWallet.toBase58().slice(0, 8)}…`, "success");
         return sig;
       } catch (e) {
@@ -346,24 +364,24 @@ export function useTransferPositionNft(slabAddress: string) {
         console.error("[useTransferPositionNft] stage:", stage, "error:", e);
 
         // Build a meaningful raw string even when .message is empty.
-        let raw = "";
+        let errMsg = "";
         if (e instanceof Error) {
-          raw = e.message || e.name || e.constructor?.name || "";
+          errMsg = e.message || e.name || e.constructor?.name || "";
         } else if (e != null) {
-          raw = String(e);
+          errMsg = String(e);
         }
-        if (!raw.trim()) {
-          raw = `Failed while ${stage}. Check the browser console for the raw error object.`;
+        if (!errMsg.trim()) {
+          errMsg = `Failed while ${stage}. Check the browser console for the raw error object.`;
         }
 
         // User rejected wallet signature — surface a clean UX message and
         // do not treat it as an error state.
-        if (/user (rejected|cancelled|denied)|rejected the request/i.test(raw)) {
+        if (/user (rejected|cancelled|denied)|rejected the request/i.test(errMsg)) {
           setError(null);
           return null;
         }
 
-        const msg = humanizeError(raw);
+        const msg = humanizeError(errMsg);
         setError(msg);
         toast(msg, "error");
         return null;
@@ -371,7 +389,7 @@ export function useTransferPositionNft(slabAddress: string) {
         setLoading(false);
       }
     },
-    [walletPubkey, userAccount, nftMint, signTransaction, connection, toast],
+    [walletPubkey, nftMint, signTransaction, connection, toast, refresh],
   );
 
   return { transfer, loading, error };

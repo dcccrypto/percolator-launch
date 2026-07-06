@@ -34,10 +34,26 @@ import {
   getAccount,
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
-import { getServiceClient } from "@/lib/supabase";
 import { getDevnetMintSigner } from "@/lib/devnet-signer";
-import { tryFaucetGate, releaseFaucetClaim } from "@/lib/faucet-rate-gate";
 import * as Sentry from "@sentry/nextjs";
+
+// ── In-memory rate-limit fallback (when Supabase unavailable) ─────────────────
+const _faucetClaims = new Map<string, number>();
+const _FAUCET_RATE_MS = 24 * 60 * 60 * 1000;
+
+function _faucetIsLimited(key: string): { limited: boolean; nextClaimAt: string | null } {
+  const last = _faucetClaims.get(key);
+  if (last === undefined) return { limited: false, nextClaimAt: null };
+  const elapsed = Date.now() - last;
+  if (elapsed < _FAUCET_RATE_MS) {
+    return { limited: true, nextClaimAt: new Date(last + _FAUCET_RATE_MS).toISOString() };
+  }
+  return { limited: false, nextClaimAt: null };
+}
+
+function _faucetRecord(key: string): void {
+  _faucetClaims.set(key, Date.now());
+}
 
 export const dynamic = "force-dynamic";
 
@@ -118,10 +134,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // GH#1595: INSERT-as-gate rate limit — eliminates SELECT→INSERT TOCTOU window.
-    // Uses faucet_claims table with UNIQUE(wallet, fund_type).
-    const supabase = getServiceClient();
-    const gate = await tryFaucetGate(supabase, walletAddress, type);
+    // Rate limit: DB-backed when Supabase available, in-memory fallback otherwise.
+    let supabase: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
+    let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
+    const rateKey = `${walletAddress}:${type}`;
+    try {
+      const sbMod = await import("@/lib/supabase");
+      const gateMod = await import("@/lib/faucet-rate-gate");
+      supabase = sbMod.getServiceClient();
+      gate = await gateMod.tryFaucetGate(supabase, walletAddress, type);
+    } catch {
+      // Supabase unavailable — use in-memory limiter
+      const { limited, nextClaimAt } = _faucetIsLimited(rateKey);
+      gate = { allowed: !limited, nextClaimAt };
+    }
 
     if (!gate.allowed) {
       return NextResponse.json(
@@ -193,17 +219,14 @@ export async function POST(req: NextRequest) {
 
       // ── Post-loop: evaluate outcome ──────────────────────────────────────
       if (lastRateLimitMsg !== null) {
-        // GH#1595: release gate so user can retry after RPC rate limit clears
-        // GH#1798: return a user-friendly rate-limit message (not "temporarily unavailable").
-        // RPC devnet rate limits are per-wallet and typically reset in ~24h.
-        if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
-        const rpcRateLimitNextClaimAt = new Date(
-          Date.now() + 24 * 60 * 60 * 1000,
-        ).toISOString();
+        // Release gate so user can retry after RPC rate limit clears
+        if (supabase && gate.claimId) {
+          try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ }
+        }
+        const rpcRateLimitNextClaimAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         return NextResponse.json(
           {
-            error:
-              "SOL airdrop rate limit reached — Solana devnet limits 1 airdrop per wallet per day. Try again tomorrow or use https://faucet.solana.com.",
+            error: "SOL airdrop rate limit reached — Solana devnet limits 1 airdrop per wallet per day. Try again tomorrow or use https://faucet.solana.com.",
             retryable: false,
             nextClaimAt: rpcRateLimitNextClaimAt,
             rpcRateLimited: true,
@@ -214,32 +237,29 @@ export async function POST(req: NextRequest) {
 
       if (sig === null && (lastTransientMsg !== null || fatalErr !== null)) {
         if (fatalErr !== null) {
-          if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
-          Sentry.captureException(fatalErr, {
-            tags: { endpoint: "/api/faucet", type: "sol" },
-            extra: { walletAddress },
-          });
+          if (supabase && gate.claimId) {
+            try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ }
+          }
+          Sentry.captureException(fatalErr, { tags: { endpoint: "/api/faucet", type: "sol" }, extra: { walletAddress } });
           return NextResponse.json({ error: "SOL airdrop failed. Please try again later." }, { status: 500 });
         }
-        // All RPCs returned transient errors
-        if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+        if (supabase && gate.claimId) {
+          try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ }
+        }
         return NextResponse.json(
-          {
-            error: "Solana devnet temporarily unavailable. Please retry in a few minutes.",
-            retryable: true,
-          },
+          { error: "Solana devnet temporarily unavailable. Please retry in a few minutes.", retryable: true },
           { status: 503 },
         );
       }
 
-      // At this point sig is guaranteed non-null (all null paths return early above)
-      // GH#1595: claim already recorded by gate INSERT — also log to auto_fund_log for analytics
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await supabase.from("auto_fund_log").insert({
-        wallet: walletAddress,
-        sol_airdropped: true,
-        usdc_minted: false,
-      });
+      // Record in-memory + analytics (analytics-only, best-effort)
+      _faucetRecord(rateKey);
+      if (supabase) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase as any).from("auto_fund_log").insert({ wallet: walletAddress, sol_airdropped: true, usdc_minted: false });
+        } catch { /* analytics-only, skip */ }
+      }
 
       return NextResponse.json({
         funded: true,
@@ -261,7 +281,7 @@ export async function POST(req: NextRequest) {
       | undefined;
 
     if (!usdcMintAddr) {
-      if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+      if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
       return NextResponse.json(
         { error: "Test USDC mint not configured" },
         { status: 500 },
@@ -273,7 +293,7 @@ export async function POST(req: NextRequest) {
     // Load sealed mint authority signer (GH#1382: replaces raw Keypair.fromSecretKey)
     const mintSigner = getDevnetMintSigner();
     if (!mintSigner) {
-      if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+      if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
       return NextResponse.json(
         { error: "Server not configured for token minting. Please contact support." },
         { status: 500 },
@@ -289,7 +309,7 @@ export async function POST(req: NextRequest) {
     try {
       const mintInfo = await connection.getAccountInfo(usdcMint);
       if (!mintInfo) {
-        if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+        if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
         return NextResponse.json(
           { error: `Test USDC mint ${usdcMintAddr} does not exist on devnet` },
           { status: 500 },
@@ -301,7 +321,7 @@ export async function POST(req: NextRequest) {
         const hasAuthority =
           new DataView(mintData.buffer, mintData.byteOffset).getUint32(0, true) === 1;
         if (!hasAuthority) {
-          if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+          if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
           return NextResponse.json(
             { error: "Test USDC mint has no mint authority (fixed supply)" },
             { status: 500 },
@@ -315,7 +335,7 @@ export async function POST(req: NextRequest) {
             ),
             { tags: { endpoint: "/api/faucet", step: "authority_check" } },
           );
-          if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+          if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
           return NextResponse.json(
             {
               error: "Cannot mint tokens: server signing key does not match the on-chain mint authority.",
@@ -333,7 +353,7 @@ export async function POST(req: NextRequest) {
         tags: { endpoint: "/api/faucet", step: "authority_check" },
         extra: { walletAddress },
       });
-      if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+      if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
       return NextResponse.json(
         { error: "Could not verify mint authority due to RPC error. Please retry.", retryable: true },
         { status: 503 },
@@ -384,23 +404,19 @@ export async function POST(req: NextRequest) {
         "confirmed",
       );
     } catch (chainErr) {
-      if (gate.claimId) await releaseFaucetClaim(supabase, gate.claimId);
+      if (supabase && gate.claimId) { try { const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate"); await releaseFaucetClaim(supabase, gate.claimId); } catch { /* best-effort */ } }
       throw chainErr;
     }
 
-    // Analytics only — do not release gate on failure after on-chain success
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await supabase.from("auto_fund_log").insert({
-        wallet: walletAddress,
-        sol_airdropped: false,
-        usdc_minted: true,
-      });
-    } catch (logErr) {
-      Sentry.captureException(logErr, {
-        tags: { endpoint: "/api/faucet", type: "usdc", step: "auto_fund_log" },
-        extra: { walletAddress },
-      });
+    // Record in-memory + analytics (best-effort)
+    _faucetRecord(rateKey);
+    if (supabase) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any).from("auto_fund_log").insert({ wallet: walletAddress, sol_airdropped: false, usdc_minted: true });
+      } catch (logErr) {
+        Sentry.captureException(logErr, { tags: { endpoint: "/api/faucet", type: "usdc", step: "auto_fund_log" }, extra: { walletAddress } });
+      }
     }
 
     const nextClaimAt = new Date(

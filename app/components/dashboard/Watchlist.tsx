@@ -43,19 +43,19 @@ export function Watchlist() {
   return (
     <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-        <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+        <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
           Markets
         </p>
-        <Link href="/markets" className="text-[10px] text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]">
+        <Link href="/markets" className="text-[10px] text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]">
           View All →
         </Link>
       </div>
 
       <div className="max-h-[280px] overflow-y-auto">
         {loading ? (
-          <div className="px-4 py-6 text-center text-[10px] text-[var(--text-muted)]">Loading markets...</div>
+          <div className="px-4 py-6 text-center text-[10px] text-[var(--text-secondary)]">Loading markets...</div>
         ) : markets.length === 0 ? (
-          <div className="px-4 py-6 text-center text-[10px] text-[var(--text-muted)]">No markets found</div>
+          <div className="px-4 py-6 text-center text-[10px] text-[var(--text-secondary)]">No markets found</div>
         ) : (
           markets.slice(0, 10).map((m) => (
             <Link
@@ -67,10 +67,10 @@ export function Watchlist() {
                 {m.symbol ? `${m.symbol}-PERP` : `${m.slab_address.slice(0, 6)}…`}
               </span>
               <div className="flex-1 text-right">
-                <p className="text-[9px] text-[var(--text-muted)]">
+                <p className="text-[9px] text-[var(--text-secondary)]">
                   Vol: {m.volume_24h_usd != null && m.volume_24h_usd > 0 ? formatCompact(m.volume_24h_usd) : "--"}
                 </p>
-                <p className="text-[9px] text-[var(--text-dim)]">
+                <p className="text-[9px] text-[var(--text-secondary)]">
                   OI: {m.total_open_interest_usd != null && m.total_open_interest_usd > 0 ? formatCompact(m.total_open_interest_usd) : "--"}
                 </p>
               </div>

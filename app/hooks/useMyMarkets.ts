@@ -27,7 +27,7 @@ export interface MyMarket extends DiscoveredMarket {
 export function useMyMarkets() {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { markets, loading: discoveryLoading, error } = useMarketDiscovery();
+  const { markets, loading: discoveryLoading, error, refetch: discoveryRefetch } = useMarketDiscovery();
 
   // Token label cache: mint → symbol (persists across re-renders)
   const tokenLabelCache = useRef<Map<string, string>>(new Map());
@@ -58,7 +58,13 @@ export function useMyMarkets() {
     }
     let cancelled = false;
     const walletStr = publicKey.toBase58();
-    const admins = markets.filter((m) => m.header.admin.toBase58() === walletStr);
+    // v17 markets carry an empty header ({}); the market authority lives in
+    // configV17.marketauth. Falling back to header.admin keeps v12 working.
+    // Optional chaining prevents the TypeError that otherwise blanked the whole
+    // admin dashboard for anyone with a v17 market.
+    const admins = markets.filter(
+      (m) => (m.configV17?.marketauth ?? m.header?.admin)?.toBase58() === walletStr,
+    );
 
     Promise.all(admins.map(async (m) => ({
       ...m,
@@ -86,7 +92,7 @@ export function useMyMarkets() {
     const walletStr = publicKey.toBase58();
     const adminAddrs = new Set(
       markets
-        .filter((m) => m.header.admin.toBase58() === walletStr)
+        .filter((m) => (m.configV17?.marketauth ?? m.header?.admin)?.toBase58() === walletStr)
         .map((m) => m.slabAddress.toBase58())
     );
     const nonAdminMarkets = markets.filter((m) => !adminAddrs.has(m.slabAddress.toBase58()));
@@ -178,5 +184,7 @@ export function useMyMarkets() {
     loading: discoveryLoading || accountsLoading,
     error,
     connected: !!publicKey,
+    /** Trigger a fresh discovery fetch (bypasses SWR dedup window). */
+    refetch: discoveryRefetch,
   };
 }

@@ -5,27 +5,33 @@ import { PublicKey, Keypair, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemP
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
-import { useUserAccount } from "@/hooks/useUserAccount";
-import { encodeMintPositionNft, getProgramId } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
-import { PERCOLATOR_NFT_PROGRAM_ID, deriveNftPda } from "@/lib/nft-program";
+import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+import {
+  deriveNftPda,
+  deriveMintAuthority,
+  deriveExtraAccountMetas,
+  deriveNftRegistry,
+  encodeNftMint,
+  parsePortfolioV17,
+  isV17Account,
+} from "@percolatorct/sdk";
 
 export function useMintPositionNft(slabAddress: string) {
   const { publicKey: walletPubkey } = useWalletCompat();
   const wallet = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { programId } = useSlabState();
-  const userAccount = useUserAccount();
+  const { programId, raw, refresh } = useSlabState();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const mint = useCallback(async () => {
-    if (!walletPubkey || !programId || !userAccount) {
-      setError("Wallet not connected or no user account");
+    if (!walletPubkey || !programId) {
+      setError("Wallet not connected or market not loaded");
       return;
     }
 
@@ -34,26 +40,58 @@ export function useMintPositionNft(slabAddress: string) {
 
     try {
       const slabPk = new PublicKey(slabAddress);
-      const userIdx = userAccount.idx;
       const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
+      const isV17 = raw != null && raw.length > 0 && isV17Account(raw);
 
-      // Derive PDA for state, generate fresh keypair for mint
-      const [nftPda] = deriveNftPda(slabPk, userIdx);
-      // nft_mint is a fresh keypair (not a PDA) — the program creates it via
-      // create_account which requires the mint account to sign the transaction
+      // ── Find the user's portfolio and active leg ──────────────────────────
+      // v17: portfolio is a standalone account; we need the marketId from the
+      // active leg to derive the correct NFT PDA seeds:
+      //   ["position_nft", portfolioPubkey, marketId_u64_LE]
+      // The portfolio is discovered via getProgramAccounts filtered by magic +
+      // market_group_id + owner (same filter as useTrade findV17Portfolio).
+      const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
+      const PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF = 16;
+      const PORTFOLIO_PROVENANCE_OWNER_OFF = 80;
+
+      let portfolioPk: PublicKey;
+      let marketId: bigint;
+
+      if (isV17) {
+        const allPortfolios = await connection.getProgramAccounts(programId, {
+          filters: [
+            { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
+            { memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: slabPk.toBase58() } },
+            { memcmp: { offset: PORTFOLIO_PROVENANCE_OWNER_OFF, bytes: walletPubkey.toBase58() } },
+          ],
+        });
+        if (allPortfolios.length === 0) {
+          throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
+        }
+        portfolioPk = allPortfolios[0].pubkey;
+        const pf = parsePortfolioV17(new Uint8Array(allPortfolios[0].account.data));
+        const activeLeg = pf.legs.find((l) => l.active);
+        if (!activeLeg) {
+          throw new Error("No active position to mint an NFT for. Open a position first.");
+        }
+        marketId = activeLeg.marketId;
+      } else {
+        // v12: NFT PDA seeds are ["position_nft", slab, userIdx_u16_LE]
+        // Fall back to the old approach for non-v17 markets — userAccount.idx
+        // is available only via useUserAccount which is no longer imported.
+        // v12 markets are not in scope for v17 NFT; surface a clear error.
+        throw new Error("Position NFT minting is only supported on v17 markets.");
+      }
+
+      // v17: derive NFT PDA with correct seeds (portfolio + marketId_u64_LE)
+      const [nftPda] = deriveNftPda(portfolioPk, marketId, nftProgId);
+      // nft_mint is a fresh keypair (not a PDA)
       const nftMintKeypair = Keypair.generate();
       const nftMint = nftMintKeypair.publicKey;
 
-      // mint_authority PDA: ["mint_authority"] on NFT program
-      const [mintAuth] = PublicKey.findProgramAddressSync(
-        [Buffer.from("mint_authority")],
-        nftProgId,
-      );
-      // extra-account-metas PDA: ["extra-account-metas", nft_mint] on NFT program
-      const [extraMetas] = PublicKey.findProgramAddressSync(
-        [Buffer.from("extra-account-metas"), nftMint.toBuffer()],
-        nftProgId,
-      );
+      // PDAs
+      const [mintAuth]   = deriveMintAuthority(nftProgId);
+      const [extraMetas] = deriveExtraAccountMetas(nftMint, nftProgId);
+      const [nftRegistry] = deriveNftRegistry(programId, slabPk);
 
       // Owner's Token-2022 ATA for the NFT mint
       const ownerAta = getAssociatedTokenAddressSync(
@@ -63,23 +101,36 @@ export function useMintPositionNft(slabAddress: string) {
         TOKEN_2022_PROGRAM_ID,
       );
 
-      // MintPositionNft (tag 0 on NFT program)
-      // 10 accounts: owner, nft_pda, nft_mint, owner_ata, slab, mint_auth, token22, ata_program, system, extra_metas
+      // MintPositionNft — 12 accounts (v17):
+      //  [0] owner           signer+writable
+      //  [1] nft_pda         writable
+      //  [2] nft_mint        signer+writable (fresh keypair)
+      //  [3] owner_ata       writable
+      //  [4] portfolio       writable  ← was incorrectly slab read-only
+      //  [5] mint_authority  readonly
+      //  [6] token-2022      readonly
+      //  [7] ata_program     readonly
+      //  [8] system          readonly
+      //  [9] extra_metas     writable
+      // [10] nft_registry    readonly  ← was missing
+      // [11] wrapper_program readonly  ← was missing
       const ix = new TransactionInstruction({
         programId: nftProgId,
         keys: [
-          { pubkey: walletPubkey, isSigner: true, isWritable: true },     // 0: owner (signer, payer)
-          { pubkey: nftPda, isSigner: false, isWritable: true },          // 1: nft_pda
-          { pubkey: nftMint, isSigner: true, isWritable: true },          // 2: nft_mint (SIGNER — fresh keypair)
-          { pubkey: ownerAta, isSigner: false, isWritable: true },        // 3: owner_ata
-          { pubkey: slabPk, isSigner: false, isWritable: false },         // 4: slab (read-only)
-          { pubkey: mintAuth, isSigner: false, isWritable: false },       // 5: mint_authority PDA
-          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // 6: token-2022
+          { pubkey: walletPubkey,              isSigner: true,  isWritable: true  }, // 0: owner
+          { pubkey: nftPda,                    isSigner: false, isWritable: true  }, // 1: nft_pda
+          { pubkey: nftMint,                   isSigner: true,  isWritable: true  }, // 2: nft_mint
+          { pubkey: ownerAta,                  isSigner: false, isWritable: true  }, // 3: owner_ata
+          { pubkey: portfolioPk,               isSigner: false, isWritable: true  }, // 4: portfolio (writable)
+          { pubkey: mintAuth,                  isSigner: false, isWritable: false }, // 5: mint_authority
+          { pubkey: TOKEN_2022_PROGRAM_ID,     isSigner: false, isWritable: false }, // 6: token-2022
           { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // 7: ata_program
-          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // 8: system
-          { pubkey: extraMetas, isSigner: false, isWritable: true },      // 9: extra_account_metas PDA
+          { pubkey: SystemProgram.programId,   isSigner: false, isWritable: false }, // 8: system
+          { pubkey: extraMetas,                isSigner: false, isWritable: true  }, // 9: extra_metas
+          { pubkey: nftRegistry,               isSigner: false, isWritable: false }, // 10: nft_registry
+          { pubkey: programId,                 isSigner: false, isWritable: false }, // 11: wrapper_program
         ],
-        data: Buffer.from([0, userIdx & 0xff, (userIdx >> 8) & 0xff]),
+        data: Buffer.from(encodeNftMint(0)), // assetIndex=0
       });
 
       // Build and sign manually — Privy embedded wallets can't handle extra
@@ -92,7 +143,7 @@ export function useMintPositionNft(slabAddress: string) {
       // 6. Send raw transaction ourselves
       const { ComputeBudgetProgram } = await import("@solana/web3.js");
       const tx = new (await import("@solana/web3.js")).Transaction();
-      tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
+      tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }));
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       tx.add(ix);
 
@@ -138,18 +189,23 @@ export function useMintPositionNft(slabAddress: string) {
       // Wait for confirmation with blockhash-based expiry
       await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
 
+      // Force an immediate slab re-poll so useUserAccount/usePositionNft re-scan
+      // and the UI reflects the just-minted NFT without waiting for the next
+      // poll cycle (closes the stale-window double-mint hazard).
+      refresh();
+
       toast("Position NFT minted!", "success");
       return sig;
     } catch (e) {
-      const raw = e instanceof Error ? e.message : String(e);
-      const msg = humanizeError(raw);
-      console.error("[useMintPositionNft]", raw);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      const msg = humanizeError(errMsg);
+      console.error("[useMintPositionNft]", errMsg);
       setError(msg);
       toast(msg, "error");
     } finally {
       setLoading(false);
     }
-  }, [walletPubkey, programId, userAccount, slabAddress, connection, wallet, toast]);
+  }, [walletPubkey, programId, raw, slabAddress, connection, wallet, toast, refresh]);
 
   return { mint, loading, error };
 }

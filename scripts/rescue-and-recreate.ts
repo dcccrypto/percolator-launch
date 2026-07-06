@@ -85,6 +85,9 @@ async function sendTx(
   label: string,
 ): Promise<string> {
   const tx = new Transaction().add(
+    // v17 wrapper installs a custom 128KB heap allocator and aborts unless the tx
+    // requests the full heap frame. Must be the FIRST instruction. (issue #176)
+    ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }),
     ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 }),
     ...instructions,

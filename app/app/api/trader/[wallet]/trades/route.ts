@@ -1,27 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createMemoryRateLimiter } from "@/lib/memory-rate-limit";
+import { hasIndexerDb, queryTraderTradesPage } from "@/lib/indexer-db";
 
 /**
  * GET /api/trader/:wallet/trades?limit=20&offset=0&slab=<optional>
  *
- * Returns paginated trade history for a specific wallet address.
- * Uses service_role client (bypasses RLS) — all on-chain trades are public.
- *
- * PERC-420: Trade history for portfolio page
- *
- * Security: IP-based in-memory rate limiter (60 req/min) guards against
- * unauthenticated enumeration / DB-scraping (see GitHub issue #700).
+ * P0 fix: reads from local indexer Postgres when INDEXER_DATABASE_URL is set.
+ * Falls back to Supabase (guarded) or returns empty list on failure.
  */
 export const dynamic = "force-dynamic";
 
-// ---------------------------------------------------------------------------
-// 60 requests per minute per IP — shared rate limiter factory (lib/memory-rate-limit.ts).
-// Resets on cold start (fine for serverless).
-// ---------------------------------------------------------------------------
 const RATE_LIMIT = 60;
 const rateLimiter = createMemoryRateLimiter({ limit: RATE_LIMIT, windowMs: 60_000 });
 
@@ -30,7 +21,7 @@ export interface TraderTradeEntry {
   slab_address: string;
   trader: string;
   side: "long" | "short";
-  size: string; // raw bigint as string
+  size: string;
   price: number;
   fee: number;
   tx_signature: string | null;
@@ -41,7 +32,6 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ wallet: string }> },
 ) {
-  // Rate limiting — 60 req/min per IP (fixes #700)
   const ip = getClientIp(_request);
   if (rateLimiter.isLimited(ip)) {
     return NextResponse.json(
@@ -61,7 +51,6 @@ export async function GET(
   const { wallet } = await params;
   const url = new URL(_request.url);
 
-  // Validate wallet address
   let walletKey: string;
   try {
     walletKey = new PublicKey(wallet).toBase58();
@@ -69,37 +58,58 @@ export async function GET(
     return NextResponse.json({ error: "Invalid wallet address" }, { status: 400 });
   }
 
-  // Pagination — use validateNumericParam for strict bounds checking
-  // GH#1815: Prevent negative/huge limit and unbounded offset values.
-  // limit: 1-100 (clamp to 100 if >100), default 20
-  // offset: 0-1000000 (clamp to max if >max), default 0
   const MAX_LIMIT = 100;
   const MAX_OFFSET = 1_000_000;
   const DEFAULT_LIMIT = 20;
 
   const limitParam = url.searchParams.get("limit");
-  const limitValidation = validateNumericParam(limitParam ?? String(DEFAULT_LIMIT), {
-    min: 1,
-    max: MAX_LIMIT,
-  });
-  const limit = !limitValidation.valid
-    ? DEFAULT_LIMIT // non-numeric or out-of-bounds → use default
-    : limitValidation.value;
+  const limitValidation = validateNumericParam(limitParam ?? String(DEFAULT_LIMIT), { min: 1, max: MAX_LIMIT });
+  const limit = !limitValidation.valid ? DEFAULT_LIMIT : limitValidation.value;
 
   const offsetParam = url.searchParams.get("offset");
-  const offsetValidation = validateNumericParam(offsetParam ?? "0", {
-    min: 0,
-    max: MAX_OFFSET,
-  });
+  const offsetValidation = validateNumericParam(offsetParam ?? "0", { min: 0, max: MAX_OFFSET });
   const offset = !offsetValidation.valid ? 0 : offsetValidation.value;
 
-  // Optional slab filter
   const slabFilter = url.searchParams.get("slab");
+  const safeSlab = slabFilter && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(slabFilter) ? slabFilter : undefined;
 
+  // P0: prefer local indexer
+  if (hasIndexerDb()) {
+    try {
+      const { trades: rawTrades, total } = await queryTraderTradesPage(walletKey, limit, offset, safeSlab);
+      const trades: TraderTradeEntry[] = rawTrades.map((r) => ({
+        id: r.id,
+        slab_address: r.slab_address,
+        trader: r.trader,
+        side: r.side as "long" | "short",
+        size: r.size,
+        price: Number(r.price),
+        fee: Number(r.fee),
+        tx_signature: r.tx_signature || null,
+        created_at: r.created_at,
+      }));
+      return NextResponse.json(
+        { trades, total, limit, offset },
+        {
+          headers: {
+            "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+            "X-RateLimit-Limit": String(RATE_LIMIT),
+            "X-RateLimit-Remaining": String(rateLimiter.remaining(ip)),
+            "X-RateLimit-Window": "60s",
+          },
+        },
+      );
+    } catch (err) {
+      console.warn("[trader-trades] indexer-db error:", err instanceof Error ? err.message : String(err));
+      // fall through to Supabase
+    }
+  }
+
+  // Supabase fallback (guarded)
   try {
+    const { getServiceClient, getServerNetwork } = await import("@/lib/supabase");
     const supabase = getServiceClient();
 
-    // PERC-8195: filter by network so devnet/mainnet trades don't mix
     let query = supabase
       .from("trades")
       .select("id, slab_address, trader, side, size, price, fee, tx_signature, created_at", { count: "exact" })
@@ -108,33 +118,18 @@ export async function GET(
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (slabFilter) {
-      // Basic slab address validation (44 chars base58)
-      const safeSlab = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(slabFilter) ? slabFilter : null;
-      if (safeSlab) query = query.eq("slab_address", safeSlab);
-    }
+    if (safeSlab) query = query.eq("slab_address", safeSlab);
 
     let { data, error, count } = await query;
 
-    // GH#1875: Graceful fallback — if the network column doesn't exist yet
-    // (PERC-8215 migration not applied), retry without the network filter.
     if (error && error.message?.includes("network")) {
-      console.warn(
-        "[trader-trades] PERC-8215: network column missing on trades table — " +
-        "falling back to unfiltered query. Apply 20260329180000_add_network_column.sql to fix."
-      );
       let fallbackQuery = supabase
         .from("trades")
         .select("id, slab_address, trader, side, size, price, fee, tx_signature, created_at", { count: "exact" })
         .eq("trader", walletKey)
         .order("created_at", { ascending: false })
         .range(offset, offset + limit - 1);
-
-      if (slabFilter) {
-        const safeSlab = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(slabFilter) ? slabFilter : null;
-        if (safeSlab) fallbackQuery = fallbackQuery.eq("slab_address", safeSlab);
-      }
-
+      if (safeSlab) fallbackQuery = fallbackQuery.eq("slab_address", safeSlab);
       const fallback = await fallbackQuery;
       data = fallback.data;
       error = fallback.error;
@@ -156,16 +151,9 @@ export async function GET(
     }));
 
     return NextResponse.json(
-      {
-        trades,
-        total: count ?? 0,
-        limit,
-        offset,
-      },
+      { trades, total: count ?? 0, limit, offset },
       {
         headers: {
-          // Allow CDN/edge to cache per-wallet responses for 10s,
-          // reducing repeat DB hits from the same request (fixes #700).
           "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
           "X-RateLimit-Limit": String(RATE_LIMIT),
           "X-RateLimit-Remaining": String(rateLimiter.remaining(ip)),
@@ -174,15 +162,18 @@ export async function GET(
       },
     );
   } catch (err) {
-    console.error("[trader-trades] error:", err);
+    // Supabase unavailable — return empty list, never 500
+    console.warn("[trader-trades] supabase unavailable:", err instanceof Error ? err.message : String(err));
     return NextResponse.json(
+      { trades: [], total: 0, limit, offset },
       {
-        error: "Failed to fetch trade history",
-        ...(process.env.NODE_ENV !== "production" && {
-          details: err instanceof Error ? err.message : String(err),
-        }),
+        headers: {
+          "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
+          "X-RateLimit-Limit": String(RATE_LIMIT),
+          "X-RateLimit-Remaining": String(rateLimiter.remaining(ip)),
+          "X-RateLimit-Window": "60s",
+        },
       },
-      { status: 500 },
     );
   }
 }

@@ -9,6 +9,7 @@ import {
   useState,
   useRef,
   useCallback,
+  useMemo,
 } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
@@ -34,6 +35,7 @@ import {
 import { isMockSlab, getMockSlabState } from "@/lib/mock-trade-data";
 import { isMockMode } from "@/lib/mock-mode";
 import { isKnownProgram } from "@/lib/programAllowlist";
+import { parseV17RiskParams } from "@/lib/v17-engine-config";
 
 export interface SlabState {
   /** The slab account address this provider is tracking */
@@ -214,9 +216,18 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
             // v17: vault is derived from vault_authority PDA; not stored directly in config.
             // Use zero PublicKey as placeholder — callers should derive via deriveVaultAuthority().
             vaultPubkey: ZERO_PK,
-            // v17: indexFeedId is in AssetOracleProfileV17.oracleLegFeeds[0] (for hybrid oracle).
-            // For admin/hyperp oracle mode, use zero PublicKey (no Pyth feed).
-            indexFeedId: assetProfile.oracleLegFeeds[0] ?? ZERO_PK,
+            // v17: use wrapperConfigV17.oracleMode to determine indexFeedId:
+            // - oracleMode=0 (admin): read from assetProfile (may have a Pyth feed).
+            // - oracleMode≠0 (hyperp, auth_mark, pyth, etc.): force indexFeedId=ZERO_PK
+            //   so detectOracleMode() returns "hyperp" and resolveMarketPriceE6() uses
+            //   lastEffectivePriceE6 = markEwmaE6, which is the keeper-pushed live mark.
+            //   The assetProfile bytes for these markets contain garbage at the oracleLegFeeds
+            //   offset (v17 layout differs from the SDK's AssetOracleProfileV17 parse); using
+            //   them directly causes detectOracleMode→"admin" and authorityPriceE6 to exceed
+            //   MAX_PRICE_E6 → resolveMarketPriceE6 returns 0n → null price.
+            indexFeedId: wrapperConfigV17.oracleMode !== 0
+              ? ZERO_PK
+              : (assetProfile.oracleLegFeeds[0] ?? ZERO_PK),
             maxStalenessSlots: wrapperConfigV17.maxStalenessSecs, // stored as secs in v17
             confFilterBps: wrapperConfigV17.confFilterBps,
             vaultAuthorityBump: 0,
@@ -257,14 +268,19 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
           };
 
           // v17 does not have the old-style engine block or accounts bitmap.
-          // engine and params stay null for v17 slabs.
+          // engine stays null. params IS available: the v17 slab embeds the
+          // engine's V16ConfigAccount (real maintenance/initial margin, fees),
+          // which we parse here so RiskParams consumers (liq price, max
+          // leverage, required margin) use the true on-chain values instead of
+          // hardcoded ?? 500n/1000n fallbacks. See lib/v17-engine-config.ts.
+          const v17Params = parseV17RiskParams(data, wrapperConfigV17.tradeFeeBps);
           setState((s) => ({
             slabAddress,
             raw: data,
             header,
             config,
             engine: null,
-            params: null,
+            params: v17Params,
             accounts: [],
             loading: false,
             error: null,
@@ -388,8 +404,16 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
 
   const refresh = useCallback(() => { fetchRef.current(); }, []);
 
+  // Memoize the context value so its identity only changes when `state` changes
+  // (i.e. when on-chain data actually changed). Without this, the inline
+  // `{ ...state, refresh }` literal minted a new object on every SlabProvider
+  // render, forcing EVERY context consumer (TradingChart, PositionsDock,
+  // OrderTicket, …) to re-render even when nothing changed — the shared floor
+  // Phase 6 traced under the per-panel re-render counts.
+  const ctxValue = useMemo(() => ({ ...state, refresh }), [state, refresh]);
+
   return (
-    <SlabContext.Provider value={{ ...state, refresh }}>
+    <SlabContext.Provider value={ctxValue}>
       {children}
     </SlabContext.Provider>
   );

@@ -118,6 +118,31 @@ export function formatUsdFromNumber(priceUsd: number | null | undefined, fallbac
 }
 
 /**
+ * Format a mark/header price with magnitude-aware precision, the way perp DEXs
+ * display the big ticker price. Avoids a fixed 6-decimal cutoff that reads as
+ * "$81.166378":
+ *   - ≥ 1000  → 2 decimals              ("$1,234.56")
+ *   - ≥ 1     → up to 4 decimals, min 2  ("$81.17")
+ *   - < 1     → ~4 significant figures    ("$0.00000401")
+ *
+ * @param priceUsd - Price already in USD units, or null/undefined
+ * @param fallback - String returned for null/non-finite/non-positive input
+ */
+export function formatMarkPrice(priceUsd: number | null | undefined, fallback = "—"): string {
+  if (priceUsd == null || !Number.isFinite(priceUsd) || priceUsd <= 0) return fallback;
+  let body: string;
+  if (priceUsd >= 1000) {
+    body = priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  } else if (priceUsd >= 1) {
+    body = priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  } else {
+    // Sub-dollar: keep significant figures so small-cap prices stay legible.
+    body = priceUsd.toLocaleString(undefined, { maximumSignificantDigits: 4 });
+  }
+  return `$${body}`;
+}
+
+/**
  * Format a liquidation price in e6 format.
  * Returns "∞" when the position is unliquidatable (liqPrice === max u64),
  * "-" when zero/null, otherwise delegates to formatUsd.

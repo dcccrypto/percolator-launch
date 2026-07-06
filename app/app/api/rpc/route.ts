@@ -410,7 +410,33 @@ function isAllowedOrigin(req: NextRequest): boolean {
     return process.env.NODE_ENV !== "production";
   }
 
-  // Accept the apex domain and its subdomains only.
+  // Dev only: allow LAN / private-network hosts so the local playground works
+  // when opened via the machine's LAN IP (e.g. a phone on the same WiFi).
+  // Production stays locked to the apex domain below.
+  if (process.env.NODE_ENV !== "production") {
+    if (
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      hostname.endsWith(".local")
+    ) {
+      return true;
+    }
+  }
+
+  // Same-origin: the browser-set Origin/Referer host matches the host actually
+  // serving this deployment. The browser always sets Origin to the real calling
+  // page, so Origin-host === serving-host is a genuine same-origin request — this
+  // makes /api/rpc work on ANY deployment domain (e.g. the devnet playground at
+  // percolator-playground.vercel.app, or a Vercel preview URL) without hardcoding
+  // each one. The no-Origin server path above still requires X-Internal-Token, so
+  // this does not reopen the anonymous-relay drain (PERC-8308).
+  const servingHost = req.headers.get("host")?.split(":")[0]?.toLowerCase();
+  if (servingHost && hostname === servingHost) {
+    return true;
+  }
+
+  // Accept the apex domain and its subdomains too.
   return hostname === "percolatorlaunch.com" || hostname.endsWith(".percolatorlaunch.com");
 }
 
