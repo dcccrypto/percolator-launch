@@ -13,6 +13,54 @@ export {
   computeRequiredMargin,
   computeMaxLeverage,
 } from "@percolatorct/sdk";
+import { computeRequiredMargin as sdkComputeRequiredMargin } from "@percolatorct/sdk";
+
+/**
+ * Convert a `computeMarkPnl()` result into collateral-equivalent raw units.
+ *
+ * `computeMarkPnl` implements the on-chain "coin-margined" formula
+ * (`diff * abs_pos / oracle` — see its own doc comment in the SDK): the
+ * bigint it returns is scaled in the same native units as `positionSize`
+ * itself, NOT already a collateral/USDC-denominated amount. For a
+ * non-trivially-priced market (e.g. a $81 SOL-PERP) that native value is
+ * off from the true collateral PnL by roughly a factor of the oracle price
+ * — e.g. a real -$4.80 loss shows up as computeMarkPnl-native "-0.0592",
+ * which is only correct once you multiply back by price.
+ *
+ * `ChartPnlBadge` already does this conversion (float `pnlTokens/10**dec *
+ * priceUsd`) to show a correct dollar figure. This is the same conversion
+ * expressed as pure BigInt math using the E6 oracle price directly (no
+ * float `priceUsd` dependency, no precision loss), so every other consumer
+ * — the positions row's PnL cell, its ROE%, its pool-cap comparison — can
+ * share one properly-scaled number instead of re-deriving (or mis-using)
+ * the raw native value.
+ */
+export function computeMarkPnlCollateral(pnlNative: bigint, oraclePriceE6: bigint): bigint {
+  if (oraclePriceE6 <= 0n) return 0n;
+  return (pnlNative * oraclePriceE6) / 1_000_000n;
+}
+
+/**
+ * Initial margin an open position "locks", computed from the position's
+ * OWN entry price and size — never a pending order's inputs. Reuses the
+ * same notional-conversion pattern OrderTicket already uses for its
+ * trading-fee receipt line (`positionSize * priceE6 / 1e6`) plus the SDK's
+ * `computeRequiredMargin` (the same `notional * initialMarginBps / 10000`
+ * basis behind every other margin/leverage figure this app shows), so a
+ * losing/winning position's ROE is measured against what actually backs
+ * it, and an order ticket can show how much of an account's capital is
+ * already tied up by an open position on this market.
+ */
+export function computePositionInitialMargin(
+  positionSize: bigint,
+  entryPriceE6: bigint,
+  initialMarginBps: bigint,
+): bigint {
+  if (positionSize === 0n || entryPriceE6 <= 0n) return 0n;
+  const absPos = positionSize < 0n ? -positionSize : positionSize;
+  const notional = (absPos * entryPriceE6) / 1_000_000n;
+  return sdkComputeRequiredMargin(notional, initialMarginBps);
+}
 
 /**
  * Estimate an effective entry price when no on-chain or client-cached entry

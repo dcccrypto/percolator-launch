@@ -45,7 +45,14 @@ import {
   formatPnl,
   formatPercent,
 } from "@/lib/format";
-import { computeMarkPnl, computeLiqPrice, computePnlPercent, estimateEntryFromPnl } from "@/lib/trading";
+import {
+  computeMarkPnl,
+  computeLiqPrice,
+  computePnlPercent,
+  estimateEntryFromPnl,
+  computeMarkPnlCollateral,
+  computePositionInitialMargin,
+} from "@/lib/trading";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { ClosePositionModal } from "./ClosePositionModal";
@@ -144,22 +151,43 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
     ? resolvedEntryPrice
     : estimateEntryFromPnl(account.positionSize, account.pnl, currentPriceE6);
   const maintenanceBps = params?.maintenanceMarginBps ?? 500n;
+  const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const hasValidMark = currentPriceE6 > 0n;
 
-  const pnlTokens = hasValidMark
+  // Native "coin-margined" scale (see computeMarkPnl's on-chain-formula doc
+  // comment) — NOT yet a collateral/USDC-denominated amount. Converted below
+  // via computeMarkPnlCollateral before it's shown or compared against
+  // anything collateral-scaled (capital, margin, vault balance). The stale
+  // on-chain `account.pnl` fallback (NFT-transfer path, no cached entry) is
+  // in this SAME native scale — estimateEntryFromPnl's whole premise is that
+  // computeMarkPnl(size, derivedEntry, mark) === account.pnl — so one
+  // conversion below covers both branches.
+  const pnlNative = hasValidMark
     ? (resolvedEntryPrice > 0n
         ? computeMarkPnl(account.positionSize, resolvedEntryPrice, currentPriceE6)
         : (isSentinelValue(account.pnl) ? 0n : account.pnl))
     : 0n;
-  const pnlUsdRaw = priceUsd !== null && hasValidMark ? (Number(pnlTokens) / 10 ** decimals) * priceUsd : null;
+  // Collateral-equivalent PnL — the single number this row's USDC line, USD
+  // line, ROE, and pool-cap check all derive from, so they can't disagree
+  // with each other (or with ChartPnlBadge, which reaches the same figure
+  // via an equivalent float `* priceUsd` conversion).
+  const pnlTokens = hasValidMark ? computeMarkPnlCollateral(pnlNative, currentPriceE6) : 0n;
+  // sim-USDC is $1-pegged collateral (see PLAYGROUND.md) — the collateral
+  // amount above already IS the dollar figure, just formatted differently.
+  const pnlUsdRaw = hasValidMark ? Number(pnlTokens) / 10 ** decimals : null;
   const pnlUsd = pnlUsdRaw !== null && Number.isFinite(pnlUsdRaw) ? pnlUsdRaw : null;
-  // computePnlPercent throws when pnlTokens*10000/capital overflows
-  // MAX_SAFE_INTEGER (extreme dust-capital position); fall back to 0 so an
-  // outlier position can't blank the whole panel (mirrors the slippageBoundE6
-  // guard in OrderTicket.tsx).
+  // The position's own locked initial margin (its entry notional at the
+  // market's initial-margin requirement) — NOT total account capital — is
+  // the correct ROE basis; a losing position must show a negative ROE, not
+  // a near-zero one from mixing native-scale PnL with collateral-scale
+  // capital. computePnlPercent throws when pnlTokens*10000/margin overflows
+  // MAX_SAFE_INTEGER (extreme dust-margin position); fall back to 0 so an
+  // outlier position can't blank the whole panel (mirrors the
+  // slippageBoundE6 guard in OrderTicket.tsx).
+  const positionInitialMargin = computePositionInitialMargin(account.positionSize, entryPriceE6, initialMarginBps);
   let roe = 0;
   try {
-    roe = hasValidMark ? computePnlPercent(pnlTokens, account.capital) : 0;
+    roe = hasValidMark && positionInitialMargin > 0n ? computePnlPercent(pnlTokens, positionInitialMargin) : 0;
   } catch {
     roe = 0;
   }

@@ -46,7 +46,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { AccountKind, computePreTradeLiqPrice, computeLiqPrice } from "@percolatorct/sdk";
-import { computeEstimatedEntryPrice, computeTradingFee } from "@/lib/trading";
+import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { usePrivyLogin } from "@/hooks/usePrivySafe";
@@ -55,7 +55,7 @@ import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { formatTokenAmount, formatUsdPriceE6, toE6 } from "@/lib/format";
-import { saveEntryPrice } from "@/lib/entry-price";
+import { saveEntryPrice, getEntryPrice } from "@/lib/entry-price";
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 
@@ -273,9 +273,35 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const leverageFillPct = maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100;
 
   const capital = userAccount ? userAccount.account.capital : 0n;
-  const effectiveBalance = userAccount ? capital : (walletAtaBalance ?? 0n);
+  // Margin already "locked" by this market's existing open position (if
+  // any), so balance/buying-power reflect what's actually free to size a
+  // NEW order with — not the account's full collateral, which is already
+  // backing the current position. Uses the position's OWN entry/size (same
+  // entry-price resolution PositionsDock/ChartPnlBadge already do: on-chain
+  // entry_price -> locally-cached entry from this trade's open -> the
+  // on-chain-pnl-implied entry for a Position NFT received via transfer),
+  // never the pending order's inputs, and the same
+  // notional/initialMarginBps basis this ticket already uses for
+  // maxLeverage/liq-price everywhere else.
+  const existingPositionSize = userAccount?.account.positionSize ?? 0n;
+  const rawExistingEntryPrice = userAccount?.account.entryPrice ?? 0n;
+  const cachedExistingEntryPrice = userAccount && rawExistingEntryPrice === 0n
+    ? getEntryPrice(slabAddress, userAccount.idx)
+    : 0n;
+  const existingEntryPriceE6 = rawExistingEntryPrice > 0n
+    ? rawExistingEntryPrice
+    : cachedExistingEntryPrice > 0n
+      ? cachedExistingEntryPrice
+      : userAccount
+        ? estimateEntryFromPnl(existingPositionSize, userAccount.account.pnl, livePriceE6 ?? 0n)
+        : 0n;
+  const lockedMargin = computePositionInitialMargin(existingPositionSize, existingEntryPriceE6, initialMarginBps);
+  const availableBalance = userAccount ? (capital > lockedMargin ? capital - lockedMargin : 0n) : 0n;
+  const effectiveBalance = userAccount ? availableBalance : (walletAtaBalance ?? 0n);
   // Buying power: how large a position (in collateral notional) the user could
-  // open at the current max leverage with their full available balance.
+  // open at the current max leverage with their full AVAILABLE (not total)
+  // balance — capital already locked by an open position can't back a
+  // second one too.
   const buyingPower = effectiveBalance * BigInt(Math.max(1, Math.round(maxLeverage)));
 
   useEffect(() => {
@@ -559,10 +585,21 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </label>
           {/* Both balances up top — users deposit from the wallet into the
               account and trade from the account; showing only one confused
-              people about where their funds "went". 3dp keeps the row tight. */}
-          <span className="text-[10px] text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+              people about where their funds "went". 3dp keeps the row tight.
+              "Acc Bal" is AVAILABLE capital (total minus margin already
+              locked by an open position on this market) — when a position
+              is open it shows "avail / total" so the locked portion isn't
+              hidden, just no longer double-counted as spendable. */}
+          <span
+            className="text-[10px] text-[var(--text)]"
+            style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
+            title={lockedMargin > 0n ? `${formatTokenAmount(lockedMargin, decimals, 3)} ${collateralSymbol} locked by your open position on this market` : undefined}
+          >
             <span className="text-[var(--text-secondary)]">Acc Bal </span>
-            {userAccount ? formatTokenAmount(capital, decimals, 3) : "0"}
+            {userAccount ? formatTokenAmount(availableBalance, decimals, 3) : "0"}
+            {lockedMargin > 0n && (
+              <span className="text-[var(--text-secondary)]">/{formatTokenAmount(capital, decimals, 3)}</span>
+            )}
             <span className="text-[var(--text-secondary)]"> · Wal Bal </span>
             {walletAtaBalance != null ? formatTokenAmount(walletAtaBalance, decimals, 3) : "—"}
             <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
@@ -781,7 +818,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* Account row: balance / buying power / deposit link */}
       <div className="mt-3 flex items-center justify-between border-t border-[var(--border)]/30 pt-2.5 text-[10px]">
         <div>
-          <div className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Balance</div>
+          <div className="flex items-center gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">
+            Avail Bal
+            <InfoIcon tooltip="Account balance minus margin already locked by an open position on this market." />
+          </div>
           <div className="font-mono tabular-nums text-[var(--text)]">{formatTokenAmount(effectiveBalance, decimals)} {collateralSymbol}</div>
         </div>
         <div className="text-right">
