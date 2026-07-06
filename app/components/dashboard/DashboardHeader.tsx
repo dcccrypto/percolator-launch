@@ -58,7 +58,7 @@ export function DashboardHeader() {
       {/* Right: Stats */}
       <div className="flex flex-wrap items-center gap-6">
         <div className="text-right">
-          <p className="text-[8px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+          <p className="text-[8px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
             Portfolio Value
           </p>
           <p
@@ -79,7 +79,7 @@ export function DashboardHeader() {
         <div className="h-6 w-px bg-[var(--border)]" />
 
         <div className="text-right">
-          <p className="text-[8px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+          <p className="text-[8px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
             Active Positions
           </p>
           <p

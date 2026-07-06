@@ -48,17 +48,17 @@ export function FundingRates() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
         <div className="flex items-center gap-2">
-          <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+          <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
             Funding Rates
           </p>
           <span
-            className="cursor-help text-[10px] text-[var(--text-dim)] transition-colors hover:text-[var(--text-secondary)]"
+            className="cursor-help text-[10px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
             title="Continuous funding: positive rate = longs pay shorts, negative = shorts pay longs. Shown as % per hour."
           >
             ⓘ
           </span>
         </div>
-        <span className="text-[9px] text-[var(--text-dim)]">% / hr</span>
+        <span className="text-[9px] text-[var(--text-secondary)]">% / hr</span>
       </div>
 
       {/* Content */}
@@ -72,8 +72,8 @@ export function FundingRates() {
         </div>
       ) : active.length === 0 ? (
         <div className="px-5 py-8 text-center">
-          <p className="text-[11px] text-[var(--text-muted)]">No active funding rates</p>
-          <p className="mt-1 text-[9px] text-[var(--text-dim)]">
+          <p className="text-[11px] text-[var(--text-secondary)]">No active funding rates</p>
+          <p className="mt-1 text-[9px] text-[var(--text-secondary)]">
             Rates appear once markets have open positions
           </p>
         </div>

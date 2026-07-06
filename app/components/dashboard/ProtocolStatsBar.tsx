@@ -157,13 +157,13 @@ export function ProtocolStatsBar() {
       label: "24h Volume",
       value: loading ? null : formatUsd(stats?.volume24h ?? 0),
       live: true,
-      color: (stats?.volume24h ?? 0) > 0 ? "text-[var(--long)]" : "text-[var(--text-muted)]",
+      color: (stats?.volume24h ?? 0) > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]",
     },
     {
       label: "Open Interest",
       value: loading ? null : formatUsd(stats?.openInterest ?? 0),
       live: false,
-      color: (stats?.openInterest ?? 0) > 0 ? "text-[var(--text)]" : "text-[var(--text-muted)]",
+      color: (stats?.openInterest ?? 0) > 0 ? "text-[var(--text)]" : "text-[var(--text-secondary)]",
     },
     {
       label: "Active Markets",
@@ -182,7 +182,7 @@ export function ProtocolStatsBar() {
         >
           <div className="flex items-center gap-1.5">
             {item.live && <Pulse />}
-            <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+            <span className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
               {item.label}
             </span>
           </div>
