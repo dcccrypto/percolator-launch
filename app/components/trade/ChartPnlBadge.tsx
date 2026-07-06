@@ -57,11 +57,13 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
 
   const { display, sign } = formatPnl(pnlUsd, roe);
   const colorClass =
-    sign === "positive" ? "text-green-400" : sign === "negative" ? "text-red-400" : "text-[var(--text-dim)]";
+    sign === "positive" ? "text-green-400" : sign === "negative" ? "text-red-400" : "text-[var(--text-secondary)]";
 
+  // Positioning is owned by DraggableChartBadges in TradingChart — this chip
+  // stacks under PositionSummary and drags with it as one unit.
   return (
-    <div className="absolute top-10 right-2 z-10 flex items-center gap-1.5 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 backdrop-blur-sm">
-      <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--text-dim)]">PnL</span>
+    <div className="flex items-center gap-1.5 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 backdrop-blur-sm">
+      <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--text-secondary)]">PnL</span>
       <span className={`text-[10px] font-mono ${colorClass}`}>{display}</span>
     </div>
   );
