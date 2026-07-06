@@ -7,6 +7,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { formatTokenAmount, formatUsdPriceE6, formatPnl, formatLiqPrice, shortenAddress } from "@/lib/format";
 import { AccountKind, computeMarkPnl, computeLiqPrice } from "@percolatorct/sdk";
+import { computeMarkPnlCollateral } from "@/lib/trading";
 import { LIQ_PRICE_UNLIQUIDATABLE } from "@/lib/format";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { isSentinelValue } from "@/lib/health";
@@ -69,9 +70,19 @@ export const AccountsCard: FC = () => {
       // Guard account.pnl against u64::MAX sentinel (uninitialized/flat positions
       // would otherwise display ~$1.84e19 in the leaderboard).
       const safePnl = account.pnl !== undefined && !isSentinelValue(account.pnl) ? account.pnl : 0n;
-      const computedPnl = account.positionSize !== 0n && oraclePrice > 0n && account.entryPrice > 0n
+      const hasValidMark = oraclePrice > 0n;
+      // computeMarkPnl returns the on-chain "coin-margined" native scale (see
+      // its doc comment) — NOT yet collateral/USDC-denominated. This row's PnL
+      // cell is formatted with the collateral token's decimals (same as the
+      // Capital column) and feeds the leaderboard sort, so it must be
+      // converted via computeMarkPnlCollateral first (mirrors PositionsDock /
+      // AccountRiskSidebar / ClosePositionModal's pnlNative -> pnlTokens step).
+      // The stale on-chain account.pnl fallback (no cached entry price) is in
+      // this SAME native scale, so one conversion below covers both branches.
+      const pnlNative = account.positionSize !== 0n && hasValidMark && account.entryPrice > 0n
         ? computeMarkPnl(account.positionSize, account.entryPrice, oraclePrice)
         : safePnl;
+      const computedPnl = hasValidMark ? computeMarkPnlCollateral(pnlNative, oraclePrice) : 0n;
       const marginPct = liqHealthPct;
       return { idx, kind: account.kind, owner: account.owner.toBase58(), direction, positionSize: account.positionSize ?? 0n, entryPrice: account.entryPrice ?? 0n, liqPrice, liqHealthPct, pnl: computedPnl, capital: account.capital ?? 0n, marginPct };
     });

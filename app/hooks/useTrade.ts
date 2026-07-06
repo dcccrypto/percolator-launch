@@ -140,7 +140,7 @@ async function findV17Portfolio(
 export function useTrade(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, accounts, raw, programId: slabProgramId, refresh: refreshSlab } = useSlabState();
+  const { config: mktConfig, accounts, raw, programId: slabProgramId, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
@@ -190,7 +190,13 @@ export function useTrade(slabAddress: string) {
 
         // Determine oracle mode using centralised detectOracleMode (oraclePrice.ts).
         // "pyth-pinned" = Pyth feed; "admin" or "hyperp" = use slab as oracle account.
-        const oracleMode = detectOracleMode(mktConfig);
+        // Pass wrapperConfigV17?.oracleMode (the on-chain oracle_mode byte) so v17
+        // AUTH_MARK/keeper markets (byte=3) classify as "keeper" instead of falling
+        // through to "hyperp" — SlabProvider forces indexFeedId to ZERO for both
+        // modes, so key-based detection alone can't tell them apart. Every other
+        // call site (MarketStatsCard, useOracleFreshness, markets/page,
+        // MarketBrowser) already passes this; useTrade was the one straggler.
+        const oracleMode = detectOracleMode({ ...mktConfig, oracleModeByte: wrapperConfigV17?.oracleMode });
         const useAdminOracle = oracleMode !== "pyth-pinned";
         const feedHex = Array.from(mktConfig.indexFeedId.toBytes()).map(b => b.toString(16).padStart(2, "0")).join("");
         const oracleAccount = useAdminOracle ? slabPk : derivePythPushOraclePDA(feedHex)[0];

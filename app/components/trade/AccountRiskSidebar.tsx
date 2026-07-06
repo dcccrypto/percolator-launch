@@ -246,7 +246,12 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
     if (capital === 0n) return 0;
     return Number(notionalNative) / Number(capital);
   }, [notionalNative, capital]);
-  const equity = capital + pnlTokens;
+  // BUG: was `capital + pnlTokens` — pnlTokens is native/coin-margined scale
+  // (see computeMarkPnl's doc comment), capital is collateral scale. Mixing
+  // them here produced a wrong equity (and downstream riskLeverage) for any
+  // market whose oracle price isn't ~1. Use pnlCollateral (already converted
+  // above for the ROE calc) so both operands share the same scale.
+  const equity = capital + pnlCollateral;
   const riskLeverage = useMemo(() => {
     if (equity <= 0n) return 0;
     return Number(notionalNative) / Number(equity);
@@ -406,7 +411,10 @@ export const AccountRiskSidebar: FC<{ slabAddress: string }> = ({ slabAddress })
               className="mt-0.5 font-mono text-[15px] font-bold"
               style={{ color: pnlColor, fontVariantNumeric: "tabular-nums" }}
             >
-              {hasPosition ? formatPnl(pnlTokens, decimals) : "—"} {hasPosition ? collateralSymbol : ""}
+              {/* pnlTokens is native/coin-margined scale (see computeMarkPnl's doc
+                  comment) — collateralSymbol next to it demands the converted
+                  pnlCollateral figure, not the raw native value. */}
+              {hasPosition ? formatPnl(pnlCollateral, decimals) : "—"} {hasPosition ? collateralSymbol : ""}
             </div>
             <div
               className="font-mono text-[10.5px]"

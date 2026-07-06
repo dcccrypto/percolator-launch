@@ -98,7 +98,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
   const { accounts, config: mktConfig, params } = useSlabState();
-  const { engine } = useEngineState();
+  const { engine, insuranceBalance } = useEngineState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
@@ -200,9 +200,14 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // matched order book) — a winning position's paper PnL can't exceed what
   // the vault + insurance fund can actually pay out. Display-only: does not
   // change settlement, just surfaces the same caveat GMX shows when
-  // `cappedPnl !== poolPnl`. `engine.vault`/`insuranceFund.balance` are the
-  // same fields TradeForm/OrderTicket already read for the vault-empty guard.
-  const payableCapacity = (engine?.vault ?? 0n) + (engine?.insuranceFund?.balance ?? 0n);
+  // `cappedPnl !== poolPnl`. `engine.vault` is v12-only (legacy engine block;
+  // always null on v17, and there's no v17 vault-capital field readable
+  // client-side — same limitation MarketInfoBar's BUG 21 fix documents).
+  // `insuranceBalance` is `useEngineState()`'s unified v12/v17 field
+  // (`engine.insuranceFund.balance` on v12, `parseMarketGroupV17OI` on v17),
+  // so this gate at least fires off insurance capacity on v17 instead of
+  // silently reading 0 forever (engine.insuranceFund is always null there).
+  const payableCapacity = (engine?.vault ?? 0n) + (insuranceBalance ?? 0n);
   const pnlIsCapped = hasValidMark && pnlTokens > 0n && payableCapacity > 0n && pnlTokens > payableCapacity;
 
   const liqPriceE6 = computeLiqPrice(entryPriceE6, account.capital, account.positionSize, maintenanceBps);

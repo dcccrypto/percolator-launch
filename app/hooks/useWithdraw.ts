@@ -36,7 +36,7 @@ const INLINE_ORACLE_PUSH_REMOVED_ERROR =
 export function useWithdraw(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, programId: slabProgramId, refresh: refreshSlab } = useSlabState();
+  const { config: mktConfig, wrapperConfigV17, programId: slabProgramId, refresh: refreshSlab } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
@@ -71,7 +71,7 @@ export function useWithdraw(slabAddress: string) {
 
         // Determine oracle mode using centralised detectOracleMode (oraclePrice.ts).
         // "pyth-pinned" = Pyth feed; "admin" or "hyperp" = use slab as oracle account.
-        const oracleMode = detectOracleMode(mktConfig);
+        const oracleMode = detectOracleMode({ ...mktConfig, oracleModeByte: wrapperConfigV17?.oracleMode });
         const useAdminOracle = oracleMode !== "pyth-pinned";
         const feedHex = Array.from(mktConfig.indexFeedId.toBytes()).map(b => b.toString(16).padStart(2, "0")).join("");
         const oracleAccount = useAdminOracle ? slabPk : derivePythPushOraclePDA(feedHex)[0];

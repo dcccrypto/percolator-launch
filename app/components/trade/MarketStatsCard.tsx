@@ -243,7 +243,18 @@ export const MarketStatsCard: FC = () => {
         return "—";
       })(),
     },
-    { label: "Accounts", value: sanitizeAccountCount(engine?.numUsedAccounts ?? 0, params ? Number(params.maxAccounts) : undefined).toString() },
+    {
+      label: "Accounts",
+      // engine.numUsedAccounts is v12-only (legacy fixed-size accounts array;
+      // always null on v17 — v17 portfolios are standalone accounts with no
+      // used-count field in the SDK). `?? 0` here would render a literal "0"
+      // for a v17 market that may have many open portfolios — mirrors the
+      // vaultAtoms/vaultDisplay null-vs-zero distinction above: show "—" when
+      // the field is genuinely unavailable rather than a misleading "0".
+      value: engine
+        ? sanitizeAccountCount(engine.numUsedAccounts, params ? Number(params.maxAccounts) : undefined).toString()
+        : "—",
+    },
   ];
 
   return (
