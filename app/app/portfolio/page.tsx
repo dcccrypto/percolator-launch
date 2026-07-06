@@ -94,8 +94,12 @@ export default function PortfolioPage() {
       const price = oraclePrice > 0 ? oraclePrice : 0;
       const capital = Number(pos.account.capital ?? 0n) / divisor;
       depositedUsd += capital * price;
-      const unrealized = Number(pos.unrealizedPnl) / divisor;
-      unrealizedPnlUsd += unrealized * price;
+      // pos.unrealizedPnl is already collateral-scale (usePortfolio.ts converts
+      // the SDK's native computeMarkPnl output via computeMarkPnlCollateral) —
+      // divide by decimals only, same as PositionsDock's pnlUsdRaw. Multiplying
+      // by price again here would double-apply it (unlike raw capital above,
+      // which is still coin-margined native scale and needs the price factor).
+      unrealizedPnlUsd += Number(pos.unrealizedPnl) / divisor;
     }
     return { depositedUsd, unrealizedPnlUsd, valueUsd: depositedUsd + unrealizedPnlUsd };
   };

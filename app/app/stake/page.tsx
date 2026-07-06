@@ -7,13 +7,11 @@ import { PublicKey } from "@solana/web3.js";
 import {
   deriveStakePool,
   deriveDepositPda,
-  STAKE_POOL_SIZE,
-  decodeStakePool,
 } from "@percolatorct/sdk";
+import { STAKE_POOL_SIZE_V1, decodeStakePoolV1 } from "@/hooks/useStakePool";
 import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
-import { useStakeDepositJunior } from "@/hooks/useStakeDepositJunior";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
 import { parseHumanAmount } from "@/lib/parseAmount";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
@@ -332,22 +330,19 @@ function DepositWidget({
   const [walletBalanceRaw, setWalletBalanceRaw] = useState<bigint | null>(null);
   const [balanceDecimals, setBalanceDecimals] = useState(6);
   const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
-  const [tranche, setTranche] = useState<"senior" | "junior">("senior");
 
   const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
   const amountNum = parseFloat(amount) || 0;
 
-  const seniorHook = useStakeDepositByPool({
+  // Bug #12: the Junior (first-loss) tranche selector was removed — DepositJunior
+  // (tag 16, PERC-303) belongs to the 384-byte v2 StakePool program, which hasn't
+  // been deployed to this devnet vault program (still 352-byte v1, no tag-16
+  // handler). Senior deposit is the only path the deployed program supports.
+  // See the warning atop useStakeDepositJunior.ts.
+  const { deposit, loading: depositLoading, error: depositError } = useStakeDepositByPool({
     slabAddress: pool?.slabAddress ?? "",
     collateralMint: pool?.collateralMint ?? "",
   });
-  const juniorHook = useStakeDepositJunior({
-    slabAddress: pool?.slabAddress ?? "",
-    collateralMint: pool?.collateralMint ?? "",
-  });
-
-  const { deposit, loading: depositLoading, error: depositError } =
-    tranche === "senior" ? seniorHook : juniorHook;
 
   // Sync selectedPool when pools list loads
   useEffect(() => {
@@ -414,40 +409,6 @@ function DepositWidget({
         <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// deposit</span>
       </div>
       <div className="p-4 space-y-4">
-        {/* Tranche selector */}
-        <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Tranche</label>
-          <div className="flex gap-0 border border-[var(--border)]">
-            <button
-              type="button"
-              onClick={() => { setTranche("senior"); setTxStatus(null); }}
-              className={`flex-1 py-2 text-[11px] font-medium uppercase tracking-[0.1em] transition-colors duration-150 ${
-                tranche === "senior"
-                  ? "bg-[var(--accent)]/[0.12] text-[var(--accent)] border-r border-[var(--border)]"
-                  : "bg-transparent text-[var(--text-secondary)] border-r border-[var(--border)] hover:text-[var(--text)]"
-              }`}
-            >
-              Senior
-            </button>
-            <button
-              type="button"
-              onClick={() => { setTranche("junior"); setTxStatus(null); }}
-              className={`flex-1 py-2 text-[11px] font-medium uppercase tracking-[0.1em] transition-colors duration-150 ${
-                tranche === "junior"
-                  ? "bg-[var(--warning)]/[0.12] text-[var(--warning)]"
-                  : "bg-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
-              }`}
-            >
-              Junior
-            </button>
-          </div>
-          {tranche === "junior" && (
-            <p className="mt-1.5 text-[10px] text-[var(--warning)]/80 leading-relaxed">
-              Junior earns higher fees but absorbs losses first.
-            </p>
-          )}
-        </div>
-
         {/* Pool selector */}
         <div>
           <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
@@ -732,10 +693,13 @@ export default function StakePage() {
             const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
             const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey, stakeProgramId);
 
-            // Fetch pool account to get lpMint using canonical StakePool layout
+            // Fetch pool account to get lpMint. Decode using the REAL deployed
+            // 352-byte v1 layout — NOT the SDK's decodeStakePool, which assumes
+            // a 384-byte v2 layout that was never deployed here (see
+            // STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
             const poolInfo = await connection.getAccountInfo(poolPda);
-            if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE) continue;
-            const { lpMint } = decodeStakePool(Buffer.from(poolInfo.data));
+            if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) continue;
+            const { lpMint } = decodeStakePoolV1(poolInfo.data);
 
             // Get user LP ATA balance
             const userLpAta = getAssociatedTokenAddressSync(lpMint, publicKey);

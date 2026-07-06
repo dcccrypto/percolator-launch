@@ -1,7 +1,6 @@
-import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError } from "@solana/web3.js";
+import { Connection, Transaction, TransactionInstruction, ComputeBudgetProgram, SendTransactionError, SystemProgram } from "@solana/web3.js";
 import bs58 from "bs58";
 import type { PublicKey, Signer } from "@solana/web3.js";
-import { getConfig } from "./config";
 
 /**
  * PERC-8388: Lighthouse v2 program ID — Blowfish/Phantom wallet middleware injects
@@ -179,26 +178,40 @@ export function estimateFees(
 }
 
 /**
- * Check that the user has enough SOL to cover transaction fees.
+ * Check that the user has enough SOL to cover transaction fees — and, for
+ * flows that create an on-chain account (BUG 17), the rent-exemption lamports
+ * that account's CreateAccount instruction will move out of the payer.
  * Throws an informative error if the balance is insufficient.
  */
 async function checkSufficientBalance(
   connection: Connection,
   payer: PublicKey,
   feeEstimate: FeeEstimate,
+  accountCreationLamports: number = 0,
 ): Promise<void> {
   try {
     const balance = await connection.getBalance(payer);
-    // Add 10% buffer for potential fee fluctuations
-    const requiredWithBuffer = Math.ceil(feeEstimate.total * 1.1);
+    // Add 10% buffer for potential fee fluctuations, plus the exact rent this
+    // tx will pay to create an account (0 for a plain trade — never over-charge
+    // it), plus MIN_SOL_BALANCE_LAMPORTS as extra headroom on ONLY the
+    // account-creation flows (so the wallet doesn't land back below
+    // rent-exemption immediately after paying it).
+    const requiredWithBuffer =
+      Math.ceil(feeEstimate.total * 1.1) +
+      accountCreationLamports +
+      (accountCreationLamports > 0 ? MIN_SOL_BALANCE_LAMPORTS : 0);
 
     if (balance < requiredWithBuffer) {
       const balanceSol = (balance / 1e9).toFixed(6);
       const requiredSol = (requiredWithBuffer / 1e9).toFixed(6);
+      const rentNote =
+        accountCreationLamports > 0
+          ? ` + ~${(accountCreationLamports / 1e9).toFixed(6)} SOL account rent`
+          : "";
       throw new Error(
-        `Insufficient SOL for transaction fees. ` +
+        `Insufficient SOL for transaction fees${accountCreationLamports > 0 ? " and account rent" : ""}. ` +
         `Balance: ${balanceSol} SOL, Required: ~${requiredSol} SOL ` +
-        `(base fee: ${feeEstimate.baseFee} lamports + priority fee: ${feeEstimate.priorityFee} lamports). ` +
+        `(base fee: ${feeEstimate.baseFee} lamports + priority fee: ${feeEstimate.priorityFee} lamports${rentNote}). ` +
         `Please add at least ${((requiredWithBuffer - balance) / 1e9).toFixed(6)} SOL to your wallet.`
       );
     }
@@ -207,65 +220,6 @@ async function checkSufficientBalance(
     if (e instanceof Error && e.message.includes("Insufficient SOL")) throw e;
     // Otherwise log and don't block — balance check is advisory
     console.warn("[checkSufficientBalance] Failed to check balance:", e);
-  }
-}
-
-// ============================================================================
-// Network validation
-// ============================================================================
-
-// Network detection cache — only check once per session
-let networkValidated = false;
-let lastGenesisHash: string | null = null;
-
-/**
- * Validate that the wallet's connected network matches the app's expected network.
- * Throws an error if there's a mismatch (e.g. wallet on mainnet, app on devnet).
- */
-async function validateNetwork(connection: Connection): Promise<void> {
-  if (networkValidated) return; // Already validated this session
-  
-  try {
-    const genesisHash = await connection.getGenesisHash();
-    const cfg = getConfig();
-    
-    // Known genesis hashes for Solana clusters
-    const GENESIS_HASHES = {
-      mainnet: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
-      devnet: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
-      testnet: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY",
-    };
-    
-    const expectedHash = GENESIS_HASHES[cfg.network as keyof typeof GENESIS_HASHES];
-    
-    if (expectedHash && genesisHash !== expectedHash) {
-      // Cache the detected hash to show in error message
-      lastGenesisHash = genesisHash;
-      
-      // Determine which network the wallet is actually on
-      let detectedNetwork = "unknown";
-      for (const [net, hash] of Object.entries(GENESIS_HASHES)) {
-        if (hash === genesisHash) {
-          detectedNetwork = net;
-          break;
-        }
-      }
-      
-      throw new Error(
-        `Network mismatch: App is configured for ${cfg.network.toUpperCase()} but your wallet is connected to ${detectedNetwork.toUpperCase()}. ` +
-        `Please switch your wallet to ${cfg.network.toUpperCase()} or change the app network in settings.`
-      );
-    }
-    
-    networkValidated = true;
-    lastGenesisHash = genesisHash;
-  } catch (error) {
-    // If it's our network mismatch error, rethrow it
-    if (error instanceof Error && error.message.includes("Network mismatch")) {
-      throw error;
-    }
-    // Otherwise, log but don't block (RPC might not support getGenesisHash)
-    console.warn("[validateNetwork] Failed to validate network:", error);
   }
 }
 
@@ -337,11 +291,35 @@ async function pollConfirmation(
  * which can falsely report "block height exceeded" when the tx
  * actually landed on-chain.
  */
-/**
- * Estimate the total SOL cost of a transaction (rent-exempt minimums + fees).
- * Returns the approximate lamports needed beyond what's already in the accounts.
- */
+
+/** Flat safety buffer stacked on top of exact fees/rent (BUG 17). */
 const MIN_SOL_BALANCE_LAMPORTS = 10_000_000; // 0.01 SOL safety buffer
+
+/**
+ * BUG 17: Sum the lamports moved by any SystemProgram CreateAccount instructions
+ * in this transaction. The v17 first-deposit/InitPortfolio flow (useDeposit.ts,
+ * useInitUser.ts, useCreateMarket.ts) prepends a CreateAccount instruction that
+ * transfers rent-exempt lamports (currently ~0.066 SOL for the 9347-byte v17
+ * portfolio) from the payer to the new account — lamports the fee-only
+ * pre-flight balance check below never counted, so a low-SOL wallet passed
+ * pre-flight and then failed on-chain with a raw System/SPL error.
+ *
+ * Detecting this by inspecting the instructions (rather than threading a new
+ * "createsAccount" flag through every sendTx() call site) means a plain trade
+ * — which never includes a CreateAccount instruction — is never over-charged.
+ */
+function getAccountCreationLamports(instructions: TransactionInstruction[]): number {
+  let total = 0;
+  for (const ix of instructions) {
+    if (!ix.programId.equals(SystemProgram.programId)) continue;
+    // System Program instruction layout (borsh): u32 discriminant | ...
+    // CreateAccount (discriminant 0): u32 | u64 lamports | u64 space | Pubkey owner
+    if (ix.data.length < 12) continue;
+    if (ix.data.readUInt32LE(0) !== 0) continue; // only CreateAccount is used by these flows
+    total += Number(ix.data.readBigUInt64LE(4));
+  }
+  return total;
+}
 
 export async function sendTx({
   connection,
@@ -357,9 +335,6 @@ export async function sendTx({
   if (!wallet.publicKey || (!wallet.signTransaction && !wallet.signAndSendTransaction)) {
     throw new Error("Wallet not connected");
   }
-  
-  // Validate network before sending any transactions
-  await validateNetwork(connection);
 
   // Check clock drift (non-blocking, warns in console; cached 5min)
   await checkClockDrift(connection);
@@ -381,7 +356,11 @@ export async function sendTx({
       if (attempt === 0) {
         const numSignatures = 1 + signers.length; // wallet + additional signers
         const fees = estimateFees(computeUnits, priorityFee, numSignatures);
-        await checkSufficientBalance(connection, wallet.publicKey, fees);
+        // BUG 17: only non-zero when this tx actually creates an account (e.g.
+        // init/first-deposit's InitPortfolio) — a plain trade's instructions
+        // contain no CreateAccount ix, so this is 0 and behavior is unchanged.
+        const accountCreationLamports = getAccountCreationLamports(instructions);
+        await checkSufficientBalance(connection, wallet.publicKey, fees, accountCreationLamports);
       }
       
       // PERC-8388: Strip any Lighthouse assertion instructions that may have been

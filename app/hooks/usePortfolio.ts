@@ -22,6 +22,7 @@ import {
   type Account,
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
+import { computeMarkPnlCollateral } from "@/lib/trading";
 import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
@@ -173,9 +174,15 @@ function buildV17Position(
     account.positionSize,
     maintenanceMarginBps,
   );
-  const unrealizedPnl = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
+  // computeMarkPnl (and the stale account.pnl fallback below, which is in the
+  // SAME native scale — see computeMarkPnlCollateral's doc comment) returns
+  // PnL in coin-margined native units, not collateral/USD. Convert once via
+  // computeMarkPnlCollateral before it's displayed or fed to computePnlPercent
+  // — mirrors PositionsDock's pnlNative/pnlTokens split.
+  const pnlNative = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
     ? computeMarkPnl(account.positionSize, effectiveEntryPrice, oraclePriceE6)
     : (isSentinelValue(account.pnl) ? 0n : account.pnl);
+  const unrealizedPnl = oraclePriceE6 > 0n ? computeMarkPnlCollateral(pnlNative, oraclePriceE6) : 0n;
   const pnlPercent = computePnlPercent(unrealizedPnl, account.capital);
 
   let liquidationDistancePct = 100;
@@ -430,9 +437,16 @@ export function usePortfolio(): PortfolioData {
                   // GH#1331: account.pnl can be u64::MAX sentinel for uninitialized/flat
                   // positions. Guard it with isSentinelValue to prevent billion-dollar
                   // phantom PnL on the dashboard when oracle price is unavailable.
-                  const unrealizedPnl = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
+                  // computeMarkPnl (and the account.pnl fallback below, in the
+                  // same native scale) returns coin-margined native units, not
+                  // collateral/USD — convert via computeMarkPnlCollateral
+                  // before display/computePnlPercent (mirrors PositionsDock).
+                  const pnlNative = oraclePriceE6 > 0n && effectiveEntryPrice > 0n
                     ? computeMarkPnl(account.positionSize, effectiveEntryPrice, oraclePriceE6)
                     : (isSentinelValue(account.pnl) ? 0n : account.pnl);
+                  const unrealizedPnl = oraclePriceE6 > 0n
+                    ? computeMarkPnlCollateral(pnlNative, oraclePriceE6)
+                    : 0n;
 
                   // PnL percentage
                   const pnlPercent = computePnlPercent(unrealizedPnl, account.capital);

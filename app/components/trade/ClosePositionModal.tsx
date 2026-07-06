@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import gsap from "gsap";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
-import { computeMarkPnl } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlCollateral } from "@/lib/trading";
 
 interface ClosePositionModalProps {
   positionSize: bigint;
@@ -131,11 +131,15 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
       : (absPosition * BigInt(percent)) / 100n;
     const remainingAbs = absPosition - closeAbs;
 
-    // Compute PnL on the close portion
+    // Compute PnL on the close portion. computeMarkPnl returns coin-margined
+    // native units (same scale as positionSize), NOT collateral — convert via
+    // computeMarkPnlCollateral before it's combined with any collateral-scale
+    // amount (rawReceive below) or shown labeled with the collateral symbol.
     const closePositionSigned = isLong ? closeAbs : -closeAbs;
-    const pnl = currentPrice > 0n && entryPrice > 0n
+    const pnlNative = currentPrice > 0n && entryPrice > 0n
       ? computeMarkPnl(closePositionSigned, entryPrice, currentPrice)
       : 0n;
+    const pnl = currentPrice > 0n ? computeMarkPnlCollateral(pnlNative, currentPrice) : 0n;
 
     // Proportional capital for the close portion
     const closeCapital = percent >= 100
@@ -147,12 +151,15 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
     const closeNotional = currentPrice > 0n ? (closeAbs * currentPrice) / 1_000_000n : 0n;
     const closeFee = tradingFeeBps > 0n ? (closeNotional * tradingFeeBps) / 10_000n : 0n;
 
-    // Estimated receive = proportional capital + PnL − trading fee (clamped to 0)
+    // Estimated receive = proportional capital + PnL (collateral-scale) − trading fee (clamped to 0)
     const rawReceive = closeCapital + pnl - closeFee;
     const receive = rawReceive > 0n ? rawReceive : 0n;
 
+    // Derived from the NATIVE pnl + float priceUsd (same pattern ChartPnlBadge
+    // uses) — not re-derived from the already-converted `pnl` above, which
+    // would double-apply the price.
     const pnlUsd = priceUsd !== null && currentPrice > 0n
-      ? (Number(pnl) / (10 ** decimals)) * priceUsd
+      ? (Number(pnlNative) / (10 ** decimals)) * priceUsd
       : null;
 
     return { closeAbs, remainingAbs, pnl, pnlUsd, closeFee, receive };

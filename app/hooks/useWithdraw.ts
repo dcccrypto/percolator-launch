@@ -108,17 +108,30 @@ export function useWithdraw(slabAddress: string) {
           let portfolioPk: PublicKey | null = null;
           let portfolioData: Buffer | null = null;
           try {
+            // Mutable owner (SDK PF_OWNER_OFF) is at offset 116, NOT offset 80
+            // (offset 80 is provenanceOwner — IMMUTABLE). MintPositionNft moves the
+            // mutable owner to the escrow PDA on wrap but leaves provenance pointing
+            // at the original wallet, so filtering on 80 would still match a wrapped
+            // (NFT-escrowed) portfolio here.
             const portfolioAccounts = await connection.getProgramAccounts(programId, {
               filters: [
                 { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES.toString("base64"), encoding: "base64" } },
                 { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
-                { memcmp: { offset: 80, bytes: wallet.publicKey.toBase58() } },
+                { memcmp: { offset: 116, bytes: wallet.publicKey.toBase58() } },
               ],
             });
             if (portfolioAccounts.length > 0) {
-              portfolioPk = portfolioAccounts[0].pubkey;
               const d = portfolioAccounts[0].account.data;
-              portfolioData = d instanceof Buffer ? d : Buffer.from(d);
+              const candidateData = d instanceof Buffer ? d : Buffer.from(d);
+              // Defense-in-depth: re-verify the mutable owner actually matches after
+              // fetch — memcmp filters are advisory server-side; don't trust blindly.
+              try {
+                const candidatePf = parsePortfolioV17(candidateData);
+                if (candidatePf.owner.equals(wallet.publicKey)) {
+                  portfolioPk = portfolioAccounts[0].pubkey;
+                  portfolioData = candidateData;
+                }
+              } catch { /* leave portfolioPk/portfolioData unset — falls through below */ }
             }
           } catch { /* fall through — portfolio lookup is best-effort */ }
 

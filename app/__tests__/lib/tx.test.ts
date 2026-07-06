@@ -36,7 +36,15 @@ describe("sendTx", () => {
     ).rejects.toThrow("Wallet not connected");
   });
 
-  it("validates network before sending (mismatch throws)", async () => {
+  it("BUG 24: no longer performs the dead genesis-hash network check", async () => {
+    // validateNetwork() used to compare the app's OWN configured Connection's
+    // genesis hash against its own config — a tautology (the connection is
+    // always built from that same config) that also 403'd in production
+    // because getGenesisHash isn't in the RPC proxy's method allowlist (see
+    // app/api/rpc/route.ts ALLOWED_RPC_METHODS). It could never actually catch
+    // "wallet on a different network than the app" and was removed as dead
+    // weight in the sendTx hot path. Assert sendTx no longer calls
+    // getGenesisHash and never throws "Network mismatch".
     vi.resetModules();
     vi.mock("@/lib/config", () => ({
       getConfig: () => ({ network: "devnet", rpcUrl: "https://api.devnet.solana.com" }),
@@ -44,18 +52,27 @@ describe("sendTx", () => {
     const { sendTx: freshSendTx } = await import("@/lib/tx");
 
     const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+    const getGenesisHash = vi.fn().mockResolvedValue(MAINNET_GENESIS);
     const conn = {
       rpcEndpoint: "https://api.devnet.solana.com",
-      getGenesisHash: vi.fn().mockResolvedValue(MAINNET_GENESIS),
+      getGenesisHash,
     } as any;
     const wallet = {
       publicKey: Keypair.generate().publicKey,
       signTransaction: vi.fn(),
     };
 
-    await expect(
-      freshSendTx({ connection: conn, wallet, instructions: [] })
-    ).rejects.toThrow("Network mismatch");
+    let caught: unknown;
+    try {
+      await freshSendTx({ connection: conn, wallet, instructions: [] });
+    } catch (e) {
+      caught = e;
+    }
+    // It may still reject for unrelated reasons (the wallet/connection mocks
+    // here aren't a full sendTx harness) — the point is it's never
+    // "Network mismatch", and getGenesisHash is never even called.
+    expect((caught as Error | undefined)?.message).not.toContain("Network mismatch");
+    expect(getGenesisHash).not.toHaveBeenCalled();
   });
 
   it("exports SendTxParams type with expected shape", () => {

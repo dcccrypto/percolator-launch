@@ -24,6 +24,8 @@ import {
   parseAssetOracleProfileV17,
   V17_HEADER_LEN,
   V17_WRAPPER_CONFIG_LEN,
+  V17_MARKET_GROUP_OFF,
+  V17_MARKET_GROUP_LEN,
   type SlabHeader,
   type MarketConfig,
   type EngineState,
@@ -58,7 +60,10 @@ export interface SlabState {
   wrapperConfigV17: WrapperConfigV17 | null;
   /**
    * v17 only: parsed AssetOracleProfileV17 for asset index 0.
-   * Offset = V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN = 448.
+   * Offset = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN = 448 + 758 = 1206.
+   * (V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN = 448 is only the start of the
+   * MarketGroupV16HeaderAccount region, NOT an asset profile — see the parse
+   * path below for the full layout.)
    * Null for v12.x (legacy) slabs.
    * Contains insurance_authority, insurance_operator, backing_bucket_authority,
    * oracle_authority (per-asset), and asset_admin.
@@ -180,9 +185,11 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       try {
         // ── v17 parse path ──────────────────────────────────────────────────
         // v17 market group accounts use a completely different layout:
-        //   bytes  0-15:  v17 header (magic[8] + version[2] + kind[1] + pad[1] + reserved[4])
-        //   bytes 16-447: WrapperConfigV16 (432 bytes)
-        //   bytes 448+:   AssetOracleProfileV16 (400 bytes each, one per asset)
+        //   bytes   0-15:    v17 header (magic[8] + version[2] + kind[1] + pad[1] + reserved[4])
+        //   bytes  16-447:   WrapperConfigV16 (432 bytes)
+        //   bytes 448-1205:  MarketGroupV16HeaderAccount (758 bytes) — NOT an asset profile
+        //   bytes 1206+:     per-asset slots (1797 bytes each), starting with
+        //                    AssetOracleProfileV16 (400 bytes) for asset index 0.
         //
         // v17 slabs use a different magic (PERCV16\0 vs PERCOLAT) — parseHeader() THROWS on v17 data.
         // parseConfig(), parseEngine(), and parseParams() are v12.x functions that read from
@@ -203,8 +210,12 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
             nonce: 0n,
             lastThrUpdateSlot: 0n,
           };
-          // AssetOracleProfileV17 for asset index 0 starts at V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN.
-          const assetProfileOffset = V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN; // = 16 + 432 = 448
+          // AssetOracleProfileV17 for asset index 0 starts AFTER the MarketGroupV16HeaderAccount,
+          // i.e. V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN = 448 + 758 = 1206 — NOT at
+          // V17_HEADER_LEN + V17_WRAPPER_CONFIG_LEN (448), which is only the start of the
+          // market-group header region (bug: was parsing the header as an asset profile,
+          // producing garbage oracleAuthority/authorityPriceE6/authorityTimestamp).
+          const assetProfileOffset = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN; // = 448 + 758 = 1206
           const assetProfile = parseAssetOracleProfileV17(data, assetProfileOffset);
 
           // Build a MarketConfig shim from v17 wrapper config for backward compat.
@@ -368,8 +379,13 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
         }
       } catch (e) {
         console.error("[SlabProvider] RPC poll error:", e);
-        // Set error on first load so page doesn't show loading forever
-        setState((s) => s.engine ? s : { ...s, loading: false, error: `RPC error: ${e instanceof Error ? e.message : "connection failed"}` });
+        // Set error on first load so page doesn't show loading forever, but keep already-loaded
+        // data on a transient background poll error (e.g. RPC 429) instead of blanking the
+        // terminal. `engine` is ALWAYS null on v17 slabs (see the v17 parse path above), so
+        // guarding on it was a no-op there and a single background 429 would wipe good v17
+        // state with a full-screen error. `config` is the version-agnostic "loaded" signal
+        // (set for both v12 and v17) — same guard as `hasNoPriceData` in trade/[slab]/page.tsx.
+        setState((s) => s.config ? s : { ...s, loading: false, error: `RPC error: ${e instanceof Error ? e.message : "connection failed"}` });
       }
     }
 

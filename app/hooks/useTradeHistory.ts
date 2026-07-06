@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { TraderTradeEntry } from "@/app/api/trader/[wallet]/trades/route";
 
 export interface UseTradeHistoryOptions {
@@ -34,9 +34,17 @@ export function useTradeHistory({
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
 
+  // Monotonically-increasing request id. Bumped on every fetchPage call and on
+  // every wallet/slabFilter change (effect cleanup), so a response that resolves
+  // after the wallet has since switched is recognized as stale and its setState
+  // calls are skipped — otherwise a delayed response for wallet A could land
+  // after wallet B's request and overwrite B's history with A's trades.
+  const requestIdRef = useRef(0);
+
   const fetchPage = useCallback(
     async (currentOffset: number, append: boolean) => {
       if (!wallet) return;
+      const requestId = ++requestIdRef.current;
       setLoading(true);
       setError(null);
 
@@ -54,15 +62,18 @@ export function useTradeHistory({
         }
         const data = await res.json();
 
+        if (requestId !== requestIdRef.current) return; // stale — a newer request superseded this one
+
         setTotal(data.total ?? 0);
         setTrades((prev) =>
           append ? [...prev, ...(data.trades ?? [])] : (data.trades ?? []),
         );
         setOffset(currentOffset);
       } catch (err) {
+        if (requestId !== requestIdRef.current) return; // stale — ignore error from a superseded request
         setError(err instanceof Error ? err.message : "Failed to load history");
       } finally {
-        setLoading(false);
+        if (requestId === requestIdRef.current) setLoading(false);
       }
     },
     [wallet, limit, slabFilter],
@@ -76,6 +87,11 @@ export function useTradeHistory({
     if (wallet) {
       fetchPage(0, false);
     }
+    return () => {
+      // Invalidate any request still in flight for the previous wallet/slabFilter
+      // (including on unmount) so its response can no longer commit state.
+      requestIdRef.current++;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet, slabFilter]);
 

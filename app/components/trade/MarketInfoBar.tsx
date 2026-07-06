@@ -105,7 +105,7 @@ function MarkPrice({ priceUsd, priceE6 }: { priceUsd: number | null; priceE6: bi
 export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, logoUrl, mintAddress }) => {
   const { priceUsd, priceE6, change24h, high24h, low24h } = useLivePrice();
   const { market } = useMarketInfo(slabAddress);
-  const { fundingRate, engine, totalOI } = useEngineState();
+  const { fundingRate, engine, totalOI, insuranceBalance, hasData: engineHasData } = useEngineState();
   const { level: oracleLevel } = useOracleFreshness();
 
   const change24hDisplay = change24h ?? 0;
@@ -118,8 +118,20 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   // oracleDown = unavailable (never cranked) or stale — oracleReady && unavailable is
   // always false (they're mutually exclusive), so check level directly.
   const oracleDown = oracleLevel === "unavailable" || oracleLevel === "stale";
-  // vaultEmpty = engine loaded but vault is 0
-  const vaultEmpty = engine !== null && (engine.vault ?? 0n) === 0n;
+  // vaultEmpty = engine loaded but vault is 0.
+  // BUG 21 fix: `engine` is always null on v17 (legacy block; see useEngineState /
+  // SlabProvider), so this check was dead there — a drained-vault v17 market always
+  // badged green "LIVE". v17 has no vault-capital field in the parsed slab state at
+  // all, so fall back to the group-level insurance reserve + total OI (both
+  // v17-available via parseMarketGroupV17OI, exposed as
+  // useEngineState().insuranceBalance/totalOI) as a conservative no-liquidity
+  // signal: only flag "no liquidity" once real v17 data has loaded and both read
+  // zero — a stale/loading read must not falsely show "LIVE" either.
+  const vaultEmpty = engine !== null
+    ? (engine.vault ?? 0n) === 0n
+    : engineHasData && insuranceBalance != null && totalOI != null
+      ? insuranceBalance === 0n && totalOI === 0n
+      : false;
 
   const volume = market?.volume_24h as number | null | undefined;
 
@@ -131,7 +143,14 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   const rawOiAtoms = market?.total_open_interest as number | null | undefined;
   const decimals = (market?.decimals as number | null | undefined) ?? 6;
   const oi: number | null = (() => {
-    if (totalOI != null) return Number(totalOI) / 1_000_000;
+    // BUG 13 fix: this branch omitted `* priceUsd`, rendering raw base-token
+    // quantity as if it were USD (e.g. "100 SOL OI" showed as "$100"). Mirror the
+    // fallback branch below: scale to a token count, then convert to USD via the
+    // live price when available.
+    if (totalOI != null) {
+      const tokenAmount = Number(totalOI) / 1_000_000;
+      return priceUsd != null && priceUsd > 0 ? tokenAmount * priceUsd : tokenAmount;
+    }
     if (rawOiAtoms == null) return null;
     const tokenAmount = rawOiAtoms / Math.pow(10, decimals);
     if (priceUsd != null && priceUsd > 0) return tokenAmount * priceUsd;

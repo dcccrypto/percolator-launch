@@ -187,7 +187,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const connected = walletConnected || mockMode;
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccountIdle(slabAddress) : null);
   const { trade, loading, error } = useTrade(slabAddress);
-  const { engine, params } = useEngineState();
+  const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
   const { accounts, config: mktConfig, header, refresh: refreshSlab } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Non-reactive — see file-header comment. NOT `useLivePrice()`.
@@ -208,7 +208,21 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const insuranceBalance = engine?.insuranceFund?.balance ?? 0n;
   const riskGateActive = riskThreshold > 0n && vaultBalance <= riskThreshold;
   const isHyperp = mktConfig?.oracleAuthority?.toBase58() === "11111111111111111111111111111111";
-  const vaultEmpty = engine !== null && vaultBalance === 0n && insuranceBalance === 0n && !isHyperp && !mockMode;
+  // BUG 21 fix: `engine` is always null on v17 (legacy block; see useEngineState /
+  // SlabProvider), so an `engine !== null` gate here was dead — a drained-vault v17
+  // market never tripped the "No vault liquidity" block. v17 has no vault-capital
+  // field in the parsed slab state at all, so fall back to the group-level insurance
+  // reserve + total OI (both v17-available via parseMarketGroupV17OI, exposed as
+  // useEngineState().insuranceBalance/totalOI): if the market has ever carried an
+  // insurance reserve OR currently has open interest, liquidity clearly exists. Only
+  // flag "no liquidity" once real v17 data has loaded and both read zero — a
+  // stale/loading read must not falsely block trading, but also must not keep
+  // showing a fake-green "tradable" state forever.
+  const vaultEmpty = engine !== null
+    ? vaultBalance === 0n && insuranceBalance === 0n && !isHyperp && !mockMode
+    : engineHasData && liveInsuranceBalance != null && liveTotalOI != null
+      ? liveInsuranceBalance === 0n && liveTotalOI === 0n && !isHyperp && !mockMode
+      : false;
 
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
   const [limitPriceInput, setLimitPriceInput] = useState("");
@@ -324,7 +338,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       }
     })();
     return () => { cancelled = true; };
-  }, [publicKey, mktConfig?.collateralMint, connection, mockMode]);
+    // BUG 10 fix: `capital` and `showInlineDeposit` are lastSig-style refresh
+    // triggers (mirrors DepositWithdrawCard's own `lastSig` dependency on its
+    // twin wallet-balance effect, DepositWithdrawCard.tsx:69) — without them this
+    // only ran once at mount, so "Wal Bal" (and the `hasWalletTokens` onboarding
+    // CTA derived from it below) froze at the mount-time value forever. `capital`
+    // changes on-chain whenever this account's deposit/withdraw completes.
+    // `showInlineDeposit` toggling closed is this component's only available
+    // signal for the inline DepositWithdrawCard's own deposit/withdraw/faucet-mint
+    // (its tx signature isn't exposed to this component) — re-fetching on that
+    // transition unfreezes the value instead of requiring a full page remount.
+  }, [publicKey, mktConfig?.collateralMint, connection, mockMode, capital, showInlineDeposit]);
 
   // Reset form state on market switch (mirrors TradeForm's bug #1a12dab5 fix).
   useEffect(() => {
@@ -423,8 +447,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const beforeLiqPrice = userAccount && userAccount.account.positionSize !== 0n && userAccount.account.entryPrice > 0n
     ? computeLiqPrice(userAccount.account.entryPrice, userAccount.account.capital, userAccount.account.positionSize, maintenanceMarginBps)
     : 0n;
+  // BUG 9 fix: opening a position RESERVES margin from existing capital — it is
+  // not a deposit — so this must show capital -> capital MINUS the reserved
+  // margin (what's left available), never capital + marginNative, which
+  // fabricated a higher post-trade balance (e.g. "100 -> 120 USDC").
   const beforeMargin = capital;
-  const afterMargin = capital + marginNative;
+  const afterMargin = beforeMargin > marginNative ? beforeMargin - marginNative : 0n;
   // Slippage: distance between the mark and the worst acceptable fill
   // (same computeLimitPriceE6 useTrade itself uses to derive the on-chain
   // limit when the caller doesn't supply one explicitly).
@@ -717,6 +745,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             label="Margin req."
             before={`${formatTokenAmount(beforeMargin, decimals)} ${collateralSymbol}`}
             after={`${formatTokenAmount(afterMargin, decimals)} ${collateralSymbol}`}
+            tooltip="Margin reserved from your account balance to back this position — not a deposit, so your balance after opening is lower, not higher."
           />
         </div>
       )}

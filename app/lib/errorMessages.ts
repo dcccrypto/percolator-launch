@@ -64,7 +64,11 @@ const ERROR_CODE_MAP: Record<number, string> = {
   18: "Invalid position leg.",
   19: "Market data is stale - a fresh price/crank is needed. Try again in a moment.",
   20: "Counterparty (backing) state is stale - crank the market, then retry.",
-  21: "This market is temporarily locked while it recovers/cranks. Try again shortly, or trade another market.",
+  // BUG 16: code 21 (loss_stale_active) only blocks risk-increasing trades on a
+  // stale asset row and self-clears via the ~20s keeper Refresh crank (closes
+  // always work) - it is not a market-wide lock, so don't tell the user to go
+  // trade elsewhere. See TRANSIENT_CODES below - this is now auto-retried.
+  21: "Price refreshing - retry in a few seconds.",
   22: "Crank made no progress - the market may need attention. Try again shortly.",
   23: "This market is in recovery mode and must be cranked before trading resumes.",
   24: "Engine counter overflow.",
@@ -140,6 +144,27 @@ function isNftProgramError(msg: string): boolean {
   return false;
 }
 
+/**
+ * BUG 15: SPL Token / Token-2022 program ids. Custom(1) is ambiguous between
+ * percolator-prog's PercolatorError::InvalidVersion and SPL Token's
+ * InsufficientFunds (e.g. depositing more sim-USDC than the wallet holds, via
+ * CPI from DepositCollateral). Same disambiguate-by-originating-program-id
+ * pattern as isNftProgramError above - hardcoded here (not imported) for the
+ * same reason NFT_PROGRAM_ID is: this module is a leaf that must stay free of
+ * the (client-only) PublicKey wrapper so it doesn't drag @/lib/tx into hook
+ * tests that mock it.
+ */
+const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+function isSplTokenProgramError(msg: string): boolean {
+  return msg.includes(SPL_TOKEN_PROGRAM_ID) || msg.includes(TOKEN_2022_PROGRAM_ID);
+}
+
+const SPL_TOKEN_INSUFFICIENT_FUNDS_MESSAGE =
+  "Insufficient balance - you're trying to deposit more than your wallet holds. " +
+  "Reduce the amount or add more funds and try again.";
+
 function extractErrorCode(msg: string): number | null {
   const m = msg.match(/(?:custom program error|Error Code)[:\s]+0x([0-9a-fA-F]+)/i);
   if (m) return parseInt(m[1], 16);
@@ -165,7 +190,10 @@ function extractCustomIndex(msg: string): number | null {
 
 // Transient = worth auto-retrying (a fresh price push / crank clears it).
 // v17 codes: EngineStale=19, EngineBStale=20, OracleInvalid=26, OracleStale=27.
-const TRANSIENT_CODES = new Set([19, 20, 26, 27]);
+// BUG 16: LossStaleActive=21 self-clears via the ~20s keeper Refresh crank
+// (it only blocks risk-increasing trades on a stale asset row) - added here so
+// withTransientRetry auto-retries instead of hard-failing the trade.
+const TRANSIENT_CODES = new Set([19, 20, 21, 26, 27]);
 
 export function isTransientError(msg: string): boolean {
   const code = extractErrorCode(msg);
@@ -222,6 +250,13 @@ export function humanizeError(rawMsg: string): string {
     if (isNftProgramError(rawMsg) && NFT_ERROR_CODE_MAP[code]) {
       return NFT_ERROR_CODE_MAP[code];
     }
+    // BUG 15: Custom(1) from the SPL Token program (InsufficientFunds, e.g. a
+    // deposit CPI where the user's ATA doesn't hold enough) must not be read as
+    // percolator-prog's Custom(1)=InvalidVersion. Route by originating program
+    // id before falling into the generic ERROR_CODE_MAP lookup below.
+    if (code === 1 && !isNftProgramError(rawMsg) && isSplTokenProgramError(rawMsg)) {
+      return SPL_TOKEN_INSUFFICIENT_FUNDS_MESSAGE;
+    }
     if (ERROR_CODE_MAP[code]) {
       return ERROR_CODE_MAP[code];
     }
@@ -272,19 +307,37 @@ export function humanizeError(rawMsg: string): string {
   return `Transaction failed: ${trimmed}`;
 }
 
+// BUG 16: code 21 (loss_stale_active) only clears once the keeper's Refresh
+// crank runs (~20s cadence) - a materially longer cadence than the "retry a
+// dropped RPC call" jitter withTransientRetry's default budget was sized for.
+// Callers (e.g. useClosePosition.ts) pass their own short maxRetries/delayMs,
+// so withTransientRetry widens its OWN budget once it recognizes one of these
+// codes, rather than requiring every call site to know the keeper's cadence.
+const LONG_WINDOW_RETRY: Record<number, { maxRetries: number; delayMs: number }> = {
+  21: { maxRetries: 8, delayMs: 4000 }, // up to ~32s total - spans one ~20-30s keeper Refresh
+};
+
 export async function withTransientRetry<T>(
   fn: () => Promise<T>,
   { maxRetries = 2, delayMs = 3000 }: { maxRetries?: number; delayMs?: number } = {},
 ): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  let effectiveMaxRetries = maxRetries;
+  let effectiveDelayMs = delayMs;
+  for (let attempt = 0; attempt <= effectiveMaxRetries; attempt++) {
     try {
       return await fn();
     } catch (e) {
       lastError = e;
       const msg = e instanceof Error ? e.message : String(e);
-      if (attempt < maxRetries && isTransientError(msg)) {
-        await new Promise((r) => setTimeout(r, delayMs));
+      if (attempt < effectiveMaxRetries && isTransientError(msg)) {
+        const code = extractErrorCode(msg);
+        const longWindow = code !== null ? LONG_WINDOW_RETRY[code] : undefined;
+        if (longWindow) {
+          effectiveMaxRetries = Math.max(effectiveMaxRetries, longWindow.maxRetries);
+          effectiveDelayMs = Math.max(effectiveDelayMs, longWindow.delayMs);
+        }
+        await new Promise((r) => setTimeout(r, effectiveDelayMs));
         continue;
       }
       throw e;

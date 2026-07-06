@@ -143,6 +143,11 @@ export function useMintPositionNft(slabAddress: string) {
       // 6. Send raw transaction ourselves
       const { ComputeBudgetProgram } = await import("@solana/web3.js");
       const tx = new (await import("@solana/web3.js")).Transaction();
+      // MintPositionNft CPIs into the v17 wrapper, which installs a custom 128KB
+      // heap allocator and aborts ("Access violation in heap section") on its first
+      // heap allocation unless the tx requests the full heap frame. Must be the
+      // FIRST instruction. (mirrors useTransferPositionNft.ts / lib/tx.ts, issue #176)
+      tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }));
       tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }));
       tx.add(ix);

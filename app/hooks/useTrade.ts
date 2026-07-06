@@ -46,9 +46,20 @@ const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x4
 // Provenance header offsets (HEADER_LEN=16, then provenance at +0)
 // market_group_id is at HEADER_LEN(16) + provenance.market_group_id(0) = 16
 // portfolio_account_id is at HEADER_LEN(16) + 32 = 48
-// owner is at HEADER_LEN(16) + 64 = 80
+// provenanceOwner (IMMUTABLE — set at portfolio creation, never changes) is at
+// HEADER_LEN(16) + 64 = 80. Used below ONLY for readPortfolioOwner (LP owner for
+// matcherDelegate derivation) — that must keep reading the same offset SetMatcherConfig
+// used, regardless of any later NFT-wrap on the LP's own portfolio.
 const PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF = 16; // offset 16 in raw account data
 const PORTFOLIO_PROVENANCE_OWNER_OFF = 80;        // offset 80 in raw account data
+
+// Mutable owner (SDK PF_OWNER_OFF) — HEADER_LEN(16) + provenance(100) = offset 116.
+// MintPositionNft moves this to the escrow PDA on wrap, leaving provenanceOwner@80
+// unchanged. findV17Portfolio (the TAKER's own-portfolio discovery, below) MUST
+// filter on this offset, not provenanceOwner@80, or a wrapped position still
+// matches and gets treated as the taker's tradeable portfolio (portfolio-discovery
+// bug — a wrapped position rendered as a normal row with a Close that fails on-chain).
+const PORTFOLIO_OWNER_OFF = 116;
 
 // PortfolioMatcherConfigV16 is appended after the portfolio body.
 // PORTFOLIO_ENGINE_ACCOUNT_LEN = HEADER_LEN(16) + PORTFOLIO_STATE_LEN
@@ -111,10 +122,15 @@ async function findV17Portfolio(
       filters: [
         { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
         { memcmp: { offset: PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF, bytes: marketPk.toBase58() } },
-        { memcmp: { offset: PORTFOLIO_PROVENANCE_OWNER_OFF, bytes: ownerPk.toBase58() } },
+        { memcmp: { offset: PORTFOLIO_OWNER_OFF, bytes: ownerPk.toBase58() } },
       ],
     });
     if (accounts.length === 0) return null;
+    // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
+    // memcmp filters are advisory server-side; don't trust them blindly.
+    const data = Buffer.from(accounts[0].account.data);
+    const portfolio = parsePortfolioV17(data);
+    if (!portfolio.owner.equals(ownerPk)) return null;
     return accounts[0].pubkey;
   } catch {
     return null;

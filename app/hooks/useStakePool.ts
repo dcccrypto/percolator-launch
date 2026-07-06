@@ -4,11 +4,9 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
-  STAKE_POOL_SIZE,
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,
-  decodeStakePool,
 } from '@percolatorct/sdk';
 import { getConfig } from '@/lib/config';
 import { useSlabState } from '@/components/providers/SlabProvider';
@@ -116,6 +114,55 @@ function parseDepositPdaAccount(data: Buffer) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// StakePool account layout (v1, 352 bytes — the REAL deployed layout)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Real deployed size of a StakePool account on the v17 devnet vault program
+ * (51CeUNpb…, 17 live pools). The SDK's `STAKE_POOL_SIZE` (384) and
+ * `decodeStakePool` describe a newer v2 layout that adds pendingAdmin/HWM/
+ * tranche fields — it has never been deployed here. Guarding on 384 (or
+ * calling the SDK decoder) makes every real 352-byte pool look
+ * "uninitialized": `384 < 352` is never true, and the SDK decoder reads past
+ * byte 352 (out of bounds) for fields that simply don't exist on-chain.
+ *
+ * Field offsets below match `parseStakePool` in
+ * `app/app/api/stake/pools/route.ts` (the route that already reads pools
+ * correctly) — they also happen to coincide with the SDK's v2 offsets for
+ * every field up through `pool_mode` @ 280; the two layouts only diverge
+ * after that point, where the v2 struct keeps growing to 384 bytes.
+ */
+export const STAKE_POOL_SIZE_V1 = 352;
+
+export interface StakePoolV1 {
+  isInitialized: boolean;
+  lpMint: PublicKey;
+  vault: PublicKey;
+  cooldownSlots: bigint;
+  depositCap: bigint;
+}
+
+/**
+ * Decode the fields the frontend needs from a raw StakePool account using the
+ * real 352-byte v1 layout. Do NOT use the SDK's `decodeStakePool` here — see
+ * the `STAKE_POOL_SIZE_V1` comment above for why it's unsafe against a real
+ * account.
+ */
+export function decodeStakePoolV1(data: Uint8Array): StakePoolV1 {
+  if (data.length < STAKE_POOL_SIZE_V1) {
+    throw new Error(`StakePool data too short: ${data.length} < ${STAKE_POOL_SIZE_V1}`);
+  }
+  const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  return {
+    isInitialized: bytes[0] === 1,
+    lpMint: new PublicKey(bytes.subarray(104, 136)),
+    vault: new PublicKey(bytes.subarray(136, 168)),
+    cooldownSlots: readU64LE(bytes, 184),
+    depositCap: readU64LE(bytes, 192),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Hook
 // ═══════════════════════════════════════════════════════════════
 
@@ -163,23 +210,33 @@ export function useStakePool() {
     }
   }, [slabAddress, walletPubkeyStr]);
 
+  // Bumped at the start of every refreshState() call. Lets a stale in-flight
+  // call detect that a newer call has since started (e.g. wallet connected or
+  // slab changed mid-fetch) and bail out instead of overwriting fresher state
+  // with stale data once its sequential awaits finally resolve.
+  const requestIdRef = useRef(0);
+
   const refreshState = useCallback(async () => {
     if (!pdas || !connection) return;
+    const requestId = ++requestIdRef.current;
+    const stale = () => requestId !== requestIdRef.current;
 
     try {
       // Fetch pool account
       const poolInfo = await connection.getAccountInfo(pdas.poolPda);
+      if (stale()) return;
       if (!poolInfo || poolInfo.data.length === 0) {
         setState({ ...DEFAULT_STATE, poolAddress: pdas.poolPda, vaultAuthAddress: pdas.vaultAuthPda });
         return;
       }
 
-      // Decode pool using canonical StakePool layout from SDK (352 bytes).
-      // Avoids manual byte offset arithmetic — offsets are versioned in decodeStakePool.
-      let poolData: ReturnType<typeof decodeStakePool> | null = null;
+      // Decode pool using the REAL deployed 352-byte v1 layout — NOT the SDK's
+      // decodeStakePool (384-byte v2 layout, never deployed here). See the
+      // STAKE_POOL_SIZE_V1 comment above for why the SDK decoder is unsafe here.
+      let poolData: StakePoolV1 | null = null;
       try {
-        poolData = decodeStakePool(Buffer.from(poolInfo.data));
-        if (!poolData.isInitialized) poolData = null;
+        const decoded = decodeStakePoolV1(poolInfo.data);
+        if (decoded.isInitialized) poolData = decoded;
       } catch {
         poolData = null;
       }
@@ -192,6 +249,7 @@ export function useStakePool() {
       let lpSupply = 0n;
       try {
         const mintInfo = await connection.getAccountInfo(poolData.lpMint);
+        if (stale()) return;
         if (mintInfo) {
           const mint = unpackMint(poolData.lpMint, mintInfo);
           lpSupply = mint.supply;
@@ -202,6 +260,7 @@ export function useStakePool() {
       let vaultBalance = 0n;
       try {
         const vaultInfo = await connection.getAccountInfo(poolData.vault);
+        if (stale()) return;
         if (vaultInfo) {
           const vaultAccount = unpackAccount(poolData.vault, vaultInfo);
           vaultBalance = vaultAccount.amount;
@@ -221,6 +280,7 @@ export function useStakePool() {
         try {
           const userLpAta = await getAssociatedTokenAddress(poolData.lpMint, walletPk);
           const lpAtaInfo = await connection.getAccountInfo(userLpAta);
+          if (stale()) return;
           if (lpAtaInfo) {
             const acct = unpackAccount(userLpAta, lpAtaInfo);
             userLpBalance = acct.amount;
@@ -231,6 +291,7 @@ export function useStakePool() {
         try {
           const userCollAta = await getAssociatedTokenAddress(collateralMint, walletPk);
           const collAtaInfo = await connection.getAccountInfo(userCollAta);
+          if (stale()) return;
           if (collAtaInfo) {
             const acct = unpackAccount(userCollAta, collAtaInfo);
             userCollateralBalance = acct.amount;
@@ -241,6 +302,7 @@ export function useStakePool() {
         if (pdas.depositPda) {
           try {
             const depInfo = await connection.getAccountInfo(pdas.depositPda);
+            if (stale()) return;
             if (depInfo) {
               const depData = parseDepositPdaAccount(Buffer.from(depInfo.data));
               if (depData) {
@@ -269,12 +331,14 @@ export function useStakePool() {
       if (userDepositSlot > 0n && poolData.cooldownSlots > 0n) {
         try {
           const currentSlot = BigInt(await connection.getSlot());
+          if (stale()) return;
           cooldownElapsed = currentSlot >= userDepositSlot + poolData.cooldownSlots;
         } catch {
           cooldownElapsed = false; // conservative: block withdrawal if we can't check
         }
       }
 
+      if (stale()) return;
       setState({
         poolExists: true,
         poolAddress: pdas.poolPda,
@@ -294,6 +358,7 @@ export function useStakePool() {
         cooldownElapsed,
       });
     } catch (err) {
+      if (stale()) return;
       console.error('[useStakePool] Failed to refresh:', err);
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -305,10 +370,19 @@ export function useStakePool() {
     refreshRef.current = refreshState;
   }, [refreshState]);
 
+  // Bug #22 fix: refresh immediately whenever the derived PDAs, wallet, or
+  // slab config change (wallet connect, market switch, config finishing its
+  // load) — previously this only happened on mount, so a post-mount
+  // wallet-connect left the UI showing zeroed LP/redeemable values for up to
+  // the full 10s interval period. Kept as a separate effect (rather than
+  // adding these deps to the interval effect below) so the 10s ticker itself
+  // stays stable and doesn't get torn down/rebuilt on every dependency change.
   useEffect(() => {
-    const doRefresh = () => refreshRef.current();
-    doRefresh();
-    const interval = setInterval(doRefresh, 10_000);
+    refreshRef.current();
+  }, [pdas, walletPubkeyStr, slabState.config]);
+
+  useEffect(() => {
+    const interval = setInterval(() => refreshRef.current(), 10_000);
     return () => clearInterval(interval);
   }, []);
 

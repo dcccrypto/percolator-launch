@@ -28,10 +28,14 @@ export interface UseClosePositionReturn {
 
 // ---------------------------------------------------------------------------
 // v17 portfolio magic + offset constants — mirrors useDeposit/useTrade.
+// Mutable owner (SDK PF_OWNER_OFF) is offset 116, NOT offset 80 (provenanceOwner,
+// IMMUTABLE). MintPositionNft moves the mutable owner to the escrow PDA on wrap
+// but leaves provenance pointing at the original wallet, so filtering on 80 would
+// still match a wrapped (NFT-escrowed) portfolio.
 // ---------------------------------------------------------------------------
 const V17_PORTFOLIO_MAGIC_CP = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 const V17_PF_MARKET_OFF_CP = 16;
-const V17_PF_OWNER_OFF_CP = 80;
+const V17_PF_OWNER_OFF_CP = 116;
 
 export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   const { connection } = useConnectionCompat();
@@ -101,8 +105,13 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
                 const portfolio = parsePortfolioV17(
                   data instanceof Buffer ? data : Buffer.from(data),
                 );
-                const activeLeg = portfolio.legs.find((l) => l.active);
-                freshPositionSize = activeLeg ? activeLeg.basisPosQ : 0n;
+                // Defense-in-depth: re-verify the mutable owner actually matches
+                // after fetch — memcmp filters are advisory server-side; don't
+                // trust them blindly. Otherwise fall through and use cached state.
+                if (portfolio.owner.equals(publicKey)) {
+                  const activeLeg = portfolio.legs.find((l) => l.active);
+                  freshPositionSize = activeLeg ? activeLeg.basisPosQ : 0n;
+                }
               }
             }
           } catch {

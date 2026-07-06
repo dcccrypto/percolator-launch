@@ -4,14 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
-  STAKE_POOL_SIZE,
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,
   encodeStakeDepositJunior,
   depositAccounts,
-  decodeStakePool,
 } from "@percolatorct/sdk";
+import { STAKE_POOL_SIZE_V1, decodeStakePoolV1 } from "@/hooks/useStakePool";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -33,6 +32,12 @@ export interface StakeDepositJuniorParams {
  * (tag 16, PERC-303) instead of the standard senior Deposit (tag 3).
  * The same pool account, vault, and LP mint are used — the on-chain program
  * handles the tranche accounting.
+ *
+ * ⚠ NOT currently wired into the UI (see stake/page.tsx). Tranches (tag 16,
+ * PERC-303) are part of the newer 384-byte v2 StakePool layout; the deployed
+ * devnet vault program (51CeUNpb…) still runs the 352-byte v1 program, which
+ * has no tag-16 handler — sending this instruction to it will fail on-chain.
+ * Re-enable the Junior tranche option once the v2 program is deployed here.
  *
  * Usage:
  * ```tsx
@@ -100,7 +105,7 @@ export function useStakeDepositJunior({ slabAddress, collateralMint }: StakeDepo
 
         // Fetch pool account to get lpMint and vault addresses
         const poolInfo = await connection.getAccountInfo(pool);
-        if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE) {
+        if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) {
           throw new Error("Stake pool not initialized for this market. Contact admin.");
         }
 
@@ -110,7 +115,10 @@ export function useStakeDepositJunior({ slabAddress, collateralMint }: StakeDepo
           );
         }
 
-        const { lpMint, vault } = decodeStakePool(Buffer.from(poolInfo.data));
+        // Decode pool using the REAL deployed 352-byte v1 layout — NOT the SDK's
+        // decodeStakePool, which assumes a 384-byte v2 layout that was never
+        // deployed here (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
+        const { lpMint, vault } = decodeStakePoolV1(poolInfo.data);
 
         const userCollateralAta = await getAssociatedTokenAddress(collMintPk, wallet.publicKey);
         const userLpAta = await getAssociatedTokenAddress(lpMint, wallet.publicKey);

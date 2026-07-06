@@ -1,7 +1,7 @@
 "use client";
 
 import { FC } from "react";
-import { computeMarkPnl, computePnlPercent } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent } from "@/lib/trading";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useMarketConfig } from "@/hooks/useMarketConfig";
@@ -51,7 +51,12 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
 
   const pnlTokens = computeMarkPnl(account.positionSize, resolvedEntryPrice, livePriceE6);
   const pnlUsd = (Number(pnlTokens) / 10 ** decimals) * priceUsd;
-  const roe = computePnlPercent(pnlTokens, account.capital);
+  // pnlTokens is coin-margined native scale (same units as positionSize), not
+  // collateral — convert via computeMarkPnlCollateral before it's the basis
+  // for ROE% (computePnlPercent expects a collateral-scale numerator to
+  // compare against collateral-scale account.capital).
+  const pnlCollateral = computeMarkPnlCollateral(pnlTokens, livePriceE6);
+  const roe = computePnlPercent(pnlCollateral, account.capital);
 
   if (!Number.isFinite(pnlUsd) || !Number.isFinite(roe)) return null;
 

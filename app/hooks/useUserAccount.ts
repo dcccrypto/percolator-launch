@@ -13,11 +13,15 @@ export interface UserAccountInfo {
 
 // ---------------------------------------------------------------------------
 // v17 portfolio magic + offsets — mirrors findV17Portfolio in useDeposit/useTrade.
-// market_group_id at offset 16; owner at offset 80.
+// market_group_id at offset 16; mutable owner (SDK PF_OWNER_OFF) at offset 116.
+// NOTE: offset 80 is provenanceOwner — IMMUTABLE, set at creation. MintPositionNft
+// moves the mutable owner (116) to the escrow PDA on wrap but leaves provenance (80)
+// pointing at the original wallet, so filtering on 80 would still match a wrapped
+// (NFT-escrowed) portfolio and render it as a normal tradeable position.
 // ---------------------------------------------------------------------------
 const V17_PORTFOLIO_MAGIC_UA = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 const V17_PF_MARKET_OFF_UA = 16;
-const V17_PF_OWNER_OFF_UA = 80;
+const V17_PF_OWNER_OFF_UA = 116;
 
 /**
  * Map a parsed v17 portfolio to the legacy Account shape consumed by TradeForm,
@@ -135,6 +139,12 @@ export function useUserAccount(): UserAccountInfo | null {
         }
         const data = results[0].account.data;
         const portfolio = parsePortfolioV17(data instanceof Buffer ? data : Buffer.from(data));
+        // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
+        // memcmp filters are advisory server-side; don't trust them blindly.
+        if (!portfolio.owner.equals(publicKey!)) {
+          setV17Account(null);
+          return;
+        }
         setV17Account({ idx: 0, account: portfolioV17ToAccount(portfolio) });
       } catch {
         if (!cancelled) setV17Account(null);

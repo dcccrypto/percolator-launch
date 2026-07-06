@@ -17,6 +17,7 @@ import {
   getAta,
   detectSlabLayout,
   isV17Account,
+  parsePortfolioV17,
   V17_PORTFOLIO_ACCOUNT_LEN,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
@@ -35,8 +36,12 @@ const V17_PORTFOLIO_MAGIC_INIT = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52
 
 // market_group_id at HEADER_LEN(16) + provenance.market_group_id(0) = offset 16
 const V17_PF_MARKET_OFF = 16;
-// owner at HEADER_LEN(16) + 64 = offset 80
-const V17_PF_OWNER_OFF = 80;
+// Mutable owner (SDK PF_OWNER_OFF) at HEADER_LEN(16) + provenance(100) = offset 116.
+// NOT offset 80 (provenanceOwner — IMMUTABLE, set at creation). MintPositionNft moves
+// the mutable owner to the escrow PDA on wrap but leaves provenance pointing at the
+// original wallet, so filtering on 80 would treat a wrapped portfolio as still owned
+// (blocking InitPortfolio for a wallet whose only portfolio here is wrapped).
+const V17_PF_OWNER_OFF = 116;
 
 async function findV17PortfolioForInit(
   connection: import("@solana/web3.js").Connection,
@@ -53,6 +58,11 @@ async function findV17PortfolioForInit(
       ],
     });
     if (accounts.length === 0) return null;
+    // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
+    // memcmp filters are advisory server-side; don't trust them blindly.
+    const data = accounts[0].account.data;
+    const portfolio = parsePortfolioV17(data instanceof Buffer ? data : Buffer.from(data));
+    if (!portfolio.owner.equals(ownerPk)) return null;
     return accounts[0].pubkey;
   } catch {
     return null;

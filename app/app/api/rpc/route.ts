@@ -360,6 +360,20 @@ async function processSingleRequest(
     }
 
     return data;
+  } catch (err) {
+    // BUG 14: an upstream network error (fetch rejects) or a non-JSON response body
+    // (e.g. a 429 whose body is HTML/plaintext, so response.json() throws) must not
+    // propagate out of here — this promise is one entry in a batch, and previously
+    // an uncaught rejection failed the ENTIRE batch via Promise.all (see POST below),
+    // discarding every other (successful) result with one HTTP 500. Return a
+    // JSON-RPC error object carrying this item's id instead, so the rest of the
+    // batch — and single-request callers — still get a well-formed response.
+    console.error(`[/api/rpc] processSingleRequest failed for method ${method}:`, err);
+    return {
+      jsonrpc: "2.0",
+      error: { code: -32603, message: "Upstream RPC request failed" },
+      id: req.id,
+    };
   } finally {
     inflightRequests.delete(cacheKey);
   }
@@ -534,14 +548,29 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Validate all requests, process valid ones with caching/dedup
-      const results = await Promise.all(
+      // Validate all requests, process valid ones with caching/dedup.
+      // BUG 14: use Promise.allSettled (not Promise.all) so batch independence holds
+      // even if something throws before processSingleRequest's own try/catch kicks in
+      // (e.g. validateRequest throwing on a malformed item) — one bad item must not
+      // discard the other ~19 good results with a single HTTP 500.
+      const settled = await Promise.allSettled(
         body.map(async (item: Record<string, unknown>) => {
           const error = validateRequest(item);
           if (error) return error;
           return processSingleRequest(item as unknown as JsonRpcRequest, networkOverride);
         })
       );
+
+      const results = settled.map((r, i) => {
+        if (r.status === "fulfilled") return r.value;
+        const item = body[i] as Record<string, unknown> | undefined;
+        console.error(`[/api/rpc] batch item ${i} rejected:`, r.reason);
+        return {
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Upstream RPC request failed" },
+          id: (item?.id as unknown) ?? null,
+        };
+      });
 
       return NextResponse.json(results, { status: 200 });
     }

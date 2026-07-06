@@ -339,6 +339,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           priceUsd={priceUsd}
           isLong={isLong}
           loading={closeLoading}
+          tradingFeeBps={params?.tradingFeeBps}
           oracleStale={oracleStale}
           onConfirm={handleConfirmClose}
           onCancel={() => setShowCloseModal(false)}

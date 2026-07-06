@@ -323,7 +323,7 @@ function TradePageInner({ slab }: { slab: string }) {
     );
   }
 
-  if (slabError && !engine) {
+  if (slabError && !config) {
     const isNotFound =
       slabError.includes("not found on-chain") ||
       slabError.includes("Market not found") ||

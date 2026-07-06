@@ -4,14 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
-  STAKE_POOL_SIZE,
   deriveStakePool,
   deriveStakeVaultAuth,
   deriveDepositPda,
   encodeStakeDeposit,
   depositAccounts,
-  decodeStakePool,
 } from '@percolatorct/sdk';
+import { STAKE_POOL_SIZE_V1, decodeStakePoolV1 } from '@/hooks/useStakePool';
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -100,7 +99,7 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
 
         // Fetch pool account to get lpMint and vault addresses
         const poolInfo = await connection.getAccountInfo(pool);
-        if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE) {
+        if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) {
           throw new Error('Stake pool not initialized for this market. Contact admin.');
         }
 
@@ -111,9 +110,10 @@ export function useStakeDepositByPool({ slabAddress, collateralMint }: StakeDepo
           throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
         }
 
-        // Decode pool using canonical StakePool layout from SDK (352 bytes).
-        // Avoids manual byte offset arithmetic — offsets are versioned in decodeStakePool.
-        const { lpMint, vault } = decodeStakePool(Buffer.from(poolInfo.data));
+        // Decode pool using the REAL deployed 352-byte v1 layout — NOT the SDK's
+        // decodeStakePool, which assumes a 384-byte v2 layout that was never
+        // deployed here (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
+        const { lpMint, vault } = decodeStakePoolV1(poolInfo.data);
 
         // Get or create user's collateral ATA
         const userCollateralAta = await getAssociatedTokenAddress(collMintPk, wallet.publicKey);

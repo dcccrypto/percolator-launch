@@ -55,11 +55,20 @@ async function findV17Portfolio(
         { memcmp: { offset: 0, bytes: V17_MAGIC_BYTES.toString("base64"), encoding: "base64" } },
         // marketGroupId is at HEADER_LEN(16) in the portfolio = offset 16
         { memcmp: { offset: 16, bytes: marketPk.toBase58() } },
-        // owner is at HEADER_LEN(16) + 32 + 32 = offset 80 (portfolioAccountId at 16+32, owner at 16+32+32)
-        { memcmp: { offset: 80, bytes: ownerPk.toBase58() } },
+        // Mutable owner (SDK PF_OWNER_OFF) is at offset 116, NOT offset 80
+        // (offset 80 is provenanceOwner — IMMUTABLE). MintPositionNft moves the
+        // mutable owner to the escrow PDA on wrap but leaves provenance pointing
+        // at the original wallet, so filtering on 80 would still match a wrapped
+        // (NFT-escrowed) portfolio here.
+        { memcmp: { offset: 116, bytes: ownerPk.toBase58() } },
       ],
     });
     if (accounts.length === 0) return null;
+    // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
+    // memcmp filters are advisory server-side; don't trust them blindly.
+    const data = accounts[0].account.data;
+    const portfolio = parsePortfolioV17(data instanceof Buffer ? data : Buffer.from(data));
+    if (!portfolio.owner.equals(ownerPk)) return null;
     return accounts[0].pubkey;
   } catch {
     return null;

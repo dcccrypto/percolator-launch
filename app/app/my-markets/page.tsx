@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/useToast";
 import { getConfig, explorerAccountUrl } from "@/lib/config";
 import { sanitizeAccountCount } from "@/lib/health";
 import { formatUsdPriceE6 } from "@/lib/format";
+import { sanitizePriceE6, applyInvert } from "@/lib/oraclePrice";
 import { deriveInsuranceLpMint } from "@percolatorct/sdk";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockMyMarkets } from "@/lib/mock-trade-data";
@@ -143,7 +144,13 @@ const MarketCard: FC<{
   const currentSlot = market.engine?.currentSlot ?? 0n;
   const staleness = Number(currentSlot - lastCrank);
   const healthy = staleness < Number(market.engine?.maxCrankStalenessSlots ?? 100n);
-  const oraclePrice = market.config?.authorityPriceE6 ?? 0n;
+  // v17 markets carry an empty v12 config ({}) — config.authorityPriceE6 is always
+  // absent, so every actively-priced v17 market showed "—". The live mark
+  // (configV17.markEwmaE6, keeper-updated every crank) is the same field the trade
+  // page reads as the oracle/index price; apply the same sanitize + invert as there.
+  const oraclePrice = isV17
+    ? applyInvert(sanitizePriceE6(market.configV17?.markEwmaE6 ?? 0n), market.configV17?.invert)
+    : (market.config?.authorityPriceE6 ?? 0n);
   const oracleAuthority = market.config?.oracleAuthority?.toBase58?.() ?? PublicKey.default.toBase58();
   const hasOracleAuthority = oracleAuthority !== PublicKey.default.toBase58();
   const isOracleAuthority = wallet.publicKey?.toBase58() === oracleAuthority;

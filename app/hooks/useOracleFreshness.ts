@@ -86,14 +86,19 @@ export function useOracleFreshness(): OracleFreshnessState {
   // Guard: detectOracleMode requires both PublicKey fields — skip if either is missing
   // (e.g. partial mock configs in test environments).
   const hasOracleKeys = config?.oracleAuthority != null && config?.indexFeedId != null;
+  // v17: pass the raw on-chain oracle_mode byte so byte=3 (AUTH_MARK/keeper) markets are
+  // labeled "keeper" instead of falling back to "hyperp" (SlabProvider forces
+  // indexFeedId=ZERO for all non-admin v17 modes, so key-based detection alone can't
+  // tell keeper apart from hyperp). Matches the other detectOracleMode call sites
+  // (MarketStatsCard, MarketBrowser, markets/page.tsx).
   const mode = (config && hasOracleKeys)
-    ? detectOracleMode(config)
+    ? detectOracleMode({ ...config, oracleModeByte: wrapperConfigV17?.oracleMode })
     : null;
 
   // Track price changes to detect updates
   useEffect(() => {
     if (!config || !hasOracleKeys) return;
-    const currentMode = detectOracleMode(config);
+    const currentMode = detectOracleMode({ ...config, oracleModeByte: wrapperConfigV17?.oracleMode });
 
     if (currentMode === "admin") {
       // Admin mode: authorityTimestamp is a real unix timestamp
