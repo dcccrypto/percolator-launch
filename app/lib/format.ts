@@ -108,13 +108,21 @@ export function formatUsdPriceE6(priceE6: bigint | null | undefined, fallback = 
 }
 
 /**
+ * Convert a plain decimal number (e.g. a USD price) into Percolator's on-chain
+ * E6 fixed-point bigint representation. Use this instead of inlining
+ * `BigInt(Math.round(x * 1_000_000))` in components.
+ */
+export function toE6(value: number): bigint {
+  return BigInt(Math.round(value * 1_000_000));
+}
+
+/**
  * Format a USD float while preserving Percolator's E6 price precision.
  * Use this for API/WebSocket prices that are already in USD units.
  */
 export function formatUsdFromNumber(priceUsd: number | null | undefined, fallback = "—"): string {
   if (priceUsd == null || !Number.isFinite(priceUsd)) return fallback;
-  const priceE6 = BigInt(Math.round(priceUsd * 1_000_000));
-  return formatUsdPriceE6(priceE6, fallback);
+  return formatUsdPriceE6(toE6(priceUsd), fallback);
 }
 
 /**

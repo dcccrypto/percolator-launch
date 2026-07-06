@@ -60,7 +60,7 @@ export const metadata: Metadata = {
   openGraph: {
     url: "https://percolator.trade",
     siteName: "Percolator",
-    title: "Percolator — Permissionless Perps on Solana",
+    title: "Percolator - Permissionless Perps on Solana",
     description: "Launch and trade perpetual futures for any Solana token.",
     type: "website",
     locale: "en_US",
@@ -68,7 +68,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     site: "@PercolatorTrade",
-    title: "Percolator — Permissionless Perps on Solana",
+    title: "Percolator - Permissionless Perps on Solana",
     description: "Launch and trade perpetual futures for any Solana token.",
   },
   robots: {

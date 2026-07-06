@@ -4,7 +4,7 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="relative flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center px-6 py-20">
+    <div className="relative flex min-h-[calc(100dvh-3.5rem)] flex-col items-center justify-center px-6 py-20">
       <div className="mx-auto max-w-[600px] text-center">
         {/* Label */}
         <div className="mb-4 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
@@ -46,7 +46,7 @@ export default function Home() {
         {/* Network badge */}
         <div className="mt-12 inline-flex items-center gap-2 border border-[#fbbf24]/20 bg-[#fbbf24]/[0.06] px-4 py-2 text-[11px] text-[#fbbf24]/80">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#fbbf24]/60" />
-          Connected to devnet — no real funds at risk
+          Connected to devnet - no real funds at risk
         </div>
       </div>
     </div>

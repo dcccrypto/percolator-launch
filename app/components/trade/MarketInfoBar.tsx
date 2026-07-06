@@ -44,9 +44,9 @@ function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; va
   else state = "live";
 
   const cfg: Record<HealthBadgeState, { label: string; icon: string; cls: string; pulse: boolean; tooltip: string }> = {
-    live:          { label: "LIVE",         icon: "●",  cls: "text-[var(--long)] bg-[var(--long)]/10 border-[var(--long)]/20",       pulse: false, tooltip: "Oracle healthy — market is live" },
-    "no-oracle":   { label: "NO ORACLE",    icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: true,  tooltip: "Oracle not cranked — market paused. Trades are blocked." },
-    "no-liquidity":{ label: "NO LIQUIDITY", icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "No vault liquidity — trades cannot execute until this market is funded." },
+    live:          { label: "LIVE",         icon: "●",  cls: "text-[var(--long)] bg-[var(--long)]/10 border-[var(--long)]/20",       pulse: false, tooltip: "Oracle healthy - market is live" },
+    "no-oracle":   { label: "NO ORACLE",    icon: "◉",  cls: "text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/20", pulse: true,  tooltip: "Oracle not cranked - market paused. Trades are blocked." },
+    "no-liquidity":{ label: "NO LIQUIDITY", icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "No vault liquidity - trades cannot execute until this market is funded." },
     inactive:      { label: "INACTIVE",     icon: "⚠",  cls: "text-[var(--short)] bg-[var(--short)]/10 border-[var(--short)]/20",     pulse: false, tooltip: "Oracle unavailable and no vault liquidity." },
   };
 

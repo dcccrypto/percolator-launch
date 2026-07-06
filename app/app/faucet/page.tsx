@@ -95,7 +95,7 @@ const FaucetPage: FC = () => {
       }
     } catch (err) {
       setFaucetError({
-        error: err instanceof Error ? err.message : "Network error — please retry",
+        error: err instanceof Error ? err.message : "Network error - please retry",
       });
     } finally {
       setLoading(false);
