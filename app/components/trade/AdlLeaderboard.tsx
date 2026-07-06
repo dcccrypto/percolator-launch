@@ -117,7 +117,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center gap-2">
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--text-dim)]" />
-          <span className="text-[10px] text-[var(--text-dim)]">Loading ADL rankings…</span>
+          <span className="text-[10px] text-[var(--text-secondary)]">Loading ADL rankings…</span>
         </div>
       </div>
     );
@@ -128,7 +128,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">ADL Rankings</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">ADL Rankings</span>
         </div>
         <p className="mt-1.5 text-[10px] text-[var(--short)]">{error ?? "No data"}</p>
       </div>
@@ -164,7 +164,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
       {/* ── Header ── */}
       <div className="mb-2.5 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             ADL Rankings
           </span>
           <InfoIcon tooltip="Auto-Deleverage leaderboard. Top profitable positions are candidates for forced reduction when insurance is depleted or PnL cap is exceeded." />
@@ -188,7 +188,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
       <div className="mb-2.5 rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)] p-2">
         <div className="mb-1 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-[var(--text-dim)]">
+            <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
               Insurance Utilization
             </span>
             <InfoIcon tooltip="How much of the insurance fund has been consumed. ADL triggers at ≥80%." />
@@ -223,13 +223,13 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
       {/* ── Rankings table ── */}
       {adlNeeded ? (
         rankings.length === 0 ? (
-          <p className="text-[10px] text-[var(--text-dim)]">
+          <p className="text-[10px] text-[var(--text-secondary)]">
             ADL triggered but no profitable positions to rank.
           </p>
         ) : (
           <>
             <div className="mb-1.5 flex items-center gap-1">
-              <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-[var(--text-dim)]">
+              <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
                 Position Rankings
               </span>
               <InfoIcon tooltip="Positions ranked by PnL%. Rank #1 is deleveraged first. Highlighted rows are near-trigger." />
@@ -238,11 +238,11 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
               <table className="w-full border-collapse text-[9px] font-mono">
                 <thead>
                   <tr className="border-b border-[var(--border)]/40">
-                    <th className="pb-1 text-left font-semibold uppercase tracking-[0.08em] text-[var(--text-dim)] pr-2">#</th>
-                    <th className="pb-1 text-left font-semibold uppercase tracking-[0.08em] text-[var(--text-dim)] pr-2">Slot</th>
-                    <th className="pb-1 text-right font-semibold uppercase tracking-[0.08em] text-[var(--text-dim)] pr-2">PnL%</th>
-                    <th className="pb-1 text-right font-semibold uppercase tracking-[0.08em] text-[var(--text-dim)] pr-2">Unr. PnL</th>
-                    <th className="pb-1 text-right font-semibold uppercase tracking-[0.08em] text-[var(--text-dim)]">Capital</th>
+                    <th className="pb-1 text-left font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] pr-2">#</th>
+                    <th className="pb-1 text-left font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] pr-2">Slot</th>
+                    <th className="pb-1 text-right font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] pr-2">PnL%</th>
+                    <th className="pb-1 text-right font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] pr-2">Unr. PnL</th>
+                    <th className="pb-1 text-right font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Capital</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -267,7 +267,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
                             <span className="ml-0.5 text-[var(--short)] text-[8px]">⚠</span>
                           )}
                         </td>
-                        <td className="py-0.5 pr-2 text-[var(--text-dim)]">{pos.idx}</td>
+                        <td className="py-0.5 pr-2 text-[var(--text-secondary)]">{pos.idx}</td>
                         <td className="py-0.5 pr-2 text-right font-bold text-[var(--long)]">
                           {fmtPct(pos.pnlPctMillionths)}
                         </td>
@@ -283,7 +283,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
                 </tbody>
               </table>
               {rankings.length > 20 && (
-                <p className="mt-1 text-[9px] text-[var(--text-dim)] text-right">
+                <p className="mt-1 text-[9px] text-[var(--text-secondary)] text-right">
                   +{rankings.length - 20} more positions
                 </p>
               )}
@@ -292,7 +292,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
         )
       ) : (
         <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)] px-3 py-2">
-          <p className="text-[10px] text-[var(--text-dim)]">
+          <p className="text-[10px] text-[var(--text-secondary)]">
             ADL is not active. No positions are at risk of auto-deleveraging.
           </p>
         </div>
@@ -300,7 +300,7 @@ export const AdlLeaderboard: FC<Props> = ({ slabAddress }) => {
 
       {/* ── Last updated ── */}
       {lastUpdated && (
-        <p className="mt-2 text-right text-[8px] text-[var(--text-dim)]">
+        <p className="mt-2 text-right text-[8px] text-[var(--text-secondary)]">
           Updated {lastUpdated.toLocaleTimeString()}
         </p>
       )}
@@ -337,7 +337,7 @@ function TriggerBadge({
       <span
         className={[
           "text-[8px] font-semibold uppercase tracking-[0.06em] leading-tight",
-          active ? "text-[var(--short)]" : "text-[var(--text-dim)]",
+          active ? "text-[var(--short)]" : "text-[var(--text-secondary)]",
         ].join(" ")}
       >
         {label}
@@ -358,7 +358,7 @@ function StatRow({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[8px] uppercase tracking-[0.08em] text-[var(--text-dim)]">{label}</span>
+      <span className="text-[8px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{label}</span>
       <span className={`font-mono text-[10px] font-bold ${valueClass}`}>{value}</span>
     </div>
   );

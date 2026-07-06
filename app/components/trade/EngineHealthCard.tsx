@@ -159,7 +159,7 @@ export const EngineHealthCard: FC = () => {
       <div className="grid grid-cols-3 gap-px">
         {metrics.map((m) => (
           <div key={m.label} className="px-1.5 py-1 border-b border-r border-[var(--border)]/20 last:border-r-0 [&:nth-child(3n)]:border-r-0 [&:nth-last-child(-n+3)]:border-b-0">
-            <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">{m.label}</p>
+            <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">{m.label}</p>
             <p className="text-[11px] font-medium text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>{m.value}</p>
           </div>
         ))}

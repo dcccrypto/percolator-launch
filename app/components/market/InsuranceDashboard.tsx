@@ -141,7 +141,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
 
   // Calculate health status
   const healthStatus = useMemo(() => {
-    if (!insuranceData) return { color: "text-[var(--text-muted)]", dotColor: "bg-[var(--text-muted)]", label: "Unknown", borderColor: "border-[var(--border)]", bgColor: "bg-transparent" };
+    if (!insuranceData) return { color: "text-[var(--text-secondary)]", dotColor: "bg-[var(--text-muted)]", label: "Unknown", borderColor: "border-[var(--border)]", bgColor: "bg-transparent" };
 
     const ratio = insuranceData.coverageRatio ?? 0;
 
@@ -176,7 +176,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             Insurance Fund
           </span>
           <div className="h-4 w-16 animate-pulse rounded-none bg-[var(--border)]" />
@@ -189,10 +189,10 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             Insurance Fund
           </span>
-          <span className="text-[10px] text-[var(--text-dim)]">No data available</span>
+          <span className="text-[10px] text-[var(--text-secondary)]">No data available</span>
         </div>
       </div>
     );
@@ -207,7 +207,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
         {/* Header row: label + balance */}
         <div className="mb-1.5 flex items-baseline justify-between">
           <div className="flex items-center gap-1">
-            <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+            <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">
               Insurance Fund
             </span>
             <InfoIcon tooltip="Safety net that protects LPs from bankruptcy during extreme market events." />
@@ -228,7 +228,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
 
         {/* Fee Revenue row */}
         <div className="mb-1.5 flex items-baseline justify-between">
-          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Fee Revenue</span>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Fee Revenue</span>
           <div className="flex items-baseline gap-1">
             <span className="text-[11px] font-medium text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
               ${feeRevenueUsd}
@@ -247,7 +247,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
               <span className={healthStatus.color}>{healthStatus.label}</span>
             </span>
             {insuranceData.coverageRatio != null && typeof insuranceData.coverageRatio === "number" && (
-              <span className="text-[9px] text-[var(--text-dim)]">
+              <span className="text-[9px] text-[var(--text-secondary)]">
                 {insuranceData.coverageRatio.toFixed(1)}x coverage
               </span>
             )}
@@ -257,7 +257,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
         {/* 7-day mini chart */}
         <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)] px-1.5 py-1">
           <div className="mb-0.5 flex items-center justify-between">
-            <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-dim)]">7d Trend</span>
+            <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">7d Trend</span>
             {insuranceData.historicalBalance && insuranceData.historicalBalance.length > 1 && insuranceData.historicalBalance[0].balance > 0 && (
               <span className="text-[9px] text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>
                 +{((insuranceData.historicalBalance[insuranceData.historicalBalance.length - 1].balance / insuranceData.historicalBalance[0].balance - 1) * 100).toFixed(1)}%
@@ -280,7 +280,7 @@ export const InsuranceDashboard: FC<{ slabAddress: string }> = ({
               })}
             </div>
           ) : (
-            <div className="flex h-6 items-center justify-center text-[9px] text-[var(--text-dim)]">No data</div>
+            <div className="flex h-6 items-center justify-center text-[9px] text-[var(--text-secondary)]">No data</div>
           )}
         </div>
 

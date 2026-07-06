@@ -31,14 +31,14 @@ export const SystemCapitalCard: FC = () => {
   if (loading) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <span className="text-[10px] text-[var(--text-dim)]">Loading...</span>
+        <span className="text-[10px] text-[var(--text-secondary)]">Loading...</span>
       </div>
     );
   }
   if (!hasData) {
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
-        <span className="text-[10px] text-[var(--text-dim)]">No capital data for this market</span>
+        <span className="text-[10px] text-[var(--text-secondary)]">No capital data for this market</span>
       </div>
     );
   }
@@ -125,7 +125,7 @@ export const SystemCapitalCard: FC = () => {
   return (
     <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
       <div className="mb-3 flex items-center gap-1">
-        <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+        <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">
           System Capital
         </span>
         <InfoIcon tooltip="Aggregate capital metrics from the on-chain risk engine" />
@@ -135,7 +135,7 @@ export const SystemCapitalCard: FC = () => {
         {stats.map((s) => (
           <div key={s.label} className="flex flex-col">
             <div className="mb-1 flex items-center gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">{s.label}</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">{s.label}</span>
               <InfoIcon tooltip={s.tip} />
             </div>
             <span className={`text-sm font-bold font-mono ${s.color || "text-[var(--text)]"}`}>{s.value}</span>
@@ -146,20 +146,20 @@ export const SystemCapitalCard: FC = () => {
       {/* LP Exposure Section */}
       <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)] p-2">
         <div className="mb-2 flex items-center gap-1">
-          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">LP Exposure</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">LP Exposure</span>
           <InfoIcon tooltip="LP position aggregates - net exposure drives funding rates, concentration shows whale risk" />
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="flex flex-col">
-            <span className="text-[9px] text-[var(--text-dim)]">Net</span>
+            <span className="text-[9px] text-[var(--text-secondary)]">Net</span>
             <span className={`text-xs font-bold font-mono ${engine ? netLpColor : "text-[var(--text)]"}`}>{engine ? fmtCompact(netLp) : "—"}</span>
           </div>
           <div className="flex flex-col">
-            <span className="text-[9px] text-[var(--text-dim)]">Total</span>
+            <span className="text-[9px] text-[var(--text-secondary)]">Total</span>
             <span className="text-xs font-bold font-mono text-[var(--text)]">{engine ? fmtCompact(lpSum) : "—"}</span>
           </div>
           <div className="flex flex-col">
-            <span className="text-[9px] text-[var(--text-dim)]">Concentration</span>
+            <span className="text-[9px] text-[var(--text-secondary)]">Concentration</span>
             <span className={`text-xs font-bold font-mono ${engine && lpConcentration > 80 ? "text-[var(--short)]" : "text-[var(--text)]"}`}>
               {engine ? `${lpConcentration.toFixed(1)}%` : "—"}
             </span>

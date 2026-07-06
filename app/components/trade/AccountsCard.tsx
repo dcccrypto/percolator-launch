@@ -110,7 +110,7 @@ export const AccountsCard: FC = () => {
     return sorted;
   }, [tab, openPositions, idleAccounts, leaderboard, sortKey, sortDir]);
 
-  if (loading) return <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3"><p className="text-[10px] text-[var(--text-muted)]">Loading...</p></div>;
+  if (loading) return <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3"><p className="text-[10px] text-[var(--text-secondary)]">Loading...</p></div>;
 
   const tabs: { key: Tab; label: string; count: number }[] = [
     { key: "open", label: "Open", count: openPositions.length },
@@ -172,11 +172,11 @@ export const AccountsCard: FC = () => {
                 const absPos = row.positionSize < 0n ? -row.positionSize : row.positionSize;
                 return (
                   <tr key={row.idx} className="border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03]">
-                    <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-dim)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{i + 1}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{i + 1}</td>
                     <td className="whitespace-nowrap px-2 py-1.5 text-left text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{shortenAddress(row.owner)}</td>
                     {isOpenLike && (
                       <td className="whitespace-nowrap px-2 py-1.5 text-left">
-                        {row.direction === "IDLE" ? <span className="text-[var(--text-dim)]">-</span> : (
+                        {row.direction === "IDLE" ? <span className="text-[var(--text-secondary)]">-</span> : (
                           <span className={`text-[9px] font-bold ${
                             row.direction === "LONG" ? "text-[var(--long)]" : "text-[var(--short)]"
                           }`}>{row.direction}</span>
@@ -184,7 +184,7 @@ export const AccountsCard: FC = () => {
                       </td>
                     )}
                     {isOpenLike && (
-                      <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+                      <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.positionSize > 0n ? "text-[var(--long)]" : row.positionSize < 0n ? "text-[var(--short)]" : "text-[var(--text-secondary)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                         {row.positionSize !== 0n ? formatTokenAmount(absPos, decimals) : "-"}
                       </td>
                     )}
@@ -201,7 +201,7 @@ export const AccountsCard: FC = () => {
                         ) : "-"}
                       </td>
                     )}
-                    <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+                    <td className={`whitespace-nowrap px-2 py-1.5 text-right ${row.pnl > 0n ? "text-[var(--long)]" : row.pnl < 0n ? "text-[var(--short)]" : "text-[var(--text-secondary)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                       {formatPnl(row.pnl, decimals)}
                     </td>
                     <td className="whitespace-nowrap px-2 py-1.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{formatTokenAmount(row.capital, decimals)}</td>

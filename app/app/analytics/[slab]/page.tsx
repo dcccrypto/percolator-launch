@@ -31,7 +31,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80">
-      <div className="border-b border-[var(--border)]/40 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+      <div className="border-b border-[var(--border)]/40 px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">
         {title}
       </div>
       <div className="p-3">{children}</div>

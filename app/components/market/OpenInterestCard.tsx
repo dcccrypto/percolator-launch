@@ -116,7 +116,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
           shortPct: 50,
           imbalancePct: 0,
           imbalanceLabel: "Balanced",
-          imbalanceColor: "text-[var(--text-muted)]",
+          imbalanceColor: "text-[var(--text-secondary)]",
           oiUtilPct: 0,
           oiUtilColor: "var(--accent)",
         };
@@ -141,7 +141,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
         "var(--short)";                             // red — near capacity
 
       let label = "Balanced";
-      let color = "text-[var(--text-muted)]";
+      let color = "text-[var(--text-secondary)]";
 
       if (Math.abs(imbalance) < 5) {
         label = "Balanced";
@@ -179,7 +179,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             Open Interest
           </span>
           <div className="h-4 w-16 animate-pulse rounded-none bg-[var(--border)]" />
@@ -192,10 +192,10 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     return (
       <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             Open Interest
           </span>
-          <span className="text-[10px] text-[var(--text-dim)]">No data available</span>
+          <span className="text-[10px] text-[var(--text-secondary)]">No data available</span>
         </div>
       </div>
     );
@@ -212,7 +212,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
       {/* Header row: label + total OI value */}
       <div className="mb-1.5 flex items-baseline justify-between">
         <div className="flex items-center gap-1">
-          <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text-dim)]">
+          <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">
             Open Interest
           </span>
           <InfoIcon tooltip="Total notional value of all open positions in the market." />
@@ -228,7 +228,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
       {/* OI Utilization bar with label */}
       <div className="mb-1.5">
         <div className="mb-1 flex items-center justify-between">
-          <span className="text-[9px] uppercase tracking-[0.04em] text-[var(--text-dim)]">
+          <span className="text-[9px] uppercase tracking-[0.04em] text-[var(--text-secondary)]">
             OI Utilization
           </span>
           <span
@@ -250,7 +250,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
       <div className="mb-1.5 space-y-1">
         <div>
           <div className="mb-0.5 flex items-center justify-between">
-            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Long</span>
+            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Long</span>
             <span className="text-[10px] font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>
               ${longOiUsd} ({longPct.toFixed(1)}%)
             </span>
@@ -261,7 +261,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
         </div>
         <div>
           <div className="mb-0.5 flex items-center justify-between">
-            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Short</span>
+            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Short</span>
             <span className="text-[10px] font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
               ${shortOiUsd} ({shortPct.toFixed(1)}%)
             </span>
@@ -275,28 +275,28 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
       {/* Imbalance + LP Net — compact two-column row */}
       <div className="mb-1.5 grid grid-cols-2 gap-1">
         <div className="rounded-none border-l-2 border-l-[var(--border)] bg-[var(--bg-elevated)] px-1.5 py-1">
-          <div className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Imbalance</div>
+          <div className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Imbalance</div>
           <div className={`text-[11px] font-bold ${imbalanceColor}`} style={{ fontFamily: "var(--font-mono)" }}>
             {imbalancePct >= 0 ? "+" : ""}{imbalancePct.toFixed(1)}%
           </div>
-          <div className="text-[8px] text-[var(--text-dim)]">{imbalanceLabel}</div>
+          <div className="text-[8px] text-[var(--text-secondary)]">{imbalanceLabel}</div>
         </div>
         <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg)] px-1.5 py-1">
           <div className="flex items-center gap-0.5">
-            <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-dim)]">LP Net</span>
+            <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">LP Net</span>
             <InfoIcon tooltip="The aggregate position LPs must hold to balance trader positions. Drives funding rates." />
           </div>
           <div className={`text-[11px] font-bold ${lpDirection === "long" ? "text-[var(--long)]" : "text-[var(--short)]"}`} style={{ fontFamily: "var(--font-mono)" }}>
             {lpNetUsd}
           </div>
-          <div className="text-[8px] text-[var(--text-dim)]">({lpDirection})</div>
+          <div className="text-[8px] text-[var(--text-secondary)]">({lpDirection})</div>
         </div>
       </div>
 
       {/* 24h OI mini chart */}
       <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg-elevated)] px-1.5 py-1">
         <div className="mb-0.5 flex items-center justify-between">
-          <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-dim)]">24h OI</span>
+          <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">24h OI</span>
           {oiData.historicalOi && oiData.historicalOi.length > 1 && oiData.historicalOi[0].totalOi > 0 && (
             <span className="text-[9px] text-[var(--accent)]" style={{ fontFamily: "var(--font-mono)" }}>
               {((oiData.historicalOi[oiData.historicalOi.length - 1].totalOi / oiData.historicalOi[0].totalOi - 1) * 100) >= 0 ? "+" : ""}
@@ -323,7 +323,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
             })}
           </div>
         ) : (
-          <div className="flex h-8 items-center justify-center text-[9px] text-[var(--text-dim)]">No data</div>
+          <div className="flex h-8 items-center justify-center text-[9px] text-[var(--text-secondary)]">No data</div>
         )}
       </div>
 
