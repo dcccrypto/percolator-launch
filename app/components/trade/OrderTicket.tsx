@@ -263,6 +263,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (arr.length === 0 || arr[arr.length - 1] < maxLeverage) arr.push(maxLeverage);
     return arr;
   }, [maxLeverage]);
+  // Display-only: how far along the track the filled (accent) portion should
+  // paint, mirroring the current leverage value — purely a visual affordance
+  // for the range input's inline gradient background (see the slider below).
+  const leverageFillPct = maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100;
 
   const capital = userAccount ? userAccount.account.capital : 0n;
   const effectiveBalance = userAccount ? capital : (walletAtaBalance ?? 0n);
@@ -479,7 +483,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     !!blockingIssue;
 
   return (
-    <div className="relative rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+    <div className="relative p-3.5">
       {/* Market / Limit tabs */}
       <div className="mb-3 flex gap-0.5 rounded-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5">
         {(["market", "limit"] as const).map((t) => (
@@ -512,13 +516,19 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       )}
 
-      {/* Long / Short segmented */}
+      {/* Long / Short segmented — semantic long/short tokens only, symmetric
+          unselected states (both read as neutral until chosen — previously
+          Short's idle state was tinted red even when not selected, which
+          fought the "green/red are semantic, not decorative" rule and made
+          the two buttons visually asymmetric at rest). */}
       <div className="mb-3 flex gap-1">
         <button
           onClick={() => setDirection("long")}
           aria-pressed={direction === "long"}
-          className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-all duration-150 ${
-            direction === "long" ? "bg-green-500 border border-green-500 text-black" : "border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)]"
+          className={`flex-1 rounded-none border py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-colors duration-150 ${
+            direction === "long"
+              ? "border-[var(--long)] bg-[var(--long)] text-black"
+              : "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--long)]/40 hover:text-[var(--text)]"
           }`}
         >
           Long
@@ -526,8 +536,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <button
           onClick={() => setDirection("short")}
           aria-pressed={direction === "short"}
-          className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-all duration-150 ${
-            direction === "short" ? "bg-red-500 border border-red-500 text-white" : "border border-red-400/60 bg-red-500/[0.08] text-red-400 hover:bg-red-500/20"
+          className={`flex-1 rounded-none border py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-colors duration-150 ${
+            direction === "short"
+              ? "border-[var(--short)] bg-[var(--short)] text-white"
+              : "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--short)]/40 hover:text-[var(--text)]"
           }`}
         >
           Short
@@ -558,7 +570,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           />
           <button
             onClick={toggleSizeUnit}
-            className="w-16 shrink-0 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:text-[var(--text)]"
+            className="w-16 shrink-0 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--border-hover)] hover:text-[var(--text)]"
           >
             {sizeUnit === "token" ? symbol : "USD"}
           </button>
@@ -574,7 +586,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <button
             key={pct}
             onClick={() => setSizePercent(pct)}
-            className="flex-1 rounded-none border border-[var(--border)]/30 py-1 text-[10px] font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--accent)]/30 hover:text-[var(--text)]"
+            className="flex-1 rounded-none border border-[var(--border)]/30 py-1 text-[10px] font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--accent)]/30 hover:bg-[var(--accent-subtle)] hover:text-[var(--text)]"
           >
             {pct === 100 ? "Max" : `${pct}%`}
           </button>
@@ -612,7 +624,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           step={1}
           value={leverage}
           onChange={(e) => updateLeverage(Number(e.target.value))}
-          className="mb-2 h-1.5 w-full cursor-pointer appearance-none touch-none accent-[var(--accent)]"
+          className="leverage-slider mb-2 w-full cursor-pointer touch-none"
+          style={{
+            background: `linear-gradient(to right, var(--accent) ${leverageFillPct}%, var(--border) ${leverageFillPct}%)`,
+          }}
         />
         <div className="flex flex-wrap gap-1">
           {availableLeverage.map((l) => (
@@ -620,7 +635,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               key={l}
               onClick={() => updateLeverage(l)}
               className={`flex-1 basis-0 min-w-[32px] rounded-none py-1.5 text-[9px] font-medium transition-colors duration-150 ${
-                leverage === l ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50"
+                leverage === l ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
               }`}
             >
               {l}x
@@ -629,9 +644,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       </div>
 
-      {/* Receipt — before -> after */}
+      {/* Receipt — before -> after. Deliberately "sunken" (var(--bg), the
+          page-level darkness, rather than an elevated surface) so it reads
+          as an inset readout inside the ticket panel — a small depth cue
+          that reinforces the panel/ticket as the raised surface. */}
       {hasOrder && (
-        <div className="mb-3 rounded-none border border-[var(--border)]/40 bg-[var(--bg-elevated)]/40 px-2.5 py-2 divide-y divide-[var(--border)]/30">
+        <div className="mb-3 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/60 px-2.5 py-2 divide-y divide-[var(--border)]/30">
           <DiffRow label="Entry" before="—" after={formatUsdPriceE6(estEntry)} />
           <DiffRow
             label="Liq price"
@@ -667,7 +685,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {needsWallet ? (
         <button
           onClick={() => openWalletModal()}
-          className="w-full rounded-none bg-[var(--accent)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:brightness-110"
+          className="w-full rounded-none bg-[var(--accent)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter] duration-150 hover:brightness-110"
         >
           Connect Wallet
         </button>
@@ -689,8 +707,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               <button
                 onClick={canOneClick ? onClickDirect : () => setShowInlineDeposit((v) => !v)}
                 disabled={initLoading}
-                className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-70 ${
-                  direction === "long" ? "bg-green-500 hover:bg-green-400" : "bg-red-500 hover:bg-red-400"
+                className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70 ${
+                  direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
                 }`}
               >
                 {initLoading ? "Creating account…" : showInlineDeposit ? "Close" : canOneClick ? "Create Account & Deposit" : needsAccount ? "Get Tokens to Trade" : "Deposit to Trade"}
@@ -730,8 +748,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             setShowConfirmModal(true);
           }}
           disabled={submitDisabled}
-          className={`w-full rounded-none py-3 text-[12px] font-bold uppercase tracking-[0.12em] text-black transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${
-            direction === "long" ? "bg-green-500 hover:bg-green-400" : "bg-red-500 hover:bg-red-400 text-white"
+          className={`w-full rounded-none py-3 text-[12px] font-bold uppercase tracking-[0.12em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 ${
+            direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
           }`}
         >
           {tradePhase === "submitting" ? "Submitting…" : tradePhase === "confirming" ? "Confirmed!" : `${direction === "long" ? "Long" : "Short"} ${symbol} ${leverage}x`}
@@ -776,11 +794,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <DepositWithdrawCard slabAddress={slabAddress} />
         </div>
       )}
-
-      <div className="mt-3 flex items-center gap-1.5">
-        <InfoIcon tooltip={`This market is margined in ${symbol}, not USD. Selected leverage: ${leverage}x.`} />
-        <span className="text-[9px] text-[var(--text)] uppercase tracking-[0.1em]">Coin-margined market</span>
-      </div>
 
       {getNetwork() === "mainnet" && (
         <div className="mt-3 border border-[var(--accent)]/30 bg-[var(--accent)]/[0.04] px-3 py-2 text-[10px] text-[var(--text)]">

@@ -10,6 +10,7 @@ import {
   deriveDepositPda,
   decodeStakePool,
 } from '@percolatorct/sdk';
+import { getConfig } from '@/lib/config';
 import { useSlabState } from '@/components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
 import {
@@ -142,13 +143,19 @@ export function useStakePool() {
   const pdas = useMemo(() => {
     if (!slabAddress) return null;
     try {
+      // Stake pools are owned by this deployment's vault program
+      // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
+      const stakeProgramId = new PublicKey(
+        (getConfig() as { vaultProgramId?: string }).vaultProgramId
+        ?? '51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ'
+      );
       const slabPk = new PublicKey(slabAddress);
-      const [poolPda] = deriveStakePool(slabPk);
-      const [vaultAuthPda] = deriveStakeVaultAuth(poolPda);
+      const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
+      const [vaultAuthPda] = deriveStakeVaultAuth(poolPda, stakeProgramId);
       let depositPda: PublicKey | null = null;
       if (walletPubkeyStr) {
         const walletPk = new PublicKey(walletPubkeyStr);
-        [depositPda] = deriveDepositPda(poolPda, walletPk);
+        [depositPda] = deriveDepositPda(poolPda, walletPk, stakeProgramId);
       }
       return { poolPda, vaultAuthPda, depositPda, slabPk };
     } catch {

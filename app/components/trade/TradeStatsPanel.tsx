@@ -76,11 +76,11 @@ function longShortBar(longTrades: number, shortTrades: number) {
       <span className="text-[10px] text-[var(--long)] font-medium w-8 text-right">{longPct}%</span>
       <div className="flex-1 h-1.5 rounded-full overflow-hidden bg-[var(--border)] flex">
         <div
-          className="h-full bg-[var(--long)] transition-all duration-500"
+          className="h-full bg-[var(--long)] transition-[width] duration-500"
           style={{ width: `${longPct}%` }}
         />
         <div
-          className="h-full bg-[var(--short)] transition-all duration-500"
+          className="h-full bg-[var(--short)] transition-[width] duration-500"
           style={{ width: `${shortPct}%` }}
         />
       </div>

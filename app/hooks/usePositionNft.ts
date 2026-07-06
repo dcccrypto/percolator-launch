@@ -129,102 +129,117 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
 
           if (cancelled) return;
 
-          if (allPortfolios.length === 0) {
-            // The owner-scan finds nothing once the position is WRAPPED: minting
-            // B-3-transfers portfolio.owner to the NFT program's escrow PDA. Fall
-            // back to the NFT the wallet still holds — scan PositionNft accounts
-            // by last_holder (offset 167) == wallet, then keep the one whose
-            // wrapped portfolio (portfolio_account @10) is on this market. This
-            // keeps Burn / Send / status working after the mint.
-            const heldNfts = await connection.getProgramAccounts(PERCOLATOR_NFT_PROGRAM_ID, {
-              filters: [
-                { dataSize: POSITION_NFT_STATE_LEN_V17 },
-                { memcmp: { offset: 167, bytes: walletPubkeyStr! } },
-              ],
-            });
+          // If the wallet owns a portfolio here (by provenance) WITH an active
+          // leg, it has a normal, unwrapped, currently-open position — resolve
+          // the NFT PDA for it directly (this is the only case where a fresh
+          // mint even makes sense).
+          //
+          // IMPORTANT: do NOT treat "allPortfolios.length === 0" as the only
+          // trigger for the held-NFT fallback below. A wallet can ALSO own a
+          // portfolio here with NO active leg (e.g. a stale/closed position,
+          // or simply one it deposited into without ever trading) while
+          // SEPARATELY holding a Position NFT — either self-minted-and-not-
+          // yet-transferred, or received via transfer from someone else (whose
+          // escrowed portfolio is a totally different account). The old code
+          // returned "not minted" the moment allPortfolios[0] had no active
+          // leg, WITHOUT ever checking whether the wallet holds an NFT — that
+          // was the bug behind "received NFT shows Not Minted / Burn disabled"
+          // even though useNftWrappedPosition (which unconditionally scans by
+          // last_holder) found it just fine.
+          let ownPortfolioPk: PublicKey | null = null;
+          let ownActiveLeg: ReturnType<typeof parsePortfolioV17>["legs"][number] | null = null;
+          if (allPortfolios.length > 0) {
+            const pf = parsePortfolioV17(new Uint8Array(allPortfolios[0].account.data));
+            const activeLeg = pf.legs.find((l) => l.active);
+            if (activeLeg) {
+              ownPortfolioPk = allPortfolios[0].pubkey;
+              ownActiveLeg = activeLeg;
+            }
+          }
+
+          if (ownPortfolioPk && ownActiveLeg) {
+            const [nftPda] = deriveNftPdaV17(ownPortfolioPk, ownActiveLeg.marketId, PERCOLATOR_NFT_PROGRAM_ID);
+            const pdaStr = nftPda.toBase58();
+
+            setState((prev) => ({ ...prev, nftPdaAddress: pdaStr }));
+
+            const accountInfo = await connection.getAccountInfo(nftPda);
+
             if (cancelled) return;
-            for (const heldNft of heldNfts) {
-              let parsedNft;
-              try {
-                parsedNft = parsePositionNftAccountSdk(new Uint8Array(heldNft.account.data));
-              } catch {
-                continue;
-              }
-              const wrappedPfInfo = await connection.getAccountInfo(parsedNft.portfolioAccount);
-              if (cancelled) return;
-              if (!wrappedPfInfo) continue;
-              let wrappedPf;
-              try {
-                wrappedPf = parsePortfolioV17(new Uint8Array(wrappedPfInfo.data));
-              } catch {
-                continue;
-              }
-              if (!(wrappedPf.marketGroupId?.equals(slabPk) ?? false)) continue;
-              const wrappedLeg = wrappedPf.legs.find((l) => l.active);
+
+            if (!accountInfo || accountInfo.data.length < POSITION_NFT_STATE_LEN_V17) {
               setState({
-                hasMintedNft: true,
-                nftMint: parsedNft.nftMint,
-                // No active (non-zero) leg ⇒ closed-but-unburned ⇒ burn to reclaim.
-                pendingSettlement: !wrappedLeg || wrappedLeg.basisPosQ === 0n,
-                nftPdaAddress: heldNft.pubkey.toBase58(),
+                hasMintedNft: false,
+                nftMint: null,
+                pendingSettlement: false,
+                nftPdaAddress: pdaStr,
                 isLoading: false,
               });
               return;
             }
+
+            const parsed = parsePositionNftAccountSdk(new Uint8Array(accountInfo.data));
+
             setState({
-              hasMintedNft: false,
-              nftMint: null,
-              pendingSettlement: false,
-              nftPdaAddress: null,
-              isLoading: false,
-            });
-            return;
-          }
-
-          const portfolioPk = allPortfolios[0].pubkey;
-          const pf = parsePortfolioV17(new Uint8Array(allPortfolios[0].account.data));
-          const activeLeg = pf.legs.find((l) => l.active);
-
-          if (!activeLeg) {
-            // No active position — NFT definitely not minted.
-            setState({
-              hasMintedNft: false,
-              nftMint: null,
-              pendingSettlement: false,
-              nftPdaAddress: portfolioPk.toBase58(),
-              isLoading: false,
-            });
-            return;
-          }
-
-          const [nftPda] = deriveNftPdaV17(portfolioPk, activeLeg.marketId, PERCOLATOR_NFT_PROGRAM_ID);
-          const pdaStr = nftPda.toBase58();
-
-          setState((prev) => ({ ...prev, nftPdaAddress: pdaStr }));
-
-          const accountInfo = await connection.getAccountInfo(nftPda);
-
-          if (cancelled) return;
-
-          if (!accountInfo || accountInfo.data.length < POSITION_NFT_STATE_LEN_V17) {
-            setState({
-              hasMintedNft: false,
-              nftMint: null,
-              pendingSettlement: false,
+              hasMintedNft: true,
+              nftMint: parsed.nftMint,
+              // positionSize === 0 means position closed but NFT not yet burned.
+              pendingSettlement: parsed.basisPosQAtMint === 0n,
               nftPdaAddress: pdaStr,
               isLoading: false,
             });
             return;
           }
 
-          const parsed = parsePositionNftAccountSdk(new Uint8Array(accountInfo.data));
-
+          // Reached when the wallet has no OWN unwrapped active-leg portfolio
+          // on this market — either it never traded here directly, or (the bug
+          // fixed above) it owns some other leg-less portfolio here. Fall back
+          // to the NFT the wallet still holds — scan PositionNft accounts by
+          // last_holder (offset 167) == wallet, then keep the one whose
+          // wrapped portfolio (portfolio_account @10) is on this market. This
+          // keeps Burn / Send / status working both right after a self-mint
+          // and after receiving a transferred NFT (mirrors
+          // useNftWrappedPosition, which uses the identical last_holder scan).
+          const heldNfts = await connection.getProgramAccounts(PERCOLATOR_NFT_PROGRAM_ID, {
+            filters: [
+              { dataSize: POSITION_NFT_STATE_LEN_V17 },
+              { memcmp: { offset: 167, bytes: walletPubkeyStr! } },
+            ],
+          });
+          if (cancelled) return;
+          for (const heldNft of heldNfts) {
+            let parsedNft;
+            try {
+              parsedNft = parsePositionNftAccountSdk(new Uint8Array(heldNft.account.data));
+            } catch {
+              continue;
+            }
+            const wrappedPfInfo = await connection.getAccountInfo(parsedNft.portfolioAccount);
+            if (cancelled) return;
+            if (!wrappedPfInfo) continue;
+            let wrappedPf;
+            try {
+              wrappedPf = parsePortfolioV17(new Uint8Array(wrappedPfInfo.data));
+            } catch {
+              continue;
+            }
+            if (!(wrappedPf.marketGroupId?.equals(slabPk) ?? false)) continue;
+            const wrappedLeg = wrappedPf.legs.find((l) => l.active);
+            setState({
+              hasMintedNft: true,
+              nftMint: parsedNft.nftMint,
+              // No active (non-zero) leg ⇒ closed-but-unburned ⇒ burn to reclaim.
+              pendingSettlement: !wrappedLeg || wrappedLeg.basisPosQ === 0n,
+              nftPdaAddress: heldNft.pubkey.toBase58(),
+              isLoading: false,
+            });
+            return;
+          }
           setState({
-            hasMintedNft: true,
-            nftMint: parsed.nftMint,
-            // positionSize === 0 means position closed but NFT not yet burned.
-            pendingSettlement: parsed.basisPosQAtMint === 0n,
-            nftPdaAddress: pdaStr,
+            hasMintedNft: false,
+            nftMint: null,
+            pendingSettlement: false,
+            nftPdaAddress: allPortfolios.length > 0 ? allPortfolios[0].pubkey.toBase58() : null,
             isLoading: false,
           });
 
@@ -286,8 +301,14 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
       cancelled = true;
     };
     // Deliberately excluding `connection` — object ref recreated on every poll.
+    // `raw` IS included so the NFT status re-scans on every slab update — after a
+    // mint/transfer/burn the portfolio is escrowed (owner != wallet), so `userIdx`
+    // stays null and would never re-trigger this effect on its own; without `raw`
+    // the panel showed stale "Minted/Active" after a Send and let the user re-click
+    // Send/Burn into a failing tx (mirrors useUserAccount / useNftWrappedPosition,
+    // which both key off `raw`).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isV17, walletPubkeyStr, userIdx, programIdStr, slabAddress, mockMode]);
+  }, [isV17, walletPubkeyStr, userIdx, programIdStr, slabAddress, mockMode, raw]);
 
   return state;
 }

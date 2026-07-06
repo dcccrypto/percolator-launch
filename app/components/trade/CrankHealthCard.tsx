@@ -83,7 +83,7 @@ export const CrankHealthCard: FC = () => {
         </div>
         <div className="h-1 w-full rounded-none bg-[var(--border)]">
           <div
-            className={`h-1 rounded-none transition-all duration-500 ${barColor}`}
+            className={`h-1 rounded-none transition-[width,background-color] duration-500 ${barColor}`}
             style={{ width: `${progressPercent}%` }}
           />
         </div>

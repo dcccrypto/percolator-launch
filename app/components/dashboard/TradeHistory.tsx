@@ -111,12 +111,12 @@ export function TradeHistory() {
     return (
       <div className="flex flex-col border border-[var(--border)] bg-[var(--panel-bg)]">
         <div className="px-5 py-4 border-b border-[var(--border)]">
-          <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+          <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
             Trade History
           </p>
         </div>
         <div className="flex flex-col items-center justify-center py-12">
-          <p className="text-[13px] text-[var(--text-dim)]">Connect wallet to view trades</p>
+          <p className="text-[13px] text-[var(--text-secondary)]">Connect wallet to view trades</p>
         </div>
       </div>
     );
@@ -126,13 +126,13 @@ export function TradeHistory() {
     <div className="flex flex-col border border-[var(--border)] bg-[var(--panel-bg)]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-        <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-dim)]">
+        <p className="text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
           Trade History
         </p>
         <button
           onClick={handleExportCsv}
           disabled={filtered.length === 0}
-          className="rounded-sm border border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-muted)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)] disabled:opacity-30"
+          className="rounded-sm border border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)] disabled:opacity-30"
         >
           Export CSV
         </button>
@@ -171,8 +171,8 @@ export function TradeHistory() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
-            <p className="text-[13px] text-[var(--text-dim)]">No trades yet</p>
-            <p className="mt-1 text-[10px] text-[var(--text-dim)]/60">
+            <p className="text-[13px] text-[var(--text-secondary)]">No trades yet</p>
+            <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
               Your executed trades will appear here once the trade indexer has processed them.
             </p>
             {(process.env.NEXT_PUBLIC_DEFAULT_NETWORK ?? process.env.NEXT_PUBLIC_SOLANA_NETWORK) === "devnet" && (
@@ -184,7 +184,7 @@ export function TradeHistory() {
         ) : (
           <table className="w-full">
             <thead>
-              <tr className="border-b border-[var(--border)] text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-dim)]">
+              <tr className="border-b border-[var(--border)] text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">
                 <th className="px-4 py-3 text-left">Time</th>
                 <th className="px-3 py-3 text-left">Market</th>
                 <th className="px-3 py-3 text-left">Side</th>
@@ -237,7 +237,7 @@ export function TradeHistory() {
                     {formatUsdFromNumber(trade.price)}
                   </td>
                   <td
-                    className="px-3 py-2.5 text-right text-[var(--text-muted)]"
+                    className="px-3 py-2.5 text-right text-[var(--text-secondary)]"
                     style={{ fontFamily: "var(--font-jetbrains-mono)" }}
                   >
                     {formatUsd(trade.fee)}
@@ -248,7 +248,7 @@ export function TradeHistory() {
                         href={explorerTxUrl(trade.tx_signature)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"
+                        className="text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
                         title="View on Solana Explorer"
                       >
                         ↗
@@ -270,12 +270,12 @@ export function TradeHistory() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="rounded-sm border border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-muted)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)] disabled:opacity-30"
+            className="rounded-sm border border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)] disabled:opacity-30"
           >
             ← Prev
           </button>
           <span
-            className="text-[10px] text-[var(--text-muted)]"
+            className="text-[10px] text-[var(--text-secondary)]"
             style={{ fontFamily: "var(--font-jetbrains-mono)" }}
           >
             Page {page} of {totalPages}
@@ -283,7 +283,7 @@ export function TradeHistory() {
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="rounded-sm border border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-muted)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text-secondary)] disabled:opacity-30"
+            className="rounded-sm border border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-secondary)] transition-all hover:border-[var(--accent)]/30 hover:text-[var(--text)] disabled:opacity-30"
           >
             Next →
           </button>

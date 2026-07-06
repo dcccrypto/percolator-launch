@@ -681,7 +681,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <button
           ref={longBtnRef}
           onClick={() => setDirection("long")}
-          className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-all duration-150 ${
+          className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-colors duration-150 ${
             direction === "long"
               ? "bg-green-500 border border-green-500 text-black"
               : "border border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)]"
@@ -692,7 +692,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <button
           ref={shortBtnRef}
           onClick={() => setDirection("short")}
-          className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-all duration-150 ${
+          className={`flex-1 rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] transition-colors duration-150 ${
             direction === "short"
               ? "bg-red-500 border border-red-500 text-white"
               : "border border-red-400/60 bg-red-500/[0.08] text-red-400 hover:bg-red-500/20 hover:border-red-400/80"
@@ -820,7 +820,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <button
               key={l}
               onClick={() => updateLeverage(l)}
-              className={`flex-1 basis-0 min-w-[32px] rounded-none py-1.5 min-h-[36px] text-[9px] font-medium transition-all duration-150 focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 touch-manipulation ${
+              className={`flex-1 basis-0 min-w-[32px] rounded-none py-1.5 min-h-[36px] text-[9px] font-medium transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 touch-manipulation ${
                 leverage === l
                   ? "bg-[var(--accent)] text-white"
                   : "border border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
@@ -863,7 +863,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {needsWallet ? (
         <button
           onClick={() => openWalletModal()}
-          className="w-full rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] bg-[var(--accent)] hover:brightness-110 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] focus-visible:ring-[var(--accent)]"
+          className="w-full rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[transform,filter] duration-150 hover:scale-[1.01] active:scale-[0.99] bg-[var(--accent)] hover:brightness-110 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] focus-visible:ring-[var(--accent)]"
         >
           Connect Wallet
         </button>
@@ -897,7 +897,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 onClick={canOneClick ? onClickDirect : () => setShowInlineDeposit((v) => !v)}
                 disabled={initLoading}
                 aria-expanded={showInlineDeposit}
-                className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
+                className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-[transform,background-color,opacity] duration-150 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
                   direction === "long"
                     ? "bg-green-500 hover:bg-green-400 focus-visible:ring-green-500"
                     : "bg-red-500 hover:bg-red-400 focus-visible:ring-red-500"
@@ -953,7 +953,7 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             setShowConfirmModal(true);
           }}
           disabled={tradePhase !== "idle" || loading || !marginInput || positionSize <= 0n || exceedsMargin || riskGateActive || header?.paused || lpUnderfunded || vaultEmpty || (!priceUsd && !mockMode) || (oracleStale && !mockMode)}
-          className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-all duration-150 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
+          className={`w-full rounded-none py-2.5 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition-[transform,background-color,opacity] duration-150 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)] ${
             direction === "long"
               ? "bg-green-500 hover:bg-green-400 focus-visible:ring-green-500"
               : "bg-red-500 hover:bg-red-400 focus-visible:ring-red-500"

@@ -172,7 +172,7 @@ export const SendPositionNftModal: FC<SendPositionNftModalProps> = ({
               type="button"
               onClick={() => parsedDest && onConfirm(parsedDest)}
               disabled={!canConfirm}
-              className="flex-[1.2] rounded-none bg-[var(--accent)] py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-white transition-all duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex-[1.2] rounded-none bg-[var(--accent)] py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-white transition-[filter,opacity] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {loading ? "Sending…" : "Confirm & Sign"}
             </button>

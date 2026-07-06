@@ -8,8 +8,10 @@ the guardrails.
 
 ## Golden rules (don't skip these)
 
-1. **One repo, one install.** `git clone` this repo → `pnpm install` (it fetches the
-   pinned `@percolatorct/sdk` from GitHub automatically — no sibling clone, no SDK build).
+1. **One repo, one install.** The playground is the **`playground` branch** (`main` is the
+   marketing site): `git clone -b playground …` → `pnpm install` (it fetches the pinned
+   `@percolatorct/sdk` from GitHub automatically — no sibling clone, no SDK build). Live
+   playground: https://percolator-playground.vercel.app
 2. **Frontend + devnet only.** We want frontend improvements and bug fixes. Never
    redeploy programs, switch to mainnet, run the keeper/faucet locally, `npm publish`,
    or `vercel deploy`.

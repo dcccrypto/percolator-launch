@@ -30,8 +30,8 @@ export const MarketBookCard: FC = () => {
 
   if (loading || !engine || !config || !params) {
     return (
-      <div className="p-3">
-        <p className="text-[10px] text-[var(--text-muted)]">{loading ? "Loading…" : "—"}</p>
+      <div className="flex h-full min-h-[160px] flex-col items-center justify-center p-3">
+        <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">{loading ? "Loading…" : "—"}</p>
       </div>
     );
   }
@@ -137,7 +137,7 @@ export const MarketBookCard: FC = () => {
           {/* 3px utilisation fill bar */}
           <div className="mt-1.5 h-[3px] w-full bg-[var(--border)]/20 overflow-hidden">
             <div
-              className="h-full bg-[var(--long)]/40 transition-all duration-500"
+              className="h-full bg-[var(--long)]/40 transition-[width] duration-500"
               style={{ width: `${bidUtilPct}%` }}
             />
           </div>
@@ -153,7 +153,7 @@ export const MarketBookCard: FC = () => {
           {/* 3px utilisation fill bar */}
           <div className="mt-1.5 h-[3px] w-full bg-[var(--border)]/20 overflow-hidden">
             <div
-              className="h-full bg-[var(--short)]/40 transition-all duration-500"
+              className="h-full bg-[var(--short)]/40 transition-[width] duration-500"
               style={{ width: `${askUtilPct}%` }}
             />
           </div>

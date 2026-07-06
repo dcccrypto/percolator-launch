@@ -163,7 +163,7 @@ const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol,
         <button
           onClick={handleDeposit}
           disabled={!canSubmit}
-          className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-none bg-[var(--accent)] py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-white transition-[filter,opacity] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? "Depositing…" : "Deposit Margin"}
         </button>
@@ -590,7 +590,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div className="mt-2 flex gap-1.5">
               <button
                 onClick={() => setShowAddMarginModal(true)}
-                className="flex-1 rounded-none border border-[var(--accent)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-150 hover:bg-[var(--accent)]/8"
+                className="flex-1 rounded-none border border-[var(--accent)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-colors duration-150 hover:bg-[var(--accent)]/8"
               >
                 + Margin
               </button>
@@ -598,7 +598,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 onClick={() => setShowCloseModal(true)}
                 disabled={closeLoading || lpUnderfunded || !hasValidMark}
                 title={!hasValidMark ? "Waiting for price data…" : undefined}
-                className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {!hasValidMark ? "Awaiting Price…" : "Close Position"}
               </button>
@@ -786,7 +786,7 @@ const PnlSection: FC<PnlSectionProps> = ({
       {hasValidMark ? (
         <div className="mt-1.5 h-[2px] w-full overflow-hidden bg-[var(--border)]/50">
           <div
-            className={`h-full transition-all duration-500 ${
+            className={`h-full transition-[width,background-color] duration-500 ${
               pnlTokens >= 0n ? "bg-[var(--long)]" : "bg-[var(--short)]"
             }`}
             style={{ width: `${pnlBarWidth}%` }}

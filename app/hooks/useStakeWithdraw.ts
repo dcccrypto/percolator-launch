@@ -4,7 +4,6 @@ import { useCallback, useRef, useState } from 'react';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
-  getStakeProgramId,
   STAKE_POOL_SIZE,
   deriveStakePool,
   deriveStakeVaultAuth,
@@ -18,6 +17,7 @@ import {
   createAssociatedTokenAccountInstruction,
 } from '@solana/spl-token';
 import { sendTx } from '@/lib/tx';
+import { getConfig } from '@/lib/config';
 import { useSlabState } from '@/components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
 
@@ -74,17 +74,23 @@ export function useStakeWithdraw() {
           if (e instanceof Error && e.message.includes('Market not found')) throw e;
         }
 
+        // Stake pools are owned by this deployment's vault program (getConfig().vaultProgramId),
+        // NOT the SDK's default stake program id. Derive all PDAs against the correct program.
+        const stakeProgramId = new PublicKey(
+          (getConfig() as { vaultProgramId?: string }).vaultProgramId
+          ?? '51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ'
+        );
+
         // Derive all PDAs
-        const [pool] = deriveStakePool(slabPk);
-        const [vaultAuth] = deriveStakeVaultAuth(pool);
-        const [depositPda] = deriveDepositPda(pool, wallet.publicKey);
+        const [pool] = deriveStakePool(slabPk, stakeProgramId);
+        const [vaultAuth] = deriveStakeVaultAuth(pool, stakeProgramId);
+        const [depositPda] = deriveDepositPda(pool, wallet.publicKey, stakeProgramId);
 
         // Fetch pool account to get lpMint and vault
         const poolInfo = await connection.getAccountInfo(pool);
         if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE) {
           throw new Error('Stake pool not initialized for this market.');
         }
-        const stakeProgramId = getStakeProgramId();
         if (!poolInfo.owner.equals(stakeProgramId)) {
           throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
         }

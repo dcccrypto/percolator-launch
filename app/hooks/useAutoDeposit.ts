@@ -40,6 +40,7 @@ function markAutoDepositAttempted(key: string): void {
   }
 }
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { isV17Account } from "@percolatorct/sdk";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { useInitUser } from "@/hooks/useInitUser";
@@ -69,7 +70,7 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
   const { connection } = useConnectionCompat();
   const userAccount = useUserAccount();
   const { initUser } = useInitUser(slabAddress);
-  const { config: mktConfig } = useSlabState();
+  const { config: mktConfig, raw: slabRaw } = useSlabState();
   const { result: fundResult } = useAutoFundResult();
   const faucetComplete = useFaucetComplete();
 
@@ -116,7 +117,14 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
 
       const sig = await initUser(depositAmount);
       setSignature(sig ?? null);
-      setAmountUsdc(Number(depositAmount) / 1_000_000);
+      // On v17, InitUser (tag 1) only creates the standalone portfolio account —
+      // it does NOT move collateral (the amount arg is ignored on-chain). Only the
+      // legacy v12 InitUser folds `feePayment` in as the initial deposit. So only
+      // report a deposited amount on v12; on v17 the account is created and the
+      // user funds it via the normal deposit card (reporting a bogus "$X deposited"
+      // toast here would be a lie). See useInitUser.ts v17 path.
+      const isV17 = !!slabRaw && slabRaw.length > 0 && isV17Account(slabRaw);
+      setAmountUsdc(isV17 ? null : Number(depositAmount) / 1_000_000);
       setDeposited(true);
     } catch (e) {
       // User rejected or tx failed — not a critical error
@@ -131,7 +139,7 @@ export function useAutoDeposit(slabAddress: string): AutoDepositState {
       inflightRef.current = false;
       setDepositing(false);
     }
-  }, [publicKey, mktConfig, slabAddress, connection, initUser, isDevnet]);
+  }, [publicKey, mktConfig, slabAddress, connection, initUser, isDevnet, slabRaw]);
 
   useEffect(() => {
     if (!isDevnet || !connected || !publicKey) return;

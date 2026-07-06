@@ -130,8 +130,7 @@ export const ChartIndicatorMenu: FC<ChartIndicatorMenuProps> = ({
         // when closed. Without this, Tab walks through every toggle and
         // input even though the panel is invisible (opacity:0 alone keeps
         // children in the focus tree).
-        // @ts-expect-error - inert is a valid HTML attribute, React types lag
-        inert={!open ? "" : undefined}
+        inert={!open ? true : undefined}
         className={[
           // z-[60] so the mobile bottom-sheet variant sits ABOVE the global
           // MobileBottomNav (z-50) — at z-20 the nav was painting over the

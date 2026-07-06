@@ -45,13 +45,18 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
     // The race applies to concurrent FIRST-time requests (two requests both see
     // no row and race to INSERT). For already-rate-limited wallets (active claim
     // already exists), the SELECT reliably returns the row without any race.
-    const { data: activeClaim } = await supabase
+    const { data: activeClaim, error: preCheckError } = await supabase
       .from("faucet_claims")
       .select("claimed_at")
       .eq("wallet", wallet)
       .eq("fund_type", fundType)
       .gte("claimed_at", windowStart)
       .maybeSingle();
+
+    if (preCheckError) {
+      console.warn(`[faucet-gate] pre-check SELECT error: ${preCheckError.message}`);
+      return { allowed: false, nextClaimAt: null };
+    }
 
     if (activeClaim) {
       const nextClaimAt = new Date(
@@ -91,15 +96,15 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
         return { allowed: false, nextClaimAt };
       }
 
-      // Unexpected DB error — fail open (devnet-only, don't block users)
+      // Unexpected DB error — fail closed
       console.warn(`[faucet-gate] INSERT error (code=${error.code}): ${error.message}`);
-      return { allowed: true, nextClaimAt: null };
+      return { allowed: false, nextClaimAt: null };
     }
 
     return { allowed: true, nextClaimAt: null, claimId: (data as { id: number } | null)?.id };
   } catch (err) {
     console.warn("[faucet-gate] threw:", err instanceof Error ? err.message : String(err));
-    return { allowed: true, nextClaimAt: null };
+    return { allowed: false, nextClaimAt: null };
   }
 }
 
