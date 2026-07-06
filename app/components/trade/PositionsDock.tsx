@@ -202,8 +202,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const pnlIsCapped = hasValidMark && pnlTokens > 0n && payableCapacity > 0n && pnlTokens > payableCapacity;
 
   const liqPriceE6 = computeLiqPrice(entryPriceE6, account.capital, account.positionSize, maintenanceBps);
+  // Long-side clamp: liq at/below $0 with a live position = cannot be
+  // liquidated by price (excess collateral) — formatLiqPrice renders "∞".
+  const liqUnliquidatable = liqPriceE6 <= 0n && entryPriceE6 > 0n && account.positionSize !== 0n;
   const liqPriceColor = (() => {
-    if (liqPriceE6 <= 0n) return "text-[var(--text-muted)]";
+    if (liqUnliquidatable) return "text-[var(--text-secondary)]";
+    if (liqPriceE6 <= 0n) return "text-[var(--text-secondary)]";
     if (!hasValidMark || currentPriceE6 <= 0n) return "text-[var(--warning)]";
     const distPct = Math.abs(Number(currentPriceE6) - Number(liqPriceE6)) / Number(currentPriceE6);
     if (distPct < 0.05) return "text-[var(--short)]";
@@ -275,8 +279,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {hasValidMark ? formatUsdPriceE6(currentPriceE6) : <span className="text-[var(--text-dim)]">--</span>}
               </td>
-              <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {formatLiqPrice(liqPriceE6)}
+              <td
+                className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor}`}
+                style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
+                title={liqUnliquidatable ? "No liquidation price — collateral exceeds position notional; cannot be liquidated by price" : undefined}
+              >
+                {formatLiqPrice(liqPriceE6, { hasPosition: liqUnliquidatable })}
               </td>
               <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {hasValidMark ? (
