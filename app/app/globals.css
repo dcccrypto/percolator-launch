@@ -199,10 +199,10 @@ html {
   --color-theme-nav-text: var(--text);
   --color-theme-panel: var(--panel-bg);
 
-  --font-sans: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
-  --font-mono: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
-  --font-display: var(--font-outfit), var(--font-space-grotesk), system-ui;
-  --font-heading: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
+  --font-sans: var(--font-plus-jakarta-sans), var(--font-jetbrains-mono), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+  --font-display: var(--font-plus-jakarta-sans), system-ui;
+  --font-heading: var(--font-plus-jakarta-sans), var(--font-jetbrains-mono), sans-serif;
 }
 
 body {
@@ -258,6 +258,7 @@ body::before {
 }
 
 /* ─── Keyframes ─── */
+<<<<<<< Updated upstream
 @keyframes shimmer {
   0% { opacity: 0.5; }
   50% { opacity: 1; }
@@ -284,6 +285,8 @@ body::before {
   50% { transform: translateY(-6px); }
 }
 
+=======
+>>>>>>> Stashed changes
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 20px rgba(153, 69, 255, 0.08); }
   50% { box-shadow: 0 0 40px rgba(153, 69, 255, 0.15); }
@@ -305,11 +308,8 @@ body::before {
   50% { opacity: 0; }
 }
 
-@keyframes cursor-fade-out {
-  0%, 70% { opacity: 1; }
-  100% { opacity: 0; }
-}
 
+<<<<<<< Updated upstream
 @keyframes scale-in {
   0% { transform: scale(0); opacity: 0; }
   50% { transform: scale(1.1); }
@@ -335,6 +335,23 @@ body::before {
   background: var(--border);
   animation: shimmer 1.5s ease-in-out infinite;
 }
+=======
+/* ponytail: explicit class bypasses tailwind v4 @theme compilation bug; will-change prevents jaggedness */
+.animate-shimmer-sweep {
+  animation: shimmer-sweep 1.6s linear infinite !important;
+  will-change: transform;
+}
+
+@keyframes shimmer-sweep {
+  0% {
+    transform: translate3d(-100%, 0, 0);
+  }
+  100% {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+>>>>>>> Stashed changes
 
 .deposit-shimmer {
   animation: pulse-glow 2s ease-in-out infinite;

@@ -28,20 +28,20 @@ export default async function OpengraphImage() {
   );
   const logoSrc = `data:image/png;base64,${logoBuffer.toString("base64")}`;
 
-  // Site type system: Outfit is the logo wordmark (--font-display); JetBrains
+  // Site type system: Plus Jakarta Sans is the logo wordmark (--font-display); JetBrains
   // Mono is the body/heading face (--font-sans / --font-heading). Match both so
   // the card reads like the site rather than a generic sans.
   let fonts:
     | { name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" }[]
     | undefined;
   try {
-    const [outfit700, mono400, mono700] = await Promise.all([
-      loadGoogleFont("Outfit", 700),
+    const [display700, mono400, mono700] = await Promise.all([
+      loadGoogleFont("Plus+Jakarta+Sans", 700),
       loadGoogleFont("JetBrains+Mono", 400),
       loadGoogleFont("JetBrains+Mono", 700),
     ]);
     fonts = [
-      { name: "Outfit", data: outfit700, weight: 700, style: "normal" },
+      { name: "Plus Jakarta Sans", data: display700, weight: 700, style: "normal" },
       { name: "JetBrains Mono", data: mono400, weight: 400, style: "normal" },
       { name: "JetBrains Mono", data: mono700, weight: 700, style: "normal" },
     ];
@@ -50,7 +50,7 @@ export default async function OpengraphImage() {
   }
 
   const monoFamily = fonts ? "JetBrains Mono, monospace" : "monospace";
-  const displayFamily = fonts ? "Outfit, sans-serif" : "sans-serif";
+  const displayFamily = fonts ? "Plus Jakarta Sans, sans-serif" : "sans-serif";
   // Site signature gradient (waitlist hero): purple → Solana green.
   const brandGradient =
     "linear-gradient(110deg, #B97AFF 0%, #9945FF 38%, #14F195 100%)";

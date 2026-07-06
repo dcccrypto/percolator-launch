@@ -1,8 +1,7 @@
 import "@/lib/polyfills";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Geist_Mono } from "next/font/google";
-import { Space_Grotesk, JetBrains_Mono, Outfit } from "next/font/google";
+import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Header } from "@/components/layout/Header";
@@ -19,17 +18,12 @@ import { Analytics } from "@vercel/analytics/next";
 import { GoogleAnalytics } from "@/components/analytics/GoogleAnalytics";
 import { CloudflareAnalytics } from "@/components/analytics/CloudflareAnalytics";
 
-// Geist (sans) and Inter Tight removed — neither --font-geist-sans nor
-// --font-inter-tight is referenced in globals.css or any component style.
-// Remaining 4 families are all actively consumed:
-//   JetBrains Mono  → --font-sans, --font-mono, --font-heading + inline styles
-//   Geist Mono      → fallback in --font-sans / --font-mono / --font-heading
-//   Outfit          → primary in --font-display (headings, OG image wordmark)
-//   Space Grotesk   → fallback in --font-display
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"], display: "swap" });
-const spaceGrotesk = Space_Grotesk({ variable: "--font-space-grotesk", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
+// Geist (sans), Geist (mono), Outfit, and Inter Tight removed.
+// Remaining 2 families are all actively consumed:
+//   JetBrains Mono    → --font-mono, and fallback in --font-sans / --font-heading + inline styles
+//   Plus Jakarta Sans → --font-sans, --font-heading, --font-display
+const plusJakartaSans = Plus_Jakarta_Sans({ variable: "--font-plus-jakarta-sans", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
 const jetbrainsMono = JetBrains_Mono({ variable: "--font-jetbrains-mono", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
-const outfit = Outfit({ variable: "--font-outfit", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap" });
 
 // PERC-695 (bug bounty — CSP static nonce): Force dynamic rendering so each request
 // generates a fresh layout render with the new per-request nonce from middleware.
@@ -86,7 +80,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
-    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth" className={`${geistMono.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth" className={`${plusJakartaSans.variable} ${jetbrainsMono.variable}`}>
       <head>
         {/* suppressHydrationWarning: browsers blank the nonce content attribute after
             parsing (nonce hiding), so React's hydration diff always sees nonce="" vs
