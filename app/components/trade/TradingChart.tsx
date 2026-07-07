@@ -617,8 +617,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     const ua = realUserAccount;
     if (!ua) return null;
     const ep = ua.account.entryPrice;
+    // Read the client-side entry with the per-wallet key (account.owner === the
+    // connected wallet that saved it) — matching OrderTicket's save + every other
+    // reader. Omitting the wallet hits the legacy wallet-less key and misses, so
+    // the Entry line never drew for v17 positions.
     const resolvedEntryPrice =
-      ep != null && ep > 0n ? ep : getEntryPrice(slabAddress, ua.idx);
+      ep != null && ep > 0n ? ep : getEntryPrice(slabAddress, ua.idx, ua.account.owner.toBase58());
     if (resolvedEntryPrice <= 0n) return null;
     return Number(resolvedEntryPrice) / 1e6;
   })();

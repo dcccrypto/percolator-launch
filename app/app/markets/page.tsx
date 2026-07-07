@@ -195,7 +195,10 @@ function MarketsPageInner() {
   const [sortBy, setSortBy] = useState<SortKey>((searchParams.get("sort") as SortKey) || "volume");
   const [leverageFilter, setLeverageFilter] = useState<LeverageFilter>((searchParams.get("lev") as LeverageFilter) || "all");
   const [oracleFilter, setOracleFilter] = useState<OracleFilter>((searchParams.get("oracle") as OracleFilter) || "all");
-  const [showUsd, setShowUsd] = useState<boolean>(searchParams.get("usd") === "true");
+  // Default to USD notional (consistent, readable across tokens); token-qty view
+  // is opt-in via ?usd=false. A markets list of raw base-token quantities (25.0M
+  // BONK next to 24.38 SOL) reads as garbage — USD is the sane default.
+  const [showUsd, setShowUsd] = useState<boolean>(searchParams.get("usd") !== "false");
   
   // P-MED-3: Pagination state for infinite scroll
   const [displayCount, setDisplayCount] = useState(20);
@@ -216,7 +219,7 @@ function MarketsPageInner() {
     if (sortBy !== "volume") params.set("sort", sortBy);
     if (leverageFilter !== "all") params.set("lev", leverageFilter);
     if (oracleFilter !== "all") params.set("oracle", oracleFilter);
-    if (showUsd) params.set("usd", "true");
+    if (!showUsd) params.set("usd", "false");
     
     const newUrl = params.toString() ? `?${params.toString()}` : "/markets";
     router.replace(newUrl, { scroll: false });
@@ -1007,11 +1010,13 @@ function MarketsPageInner() {
                     : null;
                   const oiDisplay = oiTokensRaw === 0n ? "—"
                     : oiUsd != null ? (oiUsd > 0 ? formatNum(oiUsd) : "—") : formatStatValue(oiTokensRaw, 'number', mintDecimals);
-                  const insUsd = showUsd && lastPrice != null
-                    ? Math.round((Number(insuranceTokensRaw) / tokenDivisor) * lastPrice * 100) / 100
-                    : null;
+                  // Insurance is denominated in the COLLATERAL mint (Sim-USDC, 6dp) — it is
+                  // already a USD amount, so it is NEVER multiplied by the token price (unlike
+                  // OI, which is a base-token quantity). Divide by the collateral decimals,
+                  // independent of the market's base-token decimals or the USD/token toggle.
+                  const insVal = Math.round((Number(insuranceTokensRaw) / 1e6) * 100) / 100;
                   const insuranceDisplay = insuranceTokensRaw === 0n ? "—"
-                    : insUsd != null ? (insUsd > 0 ? formatNum(insUsd) : "—") : formatStatValue(insuranceTokensRaw, 'number', mintDecimals);
+                    : insVal > 0 ? formatNum(insVal) : "—";
                   const volumeDisplay = volume24hRaw != null && volume24hRaw > 0n
                     ? (showUsd && lastPrice != null
                         ? formatNum(Math.round((Number(volume24hRaw) / tokenDivisor) * lastPrice * 100) / 100)

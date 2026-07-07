@@ -25,11 +25,14 @@ import {
   WELL_KNOWN,
   deriveVaultAuthority,
   deriveLpBackingLedger,
+  parseLpVaultRegistry,
+  parseLpRedemption,
 } from '@percolatorct/sdk';
 import { sendTx } from '@/lib/tx';
 import { useSlabState } from '../components/providers/SlabProvider';
 import { assertKnownProgram } from '@/lib/programAllowlist';
 import { useParams } from 'next/navigation';
+import { sanitizeOnChainValue } from '@/lib/health';
 
 export interface InsuranceLPState {
   /** Insurance fund balance in base tokens (lamports) */
@@ -50,6 +53,35 @@ export interface InsuranceLPState {
   lpMintAddress: PublicKey | null;
   /** Decimals of the LP token mint (NOT collateral decimals) */
   lpDecimals: number;
+
+  // ─── LP Vault Registry (v17 "Earn" vault — CreateLpVault/DepositToLpVault,
+  // tags 74-77). This is a DIFFERENT on-chain account from the engine-level
+  // insurance fund read above (`insuranceBalance`, kept for back-compat with
+  // existing consumers of this hook) — it's the actual backing for the Earn
+  // page's per-market vault. Verified on-chain 2026-07-07: totalLpSharesOutstanding
+  // == 10_000_000_000 (10,000 Sim-USDC) for all 5 curated playground markets.
+  /** Whether the LP Vault Registry PDA exists on-chain for this market. */
+  registryExists: boolean;
+  /** The LP Vault Registry PDA address. */
+  registryAddress: PublicKey | null;
+  /** User's collateral ATA balance (available to deposit), in raw atoms. */
+  userCollateralBalance: bigint;
+  /** Total atoms currently backing the LP vault: shares outstanding + distributed fee atoms. */
+  vaultTotalAtoms: bigint;
+  /** Share price = vaultTotalAtoms / lpSupply, scaled by 1e6 (1_000_000n = 1:1). */
+  vaultSharePriceE6: bigint;
+  /** User's LP position value in underlying collateral atoms (derived from vaultTotalAtoms, not insuranceBalance). */
+  userVaultValueAtoms: bigint;
+  /** Redemption cooldown period from the registry, in slots. */
+  redemptionCooldownSlots: bigint;
+  /** Whether the connected user has an open RequestRedeemLpShares ticket. */
+  hasPendingRedemption: boolean;
+  /** LP shares locked in the pending redemption ticket (0 if none). */
+  pendingRedemptionShares: bigint;
+  /** Slots remaining until the pending redemption's cooldown elapses (0 = elapsed or none pending). */
+  cooldownRemainingSlots: bigint;
+  /** True when there is no pending redemption, or its cooldown has fully elapsed (ready for ExecuteRedemption). */
+  cooldownElapsed: boolean;
 }
 
 export function useInsuranceLP() {
@@ -70,6 +102,17 @@ export function useInsuranceLP() {
     mintExists: false,
     lpMintAddress: null,
     lpDecimals: 6,
+    registryExists: false,
+    registryAddress: null,
+    userCollateralBalance: 0n,
+    vaultTotalAtoms: 0n,
+    vaultSharePriceE6: 1_000_000n,
+    userVaultValueAtoms: 0n,
+    redemptionCooldownSlots: 0n,
+    hasPendingRedemption: false,
+    pendingRedemptionShares: 0n,
+    cooldownRemainingSlots: 0n,
+    cooldownElapsed: true,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +132,26 @@ export function useInsuranceLP() {
       return null;
     }
   }, [slabAddress, programId]);
+
+  // Derive the LP Vault Registry PDA (and, once a wallet is connected, the
+  // redemption-ticket PDA for that wallet). Kept separate from lpMintInfo above
+  // so a failure deriving one never blocks the other.
+  const registryInfo = useMemo(() => {
+    if (!slabAddress || !programId) return null;
+    try {
+      const slabPubkey = new PublicKey(slabAddress);
+      const progPubkey = new PublicKey(programId);
+      const [registryPda] = deriveLpVaultRegistry(progPubkey, slabPubkey);
+      let redemptionPda: PublicKey | null = null;
+      if (walletPubkeyStr) {
+        const walletPk = new PublicKey(walletPubkeyStr);
+        [redemptionPda] = deriveLpRedemption(progPubkey, registryPda, walletPk);
+      }
+      return { registryPda, redemptionPda, progPubkey };
+    } catch {
+      return null;
+    }
+  }, [slabAddress, programId, walletPubkeyStr]);
 
   // Poll insurance state
   const refreshState = useCallback(async () => {
@@ -150,6 +213,95 @@ export function useInsuranceLP() {
         ? (userLpBalance * insuranceBalance) / lpSupply
         : 0n;
 
+      // User's collateral ATA balance (available to deposit into the LP vault).
+      let userCollateralBalance = 0n;
+      if (walletPubkeyStr && slabState.config) {
+        try {
+          const walletPk = new PublicKey(walletPubkeyStr);
+          const collateralAta = await getAssociatedTokenAddress(
+            slabState.config.collateralMint,
+            walletPk,
+          );
+          const collateralAtaInfo = await connection.getAccountInfo(collateralAta);
+          if (collateralAtaInfo) {
+            userCollateralBalance = unpackAccount(collateralAta, collateralAtaInfo).amount;
+          }
+        } catch {
+          // ATA doesn't exist yet — user has 0 collateral available
+        }
+      }
+
+      // ─── LP Vault Registry (v17 "Earn" vault) ───────────────────────────────
+      // Separate on-chain account from the engine insuranceFund read above.
+      // Wrapped in its own try/catch so a failure here (registry not yet
+      // created, RPC hiccup, or an SDK without this export) never blocks the
+      // insuranceBalance/lpSupply/userLpBalance state already computed above.
+      let registryExists = false;
+      let registryAddress: PublicKey | null = null;
+      let vaultTotalAtoms = 0n;
+      let vaultSharePriceE6 = 1_000_000n;
+      let userVaultValueAtoms = 0n;
+      let redemptionCooldownSlots = 0n;
+      let hasPendingRedemption = false;
+      let pendingRedemptionShares = 0n;
+      let cooldownRemainingSlots = 0n;
+      let cooldownElapsed = true;
+
+      try {
+        if (registryInfo) {
+          registryAddress = registryInfo.registryPda;
+          const registryAcctInfo = await connection.getAccountInfo(registryInfo.registryPda);
+          if (registryAcctInfo && registryAcctInfo.data.length > 0) {
+            const registry = parseLpVaultRegistry(new Uint8Array(registryAcctInfo.data));
+            registryExists = true;
+            redemptionCooldownSlots = sanitizeOnChainValue(registry.redemptionCooldownSlots);
+
+            // Total backing = shares outstanding (minted 1:1 with deposited atoms)
+            // + cumulative fee atoms distributed into the vault since launch.
+            const shares = sanitizeOnChainValue(registry.totalLpSharesOutstanding);
+            const feeAtoms = sanitizeOnChainValue(registry.feeDistributionTotalAtoms);
+            vaultTotalAtoms = shares + feeAtoms;
+
+            // Use the freshly-read LP mint supply (lpSupply above) as the share-count
+            // denominator — it's read from the same mint as userLpBalance, so the two
+            // stay consistent with each other.
+            vaultSharePriceE6 = lpSupply > 0n
+              ? (vaultTotalAtoms * 1_000_000n) / lpSupply
+              : 1_000_000n;
+            userVaultValueAtoms = lpSupply > 0n
+              ? (userLpBalance * vaultTotalAtoms) / lpSupply
+              : 0n;
+
+            // Pending redemption ticket (RequestRedeemLpShares → cooldown → ExecuteRedemption).
+            if (registryInfo.redemptionPda) {
+              const redemptionAcctInfo = await connection.getAccountInfo(registryInfo.redemptionPda);
+              if (redemptionAcctInfo && redemptionAcctInfo.data.length > 0) {
+                const redemption = parseLpRedemption(new Uint8Array(redemptionAcctInfo.data));
+                hasPendingRedemption = true;
+                pendingRedemptionShares = sanitizeOnChainValue(redemption.shares);
+                const requestSlot = sanitizeOnChainValue(redemption.requestSlot);
+                if (redemptionCooldownSlots > 0n) {
+                  try {
+                    const currentSlot = BigInt(await connection.getSlot());
+                    const unlockSlot = requestSlot + redemptionCooldownSlots;
+                    if (currentSlot < unlockSlot) {
+                      cooldownElapsed = false;
+                      cooldownRemainingSlots = unlockSlot - currentSlot;
+                    }
+                  } catch {
+                    cooldownElapsed = false; // conservative: can't verify, block withdrawal
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (registryErr) {
+        // Registry not yet created, malformed, or RPC hiccup — leave the safe
+        // defaults above (0 / not-pending) rather than showing garbage.
+        console.error('Failed to refresh LP vault registry state:', registryErr);
+      }
+
       setState({
         insuranceBalance,
         lpSupply,
@@ -160,11 +312,22 @@ export function useInsuranceLP() {
         mintExists,
         lpMintAddress: mintExists ? lpMintInfo.mintPda : null,
         lpDecimals,
+        registryExists,
+        registryAddress,
+        userCollateralBalance,
+        vaultTotalAtoms,
+        vaultSharePriceE6,
+        userVaultValueAtoms,
+        redemptionCooldownSlots,
+        hasPendingRedemption,
+        pendingRedemptionShares,
+        cooldownRemainingSlots,
+        cooldownElapsed,
       });
     } catch (err) {
       console.error('Failed to refresh insurance LP state:', err);
     }
-  }, [slabState, lpMintInfo, connection, walletPubkeyStr]);
+  }, [slabState, lpMintInfo, registryInfo, connection, walletPubkeyStr]);
 
   // H3: Auto-refresh every 10s — use ref to avoid stale closure
   const refreshStateRef = useRef(refreshState);

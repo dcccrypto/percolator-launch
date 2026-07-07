@@ -28,8 +28,12 @@ export function useLiqPrice(): bigint | null {
     // neither source has it (e.g. a transferred-in position NFT) — the chart
     // correctly hides the line for null.
     const rawEntryPrice = account.entryPrice ?? 0n;
+    // The client-side entry is saved per-wallet (OrderTicket passes the connected
+    // wallet). Read it with the SAME wallet key (account.owner === the connected
+    // wallet) — omitting it hits the wallet-less legacy key and misses, so the
+    // chart's Liq line silently never drew for v17 positions.
     const entryPrice =
-      rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, realUserAccount.idx);
+      rawEntryPrice > 0n ? rawEntryPrice : getEntryPrice(slabAddress, realUserAccount.idx, account.owner.toBase58());
     if (entryPrice <= 0n) return null;
 
     const maintenanceBps = params?.maintenanceMarginBps ?? 500n;

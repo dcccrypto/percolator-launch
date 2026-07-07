@@ -143,6 +143,10 @@ export function computeMarketHealthFromStats(stats: {
     ?? ((stats.open_interest_long ?? 0) + (stats.open_interest_short ?? 0));
   const insuranceRaw = stats.insurance_balance ?? stats.insurance_fund ?? 0;
   const capitalRaw = stats.c_tot ?? stats.vault_balance ?? 0;
+  // v17 markets don't surface engine/LP capital (both c_tot and vault_balance are
+  // null). Distinguish that from a known-zero (drained) capital so we don't fabricate
+  // a "Low Liquidity" verdict purely from missing data — see the v17 branch below.
+  const capitalUnknown = stats.c_tot == null && stats.vault_balance == null;
 
   // Filter out sentinel-like numeric values (JS number precision of u64::MAX ≈ 1.844e19).
   // GH#1208: Use 5e17 cap — near-sentinel corrupted values like 7.997e17 also slip through.
@@ -173,6 +177,15 @@ export function computeMarketHealthFromStats(stats: {
   }
 
   if (oi === 0) {
+    return { level: "healthy", label: "Healthy", insuranceRatio: Infinity, capitalRatio: Infinity };
+  }
+
+  // v17: engine/LP capital is not surfaced in stats. On v17 the LP portfolio is the
+  // trade counterparty, so OI > 0 implies a funded LP by construction; the small group
+  // insurance reserve is a secondary backstop, not the liquidity signal. Grade a live
+  // v17 market as healthy rather than mis-reading the tiny reserve as "Low Liquidity".
+  // Oracle liveness (the real v17 risk signal) is enforced separately by the caller.
+  if (capitalUnknown) {
     return { level: "healthy", label: "Healthy", insuranceRatio: Infinity, capitalRatio: Infinity };
   }
 

@@ -5,9 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { SlabProvider, useSlabState } from '@/components/providers/SlabProvider';
-import { useStakePool } from '@/hooks/useStakePool';
-import { useStakeDeposit } from '@/hooks/useStakeDeposit';
-import { useStakeWithdraw } from '@/hooks/useStakeWithdraw';
+import { useInsuranceLP } from '@/hooks/useInsuranceLP';
 import { useEngineState } from '@/hooks/useEngineState';
 import { useEarnStats, type MarketVaultInfo } from '@/hooks/useEarnStats';
 import { useTokenMeta } from '@/hooks/useTokenMeta';
@@ -112,10 +110,19 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     document.title = 'Vault — Percolator';
   }, []);
 
-  // Get stake pool state for this market
-  const { state: poolState, loading: poolLoading, refreshState } = useStakePool();
-  const { deposit: stakeDeposit, loading: depositLoading } = useStakeDeposit();
-  const { withdraw: stakeWithdraw, loading: withdrawLoading } = useStakeWithdraw();
+  // LP Vault ("Earn") state for this market — v17 CreateLpVault/DepositToLpVault/
+  // RequestRedeemLpShares/ExecuteRedemption mechanism (wrapper program, tags 74-77).
+  // NOT the percolator-stake pool — that's a separate on-chain account backing the
+  // /stake page (see hooks/useStakePool.ts). Verified on-chain 2026-07-07: this
+  // market's LP Vault Registry holds the real ~10,000 Sim-USDC deposit; the stake
+  // pool for the same slab was drained to 0 by an earlier deposit+withdraw test.
+  const {
+    state: lpVaultState,
+    loading: lpVaultLoading,
+    deposit: lpVaultDeposit,
+    withdraw: lpVaultWithdraw,
+    refreshState,
+  } = useInsuranceLP();
   const { engine, totalOI, vault: engineVault } = useEngineState();
 
   // BUG-5 FIX: resolve actual collateral mint from on-chain slab data.
@@ -150,23 +157,23 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     return () => { cancelled = true; };
   }, [marketInfo, earnLoading, slabAddress]);
 
-  const loading = poolLoading || earnLoading;
+  const loading = lpVaultLoading || earnLoading;
 
   // Callbacks
   const handleDeposit = useCallback(
     async (amount: bigint) => {
-      await stakeDeposit(amount);
+      await lpVaultDeposit(amount);
       await refreshState();
     },
-    [stakeDeposit, refreshState],
+    [lpVaultDeposit, refreshState],
   );
 
   const handleWithdraw = useCallback(
     async (lpAmount: bigint) => {
-      await stakeWithdraw(lpAmount);
+      await lpVaultWithdraw(lpAmount);
       await refreshState();
     },
-    [stakeWithdraw, refreshState],
+    [lpVaultWithdraw, refreshState],
   );
 
   const symbol = marketInfo?.symbol ?? fallbackSymbol ?? 'UNKNOWN';
@@ -175,7 +182,9 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const currentOI = marketInfo?.totalOI ?? (totalOI ? Number(totalOI) / collDivisor : 0);
   const estimatedApy = marketInfo?.estimatedApyPct ?? 0;
   const collateralScale = Math.pow(10, collateralDecimals);
-  const vaultUsd = Number(poolState.vaultBalance) / collateralScale;
+  // TVL = the LP Vault Registry's own backing (shares + distributed fees), NOT the
+  // percolator-stake pool (poolState.vaultBalance, wrong account — see hook comment above).
+  const vaultUsd = Number(lpVaultState.vaultTotalAtoms) / collateralScale;
   const insuranceFund = marketInfo?.insuranceFund ?? 0;
 
   return (
@@ -197,7 +206,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
         </div>
 
         {/* Not Initialized Warning */}
-        {!loading && !poolState.poolExists && (
+        {!loading && !lpVaultState.registryExists && (
           <div className="mb-6 border border-[var(--warning)]/30 bg-[var(--warning)]/5 rounded-sm px-4 py-3">
             <p className="text-[12px] font-medium text-[var(--warning)]">
               ⚠ Vault Not Initialized
@@ -264,7 +273,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             </StatCell>
             <StatCell label="LP Supply" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
-                {formatCompact(Number(poolState.lpSupply) / collDivisor)}
+                {formatCompact(Number(lpVaultState.lpSupply) / collDivisor)}
               </span>
             </StatCell>
             <StatCell label="Open Interest" loading={loading}>
@@ -297,13 +306,13 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           {/* LP Position dashboard */}
           <ScrollReveal>
             <LpPositionDashboard
-              userLpBalance={poolState.userLpBalance}
-              lpSupply={poolState.lpSupply}
-              vaultBalance={poolState.vaultBalance}
+              userLpBalance={lpVaultState.userLpBalance}
+              lpSupply={lpVaultState.lpSupply}
+              vaultBalance={lpVaultState.vaultTotalAtoms}
               decimals={collateralDecimals}
               collateralSymbol={collateralSymbol}
               estimatedApyPct={estimatedApy}
-              redemptionRateE6={poolState.redemptionRateE6}
+              redemptionRateE6={lpVaultState.vaultSharePriceE6}
               loading={loading}
             />
           </ScrollReveal>
@@ -311,15 +320,15 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           {/* Deposit / Withdraw */}
           <ScrollReveal>
             <DepositWithdrawPanel
-              userBalance={poolState.userCollateralBalance}
-              userLpBalance={poolState.userLpBalance}
-              vaultBalance={poolState.vaultBalance}
-              lpSupply={poolState.lpSupply}
+              userBalance={lpVaultState.userCollateralBalance}
+              userLpBalance={lpVaultState.userLpBalance}
+              vaultBalance={lpVaultState.vaultTotalAtoms}
+              lpSupply={lpVaultState.lpSupply}
               decimals={collateralDecimals}
               collateralSymbol={collateralSymbol}
-              loading={loading || depositLoading || withdrawLoading}
-              cooldownElapsed={poolState.cooldownElapsed}
-              cooldownSlots={poolState.cooldownSlots}
+              loading={loading || lpVaultLoading}
+              cooldownElapsed={lpVaultState.cooldownElapsed}
+              cooldownSlots={lpVaultState.redemptionCooldownSlots}
               onDeposit={handleDeposit}
               onWithdraw={handleWithdraw}
             />
@@ -339,35 +348,30 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[12px]">
               <InfoRow label="Slab Address" value={slabAddress} mono />
               <InfoRow
-                label="Pool Address"
-                value={poolState.poolAddress?.toBase58() ?? '-'}
+                label="Vault Registry"
+                value={lpVaultState.registryAddress?.toBase58() ?? '-'}
                 mono
               />
               <InfoRow
                 label="Cooldown Period"
                 value={
-                  poolState.cooldownSlots > 0n
-                    ? `${poolState.cooldownSlots.toString()} slots (~${Math.round(
-                        Number(poolState.cooldownSlots) * 0.4,
+                  lpVaultState.redemptionCooldownSlots > 0n
+                    ? `${lpVaultState.redemptionCooldownSlots.toString()} slots (~${Math.round(
+                        Number(lpVaultState.redemptionCooldownSlots) * 0.4,
                       )}s)`
                     : 'None'
                 }
               />
-              <InfoRow
-                label="Deposit Cap"
-                value={
-                  poolState.depositCap > 0n
-                    ? `${formatCompact(Number(poolState.depositCap) / collateralScale)} ${collateralSymbol}`
-                    : 'Unlimited'
-                }
-              />
+              {/* LP Vault Registry has no deposit-cap field (unlike the /stake pools) —
+                  it's bounded indirectly via oiReservationThresholdBps, not a hard cap. */}
+              <InfoRow label="Deposit Cap" value="Unlimited" />
               <InfoRow
                 label="Trading Fee"
                 value={`${(marketInfo?.tradingFeeBps ?? 10) / 100}%`}
               />
               <InfoRow
                 label="Pool Status"
-                value={poolState.poolExists ? 'Active' : 'Not Initialized'}
+                value={lpVaultState.registryExists ? 'Active' : 'Not Initialized'}
               />
             </div>
           </div>

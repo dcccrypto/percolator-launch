@@ -1,10 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getBackendUrl } from '@/lib/config';
+import { Connection, PublicKey } from '@solana/web3.js';
+import { deriveLpVaultRegistry, parseLpVaultRegistry } from '@percolatorct/sdk';
+import { getBackendUrl, getConfig, getRpcEndpoint } from '@/lib/config';
 import { getSupabase } from '@/lib/supabase';
 import { isMockMode } from '@/lib/mock-mode';
 import { isBlockedSlab } from '@/lib/blocklist';
+import { sanitizeOnChainValue } from '@/lib/health';
+import { PLAYGROUND_SLAB_META } from '@/lib/playground-slab-meta';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -157,6 +161,139 @@ function generateMockStats(): EarnStats {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Curated playground markets — on-chain LP Vault Registry TVL
+// ═══════════════════════════════════════════════════════════════
+
+/** Sim-USDC collateral decimals — the single collateral token shared by all 5 curated markets. */
+const CURATED_COLLATERAL_DECIMALS = 6;
+
+interface CuratedVaultOnChain {
+  /** Total atoms backing the LP vault (shares outstanding + distributed fee atoms). */
+  tvlAtoms: bigint;
+  /** Redemption cooldown period from the registry, in slots. */
+  cooldownSlots: bigint;
+}
+
+/**
+ * Read the LP Vault Registry for each of the 5 curated PLAYGROUND_SLAB_META markets
+ * directly on-chain (batched via getMultipleAccountsInfo) and return each vault's
+ * real backing (`totalLpSharesOutstanding + feeDistributionTotalAtoms`).
+ *
+ * This is the single source of truth for Earn-page TVL — NOT Supabase's
+ * `markets_with_stats.vault_balance`, which mirrors the market's shared engine
+ * vault (LP portfolio inventory + trader margin + LP-vault deposits all
+ * commingled — verified on-chain 2026-07-07: SOL's shared vault held 91,000
+ * Sim-USDC while its LP Vault Registry backed only the real ~10,000 deposit).
+ *
+ * Never throws — on any failure (RPC hiccup, registry not yet created, SDK
+ * mismatch) the affected slab(s) default to `{ tvlAtoms: 0n, cooldownSlots: 0n }`
+ * rather than surfacing garbage.
+ */
+async function fetchCuratedVaultsOnChain(): Promise<Record<string, CuratedVaultOnChain>> {
+  const slabs = Object.keys(PLAYGROUND_SLAB_META);
+  const result: Record<string, CuratedVaultOnChain> = {};
+  for (const slab of slabs) result[slab] = { tvlAtoms: 0n, cooldownSlots: 0n };
+
+  try {
+    const programId = new PublicKey(getConfig().programId);
+    const connection = new Connection(getRpcEndpoint(), 'confirmed');
+    const registryPdas = slabs.map(
+      (slab) => deriveLpVaultRegistry(programId, new PublicKey(slab))[0],
+    );
+    const infos = await connection.getMultipleAccountsInfo(registryPdas);
+
+    slabs.forEach((slab, i) => {
+      const info = infos[i];
+      if (!info || info.data.length === 0) return;
+      try {
+        const registry = parseLpVaultRegistry(new Uint8Array(info.data));
+        const shares = sanitizeOnChainValue(registry.totalLpSharesOutstanding);
+        const feeAtoms = sanitizeOnChainValue(registry.feeDistributionTotalAtoms);
+        result[slab] = {
+          tvlAtoms: shares + feeAtoms,
+          cooldownSlots: sanitizeOnChainValue(registry.redemptionCooldownSlots),
+        };
+      } catch {
+        // Malformed/unrecognized account for this slab — leave the 0n default.
+      }
+    });
+  } catch (err) {
+    console.error('[useEarnStats] Failed to fetch curated LP vault registries on-chain:', err);
+  }
+
+  return result;
+}
+
+/**
+ * Build the 5 curated markets' MarketVaultInfo, seeded from PLAYGROUND_SLAB_META
+ * (always present, so all 5 always render) and enriched with:
+ *  - TVL from the on-chain LP Vault Registry (`curatedVaults`) — always accurate.
+ *  - Cosmetic stats (volume/insurance/OI/leverage/fees) from Supabase when a row
+ *    exists for that slab, else sane defaults (0 / typical playground values).
+ *
+ * This never falls back to fabricated mock markets — if Supabase has no data for
+ * a curated slab, it still renders with real on-chain TVL and zeroed cosmetics,
+ * which is strictly more accurate than showing an unrelated fake market.
+ */
+function buildCuratedMarkets(
+  curatedVaults: Record<string, CuratedVaultOnChain>,
+  supabaseBySlab: Map<string, Record<string, unknown>>,
+): MarketVaultInfo[] {
+  const isSentinel = (v: number) => v > 1e18;
+
+  return Object.entries(PLAYGROUND_SLAB_META)
+    .filter(([slab]) => !isBlockedSlab(slab))
+    .map(([slab, meta]) => {
+      const row = supabaseBySlab.get(slab);
+      const decimals = CURATED_COLLATERAL_DECIMALS;
+      const collDivisor = 10 ** decimals;
+
+      const vaultAtoms = curatedVaults[slab]?.tvlAtoms ?? 0n;
+      const vaultBalance = Number(vaultAtoms); // atoms — matches MarketVaultInfo.vaultBalance convention
+      const vaultUsd = vaultBalance / collDivisor;
+
+      const oiLongRaw = Number(row?.open_interest_long ?? 0);
+      const oiShortRaw = Number(row?.open_interest_short ?? 0);
+      const totalOIRaw = Number(row?.total_open_interest ?? oiLongRaw + oiShortRaw);
+      const totalOI = isSentinel(totalOIRaw) ? 0 : totalOIRaw / collDivisor;
+
+      const maxLeverage = Number(row?.max_leverage) || 10;
+      const tradingFeeBpsRaw = Number(row?.trading_fee_bps ?? 10);
+      const tradingFeeBps = tradingFeeBpsRaw > 5_000 ? 0 : tradingFeeBpsRaw;
+
+      const volume24hRaw = Number(row?.volume_24h ?? 0);
+      const volume24h = isSentinel(volume24hRaw) ? 0 : volume24hRaw / collDivisor;
+
+      const insuranceRaw = Number(row?.insurance_fund ?? 0);
+      const insuranceFund = insuranceRaw > 0 && insuranceRaw < 1e13 ? insuranceRaw : 0;
+
+      const rawMaxOI = vaultUsd * maxLeverage;
+      const maxOI = Math.max(rawMaxOI, totalOI);
+      const oiUtilPct = maxOI > 0 ? Math.min((totalOI / maxOI) * 100, 100) : 0;
+
+      const dailyFees = (volume24h * tradingFeeBps) / 10_000;
+      const annualFees = dailyFees * 365;
+      const estimatedApyPct = vaultUsd > 0 ? Math.min((annualFees / vaultUsd) * 100, 999) : 0;
+
+      return {
+        slabAddress: slab,
+        symbol: meta.symbol,
+        name: meta.name,
+        vaultBalance,
+        totalOI,
+        maxOI,
+        insuranceFund,
+        volume24h,
+        tradingFeeBps,
+        maxLeverage,
+        estimatedApyPct,
+        oiUtilPct,
+        decimals,
+      } satisfies MarketVaultInfo;
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Hook
 // ═══════════════════════════════════════════════════════════════
 
@@ -174,102 +311,37 @@ export function useEarnStats() {
     }
 
     try {
-      let supabase: ReturnType<typeof getSupabase>;
+      // On-chain LP Vault Registry TVL is the accuracy-critical piece — fetch it
+      // unconditionally, independent of Supabase's availability. This is what
+      // keeps the Earn list restricted to (and accurate for) the 5 curated
+      // playground markets even when the indexer/DB has no rows for them yet
+      // (verified 2026-07-07: this local environment's Supabase credentials are
+      // blank, which previously caused this hook to render 4 fabricated mock
+      // markets instead of the 5 real curated ones).
+      const curatedVaults = await fetchCuratedVaultsOnChain();
+
+      // Supabase is optional enrichment only (name/volume/OI/insurance/leverage)
+      // — never a hard requirement for the curated market list or its TVL.
+      let supabaseBySlab = new Map<string, Record<string, unknown>>();
       try {
-        supabase = getSupabase();
+        const supabase = getSupabase();
+        const { data, error: dbError } = await supabase
+          .from('markets_with_stats')
+          .select('*');
+        if (!dbError && data) {
+          supabaseBySlab = new Map(
+            data
+              .filter((m) => !!m.slab_address)
+              .map((m) => [m.slab_address as string, m as Record<string, unknown>]),
+          );
+        }
       } catch {
-        // No Supabase — use mock data
-        setStats(generateMockStats());
-        setLoading(false);
-        return;
+        // No Supabase configured, or the query failed — enrichment degrades to
+        // defaults (0 volume/OI/insurance, typical fee/leverage), same spirit as
+        // PLAYGROUND.md's "external indexer is optional" guarantee elsewhere.
       }
 
-      const { data, error: dbError } = await supabase
-        .from('markets_with_stats')
-        .select('*');
-
-      if (dbError) {
-        throw new Error(dbError.message);
-      }
-
-      if (!data || data.length === 0) {
-        // No markets — show mock
-        setStats(generateMockStats());
-        setLoading(false);
-        return;
-      }
-
-      const markets: MarketVaultInfo[] = data
-        // Skip blocked/stale slabs — excluded from /api/markets but visible to anon client.
-        .filter((m) => !isBlockedSlab(m.slab_address))
-        .filter((m) => m.status === 'active' || m.status === 'Active')
-        .map((m) => {
-          const oiLongRaw = m.open_interest_long ?? 0;
-          const oiShortRaw = m.open_interest_short ?? 0;
-          const totalOIRaw = m.total_open_interest ?? oiLongRaw + oiShortRaw;
-          // Sentinel filter: u64::MAX (≈1.84e19) leaks from uninitialized on-chain fields.
-          // Any value above 1e18 is garbage — treat as 0.
-          const isSentinel = (v: number) => v > 1e18;
-          const collDecimals = m.decimals ?? 6;
-          const collDivisor = 10 ** collDecimals;
-          // OI values are stored in collateral micro-units — convert to human units
-          const totalOI = isSentinel(totalOIRaw) ? 0 : totalOIRaw / collDivisor;
-          const maxLeverage = m.max_leverage || 10;
-          // Fix GH#1204: use vault_balance (actual on-chain deposits) not lp_collateral
-          // (bootstrap config constant). lp_collateral = 10^11 for NNOB-PERP at 6 decimals
-          // = $100K TVL even when vault has zero actual deposits.
-          const vaultBalanceRaw = m.vault_balance ?? 0;
-          // Two-stage filter for vault_balance:
-          // 1. Sentinel guard: u64::MAX (>1e18) leaks from uninitialized on-chain fields.
-          // 2. USD cap: compute human-readable amount and reject if > $10M per vault.
-          //    Without this, a corrupt value at 6 decimals could produce wildly inflated TVL.
-          const MAX_VAULT_USD = 10_000_000; // $10M per vault — generous devnet ceiling
-          const vaultBalanceHuman = isSentinel(vaultBalanceRaw) ? Infinity : vaultBalanceRaw / collDivisor;
-          const vaultBalance = vaultBalanceHuman > MAX_VAULT_USD ? 0 : vaultBalanceRaw;
-          const tradingFeeBpsRaw = m.trading_fee_bps ?? 10;
-          const tradingFeeBps = tradingFeeBpsRaw > 5_000 ? 0 : tradingFeeBpsRaw;
-          const volume24hRaw = m.volume_24h ?? 0;
-          // Normalize to human-readable collateral units (same as totalOI).
-          // volume_24h is stored as raw on-chain micro-units — divide by collDivisor
-          // before using in APY calculation or display. Without this, a $100K USDC
-          // market would show "$100B" volume and ~73,000,000% APY.
-          const volume24h = isSentinel(volume24hRaw) ? 0 : volume24hRaw / collDivisor;
-          const insuranceRaw = m.insurance_fund ?? 0;
-          // Sanity cap: insurance_fund values > 10 billion USDC micro-units ($10M)
-          // are corrupt data from bad slab tier detection — clamp to 0
-          const insurance = insuranceRaw < 1e13 ? insuranceRaw : 0;
-
-          // Max OI = vault collateral × max leverage (simplified)
-          const vaultUsd = vaultBalance / collDivisor;
-          const rawMaxOI = vaultUsd * maxLeverage;
-          // GH#1231: on devnet, vault deposits can be tiny while accumulated OI is large.
-          // Clamp displayMaxOI so it is never less than totalOI — prevents confusing
-          // "Max: $343" display when Current OI is already $57K.
-          const maxOI = Math.max(rawMaxOI, totalOI);
-          const oiUtilPct = maxOI > 0 ? (totalOI / maxOI) * 100 : 0;
-
-          // Estimated APY: (daily fees × 365) / TVL × 100
-          const dailyFees = (volume24h * tradingFeeBps) / 10_000;
-          const annualFees = dailyFees * 365;
-          const estimatedApyPct =
-            vaultUsd > 0 ? (annualFees / vaultUsd) * 100 : 0;
-
-          return {
-            slabAddress: m.slab_address ?? '',
-            symbol: m.symbol ?? 'UNKNOWN',
-            name: m.name ?? m.symbol ?? 'Unknown',
-            vaultBalance,
-            totalOI,
-            maxOI,
-            insuranceFund: insurance,
-            volume24h,
-            tradingFeeBps,
-            maxLeverage,
-            estimatedApyPct: Math.min(estimatedApyPct, 999), // cap display
-            oiUtilPct: Math.min(oiUtilPct, 100),
-            decimals: collDecimals,
-          };
-        });
+      const markets = buildCuratedMarkets(curatedVaults, supabaseBySlab);
 
       const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
       const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
@@ -300,8 +372,12 @@ export function useEarnStats() {
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load earn stats');
-      // Fall back to mock data on error
-      setStats(generateMockStats());
+      // Total failure (e.g. RPC unreachable) — still show the 5 curated markets
+      // with zeroed stats rather than fabricated mock ones.
+      setStats((prev) => ({
+        ...prev,
+        markets: buildCuratedMarkets({}, new Map()),
+      }));
     } finally {
       setLoading(false);
     }

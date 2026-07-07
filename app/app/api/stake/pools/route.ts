@@ -12,7 +12,8 @@ import { NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getRpcEndpoint } from "@/lib/config";
-import { getStakeProgramId } from "@percolatorct/sdk";
+import { getStakeProgramId, deriveStakePool } from "@percolatorct/sdk";
+import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import * as Sentry from "@sentry/nextjs";
 
 // ── APR helpers ───────────────────────────────────────────────────────────────
@@ -331,12 +332,13 @@ function calcPoolValue(p: ParsedStakePool): bigint {
 export async function GET() {
   try {
     // Resolve stake program: devnet v17 vault program, else mainnet stake program.
+    const net = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
+    const isDevnet = net === "devnet";
     let stakeProgramId: PublicKey;
     try {
-      const net = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim();
       // v17 devnet: stake/vault program is 51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ
       // mainnet: DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F
-      const programIdStr = net === "devnet"
+      const programIdStr = isDevnet
         ? (process.env.STAKE_PROGRAM_ID ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ")
         : "DC5fovFQD5SZYsetwvEqd4Wi4PFY1Yfnc669VMe6oa7F";
       stakeProgramId = new PublicKey(programIdStr);
@@ -366,10 +368,28 @@ export async function GET() {
       if (pool) allParsed.push({ pubkey: pubkey.toBase58(), pool });
     }
 
+    // 2a. Playground devnet: restrict to the 5 curated markets' stake pools.
+    // getProgramAccounts(dataSize=352) returns EVERY StakePool this program owns,
+    // which on a shared devnet deployment includes pools from older/unrelated test
+    // markets. Derive the expected pool PDA for each PLAYGROUND_SLAB_META slab
+    // (not read from account data — the PDA derivation itself is the trust anchor)
+    // and intersect by pool address, so only known-good curated pools ever render.
+    // Mainnet has no curated-list concept, so this only applies on devnet.
+    const curatedFiltered = isDevnet
+      ? (() => {
+          const curatedPoolAddresses = new Set(
+            Object.keys(PLAYGROUND_SLAB_META).map((slab) =>
+              deriveStakePool(new PublicKey(slab), stakeProgramId)[0].toBase58()
+            )
+          );
+          return allParsed.filter((p) => curatedPoolAddresses.has(p.pubkey));
+        })()
+      : allParsed;
+
     // 2b. Filter out orphan pools whose slab no longer exists on-chain
-    const slabKeys = allParsed.map(p => new PublicKey(p.pool.slab));
+    const slabKeys = curatedFiltered.map(p => new PublicKey(p.pool.slab));
     const slabInfos = await connection.getMultipleAccountsInfo(slabKeys);
-    const parsed = allParsed.filter((_, i) => slabInfos[i] !== null);
+    const parsed = curatedFiltered.filter((_, i) => slabInfos[i] !== null);
 
     // 3. Fetch vault token balances (SPL token amount in each vault)
     const vaultAddresses = parsed.map((p) => p.pool.vault);

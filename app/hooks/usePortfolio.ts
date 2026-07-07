@@ -167,7 +167,7 @@ function buildV17Position(
     pendingCreatedSlot: null,
   } as Account;
 
-  const effectiveEntryPrice = getEntryPrice(slabAddrStr, 0);
+  const effectiveEntryPrice = getEntryPrice(slabAddrStr, 0, portfolio.owner.toBase58());
   const liquidationPriceE6 = computeLiqPrice(
     effectiveEntryPrice,
     account.capital,
@@ -436,7 +436,7 @@ export function usePortfolio(): PortfolioData {
                   // localStorage (saved by TradeForm at trade time) so portfolio PnL
                   // and liq-price compute correctly instead of showing 0/—.
                   const effectiveEntryPrice =
-                    account.entryPrice > 0n ? account.entryPrice : getEntryPrice(slabAddrStr, idx);
+                    account.entryPrice > 0n ? account.entryPrice : getEntryPrice(slabAddrStr, idx, account.owner.toBase58());
 
                   // Compute liquidation price
                   const liquidationPriceE6 = computeLiqPrice(
