@@ -67,7 +67,11 @@ export async function readRegisteredMarkets(): Promise<RegisteredMarket[]> {
     const found = blobs.find((b) => b.pathname === REGISTERED_MARKETS_BLOB_PATHNAME);
     if (!found) return [];
 
-    const resp = await fetch(found.url, { cache: "no-store" });
+    // Cache-bust: the public blob is served via a CDN that caches by pathname, so a
+    // plain fetch (even `no-store`) can return a stale copy — which would silently
+    // drop registrations in the read-modify-write upsert and hide markets from the
+    // keeper. A unique query forces a fresh origin read every time.
+    const resp = await fetch(`${found.url}?ts=${Date.now()}`, { cache: "no-store" });
     if (!resp.ok) {
       console.warn(
         `[playground-registered-markets] blob fetch ${resp.status} — treating as empty`,
@@ -101,6 +105,8 @@ export async function writeRegisteredMarkets(
     // registry blob. Without this, only the first-ever registration succeeds and
     // every subsequent one 502s ("blob already exists").
     allowOverwrite: true,
+    // This blob mutates on every registration — don't let the CDN serve a stale copy.
+    cacheControlMaxAge: 0,
   });
 }
 
