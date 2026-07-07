@@ -753,51 +753,52 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
         {maxLeverage > 1 ? (
           <>
-            <input
-              type="range"
-              min={1}
-              max={maxLeverage}
-              step={1}
-              value={leverage}
-              onChange={(e) => {
-                const raw = Number(e.target.value);
-                // Magnetic snap: if within half the smallest inter-point gap, snap
-                const nearest = availableLeverage.reduce((best, v) =>
-                  Math.abs(v - raw) < Math.abs(best - raw) ? v : best, raw);
-                const snapRadius = availableLeverage.length > 1
-                  ? Math.floor(Math.min(...availableLeverage.slice(1).map((v, i) => v - availableLeverage[i])) / 2)
-                  : 0;
-                updateLeverage(Math.abs(nearest - raw) <= snapRadius ? nearest : raw);
-              }}
-              className="leverage-slider w-full cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, var(--accent) ${
-                  maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 0
-                }%, var(--border) ${
-                  maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 0
-                }%)`,
-              }}
-              aria-label="Leverage"
-            />
-            {/* Snap-point labels — uniformly spaced reference */}
-            <div className="mt-1 flex justify-between">
-              {availableLeverage.map((l) => (
-                <button
-                  key={l}
-                  type="button"
-                  onClick={() => updateLeverage(l)}
-                  className={`text-[8px] font-mono transition-colors duration-100 ${
-                    leverage === l
-                      ? "text-[var(--accent)] font-bold"
-                      : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
-                  }`}
-                >
-                  {l}x
-                </button>
-              ))}
-            </div>
+            {(() => {
+              const n = availableLeverage.length;
+              // Find closest snap index to current leverage (for when text input sets a between-point value)
+              const snapIdx = availableLeverage.reduce(
+                (best, v, i) => Math.abs(v - leverage) < Math.abs(availableLeverage[best] - leverage) ? i : best,
+                0,
+              );
+              const fillPct = n > 1 ? (snapIdx / (n - 1)) * 100 : 0;
+              return (
+                <>
+                  <input
+                    type="range"
+                    min={0}
+                    max={n - 1}
+                    step={1}
+                    value={snapIdx}
+                    onChange={(e) => updateLeverage(availableLeverage[Number(e.target.value)])}
+                    className="leverage-slider w-full cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, var(--accent) ${fillPct}%, var(--border) ${fillPct}%)`,
+                    }}
+                    aria-label="Leverage"
+                  />
+                  {/* Labels uniformly spaced — one per snap point, aligns with slider steps */}
+                  <div className="mt-1 flex justify-between">
+                    {availableLeverage.map((l) => (
+                      <button
+                        key={l}
+                        type="button"
+                        onClick={() => updateLeverage(l)}
+                        className={`text-[8px] font-mono transition-colors duration-100 ${
+                          leverage === l
+                            ? "text-[var(--accent)] font-bold"
+                            : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
+                        }`}
+                      >
+                        {l}x
+                      </button>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
           </>
         ) : (
+
           <p className="text-[9px] text-[var(--text-dim)] font-mono">{maxLeverage}x (fixed)</p>
         )}
       </div>
