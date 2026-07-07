@@ -62,7 +62,7 @@ import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-pric
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 
-const LEVERAGE_SNAP_POINTS = [1, 2, 5, 10, 20];
+const LEVERAGE_SNAP_POINTS = [1, 3, 5, 10, 20];
 const SIZE_PRESETS = [25, 50, 75, 100];
 const MAX_DISPLAY_LEVERAGE = 200;
 
