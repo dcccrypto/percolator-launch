@@ -97,6 +97,10 @@ export async function writeRegisteredMarkets(
     access: "public",
     addRandomSuffix: false,
     contentType: "application/json",
+    // Fixed pathname + upsert semantics: every registration overwrites the single
+    // registry blob. Without this, only the first-ever registration succeeds and
+    // every subsequent one 502s ("blob already exists").
+    allowOverwrite: true,
   });
 }
 
