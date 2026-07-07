@@ -1,13 +1,16 @@
 "use client";
 
-import { FC, useEffect, useRef, useState } from "react";
+import { FC, useMemo } from "react";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useMarketInfo } from "@/hooks/useMarketInfo";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { useSlabState } from "@/components/providers/SlabProvider";
+import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { MarketLogo } from "@/components/market/MarketLogo";
 import { MarketSwitcher } from "@/components/trade/MarketSwitcher";
 import { formatUsdFromNumber, formatMarkPrice } from "@/lib/format";
+import { computeMarketSpread } from "@/lib/oraclePrice";
 
 interface MarketInfoBarProps {
   slabAddress: string;
@@ -66,30 +69,15 @@ function MarketHealthBadge({ oracleDown, vaultEmpty }: { oracleDown: boolean; va
 
 /**
  * Header mark price with a subtle up/down tick flash — the classic perp-DEX
- * micro-interaction. On each price change we compare the new priceE6 against
- * the previous one and briefly tint the text long-green (up) or short-red
- * (down), easing back to the neutral resting color over ~300ms. The resting
- * color is neutral so the semantic long/short flash reads clearly (the 24h
- * direction is carried by the change badge, not this number). No layout shift.
+ * micro-interaction, easing back to the neutral resting color over ~300ms
+ * via `usePriceFlash` (extracted here originally; now shared with
+ * PositionsDock/MarketBookCard — see that hook for the single source of
+ * truth). The resting color is neutral so the semantic long/short flash
+ * reads clearly (the 24h direction is carried by the change badge, not this
+ * number). No layout shift.
  */
 function MarkPrice({ priceUsd, priceE6 }: { priceUsd: number | null; priceE6: bigint | null }) {
-  const prevE6 = useRef<bigint | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [flash, setFlash] = useState<"up" | "down" | null>(null);
-
-  useEffect(() => {
-    if (priceE6 == null) return;
-    const prev = prevE6.current;
-    if (prev != null && priceE6 !== prev) {
-      setFlash(priceE6 > prev ? "up" : "down");
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setFlash(null), 300);
-    }
-    prevE6.current = priceE6;
-  }, [priceE6]);
-
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
+  const flash = usePriceFlash(priceE6);
   const flashColor =
     flash === "up" ? "text-[var(--long)]" : flash === "down" ? "text-[var(--short)]" : "text-[var(--text)]";
 
@@ -108,12 +96,23 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   const { market } = useMarketInfo(slabAddress);
   const { fundingRate, engine, totalOI, insuranceBalance, hasData: engineHasData } = useEngineState();
   const { level: oracleLevel } = useOracleFreshness();
+  const { config: mktConfig, wrapperConfigV17 } = useSlabState();
 
   const change24hDisplay = change24h ?? 0;
   const isUp = change24hDisplay >= 0;
 
   const funding8h = fundingRate != null ? fundingRateBpsTo8h(fundingRate) : null;
   const fundingColor = funding8h != null ? (funding8h < 0 ? "text-[var(--warning)]" : "text-[var(--long)]") : "text-[var(--text)]";
+
+  // Mark/index spread — same math as MarketStatsCard (lib/oraclePrice.ts). Hidden for
+  // pyth-pinned markets where mark === index by definition (no separate oracle to diverge).
+  const { spreadBps, oracleMode: spreadOracleMode } = useMemo(
+    () => computeMarketSpread(mktConfig, wrapperConfigV17?.oracleMode),
+    [mktConfig, wrapperConfigV17],
+  );
+  const showSpread = spreadOracleMode !== null && spreadOracleMode !== "pyth-pinned" && spreadBps !== null;
+  // Amber past 50bps — matches MarketStatsCard's "wide spread" threshold.
+  const spreadColor = showSpread && Math.abs(spreadBps!) > 50 ? "text-[var(--warning)]" : "text-[var(--text)]";
 
   // P3-3: oracle + vault status for health badge
   // oracleDown = unavailable (never cranked) or stale — oracleReady && unavailable is
@@ -223,6 +222,16 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
             {formatUsdFromNumber(low24h)}
           </span>
         </div>
+
+        {/* Mark/Index spread — hidden for pyth-pinned markets (mark === index there) */}
+        {showSpread && (
+          <div className="flex flex-col shrink-0">
+            <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-dim)]">Spread</span>
+            <span className={`text-xs font-medium ${spreadColor}`} style={{ fontFamily: "var(--font-mono)" }}>
+              {spreadBps! >= 0 ? "+" : ""}{(spreadBps! / 100).toFixed(2)}%
+            </span>
+          </div>
+        )}
 
         {/* Funding Rate — P3-6: pr-2 padding prevents right-edge clipping */}
         {funding8h != null && (

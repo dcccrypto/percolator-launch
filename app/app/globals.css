@@ -320,6 +320,20 @@ body::before {
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
+/* Order-submit failure feedback (OrderTicket) — brief horizontal shake tied
+   to the --short semantic token, same restrained timing family as the
+   MarkPrice tick-flash (300ms). Not decorative: communicates "this action
+   failed" the instant the submit button reverts from "Submitting…". */
+.animate-error-shake {
+  animation: error-shake var(--timing-normal, 300ms) ease-in-out;
+}
+
+@keyframes error-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
 /* ponytail: explicit class bypasses tailwind v4 @theme compilation bug */
 .animate-shimmer-sweep {
   animation: shimmer-sweep 1.6s linear infinite !important;
@@ -556,6 +570,16 @@ input[type="range"].leverage-slider::-moz-range-track {
   height: 4px;
   border-radius: 2px;
   background: var(--border);
+}
+/* Keyboard focus ring — without this, the unconditional thumb rules above
+   (same specificity, later in source order) silently win over the generic
+   `input[type="range"]:focus-visible::-webkit-slider-thumb` rule further up
+   this file, so Tab-focusing the slider produced no visible ring at all. */
+input[type="range"].leverage-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px rgba(153, 69, 255, 0.35);
+}
+input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px rgba(153, 69, 255, 0.35);
 }
 
 /* ─── Scrollbar ─── */

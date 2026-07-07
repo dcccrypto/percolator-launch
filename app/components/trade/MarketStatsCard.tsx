@@ -9,7 +9,7 @@ import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { formatTokenAmount, formatCompactTokenAmount, formatUsd, formatUsdPriceE6, formatBps } from "@/lib/format";
 import { sanitizeOnChainValue, sanitizeAccountCount, sanitizeBps, sanitizeFundingRateBps } from "@/lib/health";
 import { useLivePrice } from "@/hooks/useLivePrice";
-import { resolveMarketPriceE6, sanitizePriceE6, detectOracleMode } from "@/lib/oraclePrice";
+import { resolveMarketPriceE6, computeMarketSpread } from "@/lib/oraclePrice";
 import { FundingRateCard } from "./FundingRateCard";
 import { FundingRateChart } from "./FundingRateChart";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
@@ -21,12 +21,6 @@ function formatNum(n: number): string {
   if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
-
-// Max sane on-chain mark price: $1M USD (matches markets page cap). Values above this
-// indicate corrupted/stale authorityPriceE6 data (e.g. raw token amounts stored as price).
-// When exceeded, fall back to live WebSocket price (#1131).
-const MAX_SANE_MARK_PRICE_USD = 1_000_000; // $1M
-const MAX_SANE_MARK_E6 = BigInt(MAX_SANE_MARK_PRICE_USD) * 1_000_000n;
 
 /**
  * Convert fundingRateBpsPerSlotLast (i64) to 8-hour percentage.
@@ -56,43 +50,11 @@ export const MarketStatsCard: FC = () => {
   const [showFundingChart, setShowFundingChart] = useState(false);
 
   // ─── Mark / Index / Spread ────────────────────────────────────────────────
-  const { markPriceE6, indexPriceE6, spreadBps, oracleMode } = useMemo(() => {
-    if (!mktConfig) return { markPriceE6: null, indexPriceE6: null, spreadBps: null, oracleMode: null };
-
-    const mode = detectOracleMode({ ...mktConfig, oracleModeByte: wrapperConfigV17?.oracleMode });
-    let mark: bigint | null = null;
-    let index: bigint | null = null;
-
-    if (mode === "hyperp" || mode === "admin" || mode === "keeper") {
-      // authorityPriceE6 = latest pushed/mark price
-      // lastEffectivePriceE6 = EMA / effective / index price
-      const rawMark = sanitizePriceE6(mktConfig.authorityPriceE6);
-      // Bug #1131: for HYPERP/admin markets, authorityPriceE6 can be corrupted (e.g. raw token
-      // vault amounts stored as price). Guard: reject if price > $1M — use live WS price instead.
-      mark = rawMark > 0n && rawMark <= MAX_SANE_MARK_E6 ? rawMark : null;
-      index = sanitizePriceE6(mktConfig.lastEffectivePriceE6);
-      if (index === 0n) index = null;
-      // Bug #843: for admin mode, lastEffectivePriceE6 may be uninitialized (e.g. 1000 = $0.001)
-      // when KeeperCrank hasn't run yet. If index is >100x smaller than mark, suppress it
-      // to avoid nonsensical spread display (e.g. +200,000,000%).
-      if (mode === "admin" && mark !== null && index !== null && index > 0n) {
-        const ratio = Number(mark) / Number(index);
-        if (ratio > 100) index = null;
-      }
-    } else {
-      // pyth-pinned: mark ≈ index (Pyth IS the oracle — no separate mark/index distinction)
-      const p = sanitizePriceE6(mktConfig.lastEffectivePriceE6);
-      mark = p > 0n ? p : null;
-      index = mark;
-    }
-
-    let bps: number | null = null;
-    if (mark !== null && index !== null && index > 0n) {
-      bps = (Number(mark - index) / Number(index)) * 10000;
-    }
-
-    return { markPriceE6: mark, indexPriceE6: index, spreadBps: bps, oracleMode: mode };
-  }, [mktConfig, wrapperConfigV17]);
+  // Shared with MarketInfoBar's top-bar spread stat — see lib/oraclePrice.ts.
+  const { markPriceE6, indexPriceE6, spreadBps, oracleMode } = useMemo(
+    () => computeMarketSpread(mktConfig, wrapperConfigV17?.oracleMode),
+    [mktConfig, wrapperConfigV17],
+  );
 
   // ─── Funding Rate ──────────────────────────────────────────────────────────
   // sanitizeFundingRateBps guards against garbage on-chain values (e.g. wrong
