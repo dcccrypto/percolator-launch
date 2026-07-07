@@ -43,7 +43,9 @@
  */
 import { WebSocketServer, WebSocket } from "ws";
 
-const PORT = Number(process.env.PRICE_WS_PORT ?? 8787);
+// Railway (and most PaaS) inject PORT and route the public domain to it, so
+// prefer it; PRICE_WS_PORT is the local-dev override; 8787 is the local default.
+const PORT = Number(process.env.PORT ?? process.env.PRICE_WS_PORT ?? 8787);
 // The DISPLAY price streams from Pyth Hermes — a CEX-aggregate median oracle,
 // the SAME KIND of continuous feed Hyperliquid / Drift show as their index price
 // (~2-3 updates/sec). A single mainnet DEX pool's spot only moves on swaps
