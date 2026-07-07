@@ -521,6 +521,31 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     slippageBoundE6 = 0n;
   }
 
+  // Dispatch pending TP/SL price projections to TradingChart
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    if (!hasOrder || !priceUsd || priceUsd <= 0 || leverage <= 0) {
+      window.dispatchEvent(new CustomEvent("percolator-pending-tpsl", {
+        detail: { hasOrder: false, tp50: null, tp100: null, sl25: null, sl50: null }
+      }));
+      return;
+    }
+
+    const entryNum = Number(estEntry) / 1e6;
+    
+    // Math formulas:
+    // TP +50%: targetExitPrice = entryNum * (1 + 0.5 / leverage)
+    const tp50 = direction === "long" ? entryNum * (1 + 0.5 / leverage) : entryNum * (1 - 0.5 / leverage);
+    const tp100 = direction === "long" ? entryNum * (1 + 1.0 / leverage) : entryNum * (1 - 1.0 / leverage);
+    const sl25 = direction === "long" ? entryNum * (1 - 0.25 / leverage) : entryNum * (1 + 0.25 / leverage);
+    const sl50 = direction === "long" ? entryNum * (1 - 0.5 / leverage) : entryNum * (1 + 0.5 / leverage);
+
+    window.dispatchEvent(new CustomEvent("percolator-pending-tpsl", {
+      detail: { hasOrder: true, tp50, tp100, sl25, sl50 }
+    }));
+  }, [hasOrder, estEntry, leverage, direction, priceUsd]);
+
   // ── Validation (single banner, priority-ordered) ──
   const validationIssues = buildValidationIssues({
     marketPaused: !!header?.paused,
@@ -755,56 +780,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       </div>
 
-      {/* TP/SL Simulation HUD (Bloomberg-style High-Info 2x2 Grid) */}
-      {hasOrder && priceUsd && priceUsd > 0 && (
-        <div className="mb-3">
-          <p className="mb-1.5 text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)] font-medium">TP/SL Exit Projections</p>
-          <div className="grid grid-cols-2 gap-1.5 select-none">
-            {(() => {
-              const targets = [
-                { type: "tp", roi: 0.5, label: "TP +50%", colorClass: "border-emerald-500/20 bg-emerald-500/[0.02]", textClass: "text-emerald-400" },
-                { type: "tp", roi: 1.0, label: "TP +100%", colorClass: "border-emerald-500/20 bg-emerald-500/[0.02]", textClass: "text-emerald-400" },
-                { type: "sl", roi: -0.25, label: "SL -25%", colorClass: "border-red-500/20 bg-red-500/[0.02]", textClass: "text-red-400" },
-                { type: "sl", roi: -0.5, label: "SL -50%", colorClass: "border-red-500/20 bg-red-500/[0.02]", textClass: "text-red-400" },
-              ];
 
-              return targets.map((t, idx) => {
-                const entryNum = Number(estEntry) / 1e6;
-                const factor = t.roi / leverage;
-                const targetExitPrice = direction === "long" ? entryNum * (1 + factor) : entryNum * (1 - factor);
-                
-                const marginAmt = Number(marginNative) / Math.pow(10, decimals);
-                const pnlAmt = marginAmt * t.roi;
-                const pnlSign = pnlAmt > 0 ? "+" : "";
-
-                // Percentage price move required to hit target
-                const priceMovePct = (t.roi / leverage) * 100;
-                const priceMoveSign = priceMovePct > 0 ? "+" : "";
-
-                return (
-                  <div
-                    key={idx}
-                    className={`rounded-sm border p-1.5 flex flex-col justify-between ${t.colorClass}`}
-                  >
-                    <div className="flex items-center justify-between text-[8px] uppercase tracking-[0.05em] text-[var(--text-secondary)]">
-                      <span>{t.label}</span>
-                      <span className={t.textClass}>{priceMoveSign}{priceMovePct.toFixed(1)}%</span>
-                    </div>
-                    <div className="mt-1 flex items-baseline justify-between">
-                      <span className="text-[11px] font-bold font-mono text-[var(--text)]">
-                        ${targetExitPrice.toFixed(targetExitPrice < 0.01 ? 6 : targetExitPrice < 1 ? 4 : 2)}
-                      </span>
-                      <span className="text-[8px] font-mono text-[var(--text-dim)]">
-                        {pnlSign}{pnlAmt.toFixed(2)} {collateralSymbol}
-                      </span>
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-          </div>
-        </div>
-      )}
 
       {/* Receipt — before -> after. Deliberately "sunken" (var(--bg), the
           page-level darkness, rather than an elevated surface) so it reads

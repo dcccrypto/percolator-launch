@@ -318,6 +318,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   const priceLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const liqLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const entryLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
+  const pendingTp50LineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
+  const pendingTp100LineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
+  const pendingSl25LineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
+  const pendingSl50LineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   // Phase 2: the currently-forming bar/point, kept in sync by the structural
   // series effect (on every setData) and merged into by live ticks (on
   // every price-store notification) via series.update() — never setData().
@@ -590,6 +594,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       priceLineRef.current = null;
       liqLineRef.current = null;
       entryLineRef.current = null;
+      pendingTp50LineRef.current = null;
+      pendingTp100LineRef.current = null;
+      pendingSl25LineRef.current = null;
+      pendingSl50LineRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -644,6 +652,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     priceLineRef.current = null;
     liqLineRef.current = null;
     entryLineRef.current = null;
+    pendingTp50LineRef.current = null;
+    pendingTp100LineRef.current = null;
+    pendingSl25LineRef.current = null;
+    pendingSl50LineRef.current = null;
 
     // Series selection.
     //
@@ -955,6 +967,65 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       finishSpan();
     });
   }, [slabAddress]);
+
+  // Listen to order ticket pending TP/SL exit price projections and draw price lines on the chart
+  useEffect(() => {
+    const handlePendingTpSl = (e: Event) => {
+      const customEvt = e as CustomEvent<{
+        hasOrder: boolean;
+        tp50: number | null;
+        tp100: number | null;
+        sl25: number | null;
+        sl50: number | null;
+      }>;
+      
+      const s = seriesRef.current;
+      if (!s) return;
+
+      const { hasOrder, tp50, tp100, sl25, sl50 } = customEvt.detail;
+
+      const clearLine = (ref: React.MutableRefObject<any>) => {
+        if (ref.current) {
+          try {
+            s.removePriceLine(ref.current);
+          } catch {}
+          ref.current = null;
+        }
+      };
+
+      if (!hasOrder || overlayPrefs.entry === false) {
+        clearLine(pendingTp50LineRef);
+        clearLine(pendingTp100LineRef);
+        clearLine(pendingSl25LineRef);
+        clearLine(pendingSl50LineRef);
+        return;
+      }
+
+      const updateOrCreateLine = (ref: React.MutableRefObject<any>, price: number | null, title: string, color: string) => {
+        clearLine(ref);
+        if (price != null && price > 0) {
+          ref.current = s.createPriceLine({
+            price,
+            color,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: true,
+            title,
+          });
+        }
+      };
+
+      updateOrCreateLine(pendingTp50LineRef, tp50, "TP +50%", "#10b981");
+      updateOrCreateLine(pendingTp100LineRef, tp100, "TP +100%", "#059669");
+      updateOrCreateLine(pendingSl25LineRef, sl25, "SL -25%", "#f87171");
+      updateOrCreateLine(pendingSl50LineRef, sl50, "SL -50%", "#ef4444");
+    };
+
+    window.addEventListener("percolator-pending-tpsl", handlePendingTpSl);
+    return () => {
+      window.removeEventListener("percolator-pending-tpsl", handlePendingTpSl);
+    };
+  }, [overlayPrefs.entry]);
 
   // Header % change is ALWAYS trailing 24 h vs current — the industry
   // convention users expect, independent of what timeframe/zoom they picked.
