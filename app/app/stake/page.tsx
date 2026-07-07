@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useSyncExternalStore, type CSSProperties } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Connection } from "@solana/web3.js";
 import {
   deriveStakePool,
   deriveDepositPda,
@@ -13,7 +13,7 @@ import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
-import { parseHumanAmount } from "@/lib/parseAmount";
+import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { formatMarkPrice } from "@/lib/format";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
@@ -47,6 +47,8 @@ interface UserPosition {
   /** User's LP token balance (in tokens, not raw) */
   lpBalance: number;
   lpBalanceRaw: bigint;
+  /** Decimals of the LP mint — needed to parse partial withdraw amounts */
+  lpDecimals: number;
   estimatedValue: number;
   cooldownRemaining: number;
   cooldownTotal: number;
@@ -137,6 +139,114 @@ function LivePoolPrice({
       {formatMarkPrice(priceUsd)}
     </span>
   );
+}
+
+/* ── Position Detection ── */
+
+/**
+ * Fetch a single pool's staked-LP position for a wallet: LP balance (raw +
+ * human, using the LP mint's real decimals — never assumed), redemption
+ * cooldown status, and estimated USD value. Returns null when the pool has
+ * no on-chain StakePool account yet, or the wallet holds zero LP for it.
+ *
+ * Shared by the multi-pool scan (`StakePage`'s effect below, feeds
+ * `YourPositionPanel`) and the per-selected-pool Withdraw tab
+ * (`DepositWidget`) so both read the exact same on-chain detection logic
+ * instead of two hand-rolled copies that could silently drift apart. Never
+ * throws — all failures resolve to `null` so a scan across many pools can't
+ * be aborted by one bad account.
+ */
+async function fetchPoolPosition(
+  pool: StakePool,
+  publicKey: PublicKey,
+  connection: Connection,
+  stakeProgramId: PublicKey,
+): Promise<UserPosition | null> {
+  if (!pool.slabAddress || !pool.collateralMint) return null;
+  try {
+    const slabPk = new PublicKey(pool.slabAddress);
+    const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
+    const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey, stakeProgramId);
+
+    // Fetch pool account to get lpMint. Decode using the REAL deployed
+    // 352-byte v1 layout — NOT the SDK's decodeStakePool, which assumes
+    // a 384-byte v2 layout that was never deployed here (see
+    // STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
+    const poolInfo = await connection.getAccountInfo(poolPda);
+    if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) return null;
+    const { lpMint } = decodeStakePoolV1(poolInfo.data);
+
+    // Get user LP ATA balance
+    const userLpAta = getAssociatedTokenAddressSync(lpMint, publicKey);
+    const lpAtaInfo = await connection.getAccountInfo(userLpAta);
+    if (!lpAtaInfo) return null;
+    const lpAccount = unpackAccount(userLpAta, lpAtaInfo);
+    if (lpAccount.amount === 0n) return null;
+
+    // Derive decimals from on-chain LP mint rather than assuming 6.
+    // Wrapped in its own try/catch: a transient RPC error must not gate
+    // position discovery — lpAccount.amount already confirmed the position exists.
+    let lpDecimals = 6; // safe default
+    try {
+      const lpMintInfo = await getMint(connection, lpMint);
+      lpDecimals = lpMintInfo.decimals;
+    } catch {
+      // RPC failure: fall back to default decimals; position is still shown
+    }
+    const lpBalance = Number(lpAccount.amount) / Math.pow(10, lpDecimals);
+
+    // Calculate estimated value: (user_lp / total_lp_supply) * vault_balance
+    // pool.totalLpSupply is raw (on-chain units); divide by 10^lpDecimals
+    // to match lpBalance which is already human-readable.
+    const lpSupplyHuman = pool.totalLpSupply / Math.pow(10, lpDecimals);
+    const estimatedValue = lpSupplyHuman > 0
+      ? (lpBalance / lpSupplyHuman) * pool.tvl
+      : 0;
+
+    // Fetch deposit PDA for cooldown info
+    let cooldownRemaining = 0;
+    let cooldownElapsed = true;
+    let userDepositSlot = 0n;
+
+    const depInfo = await connection.getAccountInfo(depositPdaAddress);
+    if (depInfo && depInfo.data.length >= 81) {
+      const depData = Buffer.from(depInfo.data);
+      if (depData[0] === 1) {
+        userDepositSlot = depData.readBigUInt64LE(72);
+      }
+    }
+
+    if (userDepositSlot > 0n && pool.cooldownSlots > 0) {
+      try {
+        const currentSlot = BigInt(await connection.getSlot());
+        const slotsElapsed = currentSlot - userDepositSlot;
+        const cooldownTotal = BigInt(pool.cooldownSlots);
+        if (slotsElapsed < cooldownTotal) {
+          cooldownElapsed = false;
+          cooldownRemaining = Number(cooldownTotal - slotsElapsed);
+        }
+      } catch {
+        cooldownElapsed = false;
+      }
+    }
+
+    return {
+      poolId: pool.id,
+      poolName: pool.name,
+      slabAddress: pool.slabAddress,
+      collateralMint: pool.collateralMint,
+      lpBalance,
+      lpBalanceRaw: lpAccount.amount,
+      lpDecimals,
+      estimatedValue,
+      cooldownRemaining,
+      cooldownTotal: pool.cooldownSlots,
+      cooldownElapsed,
+    };
+  } catch (err) {
+    console.error("[fetchPoolPosition] Failed for pool:", pool.slabAddress, err);
+    return null;
+  }
 }
 
 /* ── Hero Section ── */
@@ -348,21 +458,29 @@ function YourPositionPanel({
 
 function DepositWidget({
   pools,
-  onDepositSuccess,
+  onTxSuccess,
 }: {
   pools: StakePool[];
-  onDepositSuccess?: () => void;
+  onTxSuccess?: () => void;
 }) {
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
   const [selectedPool, setSelectedPool] = useState(pools[0]?.id ?? "");
+  const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
   const [amount, setAmount] = useState("");
   const [walletBalanceRaw, setWalletBalanceRaw] = useState<bigint | null>(null);
   const [balanceDecimals, setBalanceDecimals] = useState(6);
   const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawPosition, setWithdrawPosition] = useState<UserPosition | null>(null);
+  const [withdrawPositionLoading, setWithdrawPositionLoading] = useState(false);
+  const [withdrawRefreshKey, setWithdrawRefreshKey] = useState(0);
+  const [withdrawTxStatus, setWithdrawTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+
   const pool = pools.find((p) => p.id === selectedPool) ?? pools[0];
   const amountNum = parseFloat(amount) || 0;
+  const withdrawAmountNum = parseFloat(withdrawAmount) || 0;
 
   // Bug #12: the Junior (first-loss) tranche selector was removed — DepositJunior
   // (tag 16, PERC-303) belongs to the 384-byte v2 StakePool program, which hasn't
@@ -370,6 +488,14 @@ function DepositWidget({
   // handler). Senior deposit is the only path the deployed program supports.
   // See the warning atop useStakeDepositJunior.ts.
   const { deposit, loading: depositLoading, error: depositError } = useStakeDepositByPool({
+    slabAddress: pool?.slabAddress ?? "",
+    collateralMint: pool?.collateralMint ?? "",
+  });
+
+  // Withdraw for the currently SELECTED pool — same tx builder YourPositionPanel
+  // uses, just parameterized by whichever pool is picked in the dropdown here
+  // instead of the single globally-detected "first pool with a balance" position.
+  const { withdraw, loading: withdrawLoading, error: withdrawError } = useStakeWithdrawByPool({
     slabAddress: pool?.slabAddress ?? "",
     collateralMint: pool?.collateralMint ?? "",
   });
@@ -399,6 +525,37 @@ function DepositWidget({
     return () => { cancelled = true; };
   }, [publicKey, pool?.collateralMint, connection]);
 
+  // Fetch the selected pool's staked-LP position for the Withdraw tab. Reuses
+  // fetchPoolPosition — the exact same on-chain detection the multi-pool scan
+  // in StakePage uses (which feeds YourPositionPanel) — applied to just the
+  // currently-selected pool instead of scanning all pools for the first match.
+  useEffect(() => {
+    if (!connected || !publicKey || !pool?.slabAddress) {
+      setWithdrawPosition(null);
+      return;
+    }
+    let cancelled = false;
+    setWithdrawPositionLoading(true);
+    (async () => {
+      try {
+        // Stake pools are owned by this deployment's vault program
+        // (getConfig().vaultProgramId), NOT the SDK's default stake program id.
+        const stakeProgramId = new PublicKey(
+          (getConfig() as { vaultProgramId?: string }).vaultProgramId
+          ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
+        );
+        const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
+        if (!cancelled) setWithdrawPosition(found);
+      } catch (err) {
+        console.error("[DepositWidget] Failed to fetch withdraw position:", err);
+        if (!cancelled) setWithdrawPosition(null);
+      } finally {
+        if (!cancelled) setWithdrawPositionLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [connected, publicKey, pool, connection, withdrawRefreshKey]);
+
   // Human-readable balance (null = unknown / not fetched)
   const walletBalance: number | null = walletBalanceRaw !== null
     ? Number(walletBalanceRaw) / Math.pow(10, balanceDecimals)
@@ -426,17 +583,37 @@ function DepositWidget({
       const sig = await deposit(rawAmount);
       setAmount("");
       setTxStatus({ type: "success", msg: `Deposit confirmed: ${sig.slice(0, 8)}…` });
-      onDepositSuccess?.();
+      onTxSuccess?.();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setTxStatus({ type: "error", msg });
     }
-  }, [pool, amount, balanceDecimals, deposit, depositLoading, onDepositSuccess]);
+  }, [pool, amount, balanceDecimals, deposit, depositLoading, onTxSuccess]);
+
+  const handleWithdraw = useCallback(async () => {
+    if (!pool || !withdrawPosition || withdrawLoading) return;
+    if (!withdrawPosition.cooldownElapsed) return;
+    setWithdrawTxStatus(null);
+    try {
+      // String-based BigInt parsing (same approach as Deposit) to avoid float
+      // precision loss, using the LP mint's real decimals from fetchPoolPosition.
+      const rawAmount = parseHumanAmount(withdrawAmount, withdrawPosition.lpDecimals);
+      if (rawAmount <= 0n || rawAmount > withdrawPosition.lpBalanceRaw) return;
+      const sig = await withdraw(rawAmount);
+      setWithdrawAmount("");
+      setWithdrawTxStatus({ type: "success", msg: `Withdrawal confirmed: ${sig.slice(0, 8)}…` });
+      setWithdrawRefreshKey((k) => k + 1);
+      onTxSuccess?.();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setWithdrawTxStatus({ type: "error", msg });
+    }
+  }, [pool, withdrawPosition, withdrawAmount, withdraw, withdrawLoading, onTxSuccess]);
 
   return (
     <div id="deposit" className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
       <div className="px-4 py-2 border-b border-[var(--border)]/30 flex items-center justify-between gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// deposit</span>
+        <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// {mode}</span>
         {pool && (
           <span className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
             {pool.symbol}
@@ -445,12 +622,38 @@ function DepositWidget({
         )}
       </div>
       <div className="p-4 space-y-4">
-        {/* Pool selector */}
+        {/* Deposit / Withdraw toggle */}
+        <div className="flex gap-1 border border-[var(--border)] p-0.5">
+          <button
+            type="button"
+            onClick={() => { setMode("deposit"); setTxStatus(null); setWithdrawTxStatus(null); }}
+            className={`flex-1 rounded-sm py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors ${
+              mode === "deposit"
+                ? "bg-[var(--accent)]/[0.12] text-[var(--accent)]"
+                : "text-[var(--text-secondary)] hover:text-[var(--text)]"
+            }`}
+          >
+            Deposit
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode("withdraw"); setTxStatus(null); setWithdrawTxStatus(null); }}
+            className={`flex-1 rounded-sm py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors ${
+              mode === "withdraw"
+                ? "bg-[var(--cyan)]/[0.12] text-[var(--cyan)]"
+                : "text-[var(--text-secondary)] hover:text-[var(--text)]"
+            }`}
+          >
+            Withdraw
+          </button>
+        </div>
+
+        {/* Pool selector — shared between Deposit and Withdraw modes */}
         <div>
           <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
           <select
             value={selectedPool}
-            onChange={(e) => { setSelectedPool(e.target.value); setTxStatus(null); }}
+            onChange={(e) => { setSelectedPool(e.target.value); setTxStatus(null); setWithdrawTxStatus(null); }}
             className="w-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)]/50"
             style={{ fontFamily: "var(--font-mono)" }}
           >
@@ -460,102 +663,199 @@ function DepositWidget({
           </select>
         </div>
 
-        {/* Amount input */}
-        <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
-            {connected && walletBalance !== null && (
+        {mode === "deposit" ? (
+          <>
+            {/* Amount input */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+                {connected && walletBalance !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setAmount(String(walletBalance))}
+                    className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent)] cursor-pointer"
+                    style={{ fontFamily: "var(--font-mono)" }}
+                    title="Click to use max balance"
+                  >
+                    Balance: {walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => { setAmount(e.target.value); setTxStatus(null); }}
+                  placeholder="0.00"
+                  min="0"
+                  step="any"
+                  className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => { if (walletBalance !== null && walletBalance > 0) setAmount(String(walletBalance)); }}
+                  className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)]"
+                >
+                  MAX
+                </button>
+              </div>
+            </div>
+
+            {/* LP estimate */}
+            {amountNum > 0 && (
+              <div className="text-[12px] text-[var(--text-secondary)]">
+                You will receive ≈{" "}
+                <span className="font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+                  {lpEstimate.toLocaleString(undefined, { maximumFractionDigits: 4 })} LP
+                </span>
+              </div>
+            )}
+
+            {/* Pool cap bar */}
+            {pool && (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] text-[var(--text-secondary)]">Pool cap</span>
+                  <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+                    {pool.capTotal > 0
+                      ? `${formatUsd(pool.capUsed)} / ${formatUsd(pool.capTotal)} (${Math.round(capRatio * 100)}%)`
+                      : `${formatUsd(pool.capUsed)} deposited · No cap`}
+                  </span>
+                </div>
+                <ProgressBar value={capRatio} height={6} />
+              </div>
+            )}
+
+            {/* Cooldown info */}
+            {pool && (
+              <p className="text-[10px] text-[var(--text-muted)]">
+                Cooldown period: ~{pool.cooldownSlots.toLocaleString()} slots ({slotsToTime(pool.cooldownSlots)} before withdrawal)
+              </p>
+            )}
+
+            {/* Tx feedback */}
+            {txStatus && (
+              <p className={`text-[11px] ${txStatus.type === "success" ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
+                {txStatus.msg}
+              </p>
+            )}
+            {depositError && !txStatus && (
+              <p className="text-[11px] text-[var(--short)]">{depositError}</p>
+            )}
+
+            {/* CTA */}
+            {!connected ? (
+              <button className="w-full rounded-md py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] cursor-not-allowed">
+                Connect Wallet to Deposit
+              </button>
+            ) : (
               <button
-                type="button"
-                onClick={() => setAmount(String(walletBalance))}
-                className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent)] cursor-pointer"
-                style={{ fontFamily: "var(--font-mono)" }}
-                title="Click to use max balance"
+                disabled={amountNum <= 0 || depositLoading}
+                onClick={handleDeposit}
+                className={`w-full rounded-md py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+                  amountNum > 0 && !depositLoading
+                    ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
+                    : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
+                }`}
               >
-                Balance: {walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
+                {depositLoading ? "Depositing…" : "Deposit →"}
               </button>
             )}
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => { setAmount(e.target.value); setTxStatus(null); }}
-              placeholder="0.00"
-              min="0"
-              step="any"
-              className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums"
-              style={{ fontFamily: "var(--font-mono)" }}
-            />
-            <button
-              type="button"
-              onClick={() => { if (walletBalance !== null && walletBalance > 0) setAmount(String(walletBalance)); }}
-              className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)]"
-            >
-              MAX
-            </button>
-          </div>
-        </div>
-
-        {/* LP estimate */}
-        {amountNum > 0 && (
-          <div className="text-[12px] text-[var(--text-secondary)]">
-            You will receive ≈{" "}
-            <span className="font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-              {lpEstimate.toLocaleString(undefined, { maximumFractionDigits: 4 })} LP
-            </span>
-          </div>
-        )}
-
-        {/* Pool cap bar */}
-        {pool && (
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] text-[var(--text-secondary)]">Pool cap</span>
-              <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-                {pool.capTotal > 0
-                  ? `${formatUsd(pool.capUsed)} / ${formatUsd(pool.capTotal)} (${Math.round(capRatio * 100)}%)`
-                  : `${formatUsd(pool.capUsed)} deposited · No cap`}
-              </span>
-            </div>
-            <ProgressBar value={capRatio} height={6} />
-          </div>
-        )}
-
-        {/* Cooldown info */}
-        {pool && (
-          <p className="text-[10px] text-[var(--text-muted)]">
-            Cooldown period: ~{pool.cooldownSlots.toLocaleString()} slots ({slotsToTime(pool.cooldownSlots)} before withdrawal)
-          </p>
-        )}
-
-        {/* Tx feedback */}
-        {txStatus && (
-          <p className={`text-[11px] ${txStatus.type === "success" ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
-            {txStatus.msg}
-          </p>
-        )}
-        {depositError && !txStatus && (
-          <p className="text-[11px] text-[var(--short)]">{depositError}</p>
-        )}
-
-        {/* CTA */}
-        {!connected ? (
-          <button className="w-full rounded-md py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] cursor-not-allowed">
-            Connect Wallet to Deposit
-          </button>
+          </>
         ) : (
-          <button
-            disabled={amountNum <= 0 || depositLoading}
-            onClick={handleDeposit}
-            className={`w-full rounded-md py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
-              amountNum > 0 && !depositLoading
-                ? "border border-[var(--accent)]/50 bg-[var(--accent)]/[0.10] text-[var(--accent)] hover:border-[var(--accent)] hover:bg-[var(--accent)]/[0.18]"
-                : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
-            }`}
-          >
-            {depositLoading ? "Depositing…" : "Deposit →"}
-          </button>
+          <>
+            {/* Withdraw amount input */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
+                {connected && withdrawPosition && (
+                  <button
+                    type="button"
+                    onClick={() => setWithdrawAmount(formatHumanAmount(withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals))}
+                    className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent)] cursor-pointer"
+                    style={{ fontFamily: "var(--font-mono)" }}
+                    title="Click to use full staked balance"
+                  >
+                    Staked: {withdrawPosition.lpBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} LP
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={withdrawAmount}
+                  onChange={(e) => { setWithdrawAmount(e.target.value); setWithdrawTxStatus(null); }}
+                  placeholder="0.00"
+                  min="0"
+                  step="any"
+                  disabled={!withdrawPosition}
+                  className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums disabled:opacity-50"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => { if (withdrawPosition) setWithdrawAmount(formatHumanAmount(withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals)); }}
+                  disabled={!withdrawPosition}
+                  className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  MAX
+                </button>
+              </div>
+            </div>
+
+            {/* Empty / loading state */}
+            {withdrawPositionLoading && (
+              <p className="text-[11px] text-[var(--text-muted)]">Checking staked balance…</p>
+            )}
+            {!withdrawPositionLoading && connected && !withdrawPosition && (
+              <p className="text-[11px] text-[var(--text-muted)]">No staked balance in this pool.</p>
+            )}
+
+            {/* Cooldown status */}
+            {withdrawPosition && (
+              <p className={`text-[10px] ${withdrawPosition.cooldownElapsed ? "text-[var(--text-muted)]" : "text-[var(--short)]"}`}>
+                {withdrawPosition.cooldownElapsed
+                  ? "Cooldown complete — ready to withdraw."
+                  : `Cooldown: ~${withdrawPosition.cooldownRemaining.toLocaleString()} slots (${slotsToTime(withdrawPosition.cooldownRemaining)}) remaining.`}
+              </p>
+            )}
+
+            {/* Tx feedback */}
+            {withdrawTxStatus && (
+              <p className={`text-[11px] ${withdrawTxStatus.type === "success" ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
+                {withdrawTxStatus.msg}
+              </p>
+            )}
+            {withdrawError && !withdrawTxStatus && (
+              <p className="text-[11px] text-[var(--short)]">{withdrawError}</p>
+            )}
+
+            {/* CTA */}
+            {!connected ? (
+              <button className="w-full rounded-md py-3 border border-[var(--border)] bg-[var(--bg)] text-[12px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] cursor-not-allowed">
+                Connect Wallet to Withdraw
+              </button>
+            ) : (
+              <button
+                disabled={!withdrawPosition || !withdrawPosition.cooldownElapsed || withdrawAmountNum <= 0 || withdrawLoading}
+                onClick={handleWithdraw}
+                className={`w-full rounded-md py-3 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+                  withdrawPosition && withdrawPosition.cooldownElapsed && withdrawAmountNum > 0 && !withdrawLoading
+                    ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
+                    : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
+                }`}
+              >
+                {withdrawLoading
+                  ? "Withdrawing…"
+                  : !withdrawPosition
+                  ? "Nothing to Withdraw"
+                  : !withdrawPosition.cooldownElapsed
+                  ? `Withdraw in ${withdrawPosition.cooldownRemaining.toLocaleString()} slots`
+                  : "Withdraw →"}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -568,20 +868,20 @@ function PoolCard({ pool }: { pool: StakePool }) {
   const capRatio = pool.capTotal > 0 ? pool.capUsed / pool.capTotal : 0;
 
   return (
-    <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] min-w-[280px]">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] text-[12px]">
+    <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)]">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] text-[12px]">
             💧
           </div>
-          <div>
-            <h3 className="text-[13px] font-semibold text-[var(--text)]">{pool.symbol}</h3>
+          <div className="min-w-0">
+            <h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{pool.symbol}</h3>
             <p className="text-[10px] text-[var(--text-muted)]">POOL</p>
           </div>
         </div>
         <LivePoolPrice
           slab={pool.slabAddress}
-          className="text-[13px] font-semibold text-[var(--text)] tabular-nums"
+          className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-[var(--text)] tabular-nums"
           style={{ fontFamily: "var(--font-mono)" }}
         />
       </div>
@@ -625,14 +925,14 @@ function PoolCard({ pool }: { pool: StakePool }) {
   );
 }
 
-/** Subtle grid filler so a pool count that isn't a multiple of 3 doesn't leave
- *  a dangling empty cell in the last row (e.g. 5 pools in a 3-col grid leaves
- *  slot 6 empty) — points at market creation instead of being dead space. */
+/** Subtle grid filler so an odd pool count doesn't leave a dangling empty
+ *  cell in the last row of the (now capped at 2-col) pools grid — points at
+ *  market creation instead of being dead space. */
 function PoolPlaceholderCard() {
   return (
     <a
       href="/create"
-      className="group flex min-w-[280px] flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-4 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] sm:p-5"
+      className="group flex flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-4 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] sm:p-5"
     >
       <span className="text-xl text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent)]">＋</span>
       <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--accent)]">
@@ -652,7 +952,7 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
         <div className="mb-4 flex items-center justify-between">
           <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2">
           {[0, 1, 2].map((i) => (
             <div key={i} className="bg-[var(--panel-bg)] p-4 sm:p-5 space-y-3">
               <div className="flex items-center gap-2.5 mb-4">
@@ -687,22 +987,22 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
     );
   }
 
-  // Bug #850 (extended): a pool count that isn't a multiple of 3 leaves a dangling
-  // empty cell in the last row once the grid reaches xl:grid-cols-3 (e.g. 5 pools
-  // leaves slot 6 empty). 3 is the only remainder that matters — it's our widest
-  // column count — and topping up to the next multiple of 3 never adds a worse gap
-  // at the narrower 2-col (sm/lg) breakpoints. Fill with subtle placeholder cards
-  // instead of leaving dead grid space.
-  const fillerCount = pools.length >= 3 ? (3 - (pools.length % 3)) % 3 : 0;
+  // Bug #850 (extended) + clipping fix: the pools column lives in a
+  // lg:grid-cols-[380px_1fr] layout inside a max-w-[1100px] page, leaving only
+  // ~696px for pools at lg+. The old xl:grid-cols-3 needed 3 columns to fit,
+  // which overflowed that width and clipped the right column (including the
+  // live price) — capped at 2 columns everywhere fixes that. A pool count
+  // that isn't even still leaves a dangling empty cell in the last row, so
+  // top up to the next even count with a subtle placeholder card instead of
+  // leaving dead grid space.
+  const fillerCount = pools.length >= 2 ? (2 - (pools.length % 2)) % 2 : 0;
 
   return (
     <section id="pools">
       <div className="mb-4 flex items-center justify-between">
         <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">// available pools</span>
       </div>
-      {/* Bug #850: only use xl:grid-cols-3 when there are ≥ 3 pools; with fewer, stay at lg:grid-cols-2
-           to avoid ghost empty card slots filling the grid background */}
-      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 ${pools.length >= 3 ? "xl:grid-cols-3" : ""}`}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2">
         {pools.map((pool) => (
           <PoolCard key={pool.id} pool={pool} />
         ))}
@@ -759,93 +1059,13 @@ export default function StakePage() {
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
           ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
         );
-        // Check each pool for user's LP position
+        // Check each pool for user's LP position — same detection logic the
+        // Withdraw tab uses for a single selected pool (fetchPoolPosition).
         for (const pool of pools) {
-          if (!pool.slabAddress || !pool.collateralMint) continue;
-          try {
-            const slabPk = new PublicKey(pool.slabAddress);
-            const [poolPda] = deriveStakePool(slabPk, stakeProgramId);
-            const [depositPdaAddress] = deriveDepositPda(poolPda, publicKey, stakeProgramId);
-
-            // Fetch pool account to get lpMint. Decode using the REAL deployed
-            // 352-byte v1 layout — NOT the SDK's decodeStakePool, which assumes
-            // a 384-byte v2 layout that was never deployed here (see
-            // STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
-            const poolInfo = await connection.getAccountInfo(poolPda);
-            if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) continue;
-            const { lpMint } = decodeStakePoolV1(poolInfo.data);
-
-            // Get user LP ATA balance
-            const userLpAta = getAssociatedTokenAddressSync(lpMint, publicKey);
-            const lpAtaInfo = await connection.getAccountInfo(userLpAta);
-            if (!lpAtaInfo) continue;
-            const lpAccount = unpackAccount(userLpAta, lpAtaInfo);
-            if (lpAccount.amount === 0n) continue;
-
-            // Derive decimals from on-chain LP mint rather than assuming 6.
-            // Wrapped in its own try/catch: a transient RPC error must not gate
-            // position discovery — lpAccount.amount already confirmed the position exists.
-            let lpDecimals = 6; // safe default
-            try {
-              const lpMintInfo = await getMint(connection, lpMint);
-              lpDecimals = lpMintInfo.decimals;
-            } catch {
-              // RPC failure: fall back to default decimals; position is still shown
-            }
-            const lpBalance = Number(lpAccount.amount) / Math.pow(10, lpDecimals);
-
-            // Calculate estimated value: (user_lp / total_lp_supply) * vault_balance
-            // pool.totalLpSupply is raw (on-chain units); divide by 10^lpDecimals
-            // to match lpBalance which is already human-readable.
-            const lpSupplyHuman = pool.totalLpSupply / Math.pow(10, lpDecimals);
-            const estimatedValue = lpSupplyHuman > 0
-              ? (lpBalance / lpSupplyHuman) * pool.tvl
-              : 0;
-
-            // Fetch deposit PDA for cooldown info
-            let cooldownRemaining = 0;
-            let cooldownElapsed = true;
-            let userDepositSlot = 0n;
-
-            const depInfo = await connection.getAccountInfo(depositPdaAddress);
-            if (depInfo && depInfo.data.length >= 81) {
-              const depData = Buffer.from(depInfo.data);
-              if (depData[0] === 1) {
-                userDepositSlot = depData.readBigUInt64LE(72);
-              }
-            }
-
-            if (userDepositSlot > 0n && pool.cooldownSlots > 0) {
-              try {
-                const currentSlot = BigInt(await connection.getSlot());
-                const slotsElapsed = currentSlot - userDepositSlot;
-                const cooldownTotal = BigInt(pool.cooldownSlots);
-                if (slotsElapsed < cooldownTotal) {
-                  cooldownElapsed = false;
-                  cooldownRemaining = Number(cooldownTotal - slotsElapsed);
-                }
-              } catch {
-                cooldownElapsed = false;
-              }
-            }
-
-            if (!cancelled) {
-              setPosition({
-                poolId: pool.id,
-                poolName: pool.name,
-                slabAddress: pool.slabAddress,
-                collateralMint: pool.collateralMint!,
-                lpBalance,
-                lpBalanceRaw: lpAccount.amount,
-                estimatedValue,
-                cooldownRemaining,
-                cooldownTotal: pool.cooldownSlots,
-                cooldownElapsed,
-              });
-            }
+          const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
+          if (found) {
+            if (!cancelled) setPosition(found);
             return; // found a position, stop scanning
-          } catch (poolErr) {
-            console.error("[StakePage] Pool position check failed:", pool.slabAddress, poolErr);
           }
         }
         // No position found across all pools
@@ -886,7 +1106,7 @@ export default function StakePage() {
                 <YourPositionPanel position={position} onWithdrawSuccess={handleTxSuccess} />
               </ErrorBoundary>
               <ErrorBoundary label="Deposit Widget">
-                <DepositWidget pools={pools} onDepositSuccess={handleTxSuccess} />
+                <DepositWidget pools={pools} onTxSuccess={handleTxSuccess} />
               </ErrorBoundary>
             </div>
 
