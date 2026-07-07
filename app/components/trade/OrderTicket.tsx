@@ -316,10 +316,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (arr.length === 0 || arr[arr.length - 1] < maxLeverage) arr.push(maxLeverage);
     return arr;
   }, [maxLeverage]);
-  // Display-only: how far along the track the filled (accent) portion should
-  // paint, mirroring the current leverage value — purely a visual affordance
-  // for the range input's inline gradient background (see the slider below).
-  const leverageFillPct = maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100;
 
   const capital = userAccount ? userAccount.account.capital : 0n;
   // Margin already "locked" by this market's existing open position (if
@@ -731,9 +727,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         ))}
       </div>
 
-      {/* Leverage slider + input */}
+      {/* Leverage — unified snapping slider with tick marks */}
       <div className="mb-4">
-        <div className="mb-1 flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
             Leverage
             <InfoIcon tooltip="The multiplier used to size this order. On-chain margin params are the authoritative cap." />
@@ -755,32 +751,72 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <span className="text-[11px] font-medium text-[var(--text)]">x</span>
           </div>
         </div>
-        <input
-          type="range"
-          min={1}
-          max={maxLeverage}
-          step={1}
-          value={leverage}
-          onChange={(e) => updateLeverage(Number(e.target.value))}
-          className="leverage-slider mb-2 w-full cursor-pointer touch-none"
-          style={{
-            background: `linear-gradient(to right, var(--accent) ${leverageFillPct}%, var(--border) ${leverageFillPct}%)`,
-          }}
-        />
-        <div className="flex flex-wrap gap-1">
-          {availableLeverage.map((l) => (
-            <button
-              key={l}
-              onClick={() => updateLeverage(l)}
-              className={`flex-1 basis-0 min-w-[32px] rounded-none py-1.5 text-[9px] font-medium transition-colors duration-150 ${
-                leverage === l ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
-              }`}
-            >
-              {l}x
-            </button>
-          ))}
-        </div>
+        {/* Unified snapping slider — steps are indices into availableLeverage */}
+        {availableLeverage.length > 1 && (() => {
+          const snapIdx = availableLeverage.indexOf(leverage) !== -1
+            ? availableLeverage.indexOf(leverage)
+            : availableLeverage.reduce((best, val, i) =>
+                Math.abs(val - leverage) < Math.abs(availableLeverage[best] - leverage) ? i : best, 0);
+          const fillPct = availableLeverage.length > 1 ? (snapIdx / (availableLeverage.length - 1)) * 100 : 0;
+          return (
+            <div className="relative px-0 pb-5">
+              {/* Track + filled portion */}
+              <div className="relative h-[3px] rounded-full bg-[var(--border)]/30 mt-3">
+                <div
+                  className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)] transition-[width] duration-75"
+                  style={{ width: `${fillPct}%` }}
+                />
+                {/* Tick marks */}
+                {availableLeverage.map((l, i) => {
+                  const pct = availableLeverage.length > 1 ? (i / (availableLeverage.length - 1)) * 100 : 0;
+                  const isActive = leverage >= l;
+                  return (
+                    <button
+                      key={l}
+                      type="button"
+                      aria-label={`Set leverage to ${l}x`}
+                      onClick={() => updateLeverage(l)}
+                      className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 group"
+                      style={{ left: `${pct}%` }}
+                    >
+                      {/* Tick dot */}
+                      <span className={`block h-2.5 w-2.5 rounded-full border-2 transition-colors duration-100 ${
+                        leverage === l
+                          ? "border-[var(--accent)] bg-[var(--accent)] scale-125"
+                          : isActive
+                            ? "border-[var(--accent)] bg-[var(--accent)]/30 group-hover:bg-[var(--accent)]/60"
+                            : "border-[var(--border)] bg-[var(--panel-bg)] group-hover:border-[var(--accent)]/50"
+                      }`} />
+                      {/* Label below */}
+                      <span className={`absolute top-3.5 left-1/2 -translate-x-1/2 text-[8px] whitespace-nowrap font-mono transition-colors duration-100 ${
+                        leverage === l ? "text-[var(--accent)] font-bold" : "text-[var(--text-dim)] group-hover:text-[var(--text-secondary)]"
+                      }`}>
+                        {l}x
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Invisible range input overlaid for drag behaviour */}
+              <input
+                type="range"
+                min={0}
+                max={availableLeverage.length - 1}
+                step={1}
+                value={snapIdx}
+                onChange={(e) => updateLeverage(availableLeverage[Number(e.target.value)])}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                aria-label="Leverage"
+              />
+            </div>
+          );
+        })()}
+        {/* Fallback for single-leverage markets */}
+        {availableLeverage.length === 1 && (
+          <p className="text-[9px] text-[var(--text-dim)] font-mono">{availableLeverage[0]}x (fixed)</p>
+        )}
       </div>
+
 
 
 
