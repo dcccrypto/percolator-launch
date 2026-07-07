@@ -751,102 +751,57 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <span className="text-[11px] font-medium text-[var(--text)]">x</span>
           </div>
         </div>
-        {/* Unified continuous slider — tick marks uniformly spaced, magnetic snap */}
-        {maxLeverage > 1 && (() => {
-          const n = availableLeverage.length;
-
-          // Snap within half the smallest gap between adjacent snap points
-          const snapRadius = n > 1
-            ? Math.floor(Math.min(...availableLeverage.slice(1).map((v, i) => v - availableLeverage[i])) / 2)
-            : 0;
-
-          const handleChange = (raw: number) => {
-            if (snapRadius > 0) {
-              const nearest = availableLeverage.reduce((best, v) =>
-                Math.abs(v - raw) < Math.abs(best - raw) ? v : best, raw);
-              if (Math.abs(nearest - raw) <= snapRadius) {
-                updateLeverage(nearest);
-                return;
-              }
-            }
-            updateLeverage(raw);
-          };
-
-          // Map a leverage value → uniform display %, interpolating between snap-point indices
-          const valueToPct = (val: number): number => {
-            if (n <= 1) return 0;
-            for (let i = 0; i < n - 1; i++) {
-              if (val <= availableLeverage[i + 1]) {
-                const lo = availableLeverage[i];
-                const hi = availableLeverage[i + 1];
-                const segFrac = hi > lo ? (val - lo) / (hi - lo) : 0;
-                return ((i + segFrac) / (n - 1)) * 100;
-              }
-            }
-            return 100;
-          };
-
-          const fillPct = valueToPct(leverage);
-
-          return (
-            <div className="relative pb-5">
-              {/* Visual track */}
-              <div className="relative h-[3px] rounded-full bg-[var(--border)]/30 mt-3">
-                {/* Filled portion — width tracks index-space position */}
-                <div
-                  className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)]"
-                  style={{ width: `${fillPct}%` }}
-                />
-                {/* Uniformly spaced tick marks */}
-                {availableLeverage.map((l, i) => {
-                  const pct = n > 1 ? (i / (n - 1)) * 100 : 0;
-                  const isActive = leverage >= l;
-                  const isCurrent = leverage === l;
-                  return (
-                    <button
-                      key={l}
-                      type="button"
-                      aria-label={`Set leverage to ${l}x`}
-                      onClick={() => updateLeverage(l)}
-                      className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 group z-10"
-                      style={{ left: `${pct}%` }}
-                    >
-                      <span className={`block rounded-full border-2 transition-all duration-100 ${
-                        isCurrent
-                          ? "h-3 w-3 border-[var(--accent)] bg-[var(--accent)]"
-                          : isActive
-                            ? "h-2.5 w-2.5 border-[var(--accent)] bg-[var(--accent)]/40 group-hover:bg-[var(--accent)]/70"
-                            : "h-2.5 w-2.5 border-[var(--border)] bg-[var(--panel-bg)] group-hover:border-[var(--accent)]/60"
-                      }`} />
-                      <span className={`absolute top-3.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] font-mono transition-colors duration-100 ${
-                        isCurrent ? "text-[var(--accent)] font-bold" : "text-[var(--text-dim)] group-hover:text-[var(--text-secondary)]"
-                      }`}>
-                        {l}x
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              {/* Full-range input overlay — continuous, step 1 */}
-              <input
-                type="range"
-                min={1}
-                max={maxLeverage}
-                step={1}
-                value={leverage}
-                onChange={(e) => handleChange(Number(e.target.value))}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
-                aria-label="Leverage"
-              />
+        {maxLeverage > 1 ? (
+          <>
+            <input
+              type="range"
+              min={1}
+              max={maxLeverage}
+              step={1}
+              value={leverage}
+              onChange={(e) => {
+                const raw = Number(e.target.value);
+                // Magnetic snap: if within half the smallest inter-point gap, snap
+                const nearest = availableLeverage.reduce((best, v) =>
+                  Math.abs(v - raw) < Math.abs(best - raw) ? v : best, raw);
+                const snapRadius = availableLeverage.length > 1
+                  ? Math.floor(Math.min(...availableLeverage.slice(1).map((v, i) => v - availableLeverage[i])) / 2)
+                  : 0;
+                updateLeverage(Math.abs(nearest - raw) <= snapRadius ? nearest : raw);
+              }}
+              className="leverage-slider w-full cursor-pointer"
+              style={{
+                background: `linear-gradient(to right, var(--accent) ${
+                  maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 0
+                }%, var(--border) ${
+                  maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 0
+                }%)`,
+              }}
+              aria-label="Leverage"
+            />
+            {/* Snap-point labels — uniformly spaced reference */}
+            <div className="mt-1 flex justify-between">
+              {availableLeverage.map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => updateLeverage(l)}
+                  className={`text-[8px] font-mono transition-colors duration-100 ${
+                    leverage === l
+                      ? "text-[var(--accent)] font-bold"
+                      : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
+                  }`}
+                >
+                  {l}x
+                </button>
+              ))}
             </div>
-
-          );
-        })()}
-        {maxLeverage <= 1 && (
+          </>
+        ) : (
           <p className="text-[9px] text-[var(--text-dim)] font-mono">{maxLeverage}x (fixed)</p>
         )}
-
       </div>
+
 
 
 
