@@ -640,7 +640,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     const chart = chartRef.current;
     if (!chart) return;
 
-    // Remove old series
+    // Null pending TP/SL line refs before removeSeries so in-flight
+    // handlePendingTpSl events can't attempt removePriceLine on the wrong series.
+    pendingTp50LineRef.current = null;
+    pendingTp100LineRef.current = null;
+    pendingSl25LineRef.current = null;
+    pendingSl50LineRef.current = null;
     if (seriesRef.current) {
       chart.removeSeries(seriesRef.current);
       seriesRef.current = null;
@@ -984,7 +989,9 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
 
       const { hasOrder, tp50, tp100, sl25, sl50 } = customEvt.detail;
 
-      const clearLine = (ref: React.MutableRefObject<any>) => {
+      type PriceLine = ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>;
+
+      const clearLine = (ref: React.MutableRefObject<PriceLine | null>) => {
         if (ref.current) {
           try {
             s.removePriceLine(ref.current);
@@ -1001,9 +1008,18 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
         return;
       }
 
-      const updateOrCreateLine = (ref: React.MutableRefObject<any>, price: number | null, title: string, color: string) => {
-        clearLine(ref);
+      const updateOrCreateLine = (
+        ref: React.MutableRefObject<PriceLine | null>,
+        price: number | null,
+        title: string,
+        color: string,
+      ) => {
         if (price != null && price > 0) {
+          if (ref.current) {
+            // Cheap update — avoids flicker of remove+recreate on every tick
+            ref.current.applyOptions({ price });
+            return;
+          }
           ref.current = s.createPriceLine({
             price,
             color,
@@ -1012,6 +1028,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
             axisLabelVisible: true,
             title,
           });
+        } else {
+          clearLine(ref);
         }
       };
 

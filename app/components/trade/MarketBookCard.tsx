@@ -92,7 +92,9 @@ export const MarketBookCard: FC = () => {
       {/* 2.1: Price ladder — bigger fonts (Click to auto-populate Order Ticket) */}
       <div className="mb-2 grid grid-cols-3 gap-px border border-[var(--border)]/30">
         {/* Bid */}
-        <div
+        <button
+          type="button"
+          aria-label="Long at Bid price"
           onClick={() => {
             const event = new CustomEvent("percolator-book-click", {
               detail: { price: Number(bestBidE6) / 1e6, type: "bid" }
@@ -100,13 +102,15 @@ export const MarketBookCard: FC = () => {
             window.dispatchEvent(event);
           }}
           title="Click to Long at Bid price"
-          className="bg-[var(--bg)] p-2 text-center cursor-pointer hover:bg-[var(--long)]/[0.08] transition-colors duration-150 active:scale-98 select-none"
+          className="bg-[var(--bg)] p-2 text-center cursor-pointer hover:bg-[var(--long)]/[0.08] transition-colors duration-150 active:scale-98 select-none focus-visible:ring-1 focus-visible:ring-[var(--long)]/40"
         >
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Bid</p>
           <p className="text-[11px] font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestBidE6)}</p>
-        </div>
+        </button>
         {/* Oracle — subtle accent border + bg */}
-        <div
+        <button
+          type="button"
+          aria-label="Populate order at Oracle price"
           onClick={() => {
             const event = new CustomEvent("percolator-book-click", {
               detail: { price: Number(oraclePrice) / 1e6, type: "oracle" }
@@ -114,7 +118,7 @@ export const MarketBookCard: FC = () => {
             window.dispatchEvent(event);
           }}
           title="Click to populate Oracle price"
-          className="p-2 text-center border-x border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] cursor-pointer hover:bg-[var(--accent)]/[0.08] transition-colors duration-150 active:scale-98 select-none"
+          className="p-2 text-center border-x border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] cursor-pointer hover:bg-[var(--accent)]/[0.08] transition-colors duration-150 active:scale-98 select-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]/40"
         >
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Oracle</p>
           <p
@@ -123,9 +127,11 @@ export const MarketBookCard: FC = () => {
           >
             {formatUsdPriceE6(oraclePrice)}
           </p>
-        </div>
+        </button>
         {/* Ask */}
-        <div
+        <button
+          type="button"
+          aria-label="Short at Ask price"
           onClick={() => {
             const event = new CustomEvent("percolator-book-click", {
               detail: { price: Number(bestAskE6) / 1e6, type: "ask" }
@@ -133,11 +139,11 @@ export const MarketBookCard: FC = () => {
             window.dispatchEvent(event);
           }}
           title="Click to Short at Ask price"
-          className="bg-[var(--bg)] p-2 text-center cursor-pointer hover:bg-[var(--short)]/[0.08] transition-colors duration-150 active:scale-98 select-none"
+          className="bg-[var(--bg)] p-2 text-center cursor-pointer hover:bg-[var(--short)]/[0.08] transition-colors duration-150 active:scale-98 select-none focus-visible:ring-1 focus-visible:ring-[var(--short)]/40"
         >
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Ask</p>
           <p className="text-[11px] font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestAskE6)}</p>
-        </div>
+        </button>
       </div>
 
       {/* 2.2: Spread row */}

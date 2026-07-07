@@ -565,6 +565,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const needsAccount = connected && !userAccount;
   const needsDeposit = connected && userAccount && capital === 0n;
 
+  // snapshotSize must be UNSIGNED (magnitude only). Direction sign is applied
+  // internally: `direction === "short" ? -effectiveSize : effectiveSize`.
   async function handleTrade(snapshotSize?: bigint) {
     const effectiveSize = snapshotSize ?? positionSize;
     if (!marginInput || !userAccount || effectiveSize <= 0n || exceedsBalance) return;
@@ -820,27 +822,25 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 const liq = afterLiqPrice;
                 if (mark <= 0n || liq <= 0n) return <span className="text-[var(--text-dim)] font-mono">N/A</span>;
                 const pct = mark > 0n ? Math.abs(Number(mark - liq)) / Number(mark) : 0;
-                
+                // barPct: distance-to-liq as a 0–100 gauge (40%+ distance = 100% "safe")
+                const barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100));
+
                 let label = "Low";
                 let colorClass = "text-emerald-400 border-emerald-400/30 bg-emerald-400/5";
                 let barColor = "bg-emerald-400";
-                let barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100)); // 40%+ is 100% green
-                
+
                 if (pct < 0.05) {
                   label = "Critical";
                   colorClass = "text-red-500 border-red-500/30 bg-red-500/5 font-bold animate-pulse";
                   barColor = "bg-red-500";
-                  barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100));
                 } else if (pct < 0.15) {
                   label = "High";
                   colorClass = "text-red-400 border-red-400/30 bg-red-400/5";
                   barColor = "bg-red-400";
-                  barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100));
                 } else if (pct < 0.30) {
                   label = "Medium";
                   colorClass = "text-amber-400 border-amber-400/30 bg-amber-400/5";
                   barColor = "bg-amber-400";
-                  barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100));
                 }
                 
                 return (
@@ -870,8 +870,9 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       {/* One-click trading option */}
       {connected && !needsAccount && !needsDeposit && (
         <div className="mb-3 flex items-center justify-between">
-          <label className="flex items-center gap-1.5 cursor-pointer text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.08em]">
+          <label htmlFor="one-click-trade" className="flex items-center gap-1.5 cursor-pointer text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.08em]">
             <input
+              id="one-click-trade"
               type="checkbox"
               checked={oneClickEnabled}
               onChange={(e) => handleOneClickToggle(e.target.checked)}
