@@ -772,36 +772,39 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             : 0;
 
           return (
-            <div className="relative pt-1 pb-1">
-              {/* Custom visual track — 3px tall */}
-              <div className="relative mx-0 h-[3px] rounded-full bg-[var(--border)]/30 mt-2">
-                {/* Fill */}
-                <div
-                  className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)]"
-                  style={{ width: `${thumbPct}%` }}
-                />
-                {/* Custom thumb — follows valueToPct, not the native linear position */}
+            <div className="relative pb-1">
+              {/* Track wrapper — gives the invisible input a well-defined bounding box */}
+              <div className="relative mx-0 mt-3 h-6">
+                {/* Visual track line, vertically centred */}
+                <div className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--border)]/30">
+                  {/* Fill */}
+                  <div
+                    className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)]"
+                    style={{ width: `${thumbPct}%` }}
+                  />
+                </div>
+                {/* Custom thumb */}
                 <div
                   className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--accent)] ring-2 ring-[var(--accent)]/30"
                   style={{ left: `${thumbPct}%` }}
                 />
+                {/* Invisible native input — same bounding box as the wrapper (h-6), handles all drag/click */}
+                <input
+                  type="range"
+                  min={1}
+                  max={maxLeverage}
+                  step={1}
+                  value={leverage}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    const nearest = availableLeverage.reduce((best, v) =>
+                      Math.abs(v - raw) < Math.abs(best - raw) ? v : best, raw);
+                    updateLeverage(Math.abs(nearest - raw) <= snapRadius ? nearest : raw);
+                  }}
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  aria-label="Leverage"
+                />
               </div>
-              {/* Invisible native input — full value range, handles all drag/click */}
-              <input
-                type="range"
-                min={1}
-                max={maxLeverage}
-                step={1}
-                value={leverage}
-                onChange={(e) => {
-                  const raw = Number(e.target.value);
-                  const nearest = availableLeverage.reduce((best, v) =>
-                    Math.abs(v - raw) < Math.abs(best - raw) ? v : best, raw);
-                  updateLeverage(Math.abs(nearest - raw) <= snapRadius ? nearest : raw);
-                }}
-                className="absolute inset-x-0 top-0 h-full w-full cursor-pointer opacity-0"
-                aria-label="Leverage"
-              />
               {/* Labels — uniformly spaced, one per snap point */}
               <div className="mt-2 flex justify-between">
                 {availableLeverage.map((l) => (
