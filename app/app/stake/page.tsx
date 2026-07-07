@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useSyncExternalStore, type CSSProperties } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
@@ -14,6 +14,8 @@ import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
 import { parseHumanAmount } from "@/lib/parseAmount";
+import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
+import { formatMarkPrice } from "@/lib/format";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -107,6 +109,34 @@ function slotsToTime(slots: number): string {
   const seconds = Math.round(slots * 0.4);
   if (seconds < 60) return `~${seconds}s`;
   return `~${Math.round(seconds / 60)} min`;
+}
+
+/* ── Live Price ── */
+
+/**
+ * Live-ticking USD price for a pool's underlying market slab, subscribed to
+ * the shared price store (the same WS feed the trade/markets pages tick off)
+ * — mirrors the `LiveRowPrice` pattern in app/markets/page.tsx. Isolated as
+ * its own component so ticks re-render only this price cell, not the whole
+ * card/panel.
+ */
+function LivePoolPrice({
+  slab,
+  className,
+  style,
+}: {
+  slab: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const subscribe = useCallback((cb: () => void) => subscribeSlab(slab, cb), [slab]);
+  const getSnap = useCallback(() => getSnapshot(slab).priceUsd, [slab]);
+  const priceUsd = useSyncExternalStore(subscribe, getSnap, () => null);
+  return (
+    <span className={className} style={style}>
+      {formatMarkPrice(priceUsd)}
+    </span>
+  );
 }
 
 /* ── Hero Section ── */
@@ -405,8 +435,14 @@ function DepositWidget({
 
   return (
     <div id="deposit" className="border border-[var(--border)]/50 bg-[var(--panel-bg)]">
-      <div className="px-4 py-2 border-b border-[var(--border)]/30">
+      <div className="px-4 py-2 border-b border-[var(--border)]/30 flex items-center justify-between gap-2">
         <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// deposit</span>
+        {pool && (
+          <span className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+            {pool.symbol}
+            <LivePoolPrice slab={pool.slabAddress} className="text-[var(--cyan)]" />
+          </span>
+        )}
       </div>
       <div className="p-4 space-y-4">
         {/* Pool selector */}
@@ -436,7 +472,7 @@ function DepositWidget({
                 style={{ fontFamily: "var(--font-mono)" }}
                 title="Click to use max balance"
               >
-                Balance: {walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {pool?.symbol ?? 'Token'}
+                Balance: {walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
               </button>
             )}
           </div>
@@ -477,7 +513,9 @@ function DepositWidget({
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] text-[var(--text-secondary)]">Pool cap</span>
               <span className="text-[10px] text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-                {formatUsd(pool.capUsed)} / {formatUsd(pool.capTotal)} ({Math.round(capRatio * 100)}%)
+                {pool.capTotal > 0
+                  ? `${formatUsd(pool.capUsed)} / ${formatUsd(pool.capTotal)} (${Math.round(capRatio * 100)}%)`
+                  : `${formatUsd(pool.capUsed)} deposited · No cap`}
               </span>
             </div>
             <ProgressBar value={capRatio} height={6} />
@@ -541,6 +579,11 @@ function PoolCard({ pool }: { pool: StakePool }) {
             <p className="text-[10px] text-[var(--text-muted)]">POOL</p>
           </div>
         </div>
+        <LivePoolPrice
+          slab={pool.slabAddress}
+          className="text-[13px] font-semibold text-[var(--text)] tabular-nums"
+          style={{ fontFamily: "var(--font-mono)" }}
+        />
       </div>
 
       <div className="space-y-2 text-[12px]">
@@ -550,11 +593,13 @@ function PoolCard({ pool }: { pool: StakePool }) {
         </div>
         <div className="flex justify-between">
           <span className="text-[var(--text-secondary)]">APR</span>
-          <span className="font-semibold text-[var(--cyan)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.apr.toFixed(1)}%</span>
+          <span className="font-semibold text-[var(--cyan)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{pool.apr.toFixed(2)}%</span>
         </div>
         <div className="flex justify-between">
           <span className="text-[var(--text-secondary)]">Cap</span>
-          <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>{Math.round(capRatio * 100)}% full</span>
+          <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+            {pool.capTotal > 0 ? `${Math.round(capRatio * 100)}% full` : "No cap"}
+          </span>
         </div>
         <div className="flex justify-between gap-x-2">
           <span className="shrink-0 text-[var(--text-secondary)]">Cooldown</span>
@@ -577,6 +622,24 @@ function PoolCard({ pool }: { pool: StakePool }) {
 
       <div className="absolute bottom-0 left-0 right-0 h-px bg-[var(--accent)]/0 transition-all duration-300 group-hover:bg-[var(--accent)]/30" />
     </article>
+  );
+}
+
+/** Subtle grid filler so a pool count that isn't a multiple of 3 doesn't leave
+ *  a dangling empty cell in the last row (e.g. 5 pools in a 3-col grid leaves
+ *  slot 6 empty) — points at market creation instead of being dead space. */
+function PoolPlaceholderCard() {
+  return (
+    <a
+      href="/create"
+      className="group flex min-w-[280px] flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-4 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] sm:p-5"
+    >
+      <span className="text-xl text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent)]">＋</span>
+      <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--accent)]">
+        Create a market
+      </p>
+      <p className="text-[10px] text-[var(--text-muted)]">More pools coming →</p>
+    </a>
   );
 }
 
@@ -624,6 +687,14 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
     );
   }
 
+  // Bug #850 (extended): a pool count that isn't a multiple of 3 leaves a dangling
+  // empty cell in the last row once the grid reaches xl:grid-cols-3 (e.g. 5 pools
+  // leaves slot 6 empty). 3 is the only remainder that matters — it's our widest
+  // column count — and topping up to the next multiple of 3 never adds a worse gap
+  // at the narrower 2-col (sm/lg) breakpoints. Fill with subtle placeholder cards
+  // instead of leaving dead grid space.
+  const fillerCount = pools.length >= 3 ? (3 - (pools.length % 3)) % 3 : 0;
+
   return (
     <section id="pools">
       <div className="mb-4 flex items-center justify-between">
@@ -634,6 +705,9 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
       <div className={`grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2 ${pools.length >= 3 ? "xl:grid-cols-3" : ""}`}>
         {pools.map((pool) => (
           <PoolCard key={pool.id} pool={pool} />
+        ))}
+        {Array.from({ length: fillerCount }).map((_, i) => (
+          <PoolPlaceholderCard key={`filler-${i}`} />
         ))}
       </div>
     </section>

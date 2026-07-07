@@ -493,9 +493,9 @@ export async function GET() {
         lpMint: pool.lpMint,
         /** Vault token account */
         vault: pool.vault,
-        /** Market info (null if slab not in Supabase) */
-        name: market?.name ?? `Pool ${pool.slab.slice(0, 8)}`,
-        symbol: market?.symbol ?? pool.slab.slice(0, 8),
+        /** Market info: Supabase first, then curated playground metadata, then slab-prefix last resort */
+        name: market?.name ?? PLAYGROUND_SLAB_META[pool.slab]?.name ?? `Pool ${pool.slab.slice(0, 8)}`,
+        symbol: market?.symbol ?? PLAYGROUND_SLAB_META[pool.slab]?.symbol ?? pool.slab.slice(0, 8),
         logoUrl: market?.logo_url ?? null,
         /** TVL = vault balance in USDC */
         tvl: toUsdcFloat(vaultBalRaw),
