@@ -751,10 +751,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <span className="text-[11px] font-medium text-[var(--text)]">x</span>
           </div>
         </div>
-        {/* Unified continuous slider with snapping tick marks */}
+        {/* Unified continuous slider — tick marks uniformly spaced, magnetic snap */}
         {maxLeverage > 1 && (() => {
-          // Snap magnitude: snap if within half the smallest gap between adjacent snap points
-          const snapRadius = availableLeverage.length > 1
+          const n = availableLeverage.length;
+
+          // Snap within half the smallest gap between adjacent snap points
+          const snapRadius = n > 1
             ? Math.floor(Math.min(...availableLeverage.slice(1).map((v, i) => v - availableLeverage[i])) / 2)
             : 0;
 
@@ -770,20 +772,34 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             updateLeverage(raw);
           };
 
-          const fillPct = maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 0;
+          // Map a leverage value → uniform display %, interpolating between snap-point indices
+          const valueToPct = (val: number): number => {
+            if (n <= 1) return 0;
+            for (let i = 0; i < n - 1; i++) {
+              if (val <= availableLeverage[i + 1]) {
+                const lo = availableLeverage[i];
+                const hi = availableLeverage[i + 1];
+                const segFrac = hi > lo ? (val - lo) / (hi - lo) : 0;
+                return ((i + segFrac) / (n - 1)) * 100;
+              }
+            }
+            return 100;
+          };
+
+          const fillPct = valueToPct(leverage);
 
           return (
             <div className="relative pb-5">
               {/* Visual track */}
-              <div className="relative h-[3px] rounded-full bg-[var(--border)]/30 mt-3 mx-0">
-                {/* Filled portion */}
+              <div className="relative h-[3px] rounded-full bg-[var(--border)]/30 mt-3">
+                {/* Filled portion — width tracks index-space position */}
                 <div
                   className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)]"
                   style={{ width: `${fillPct}%` }}
                 />
-                {/* Snap point tick marks — purely visual, also clickable */}
-                {availableLeverage.map((l) => {
-                  const pct = maxLeverage > 1 ? ((l - 1) / (maxLeverage - 1)) * 100 : 0;
+                {/* Uniformly spaced tick marks */}
+                {availableLeverage.map((l, i) => {
+                  const pct = n > 1 ? (i / (n - 1)) * 100 : 0;
                   const isActive = leverage >= l;
                   const isCurrent = leverage === l;
                   return (
@@ -823,6 +839,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 aria-label="Leverage"
               />
             </div>
+
           );
         })()}
         {maxLeverage <= 1 && (
