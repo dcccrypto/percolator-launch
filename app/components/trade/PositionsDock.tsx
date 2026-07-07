@@ -289,11 +289,33 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 {hasValidMark ? formatUsdPriceE6(currentPriceE6) : <span className="text-[var(--text-dim)]">--</span>}
               </td>
               <td
-                className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor}`}
+                className="whitespace-nowrap px-3 py-2.5 text-right font-medium"
                 style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
                 title={liqUnliquidatable ? "No liquidation price — collateral exceeds position notional; cannot be liquidated by price" : undefined}
               >
-                {formatLiqPrice(liqPriceE6, { hasPosition: liqUnliquidatable })}
+                <div className={liqPriceColor}>{formatLiqPrice(liqPriceE6, { hasPosition: liqUnliquidatable })}</div>
+                {liqPriceE6 > 0n && !liqUnliquidatable && hasValidMark && (
+                  (() => {
+                    const pct = currentPriceE6 > 0n ? Math.abs(Number(currentPriceE6 - liqPriceE6)) / Number(currentPriceE6) : 0;
+                    let riskLabel = "Low Risk";
+                    let riskColor = "text-emerald-400";
+                    if (pct < 0.05) {
+                      riskLabel = "Critical";
+                      riskColor = "text-red-500 font-bold animate-pulse";
+                    } else if (pct < 0.15) {
+                      riskLabel = "High Risk";
+                      riskColor = "text-red-400";
+                    } else if (pct < 0.30) {
+                      riskLabel = "Med Risk";
+                      riskColor = "text-amber-400";
+                    }
+                    return (
+                      <div className={`text-[8px] uppercase tracking-[0.05em] mt-0.5 ${riskColor}`}>
+                        {riskLabel}
+                      </div>
+                    );
+                  })()
+                )}
               </td>
               <td className={`whitespace-nowrap px-3 py-2.5 text-right ${hasValidMark ? pnlColor : "text-[var(--text-dim)]"}`} style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {hasValidMark ? (

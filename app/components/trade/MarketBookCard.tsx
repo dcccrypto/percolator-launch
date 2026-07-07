@@ -89,15 +89,33 @@ export const MarketBookCard: FC = () => {
         </button>
       </div>
 
-      {/* 2.1: Price ladder — bigger fonts */}
+      {/* 2.1: Price ladder — bigger fonts (Click to auto-populate Order Ticket) */}
       <div className="mb-2 grid grid-cols-3 gap-px border border-[var(--border)]/30">
         {/* Bid */}
-        <div className="bg-[var(--bg)] p-2 text-center">
+        <div
+          onClick={() => {
+            const event = new CustomEvent("percolator-book-click", {
+              detail: { price: Number(bestBidE6) / 1e6, type: "bid" }
+            });
+            window.dispatchEvent(event);
+          }}
+          title="Click to Long at Bid price"
+          className="bg-[var(--bg)] p-2 text-center cursor-pointer hover:bg-[var(--long)]/[0.08] transition-colors duration-150 active:scale-98 select-none"
+        >
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Bid</p>
           <p className="text-[11px] font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestBidE6)}</p>
         </div>
         {/* Oracle — subtle accent border + bg */}
-        <div className="p-2 text-center border-x border-[var(--accent)]/20 bg-[var(--accent)]/[0.03]">
+        <div
+          onClick={() => {
+            const event = new CustomEvent("percolator-book-click", {
+              detail: { price: Number(oraclePrice) / 1e6, type: "oracle" }
+            });
+            window.dispatchEvent(event);
+          }}
+          title="Click to populate Oracle price"
+          className="p-2 text-center border-x border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] cursor-pointer hover:bg-[var(--accent)]/[0.08] transition-colors duration-150 active:scale-98 select-none"
+        >
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Oracle</p>
           <p
             className="text-[13px] font-medium text-[var(--text)]"
@@ -107,7 +125,16 @@ export const MarketBookCard: FC = () => {
           </p>
         </div>
         {/* Ask */}
-        <div className="bg-[var(--bg)] p-2 text-center">
+        <div
+          onClick={() => {
+            const event = new CustomEvent("percolator-book-click", {
+              detail: { price: Number(bestAskE6) / 1e6, type: "ask" }
+            });
+            window.dispatchEvent(event);
+          }}
+          title="Click to Short at Ask price"
+          className="bg-[var(--bg)] p-2 text-center cursor-pointer hover:bg-[var(--short)]/[0.08] transition-colors duration-150 active:scale-98 select-none"
+        >
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Ask</p>
           <p className="text-[11px] font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestAskE6)}</p>
         </div>

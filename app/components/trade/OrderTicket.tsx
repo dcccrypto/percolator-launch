@@ -247,6 +247,40 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     worstFillPriceE6: bigint;
   } | null>(null);
   const [showInlineDeposit, setShowInlineDeposit] = useState(false);
+  const [oneClickEnabled, setOneClickEnabled] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const val = localStorage.getItem("percolator-one-click-trading");
+      if (val === "true") setOneClickEnabled(true);
+    }
+  }, []);
+
+  const handleOneClickToggle = (val: boolean) => {
+    setOneClickEnabled(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("percolator-one-click-trading", val ? "true" : "false");
+    }
+  };
+
+  // Keyboard shortcuts: Shift+L for Long, Shift+S for Short
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
+        return;
+      }
+      if (e.shiftKey && e.key.toUpperCase() === "L") {
+        e.preventDefault();
+        setDirection("long");
+      } else if (e.shiftKey && e.key.toUpperCase() === "S") {
+        e.preventDefault();
+        setDirection("short");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   // Which tab the inline card opens on. Clicking the active trigger closes the
   // card; clicking the other trigger switches its tab in place.
   const [inlineDepositMode, setInlineDepositMode] = useState<"deposit" | "withdraw">("deposit");
@@ -428,6 +462,28 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     },
     [effectiveBalance, decimals, leverage, priceUsd, sizeUnit],
   );
+
+  // Listen to order book price clicks to auto-calculate/populate size input
+  useEffect(() => {
+    const handleBookClick = (e: Event) => {
+      const customEvt = e as CustomEvent<{ price: number; type: "bid" | "ask" | "oracle" }>;
+      const clickPrice = customEvt.detail.price;
+      const type = customEvt.detail.type;
+
+      if (type === "bid") setDirection("long");
+      if (type === "ask") setDirection("short");
+
+      if (clickPrice > 0 && effectiveBalance > 0n) {
+        const balNum = Number(effectiveBalance) / Math.pow(10, decimals);
+        const maxNotionalUsd = balNum * leverage;
+        const val = sizeUnit === "token" ? (maxNotionalUsd / clickPrice).toFixed(6) : maxNotionalUsd.toFixed(2);
+        setSizeInput(val);
+        recomputeFromSize(val, sizeUnit, leverage);
+      }
+    };
+    window.addEventListener("percolator-book-click", handleBookClick);
+    return () => window.removeEventListener("percolator-book-click", handleBookClick);
+  }, [effectiveBalance, decimals, leverage, sizeUnit, recomputeFromSize]);
 
   const marginNative = marginInput ? parsePercToNative(marginInput, decimals) : 0n;
   const notionalNative = marginNative * BigInt(leverage);
@@ -726,6 +782,53 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             after={`${formatTokenAmount(afterMargin, decimals)} ${collateralSymbol}`}
             tooltip="Margin reserved from your account balance to back this position — not a deposit, so your balance after opening is lower, not higher."
           />
+          {afterLiqPrice > 0n && (
+            <div className="flex items-center justify-between py-1 text-[10px]">
+              <span className="flex items-center gap-1 text-[var(--text-secondary)] uppercase tracking-[0.08em]">
+                Risk Level
+                <InfoIcon tooltip="The estimated risk of liquidation based on the distance between the oracle price and your liquidation price." />
+              </span>
+              {(() => {
+                const mark = livePriceE6 ?? oracleE6;
+                const liq = afterLiqPrice;
+                if (mark <= 0n || liq <= 0n) return <span className="text-[var(--text-dim)] font-mono">N/A</span>;
+                const pct = mark > 0n ? Math.abs(Number(mark - liq)) / Number(mark) : 0;
+                
+                let label = "Low";
+                let colorClass = "text-emerald-400 border-emerald-400/30 bg-emerald-400/5";
+                let barColor = "bg-emerald-400";
+                let barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100)); // 40%+ is 100% green
+                
+                if (pct < 0.05) {
+                  label = "Critical";
+                  colorClass = "text-red-500 border-red-500/30 bg-red-500/5 font-bold animate-pulse";
+                  barColor = "bg-red-500";
+                  barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100));
+                } else if (pct < 0.15) {
+                  label = "High";
+                  colorClass = "text-red-400 border-red-400/30 bg-red-400/5";
+                  barColor = "bg-red-400";
+                  barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100));
+                } else if (pct < 0.30) {
+                  label = "Medium";
+                  colorClass = "text-amber-400 border-amber-400/30 bg-amber-400/5";
+                  barColor = "bg-amber-400";
+                  barPct = Math.min(100, Math.max(0, (pct / 0.4) * 100));
+                }
+                
+                return (
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-12 bg-[var(--border)]/20 overflow-hidden rounded-sm hidden xs:block">
+                      <div className={`h-full ${barColor}`} style={{ width: `${barPct}%` }} />
+                    </div>
+                    <span className={`px-1.5 py-0.5 rounded-sm border text-[9px] font-medium uppercase tracking-[0.05em] ${colorClass}`}>
+                      {label}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
 
@@ -734,6 +837,21 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <div className="mb-3 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 p-2.5">
           <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">{blockingIssue.title}</p>
           <p className="mt-1 text-[9px] leading-relaxed text-[var(--text-secondary)]">{blockingIssue.message}</p>
+        </div>
+      )}
+
+      {/* One-click trading option */}
+      {connected && !needsAccount && !needsDeposit && (
+        <div className="mb-3 flex items-center justify-between">
+          <label className="flex items-center gap-1.5 cursor-pointer text-[10px] text-[var(--text-secondary)] uppercase tracking-[0.08em]">
+            <input
+              type="checkbox"
+              checked={oneClickEnabled}
+              onChange={(e) => handleOneClickToggle(e.target.checked)}
+              className="accent-[var(--accent)]"
+            />
+            One-Click Trading
+          </label>
         </div>
       )}
 
@@ -794,14 +912,18 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             } catch {
               worstFillPriceE6 = 0n;
             }
-            setConfirmSnapshot({
-              positionSize,
-              marginNative,
-              estimatedLiqPrice: afterLiqPrice,
-              tradingFee: fee,
-              worstFillPriceE6,
-            });
-            setShowConfirmModal(true);
+            if (oneClickEnabled) {
+              handleTrade(positionSize);
+            } else {
+              setConfirmSnapshot({
+                positionSize,
+                marginNative,
+                estimatedLiqPrice: afterLiqPrice,
+                tradingFee: fee,
+                worstFillPriceE6,
+              });
+              setShowConfirmModal(true);
+            }
           }}
           disabled={submitDisabled}
           className={`w-full rounded-none py-3 text-[12px] font-bold uppercase tracking-[0.12em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 ${
