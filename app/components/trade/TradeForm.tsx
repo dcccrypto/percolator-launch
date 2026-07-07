@@ -87,6 +87,17 @@ export const TradeForm: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
   const oracleStale = oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp"));
+
+// Keep the trade form in sync with keeper/crank updates while the market is stale.
+// The submit guard already blocks stale oracle states; this short polling window
+// refreshes the slab engine state so trading can re-enable once a fresh crank lands.
+useEffect(() => {
+  if (mockMode || (!oracleUnavailable && !oracleStale)) return;
+
+  refreshSlab();
+  const id = window.setInterval(refreshSlab, 5_000);
+  return () => window.clearInterval(id);
+}, [mockMode, oracleUnavailable, oracleStale, refreshSlab]);
   const openWalletModal = usePrivyLogin();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
