@@ -1021,6 +1021,7 @@ export default function StakePage() {
   const [poolsLoading, setPoolsLoading] = useState(true);
   const [position, setPosition] = useState<UserPosition | null>(null);
   const [positionRefreshKey, setPositionRefreshKey] = useState(0);
+  const [poolsRefreshKey, setPoolsRefreshKey] = useState(0);
 
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -1041,7 +1042,7 @@ export default function StakePage() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [poolsRefreshKey]);
 
   // Fetch user position from on-chain data when wallet connected + pools loaded
   useEffect(() => {
@@ -1080,8 +1081,15 @@ export default function StakePage() {
   }, [connected, publicKey, pools, connection, positionRefreshKey]);
 
   const handleTxSuccess = useCallback(() => {
-    // Re-fetch position after deposit/withdraw
+    // Re-fetch both the user's LP position and pool-level TVL/cap data after
+    // deposit/withdraw. Without refreshing pools, successful deposits can leave
+    // pool cards showing stale TVL until the user manually reloads.
     setPositionRefreshKey((k) => k + 1);
+    setPoolsRefreshKey((k) => k + 1);
+
+    // RPC/indexer reads can lag just after confirmation, so do one follow-up
+    // refresh to catch the settled vault balance without requiring a reload.
+    window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 2_000);
   }, []);
 
   const totalUserDeposited = position ? position.estimatedValue : connected ? 0 : null;
