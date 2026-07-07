@@ -15,35 +15,35 @@ export const PLAYGROUND_SLAB_META: Record<string, {
   dex_pool_address: string;
 }> = {
   // SOL/USDC — raydium-clmm — new 2026-07-01
-  "CsPuA8jjvHhg6UZSjH4s61E5v339ZjBGinQzbm1Nh1Xc": {
+  "9NqrXtHxgkYKWERxuC3rQ5q3LABc8iDgJBoZPqCbf2Cy": {
     symbol: "SOL-PERP",
     name: "SOL/USDC Perpetual",
     mainnet_ca: "So11111111111111111111111111111111111111112",
     dex_pool_address: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
   },
   // BONK/USDC — raydium-clmm — new 2026-07-01
-  "4s7HrCoHekfMKB2F45z4bEq3K1WuS9ihS73gffNhtj1i": {
+  "EC5jrkpRkPG47ZCXH6GDUCLYK9Yfszv9Bv1LVsvgcZH7": {
     symbol: "BONK-PERP",
     name: "BONK/USDC Perpetual",
     mainnet_ca: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
     dex_pool_address: "3UwfrdLTpAjxTRni1boc5HUWe6hzc4HgE5yLdvEp2Noc",
   },
   // JUP/USDC — meteora-dlmm — new 2026-07-01
-  "qBhFaHzj3qi7xh6piTidKyyiuWacBepF1sK6EGM4xoR": {
+  "CBcVebWVTxqbh75PW12nN9uvZBHDrkPf1UL92ja3hzK2": {
     symbol: "JUP-PERP",
     name: "JUP/USDC Perpetual",
     mainnet_ca: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
     dex_pool_address: "HfgjZDmexhFVD28Vkb1NbQwWeXP3uDcVTLPjSGHmRHhL",
   },
   // TRUMP/USDC — meteora-dlmm — new 2026-07-01
-  "Az9jziKXA8mQjQtGBLaNH9uYGhF6dyqMuzm5R8UYWy6v": {
+  "AXU3BPEB3GjEfCJirYejtiqSkAqDvrTtaDqcvjvhPoqb": {
     symbol: "TRUMP-PERP",
     name: "TRUMP/USDC Perpetual",
     mainnet_ca: "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
     dex_pool_address: "9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2",
   },
   // PENGU/USDC — meteora-dlmm — new 2026-07-01
-  "B3JTEUcBgFFuHozpEP8rZLgDTbYPt29ytijPoHy8x4He": {
+  "6fXCu33Wrhwtsd2srFGJt8xMV2GB16DYM5Bn9s12ShZH": {
     symbol: "PENGU-PERP",
     name: "PENGU/USDC Perpetual",
     mainnet_ca: "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",

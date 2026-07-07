@@ -54,11 +54,11 @@ const POLL_INTERVAL_MS = Number(process.env.PRICE_WS_POLL_MS ?? 500);
 const HERMES_BASE = process.env.HERMES_BASE ?? "https://hermes.pyth.network";
 // Pyth mainnet crypto price-feed IDs, keyed by the CURRENT devnet slab.
 const PYTH_FEED: Record<string, string> = {
-  "CsPuA8jjvHhg6UZSjH4s61E5v339ZjBGinQzbm1Nh1Xc": "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", // SOL
-  "4s7HrCoHekfMKB2F45z4bEq3K1WuS9ihS73gffNhtj1i": "72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419", // BONK
-  "qBhFaHzj3qi7xh6piTidKyyiuWacBepF1sK6EGM4xoR": "0a0408d619e9380abad35060f9192039ed5042fa6f82301d0e48bb52be830996", // JUP
-  "Az9jziKXA8mQjQtGBLaNH9uYGhF6dyqMuzm5R8UYWy6v": "879551021853eec7a7dc827578e8e69da7e4fa8148339aa0d3d5296405be4b1a", // TRUMP
-  "B3JTEUcBgFFuHozpEP8rZLgDTbYPt29ytijPoHy8x4He": "bed3097008b9b5e3c93bec20be79cb43986b85a996475589351a21e67bae9b61", // PENGU
+  "9NqrXtHxgkYKWERxuC3rQ5q3LABc8iDgJBoZPqCbf2Cy": "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", // SOL
+  "EC5jrkpRkPG47ZCXH6GDUCLYK9Yfszv9Bv1LVsvgcZH7": "72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419", // BONK
+  "CBcVebWVTxqbh75PW12nN9uvZBHDrkPf1UL92ja3hzK2": "0a0408d619e9380abad35060f9192039ed5042fa6f82301d0e48bb52be830996", // JUP
+  "AXU3BPEB3GjEfCJirYejtiqSkAqDvrTtaDqcvjvhPoqb": "879551021853eec7a7dc827578e8e69da7e4fa8148339aa0d3d5296405be4b1a", // TRUMP
+  "6fXCu33Wrhwtsd2srFGJt8xMV2GB16DYM5Bn9s12ShZH": "bed3097008b9b5e3c93bec20be79cb43986b85a996475589351a21e67bae9b61", // PENGU
 };
 const idToSlab = new Map(Object.entries(PYTH_FEED).map(([slab, id]) => [id.toLowerCase(), slab]));
 
@@ -71,11 +71,11 @@ interface MarketEntry {
 
 /** Mirrors ~/percolator-oracle-keeper/registry.json as of 2026-07-01. */
 const MARKETS: MarketEntry[] = [
-  { slab: "CsPuA8jjvHhg6UZSjH4s61E5v339ZjBGinQzbm1Nh1Xc", pool: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj", dexType: "raydium-clmm", label: "SOL/USDC" },
-  { slab: "4s7HrCoHekfMKB2F45z4bEq3K1WuS9ihS73gffNhtj1i", pool: "3UwfrdLTpAjxTRni1boc5HUWe6hzc4HgE5yLdvEp2Noc", dexType: "raydium-clmm", label: "BONK/USDC" },
-  { slab: "qBhFaHzj3qi7xh6piTidKyyiuWacBepF1sK6EGM4xoR", pool: "HfgjZDmexhFVD28Vkb1NbQwWeXP3uDcVTLPjSGHmRHhL", dexType: "meteora-dlmm", label: "JUP/USDC" },
-  { slab: "Az9jziKXA8mQjQtGBLaNH9uYGhF6dyqMuzm5R8UYWy6v", pool: "9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2", dexType: "meteora-dlmm", label: "TRUMP/USDC" },
-  { slab: "B3JTEUcBgFFuHozpEP8rZLgDTbYPt29ytijPoHy8x4He", pool: "DdMA1cHcHEqYfttc1z1sJEY978CcU1pyjNuTWTNmdvzU", dexType: "meteora-dlmm", label: "PENGU/USDC" },
+  { slab: "9NqrXtHxgkYKWERxuC3rQ5q3LABc8iDgJBoZPqCbf2Cy", pool: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj", dexType: "raydium-clmm", label: "SOL/USDC" },
+  { slab: "EC5jrkpRkPG47ZCXH6GDUCLYK9Yfszv9Bv1LVsvgcZH7", pool: "3UwfrdLTpAjxTRni1boc5HUWe6hzc4HgE5yLdvEp2Noc", dexType: "raydium-clmm", label: "BONK/USDC" },
+  { slab: "CBcVebWVTxqbh75PW12nN9uvZBHDrkPf1UL92ja3hzK2", pool: "HfgjZDmexhFVD28Vkb1NbQwWeXP3uDcVTLPjSGHmRHhL", dexType: "meteora-dlmm", label: "JUP/USDC" },
+  { slab: "AXU3BPEB3GjEfCJirYejtiqSkAqDvrTtaDqcvjvhPoqb", pool: "9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2", dexType: "meteora-dlmm", label: "TRUMP/USDC" },
+  { slab: "6fXCu33Wrhwtsd2srFGJt8xMV2GB16DYM5Bn9s12ShZH", pool: "DdMA1cHcHEqYfttc1z1sJEY978CcU1pyjNuTWTNmdvzU", dexType: "meteora-dlmm", label: "PENGU/USDC" },
 ];
 
 const lastPriceE6 = new Map<string, bigint>();
