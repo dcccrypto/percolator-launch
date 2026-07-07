@@ -755,6 +755,44 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       </div>
 
+      {/* TP/SL Simulation HUD (Horizontal scrollable chips) */}
+      {hasOrder && priceUsd && priceUsd > 0 && (
+        <div className="mb-3">
+          <p className="mb-1 text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)] font-medium">TP/SL Exit Projections</p>
+          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin select-none">
+            {(() => {
+              const targets = [
+                { type: "tp", roi: 0.5, label: "TP +50%", colorClass: "text-emerald-400 border-emerald-500/20 bg-emerald-500/5" },
+                { type: "tp", roi: 1.0, label: "TP +100%", colorClass: "text-emerald-400 border-emerald-500/20 bg-emerald-500/5 font-medium" },
+                { type: "sl", roi: -0.25, label: "SL -25%", colorClass: "text-red-400 border-red-500/20 bg-red-500/5" },
+                { type: "sl", roi: -0.5, label: "SL -50%", colorClass: "text-red-400 border-red-500/20 bg-red-500/5 font-medium" },
+              ];
+
+              return targets.map((t, idx) => {
+                const entryNum = Number(estEntry) / 1e6;
+                const factor = t.roi / leverage;
+                const targetExitPrice = direction === "long" ? entryNum * (1 + factor) : entryNum * (1 - factor);
+                
+                const marginAmt = Number(marginNative) / Math.pow(10, decimals);
+                const pnlAmt = marginAmt * t.roi;
+                const pnlSign = pnlAmt > 0 ? "+" : "";
+
+                return (
+                  <div
+                    key={idx}
+                    className={`flex-shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-sm border text-[9px] font-mono whitespace-nowrap ${t.colorClass}`}
+                  >
+                    <span className="opacity-90">{t.label}:</span>
+                    <span className="font-semibold text-[var(--text)]">${targetExitPrice.toFixed(targetExitPrice < 0.01 ? 6 : targetExitPrice < 1 ? 4 : 2)}</span>
+                    <span className="opacity-70">({pnlSign}{pnlAmt.toFixed(2)} {collateralSymbol})</span>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Receipt — before -> after. Deliberately "sunken" (var(--bg), the
           page-level darkness, rather than an elevated surface) so it reads
           as an inset readout inside the ticket panel — a small depth cue
