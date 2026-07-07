@@ -751,45 +751,59 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <span className="text-[11px] font-medium text-[var(--text)]">x</span>
           </div>
         </div>
-        {/* Unified snapping slider — steps are indices into availableLeverage */}
-        {availableLeverage.length > 1 && (() => {
-          const snapIdx = availableLeverage.indexOf(leverage) !== -1
-            ? availableLeverage.indexOf(leverage)
-            : availableLeverage.reduce((best, val, i) =>
-                Math.abs(val - leverage) < Math.abs(availableLeverage[best] - leverage) ? i : best, 0);
-          const fillPct = availableLeverage.length > 1 ? (snapIdx / (availableLeverage.length - 1)) * 100 : 0;
+        {/* Unified continuous slider with snapping tick marks */}
+        {maxLeverage > 1 && (() => {
+          // Snap magnitude: snap if within half the smallest gap between adjacent snap points
+          const snapRadius = availableLeverage.length > 1
+            ? Math.floor(Math.min(...availableLeverage.slice(1).map((v, i) => v - availableLeverage[i])) / 2)
+            : 0;
+
+          const handleChange = (raw: number) => {
+            if (snapRadius > 0) {
+              const nearest = availableLeverage.reduce((best, v) =>
+                Math.abs(v - raw) < Math.abs(best - raw) ? v : best, raw);
+              if (Math.abs(nearest - raw) <= snapRadius) {
+                updateLeverage(nearest);
+                return;
+              }
+            }
+            updateLeverage(raw);
+          };
+
+          const fillPct = maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 0;
+
           return (
-            <div className="relative px-0 pb-5">
-              {/* Track + filled portion */}
-              <div className="relative h-[3px] rounded-full bg-[var(--border)]/30 mt-3">
+            <div className="relative pb-5">
+              {/* Visual track */}
+              <div className="relative h-[3px] rounded-full bg-[var(--border)]/30 mt-3 mx-0">
+                {/* Filled portion */}
                 <div
-                  className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)] transition-[width] duration-75"
+                  className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)]"
                   style={{ width: `${fillPct}%` }}
                 />
-                {/* Tick marks */}
-                {availableLeverage.map((l, i) => {
-                  const pct = availableLeverage.length > 1 ? (i / (availableLeverage.length - 1)) * 100 : 0;
+                {/* Snap point tick marks — purely visual, also clickable */}
+                {availableLeverage.map((l) => {
+                  const pct = maxLeverage > 1 ? ((l - 1) / (maxLeverage - 1)) * 100 : 0;
                   const isActive = leverage >= l;
+                  const isCurrent = leverage === l;
                   return (
                     <button
                       key={l}
                       type="button"
                       aria-label={`Set leverage to ${l}x`}
                       onClick={() => updateLeverage(l)}
-                      className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 group"
+                      className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 group z-10"
                       style={{ left: `${pct}%` }}
                     >
-                      {/* Tick dot */}
-                      <span className={`block h-2.5 w-2.5 rounded-full border-2 transition-colors duration-100 ${
-                        leverage === l
-                          ? "border-[var(--accent)] bg-[var(--accent)] scale-125"
+                      <span className={`block rounded-full border-2 transition-all duration-100 ${
+                        isCurrent
+                          ? "h-3 w-3 border-[var(--accent)] bg-[var(--accent)]"
                           : isActive
-                            ? "border-[var(--accent)] bg-[var(--accent)]/30 group-hover:bg-[var(--accent)]/60"
-                            : "border-[var(--border)] bg-[var(--panel-bg)] group-hover:border-[var(--accent)]/50"
+                            ? "h-2.5 w-2.5 border-[var(--accent)] bg-[var(--accent)]/40 group-hover:bg-[var(--accent)]/70"
+                            : "h-2.5 w-2.5 border-[var(--border)] bg-[var(--panel-bg)] group-hover:border-[var(--accent)]/60"
                       }`} />
-                      {/* Label below */}
-                      <span className={`absolute top-3.5 left-1/2 -translate-x-1/2 text-[8px] whitespace-nowrap font-mono transition-colors duration-100 ${
-                        leverage === l ? "text-[var(--accent)] font-bold" : "text-[var(--text-dim)] group-hover:text-[var(--text-secondary)]"
+                      <span className={`absolute top-3.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] font-mono transition-colors duration-100 ${
+                        isCurrent ? "text-[var(--accent)] font-bold" : "text-[var(--text-dim)] group-hover:text-[var(--text-secondary)]"
                       }`}>
                         {l}x
                       </span>
@@ -797,24 +811,24 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   );
                 })}
               </div>
-              {/* Invisible range input overlaid for drag behaviour */}
+              {/* Full-range input overlay — continuous, step 1 */}
               <input
                 type="range"
-                min={0}
-                max={availableLeverage.length - 1}
+                min={1}
+                max={maxLeverage}
                 step={1}
-                value={snapIdx}
-                onChange={(e) => updateLeverage(availableLeverage[Number(e.target.value)])}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                value={leverage}
+                onChange={(e) => handleChange(Number(e.target.value))}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
                 aria-label="Leverage"
               />
             </div>
           );
         })()}
-        {/* Fallback for single-leverage markets */}
-        {availableLeverage.length === 1 && (
-          <p className="text-[9px] text-[var(--text-dim)] font-mono">{availableLeverage[0]}x (fixed)</p>
+        {maxLeverage <= 1 && (
+          <p className="text-[9px] text-[var(--text-dim)] font-mono">{maxLeverage}x (fixed)</p>
         )}
+
       </div>
 
 
