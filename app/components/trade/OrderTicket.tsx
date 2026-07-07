@@ -755,17 +755,17 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </div>
       </div>
 
-      {/* TP/SL Simulation HUD (Horizontal scrollable chips) */}
+      {/* TP/SL Simulation HUD (Bloomberg-style High-Info 2x2 Grid) */}
       {hasOrder && priceUsd && priceUsd > 0 && (
         <div className="mb-3">
-          <p className="mb-1 text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)] font-medium">TP/SL Exit Projections</p>
-          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin select-none">
+          <p className="mb-1.5 text-[8px] uppercase tracking-[0.15em] text-[var(--text-secondary)] font-medium">TP/SL Exit Projections</p>
+          <div className="grid grid-cols-2 gap-1.5 select-none">
             {(() => {
               const targets = [
-                { type: "tp", roi: 0.5, label: "TP +50%", colorClass: "text-emerald-400 border-emerald-500/20 bg-emerald-500/5" },
-                { type: "tp", roi: 1.0, label: "TP +100%", colorClass: "text-emerald-400 border-emerald-500/20 bg-emerald-500/5 font-medium" },
-                { type: "sl", roi: -0.25, label: "SL -25%", colorClass: "text-red-400 border-red-500/20 bg-red-500/5" },
-                { type: "sl", roi: -0.5, label: "SL -50%", colorClass: "text-red-400 border-red-500/20 bg-red-500/5 font-medium" },
+                { type: "tp", roi: 0.5, label: "TP +50%", colorClass: "border-emerald-500/20 bg-emerald-500/[0.02]", textClass: "text-emerald-400" },
+                { type: "tp", roi: 1.0, label: "TP +100%", colorClass: "border-emerald-500/20 bg-emerald-500/[0.02]", textClass: "text-emerald-400" },
+                { type: "sl", roi: -0.25, label: "SL -25%", colorClass: "border-red-500/20 bg-red-500/[0.02]", textClass: "text-red-400" },
+                { type: "sl", roi: -0.5, label: "SL -50%", colorClass: "border-red-500/20 bg-red-500/[0.02]", textClass: "text-red-400" },
               ];
 
               return targets.map((t, idx) => {
@@ -777,14 +777,27 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 const pnlAmt = marginAmt * t.roi;
                 const pnlSign = pnlAmt > 0 ? "+" : "";
 
+                // Percentage price move required to hit target
+                const priceMovePct = (t.roi / leverage) * 100;
+                const priceMoveSign = priceMovePct > 0 ? "+" : "";
+
                 return (
                   <div
                     key={idx}
-                    className={`flex-shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-sm border text-[9px] font-mono whitespace-nowrap ${t.colorClass}`}
+                    className={`rounded-sm border p-1.5 flex flex-col justify-between ${t.colorClass}`}
                   >
-                    <span className="opacity-90">{t.label}:</span>
-                    <span className="font-semibold text-[var(--text)]">${targetExitPrice.toFixed(targetExitPrice < 0.01 ? 6 : targetExitPrice < 1 ? 4 : 2)}</span>
-                    <span className="opacity-70">({pnlSign}{pnlAmt.toFixed(2)} {collateralSymbol})</span>
+                    <div className="flex items-center justify-between text-[8px] uppercase tracking-[0.05em] text-[var(--text-secondary)]">
+                      <span>{t.label}</span>
+                      <span className={t.textClass}>{priceMoveSign}{priceMovePct.toFixed(1)}%</span>
+                    </div>
+                    <div className="mt-1 flex items-baseline justify-between">
+                      <span className="text-[11px] font-bold font-mono text-[var(--text)]">
+                        ${targetExitPrice.toFixed(targetExitPrice < 0.01 ? 6 : targetExitPrice < 1 ? 4 : 2)}
+                      </span>
+                      <span className="text-[8px] font-mono text-[var(--text-dim)]">
+                        {pnlSign}{pnlAmt.toFixed(2)} {collateralSymbol}
+                      </span>
+                    </div>
                   </div>
                 );
               });
