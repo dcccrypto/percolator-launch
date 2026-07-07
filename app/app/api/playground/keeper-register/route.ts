@@ -1,18 +1,23 @@
 /**
  * POST /api/playground/keeper-register
  *
- * Register a newly-created playground market with the oracle keeper service
- * so price-push starts immediately.
+ * Register a newly-created playground market so the oracle keeper starts pricing it.
  *
- * The keeper service (dcccrypto/percolator-oracle-keeper feat/cross-cluster-keeper)
- * stores market→pool mappings in registry.json and reads mainnet DEX prices every
- * cycle, pushing them as PushAuthMark to each registered devnet market.
+ * The keeper (dcccrypto/percolator-oracle-keeper feat/cross-cluster-keeper) runs on a
+ * NAT'd Mac mini — it can only make OUTBOUND calls, so this Vercel app can't POST to it
+ * directly. Instead this route persists the registration to a Vercel Blob JSON store
+ * (see lib/playground-registered-markets.ts); the keeper polls
+ * GET /api/playground/registered-markets outbound on its own interval and adds any
+ * market it doesn't already know about. v17 has no on-chain feed_id, so this payload
+ * is the only place the market↔pool binding is recorded.
  *
  * This route:
- *   1. POSTs { marketAddress, poolAddress, dexType, label, assetIndex } to the
- *      keeper service's /playground/register endpoint.
- *   2. If the keeper is unreachable, returns { registered: false } — non-fatal.
- *      The caller should notify the user that prices will start on next keeper cycle.
+ *   1. Validates the request (devnet-only, pubkey shapes, dexType allow-list).
+ *   2. Upserts { slabAddress, marketAddress, poolAddress, dexType, symbol, label,
+ *      mainnetCA, collateral, registeredAt } into the blob, keyed by slabAddress.
+ *   3. Returns { ok: true, registered: true, ... } on success, or a 502 with a clear
+ *      message if the Blob write fails (never throws uncaught — market creation
+ *      itself already landed on-chain regardless of this route's outcome).
  *
  * Body: {
  *   slabAddress:    string  — devnet market account
@@ -23,32 +28,23 @@
  *   label?:         string  — human label (e.g. "SOL/USDC — Raydium CLMM")
  * }
  *
- * Keeper service contract (POST KEEPER_INTERNAL_URL/playground/register):
- * {
- *   marketAddress: string,
- *   poolAddress:   string,
- *   dexType:       string,
- *   assetIndex:    number (0),
- *   label:         string,
- * }
- * Expected response: { success: boolean, message: string }
- *
  * Environment:
- *   KEEPER_INTERNAL_URL     — keeper service base URL (default: http://localhost:8081)
- *   KEEPER_REGISTER_SECRET  — shared secret for keeper auth (same as oracle-keeper/register)
+ *   BLOB_READ_WRITE_TOKEN — read automatically by the @vercel/blob SDK (Vercel-managed).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { signKeeperRequest } from "@/lib/keeper-hmac";
+import type { RegisteredMarket } from "@/lib/playground-registered-markets";
+import { upsertRegisteredMarket } from "@/lib/playground-registered-markets";
 
 export const dynamic = "force-dynamic";
 
 const NETWORK = process.env.NEXT_PUBLIC_DEFAULT_NETWORK?.trim() ?? process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim();
-const KEEPER_URL = (process.env.KEEPER_INTERNAL_URL ?? "http://localhost:8081").replace(/\/$/, "");
-const KEEPER_SECRET = (process.env.KEEPER_REGISTER_SECRET ?? "").trim();
 
 const VALID_DEX_TYPES = new Set(["raydium-clmm", "meteora-dlmm", "pumpswap"]);
+
+/** sim-USDC — the single collateral mint shared by every playground market. */
+const PLAYGROUND_COLLATERAL_MINT = "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC";
 
 export async function POST(req: NextRequest) {
   if (NETWORK !== "devnet") {
@@ -95,54 +91,40 @@ export async function POST(req: NextRequest) {
 
   const resolvedLabel = label ?? (symbol ? `${symbol}/USDC — ${dexType}` : `${slabAddress.slice(0, 8)}… — ${dexType}`);
 
-  // POST to keeper service
-  let registered = false;
-  let message = "Keeper unreachable — market will appear after next keeper restart (check KEEPER_INTERNAL_URL)";
+  const entry: RegisteredMarket = {
+    slabAddress,
+    marketAddress: slabAddress,
+    poolAddress: dexPoolAddress,
+    dexType,
+    symbol: symbol ?? null,
+    label: resolvedLabel,
+    mainnetCA: mainnetCA ?? null,
+    collateral: PLAYGROUND_COLLATERAL_MINT,
+    registeredAt: Date.now(),
+  };
 
   try {
-    const keeperBody = JSON.stringify({
-      marketAddress: slabAddress,
-      poolAddress: dexPoolAddress,
-      dexType,
-      assetIndex: 0,
-      label: resolvedLabel,
-      mainnetCA: mainnetCA ?? null,
-    });
-
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (KEEPER_SECRET) {
-      // LAUNCH-16: sign instead of forwarding the raw shared secret (same HMAC-SHA256
-      // scheme as /api/oracle-keeper/register) — the credential never appears on the wire.
-      const { timestamp, signature } = signKeeperRequest(KEEPER_SECRET, keeperBody);
-      headers["x-keeper-timestamp"] = timestamp;
-      headers["x-keeper-signature"] = signature;
-    }
-
-    const keeperResp = await fetch(`${KEEPER_URL}/playground/register`, {
-      method: "POST",
-      headers,
-      body: keeperBody,
-      signal: AbortSignal.timeout(8_000),
-    });
-
-    if (keeperResp.ok) {
-      const data = (await keeperResp.json()) as { success?: boolean; message?: string };
-      registered = data.success ?? false;
-      message = data.message ?? "Registered";
-    } else {
-      const errText = await keeperResp.text().catch(() => keeperResp.statusText);
-      message = `Keeper returned ${keeperResp.status}: ${errText.slice(0, 200)}`;
-      console.warn("[playground/keeper-register] Keeper error:", message);
-    }
+    await upsertRegisteredMarket(entry);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    console.warn("[playground/keeper-register] Keeper unreachable:", detail);
-    // Non-fatal — leave registered=false
+    console.error("[playground/keeper-register] Blob write failed:", detail);
+    return NextResponse.json(
+      {
+        ok: false,
+        registered: false,
+        error: "Failed to persist market registration to Blob store",
+        detail,
+      },
+      { status: 502 },
+    );
   }
 
   return NextResponse.json({
-    registered,
-    message,
+    ok: true,
+    // Kept alongside `ok` for backward compatibility with the existing
+    // hooks/useCreateMarket.ts caller (registered/message drive its UI copy).
+    registered: true,
+    message: "Registered — the keeper will pick this up on its next poll (~30s)",
     slabAddress,
     dexPoolAddress,
     dexType,
