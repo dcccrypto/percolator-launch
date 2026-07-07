@@ -751,57 +751,81 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <span className="text-[11px] font-medium text-[var(--text)]">x</span>
           </div>
         </div>
-        {maxLeverage > 1 ? (
-          <>
-            {(() => {
-              const n = availableLeverage.length;
-              // Find closest snap index to current leverage (for when text input sets a between-point value)
-              const snapIdx = availableLeverage.reduce(
-                (best, v, i) => Math.abs(v - leverage) < Math.abs(availableLeverage[best] - leverage) ? i : best,
-                0,
-              );
-              const fillPct = n > 1 ? (snapIdx / (n - 1)) * 100 : 0;
-              return (
-                <>
-                  <input
-                    type="range"
-                    min={0}
-                    max={n - 1}
-                    step={1}
-                    value={snapIdx}
-                    onChange={(e) => updateLeverage(availableLeverage[Number(e.target.value)])}
-                    className="leverage-slider w-full cursor-pointer"
-                    style={{
-                      background: `linear-gradient(to right, var(--accent) ${fillPct}%, var(--border) ${fillPct}%)`,
-                    }}
-                    aria-label="Leverage"
-                  />
-                  {/* Labels uniformly spaced — one per snap point, aligns with slider steps */}
-                  <div className="mt-1 flex justify-between">
-                    {availableLeverage.map((l) => (
-                      <button
-                        key={l}
-                        type="button"
-                        onClick={() => updateLeverage(l)}
-                        className={`text-[8px] font-mono transition-colors duration-100 ${
-                          leverage === l
-                            ? "text-[var(--accent)] font-bold"
-                            : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
-                        }`}
-                      >
-                        {l}x
-                      </button>
-                    ))}
-                  </div>
-                </>
-              );
-            })()}
-          </>
-        ) : (
+        {maxLeverage > 1 ? (() => {
+          const n = availableLeverage.length;
 
+          // Maps a leverage value → uniform display % (interpolates between snap-point indices)
+          const valueToPct = (val: number): number => {
+            if (n <= 1) return 0;
+            for (let i = 0; i < n - 1; i++) {
+              if (val <= availableLeverage[i + 1]) {
+                const lo = availableLeverage[i], hi = availableLeverage[i + 1];
+                return ((i + (hi > lo ? (val - lo) / (hi - lo) : 0)) / (n - 1)) * 100;
+              }
+            }
+            return 100;
+          };
+
+          const thumbPct = valueToPct(leverage);
+          const snapRadius = n > 1
+            ? Math.floor(Math.min(...availableLeverage.slice(1).map((v, i) => v - availableLeverage[i])) / 2)
+            : 0;
+
+          return (
+            <div className="relative pt-1 pb-1">
+              {/* Custom visual track — 3px tall */}
+              <div className="relative mx-0 h-[3px] rounded-full bg-[var(--border)]/30 mt-2">
+                {/* Fill */}
+                <div
+                  className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)]"
+                  style={{ width: `${thumbPct}%` }}
+                />
+                {/* Custom thumb — follows valueToPct, not the native linear position */}
+                <div
+                  className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--accent)] ring-2 ring-[var(--accent)]/30"
+                  style={{ left: `${thumbPct}%` }}
+                />
+              </div>
+              {/* Invisible native input — full value range, handles all drag/click */}
+              <input
+                type="range"
+                min={1}
+                max={maxLeverage}
+                step={1}
+                value={leverage}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  const nearest = availableLeverage.reduce((best, v) =>
+                    Math.abs(v - raw) < Math.abs(best - raw) ? v : best, raw);
+                  updateLeverage(Math.abs(nearest - raw) <= snapRadius ? nearest : raw);
+                }}
+                className="absolute inset-x-0 top-0 h-full w-full cursor-pointer opacity-0"
+                aria-label="Leverage"
+              />
+              {/* Labels — uniformly spaced, one per snap point */}
+              <div className="mt-2 flex justify-between">
+                {availableLeverage.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => updateLeverage(l)}
+                    className={`text-[8px] font-mono transition-colors duration-100 ${
+                      leverage === l
+                        ? "text-[var(--accent)] font-bold"
+                        : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
+                    }`}
+                  >
+                    {l}x
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })() : (
           <p className="text-[9px] text-[var(--text-dim)] font-mono">{maxLeverage}x (fixed)</p>
         )}
       </div>
+
 
 
 
