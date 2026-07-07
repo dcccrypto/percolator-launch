@@ -93,7 +93,7 @@ export const ChartIndicatorMenu: FC<ChartIndicatorMenuProps> = ({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="true"
-        aria-label="Indicators"
+        aria-label={indicators.length > 0 ? `Indicators (${indicators.length} active)` : "Indicators"}
         title="Indicators"
         className={[
           "flex items-center gap-1 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-1.5 sm:px-2 py-1 text-xs transition-colors",
@@ -103,6 +103,14 @@ export const ChartIndicatorMenu: FC<ChartIndicatorMenuProps> = ({
         ].join(" ")}
       >
         <span className="font-mono italic">f(x)</span>
+        {indicators.length > 0 && (
+          <span
+            className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-[var(--accent)]/15 px-1 font-mono text-[9px] font-bold text-[var(--accent)]"
+            aria-hidden="true"
+          >
+            {indicators.length}
+          </span>
+        )}
         <svg
           width="10"
           height="10"

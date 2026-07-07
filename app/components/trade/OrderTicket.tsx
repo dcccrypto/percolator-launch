@@ -62,7 +62,7 @@ import { saveEntryPrice, getEntryPrice, clearEntryPrice } from "@/lib/entry-pric
 import { DepositWithdrawCard } from "@/components/trade/DepositWithdrawCard";
 import { useInitUser } from "@/hooks/useInitUser";
 
-const LEVERAGE_SNAP_POINTS = [1, 2, 5, 10, 20];
+const LEVERAGE_SNAP_POINTS = [1, 3, 5, 10, 20];
 const SIZE_PRESETS = [25, 50, 75, 100];
 const MAX_DISPLAY_LEVERAGE = 200;
 
@@ -235,8 +235,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [marginInput, setMarginInput] = useState("");
   const [leverage, setLeverage] = useState(1);
   const [leverageText, setLeverageText] = useState("1");
+  // The unified snapping slider's native input is visually hidden (custom
+  // thumb div instead) — track focus explicitly so the fake thumb can carry
+  // a keyboard focus ring; opacity-0 would otherwise make the browser's own
+  // focus-visible outline invisible too, silently regressing keyboard a11y.
+  const [leverageFocused, setLeverageFocused] = useState(false);
   const [lastSig, setLastSig] = useState<string | null>(null);
-  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "confirming">("idle");
+  const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "confirming" | "error">("idle");
   const [humanError, setHumanError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmSnapshot, setConfirmSnapshot] = useState<{
@@ -282,11 +287,6 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     if (arr.length === 0 || arr[arr.length - 1] < maxLeverage) arr.push(maxLeverage);
     return arr;
   }, [maxLeverage]);
-  // Display-only: how far along the track the filled (accent) portion should
-  // paint, mirroring the current leverage value — purely a visual affordance
-  // for the range input's inline gradient background (see the slider below).
-  const leverageFillPct = maxLeverage > 1 ? ((leverage - 1) / (maxLeverage - 1)) * 100 : 100;
-
   const capital = userAccount ? userAccount.account.capital : 0n;
   // Margin already "locked" by this market's existing open position (if
   // any), so balance/buying-power reflect what's actually free to size a
@@ -540,7 +540,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[OrderTicket] raw error:", msg);
       setHumanError(humanizeError(msg));
-      setTradePhase("idle");
+      // Brief "Failed" flash on the submit button itself (matches the
+      // "Confirmed!" success flash below) before reverting to idle — the
+      // detailed reason stays in the humanError banner underneath.
+      setTradePhase("error");
+      setTimeout(() => setTradePhase("idle"), 1200);
     }
   }
 
@@ -553,6 +557,21 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   return (
     <div className="relative p-3.5">
+      {/* Top strip — order type (market-only, so a static label rather than
+          a tab you can't actually switch) + a leverage-at-a-glance pill.
+          Hyperliquid-style: leverage is visible from the first glance at the
+          ticket, not only once you've scrolled to the slider below. */}
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-secondary)]">Market</span>
+        <span
+          className="rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text)]"
+          style={{ fontFamily: "var(--font-mono)" }}
+          title="Current leverage — adjust below"
+        >
+          {leverage}x
+        </span>
+      </div>
+
       {/* Long / Short segmented — semantic long/short tokens only, symmetric
           unselected states (both read as neutral until chosen — previously
           Short's idle state was tinted red even when not selected, which
@@ -583,35 +602,38 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </button>
       </div>
 
+      {/* Account strip — Hyperliquid-style "Available to Trade" line: its own
+          clean row above the input rather than crammed into the Size label.
+          "Acc Bal" is AVAILABLE capital (total minus margin already locked by
+          an open position on this market) — when a position is open it shows
+          "avail / total" so the locked portion isn't hidden, just no longer
+          double-counted as spendable. */}
+      <div
+        className="mb-2 flex items-center justify-between text-[10px] text-[var(--text)]"
+        style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
+        title={lockedMargin > 0n ? `${formatTokenAmount(lockedMargin, decimals, 3)} ${collateralSymbol} locked by your open position on this market` : undefined}
+      >
+        <span>
+          <span className="text-[var(--text-secondary)]">Balance </span>
+          {userAccount ? formatTokenAmount(availableBalance, decimals, 3) : "0"}
+          {lockedMargin > 0n && (
+            <span className="text-[var(--text-secondary)]">/{formatTokenAmount(capital, decimals, 3)}</span>
+          )}
+          <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
+        </span>
+        <span>
+          <span className="text-[var(--text-secondary)]">Wallet </span>
+          {walletAtaBalance != null ? formatTokenAmount(walletAtaBalance, decimals, 3) : "—"}
+          <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
+        </span>
+      </div>
+
       {/* Size — single input + unit toggle + quick-fill chips */}
       <div className="mb-2">
-        <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
-            Size
-            <InfoIcon tooltip="Position size in the toggled unit. Switch between token and USD - both stay in sync." />
-          </label>
-          {/* Both balances up top — users deposit from the wallet into the
-              account and trade from the account; showing only one confused
-              people about where their funds "went". 3dp keeps the row tight.
-              "Acc Bal" is AVAILABLE capital (total minus margin already
-              locked by an open position on this market) — when a position
-              is open it shows "avail / total" so the locked portion isn't
-              hidden, just no longer double-counted as spendable. */}
-          <span
-            className="text-[10px] text-[var(--text)]"
-            style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
-            title={lockedMargin > 0n ? `${formatTokenAmount(lockedMargin, decimals, 3)} ${collateralSymbol} locked by your open position on this market` : undefined}
-          >
-            <span className="text-[var(--text-secondary)]">Acc Bal </span>
-            {userAccount ? formatTokenAmount(availableBalance, decimals, 3) : "0"}
-            {lockedMargin > 0n && (
-              <span className="text-[var(--text-secondary)]">/{formatTokenAmount(capital, decimals, 3)}</span>
-            )}
-            <span className="text-[var(--text-secondary)]"> · Wal Bal </span>
-            {walletAtaBalance != null ? formatTokenAmount(walletAtaBalance, decimals, 3) : "—"}
-            <span className="text-[var(--text-secondary)]"> {collateralSymbol}</span>
-          </span>
-        </div>
+        <label className="mb-1.5 block text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
+          Size
+          <InfoIcon tooltip="Position size in the toggled unit. Switch between token and USD - both stay in sync." />
+        </label>
         <div className="flex gap-1.5">
           <input
             type="text"
@@ -636,7 +658,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           </p>
         )}
       </div>
-      <div className="mb-3 flex gap-1">
+      <div className="mb-2 flex gap-1">
         {SIZE_PRESETS.map((pct) => (
           <button
             key={pct}
@@ -648,8 +670,25 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         ))}
       </div>
 
-      {/* Leverage slider + input */}
-      <div className="mb-4">
+      {/* Order value — surfaced right under the size input (Hyperliquid
+          shows notional at a glance here, not buried below leverage). Moved
+          out of the receipt box below so it isn't shown twice. */}
+      {hasOrder && (
+        <div className="mb-3 flex items-center justify-between text-[10px]">
+          <span className="flex items-center gap-1 text-[var(--text-secondary)] uppercase tracking-[0.08em]">
+            Order value
+            <InfoIcon tooltip="Total notional exposure — margin × leverage. sim-USDC is $1-pegged, so this is your USD exposure." />
+          </span>
+          <span className="font-mono tabular-nums text-[var(--text)]">
+            {formatTokenAmount(notionalNative, decimals)} {collateralSymbol}
+          </span>
+        </div>
+      )}
+
+      {/* Leverage slider + input — divider matches the account row's border-t
+          below, giving "size" and "leverage/risk" distinct visual sections
+          instead of one continuous unbroken stack. */}
+      <div className="mb-4 border-t border-[var(--border)]/20 pt-3">
         <div className="mb-1 flex items-center justify-between">
           <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
             Leverage
@@ -672,31 +711,91 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <span className="text-[11px] font-medium text-[var(--text)]">x</span>
           </div>
         </div>
-        <input
-          type="range"
-          min={1}
-          max={maxLeverage}
-          step={1}
-          value={leverage}
-          onChange={(e) => updateLeverage(Number(e.target.value))}
-          className="leverage-slider mb-2 w-full cursor-pointer touch-none"
-          style={{
-            background: `linear-gradient(to right, var(--accent) ${leverageFillPct}%, var(--border) ${leverageFillPct}%)`,
-          }}
-        />
-        <div className="flex flex-wrap gap-1">
-          {availableLeverage.map((l) => (
-            <button
-              key={l}
-              onClick={() => updateLeverage(l)}
-              className={`flex-1 basis-0 min-w-[32px] rounded-none py-1.5 text-[9px] font-medium transition-colors duration-150 ${
-                leverage === l ? "bg-[var(--accent)] text-white" : "border border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
-              }`}
-            >
-              {l}x
-            </button>
-          ))}
-        </div>
+        {maxLeverage > 1 ? (() => {
+          const n = availableLeverage.length;
+
+          // Maps a leverage value → uniform display % — interpolates between
+          // snap-point INDICES, not raw numeric values, so labels stay evenly
+          // spaced regardless of the gap between them (e.g. 1/3/5/10/20 would
+          // bunch up on a linear numeric scale; this keeps them uniform).
+          const valueToPct = (val: number): number => {
+            if (n <= 1) return 0;
+            for (let i = 0; i < n - 1; i++) {
+              if (val <= availableLeverage[i + 1]) {
+                const lo = availableLeverage[i], hi = availableLeverage[i + 1];
+                return ((i + (hi > lo ? (val - lo) / (hi - lo) : 0)) / (n - 1)) * 100;
+              }
+            }
+            return 100;
+          };
+
+          const thumbPct = valueToPct(leverage);
+          const snapRadius = n > 1
+            ? Math.floor(Math.min(...availableLeverage.slice(1).map((v, i) => v - availableLeverage[i])) / 2)
+            : 0;
+
+          return (
+            <div className="relative pb-1">
+              {/* Track wrapper — gives the invisible input a well-defined bounding box */}
+              <div className="relative mx-0 mt-3 h-6">
+                {/* Visual track line, vertically centred */}
+                <div className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--border)]/30">
+                  {/* Fill */}
+                  <div
+                    className="absolute left-0 top-0 h-full rounded-full bg-[var(--accent)]"
+                    style={{ width: `${thumbPct}%` }}
+                  />
+                </div>
+                {/* Custom thumb — carries the keyboard focus ring since the
+                    native input driving it is visually hidden below. */}
+                <div
+                  className={`pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--accent)] transition-shadow duration-150 ${
+                    leverageFocused ? "ring-2 ring-offset-2 ring-offset-[var(--bg)] ring-[var(--accent)]" : "ring-2 ring-[var(--accent)]/30"
+                  }`}
+                  style={{ left: `${thumbPct}%` }}
+                />
+                {/* Invisible native input — same bounding box as the wrapper (h-6), handles all drag/click */}
+                <input
+                  type="range"
+                  min={1}
+                  max={maxLeverage}
+                  step={1}
+                  value={leverage}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    const nearest = availableLeverage.reduce((best, v) =>
+                      Math.abs(v - raw) < Math.abs(best - raw) ? v : best, raw);
+                    updateLeverage(Math.abs(nearest - raw) <= snapRadius ? nearest : raw);
+                  }}
+                  onFocus={() => setLeverageFocused(true)}
+                  onBlur={() => setLeverageFocused(false)}
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  style={{ height: "100%" }}
+                  aria-label="Leverage"
+                />
+              </div>
+              {/* Labels — uniformly spaced, one per snap point */}
+              <div className="mt-2 flex justify-between">
+                {availableLeverage.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => updateLeverage(l)}
+                    className={`text-[8px] font-mono transition-colors duration-100 ${
+                      leverage === l
+                        ? "text-[var(--accent)] font-bold"
+                        : "text-[var(--text-dim)] hover:text-[var(--text-secondary)]"
+                    }`}
+                  >
+                    {l}x
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })() : (
+          <p className="text-[9px] text-[var(--text-dim)] font-mono">{maxLeverage}x (fixed)</p>
+        )}
       </div>
 
       {/* Receipt — before -> after. Deliberately "sunken" (var(--bg), the
@@ -767,7 +866,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                   direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
                 }`}
               >
-                {initLoading ? "Creating account…" : showInlineDeposit ? "Close" : canOneClick ? "Create Account & Deposit" : needsAccount ? "Get Tokens to Trade" : "Deposit to Trade"}
+                {initLoading ? "Creating account…" : showInlineDeposit ? "Close" : canOneClick ? "Initialize Account" : needsAccount ? "Get Tokens to Trade" : "Deposit to Trade"}
               </button>
             );
           })()}
@@ -804,11 +903,21 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             setShowConfirmModal(true);
           }}
           disabled={submitDisabled}
-          className={`w-full rounded-none py-3 text-[12px] font-bold uppercase tracking-[0.12em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 ${
-            direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"
+          className={`w-full rounded-none py-3 text-[12px] font-bold uppercase tracking-[0.12em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:hover:brightness-100 ${
+            tradePhase === "error"
+              ? "bg-[var(--short)] text-white disabled:opacity-100 animate-error-shake"
+              : `disabled:opacity-50 ${direction === "long" ? "bg-[var(--long)] text-black" : "bg-[var(--short)] text-white"} ${
+                  tradePhase === "confirming" ? "animate-scale-in" : ""
+                }`
           }`}
         >
-          {tradePhase === "submitting" ? "Submitting…" : tradePhase === "confirming" ? "Confirmed!" : `${direction === "long" ? "Long" : "Short"} ${symbol} ${leverage}x`}
+          {tradePhase === "submitting"
+            ? "Submitting…"
+            : tradePhase === "confirming"
+              ? "Confirmed!"
+              : tradePhase === "error"
+                ? "Failed"
+                : `${direction === "long" ? "Long" : "Short"} ${symbol} ${leverage}x`}
         </button>
       )}
 
@@ -823,17 +932,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </p>
       )}
 
-      {/* Account row: balance / buying power / deposit link */}
+      {/* Account row: buying power / deposit link. Available balance is
+          already shown compactly next to the Size input above ("Acc Bal") —
+          repeating it here duplicated the same number under a different
+          label; Buying Power is the one distinct figure worth a second look. */}
       <div className="mt-3 flex items-center justify-between border-t border-[var(--border)]/30 pt-2.5 text-[10px]">
         <div>
           <div className="flex items-center gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-            Avail Bal
-            <InfoIcon tooltip="Account balance minus margin already locked by an open position on this market." />
-          </div>
-          <div className="font-mono tabular-nums text-[var(--text)]">{formatTokenAmount(effectiveBalance, decimals)} {collateralSymbol}</div>
-        </div>
-        <div className="text-right">
-          <div className="flex items-center justify-end gap-1 text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
             Buying power
             <InfoIcon tooltip="Available balance x max leverage - the largest notional you could open right now." />
           </div>

@@ -252,6 +252,10 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
             onChange={(e) => setPercent(Number(e.target.value))}
             style={{
               background: `linear-gradient(to right, var(--short) 0%, var(--short) ${percent}%, rgba(255,255,255,0.03) ${percent}%, rgba(255,255,255,0.03) 100%)`,
+              backgroundSize: "100% 2px",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
+              height: "20px",
             }}
             className="mb-2 h-1 w-full cursor-pointer appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:bg-[var(--short)] [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-none [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--short)] [&::-moz-range-track]:bg-transparent"
           />

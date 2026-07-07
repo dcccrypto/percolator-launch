@@ -7,9 +7,11 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
+import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { formatUsdPriceE6, formatTokenAmount, shortenAddress } from "@/lib/format";
 import { resolveMarketPriceE6 } from "@/lib/oraclePrice";
 import { AccountKind } from "@percolatorct/sdk";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 const LP_TABLE_CAP = 5;
 
@@ -22,6 +24,10 @@ export const MarketBookCard: FC = () => {
   const symbol = tokenMeta?.symbol ?? "Token";
   const decimals = tokenMeta?.decimals ?? 6;
   const [, toggleBook] = useOrderBookVisibility();
+  // Called unconditionally (before the loading early-return below) per rules
+  // of hooks — the oracle cell it drives only needs livePriceE6, not
+  // engine/params, so this is safe to compute even while those are loading.
+  const oracleFlash = usePriceFlash(livePriceE6 ?? null);
 
   const lps = useMemo(
     () => accounts.filter(({ account }) => account.kind === AccountKind.LP),
@@ -29,9 +35,38 @@ export const MarketBookCard: FC = () => {
   );
 
   if (loading || !engine || !config || !params) {
+    if (!loading) {
+      return (
+        <div className="flex h-full min-h-[160px] flex-col items-center justify-center p-3">
+          <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">—</p>
+        </div>
+      );
+    }
+    // Shimmer skeleton mirrors the real layout (price ladder / spread /
+    // depth bars / LP rows) instead of a flash-of-plain-text loading state.
     return (
-      <div className="flex h-full min-h-[160px] flex-col items-center justify-center p-3">
-        <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">{loading ? "Loading…" : "—"}</p>
+      <div className="p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[var(--text-dim)]">Order Book</span>
+        </div>
+        <div className="mb-2 grid grid-cols-3 gap-px border border-[var(--border)]/30">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="p-2 text-center">
+              <ShimmerSkeleton className="mx-auto h-2 w-8" />
+              <ShimmerSkeleton className="mx-auto mt-1.5 h-3.5 w-14" />
+            </div>
+          ))}
+        </div>
+        <ShimmerSkeleton className="mb-3 h-2 w-full" />
+        <div className="mb-3 grid grid-cols-2 gap-1">
+          <ShimmerSkeleton className="h-12 w-full" />
+          <ShimmerSkeleton className="h-12 w-full" />
+        </div>
+        <div className="space-y-1.5">
+          {[0, 1, 2].map((i) => (
+            <ShimmerSkeleton key={i} className="h-3 w-full" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -96,11 +131,13 @@ export const MarketBookCard: FC = () => {
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Bid</p>
           <p className="text-[11px] font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>{formatUsdPriceE6(bestBidE6)}</p>
         </div>
-        {/* Oracle — subtle accent border + bg */}
+        {/* Oracle — subtle accent border + bg; flashes long/short on tick (usePriceFlash) */}
         <div className="p-2 text-center border-x border-[var(--accent)]/20 bg-[var(--accent)]/[0.03]">
           <p className="text-[8px] uppercase tracking-[0.15em] text-[var(--text-dim)]">Oracle</p>
           <p
-            className="text-[13px] font-medium text-[var(--text)]"
+            className={`text-[13px] font-medium transition-colors duration-300 ease-out ${
+              oracleFlash === "up" ? "text-[var(--long)]" : oracleFlash === "down" ? "text-[var(--short)]" : "text-[var(--text)]"
+            }`}
             style={{ fontFamily: "var(--font-mono)" }}
           >
             {formatUsdPriceE6(oraclePrice)}

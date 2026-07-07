@@ -27,10 +27,15 @@ const DARK_THEME: ChartTheme = {
   // clearly above this 0.07 grid, so the hierarchy holds.
   gridColor: "rgba(255,255,255,0.07)",
   borderColor: "rgba(255,255,255,0.10)",
-  upColor: "#22c55e",
-  downColor: "#ef4444",
-  volUpColor: "rgba(34,197,94,0.6)",
-  volDownColor: "rgba(239,68,68,0.6)",
+  // Brand --long/--short (globals.css), not generic Tailwind green/red-500 —
+  // candles + volume bars are the single most visible color on the chart,
+  // and they were the one surface still off-brand vs. MarketInfoBar /
+  // PositionsDock / OrderTicket, which all use these exact tokens (canvas
+  // can't read CSS custom properties, so these are the literal hex values).
+  upColor: "#14F195",
+  downColor: "#FF3B5C",
+  volUpColor: "rgba(20,241,149,0.6)",
+  volDownColor: "rgba(255,59,92,0.6)",
 };
 
 const LIGHT_THEME: ChartTheme = {
