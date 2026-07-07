@@ -19,9 +19,21 @@ const RENT_PER_BYTE = 6960;
 const RENT_OVERHEAD_BYTES = 128;
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
-/** Estimated transaction fees for the ~7-8 signed-transaction creation flow (see
- *  useCreateMarket's create() / StepReview's TX_STEPS for the exact sequence). */
-const TX_FEE_ESTIMATE_SOL = 0.025; // ~8 transactions × 5000 lamports each + priority fee headroom
+/** Estimated transaction fees for the ~9-10 signed-transaction creation flow (see
+ *  useCreateMarket's create() / StepReview's BASE_TX_STEPS for the exact sequence —
+ *  bumped from 8 when the Earn vault + stake pool steps were added). */
+const TX_FEE_ESTIMATE_SOL = 0.031; // ~10 transactions × 5000 lamports each + priority fee headroom
+
+/**
+ * Additional rent for the Earn LP vault + stake pool accounts created by Steps 4/5
+ * (see useCreateMarket.ts's create()):
+ *   - LP Vault Registry PDA: 176 bytes (paid by the creator inside CreateLpVault)
+ *   - LP Vault (Earn) mint PDA: 82 bytes (paid by the creator inside CreateLpVault)
+ *   - Stake pool LP mint: 82 bytes (explicit client-paid CreateAccount)
+ *   - Stake pool collateral vault token account: 165 bytes (explicit client-paid CreateAccount)
+ *   - Stake pool PDA itself: 352 bytes (paid by the creator via CPI inside StakeInitPool)
+ */
+const EARN_VAULT_AND_STAKE_RENT_BYTES = 176 + 82 + 82 + 165 + 352;
 
 /**
  * Detailed cost breakdown for market creation.
@@ -55,8 +67,12 @@ export const CostEstimate: FC<CostEstimateProps> = ({
     // Each token account ~165 bytes, each mint ~82 bytes
     const tokenAccountRentSol = (165 * 3 + 82 * 2) * RENT_PER_BYTE / LAMPORTS_PER_SOL;
 
+    // Rent for the Earn vault (Step 4) + stake pool (Step 5) accounts — see
+    // EARN_VAULT_AND_STAKE_RENT_BYTES doc comment above.
+    const earnVaultStakeRentSol = (EARN_VAULT_AND_STAKE_RENT_BYTES * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+
     // Total SOL cost
-    const totalSolCost = slabRentSol + tokenAccountRentSol + TX_FEE_ESTIMATE_SOL;
+    const totalSolCost = slabRentSol + tokenAccountRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL;
 
     // Token costs (vault seed is 500_000_000 raw = 500 at 6 decimals)
     const seedAmount = 500_000_000 / Math.pow(10, tokenDecimals);
@@ -70,6 +86,7 @@ export const CostEstimate: FC<CostEstimateProps> = ({
     return {
       slabRentSol: slabRentSol.toFixed(4),
       tokenAccountRentSol: tokenAccountRentSol.toFixed(4),
+      earnVaultStakeRentSol: earnVaultStakeRentSol.toFixed(4),
       txFeeSol: TX_FEE_ESTIMATE_SOL.toFixed(4),
       totalSolCost: totalSolCost.toFixed(4),
       seedTokens: seedAmount,
@@ -104,7 +121,11 @@ export const CostEstimate: FC<CostEstimateProps> = ({
           <span className="font-mono text-[var(--text)]">{estimate.tokenAccountRentSol} SOL</span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text-secondary)]">Transaction fees (5 txs)</span>
+          <span className="text-[var(--text-secondary)]">Earn vault & stake pool</span>
+          <span className="font-mono text-[var(--text)]">{estimate.earnVaultStakeRentSol} SOL</span>
+        </div>
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-[var(--text-secondary)]">Transaction fees (~9 txs)</span>
           <span className="font-mono text-[var(--text)]">{estimate.txFeeSol} SOL</span>
         </div>
         <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">

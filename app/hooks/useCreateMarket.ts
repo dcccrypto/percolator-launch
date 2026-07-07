@@ -14,6 +14,8 @@ import {
   createTransferInstruction,
   getAssociatedTokenAddress,
   getAccount,
+  MINT_SIZE,
+  ACCOUNT_SIZE,
 } from "@solana/spl-token";
 import {
   encodeInitMarket,
@@ -25,6 +27,8 @@ import {
   encodeSetMatcherConfig,
   encodeInitUser,
   encodeSetNftProgramId,
+  encodeCreateLpVaultV17,
+  encodeStakeInitPool,
   CrankAction,
   detectDexType,
   parseDexPool,
@@ -35,6 +39,7 @@ import {
   ACCOUNTS_SET_MATCHER_CONFIG,
   ACCOUNTS_INIT_MATCHER_CTX,
   ACCOUNTS_INIT_USER,
+  ACCOUNTS_CREATE_LP_VAULT,
   buildAccountMetas,
   WELL_KNOWN,
   buildIx,
@@ -42,6 +47,11 @@ import {
   derivePythPushOraclePDA,
   deriveMatcherDelegate,
   deriveNftRegistry,
+  deriveLpVaultRegistry,
+  deriveInsuranceLpMint,
+  deriveStakePool,
+  deriveStakeVaultAuth,
+  initPoolAccounts,
   parseHeader,
   isV17Account,
   v17MarketAccountLen,
@@ -207,9 +217,11 @@ export interface CreateMarketState {
   /** Error from devnet mint attempt */
   devnetMintError: string | null;
   /**
-   * GH#1761: Set to true when step 5 (Insurance LP Mint) fails after exhausting retries.
-   * The market is still live and tradeable — this is non-fatal. The mint can be retried
-   * independently later. Success screen shows a soft warning rather than hard error.
+   * GH#1761 (legacy): previously set to true when the old "Insurance LP Mint" step
+   * failed after exhausting retries. That instruction was removed (see the Step 4/5
+   * comment block in create() below — CreateLpVault/StakeInitPool replaced it and are
+   * NOT treated as non-fatal; they use the same hard-error/retry path as every other
+   * step). Kept for backwards-compatible UI wiring; never set to true by create().
    */
   insuranceMintFailed: boolean;
   /** Keeper oracle mode: true when oracle_authority was delegated to keeper */
@@ -223,7 +235,8 @@ const STEP_LABELS = [
   "Oracle setup & pre-LP crank...",
   "Initializing LP...",
   "Depositing collateral, insurance & final crank...",
-  "Creating insurance LP mint...",
+  "Creating Earn vault...",
+  "Initializing stake pool (finalizing market)...",
 ];
 
 export function useCreateMarket() {
@@ -1212,11 +1225,12 @@ export function useCreateMarket() {
           setState((s) => ({ ...s, txSigs: [...s.txSigs, sig] }));
         }
 
-        // GH#1761: Register market in Supabase BEFORE step 5 (Insurance LP Mint).
-        // Steps 1-4 create a live, tradeable market. Moving registration here ensures
-        // symbol, mainnet_ca, and oracle_authority are stored even if step 5 fails.
-        // Previously this ran after step 5, so a step-5 timeout left the market on-chain
-        // with no DB record → dashboard showed random chars (CCPHprPU) instead of symbol.
+        // GH#1761: Register market in Supabase BEFORE Steps 4/5 (Earn vault + stake
+        // pool, added below). Steps 0-3 already create a live, tradeable market — moving
+        // registration here ensures symbol, mainnet_ca, and oracle_authority are stored
+        // even if Step 4 or Step 5 fails. (Originally written for the now-removed
+        // "Insurance LP Mint" step 5, which had the same non-fatal-tail-step shape;
+        // Steps 4/5 below inherit the same "register first, then attempt" ordering.)
         //
         // PERC-8332: Attach nonce + ed25519 signature so the POST handler can verify
         // deployer ownership without Supabase. Flow:
@@ -1283,8 +1297,144 @@ export function useCreateMarket() {
           }
         }
 
-        // Insurance LP mint creation removed — moved to percolator-stake program.
-        // Markets are fully operational without it (steps 0-3 are sufficient).
+        // Step 4: Create the Earn LP vault (CreateLpVault, tag 74) — the same
+        // mechanism the 5 curated/seeded markets use (see
+        // percolator-v17-devnet-test/playground/newmarkets.ts step [6b], whose
+        // account list + args this mirrors exactly). This MUST run BEFORE
+        // Step 5 (Stake InitPool) below: Stake InitPool rotates on-chain
+        // marketauth from this wallet to the stake-pool PDA
+        // (stake-governs-market — the accepted design for parity with the
+        // seeded markets), and CreateLpVault is marketauth-gated. Once
+        // marketauth moves to a PDA (no private key to sign with), it can
+        // never be called again — newmarkets.ts's "ROOT-CAUSE FIX #2" note
+        // documents this exact failure mode being reproduced on-chain when
+        // the ordering was reversed. Every earlier marketauth-gated call in
+        // this flow (ConfigureAuthMark, UpdateAssetAuthority,
+        // SetNftProgramId, SetMatcherConfig, InitMatcherCtx) already relies
+        // on the same "marketauth == creator wallet until Stake InitPool"
+        // invariant — Step 4/5 just extend it by two more steps.
+        //
+        // No initial DepositToLpVault here, by design: the LP Vault Registry
+        // PDA existing on-chain is sufficient for the Earn page to treat the
+        // vault as live — see `lpVaultState.registryExists` in
+        // app/earn/[slab]/page.tsx, which drives "Pool Status: Active" purely
+        // off account existence, not balance. Forcing the creator to seed a
+        // deposit here would add an extra funding requirement with no
+        // functional benefit; anyone (including the creator, later) can be
+        // the vault's first depositor from the Earn page.
+        if (startStep <= 4) {
+          setState((s) => ({ ...s, step: 4, stepLabel: STEP_LABELS[4] }));
+
+          const [lpVaultRegistry] = deriveLpVaultRegistry(programId, slabPk);
+          const [lpVaultMint] = deriveInsuranceLpMint(programId, slabPk);
+
+          // Idempotent on retry — a prior attempt may have already landed this ix
+          // even though the overall create() call subsequently failed/threw.
+          const existingRegistry = await connection.getAccountInfo(lpVaultRegistry);
+          if (!existingRegistry) {
+            const createLpVaultIx = buildIx({
+              programId,
+              keys: buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, {
+                admin: wallet.publicKey,
+                market: slabPk,
+                registry: lpVaultRegistry,
+                lpMint: lpVaultMint,
+                systemProgram: WELL_KNOWN.systemProgram,
+                tokenProgram: WELL_KNOWN.tokenProgram,
+              }),
+              data: encodeCreateLpVaultV17({
+                feeShareBps: 1000, // 10% fee share — matches the 5 seeded markets
+                oiReservationThresholdBps: 8000,
+                redemptionCooldownSlots: 5n, // fast cooldown for devnet — matches seeded markets
+                domain: 0,
+              }),
+            });
+
+            const sigLpVault = await sendTx({
+              connection,
+              wallet,
+              instructions: [createLpVaultIx],
+              computeUnits: 250_000,
+            });
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, sigLpVault] }));
+          }
+          updateInFlightStep(slabPk.toBase58(), 5);
+        }
+
+        // Step 5 (FINAL on-chain step): percolator-stake InitPool. Creates the
+        // per-market stake pool and — critically — ROTATES on-chain
+        // marketauth from this wallet to the stake-pool PDA
+        // (stake-governs-market design; mirrors newmarkets.ts step [7]).
+        // This is why Step 4 (Earn vault) above must always complete first,
+        // and why this must be the LAST on-chain mutation the wizard
+        // performs — nothing after this point may depend on marketauth
+        // still being the creator wallet.
+        if (startStep <= 5) {
+          setState((s) => ({ ...s, step: 5, stepLabel: STEP_LABELS[5] }));
+
+          // Stake pools live under this deployment's vault program
+          // (getConfig().vaultProgramId) — NOT the SDK's default stake
+          // program id. Same lookup + fallback pattern as
+          // hooks/useStakeDeposit.ts and hooks/useStakePool.ts.
+          const stakeProgramId = new PublicKey(
+            (getConfig() as { vaultProgramId?: string }).vaultProgramId ??
+              "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ",
+          );
+          const [stakePoolPda] = deriveStakePool(slabPk, stakeProgramId);
+
+          // Idempotent on retry — if a prior attempt already landed InitPool,
+          // don't try again (a fresh lpMint/vault keypair pair would be
+          // orphaned, and InitPool would revert against an already-live pool).
+          const existingPool = await connection.getAccountInfo(stakePoolPda);
+          if (!existingPool) {
+            const [stakeVaultAuth] = deriveStakeVaultAuth(stakePoolPda, stakeProgramId);
+            const stakeLpMintKp = Keypair.generate();
+            const stakeVaultKp = Keypair.generate();
+
+            const mintRent = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
+            const vaultRent = await connection.getMinimumBalanceForRentExemption(ACCOUNT_SIZE);
+
+            const createLpMintIx = SystemProgram.createAccount({
+              fromPubkey: wallet.publicKey,
+              newAccountPubkey: stakeLpMintKp.publicKey,
+              lamports: mintRent,
+              space: MINT_SIZE,
+              programId: WELL_KNOWN.tokenProgram,
+            });
+            const createVaultIx = SystemProgram.createAccount({
+              fromPubkey: wallet.publicKey,
+              newAccountPubkey: stakeVaultKp.publicKey,
+              lamports: vaultRent,
+              space: ACCOUNT_SIZE,
+              programId: WELL_KNOWN.tokenProgram,
+            });
+            const initPoolIx = buildIx({
+              programId: stakeProgramId,
+              keys: initPoolAccounts({
+                admin: wallet.publicKey,
+                slab: slabPk,
+                pool: stakePoolPda,
+                lpMint: stakeLpMintKp.publicKey,
+                vault: stakeVaultKp.publicKey,
+                vaultAuth: stakeVaultAuth,
+                collateralMint: params.mint,
+                percolatorProgram: programId,
+              }),
+              // cooldown=5 slots, depositCap=0 (uncapped) — matches the 5 seeded markets
+              data: encodeStakeInitPool(5n, 0n),
+            });
+
+            const sigStake = await sendTx({
+              connection,
+              wallet,
+              instructions: [createLpMintIx, createVaultIx, initPoolIx],
+              signers: [stakeLpMintKp, stakeVaultKp],
+              computeUnits: 300_000,
+            });
+            setState((s) => ({ ...s, txSigs: [...s.txSigs, sigStake] }));
+          }
+          updateInFlightStep(slabPk.toBase58(), 6);
+        }
 
         // PERC-465: Post-creation hooks — register with oracle keeper + mint devnet token
         const slabAddr = slabPk.toBase58();
@@ -1375,7 +1525,7 @@ export function useCreateMarket() {
         setState((s) => ({
           ...s,
           loading: false,
-          step: 5,
+          step: 6,
           stepLabel: "Market created!",
           keeperDelegated,
           keeperMessage,

@@ -21,7 +21,8 @@ const STEP_LABELS = [
   "Oracle setup & crank",
   "Initialize LP",
   "Deposit, insurance & finalize",
-  "Insurance LP mint",
+  "Create Earn vault",
+  "Initialize stake pool",
 ] as const;
 
 /**
@@ -45,7 +46,7 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
       <div className="space-y-3" aria-live="polite">
         {STEP_LABELS.map((label, i) => {
           let status: "pending" | "active" | "done" | "error" = "pending";
-          if (state.step > i || state.step >= 5) status = "done";
+          if (state.step > i || state.step >= 6) status = "done";
           else if (state.step === i && state.loading) status = "active";
           else if (state.step === i && state.error) status = "error";
 
@@ -130,7 +131,7 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
       {/* Progress text */}
       {state.loading && !state.error && (
         <p className="mt-5 text-[12px] text-[var(--text-secondary)]">
-          Step {state.step + 1} of 5 — Sign the transaction in your wallet
+          Step {state.step + 1} of 6 — Sign the transaction in your wallet
         </p>
       )}
 

@@ -148,7 +148,8 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
       {keeperDelegated && (
         <div className="mb-4 border border-[var(--long)]/30 bg-[var(--long)]/[0.06] px-4 py-2.5 text-[11px] text-[var(--long)]">
           Keeper oracle active — oracle_authority delegated to the Percolator keeper.
-          Mainnet DEX prices will flow to this market within ~30s.
+          The market is live now; mainnet DEX prices typically start flowing within
+          ~1&ndash;2 minutes while the keeper&apos;s register-poll cycle picks it up.
         </div>
       )}
       {!keeperDelegated && keeperMessage && (

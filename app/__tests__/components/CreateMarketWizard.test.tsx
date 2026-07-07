@@ -146,7 +146,7 @@ describe("LaunchProgress", () => {
         onReset={onReset}
       />
     );
-    expect(screen.getByText(/Step 3 of 5/i)).toBeDefined();
+    expect(screen.getByText(/Step 3 of 6/i)).toBeDefined();
   });
 
   it("has proper aria attributes for accessibility", () => {
@@ -158,13 +158,14 @@ describe("LaunchProgress", () => {
     expect(dialog?.getAttribute("aria-label")).toBe("Market launch progress");
   });
 
-  it("renders all 5 step labels", () => {
+  it("renders all 6 step labels", () => {
     render(<LaunchProgress state={baseState} onReset={onReset} />);
     expect(screen.getByText("Create slab & initialize market")).toBeDefined();
     expect(screen.getByText("Oracle setup & crank")).toBeDefined();
     expect(screen.getByText("Initialize LP")).toBeDefined();
     expect(screen.getByText(/Deposit, insurance & finalize/)).toBeDefined();
-    expect(screen.getByText("Insurance LP mint")).toBeDefined();
+    expect(screen.getByText("Create Earn vault")).toBeDefined();
+    expect(screen.getByText("Initialize stake pool")).toBeDefined();
   });
 });
 

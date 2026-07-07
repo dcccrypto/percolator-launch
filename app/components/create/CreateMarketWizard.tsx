@@ -330,7 +330,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     "Oracle setup & crank",
     "Initialize LP",
     "Deposit, insurance & finalize",
-    "Insurance LP mint",
+    "Create Earn vault",
+    "Initialize stake pool",
   ];
   const [demoLaunch, setDemoLaunch] = useState<{
     active: boolean;
@@ -341,7 +342,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   useEffect(() => {
     if (!demoLaunch.active) return;
     if (demoLaunch.step >= DEMO_STEPS.length) {
-      // All 5 steps complete — redirect to the mock BONK trade page so the
+      // All steps complete — redirect to the mock BONK trade page so the
       // demo flows from create → trade without breaking pace.
       const t = setTimeout(() => {
         router.push(`/trade/${DEMO_BONK_SLAB}?mock=1`);
@@ -761,9 +762,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // --- Render ---
 
   // PERC-516: Clear persisted state on success so a refresh doesn't show stale wizard
-  // GH#1761: Also clear when insuranceMintFailed — market is live regardless of step 5
+  // GH#1761 (legacy): also clear when insuranceMintFailed — kept for backwards compat,
+  // never set true by create() anymore (see useCreateMarket.ts's field comment).
+  // Success is step 6 (0-indexed steps 0-5: slab/init, oracle, LP, deposit/insurance,
+  // Earn vault, stake pool — see STEP_LABELS in useCreateMarket.ts).
   useEffect(() => {
-    if ((createState.step >= 5 || createState.insuranceMintFailed) && createState.slabAddress) {
+    if ((createState.step >= 6 || createState.insuranceMintFailed) && createState.slabAddress) {
       try {
         localStorage.removeItem(WIZARD_STORAGE_KEY);
         localStorage.removeItem("percolator-pending-slab-keypair");
@@ -773,9 +777,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     }
   }, [createState.step, createState.insuranceMintFailed, createState.slabAddress]);
 
-  // GH#1761: Show success when all 5 steps complete, OR when steps 1-4 succeed but
-  // step 5 (Insurance LP Mint) fails non-fatally. Market is live either way.
-  const isSuccess = (createState.step >= 5 || createState.insuranceMintFailed) && !!createState.slabAddress;
+  // Show success when all 6 on-chain steps complete (0-5: slab/init, oracle, LP,
+  // deposit/insurance, Earn vault, stake pool). GH#1761's insuranceMintFailed
+  // fallback is kept for backwards compat but is never set true anymore — the
+  // Earn vault / stake pool steps use the same hard-error/retry path as every
+  // other step (see useCreateMarket.ts's field comment for why).
+  const isSuccess = (createState.step >= 6 || createState.insuranceMintFailed) && !!createState.slabAddress;
 
   // Success state
   if (isSuccess) {

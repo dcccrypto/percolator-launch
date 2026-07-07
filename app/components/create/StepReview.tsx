@@ -59,7 +59,13 @@ interface TxStep {
  * useCreateMarket.ts's create() — previously this was a stale 5-item list (including an
  * "Insurance LP mint" step that was removed; see create()'s "Insurance LP mint creation
  * removed — moved to percolator-stake program" note) while the real happy path fires 7
- * signed transactions:
+ * signed transactions.
+ *
+ * Updated again when the Earn vault (Step 4) + stake pool (Step 5) were added to give
+ * wizard-created markets full parity with the 5 seeded markets (see the Step 4/5 doc
+ * comment in useCreateMarket.ts's create() for the marketauth-ordering rationale — the
+ * stake pool step is deliberately last, since it rotates on-chain marketauth away from
+ * the creator wallet). The happy path now fires 9 signed transactions:
  *   1. createAccount(slab) + createATA(vault) + seed transfer + InitMarket   (atomic)
  *   2. SetNftProgramId (registers the per-market NFT registry; v17 has no separate
  *      oracle-setup/pre-LP crank step — that's embedded in InitMarket)
@@ -68,6 +74,9 @@ interface TxStep {
  *   5. SetMatcherConfig (on the LP portfolio)
  *   6. InitMatcherCtx (wrapper CPIs into the matcher program)
  *   7. DepositCollateral + TopUpInsurance + final PermissionlessCrank
+ *   8. CreateLpVault (Earn vault — no forced initial deposit, see Step 4 doc comment)
+ *   9. createAccount(stake lpMint) + createAccount(stake vault) + Stake InitPool (atomic;
+ *      rotates on-chain marketauth to the stake pool PDA)
  * ...plus one off-chain wallet.signMessage() (nonce sign for the /api/markets dashboard
  * registration POST, GH#1761/PERC-8332) — not a transaction, no SOL cost, but still a
  * wallet approval the user will see.
@@ -80,6 +89,8 @@ const BASE_TX_STEPS: readonly TxStep[] = [
   { label: "Configure matcher", detail: "Attaches matcher config to the LP portfolio", kind: "tx" },
   { label: "Initialize matcher context", detail: "Activates passive market-making", kind: "tx" },
   { label: "Deposit, insurance & finalize", detail: "Seed capital + insurance fund + final crank", kind: "tx" },
+  { label: "Create Earn vault", detail: "Opens this market's LP vault for depositors", kind: "tx" },
+  { label: "Initialize stake pool", detail: "Final step — hands market governance to the stake pool", kind: "tx" },
   { label: "Sign market registration", detail: "Off-chain signature — lists the market on the dashboard, no SOL cost", kind: "signature" },
 ] as const;
 

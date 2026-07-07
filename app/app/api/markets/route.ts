@@ -5,6 +5,7 @@ import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
 import { getClientIp } from "@/lib/get-client-ip";
 import { claimPlaygroundChallenge } from "@/lib/playground-nonce-store";
 import { signKeeperRequest } from "@/lib/keeper-hmac";
@@ -426,10 +427,19 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
         null;
       const searchTrimmed = searchParam?.trim().toLowerCase() ?? null;
 
+      // Cross-instance user-created markets live in the registration Blob — the local
+      // allowed-slab Set is per-serverless-instance and doesn't persist across cold
+      // starts, so union the Blob in so a wizard-launched market appears from any
+      // instance. Guarded: Blob unavailable → fall back to curated ∪ local.
+      const blobSlabs = new Set<string>();
+      try {
+        for (const rm of await readRegisteredMarkets()) blobSlabs.add(rm.slabAddress);
+      } catch { /* fall back to curated ∪ local */ }
+
       const filtered = rows
         .filter(m => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string))
         // Playground: hide the ~80 leftover devnet test markets — show curated seeds ∪ user-created.
-        .filter(m => !PLAYGROUND_CURATED_ONLY || getPlaygroundAllowedSlabs().has(m.slab_address as string))
+        .filter(m => !PLAYGROUND_CURATED_ONLY || getPlaygroundAllowedSlabs().has(m.slab_address as string) || blobSlabs.has(m.slab_address as string))
         .filter(m => !programIdParam || m.program_id === programIdParam)
         .filter(m => {
           if (!searchTrimmed) return true;

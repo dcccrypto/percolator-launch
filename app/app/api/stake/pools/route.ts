@@ -14,6 +14,7 @@ import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getRpcEndpoint } from "@/lib/config";
 import { getStakeProgramId, deriveStakePool } from "@percolatorct/sdk";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { readRegisteredMarkets, type RegisteredMarket } from "@/lib/playground-registered-markets";
 import * as Sentry from "@sentry/nextjs";
 
 // ── APR helpers ───────────────────────────────────────────────────────────────
@@ -368,20 +369,52 @@ export async function GET() {
       if (pool) allParsed.push({ pubkey: pubkey.toBase58(), pool });
     }
 
-    // 2a. Playground devnet: restrict to the 5 curated markets' stake pools.
+    // 2a. Playground devnet: restrict to the 5 curated markets' stake pools PLUS
+    // any user-launched markets registered via the create-market wizard.
     // getProgramAccounts(dataSize=352) returns EVERY StakePool this program owns,
     // which on a shared devnet deployment includes pools from older/unrelated test
-    // markets. Derive the expected pool PDA for each PLAYGROUND_SLAB_META slab
-    // (not read from account data — the PDA derivation itself is the trust anchor)
-    // and intersect by pool address, so only known-good curated pools ever render.
-    // Mainnet has no curated-list concept, so this only applies on devnet.
+    // markets. Derive the expected pool PDA for each known slab (curated seeds ∪
+    // registered markets — not read from account data, the PDA derivation itself
+    // is the trust anchor) and intersect by pool address, so only known-good pools
+    // ever render. Mainnet has no curated-list concept, so this only applies on devnet.
+    //
+    // The registration Blob is read once here (not per-pool) — the same result also
+    // backfills name/symbol below (step 5) for launched markets not yet in Supabase.
+    let registeredMarkets: RegisteredMarket[] = [];
+    if (isDevnet) {
+      try {
+        registeredMarkets = await readRegisteredMarkets();
+      } catch (regErr) {
+        // Never let a registry read failure take down /stake — degrade to
+        // curated-5-only, same as before this feature existed.
+        console.warn(
+          "[/api/stake/pools] readRegisteredMarkets failed (non-fatal):",
+          regErr instanceof Error ? regErr.message : String(regErr)
+        );
+      }
+    }
+    const registeredBySlab = new Map(registeredMarkets.map((m) => [m.slabAddress, m]));
+
     const curatedFiltered = isDevnet
       ? (() => {
-          const curatedPoolAddresses = new Set(
-            Object.keys(PLAYGROUND_SLAB_META).map((slab) =>
-              deriveStakePool(new PublicKey(slab), stakeProgramId)[0].toBase58()
-            )
-          );
+          // Union: the 5 curated seeds ∪ every slab from the registration Blob
+          // (user-created markets). A Set dedups automatically.
+          const knownSlabs = new Set<string>([
+            ...Object.keys(PLAYGROUND_SLAB_META),
+            ...registeredBySlab.keys(),
+          ]);
+
+          const curatedPoolAddresses = new Set<string>();
+          for (const slab of knownSlabs) {
+            try {
+              curatedPoolAddresses.add(
+                deriveStakePool(new PublicKey(slab), stakeProgramId)[0].toBase58()
+              );
+            } catch {
+              // Malformed slab address (shouldn't happen — registry entries are
+              // verified on-chain at registration time) — skip rather than 500.
+            }
+          }
           return allParsed.filter((p) => curatedPoolAddresses.has(p.pubkey));
         })()
       : allParsed;
@@ -493,9 +526,18 @@ export async function GET() {
         lpMint: pool.lpMint,
         /** Vault token account */
         vault: pool.vault,
-        /** Market info: Supabase first, then curated playground metadata, then slab-prefix last resort */
-        name: market?.name ?? PLAYGROUND_SLAB_META[pool.slab]?.name ?? `Pool ${pool.slab.slice(0, 8)}`,
-        symbol: market?.symbol ?? PLAYGROUND_SLAB_META[pool.slab]?.symbol ?? pool.slab.slice(0, 8),
+        /** Market info: Supabase first, then curated playground metadata, then the
+         *  registration Blob (user-launched markets), then slab-prefix last resort. */
+        name:
+          market?.name ??
+          PLAYGROUND_SLAB_META[pool.slab]?.name ??
+          registeredBySlab.get(pool.slab)?.label ??
+          `Pool ${pool.slab.slice(0, 8)}`,
+        symbol:
+          market?.symbol ??
+          PLAYGROUND_SLAB_META[pool.slab]?.symbol ??
+          registeredBySlab.get(pool.slab)?.symbol ??
+          pool.slab.slice(0, 8),
         logoUrl: market?.logo_url ?? null,
         /** TVL = vault balance in USDC */
         tvl: toUsdcFloat(vaultBalRaw),
