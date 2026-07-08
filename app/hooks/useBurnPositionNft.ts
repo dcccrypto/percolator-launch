@@ -10,6 +10,7 @@ import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+import { sendEmergencyBurn } from "@/hooks/useEmergencyBurn";
 import {
   deriveMintAuthority,
   deriveExtraAccountMetas,
@@ -17,6 +18,27 @@ import {
   encodeNftBurn,
   isV17Account,
 } from "@percolatorct/sdk";
+
+// H8: NFT-program error code 22 = LegNotActive (percolator-nft/src/error.rs) —
+// the leg BurnPositionNft's verify_bound_leg gate expects is no longer active
+// (closed, liquidated, or slot-reused while wrapped), so a normal burn reverts
+// forever, stranding the escrowed position + the NFT's mint/PDA rent. This
+// numerically collides with the WRAPPER program's EngineNonProgress(22) (the
+// "EC" cross-program error-code collision noted in the audit), so the raw code
+// alone isn't enough — only trust it when the error also names the NFT
+// program, mirroring errorMessages.ts's isNftProgramError() routing (kept as
+// a local, self-contained check here rather than importing that file's
+// private helper).
+function isLegNotActiveError(rawMsg: string): boolean {
+  if (!rawMsg.includes(PERCOLATOR_NFT_PROGRAM_ID.toBase58())) return false;
+  const hex = rawMsg.match(/(?:custom program error|Error Code)[:\s]+0x([0-9a-fA-F]+)/i);
+  if (hex) return parseInt(hex[1], 16) === 22;
+  const json = rawMsg.match(/"Custom"\s*:\s*(\d+)/);
+  if (json) return parseInt(json[1], 10) === 22;
+  const paren = rawMsg.match(/Custom\((\d+)\)/);
+  if (paren) return parseInt(paren[1], 10) === 22;
+  return false;
+}
 
 /** Lets a caller (e.g. PositionNftPanel) supply the NFT identity directly
  *  instead of relying solely on this hook's own usePositionNft() scan — used
@@ -131,6 +153,39 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
       return sig;
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
+
+      // H8: a normal burn requires the bound leg to still be "active"
+      // on-chain — if the position was closed or liquidated WHILE wrapped,
+      // that gate reverts LegNotActive(22) forever, permanently stranding the
+      // escrowed position and the NFT's mint/PDA rent (no self-service
+      // recovery). Fall back in-place to EmergencyBurn (tag 5), which runs
+      // the more permissive emergency_burn_ok() check instead and still
+      // returns the escrow + rent to the holder. See useEmergencyBurn.ts.
+      if (isLegNotActiveError(errMsg) && walletPubkey && programId) {
+        try {
+          const sig = await sendEmergencyBurn({
+            connection,
+            wallet,
+            walletPubkey,
+            wrapperProgramId: programId,
+            slabAddress,
+            nftMint,
+            nftPdaAddress,
+          });
+
+          refresh();
+          toast("Position was already closed elsewhere — recovered via emergency burn.", "success");
+          return sig;
+        } catch (emergencyErr) {
+          const emergencyMsg = emergencyErr instanceof Error ? emergencyErr.message : String(emergencyErr);
+          const msg = humanizeError(emergencyMsg);
+          console.error("[useBurnPositionNft] EmergencyBurn fallback failed", emergencyMsg);
+          setError(msg);
+          toast(msg, "error");
+          return;
+        }
+      }
+
       const msg = humanizeError(errMsg);
       console.error("[useBurnPositionNft]", errMsg);
       setError(msg);
