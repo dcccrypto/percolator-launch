@@ -345,24 +345,29 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
 
 /* ── Your Position Panel ── */
 
-function YourPositionPanel({
+/**
+ * A single staked-LP position with its own withdraw controls. Split out from
+ * YourPositionPanel (S-M1 fix) so each pool position gets its own
+ * useStakeWithdrawByPool hook instance — Rules of Hooks means a single
+ * component can't call the hook once per array entry, so multi-pool display
+ * requires one component instance per position.
+ */
+function PositionCard({
   position,
   onWithdrawSuccess,
 }: {
-  position: UserPosition | null;
+  position: UserPosition;
   onWithdrawSuccess?: () => void;
 }) {
-  const { connected } = useWalletCompat();
-
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useStakeWithdrawByPool({
-    slabAddress: position?.slabAddress ?? "",
-    collateralMint: position?.collateralMint ?? "",
+    slabAddress: position.slabAddress,
+    collateralMint: position.collateralMint,
   });
 
   const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const handleWithdraw = useCallback(async () => {
-    if (!position || !position.cooldownElapsed) return;
+    if (!position.cooldownElapsed) return;
     setTxStatus(null);
     try {
       const sig = await withdraw(position.lpBalanceRaw);
@@ -373,22 +378,6 @@ function YourPositionPanel({
       setTxStatus({ type: "error", msg });
     }
   }, [withdraw, position, onWithdrawSuccess]);
-
-  if (!connected) return null;
-  if (!position) {
-    return (
-      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-6 text-center">
-        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No open positions</p>
-        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">Deposit into a pool to get started</p>
-        <a
-          href="#deposit"
-          className="mt-3 inline-block text-[11px] font-medium text-[var(--accent)] transition-colors hover:text-[var(--text)]"
-        >
-          Deposit Now →
-        </a>
-      </div>
-    );
-  }
 
   const cooldownPct = position.cooldownTotal > 0
     ? 1 - position.cooldownRemaining / position.cooldownTotal
@@ -460,6 +449,47 @@ function YourPositionPanel({
             : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * S-M1 fix: renders one PositionCard per pool the wallet holds a balance in.
+ * Previously this component received a single `position` that StakePage's
+ * scan effect stopped populating after the FIRST pool with a non-zero
+ * balance — multi-pool stakers had every other position silently dropped
+ * from both the UI and totalUserDeposited.
+ */
+function YourPositionPanel({
+  positions,
+  onWithdrawSuccess,
+}: {
+  positions: UserPosition[];
+  onWithdrawSuccess?: () => void;
+}) {
+  const { connected } = useWalletCompat();
+
+  if (!connected) return null;
+  if (positions.length === 0) {
+    return (
+      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-6 text-center">
+        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No open positions</p>
+        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">Deposit into a pool to get started</p>
+        <a
+          href="#deposit"
+          className="mt-3 inline-block text-[11px] font-medium text-[var(--accent)] transition-colors hover:text-[var(--text)]"
+        >
+          Deposit Now →
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {positions.map((position) => (
+        <PositionCard key={position.poolId} position={position} onWithdrawSuccess={onWithdrawSuccess} />
+      ))}
     </div>
   );
 }
@@ -1029,7 +1059,9 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
 export default function StakePage() {
   const [pools, setPools] = useState<StakePool[]>([]);
   const [poolsLoading, setPoolsLoading] = useState(true);
-  const [position, setPosition] = useState<UserPosition | null>(null);
+  // S-M1 fix: ALL positions the wallet holds across pools, not just the first
+  // one found.
+  const [positions, setPositions] = useState<UserPosition[]>([]);
   const [positionRefreshKey, setPositionRefreshKey] = useState(0);
   const [poolsRefreshKey, setPoolsRefreshKey] = useState(0);
 
@@ -1054,10 +1086,16 @@ export default function StakePage() {
     return () => { cancelled = true; };
   }, [poolsRefreshKey]);
 
-  // Fetch user position from on-chain data when wallet connected + pools loaded
+  // Fetch user positions from on-chain data when wallet connected + pools loaded.
+  // S-M1 fix: scan ALL pools and aggregate every position the wallet holds —
+  // previously this returned after the FIRST pool with a non-zero balance
+  // ("found a position, stop scanning"), so a wallet staked in 2+ pools had
+  // every position after the first silently dropped from "Your Position" and
+  // from totalUserDeposited. Fetches concurrently and aggregates via
+  // Promise.allSettled, mirroring useLpPositions.ts.
   useEffect(() => {
     if (!connected || !publicKey || pools.length === 0) {
-      setPosition(null);
+      setPositions([]);
       return;
     }
     let cancelled = false;
@@ -1070,20 +1108,21 @@ export default function StakePage() {
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
           ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
         );
-        // Check each pool for user's LP position — same detection logic the
+        // Check every pool for user's LP position — same detection logic the
         // Withdraw tab uses for a single selected pool (fetchPoolPosition).
-        for (const pool of pools) {
-          const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
-          if (found) {
-            if (!cancelled) setPosition(found);
-            return; // found a position, stop scanning
-          }
-        }
-        // No position found across all pools
-        if (!cancelled) setPosition(null);
+        // allSettled: one bad pool/RPC hiccup must not blank out the rest.
+        const results = await Promise.allSettled(
+          pools.map((pool) => fetchPoolPosition(pool, publicKey, connection, stakeProgramId)),
+        );
+        if (cancelled) return;
+        const found = results
+          .filter((r): r is PromiseFulfilledResult<UserPosition | null> => r.status === "fulfilled")
+          .map((r) => r.value)
+          .filter((p): p is UserPosition => p !== null);
+        setPositions(found);
       } catch (err) {
-        console.error("[StakePage] Failed to fetch user position:", err);
-        if (!cancelled) setPosition(null);
+        console.error("[StakePage] Failed to fetch user positions:", err);
+        if (!cancelled) setPositions([]);
       }
     })();
 
@@ -1102,7 +1141,10 @@ export default function StakePage() {
     window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 2_000);
   }, []);
 
-  const totalUserDeposited = position ? position.estimatedValue : connected ? 0 : null;
+  // S-M1 fix: sum across ALL positions, not just a single (possibly-missing) one.
+  const totalUserDeposited = positions.length > 0
+    ? positions.reduce((sum, p) => sum + p.estimatedValue, 0)
+    : connected ? 0 : null;
 
   return (
     <div className="relative min-h-screen overflow-x-hidden">
@@ -1121,7 +1163,7 @@ export default function StakePage() {
             {/* pb-24 on mobile ensures deposit widget clears the fixed bottom nav (56px) */}
             <div className="space-y-4 pb-24 lg:pb-0">
               <ErrorBoundary label="Your Position">
-                <YourPositionPanel position={position} onWithdrawSuccess={handleTxSuccess} />
+                <YourPositionPanel positions={positions} onWithdrawSuccess={handleTxSuccess} />
               </ErrorBoundary>
               <ErrorBoundary label="Deposit Widget">
                 <DepositWidget pools={pools} onTxSuccess={handleTxSuccess} />

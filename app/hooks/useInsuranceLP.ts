@@ -34,6 +34,22 @@ import { assertKnownProgram } from '@/lib/programAllowlist';
 import { useParams } from 'next/navigation';
 import { sanitizeOnChainValue } from '@/lib/health';
 
+/**
+ * Which LP-vault redemption step a `withdraw()` call actually ran:
+ *  - 'requested' — RequestRedeemLpShares (tag 76) fired. This only starts the
+ *    cooldown ticket; NO funds have moved yet.
+ *  - 'executed' — ExecuteRedemption (tag 77) fired. Funds were sent to the
+ *    caller's wallet.
+ * S2 fix: callers must branch on this to avoid showing a false "Withdrawal
+ * successful!" toast after a 'requested' step.
+ */
+export type RedemptionStep = 'requested' | 'executed';
+
+export interface WithdrawResult {
+  step: RedemptionStep;
+  signature: string;
+}
+
 export interface InsuranceLPState {
   /** Insurance fund balance in base tokens (lamports) */
   insuranceBalance: bigint;
@@ -153,13 +169,23 @@ export function useInsuranceLP() {
     }
   }, [slabAddress, programId, walletPubkeyStr]);
 
+  // S-H1 fix: bumped at the start of every refreshState() call. Lets a stale
+  // in-flight call detect that a newer call has since started (e.g. wallet
+  // switched or slab changed mid-fetch) and bail out instead of overwriting
+  // fresher state with stale data once its sequential awaits finally
+  // resolve. Mirrors the equivalent guard in useStakePool.ts.
+  const requestIdRef = useRef(0);
+
   // Poll insurance state
   const refreshState = useCallback(async () => {
     if (!slabState || !lpMintInfo || !connection) return;
+    const requestId = ++requestIdRef.current;
+    const stale = () => requestId !== requestIdRef.current;
 
     try {
       // Check if LP mint exists on-chain first — needed to sanitize insuranceBalance
       const mintInfo = await connection.getAccountInfo(lpMintInfo.mintPda);
+      if (stale()) return;
       const mintExists = mintInfo != null && mintInfo.data != null && mintInfo.data.length > 0;
 
       // Get insurance balance from engine state.
@@ -190,6 +216,7 @@ export function useInsuranceLP() {
               walletPk
             );
             const ataInfo = await connection.getAccountInfo(userLpAta);
+            if (stale()) return;
             if (ataInfo) {
               const account = unpackAccount(userLpAta, ataInfo);
               userLpBalance = account.amount;
@@ -223,6 +250,7 @@ export function useInsuranceLP() {
             walletPk,
           );
           const collateralAtaInfo = await connection.getAccountInfo(collateralAta);
+          if (stale()) return;
           if (collateralAtaInfo) {
             userCollateralBalance = unpackAccount(collateralAta, collateralAtaInfo).amount;
           }
@@ -251,6 +279,7 @@ export function useInsuranceLP() {
         if (registryInfo) {
           registryAddress = registryInfo.registryPda;
           const registryAcctInfo = await connection.getAccountInfo(registryInfo.registryPda);
+          if (stale()) return;
           if (registryAcctInfo && registryAcctInfo.data.length > 0) {
             const registry = parseLpVaultRegistry(new Uint8Array(registryAcctInfo.data));
             registryExists = true;
@@ -275,6 +304,7 @@ export function useInsuranceLP() {
             // Pending redemption ticket (RequestRedeemLpShares → cooldown → ExecuteRedemption).
             if (registryInfo.redemptionPda) {
               const redemptionAcctInfo = await connection.getAccountInfo(registryInfo.redemptionPda);
+              if (stale()) return;
               if (redemptionAcctInfo && redemptionAcctInfo.data.length > 0) {
                 const redemption = parseLpRedemption(new Uint8Array(redemptionAcctInfo.data));
                 hasPendingRedemption = true;
@@ -283,6 +313,7 @@ export function useInsuranceLP() {
                 if (redemptionCooldownSlots > 0n) {
                   try {
                     const currentSlot = BigInt(await connection.getSlot());
+                    if (stale()) return;
                     const unlockSlot = requestSlot + redemptionCooldownSlots;
                     if (currentSlot < unlockSlot) {
                       cooldownElapsed = false;
@@ -302,6 +333,7 @@ export function useInsuranceLP() {
         console.error('Failed to refresh LP vault registry state:', registryErr);
       }
 
+      if (stale()) return;
       setState({
         insuranceBalance,
         lpSupply,
@@ -334,14 +366,23 @@ export function useInsuranceLP() {
   useEffect(() => {
     refreshStateRef.current = refreshState;
   }, [refreshState]);
-  
+
+  // S-H1 fix: refresh immediately whenever the derived PDAs, wallet, or slab
+  // config change (wallet connect/switch, market switch) — previously this
+  // only ran once on mount via the interval effect below, so a post-mount
+  // wallet connect/switch left the UI showing the PREVIOUS wallet's LP
+  // balance / pending-redemption state for up to the full 10s interval
+  // period. Mirrors the equivalent fix in useStakePool.ts.
   useEffect(() => {
-    // Call refreshState on mount and set up auto-refresh interval
-    const doRefresh = () => refreshStateRef.current();
-    doRefresh();
-    const interval = setInterval(doRefresh, 10_000);
+    refreshStateRef.current();
+  }, [lpMintInfo, registryInfo, walletPubkeyStr, slabState.config]);
+
+  useEffect(() => {
+    // Set up the 10s auto-refresh interval. The initial call now happens via
+    // the immediate-refresh effect above (which also re-fires on mount).
+    const interval = setInterval(() => refreshStateRef.current(), 10_000);
     return () => clearInterval(interval);
-  }, []); // Empty deps safe now — ref always points to latest refreshState
+  }, []);
 
   // v17 LP Vault operations via the wrapper program.
   // CreateLpVault (tag 74), DepositToLpVault (tag 75),
@@ -491,8 +532,15 @@ export function useInsuranceLP() {
    *
    * For simplicity the UI may call withdraw() which runs both steps in sequence
    * if the redemption is past cooldown, or just RequestRedeem if not yet requested.
+   *
+   * S2 fix: returns which step actually ran + the tx signature. Previously the
+   * caller had no way to distinguish "redemption REQUESTED (cooldown just
+   * started, no funds moved yet)" from "redemption EXECUTED (funds sent)" —
+   * the UI showed a blanket "Withdrawal successful!" even when step 1 only
+   * requested the redemption, misleading users into thinking their funds had
+   * already been returned.
    */
-  const withdraw = useCallback(async (lpAmount: bigint) => {
+  const withdraw = useCallback(async (lpAmount: bigint): Promise<WithdrawResult> => {
     if (!wallet.publicKey || !wallet.signTransaction) {
       throw new Error('Wallet not connected');
     }
@@ -510,6 +558,9 @@ export function useInsuranceLP() {
       const [redemptionPda] = deriveLpRedemption(progPk, registryPda, wallet.publicKey);
       const [lpMintPda] = deriveInsuranceLpMint(progPk, marketPk);
       const [escrowPda] = deriveLpEscrow(progPk, marketPk);
+
+      let step: RedemptionStep;
+      let signature: string;
 
       // Check if a redemption request already exists
       const redemptionInfo = await connection.getAccountInfo(redemptionPda);
@@ -538,7 +589,8 @@ export function useInsuranceLP() {
           keys: requestKeys,
           data: encodeRequestRedeemLpShares({ shares: lpAmount.toString() }),
         });
-        await sendTx({ connection, wallet, instructions: [requestIx] });
+        signature = await sendTx({ connection, wallet, instructions: [requestIx] });
+        step = 'requested';
       } else {
         // Step 2: ExecuteRedemption (tag 77) — collect collateral after cooldown.
         // BUG FIX (devnet flow-test 2026-07-01): this account list was missing the LP
@@ -575,9 +627,11 @@ export function useInsuranceLP() {
           keys: executeKeys,
           data: encodeExecuteRedemption(),
         });
-        await sendTx({ connection, wallet, instructions: [executeIx] });
+        signature = await sendTx({ connection, wallet, instructions: [executeIx] });
+        step = 'executed';
       }
       await refreshState();
+      return { step, signature };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
