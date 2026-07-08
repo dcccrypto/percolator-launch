@@ -190,7 +190,7 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           </h2>
           <button
             onClick={onCancel}
-            className="text-[var(--text-muted)] transition-colors hover:text-[var(--text)]"
+            className="text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
             aria-label="Close"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -216,42 +216,42 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
         {/* Trade details */}
         <div className="mb-6 space-y-2 text-xs">
           <div className="flex justify-between">
-            <span className="text-[var(--text-dim)]">Position Size:</span>
+            <span className="text-[var(--text-secondary)]">Position Size:</span>
             <span className="font-mono font-medium text-[var(--text)]">
               {formatTokenAmount(positionSize, decimals)} {symbol}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--text-dim)]">Margin Required:</span>
+            <span className="text-[var(--text-secondary)]">Margin Required:</span>
             <span className="font-mono font-medium text-[var(--text)]">
               {formatTokenAmount(margin, decimals)} {settleSymbol}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--text-dim)]">{ORDER_LEVERAGE_LABEL}:</span>
+            <span className="text-[var(--text-secondary)]">{ORDER_LEVERAGE_LABEL}:</span>
             <span className="font-mono font-medium text-[var(--text)]">{formatLeverage(leverage)}</span>
           </div>
           {riskLeverage !== null && (
             <div className="flex justify-between">
-              <span className="text-[var(--text-dim)]">{RISK_LEVERAGE_LABEL}:</span>
+              <span className="text-[var(--text-secondary)]">{RISK_LEVERAGE_LABEL}:</span>
               <span className="font-mono font-medium text-[var(--text-secondary)]">{formatLeverage(riskLeverage)}</span>
             </div>
           )}
           <div className="flex justify-between">
-            <span className="text-[var(--text-dim)]">Trading Fee:</span>
+            <span className="text-[var(--text-secondary)]">Trading Fee:</span>
             <span className="font-mono font-medium text-[var(--text)]">
               {formatTokenAmount(tradingFee, decimals)} {settleSymbol}
             </span>
           </div>
           <div className="flex justify-between border-t border-[var(--border)]/30 pt-2">
-            <span className="text-[var(--text-dim)]">Est. Liquidation Price:</span>
+            <span className="text-[var(--text-secondary)]">Est. Liquidation Price:</span>
             <span className="font-mono font-medium text-[var(--short)]">
               {estimatedLiqPrice <= 0n ? "N/A" : `$${formatTokenAmount(estimatedLiqPrice, 6)}`}
             </span>
           </div>
           {worstFillPriceE6 != null && worstFillPriceE6 > 0n && (
             <div className="flex justify-between">
-              <span className="text-[var(--text-dim)]">
+              <span className="text-[var(--text-secondary)]">
                 {direction === "long" ? "Max Fill Price:" : "Min Fill Price:"}
               </span>
               <span className="font-mono font-medium text-[var(--text)]">
