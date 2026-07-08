@@ -13,6 +13,17 @@ const ConnectButton = dynamic(
 
 type Tab = 'deposit' | 'withdraw';
 
+/**
+ * S2 fix: `onWithdraw` reports which redemption step actually ran so the
+ * caller can show the correct toast. 'requested' means RequestRedeemLpShares
+ * fired (cooldown just started, NO funds moved); 'executed' means
+ * ExecuteRedemption fired (funds sent to the wallet). `| void` keeps this
+ * backward-compatible with callers/tests that don't return a value.
+ */
+export interface WithdrawStepResult {
+  step: 'requested' | 'executed';
+}
+
 interface DepositWithdrawPanelProps {
   /** User's collateral balance (lamports/raw) */
   userBalance: bigint;
@@ -32,10 +43,22 @@ interface DepositWithdrawPanelProps {
   cooldownElapsed: boolean;
   /** Cooldown duration in slots (0 = no cooldown) */
   cooldownSlots?: bigint;
+  /**
+   * S1 fix: whether the connected wallet has an open RequestRedeemLpShares
+   * ticket. A full ("Max") redemption request moves the user's ENTIRE LP
+   * balance into escrow, zeroing `userLpBalance` — without this flag the
+   * Withdraw button becomes permanently disabled (`rawAmount <= userLpBalance
+   * === 0`) with no way to reach ExecuteRedemption and claim the funds.
+   */
+  hasPendingRedemption?: boolean;
+  /** LP shares locked in the pending redemption ticket (0 if none). */
+  pendingRedemptionShares?: bigint;
+  /** Slots remaining until the pending redemption's cooldown elapses (0 = elapsed/none). */
+  cooldownRemainingSlots?: bigint;
   /** Deposit callback */
   onDeposit: (amount: bigint) => Promise<void>;
-  /** Withdraw callback */
-  onWithdraw: (lpAmount: bigint) => Promise<void>;
+  /** Withdraw callback — see `WithdrawStepResult` (S2 fix). */
+  onWithdraw: (lpAmount: bigint) => Promise<WithdrawStepResult | void>;
 }
 
 export function DepositWithdrawPanel({
@@ -48,6 +71,9 @@ export function DepositWithdrawPanel({
   loading,
   cooldownElapsed,
   cooldownSlots,
+  hasPendingRedemption = false,
+  pendingRedemptionShares = 0n,
+  cooldownRemainingSlots = 0n,
   onDeposit,
   onWithdraw,
 }: DepositWithdrawPanelProps) {
@@ -57,6 +83,11 @@ export function DepositWithdrawPanel({
   const [submitting, setSubmitting] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txSuccess, setTxSuccess] = useState<string | null>(null);
+  // Claim-redemption is a separate action from the deposit/withdraw form below —
+  // tracked independently so it doesn't fight the form's submitting/error state.
+  const [claimSubmitting, setClaimSubmitting] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [claimSuccess, setClaimSuccess] = useState<string | null>(null);
   // Two-step confirm for withdrawals
   const [withdrawConfirming, setWithdrawConfirming] = useState(false);
 
@@ -134,8 +165,15 @@ export function DepositWithdrawPanel({
         await onDeposit(rawAmount);
         setTxSuccess('Deposit successful!');
       } else {
-        await onWithdraw(rawAmount);
-        setTxSuccess('Withdrawal successful!');
+        const result = await onWithdraw(rawAmount);
+        // S2 fix: step 1 (RequestRedeemLpShares) only STARTS the cooldown —
+        // no funds have moved yet. Only step 2 (ExecuteRedemption) actually
+        // sends collateral to the wallet, so only that step earns "successful".
+        setTxSuccess(
+          result?.step === 'requested'
+            ? 'Redemption requested — claim it once the cooldown elapses.'
+            : 'Withdrawal successful!',
+        );
         setWithdrawConfirming(false);
       }
       setAmount('');
@@ -146,6 +184,29 @@ export function DepositWithdrawPanel({
       setSubmitting(false);
     }
   }, [rawAmount, tab, withdrawConfirming, onDeposit, onWithdraw]);
+
+  // S1 fix: claim an already-requested redemption. Deliberately bypasses the
+  // rawAmount/userLpBalance gate below — a full ("Max") redemption request
+  // zeroes userLpBalance, which would otherwise make ExecuteRedemption
+  // permanently unreachable through the normal form.
+  const handleClaimRedemption = useCallback(async () => {
+    if (claimSubmitting || loading || !cooldownElapsed) return;
+    setClaimSubmitting(true);
+    setClaimError(null);
+    setClaimSuccess(null);
+    try {
+      const result = await onWithdraw(pendingRedemptionShares);
+      setClaimSuccess(
+        result?.step === 'requested'
+          ? 'Redemption requested — claim it once the cooldown elapses.'
+          : 'Redemption claimed — funds sent to your wallet!',
+      );
+    } catch (e) {
+      setClaimError(e instanceof Error ? e.message : 'Transaction failed');
+    } finally {
+      setClaimSubmitting(false);
+    }
+  }, [claimSubmitting, loading, cooldownElapsed, onWithdraw, pendingRedemptionShares]);
 
   // Validation
   const isValid = useMemo(() => {
@@ -197,6 +258,51 @@ export function DepositWithdrawPanel({
           </button>
         ))}
       </div>
+
+      {/* S1 fix: pending-redemption banner — shown on both tabs so it's never
+          missed. A full ("Max") redemption request zeroes userLpBalance, so
+          without this the normal Withdraw button becomes permanently
+          disabled and ExecuteRedemption is unreachable through the form. */}
+      {hasPendingRedemption && (
+        <div className="mx-5 mt-5 p-3 border border-[var(--accent)]/30 bg-[var(--accent)]/5 rounded-sm">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] uppercase tracking-[0.15em] font-medium text-[var(--accent)]">
+              Pending Redemption
+            </span>
+            <span className="text-[12px] font-mono tabular-nums text-[var(--text)]">
+              {formatRaw(pendingRedemptionShares, decimals)} LP
+            </span>
+          </div>
+          <p className="text-[11px] text-[var(--text-secondary)] mb-3">
+            {cooldownElapsed
+              ? 'Cooldown elapsed — claim your redemption to receive the underlying collateral.'
+              : cooldownRemainingSlots > 0n
+                ? `Cooldown in progress — ~${Math.ceil(Number(cooldownRemainingSlots) * 0.4)}s remaining.`
+                : 'Cooldown in progress.'}
+          </p>
+
+          {claimError && (
+            <p className="mb-2 text-[11px] text-[var(--short)]">{claimError}</p>
+          )}
+          {claimSuccess && (
+            <p className="mb-2 text-[11px] text-[var(--cyan)]">{claimSuccess}</p>
+          )}
+
+          <GlowButton
+            onClick={handleClaimRedemption}
+            disabled={!cooldownElapsed || claimSubmitting || loading}
+            variant="primary"
+            size="lg"
+            className="w-full"
+          >
+            {claimSubmitting
+              ? 'Claiming...'
+              : cooldownElapsed
+                ? 'Claim Redemption'
+                : 'Claim available after cooldown'}
+          </GlowButton>
+        </div>
+      )}
 
       <div className="p-5">
         {/* Amount input */}

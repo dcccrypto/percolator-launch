@@ -170,8 +170,12 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
 
   const handleWithdraw = useCallback(
     async (lpAmount: bigint) => {
-      await lpVaultWithdraw(lpAmount);
+      // S2 fix: propagate which redemption step ran (RequestRedeemLpShares vs
+      // ExecuteRedemption) so DepositWithdrawPanel can show the correct toast
+      // instead of a blanket "Withdrawal successful!".
+      const result = await lpVaultWithdraw(lpAmount);
       await refreshState();
+      return result;
     },
     [lpVaultWithdraw, refreshState],
   );
@@ -329,6 +333,9 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               loading={loading || lpVaultLoading}
               cooldownElapsed={lpVaultState.cooldownElapsed}
               cooldownSlots={lpVaultState.redemptionCooldownSlots}
+              hasPendingRedemption={lpVaultState.hasPendingRedemption}
+              pendingRedemptionShares={lpVaultState.pendingRedemptionShares}
+              cooldownRemainingSlots={lpVaultState.cooldownRemainingSlots}
               onDeposit={handleDeposit}
               onWithdraw={handleWithdraw}
             />
