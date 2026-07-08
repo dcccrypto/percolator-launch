@@ -229,7 +229,13 @@ export function PositionSummary() {
                 key={`${pos.slabAddress}-${i}`}
                 pos={pos}
                 symbol={
-                  tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol
+                  // P1: label by the market's own symbol (e.g. "SOL-PERP"), not the
+                  // collateral token — sim-USDC is the SAME collateral across every
+                  // market (see PLAYGROUND.md), so the old collateralMint lookup
+                  // rendered "USDC/USD" for every position regardless of market.
+                  pos.symbol
+                    ? `${pos.symbol}/USD`
+                    : tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol
                     ? `${tokenMetaMap.get(pos.collateralMint.toBase58())!.symbol}/USD`
                     : `${pos.slabAddress.slice(0, 6)}…/USD`
                 }

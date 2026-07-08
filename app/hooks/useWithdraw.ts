@@ -30,6 +30,25 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError } from "@/lib/errorMessages";
+import { computePositionInitialMargin } from "@/lib/trading";
+import { getEntryPrice } from "@/lib/entry-price";
+
+// M7: withdraw's own EngineStale(19) surface. Unlike a trade (which can be
+// auto-retried after the next keeper crank via withTransientRetry — see
+// OrderTicket/useClosePosition), withdraw here never auto-retries, and a
+// deep-stale/dead market (see DEFINITIVE-PLAN-2026-07-08.md) never
+// self-clears on a manual retry either — only a maintainer re-seed does.
+// humanizeError's generic "stale - try again in a moment" copy is actively
+// misleading for THIS instruction, so detect the code locally (mirrors
+// errorMessages.ts's own extractCustomIndex regex) and override the message
+// without touching the shared error-copy table other flows still rely on.
+const ENGINE_STALE_CODE = 19;
+function isEngineStaleWithdrawError(msg: string): boolean {
+  const m = msg.match(/Custom\((\d+)\)/) ?? msg.match(/"Custom"\s*:\s*(\d+)/);
+  return m !== null && parseInt(m[1], 10) === ENGINE_STALE_CODE;
+}
+const ENGINE_STALE_WITHDRAW_MESSAGE =
+  "This market's on-chain price/crank data is too stale to process a withdrawal. This won't clear on its own retry — the market needs a fresh crank from the maintainer before withdrawals will work again.";
 
 const INLINE_ORACLE_PUSH_REMOVED_ERROR =
   "Inline oracle price push was removed on-chain in beta.29. Migrate this flow to /api/oracle/advance-phase or another server-side oracle publisher before withdrawing as the oracle authority.";
@@ -37,7 +56,7 @@ const INLINE_ORACLE_PUSH_REMOVED_ERROR =
 export function useWithdraw(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, wrapperConfigV17, programId: slabProgramId, refresh: refreshSlab } = useSlabState();
+  const { config: mktConfig, wrapperConfigV17, programId: slabProgramId, params: slabParams, refresh: refreshSlab } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
@@ -88,14 +107,21 @@ export function useWithdraw(slabAddress: string) {
           throw new Error(INLINE_ORACLE_PUSH_REMOVED_ERROR);
         }
 
-        // Fetch slab data to detect v17 vs v12 layout.
-        let slabDataForLayout: Uint8Array | null = null;
-        try {
-          const slabInfo = await connection.getAccountInfo(slabPk);
-          if (slabInfo?.data) slabDataForLayout = new Uint8Array(slabInfo.data);
-        } catch { /* fall through — layout detection best-effort */ }
-
-        const isV17 = slabDataForLayout ? isV17Account(slabDataForLayout) : false;
+        // M9: Prefer the already-loaded SlabProvider state (`wrapperConfigV17`)
+        // over re-detecting the layout from a fresh, fragile refetch — a
+        // transient RPC blip in that refetch used to leave `slabDataForLayout`
+        // null and silently default `isV17` to `false`, building a v12-shaped
+        // withdraw tx (wrong account list + wrong instruction encoding)
+        // against a v17 slab. Only re-detect from a fresh fetch when
+        // SlabProvider hasn't parsed a v17 config for this slab yet (e.g. the
+        // very first render, before SlabProvider's initial load completes).
+        let isV17 = wrapperConfigV17 != null;
+        if (!isV17) {
+          try {
+            const slabInfo = await connection.getAccountInfo(slabPk);
+            if (slabInfo?.data) isV17 = isV17Account(new Uint8Array(slabInfo.data));
+          } catch { /* fall through — layout detection best-effort */ }
+        }
         // Set when the v17 path prepends a crank — bumps the CU budget below.
         let v17CrankIncluded = false;
 
@@ -124,14 +150,25 @@ export function useWithdraw(slabAddress: string) {
               ],
             });
             if (portfolioAccounts.length > 0) {
-              const d = portfolioAccounts[0].account.data;
+              // M10: getProgramAccounts doesn't guarantee stable ordering
+              // across RPC nodes/calls. If more than one account ever matches
+              // this owner+market filter, picking an arbitrary array element
+              // can select a DIFFERENT portfolio than useDeposit.ts /
+              // useUserAccount.ts pick for the exact same wallet+market —
+              // withdraw could silently act on a different account than the
+              // one the UI displays. Sort deterministically by pubkey so
+              // every caller converges on the same account.
+              const sortedPortfolios = [...portfolioAccounts].sort((a, b) =>
+                a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
+              );
+              const d = sortedPortfolios[0].account.data;
               const candidateData = d instanceof Buffer ? d : Buffer.from(d);
               // Defense-in-depth: re-verify the mutable owner actually matches after
               // fetch — memcmp filters are advisory server-side; don't trust blindly.
               try {
                 const candidatePf = parsePortfolioV17(candidateData);
                 if (candidatePf.owner.equals(wallet.publicKey)) {
-                  portfolioPk = portfolioAccounts[0].pubkey;
+                  portfolioPk = sortedPortfolios[0].pubkey;
                   portfolioData = candidateData;
                 }
               } catch { /* leave portfolioPk/portfolioData unset — falls through below */ }
@@ -143,24 +180,34 @@ export function useWithdraw(slabAddress: string) {
           }
 
           // Over-withdraw pre-check (defense-in-depth). The DepositWithdrawCard UI
-          // already blocks amount > capital, but this guards direct/other callers
-          // and turns a confusing on-chain failure into a clear message.
+          // already blocks amount > freeMargin, but this guards direct/other
+          // callers and turns a confusing on-chain failure into a clear message.
           //
-          // NOTE: we can only bound against TOTAL capital here. When a position is
-          // open the true free (unreserved) collateral is lower — computing the
-          // exact reserved margin requires the engine's margin math, so the
-          // on-chain program remains the source of truth for that case (it rejects
-          // with "insufficient margin" if the withdrawal would under-collateralize
-          // the open position). This check never blocks a valid withdrawal; it only
-          // catches the unambiguous "more than the whole account" case early.
+          // M7: gate on FREE margin — capital minus the open position's OWN
+          // locked initial margin (computePositionInitialMargin, same formula
+          // used by usePortfolio's ROE calc) — not total capital. The old
+          // check only bounded against `portfolio.capital`, so an amount that
+          // left an open position under-collateralized slipped past this
+          // pre-check and was rejected only by the on-chain program with a
+          // generic "insufficient margin" revert. This still never blocks a
+          // valid withdrawal — it only tightens the early client-side bound
+          // to match what the chain will actually allow.
           let hasActiveLegs = false;
           if (portfolioData) {
             try {
               const portfolio = parsePortfolioV17(portfolioData);
-              hasActiveLegs = portfolio.legs.some((l) => l.active);
-              if (params.amount > portfolio.capital) {
+              const activeLeg = portfolio.legs.find((l) => l.active);
+              hasActiveLegs = activeLeg !== undefined;
+              const positionSize = activeLeg ? activeLeg.basisPosQ : 0n;
+              const effectiveEntryPrice = getEntryPrice(slabAddress, 0, wallet.publicKey.toBase58());
+              const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
+              const lockedMargin = computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps);
+              const freeMargin = portfolio.capital > lockedMargin ? portfolio.capital - lockedMargin : 0n;
+              if (params.amount > freeMargin) {
                 throw new Error(
-                  "Withdrawal amount exceeds your account balance. Reduce the amount and try again.",
+                  hasActiveLegs
+                    ? "Withdrawal amount exceeds your free margin. Part of your balance backs an open position — reduce the amount or close the position first."
+                    : "Withdrawal amount exceeds your account balance. Reduce the amount and try again.",
                 );
               }
             } catch (checkErr) {
@@ -242,14 +289,17 @@ export function useWithdraw(slabAddress: string) {
         setTimeout(() => refreshSlab(), 2000);
         return sig;
       } catch (e) {
-        setError(humanizeError(e instanceof Error ? e.message : String(e)));
+        const rawMsg = e instanceof Error ? e.message : String(e);
+        // M7: don't let a withdraw-specific EngineStale(19) read as
+        // transient/auto-fixable — see ENGINE_STALE_WITHDRAW_MESSAGE above.
+        setError(isEngineStaleWithdrawError(rawMsg) ? ENGINE_STALE_WITHDRAW_MESSAGE : humanizeError(rawMsg));
         throw e;
       } finally {
         inflightRef.current = false;
         setLoading(false);
       }
     },
-    [connection, wallet, mktConfig, slabAddress, slabProgramId, refreshSlab]
+    [connection, wallet, mktConfig, slabAddress, slabProgramId, slabParams, wrapperConfigV17, refreshSlab]
   );
 
   return { withdraw, loading, error };
