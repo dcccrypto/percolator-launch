@@ -64,12 +64,20 @@ async function findV17Portfolio(
       ],
     });
     if (accounts.length === 0) return null;
+    // M10: getProgramAccounts doesn't guarantee stable ordering across RPC
+    // nodes/calls. If more than one account ever matches this owner+market
+    // filter, picking an arbitrary array element can select a DIFFERENT
+    // portfolio than useWithdraw.ts / useUserAccount.ts pick for the exact
+    // same wallet+market — deposit, withdraw, and display would silently
+    // disagree about which account holds the user's funds. Sort
+    // deterministically by pubkey so every caller converges on the same one.
+    const sorted = [...accounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()));
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
     // memcmp filters are advisory server-side; don't trust them blindly.
-    const data = accounts[0].account.data;
+    const data = sorted[0].account.data;
     const portfolio = parsePortfolioV17(data instanceof Buffer ? data : Buffer.from(data));
     if (!portfolio.owner.equals(ownerPk)) return null;
-    return accounts[0].pubkey;
+    return sorted[0].pubkey;
   } catch {
     return null;
   }
@@ -78,7 +86,7 @@ async function findV17Portfolio(
 export function useDeposit(slabAddress: string) {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const { config: mktConfig, programId: slabProgramId, params: slabParams, refresh: refreshSlab } = useSlabState();
+  const { config: mktConfig, programId: slabProgramId, params: slabParams, wrapperConfigV17, refresh: refreshSlab } = useSlabState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
@@ -144,7 +152,16 @@ export function useDeposit(slabAddress: string) {
         // v17 vs v12 deposit path diverge on the account list shape.
         // v17: [owner, market, portfolio, sourceToken, vaultToken, tokenProgram] (6 accounts, no clock)
         // v12: [owner, market, userAta, vault, tokenProgram, clock] (6 accounts, has clock)
-        const isV17 = slabData ? isV17Account(slabData) : false;
+        //
+        // M9: Prefer the already-loaded SlabProvider state (`wrapperConfigV17`)
+        // over re-detecting the layout from the fresh `slabData` refetch above —
+        // that refetch is best-effort (a transient RPC blip leaves `slabData`
+        // undefined) and used to silently default `isV17` to `false`, building
+        // a v12-shaped deposit tx (wrong account list + wrong instruction
+        // encoding) against a v17 slab. Only fall back to detecting from
+        // `slabData` when SlabProvider hasn't parsed a v17 config for this slab
+        // (e.g. the very first render, before SlabProvider's initial load).
+        const isV17 = wrapperConfigV17 != null || (slabData ? isV17Account(slabData) : false);
 
         if (isV17) {
           // v17: derive vault authority PDA to build the vault token ATA.
@@ -315,7 +332,7 @@ export function useDeposit(slabAddress: string) {
         setLoading(false);
       }
     },
-    [connection, wallet, mktConfig, slabAddress, slabProgramId, refreshSlab],
+    [connection, wallet, mktConfig, slabAddress, slabProgramId, wrapperConfigV17, refreshSlab],
   );
 
   return { deposit, loading, error };

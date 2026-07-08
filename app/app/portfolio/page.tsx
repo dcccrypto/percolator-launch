@@ -306,7 +306,11 @@ export default function PortfolioPage() {
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? pos.slabAddress.slice(0, 8) + "\u2026"}/USD
+                            {/* P1: label by the market's own symbol (e.g. "SOL-PERP"), not the
+                                collateral token \u2014 sim-USDC is the SAME collateral across every
+                                market (see PLAYGROUND.md), so the old collateralMint lookup
+                                rendered "USDC/USD" for every position regardless of market. */}
+                            {pos.symbol ?? (tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? pos.slabAddress.slice(0, 8) + "\u2026")}/USD
                           </span>
                           <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${
                             side === "Long"

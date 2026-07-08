@@ -137,7 +137,15 @@ export function useUserAccount(): UserAccountInfo | null {
           setV17Account(null);
           return;
         }
-        const data = results[0].account.data;
+        // M10: getProgramAccounts doesn't guarantee stable ordering across RPC
+        // nodes/calls. If more than one account ever matches this owner+market
+        // filter, picking an arbitrary array element can select a DIFFERENT
+        // portfolio than useDeposit.ts / useWithdraw.ts pick for the exact same
+        // wallet+market — the displayed account could silently disagree with
+        // the one deposit/withdraw actually mutate. Sort deterministically by
+        // pubkey so every caller converges on the same account.
+        const sorted = [...results].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()));
+        const data = sorted[0].account.data;
         const portfolio = parsePortfolioV17(data instanceof Buffer ? data : Buffer.from(data));
         // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
         // memcmp filters are advisory server-side; don't trust them blindly.

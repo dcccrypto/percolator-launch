@@ -29,6 +29,7 @@ import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
 import { discoverMarketsViaProgramDirectory } from "@/lib/market-directory-discovery";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
+import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 
 const MAINNET_STATIC_MARKETS = [
   {
@@ -67,6 +68,55 @@ async function discoverPortfolioMarkets(
   }
 
   return [];
+}
+
+/**
+ * P1: `DiscoveredMarket` (from discoverPortfolioMarkets, on-chain only) carries
+ * no symbol — every position was falling back to the COLLATERAL token symbol
+ * ("USDC/USD") for every market, since sim-USDC is the single collateral shared
+ * across all playground markets (see PLAYGROUND.md). Resolve the real market
+ * symbol from the app's own `/api/markets` directory (covers curated AND
+ * wizard-created markets), with `PLAYGROUND_SLAB_META` as a zero-network
+ * fallback for the 5 curated devnet markets. Best-effort: a failed/slow fetch
+ * must never block the portfolio load — callers fall back to
+ * `PLAYGROUND_SLAB_META` or `null` (existing "collateral/USD" / truncated
+ * address rendering) when this returns an empty map.
+ */
+async function fetchSymbolBySlab(apiBaseUrl: string | undefined): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!apiBaseUrl) return map;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    let response: Response;
+    try {
+      response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/markets?limit=500`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) return map;
+    const body = (await response.json()) as { markets?: unknown };
+    const rows = Array.isArray(body.markets) ? body.markets : [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const r = row as Record<string, unknown>;
+      const slab = typeof r.slab_address === "string" ? r.slab_address : null;
+      const symbol = typeof r.symbol === "string" && r.symbol.length > 0 ? r.symbol : null;
+      if (slab && symbol) map.set(slab, symbol);
+    }
+  } catch {
+    // Best-effort — never block the portfolio load on this.
+  }
+  return map;
+}
+
+/** Resolve a market's display symbol: API directory first, curated static meta fallback. */
+function resolveSymbol(slabAddrStr: string, symbolBySlab: Map<string, string>): string | null {
+  return symbolBySlab.get(slabAddrStr) ?? PLAYGROUND_SLAB_META[slabAddrStr]?.symbol ?? null;
 }
 
 export interface PortfolioPosition {
@@ -132,6 +182,7 @@ function buildV17Position(
   market: DiscoveredMarket,
   nftWrapped = false,
   initialMarginBps = 1000n,
+  symbol: string | null = null,
 ): PortfolioPosition {
   // v17 markets return an empty `market.config` from the SDK — the real
   // collateral mint lives in `market.configV17` (see markets/page.tsx's
@@ -228,7 +279,7 @@ function buildV17Position(
 
   return {
     slabAddress: slabAddrStr,
-    symbol: null,
+    symbol,
     account,
     idx: 0,
     market,
@@ -315,9 +366,11 @@ export function usePortfolio(): PortfolioData {
         } else {
           setLoading(true);
         }
-        const marketArrays = await Promise.all(
-          programIds.map((id) => discoverPortfolioMarkets(connection, new PublicKey(id)))
-        );
+        const apiBaseUrl = getApiBaseUrl();
+        const [marketArrays, symbolBySlab] = await Promise.all([
+          Promise.all(programIds.map((id) => discoverPortfolioMarkets(connection, new PublicKey(id)))),
+          fetchSymbolBySlab(apiBaseUrl),
+        ]);
         const markets = marketArrays.flat();
         const allPositions: PortfolioPosition[] = [];
         // v17 markets keyed by slab address → oracle price + margin, so the
@@ -433,6 +486,7 @@ export function usePortfolio(): PortfolioData {
                   market,
                   false,
                   initialMarginBps,
+                  resolveSymbol(slabAddrStr, symbolBySlab),
                 );
 
                 if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
@@ -547,7 +601,7 @@ export function usePortfolio(): PortfolioData {
 
                   allPositions.push({
                     slabAddress: slabAddrStr,
-                    symbol: null,
+                    symbol: resolveSymbol(slabAddrStr, symbolBySlab),
                     account,
                     idx,
                     market,
@@ -622,6 +676,7 @@ export function usePortfolio(): PortfolioData {
                 meta.market,
                 true, // nftWrapped
                 meta.initialMarginBps,
+                resolveSymbol(slabAddrStr, symbolBySlab),
               );
 
               if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
