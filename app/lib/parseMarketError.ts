@@ -33,8 +33,18 @@ const LAUNCH_ERROR_OVERRIDES: Record<number, string> = {
   16: "Portfolio provenance mismatch. This portfolio was not created for this market group.",
   // 18: EngineInvalidLeg
   18: "Invalid trade leg. Check asset_index and size parameters.",
-  // 19: EngineStale — direct user action
-  19: "Market is stale. A permissionless crank was prepended to your transaction — retry or wait a few seconds for the oracle to update.",
+  // 19: EngineStale. LF1 (2026-07-08): this used to promise a bare retry
+  // would fix it ("a permissionless crank was prepended... retry"), which is
+  // true for a brand-new market awaiting its first crank but NOT for the
+  // ~500-slot accrue cliff a market can also hit — live-devnet verification
+  // found markets sitting hundreds of thousands of slots past it, where
+  // EngineStale is permanent until a maintainer re-seeds the market. Hedge
+  // the copy instead of promising a fix a retry can't deliver.
+  19: "Market engine is stale — a crank is needed before this step can proceed. If this keeps happening after a retry or two, the crank isn't clearing it and the market's engine may need a full re-seed rather than a simple crank — contact a maintainer.",
+  // 21: EngineLockActive. Same LF1 fix — the SDK's default hint ("wait for
+  // it to complete") over-promises self-resolution the same way 19's old
+  // copy did.
+  21: "Engine lock is active on this market (a close or recovery hasn't finished). If this doesn't clear after a retry or two, the market may need a full re-seed rather than simply waiting — contact a maintainer.",
 };
 
 export function parseMarketCreationError(error: unknown): string {

@@ -48,6 +48,7 @@ import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { AccountKind, computePreTradeLiqPrice, computeLiqPrice } from "@percolatorct/sdk";
 import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
@@ -86,6 +87,7 @@ interface TicketValidationCtx {
   riskGateActive: boolean;
   oracleUnavailable: boolean;
   oracleStale: boolean;
+  engineStale: boolean;
   hasPrice: boolean;
   mockMode: boolean;
   exceedsBalance: boolean;
@@ -115,6 +117,13 @@ function buildValidationIssues(ctx: TicketValidationCtx): ValidationIssue[] {
     issues.push({ severity: "error", title: "Oracle unavailable", message: "Oracle not yet active - keeper has not cranked this market." });
   } else if (ctx.oracleStale) {
     issues.push({ severity: "error", title: "Oracle stale", message: "The oracle price for this market has not updated recently. Trading is temporarily disabled to prevent failed transactions." });
+  } else if (ctx.engineStale) {
+    // H6: the KEEPER's price push can look perfectly fresh (oracleStale
+    // false) while the ENGINE hasn't accrued this market in ~500 slots — a
+    // cliff-dead market that reverts EngineStale(19)/EngineLockActive(21) on
+    // every trade, permanently, until a maintainer re-seeds it. See
+    // useEngineFreshness.
+    issues.push({ severity: "error", title: "Market crank behind", message: "This market's engine hasn't been cranked recently enough to trade safely. Trading is paused to prevent failed transactions - check back later or ask a maintainer to re-seed the market." });
   }
   if (!ctx.hasPrice) {
     issues.push({ severity: "error", title: "No oracle price", message: "Waiting for price feed. Trades will be enabled once oracle data is available." });
@@ -197,7 +206,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
   const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
-  const oracleStale = !oracleUnavailable && oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp");
+  // H7: this gate was dead for keeper-mode markets (byte=3/AUTH_MARK) — the
+  // mode set only listed "admin"/"hyperp", so a stale keeper-priced market
+  // never blocked trading (fired for 0/5 live markets). "keeper" added.
+  const oracleStale = !oracleUnavailable && oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp" || oracleMode === "keeper");
+  // H6: engine accrue-staleness — see useEngineFreshness's file header.
+  const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
@@ -440,11 +454,42 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const hasOrder = marginNative > 0n && positionSize > 0n && !exceedsBalance;
   const estEntry = hasOrder ? computeEstimatedEntryPrice(oracleE6, tradingFeeBps, direction) : 0n;
   const fee = hasOrder ? computeTradingFee((positionSize * oracleE6) / 1_000_000n, tradingFeeBps) : 0n;
+  // M8 fix: two bugs in the receipt's liq-price row.
+  // (1) beforeLiqPrice always read "—" because `userAccount.account
+  //     .entryPrice` is always 0n on v17 (the on-chain field isn't
+  //     populated) — same gap `existingEntryPriceE6` above already resolves
+  //     (on-chain entry -> locally-cached entry -> pnl-implied entry), so use
+  //     that instead of the raw always-zero field.
+  // (2) afterLiqPrice always priced the order as a flat->fresh-position open
+  //     (computePreTradeLiqPrice against just the NEW margin/size), silently
+  //     ignoring any position already open on this market — a scale-in
+  //     showed a liq price for the new slice alone, not the resulting
+  //     COMBINED position. When there IS an existing position, blend it with
+  //     this order the same way PositionsDock/PositionPanel already compute
+  //     a standing position's liq price: full account capital + the
+  //     resulting signed size, entry price weighted by the pre-trade cost
+  //     basis for a same-direction add, unchanged for a partial reduce, or
+  //     this trade's own fill price for a flip/fresh-open residual.
+  const newSignedSize = direction === "short" ? -positionSize : positionSize;
+  const combinedSignedSize = existingPositionSize + newSignedSize;
+  const existingAbsSize = existingPositionSize < 0n ? -existingPositionSize : existingPositionSize;
+  const sameDirection = existingPositionSize === 0n || (existingPositionSize > 0n) === (newSignedSize > 0n);
+  const combinedEntryPriceE6 = sameDirection
+    ? (existingAbsSize + positionSize > 0n
+        ? (existingEntryPriceE6 * existingAbsSize + estEntry * positionSize) / (existingAbsSize + positionSize)
+        : 0n)
+    // Opposite direction: a partial reduce keeps the original cost basis; a
+    // flip's residual position takes on this trade's fill price as its entry.
+    : (positionSize < existingAbsSize ? existingEntryPriceE6 : estEntry);
   const afterLiqPrice = hasOrder
-    ? computePreTradeLiqPrice(oracleE6, marginNative, positionSize, maintenanceMarginBps, tradingFeeBps, direction)
+    ? (existingPositionSize === 0n
+        ? computePreTradeLiqPrice(oracleE6, marginNative, positionSize, maintenanceMarginBps, tradingFeeBps, direction)
+        : (combinedSignedSize !== 0n && combinedEntryPriceE6 > 0n
+            ? computeLiqPrice(combinedEntryPriceE6, capital, combinedSignedSize, maintenanceMarginBps)
+            : 0n))
     : 0n;
-  const beforeLiqPrice = userAccount && userAccount.account.positionSize !== 0n && userAccount.account.entryPrice > 0n
-    ? computeLiqPrice(userAccount.account.entryPrice, userAccount.account.capital, userAccount.account.positionSize, maintenanceMarginBps)
+  const beforeLiqPrice = userAccount && userAccount.account.positionSize !== 0n && existingEntryPriceE6 > 0n
+    ? computeLiqPrice(existingEntryPriceE6, capital, userAccount.account.positionSize, maintenanceMarginBps)
     : 0n;
   // BUG 9 fix: opening a position RESERVES margin from existing capital — it is
   // not a deposit — so this must show capital -> capital MINUS the reserved
@@ -473,6 +518,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     riskGateActive,
     oracleUnavailable,
     oracleStale,
+    engineStale,
     hasPrice: priceUsd != null,
     mockMode,
     exceedsBalance,
@@ -539,7 +585,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[OrderTicket] raw error:", msg);
-      setHumanError(humanizeError(msg));
+      // TX1: Custom(9) from THIS call site is always a trade() CPI — humanize
+      // it as the slippage/worst-fill-price rejection it actually is here,
+      // not the generic "invalid instruction" text (still correct for
+      // deposit/withdraw/NFT/market-creation call sites).
+      setHumanError(humanizeError(msg, "trade"));
       // Brief "Failed" flash on the submit button itself (matches the
       // "Confirmed!" success flash below) before reverting to idle — the
       // detailed reason stays in the humanError banner underneath.
