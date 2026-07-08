@@ -98,17 +98,22 @@ export function DepositWithdrawPanel({
     return formatRaw(raw, decimals);
   }, [tab, userBalance, userLpBalance, decimals]);
 
+  const displayMaxAmount = loading ? '—' : maxAmount;
+
   const handleSetMax = useCallback(() => {
+    if (loading) return;
     setAmount(maxAmount);
-  }, [maxAmount]);
+  }, [loading, maxAmount]);
 
   const handleSetPercent = useCallback(
     (pct: number) => {
+      if (loading) return;
+
       const raw = tab === 'deposit' ? userBalance : userLpBalance;
       const partial = (raw * BigInt(pct)) / 100n;
       setAmount(formatRaw(partial, decimals));
     },
-    [tab, userBalance, userLpBalance, decimals],
+    [loading, tab, userBalance, userLpBalance, decimals],
   );
 
   const handleSubmit = useCallback(async () => {
@@ -144,6 +149,7 @@ export function DepositWithdrawPanel({
 
   // Validation
   const isValid = useMemo(() => {
+    if (loading) return false;
     if (rawAmount <= 0n) return false;
     if (tab === 'deposit' && rawAmount > userBalance) return false;
     if (tab === 'withdraw') {
@@ -151,7 +157,7 @@ export function DepositWithdrawPanel({
       if (!cooldownElapsed) return false;
     }
     return true;
-  }, [rawAmount, tab, userBalance, userLpBalance, cooldownElapsed]);
+  }, [loading, rawAmount, tab, userBalance, userLpBalance, cooldownElapsed]);
 
   if (!connected) {
     return (
@@ -203,7 +209,7 @@ export function DepositWithdrawPanel({
               onClick={handleSetMax}
               className="text-[10px] text-[var(--accent)] hover:text-[var(--accent)]/80 transition-colors"
             >
-              Max: {maxAmount} {tab === 'deposit' ? collateralSymbol : 'LP'}
+              Max: {displayMaxAmount} {tab === 'deposit' ? collateralSymbol : 'LP'}
             </button>
           </div>
 
