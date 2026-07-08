@@ -80,6 +80,13 @@ const DEVNET_ALLOWED_MINTS: Set<string> = new Set(
  * Update this list as new confirmed safe devnet mints are created.
  */
 const EMERGENCY_DEVNET_MINTS: Set<string> = new Set([
+  // Sim-USDC — the canonical playground collateral mint (app/lib/config.ts testUsdcMint).
+  // Every seeded market, the faucet, and the trade flow already collateralize in this mint;
+  // the create-market wizard now does too (the old per-market "mirror mint" collateral model
+  // is removed). Must always be permitted here regardless of Supabase/devnet_mints
+  // availability — this is the one mint every new market's vault seed / LP deposit /
+  // insurance top-up needs pre-funded.
+  "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC", // Sim-USDC (testUsdcMint)
   // Mirror mints — mainnet tokens mirrored to devnet via /api/devnet-mirror-mint
   // Last synced: 2026-03-28 from devnet_mints table
   "DJKjmSbWjhx925kuk1fS1BENCBnqXCfwUJjb9EKwSEnV", // Percolator (PERC)
@@ -212,8 +219,11 @@ export async function POST(req: NextRequest) {
           Sentry.captureException(e, {
             tags: { endpoint: "/api/devnet-pre-fund", phase: "dynamic-mint-check" },
           });
-          // DB unavailable and not in static list: fail-closed (on-chain check would catch anyway)
-          finallyPermitted = false;
+          // DB unavailable and not in static list: fall back to the emergency allowlist
+          // (mirrors the `else` branch below) so Sim-USDC and other known-safe mints stay
+          // fundable even when Supabase is down — otherwise every market creation on a
+          // Supabase-less deployment hard-fails at "mintAddress not permitted".
+          finallyPermitted = EMERGENCY_DEVNET_MINTS.has(mintAddress);
         }
       }
     } else {

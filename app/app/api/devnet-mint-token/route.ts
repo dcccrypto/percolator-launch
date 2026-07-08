@@ -172,8 +172,25 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Per-wallet durable claim gate: one $500 grant per wallet per token per 24 hours.
-    const supabase = getServiceClient();
-    const gate = await tryFaucetGate(supabase, creatorWallet, `devnet-mint:${mainnetCA}`);
+    // NOTE: this route is NOT currently called by the frontend — the create-market
+    // wizard's post-launch "$500 airdrop" uses /api/devnet-airdrop instead (see
+    // useCreateMarket.ts's "PERC-465: Post-creation hooks" comment: "Use the
+    // devnet-airdrop endpoint (not devnet-mint-token) because the mirror mint was
+    // already created by StepTokenSelect..."), which already degrades gracefully
+    // without Supabase via its own _tryGetServiceClient() + static-allowlist fallback.
+    // Wrapping the gate here in try/catch (mirroring app/api/faucet/route.ts's pattern)
+    // keeps this route consistent/safe in case it's ever wired back up, rather than
+    // hard-500ing the instant Supabase creds are absent.
+    let supabase: ReturnType<typeof getServiceClient> | null = null;
+    let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
+    try {
+      supabase = getServiceClient();
+      gate = await tryFaucetGate(supabase, creatorWallet, `devnet-mint:${mainnetCA}`);
+    } catch {
+      // Supabase unavailable — proceed without the 24h dedup gate (degrade to "no gate").
+      supabase = null;
+      gate = { allowed: true, nextClaimAt: null };
+    }
     if (!gate.allowed) {
       return NextResponse.json(
         {
@@ -183,6 +200,16 @@ export async function POST(req: NextRequest) {
           nextClaimAt: gate.nextClaimAt,
         },
         { status: gate.nextClaimAt ? 429 : 503 },
+      );
+    }
+    if (!supabase) {
+      // The rest of this route's mint-dedup bookkeeping (devnet_mints / markets tables)
+      // requires Supabase to track which devnet mint maps to which mainnet CA — without
+      // it we cannot safely proceed. Fail clearly here instead of hitting undefined DB
+      // calls below. (Not reached by the live create-market flow — see note above.)
+      return NextResponse.json(
+        { error: "Server not configured (Supabase unavailable) for devnet token minting." },
+        { status: 503 },
       );
     }
 

@@ -17,7 +17,7 @@ import { useQuickLaunch } from "@/hooks/useQuickLaunch";
 import { type DexPoolResult } from "@/hooks/useDexPoolSearch";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { SLAB_TIERS, type SlabTierKey } from "@/lib/slabTiers";
-import { getNetwork } from "@/lib/config";
+import { getConfig, getNetwork } from "@/lib/config";
 import { toE6 } from "@/lib/format";
 
 import { ModeSelector } from "./ModeSelector";
@@ -220,8 +220,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     }
     return false;
   });
-  // Devnet mirror mint address (different from mainnet CA entered by user)
-  const [devnetMintAddress, setDevnetMintAddress] = useState<string | null>(null);
 
   // SOL balance for cost check in review step.
   // In mock mode (?mock=1), force a funded-looking value (8.5 SOL) so
@@ -259,7 +257,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const maxLeverage = Math.floor(10000 / flooredInitialMarginBps(wizard.initialMarginBps));
   const feeConflict = wizard.tradingFeeBps >= wizard.initialMarginBps;
   const hasTokens = wizard.walletBalance !== null && wizard.walletBalance > 0n;
-  const decimals = wizard.tokenMeta?.decimals ?? 6;
+  // Collateral is ALWAYS the universal Sim-USDC mint on devnet (6 decimals) — never the
+  // base token's own decimals. The mirror-mint model (where collateral was a per-market
+  // mint of the base token, at the base token's decimals) is removed; see the collateral
+  // mint resolution below (`collateralMintAddress`) and launch-test-market.ts (the proven
+  // reference), whose vault/LP/insurance amounts are all parsed at Sim-USDC's 6 decimals
+  // regardless of what the base token's own decimals are. The base token's tokenMeta.decimals
+  // is now purely informational (display only) — it no longer feeds collateral amount math.
+  const decimals = 6;
   // GH#1301: Check against the full token requirement (seed + LP collateral + insurance),
   // not just MIN_INIT_MARKET_SEED (500 tokens). A user with 600 tokens but 1100 LP
   // collateral entered would previously pass the check and reach a failed on-chain tx.
@@ -304,19 +309,24 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   }, []);
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
   const isDevnet = getNetwork() === "devnet";
-  // GH#1117: True only when the selected token is a Percolator mirror mint
-  // (devnetMintAddress differs from the user's input = mirror flow ran).
-  // False for custom tokens entered directly (user = mint authority; no auto-airdrop).
-  const isPercolatorMirror = devnetMintAddress !== null && devnetMintAddress !== wizard.mintAddress;
-  // GH#1301: On devnet, tokens are auto-airdropped — but ONLY for Percolator-managed mirror mints.
-  // Custom tokens (user = mint authority) and native-SOL collateral markets (e.g., SOL-PERP with
-  // 1100 SOL LP collateral) cannot be auto-funded. Tightening the bypass from `isDevnet` to
-  // `isDevnet && isPercolatorMirror` prevents the Launch button from being enabled when the user
-  // has 5 SOL but entered 1100 SOL as LP collateral.
+  // Collateral mint: on devnet, ALWAYS the universal Sim-USDC mint (app/lib/config.ts
+  // testUsdcMint) — the same collateral every seeded market, the faucet, and the trade
+  // flow use. Never a per-market "mirror" of the base token entered in Step 1 (that model
+  // is removed — see launch-test-market.ts, the proven end-to-end reference this now
+  // matches: its InitMarket/vault ATA/LP deposit/StakeInitPool all use SIM_USDC as the
+  // collateral mint). On mainnet (no Sim-USDC concept — testUsdcMint is devnet-only in
+  // CONFIGS), collateral remains the user-entered mint, unchanged.
+  const simUsdcMint = (getConfig() as Record<string, unknown>).testUsdcMint as string | undefined;
+  const collateralMintAddress = isDevnet && simUsdcMint ? simUsdcMint : wizard.mintAddress;
+  // GH#1301 (superseded): tokens used to be auto-airdropped only for Percolator-managed
+  // mirror mints. Now that devnet collateral is ALWAYS Sim-USDC and is ALWAYS auto-funded
+  // via /api/devnet-pre-fund (called from useCreateMarket.ts's create() before every
+  // collateral-moving step), the wallet-token-balance precheck is unconditionally
+  // irrelevant on devnet — skip it for every devnet market, not just former "mirror" ones.
   // Mock-mode (?mock=1) bypasses all balance checks so investors / pitch
   // captures can walk through the wizard without funding a real wallet.
   const mockBypass = isMockMode();
-  const skipTokenBalanceCheck = (isDevnet && isPercolatorMirror) || mockBypass;
+  const skipTokenBalanceCheck = isDevnet || mockBypass;
   const allValid = step1Valid && step2Valid && step3Valid && (skipTokenBalanceCheck || (hasTokens && hasSufficientTokensForSeed)) && (mockBypass || hasSufficientSol);
 
   // Demo-launch state machine. When mockBypass is on and the user clicks
@@ -491,8 +501,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
 
   // Updaters (memoized to avoid unnecessary re-renders in children)
   //
-  // GH#1263 (secondary guard): Only reset mintExistsOnNetwork / devnetMintAddress when
-  // the mint address *actually* changed.  The primary fix is in StepTokenSelect's
+  // GH#1263 (secondary guard): Only reset mintExistsOnNetwork when the mint address
+  // *actually* changed.  The primary fix is in StepTokenSelect's
   // debounce (it no longer calls onMintChange when the value is the same), but this
   // guard provides an extra safety net in case any other code path calls us with the
   // same value.  Without it, a spurious call resets mintExistsOnNetwork to false even
@@ -500,9 +510,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   const setMintAddress = useCallback((mint: string) => {
     if (currentMintRef.current === mint) return; // no-op if address unchanged
     setWizard((prev) => ({ ...prev, mintAddress: mint }));
-    // Reset network validation and devnet mirror only on a genuine address change.
+    // Reset network validation only on a genuine address change.
     setMintExistsOnNetwork(false);
-    setDevnetMintAddress(null);
   }, []);
 
   const setTokenMeta = useCallback(
@@ -620,8 +629,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       return;
     }
     const tier = SLAB_TIERS[wizard.slabTier];
-    // On devnet, use the mirror mint for on-chain ops; keep mainnet CA for metadata
-    const effectiveMint = devnetMintAddress ?? wizard.mintAddress;
 
     // PERC-470: Map wizard oracle type to CreateMarketParams oracleMode
     // "keeper" = AUTH_MARK oracle with oracle_authority delegated to keeper service
@@ -642,7 +649,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       : (wizard.tokenMeta?.name ?? "Unknown Token");
 
     const params: CreateMarketParams = {
-      mint: new PublicKey(effectiveMint),
+      mint: new PublicKey(collateralMintAddress),
       initialPriceE6: priceE6,
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
       insuranceAmount: parseHumanAmount(wizard.insuranceAmount, decimals),
@@ -659,7 +666,11 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       symbol: marketSymbol,
       name: marketName,
       decimals,
-      mainnetCA: wizard.mintAddress !== effectiveMint ? wizard.mintAddress : undefined,
+      // Base token CA — used by the keeper for pricing + metadata, always distinct from
+      // the Sim-USDC collateral mint now. Set unconditionally (previously only set when
+      // collateral differed from the entered mint, back when a non-mirrored custom token
+      // could BE the collateral itself).
+      mainnetCA: wizard.mintAddress,
       oracleMode,
       // PERC-470/#811: Pass DEX pool address for hyperp mode.
       // wizard.dexPool is set when the user selects a pool from the UI.
@@ -693,7 +704,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     if (createState.step > 0 && !createState.slabAddress) return;
     const { oracleFeed, priceE6 } = getOracleFeedAndPrice();
     const tier = SLAB_TIERS[wizard.slabTier];
-    const effectiveMint = devnetMintAddress ?? wizard.mintAddress;
 
     // PERC-470: Include oracleMode + dexPoolAddress in retry params (fixes #810)
     const oracleMode = wizard.oracleType === "pyth" ? "pyth" as const
@@ -710,7 +720,7 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       : (wizard.tokenMeta?.name ?? "Unknown Token");
 
     const params: CreateMarketParams = {
-      mint: new PublicKey(effectiveMint),
+      mint: new PublicKey(collateralMintAddress),
       initialPriceE6: priceE6,
       lpCollateral: parseHumanAmount(wizard.lpCollateral || "0", decimals),
       insuranceAmount: parseHumanAmount(wizard.insuranceAmount, decimals),
@@ -724,7 +734,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
       symbol: retryMarketSymbol,
       name: retryMarketName,
       decimals,
-      mainnetCA: wizard.mintAddress !== effectiveMint ? wizard.mintAddress : undefined,
+      // See handleLaunch's mainnetCA comment — set unconditionally now.
+      mainnetCA: wizard.mintAddress,
       oracleMode,
       // PERC-470/#811: Same fallback as handleLaunch — oracleFeed holds pool address
       // for Quick Launch when wizard.dexPool is null.
@@ -753,7 +764,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     resetCreate();
     setWizard({ ...DEFAULT_STATE, mintAddress: initialMint ?? "" });
     setCompletedSteps(new Set());
-    setDevnetMintAddress(null);
     // PERC-516: Clear persisted wizard state
     try { localStorage.removeItem(WIZARD_STORAGE_KEY); } catch {}
     setResumeFromStep(null);
@@ -980,7 +990,6 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             onTokenResolved={setTokenMeta}
             onBalanceChange={setWalletBalance}
             onMintNetworkValidChange={setMintExistsOnNetwork}
-            onDevnetMintResolved={setDevnetMintAddress}
             onContinue={() => advanceStep(1)}
             canContinue={step1Valid}
           />
@@ -1105,7 +1114,12 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             hasTokens={hasTokens}
             hasSufficientTokensForSeed={hasSufficientTokensForSeed}
             feeConflict={feeConflict}
-            isPercolatorMirror={isPercolatorMirror}
+            // StepReview's isPercolatorMirror prop drives the "tokens auto-airdropped"
+            // banner + button label. Its meaning is generalized now: on devnet, EVERY
+            // market's collateral (Sim-USDC) is auto-funded via /api/devnet-pre-fund
+            // regardless of what the user pasted in Step 1 — there is no more per-market
+            // "mirror mint" distinction, so `isDevnet` alone is the right signal here.
+            isPercolatorMirror={isDevnet}
             onBack={goBack}
             onLaunch={handleLaunch}
             canLaunch={allValid && !!publicKey}
