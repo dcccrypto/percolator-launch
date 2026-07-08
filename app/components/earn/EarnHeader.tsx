@@ -3,6 +3,7 @@
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import type { EarnStats } from '@/hooks/useEarnStats';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+import { InDevelopmentBanner } from '@/components/InDevelopmentBanner';
 
 
 interface EarnHeaderProps {
@@ -33,6 +34,15 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
           Provide counterparty backing to Percolator markets — fully on-chain and
           transparent.
         </p>
+
+        <div className="mt-5 max-w-3xl">
+          <InDevelopmentBanner>
+            LP vaults accept deposits and redemptions work, but yield distribution isn&apos;t live on
+            the deployed program yet — <span className="text-[var(--text)]">APY is genuinely 0%</span>.
+            Deposited capital is held as protocol counterparty backing; treat this as experimental, not
+            a yield product.
+          </InDevelopmentBanner>
+        </div>
 
         {/* Stats row */}
         <div className="mt-6 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4" aria-label="Earn statistics">
