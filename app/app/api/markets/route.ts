@@ -5,7 +5,7 @@ import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
-import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
+import { readRegisteredMarkets, type RegisteredMarket } from "@/lib/playground-registered-markets";
 import { getClientIp } from "@/lib/get-client-ip";
 import { claimPlaygroundChallenge } from "@/lib/playground-nonce-store";
 import { signKeeperRequest } from "@/lib/keeper-hmac";
@@ -264,7 +264,11 @@ function numericOrNull(v: unknown): number | null {
  * For v17 markets, configV17 carries all config fields.
  * For v12 slabs, config has the fields; engine/params hold stats.
  */
-function discoveredToApiRow(m: DiscoveredMarket, v17Oi?: V17MarketGroupOI): Record<string, unknown> {
+function discoveredToApiRow(
+  m: DiscoveredMarket,
+  v17Oi?: V17MarketGroupOI,
+  registered?: RegisteredMarket,
+): Record<string, unknown> {
   const slabAddress = m.slabAddress.toBase58();
   const programId = m.programId.toBase58();
 
@@ -284,15 +288,19 @@ function discoveredToApiRow(m: DiscoveredMarket, v17Oi?: V17MarketGroupOI): Reco
       slab_address: slabAddress,
       program_id: programId,
       mint_address: cfg.collateralMint.toBase58(),
-      symbol: playgroundMeta?.symbol ?? null,
-      name: playgroundMeta?.name ?? null,
+      // Metadata: curated seeds first, then the registration Blob — wizard-
+      // launched markets live there (see keeper-register). Without this
+      // fallback a registered market passed the visibility filter but rendered
+      // symbol/name-less ("USDC/USD") on every page.
+      symbol: playgroundMeta?.symbol ?? registered?.symbol ?? null,
+      name: playgroundMeta?.name ?? registered?.label ?? null,
       decimals: 6,
       deployer: cfg.marketauth.toBase58(),
       oracle_authority: cfg.marketauth.toBase58(),
       // oracleMode: 0=admin, 1=hyperp, 3=AUTH_MARK (keeper)
       oracle_mode: cfg.oracleMode === 1 ? "hyperp" : cfg.oracleMode === 3 ? "keeper" : "admin",
-      dex_pool_address: playgroundMeta?.dex_pool_address ?? null,
-      mainnet_ca: playgroundMeta?.mainnet_ca ?? null,
+      dex_pool_address: playgroundMeta?.dex_pool_address ?? registered?.poolAddress ?? null,
+      mainnet_ca: playgroundMeta?.mainnet_ca ?? registered?.mainnetCA ?? null,
       created_at: null,
       stats_updated_at: null,
       is_zombie: false,
@@ -360,7 +368,12 @@ function discoveredToApiRow(m: DiscoveredMarket, v17Oi?: V17MarketGroupOI): Reco
  *
  * Returns [] on any failure; callers must degrade gracefully.
  */
-async function discoverMarketsOnChain(): Promise<Record<string, unknown>[]> {
+async function discoverMarketsOnChain(
+  /** Registration-Blob entries keyed by slab — supplies symbol/name/pool
+   *  metadata for wizard-launched markets (curated seeds come from
+   *  PLAYGROUND_SLAB_META). Optional so a Blob outage never blocks discovery. */
+  registeredBySlab?: Map<string, RegisteredMarket>,
+): Promise<Record<string, unknown>[]> {
   const cfg = getConfig();
   if (cfg.network !== "devnet") return [];
 
@@ -406,7 +419,10 @@ async function discoverMarketsOnChain(): Promise<Record<string, unknown>[]> {
       }
     }
 
-    return unique.map((m) => discoveredToApiRow(m, v17Stats.get(m.slabAddress.toBase58())));
+    return unique.map((m) => {
+      const slab = m.slabAddress.toBase58();
+      return discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab));
+    });
   } catch {
     return [];
   }
@@ -418,7 +434,15 @@ async function discoverMarketsOnChain(): Promise<Record<string, unknown>[]> {
  */
 async function onChainOrStaticResponse(request: NextRequest, reason: string): Promise<NextResponse> {
   try {
-    const rows = await discoverMarketsOnChain();
+    // Read the registration Blob ONCE per request — feeds both row metadata
+    // (symbol/name for wizard-launched markets) and the visibility filter
+    // below. Guarded: Blob unavailable → empty map, curated-only behavior.
+    const registeredBySlab = new Map<string, RegisteredMarket>();
+    try {
+      for (const rm of await readRegisteredMarkets()) registeredBySlab.set(rm.slabAddress, rm);
+    } catch { /* curated-only */ }
+
+    const rows = await discoverMarketsOnChain(registeredBySlab);
     if (rows.length > 0) {
       const programIdParam = request?.nextUrl?.searchParams?.get("program_id") ?? null;
       const searchParam =
@@ -430,11 +454,8 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
       // Cross-instance user-created markets live in the registration Blob — the local
       // allowed-slab Set is per-serverless-instance and doesn't persist across cold
       // starts, so union the Blob in so a wizard-launched market appears from any
-      // instance. Guarded: Blob unavailable → fall back to curated ∪ local.
-      const blobSlabs = new Set<string>();
-      try {
-        for (const rm of await readRegisteredMarkets()) blobSlabs.add(rm.slabAddress);
-      } catch { /* fall back to curated ∪ local */ }
+      // instance. (Same read as the metadata map above — one Blob fetch per request.)
+      const blobSlabs = new Set<string>(registeredBySlab.keys());
 
       const filtered = rows
         .filter(m => !BLOCKED_SLAB_ADDRESSES.has(m.slab_address as string))

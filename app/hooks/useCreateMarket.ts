@@ -65,6 +65,7 @@ import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 // We guard all callsites with isAdminOracle && !isV17Slab before using these.
 import { sendTx } from "@/lib/tx";
 import { getConfig, getNetwork } from "@/lib/config";
+import { normalizeDexType } from "@/lib/dex-type";
 import { parseMarketCreationError } from "@/lib/parseMarketError";
 import {
   saveInFlightMarket,
@@ -1502,20 +1503,31 @@ export function useCreateMarket() {
                 slabAddress: slabPk.toBase58(),
                 mainnetCA: params.mainnetCA ?? null,
                 dexPoolAddress: params.dexPoolAddress,
-                dexType: params.dexType ?? "raydium-clmm",
+                // params.dexType carries DexScreener's raw dexId ("meteora",
+                // "raydium") — normalize to the keeper vocabulary or the route
+                // 400s and the market is orphaned (no price, no name).
+                dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "raydium-clmm",
                 symbol: params.symbol ?? null,
               }),
             });
             const keeperRegData = await keeperRegResp.json() as {
               registered?: boolean;
               message?: string;
+              error?: string;
             };
             keeperDelegated = keeperRegData.registered ?? false;
-            keeperMessage = keeperRegData.message ?? null;
+            // Error responses put their reason in `error`, not `message` —
+            // previously a 400/502 left keeperMessage null and the wizard
+            // showed nothing, so users had no idea their market wasn't priced.
+            keeperMessage =
+              keeperRegData.message ??
+              (keeperRegData.error
+                ? `Keeper registration failed: ${keeperRegData.error} — the market is live on-chain but won't be priced or listed until it's registered.`
+                : null);
             console.log("[useCreateMarket] Keeper registration:", keeperRegData);
           } catch (keeperErr) {
             console.warn("[useCreateMarket] Keeper registration failed (non-fatal):", keeperErr);
-            keeperMessage = "Keeper registration failed — prices will start on next keeper discovery cycle";
+            keeperMessage = "Keeper registration failed — the market is live on-chain but won't be priced or listed until it's registered.";
           }
         }
 
