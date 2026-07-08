@@ -12,6 +12,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
+import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
@@ -84,6 +85,22 @@ export default function PortfolioPage() {
   const activePositions = positions.filter(
     (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n
   );
+
+  // Split real trades from idle deposits. A funded-but-flat account is the
+  // user's parked collateral, not a position — rendering both identically
+  // (and counting deposits in the POSITIONS stat) read as bogus data.
+  const openPositions = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) !== 0n);
+  const idleDeposits = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) === 0n);
+
+  // Market symbol/name per slab — the row label used to show the COLLATERAL
+  // token's symbol, which is the same sim-USDC mint (with no token-list
+  // metadata → raw address) for every playground market: every row read
+  // "DJ54…N8eC/USD" with no way to tell markets apart.
+  const { statsMap } = useAllMarketStats();
+  const marketLabel = (slabAddress: string): string => {
+    const sym = statsMap.get(slabAddress)?.symbol;
+    return sym ? `${sym}/USD` : `${slabAddress.slice(0, 8)}…`;
+  };
 
   // GH#1808: Only block on tokenMetas if positions are still loading too. If positions have
   // loaded (loading=false) but tokenMetas haven't resolved, the fetch likely failed silently —
@@ -201,9 +218,9 @@ export default function PortfolioPage() {
               },
               {
                 label: "Positions",
-                value: !walletConnected ? "—" : loading ? "\u2026" : activePositions.length.toString(),
+                value: !walletConnected ? "—" : loading ? "\u2026" : openPositions.length.toString(),
                 color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
-                sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
+                sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : walletConnected && idleDeposits.length > 0 ? `${idleDeposits.length} market deposit${idleDeposits.length === 1 ? "" : "s"}` : undefined,
                 subColor: atRiskCount > 0 ? "text-[var(--short)]" : undefined,
               },
             ].map((stat, idx, arr) => (
@@ -251,17 +268,21 @@ export default function PortfolioPage() {
                 </div>
               ))}
             </div>
-          ) : activePositions.length === 0 ? (
+          ) : openPositions.length === 0 ? (
             <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
-              <h3 className="mb-1 text-[15px] font-semibold text-[var(--text)]">No positions yet</h3>
-              <p className="mb-4 text-[13px] text-[var(--text-secondary)]">Browse markets to start trading.</p>
+              <h3 className="mb-1 text-[15px] font-semibold text-[var(--text)]">No open positions</h3>
+              <p className="mb-4 text-[13px] text-[var(--text-secondary)]">
+                {idleDeposits.length > 0
+                  ? "Your deposited collateral is listed under Market Deposits below."
+                  : "Browse markets to start trading."}
+              </p>
               <Link href="/markets">
                 <GlowButton>Browse Markets</GlowButton>
               </Link>
             </div>
           ) : (
             <div className="space-y-3">
-              {activePositions.map((pos, i) => {
+              {openPositions.map((pos, i) => {
                 const posSize = pos.account?.positionSize ?? 0n;
                 const posCapital = pos.account?.capital ?? 0n;
                 const posEntry = pos.effectiveEntryPrice;
@@ -306,11 +327,7 @@ export default function PortfolioPage() {
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {/* P1: label by the market's own symbol (e.g. "SOL-PERP"), not the
-                                collateral token \u2014 sim-USDC is the SAME collateral across every
-                                market (see PLAYGROUND.md), so the old collateralMint lookup
-                                rendered "USDC/USD" for every position regardless of market. */}
-                            {pos.symbol ?? (tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? pos.slabAddress.slice(0, 8) + "\u2026")}/USD
+                            {marketLabel(pos.slabAddress)}
                           </span>
                           <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${
                             side === "Long"
@@ -450,6 +467,47 @@ export default function PortfolioPage() {
             </div>
           )}
         </ScrollReveal>
+
+        {/* Market deposits — funded accounts with NO open position. Shown
+            separately from positions: it's the user's parked collateral, and
+            mixing it into the positions list (as identical flat rows) read as
+            broken/mock data. */}
+        {connected && !loading && idleDeposits.length > 0 && (
+          <ScrollReveal delay={0.22}>
+            <div className="mt-8">
+              <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+                // market deposits
+              </h2>
+              <div className="space-y-px border border-[var(--border)]">
+                {idleDeposits.map((pos, i) => (
+                  <Link
+                    key={`${pos.slabAddress}-dep-${i}`}
+                    href={`/trade/${pos.slabAddress}`}
+                    className="flex items-center justify-between gap-4 bg-[var(--panel-bg)] px-4 py-3 transition-colors hover:bg-[var(--bg-elevated)]"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-[13px] font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                        {marketLabel(pos.slabAddress)}
+                      </span>
+                      <span className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                        idle collateral
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-[12px] tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                        {formatTokenAmount(pos.account?.capital ?? 0n, getDecimals(pos), 3)}{" "}
+                        <span className="text-[10px] text-[var(--text-secondary)]">
+                          {tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? "USDC"}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--accent)]">Trade →</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </ScrollReveal>
+        )}
 
         {/* LP positions */}
         <ScrollReveal delay={0.25}>
