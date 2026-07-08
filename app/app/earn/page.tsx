@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useEarnStats } from '@/hooks/useEarnStats';
+import { InDevelopmentBanner } from '@/components/InDevelopmentBanner';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 
@@ -146,6 +147,12 @@ export default function EarnPage() {
       <EarnHeader stats={stats} loading={loading} />
 
       <div className="mx-auto max-w-6xl px-4 pb-16">
+        <InDevelopmentBanner>
+          LP vaults accept deposits and redemptions work, but yield distribution isn&apos;t live on
+          the deployed program yet — <span className="text-[var(--text)]">APY is genuinely 0%</span>.
+          Deposited capital is held as protocol counterparty backing; treat this as experimental, not
+          a yield product.
+        </InDevelopmentBanner>
         {/* Platform-wide OI cap meter */}
         <ScrollReveal>
           <div className="mb-8 border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners">

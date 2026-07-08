@@ -13,6 +13,7 @@ import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
 import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
+import { InDevelopmentBanner } from "@/components/InDevelopmentBanner";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { formatMarkPrice } from "@/lib/format";
@@ -293,9 +294,18 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
             <br />
             <span className="text-[var(--cyan)]">Back the Fund.</span>
           </h1>
-          <p className="mb-8 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
-            Deposit collateral into insurance pools to earn LP rewards and back the Percolator insurance fund.
+          <p className="mb-6 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
+            Deposit collateral into insurance pools to back the Percolator insurance fund.
           </p>
+
+          <div className="max-w-[640px]">
+            <InDevelopmentBanner>
+              Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
+              distribution on the deployed program — <span className="text-[var(--text)]">APR is
+              genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
+              yield product.
+            </InDevelopmentBanner>
+          </div>
 
           {/* CTA buttons */}
           <div className="mb-10 flex flex-wrap items-center gap-3">
