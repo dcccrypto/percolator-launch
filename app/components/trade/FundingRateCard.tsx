@@ -106,9 +106,24 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
         if (!res.ok) throw new Error("API unavailable");
         const data = await res.json();
         if (cancelled) return;
+        // GH#funding-display: percolator-api GET /funding/:slab returns
+        // { currentRateBpsPerSlot, hourlyRatePercent, annualizedPercent, netLpPosition, ... }
+        // — it does NOT return `direction`, `aprPercent`, `nextFundingSlot`, or
+        // `currentSlot`. Spreading the raw response left those fields undefined,
+        // so userPays was always false (every position showed "receiving") and
+        // APR was stuck at "+0.0%". Map the real fields onto FundingData's
+        // normalized shape, deriving `direction` from the rate's sign the same
+        // way the on-chain fallback below does (rate > 0 → longs pay shorts,
+        // per the API's own metadata.explanation.sign convention).
+        const rate = Number(data.currentRateBpsPerSlot ?? 0);
         setFundingData({
-          ...data,
+          currentRateBpsPerSlot: rate,
+          hourlyRatePercent: Number(data.hourlyRatePercent ?? 0),
+          aprPercent: Number(data.annualizedPercent ?? 0),
+          direction: rate > 0 ? "long_pays_short" : rate < 0 ? "short_pays_long" : "neutral",
+          nextFundingSlot: 0,
           netLpPosition: BigInt(data.netLpPosition ?? 0),
+          currentSlot: 0,
         });
         // P3-4: fetch last 4 funding history points for mini bar chart
         // /history returns { rateBpsPerSlot } — convert to 8h rate%:

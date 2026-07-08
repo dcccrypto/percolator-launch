@@ -113,7 +113,20 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
   const isUp = change24hDisplay >= 0;
 
   const funding8h = fundingRate != null ? fundingRateBpsTo8h(fundingRate) : null;
-  const fundingColor = funding8h != null ? (funding8h < 0 ? "text-[var(--warning)]" : "text-[var(--long)]") : "text-[var(--text)]";
+  // GH#funding-display: this used to invert the convention used everywhere
+  // else in the terminal (FundingRateCard.tsx, MarketStatsCard.tsx) — positive
+  // rate (longs pay shorts) was colored --long (green) here but --short (red)
+  // there, and negative rate used --warning instead of --long. Positive =
+  // longs pay shorts = short-favorable = --short; negative = long-favorable =
+  // --long, matching MarketStatsCard's documented convention.
+  const fundingColor =
+    funding8h == null
+      ? "text-[var(--text)]"
+      : funding8h > 0
+        ? "text-[var(--short)]" // longs pay shorts → short favorable
+        : funding8h < 0
+          ? "text-[var(--long)]" // shorts pay longs → long favorable
+          : "text-[var(--text)]";
 
   // P3-3: oracle + vault status for health badge
   // oracleDown = unavailable (never cranked) or stale — oracleReady && unavailable is

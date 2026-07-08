@@ -40,8 +40,18 @@ export function FundingRates() {
     };
   }, []);
 
+  // GH#funding-display: FundingGlobalEntry.rateBpsPerSlot is only populated by
+  // the local indexer-db fallback path. The primary path (Railway proxy →
+  // percolator-api GET /funding/global) returns `currentRateBpsPerSlot`
+  // instead, which left rateBpsPerSlot `undefined` on the common path —
+  // `undefined !== 0` is always true (filter never filtered) and
+  // `undefined > 0` is always false (every market showed "S→L" red). Read
+  // whichever field the response actually populated.
+  const rateBps = (m: FundingGlobalEntry): number =>
+    m.currentRateBpsPerSlot ?? m.rateBpsPerSlot ?? 0;
+
   // Active markets are those with non-zero funding rate
-  const active = markets.filter((m) => m.rateBpsPerSlot !== 0);
+  const active = markets.filter((m) => rateBps(m) !== 0);
 
   return (
     <div className="border border-[var(--border)] bg-[var(--panel-bg)]">
@@ -81,7 +91,7 @@ export function FundingRates() {
         <div className="max-h-[280px] overflow-y-auto">
         <ul className="divide-y divide-[rgba(255,255,255,0.04)]">
           {active.slice(0, 15).map((m) => {
-            const isPositive = m.rateBpsPerSlot > 0;
+            const isPositive = rateBps(m) > 0;
             const rateStr =
               (isPositive ? "+" : "") +
               m.hourlyRatePercent.toFixed(4) + "%";

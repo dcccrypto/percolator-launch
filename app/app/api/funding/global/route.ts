@@ -12,7 +12,14 @@ export const dynamic = "force-dynamic";
 export interface FundingGlobalEntry {
   slabAddress: string;
   baseSymbol: string | null;
-  rateBpsPerSlot: number;
+  // GH#funding-display: this route is a thin proxy (GH#1066) — the primary
+  // path forwards percolator-api's GET /funding/global response verbatim,
+  // which uses `currentRateBpsPerSlot`. The local indexer-db fallback path
+  // (queryFundingGlobal in lib/indexer-db.ts) uses `rateBpsPerSlot` instead.
+  // Both are optional here so consumers must read whichever is present
+  // rather than assuming one name always exists.
+  rateBpsPerSlot?: number;
+  currentRateBpsPerSlot?: number;
   hourlyRatePercent: number;
   dailyRatePercent: number;
   dailyRateAbs?: number;
