@@ -61,13 +61,17 @@ export default function PortfolioPage() {
 
   // Auto-refresh handled by usePortfolio hook (30s interval + visibility change)
 
-  // Resolve collateral mint addresses to token symbols and decimals
-  const collateralMints = positions.map((pos) => pos.market.config.collateralMint);
+  // Resolve collateral mint addresses to token symbols and decimals. v17 markets
+  // return an empty `market.config` from the SDK (real value in
+  // `market.configV17.collateralMint`) — use the pre-resolved `pos.collateralMint`
+  // (set by usePortfolio) instead of touching `pos.market.config.collateralMint`
+  // directly, which is undefined for v17 markets and crashes `.toBase58()`.
+  const collateralMints = positions.map((pos) => pos.collateralMint);
   const tokenMetaMap = useMultiTokenMeta(collateralMints);
 
   // Helper: get collateral decimals for a position from token metadata
   const getDecimals = (pos: typeof positions[number]) =>
-    tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.decimals ?? 6;
+    tokenMetaMap.get(pos.collateralMint.toBase58())?.decimals ?? 6;
 
   // Compute USD-normalized totals. Collateral across every market is sim-USDC
   // (see PLAYGROUND.md) — `capital` is already collateral-scale dollars, so it
@@ -302,7 +306,7 @@ export default function PortfolioPage() {
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.symbol ?? pos.slabAddress.slice(0, 8) + "\u2026"}/USD
+                            {tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? pos.slabAddress.slice(0, 8) + "\u2026"}/USD
                           </span>
                           <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${
                             side === "Long"

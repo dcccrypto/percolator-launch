@@ -14,18 +14,26 @@ export function useMultiTokenMeta(mints: PublicKey[]): Map<string, TokenMeta> {
   const { connection } = useConnectionCompat();
   const [metaMap, setMetaMap] = useState<Map<string, TokenMeta>>(new Map());
 
+  // Defense-in-depth: some callers derive mints from market config shims that
+  // can be undefined for markets whose type doesn't match the caller's
+  // assumption (e.g. v17 markets returning an empty `market.config` from the
+  // SDK). Filter those out here instead of crashing on `.toBase58()` below —
+  // a missing mint degrades to "no metadata for this position" rather than
+  // taking down the whole component tree.
+  const definedMints = mints.filter((m): m is PublicKey => !!m);
+
   // Stable key for the mints array
-  const mintsKey = mints.map((m) => m.toBase58()).sort().join(",");
+  const mintsKey = definedMints.map((m) => m.toBase58()).sort().join(",");
 
   useEffect(() => {
-    if (mints.length === 0) {
+    if (definedMints.length === 0) {
       setMetaMap(new Map());
       return;
     }
 
     let cancelled = false;
 
-    fetchTokenMetaBatch(connection, mints)
+    fetchTokenMetaBatch(connection, definedMints)
       .then((map) => {
         if (!cancelled) setMetaMap(map);
       })

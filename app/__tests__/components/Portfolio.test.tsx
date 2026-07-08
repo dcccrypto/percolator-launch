@@ -92,6 +92,7 @@ describe("Portfolio Component Tests", () => {
             slabAddress: "test-slab-123",
             symbol: "SOL",
             idx: 0,
+            collateralMint: mockPublicKey,
             account: {
               kind: AccountKind.User,
               owner: mockPublicKey,
@@ -144,6 +145,7 @@ describe("Portfolio Component Tests", () => {
             slabAddress: "test-slab-456",
             symbol: "USDC",
             idx: 0,
+            collateralMint: mockPublicKey,
             account: {
               kind: AccountKind.User,
               owner: mockPublicKey,
@@ -196,6 +198,7 @@ describe("Portfolio Component Tests", () => {
             slabAddress: "test-slab-789",
             symbol: "SOL",
             idx: 0,
+            collateralMint: mockPublicKey,
             account: {
               kind: AccountKind.User,
               owner: mockPublicKey,
@@ -331,6 +334,7 @@ describe("Portfolio Component Tests", () => {
             slabAddress: "test-slab",
             symbol: null,
             idx: 0,
+            collateralMint: mockPublicKey,
             account: {
               kind: AccountKind.User,
               owner: mockPublicKey,
@@ -387,6 +391,7 @@ describe("Portfolio Component Tests", () => {
             slabAddress: "test-slab-abc",
             symbol: null,
             idx: 0,
+            collateralMint: mockPublicKey,
             account: {
               kind: AccountKind.User,
               owner: mockPublicKey,

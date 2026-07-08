@@ -22,7 +22,8 @@ import {
   type Account,
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
-import { computeMarkPnlCollateral } from "@/lib/trading";
+import { computeMarkPnlCollateral, computePositionInitialMargin } from "@/lib/trading";
+import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { getAllProgramIds, getNetwork } from "@/lib/config";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getEntryPrice } from "@/lib/entry-price";
@@ -75,6 +76,14 @@ export interface PortfolioPosition {
   idx: number;
   market: DiscoveredMarket;
   /**
+   * Resolved collateral mint for this position's market. v17 markets return an
+   * empty `market.config` from the SDK (the real value lives in
+   * `market.configV17.collateralMint`) — this field is pre-resolved here so
+   * callers never need to touch `market.config.collateralMint` directly and
+   * risk `undefined.toBase58()`.
+   */
+  collateralMint: PublicKey;
+  /**
    * Effective entry price in e6 format.
    * V12_1 removed entry_price from the on-chain struct; falls back to
    * localStorage (saved at trade time) when account.entryPrice is 0.
@@ -122,7 +131,12 @@ function buildV17Position(
   slabAddrStr: string,
   market: DiscoveredMarket,
   nftWrapped = false,
+  initialMarginBps = 1000n,
 ): PortfolioPosition {
+  // v17 markets return an empty `market.config` from the SDK — the real
+  // collateral mint lives in `market.configV17` (see markets/page.tsx's
+  // established `v17?.collateralMint ?? d.config.collateralMint` pattern).
+  const collateralMint = market.configV17?.collateralMint ?? market.config.collateralMint;
   // Map v17 portfolio to the Account shape used by the rest of usePortfolio
   const ZERO_PK = new PublicKey(new Uint8Array(32));
   const activeLeg = portfolio.legs.find((l) => l.active);
@@ -183,7 +197,15 @@ function buildV17Position(
     ? computeMarkPnl(account.positionSize, effectiveEntryPrice, oraclePriceE6)
     : (isSentinelValue(account.pnl) ? 0n : account.pnl);
   const unrealizedPnl = oraclePriceE6 > 0n ? computeMarkPnlCollateral(pnlNative, oraclePriceE6) : 0n;
-  const pnlPercent = computePnlPercent(unrealizedPnl, account.capital);
+  // ROE: divide by this position's own locked initial margin, matching the
+  // trade terminal (PositionsDock/PositionPanel/ChartPnlBadge/AccountRiskSidebar),
+  // not total account capital — capital can include collateral not backing
+  // this specific position. Falls back to capital when initial margin can't
+  // be computed (e.g. flat position) to preserve prior behavior.
+  const positionInitialMargin = computePositionInitialMargin(account.positionSize, effectiveEntryPrice, initialMarginBps);
+  const pnlPercent = positionInitialMargin > 0n
+    ? computePnlPercent(unrealizedPnl, positionInitialMargin)
+    : computePnlPercent(unrealizedPnl, account.capital);
 
   let liquidationDistancePct = 100;
   if (oraclePriceE6 > 0n && liquidationPriceE6 > 0n && account.positionSize !== 0n) {
@@ -210,6 +232,7 @@ function buildV17Position(
     account,
     idx: 0,
     market,
+    collateralMint,
     effectiveEntryPrice,
     oraclePriceE6,
     liquidationPriceE6,
@@ -302,7 +325,7 @@ export function usePortfolio(): PortfolioData {
         // the same market context the owner-scan used.
         const marketMetaBySlab = new Map<
           string,
-          { market: DiscoveredMarket; oraclePriceE6: bigint; maintenanceMarginBps: bigint }
+          { market: DiscoveredMarket; oraclePriceE6: bigint; maintenanceMarginBps: bigint; initialMarginBps: bigint }
         >();
         let pnlSum = 0n;
         let depositSum = 0n;
@@ -352,18 +375,28 @@ export function usePortfolio(): PortfolioData {
 
               // Oracle price: read markEwmaE6 from v17 WrapperConfigV17 (at V17_HEADER_LEN).
               let oraclePriceE6 = 0n;
-              let maintenanceMarginBps = 500n;
+              // Defaults only used if the v17 risk-params parse below fails. The
+              // real on-chain maintenance margin is 600 bps, not the old 500 bps
+              // v12 fallback — always prefer parseV17RiskParams (mirrors
+              // SlabProvider's real-values-not-hardcoded-fallbacks comment).
+              let maintenanceMarginBps = 600n;
+              let initialMarginBps = 1000n;
               try {
                 const wCfg = parseWrapperConfigV17(slabData, V17_HEADER_LEN);
                 // markEwmaE6 is the last effective price in v17 wrapper config.
                 oraclePriceE6 = sanitizePriceE6(wCfg.markEwmaE6);
+                const v17Params = parseV17RiskParams(slabData, wCfg.tradeFeeBps);
+                if (v17Params) {
+                  maintenanceMarginBps = v17Params.maintenanceMarginBps;
+                  initialMarginBps = v17Params.initialMarginBps;
+                }
               } catch {
                 // Use defaults if parse fails
               }
 
               // Remember this v17 market's context so the NFT-wrapped recovery
               // scan below can enrich escrowed portfolios the same way.
-              marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps });
+              marketMetaBySlab.set(slabAddrStr, { market, oraclePriceE6, maintenanceMarginBps, initialMarginBps });
 
               const V17_PORTFOLIO_MAGIC_P = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
               const portfolioResults = await connection.getProgramAccounts(v17ProgramId, {
@@ -398,6 +431,8 @@ export function usePortfolio(): PortfolioData {
                   maintenanceMarginBps,
                   slabAddrStr,
                   market,
+                  false,
+                  initialMarginBps,
                 );
 
                 if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {
@@ -416,6 +451,14 @@ export function usePortfolio(): PortfolioData {
               // Parse config and params for this market (needed for oracle price + risk params)
               let oraclePriceE6 = 0n;
               let maintenanceMarginBps = 500n; // default 5%
+              let initialMarginBps = 1000n; // default 10%
+              // v17 markets return an empty `market.config` from the SDK — the real
+              // collateral mint lives in `market.configV17` (see markets/page.tsx's
+              // established `v17?.collateralMint ?? d.config.collateralMint` pattern).
+              // This is the v12.x branch so market.configV17 is normally undefined and
+              // this resolves to market.config.collateralMint, but resolving the same
+              // way keeps PortfolioPosition.collateralMint consistent across both paths.
+              const collateralMint = market.configV17?.collateralMint ?? market.config.collateralMint;
               try {
                 const config = parseConfig(slabData);
                 // GH#1990: lastEffectivePriceE6 is the raw oracle price (pre-inversion).
@@ -426,6 +469,7 @@ export function usePortfolio(): PortfolioData {
                 oraclePriceE6 = sanitizePriceE6(applyInvert(rawPriceE6, config.invert));
                 const params = parseParams(slabData);
                 maintenanceMarginBps = params.maintenanceMarginBps;
+                initialMarginBps = params.initialMarginBps;
               } catch {
                 // If config parse fails, use defaults
               }
@@ -461,8 +505,16 @@ export function usePortfolio(): PortfolioData {
                     ? computeMarkPnlCollateral(pnlNative, oraclePriceE6)
                     : 0n;
 
-                  // PnL percentage
-                  const pnlPercent = computePnlPercent(unrealizedPnl, account.capital);
+                  // PnL percentage (ROE): divide by this position's own locked initial
+                  // margin, matching the trade terminal (PositionsDock/PositionPanel/
+                  // ChartPnlBadge/AccountRiskSidebar), not total account capital —
+                  // capital can include collateral not backing this specific position.
+                  // Falls back to capital when initial margin can't be computed (e.g.
+                  // flat position) to preserve prior behavior.
+                  const positionInitialMargin = computePositionInitialMargin(account.positionSize, effectiveEntryPrice, initialMarginBps);
+                  const pnlPercent = positionInitialMargin > 0n
+                    ? computePnlPercent(unrealizedPnl, positionInitialMargin)
+                    : computePnlPercent(unrealizedPnl, account.capital);
 
                   // Liquidation distance percentage
                   let liquidationDistancePct = 100;
@@ -499,6 +551,7 @@ export function usePortfolio(): PortfolioData {
                     account,
                     idx,
                     market,
+                    collateralMint,
                     effectiveEntryPrice,
                     oraclePriceE6,
                     liquidationPriceE6,
@@ -568,6 +621,7 @@ export function usePortfolio(): PortfolioData {
                 slabAddrStr,
                 meta.market,
                 true, // nftWrapped
+                meta.initialMarginBps,
               );
 
               if (pos.liquidationDistancePct <= 30 && pos.account.positionSize !== 0n) {

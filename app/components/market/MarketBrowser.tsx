@@ -23,7 +23,11 @@ export const MarketBrowser: FC = () => {
   const { markets, loading, error } = useMarketDiscovery();
 
   const mints = useMemo(
-    () => markets.map((m) => m.config.collateralMint),
+    // v17 markets return an empty `market.config` from the SDK — the real
+    // collateral mint lives in `market.configV17` (mirrors markets/page.tsx's
+    // `v17?.collateralMint ?? d.config.collateralMint` pattern). Avoids a
+    // future `undefined.toBase58()` crash if this dead-code path is wired up.
+    () => markets.map((m) => m.configV17?.collateralMint ?? m.config.collateralMint),
     [markets],
   );
   const tokenMetaMap = useMultiTokenMeta(mints);
@@ -89,7 +93,7 @@ export const MarketBrowser: FC = () => {
           <tbody className="divide-y divide-[var(--border-subtle)]">
             {sortedMarkets.map((m) => {
               const slab = m.slabAddress.toBase58();
-              const mintBase58 = m.config.collateralMint.toBase58();
+              const mintBase58 = (m.configV17?.collateralMint ?? m.config.collateralMint).toBase58();
               const meta = tokenMetaMap.get(mintBase58);
               const symbol = meta?.symbol ?? shortenAddress(mintBase58, 4);
               const decimals = meta?.decimals ?? 6;
@@ -144,7 +148,7 @@ export const MarketBrowser: FC = () => {
       <div className="sm:hidden divide-y divide-[var(--border-subtle)]">
         {sortedMarkets.map((m) => {
           const slab = m.slabAddress.toBase58();
-          const mintBase58 = m.config.collateralMint.toBase58();
+          const mintBase58 = (m.configV17?.collateralMint ?? m.config.collateralMint).toBase58();
           const meta = tokenMetaMap.get(mintBase58);
           const symbol = meta?.symbol ?? shortenAddress(mintBase58, 4);
           const decimals = meta?.decimals ?? 6;

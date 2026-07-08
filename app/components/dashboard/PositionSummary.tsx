@@ -180,7 +180,12 @@ export function PositionSummary() {
   const positions = (portfolio.positions ?? []) as PortfolioPosition[];
   const loading = portfolio.loading;
 
-  const collateralMints = positions.map((pos) => pos.market.config.collateralMint);
+  // v17 markets return an empty `market.config` from the SDK (real value in
+  // `market.configV17.collateralMint`) — use the pre-resolved `pos.collateralMint`
+  // (set by usePortfolio) instead of `pos.market.config.collateralMint`, which is
+  // undefined for v17 markets and crashes `.toBase58()` (this is the crash that
+  // took down the whole dashboard shell — no error boundary here).
+  const collateralMints = positions.map((pos) => pos.collateralMint);
   const tokenMetaMap = useMultiTokenMeta(collateralMints);
 
   return (
@@ -224,11 +229,11 @@ export function PositionSummary() {
                 key={`${pos.slabAddress}-${i}`}
                 pos={pos}
                 symbol={
-                  tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.symbol
-                    ? `${tokenMetaMap.get(pos.market.config.collateralMint.toBase58())!.symbol}/USD`
+                  tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol
+                    ? `${tokenMetaMap.get(pos.collateralMint.toBase58())!.symbol}/USD`
                     : `${pos.slabAddress.slice(0, 6)}…/USD`
                 }
-                decimals={tokenMetaMap.get(pos.market.config.collateralMint.toBase58())?.decimals ?? 6}
+                decimals={tokenMetaMap.get(pos.collateralMint.toBase58())?.decimals ?? 6}
               />
             ))}
           </div>

@@ -473,6 +473,7 @@ export function getMockPortfolioPositions(): PortfolioPosition[] {
       slabAddress: slabAddr,
       symbol: m.symbol,
       idx: 2,
+      collateralMint: mintPk,
       effectiveEntryPrice: entryE6,
       oraclePriceE6: priceE6,
       liquidationPriceE6,
