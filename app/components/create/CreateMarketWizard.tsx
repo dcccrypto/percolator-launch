@@ -6,7 +6,6 @@ import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
   useCreateMarket,
-  MIN_INIT_MARKET_SEED,
   DEFAULT_SLAB_SIZE,
   flooredInitialMarginBps,
   type CreateMarketParams,
@@ -30,6 +29,10 @@ import { LaunchProgress } from "./LaunchProgress";
 import { LaunchSuccess } from "./LaunchSuccess";
 import { RecoverSolBanner } from "./RecoverSolBanner";
 import { SlabTierPicker } from "./SlabTierPicker";
+// W8 fix: share ONE SOL-cost formula with CostEstimate.tsx's own display so the
+// launch gate and the number shown to the user can never drift apart — see that
+// file's computeCreateMarketSolCost doc comment.
+import { computeCreateMarketSolCost } from "./CostEstimate";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
 import { useToast } from "@/hooks/useToast";
 import { isMockMode } from "@/lib/mock-mode";
@@ -92,7 +95,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // it's a shared component out of this fix's scope, so rather than changing its signature,
   // call useStuckSlabs() here too (same hook RecoverSolBanner uses internally) to get our own
   // reference to the reconstructed slab Keypair and hand it to restoreSlabKeypair below.
-  const { stuckSlab } = useStuckSlabs();
+  //
+  // W7 fix (2026-07-08): use the full `stuckSlabs` list, not just the singular
+  // most-recent `stuckSlab` — RecoverSolBanner can now render a card (and a RESUME
+  // button) for ANY in-flight market, not only the most-recently-touched one. Looking
+  // up only `stuckSlab` here would silently fail to hand over the right keypair for an
+  // older stuck slab's resume click.
+  const { stuckSlab, stuckSlabs } = useStuckSlabs();
 
   // PERC-516: Persist wizard state to localStorage so form survives page refresh.
   // This fixes the "Continue button does nothing" bug — without persisted state,
@@ -265,13 +274,18 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // regardless of what the base token's own decimals are. The base token's tokenMeta.decimals
   // is now purely informational (display only) — it no longer feeds collateral amount math.
   const decimals = 6;
-  // GH#1301: Check against the full token requirement (seed + LP collateral + insurance),
-  // not just MIN_INIT_MARKET_SEED (500 tokens). A user with 600 tokens but 1100 LP
-  // collateral entered would previously pass the check and reach a failed on-chain tx.
+  // GH#1301: Check against the full token requirement (LP collateral + insurance).
+  // A user with 600 tokens but 1100 LP collateral entered would previously pass the
+  // check and reach a failed on-chain tx.
+  // W11 fix (2026-07-08): no longer adds MIN_INIT_MARKET_SEED (500 tokens) —
+  // useCreateMarket.ts's create() no longer transfers a vault seed before InitMarket
+  // (the proven on-chain reference, launch-test-market.ts, never seeds the vault and
+  // succeeds; the engine doesn't require or account for it). Keeping the old +500 here
+  // would over-require tokens the flow no longer needs.
   const totalTokensRequired = useMemo((): bigint => {
     const lpRaw = parseHumanAmount(wizard.lpCollateral || "0", decimals);
     const insRaw = parseHumanAmount(wizard.insuranceAmount, decimals);
-    return MIN_INIT_MARKET_SEED + lpRaw + insRaw;
+    return lpRaw + insRaw;
   }, [wizard.lpCollateral, wizard.insuranceAmount, decimals]);
   const hasSufficientTokensForSeed = wizard.walletBalance !== null && wizard.walletBalance >= totalTokensRequired;
   const symbol = wizard.tokenMeta?.symbol ?? "Token";
@@ -298,15 +312,14 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
   // v17 size regardless of tier, via the DEFAULT_SLAB_SIZE fallback). The v17 slab size
   // does NOT vary by tier — tier only selects which deployed program (max concurrent
   // trader accounts) InitMarket targets, so this is now a constant, not a per-tier memo.
-  const requiredSol = useMemo(() => {
-    const RENT_PER_BYTE = 6960;
-    const RENT_OVERHEAD_BYTES = 128;
-    const LAMPORTS_PER_SOL = 1_000_000_000;
-    const TX_FEE_ESTIMATE_SOL = 0.025;
-    const slabRentSol = Math.ceil((DEFAULT_SLAB_SIZE + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
-    const tokenAccountRentSol = (165 * 3 + 82 * 2) * RENT_PER_BYTE / LAMPORTS_PER_SOL;
-    return slabRentSol + tokenAccountRentSol + TX_FEE_ESTIMATE_SOL;
-  }, []);
+  //
+  // W8 fix (2026-07-08): this used to hand-roll its own formula that omitted the Step 2
+  // LP-portfolio (9347 bytes) + matcher-ctx (320 bytes) rent entirely — under-counting
+  // required SOL by ~0.067 SOL, enough to pass this gate and then strand the user
+  // mid-flow at Step 2 with "insufficient lamports." Now delegates to
+  // computeCreateMarketSolCost() (CostEstimate.tsx), the SAME formula the Review step's
+  // displayed cost estimate uses, so the gate and the displayed number can't drift apart.
+  const requiredSol = useMemo(() => computeCreateMarketSolCost().totalSolCost, []);
   const hasSufficientSol = solBalance !== null && solBalance >= requiredSol;
   const isDevnet = getNetwork() === "devnet";
   // Collateral mint: on devnet, ALWAYS the universal Sim-USDC mint (app/lib/config.ts
@@ -906,8 +919,16 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
           // localStorage in the common case, but hand our own useStuckSlabs()-reconstructed
           // keypair (see above) to the hook too — belt-and-suspenders against any race where
           // the mount effect hasn't run yet (e.g. wallet just connected this render).
-          if (stuckSlab?.keypair && stuckSlab.publicKey.toBase58() === slabAddress) {
-            restoreSlabKeypair(stuckSlab.keypair, slabAddress);
+          //
+          // W7 fix (2026-07-08): search the FULL stuckSlabs list, not just the singular
+          // most-recent `stuckSlab` — the mount effect and `stuckSlab` both only ever
+          // point at the most-recently-touched in-flight market, but RecoverSolBanner
+          // can now surface a RESUME click for ANY of them. Falling back to `stuckSlab`
+          // keeps this working even against a test/mocked hook that doesn't supply
+          // `stuckSlabs`.
+          const matched = stuckSlabs?.find((s) => s.publicKey.toBase58() === slabAddress) ?? stuckSlab;
+          if (matched?.keypair && matched.publicKey.toBase58() === slabAddress) {
+            restoreSlabKeypair(matched.keypair, slabAddress);
           }
           // Set resumeFromStep so handleLaunch skips slab creation and resumes correctly.
           setResumeFromStep(fromStep);
@@ -936,9 +957,13 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
             <span className="text-[11px] text-[var(--text-secondary)]">
               <span className="font-semibold text-[var(--accent)]">Resume mode</span>
               {" — "}
-              {resumeFromStep === 1
-                ? "Slab is initialized. Re-enter your parameters to complete oracle setup, LP, and insurance."
-                : "Re-enter your parameters to retry market initialization."}
+              {/* W1 fix (2026-07-08): resumeFromStep now carries the real
+                  stuckSlab.lastStep (0-6), not just 0 or 1 — reflect that instead of
+                  a binary "retry vs. complete" message that was wrong for anything
+                  past Step 1 (e.g. resuming after LP init or deposit already landed). */}
+              {resumeFromStep === 0
+                ? "Re-enter your parameters to retry market initialization."
+                : `Slab is initialized (through step ${resumeFromStep} of 6). Re-enter your parameters to resume from where you left off.`}
             </span>
           </div>
           <button

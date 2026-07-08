@@ -2,6 +2,7 @@
 
 import { FC } from "react";
 import { RecoveryExportButton } from "./RecoveryExportButton";
+import { loadAllInFlightMarkets } from "@/lib/inFlightMarket";
 
 interface LaunchProgressProps {
   state: {
@@ -30,6 +31,16 @@ const STEP_LABELS = [
  * Replaces the review panel after submit.
  */
 export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetry }) => {
+  // W10 fix (2026-07-08): the recovery panel used to gate on `state.step >= 1 &&
+  // state.slabAddress` — component-local state that never advances past 0 (and never
+  // gets slabAddress set) when Step 0's confirmation THROWS client-side (e.g. a
+  // websocket/RPC timeout) even though the transaction actually landed on-chain.
+  // saveInFlightMarket() (useCreateMarket.ts) persists the in-flight entry to
+  // localStorage BEFORE Step 0 is even sent, independent of this component's state —
+  // read that directly instead so the panel (and its "download recovery JSON" button)
+  // is available for exactly that "timed out but landed" case, not just once `state`
+  // catches up.
+  const hasInFlightRecovery = loadAllInFlightMarkets().length > 0;
   return (
     <div
       className="border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-6"
@@ -160,10 +171,11 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
         </div>
       )}
 
-      {/* Recovery export — shown once the slab exists on chain (step >= 1)
-           so the user can download a recovery JSON if anything goes wrong
-           later. Survives tab close. */}
-      {state.step >= 1 && state.slabAddress && (
+      {/* Recovery export — shown whenever a persisted in-flight entry exists (W10 fix:
+           was gated on component-local `state`, which could lag or never catch up to
+           what's actually on-chain — see hasInFlightRecovery above), so the user can
+           download a recovery JSON if anything goes wrong. Survives tab close. */}
+      {hasInFlightRecovery && (
         <div className="mt-5 border border-[var(--border)] bg-[var(--bg-surface)] p-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] mb-1">
             Recovery
