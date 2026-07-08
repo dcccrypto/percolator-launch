@@ -4,6 +4,7 @@ import { FC } from "react";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { useLivePrice } from "@/hooks/useLivePrice";
 import { sanitizeOnChainValue } from "@/lib/health";
 import { InfoIcon } from "@/components/ui/Tooltip";
 
@@ -20,11 +21,12 @@ function fmtCompact(n: number): string {
 export const LiquidationAnalytics: FC = () => {
   // insuranceBalance / totalOI work on BOTH v12 and v17; params (liq fee/buffer)
   // is populated on both. Lifetime counters are engine-only → "—" on v17.
-  const { engine, params, loading, hasData, insuranceBalance: insuranceRaw, totalOI: totalOIRaw } = useEngineState();
+  const { engine, params, loading, hasData, insuranceBalance: insuranceRaw, totalOI: totalOIRaw, isV17 } = useEngineState();
   const { config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const decimals = tokenMeta?.decimals ?? 6;
   const divisor = 10 ** decimals;
+  const { priceUsd } = useLivePrice();
 
   if (loading) {
     return (
@@ -45,9 +47,21 @@ export const LiquidationAnalytics: FC = () => {
   // Lifetime counters live in the legacy engine block → "—" when engine is null (v17).
   const lifetimeLiquidationsStr = engine ? Number(sanitizeOnChainValue(engine.lifetimeLiquidations ?? 0n)).toLocaleString() : "—";
   const lifetimeForceClosesStr = engine ? Number(sanitizeOnChainValue(engine.lifetimeForceCloses ?? 0n)).toLocaleString() : "—";
-  // Cross-version metrics (real on v12 AND v17).
+  // Cross-version metrics (real on v12 AND v17). Insurance is collateral
+  // (USD) atoms on both versions — ÷divisor only, never ×price.
   const insuranceBalance = insuranceRaw != null ? Number(sanitizeOnChainValue(insuranceRaw)) / divisor : null;
-  const totalOI = totalOIRaw != null ? Number(sanitizeOnChainValue(totalOIRaw)) / divisor : null;
+  // M12: v17's OI is a base-asset "Q" quantity (fixed-point, scale 1e6), NOT
+  // USD — the old `÷divisor` here silently mixed it with insurance's USD
+  // units, producing a price-biased coverage ratio (e.g. a $200 asset made
+  // coverage read ~200x too generous). Convert via the live price on v17;
+  // v12's OI is already collateral-notional (unchanged, ÷divisor only).
+  const totalOIRawNum = totalOIRaw != null ? Number(sanitizeOnChainValue(totalOIRaw)) : null;
+  const totalOI =
+    totalOIRawNum == null
+      ? null
+      : isV17
+        ? (priceUsd != null ? (totalOIRawNum / 1_000_000) * priceUsd : null)
+        : totalOIRawNum / divisor;
   const liqFeeBps = params ? Number(params.liquidationFeeBps ?? 0n) : 0;
   const bufferBps = params ? Number(params.liquidationBufferBps ?? 0n) : 0;
 

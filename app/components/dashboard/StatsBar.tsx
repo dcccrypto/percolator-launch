@@ -8,6 +8,11 @@ function formatUsd(val: number): string {
   return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** M15: real per-market trade fee (bps → %) — not a fabricated maker/taker split. */
+function formatTradeFeeBps(bps: bigint): string {
+  return `${(Number(bps) / 100).toFixed(2)}%`;
+}
+
 export function StatsBar() {
   const { positions, loading } = usePortfolio();
 
@@ -18,6 +23,30 @@ export function StatsBar() {
   const losses = positions.filter((p) => (p.unrealizedPnl ?? 0n) < 0n).length;
   const total = wins + losses;
   const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : "--";
+
+  // M15: v17 has no maker/taker fee split — "Fee Tier" used to fabricate one
+  // (a hardcoded "Maker 0.02% / Taker 0.06%" that doesn't exist in the
+  // protocol). Show the real per-market trade fee instead
+  // (WrapperConfigV17.tradeFeeBps on v17, RiskParams.tradingFeeBps on v12,
+  // both already attached to each position's `market` object) — a single
+  // value when every open position shares the same fee, "Varies by market"
+  // when they don't.
+  const feeBpsValues = Array.from(
+    new Set(
+      positions
+        .map((p) => p.market.configV17?.tradeFeeBps ?? p.market.params?.tradingFeeBps ?? null)
+        .filter((v): v is bigint => v != null)
+        .map((v) => v.toString()),
+    ),
+  );
+  const feeTierValue =
+    positions.length === 0
+      ? "--"
+      : feeBpsValues.length === 1
+        ? formatTradeFeeBps(BigInt(feeBpsValues[0]))
+        : feeBpsValues.length > 1
+          ? "Varies by market"
+          : "--";
 
   const cards = [
     {
@@ -39,9 +68,9 @@ export function StatsBar() {
       color: "text-[var(--text)]",
     },
     {
-      label: "Fee Tier",
-      value: "Maker 0.02% / Taker 0.06%",
-      sub: "Standard",
+      label: "Trade Fee",
+      value: loading ? "..." : feeTierValue,
+      sub: positions.length > 0 ? "Per market" : "No open positions",
       color: "text-[var(--warning)]",
     },
   ];

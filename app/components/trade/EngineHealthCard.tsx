@@ -28,20 +28,34 @@ const HEALTH_COLORS: Record<string, string> = {
  * score from what the v17 slab group exposes: insurance coverage (insurance/OI,
  * clamped 0..1) and OI balance (1 − |long−short|/(long+short)). Maps to the same
  * level → color buckets as the v12 path.
+ *
+ * M12: insurance is collateral (sim-USDC) atoms — already USD. OI is a
+ * base-asset "Q" quantity (fixed-point, scale 1e6) denominated in whatever
+ * asset the market trades (SOL, BONK, ...), NOT USD. The original coverage
+ * ratio divided these two different units directly (ins_raw / oi_raw) — for
+ * any market priced away from $1 this produced a wildly wrong number (e.g. a
+ * $200 asset made coverage read ~200x too generous). Convert OI to USD via
+ * the live price before comparing; insurance is used as-is (never ×price).
  */
 function computeV17Health(
   insurance: bigint | null,
   totalOI: bigint | null,
   oiLong: bigint | null,
   oiShort: bigint | null,
+  priceUsd: number | null,
 ): { level: string; label: string } {
-  const ins = insurance != null ? Number(sanitizeOnChainValue(insurance)) : 0;
-  const oi = totalOI != null ? Number(sanitizeOnChainValue(totalOI)) : 0;
+  const insUsd = insurance != null ? Number(sanitizeOnChainValue(insurance)) / 1_000_000 : 0;
+  const oiRawTotal = totalOI != null ? Number(sanitizeOnChainValue(totalOI)) : 0;
+  const oiUsd = priceUsd != null ? (oiRawTotal / 1_000_000) * priceUsd : null;
   const long = oiLong != null ? Number(sanitizeOnChainValue(oiLong)) : 0;
   const short = oiShort != null ? Number(sanitizeOnChainValue(oiShort)) : 0;
 
-  // No open interest → no exposure → fully healthy (matches v12 computeMarketHealth).
-  const coverage = oi > 0 ? Math.min(1, Math.max(0, ins / oi)) : 1;
+  // No open interest, or no price yet to value it → treat as fully covered
+  // (matches v12 computeMarketHealth's default-healthy-when-empty; an
+  // unpriced market's exposure is unknown, not unhealthy).
+  const coverage = oiUsd != null && oiUsd > 0 ? Math.min(1, Math.max(0, insUsd / oiUsd)) : 1;
+  // Balance is a same-unit ratio (long vs short, both raw Q) — a uniform
+  // price multiplier cancels out, so this doesn't need USD conversion.
   const oiSum = long + short;
   const oiBalance = oiSum > 0 ? 1 - Math.abs(long - short) / oiSum : 1;
 
@@ -77,14 +91,35 @@ export const EngineHealthCard: FC = () => {
   // Health: v12 uses the legacy engine block; v17 derives from insurance + OI.
   const health = engine
     ? computeMarketHealth(engine)
-    : computeV17Health(insuranceBalance, totalOI, oiLong, oiShort);
+    : computeV17Health(insuranceBalance, totalOI, oiLong, oiShort, priceUsd);
 
-  // Cross-version display helper (atoms bigint → USD/token string, "—" when null).
+  // v12 display helper (atoms bigint → USD/token string, "—" when null). Used
+  // by the v12 metrics below, whose fields are all denominated in the same
+  // collateral units.
   const fmtAtoms = (v: bigint | null): string => {
     if (v == null) return "—";
     const s = sanitizeOnChainValue(v);
     return showUsd && priceUsd != null
       ? formatNum((Number(s) / (10 ** decimals)) * priceUsd)
+      : formatTokenAmount(s, decimals);
+  };
+
+  // M12: v17's insurance and OI are NOT the same unit. Insurance is collateral
+  // (sim-USDC) atoms — already USD, so it must never be multiplied by the
+  // market's base-asset price. OI is a base-asset "Q" quantity (fixed-point,
+  // scale 1e6) — it genuinely needs ×price to become USD. Reusing one
+  // price-multiplying formatter for both (the old `fmtAtoms` call below) is
+  // exactly the bug this finding flagged.
+  const fmtV17InsuranceUsd = (v: bigint | null): string => {
+    if (v == null) return "—";
+    const s = sanitizeOnChainValue(v);
+    return showUsd ? formatNum(Number(s) / 1_000_000) : formatTokenAmount(s, decimals);
+  };
+  const fmtV17OiUsd = (v: bigint | null): string => {
+    if (v == null) return "—";
+    const s = sanitizeOnChainValue(v);
+    return showUsd && priceUsd != null
+      ? formatNum((Number(s) / 1_000_000) * priceUsd)
       : formatTokenAmount(s, decimals);
   };
 
@@ -134,10 +169,10 @@ export const EngineHealthCard: FC = () => {
   } else {
     // ── v17 path: insurance + OI are real; legacy engine counters show "—" ────
     metrics = [
-      { label: "Insurance", value: fmtAtoms(insuranceBalance) },
-      { label: "Open Interest", value: fmtAtoms(totalOI) },
-      { label: "OI Long", value: fmtAtoms(oiLong) },
-      { label: "OI Short", value: fmtAtoms(oiShort) },
+      { label: "Insurance", value: fmtV17InsuranceUsd(insuranceBalance) },
+      { label: "Open Interest", value: fmtV17OiUsd(totalOI) },
+      { label: "OI Long", value: fmtV17OiUsd(oiLong) },
+      { label: "OI Short", value: fmtV17OiUsd(oiShort) },
       { label: "Crank Age", value: "—" },
       { label: "Current Slot", value: "—" },
       { label: "Liquidations", value: "—" },

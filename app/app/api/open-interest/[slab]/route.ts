@@ -101,10 +101,18 @@ export async function GET(
               longOi: oi.totalLongOiQ.toString(),
               shortOi: oi.totalShortOiQ.toString(),
               // v17 does not aggregate net LP position server-side — return 0 until
-              // per-portfolio accumulation is implemented.
+              // per-portfolio accumulation is implemented. The client hides this
+              // field entirely (rather than showing a fabricated $0) once it sees
+              // isV17: true below — see OpenInterestCard.tsx.
               netLpPosition: "0",
               insuranceBalance: oi.insuranceBalance.toString(),
               historicalOi: [],
+              // H12: totalOi/longOi/shortOi above are base-asset "Q" quantities
+              // (fixed-point, scale 1e6), NOT USD atoms like the v12 branch below.
+              // The client needs this flag to know to multiply by the live price
+              // before formatting as `$` — printing them directly as dollars was
+              // the bug (H12).
+              isV17: true,
             },
             {
               headers: {
@@ -127,12 +135,14 @@ export async function GET(
           shortOi: "0",
           netLpPosition: "0",
           historicalOi: [],
+          isV17: true,
         },
         { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } },
       );
     }
 
     // v12.x slab — parseEngine gives us longOi / shortOi / netLpPos directly.
+    // Unlike v17, these are already collateral-notional (USD) atoms.
     const engine = parseEngine(bytes);
     const longOi = engine.longOi;
     const shortOi = engine.shortOi;
@@ -149,6 +159,7 @@ export async function GET(
         // snapshots which aren't stored in the indexer schema.  Return empty so
         // the component renders the current-snapshot bars only.
         historicalOi: [],
+        isV17: false,
       },
       {
         headers: {

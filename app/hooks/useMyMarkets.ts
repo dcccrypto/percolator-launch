@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useEffect, useState, useRef, useCallback } from "react";
+import { PublicKey } from "@solana/web3.js";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useMarketDiscovery } from "./useMarketDiscovery";
@@ -8,8 +9,14 @@ import {
   parseAllAccounts,
   parsePortfolioV17,
   isV17Account,
+  isV17MarketAccount,
+  parseMarketGroupV17OI,
   AccountKind,
+  V17_MARKET_GROUP_OFF,
+  V17_MARKET_GROUP_LEN,
+  V17_MARKET_ASSET_SLOT_LEN,
   type DiscoveredMarket,
+  type V17MarketGroupOI,
 } from "@percolatorct/sdk";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
 
@@ -22,11 +29,50 @@ const V17_PORTFOLIO_MAGIC_MM = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 
 const V17_PF_MARKET_OFF_MM = 16;
 const V17_PF_OWNER_OFF_MM = 116;
 
+// H11: v17 markets carry an empty legacy `engine` block ({}), so /my-markets
+// was reading OI/vault/insurance/health off fields that only ever populate on
+// v12 — always 0, always "healthy". Real v17 OI + insurance come from
+// parseMarketGroupV17OI(rawSlab), which needs the raw account bytes (discovery
+// doesn't retain them) — fetched below in a dedicated enrichment pass. Real
+// v17 health comes from the asset's accrue slot (`AssetStateV16Account.
+// slot_last`, which advances only via crank/trade — NOT PushAuthMark, the
+// display-price push) vs the current on-chain slot.
+//
+// slot_last has no SDK parser yet, so it's read directly off raw bytes here.
+// Offset derivation (fully-packed repr(C) Pod struct, zero padding — verified
+// by reproducing the SDK's own offsets exactly): AssetStateV16Account =
+// market_id(8) + retired_slot(8) + lifecycle(1) + raw_oracle_target_price(8) +
+// effective_price(8) + fund_px_last(8) = 41 bytes before slot_last (u64).
+// Continuing the same packed sum through a_long..oi_eff_long_q lands exactly
+// on the SDK's V17_ASSET_STATE_OI_LONG_REL=273, cross-confirming the method.
+const V17_ASSET_SLOT_WRAPPER_SIZE = 512; // 512-byte T-wrapper preceding AssetStateV16Account in each slot
+const V17_ASSET_STATE_SLOT_LAST_REL = 41; // slot_last offset within AssetStateV16Account
+
+/** Read `AssetStateV16Account.slot_last` for one asset slot of a v17 market-group account. */
+function readV17AssetSlotLast(data: Uint8Array, assetIndex = 0): bigint | null {
+  const slotsBase = V17_MARKET_GROUP_OFF + V17_MARKET_GROUP_LEN;
+  const slotBase = slotsBase + assetIndex * V17_MARKET_ASSET_SLOT_LEN;
+  const off = slotBase + V17_ASSET_SLOT_WRAPPER_SIZE + V17_ASSET_STATE_SLOT_LAST_REL;
+  if (off + 8 > data.length) return null;
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return dv.getBigUint64(off, true);
+}
+
 export interface MyMarket extends DiscoveredMarket {
   /** Formatted label for display (token symbol or truncated address) */
   label: string;
   /** Why this market appears in "my markets" */
   role: "admin" | "trader" | "lp";
+  /**
+   * v17 only: live OI + insurance parsed from the raw market-group account
+   * bytes, plus the asset's accrue slot for real health/staleness. Undefined
+   * until the enrichment fetch resolves (or for v12 markets, which use the
+   * legacy `engine` block instead).
+   */
+  v17Stats?: {
+    oi: V17MarketGroupOI;
+    assetSlotLast: bigint | null;
+  };
 }
 
 /**
@@ -222,12 +268,84 @@ export function useMyMarkets() {
     return unique;
   }, [adminMarkets, tradedMarkets]);
 
+  // H11: enrich v17 markets with real OI/insurance/health data. Runs as a
+  // separate pass (not folded into the admin/traded effects above) because it
+  // needs a batched raw-bytes read + the current on-chain slot, and should not
+  // block or re-trigger role discovery.
+  //
+  // Keyed on a stable joined-string of v17 slab addresses (not the `myMarkets`
+  // array reference) so identical-content-but-new-reference renders (e.g. the
+  // discovery SWR poll refreshing `markets` every 30s, or a manual "refresh"
+  // click) don't spuriously reset the effect — and paired with its OWN
+  // interval so the fetch itself still repeats periodically, keeping
+  // OI/health/staleness live instead of freezing after the first successful
+  // fetch (which an earlier "skip if same key" version of this effect did).
+  const [v17Enrichment, setV17Enrichment] = useState<{
+    currentSlot: bigint | null;
+    stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null }>;
+  }>({ currentSlot: null, stats: {} });
+
+  const v17SlabsKey = useMemo(
+    () => myMarkets.filter((m) => m.configV17).map((m) => m.slabAddress.toBase58()).sort().join(","),
+    [myMarkets],
+  );
+
+  useEffect(() => {
+    if (!v17SlabsKey) {
+      setV17Enrichment({ currentSlot: null, stats: {} });
+      return;
+    }
+    const v17Slabs = v17SlabsKey.split(",").map((s) => new PublicKey(s));
+
+    let cancelled = false;
+    async function enrich() {
+      try {
+        const [slot, infos] = await Promise.all([
+          connection.getSlot(),
+          connection.getMultipleAccountsInfo(v17Slabs),
+        ]);
+        if (cancelled) return;
+        const stats: Record<string, { oi: V17MarketGroupOI; assetSlotLast: bigint | null }> = {};
+        infos.forEach((info, i) => {
+          if (!info?.data) return;
+          const bytes = new Uint8Array(info.data);
+          if (!isV17MarketAccount(bytes)) return;
+          try {
+            stats[v17Slabs[i].toBase58()] = {
+              oi: parseMarketGroupV17OI(bytes),
+              assetSlotLast: readV17AssetSlotLast(bytes),
+            };
+          } catch {
+            // Unparseable slab — this market keeps no v17Stats (page shows "—")
+          }
+        });
+        if (!cancelled) setV17Enrichment({ currentSlot: BigInt(slot), stats });
+      } catch {
+        // RPC failure — degrade gracefully, keep prior enrichment (if any)
+      }
+    }
+
+    enrich();
+    const interval = setInterval(enrich, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [v17SlabsKey, connection]);
+
+  const enrichedMarkets = useMemo(() => {
+    if (Object.keys(v17Enrichment.stats).length === 0) return myMarkets;
+    return myMarkets.map((m) => {
+      const stats = v17Enrichment.stats[m.slabAddress.toBase58()];
+      return stats ? { ...m, v17Stats: stats } : m;
+    });
+  }, [myMarkets, v17Enrichment]);
+
   return {
-    myMarkets,
+    myMarkets: enrichedMarkets,
     loading: discoveryLoading || accountsLoading,
     error,
     connected: !!publicKey,
     /** Trigger a fresh discovery fetch (bypasses SWR dedup window). */
     refetch: discoveryRefetch,
+    /** Current on-chain slot from the v17 enrichment fetch — null until it resolves. */
+    currentSlot: v17Enrichment.currentSlot,
   };
 }

@@ -5,14 +5,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { parseEngine, isV17Account } from "@percolatorct/sdk";
+import { parseEngine, isV17Account, discoverMarkets, parseMarketGroupV17OI } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { isActiveMarket, isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
 import { isPhantomOpenInterest } from "@/lib/phantom-oi";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { getClientIp } from "@/lib/get-client-ip";
 import { createMemoryRateLimiter } from "@/lib/memory-rate-limit";
-import { getRpcEndpoint } from "@/lib/config";
+import { getConfig, getRpcEndpoint } from "@/lib/config";
 import {
   hasIndexerDb,
   queryStatsAggregate,
@@ -39,7 +39,12 @@ const STATS_CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=15, stale-while-revalidate=45",
 } as const;
 
-/** Empty / zero stats response shape — returned when no data source is available. */
+/**
+ * Empty / zero stats response shape — returned when no data source is available.
+ * `live: false` (M13/H10) — this is the degraded fallback, not a real fetch;
+ * ProtocolStatsBar gates its pulsing "live" indicator on this flag so a dead
+ * Supabase/indexer doesn't render as a healthy, actively-updating protocol.
+ */
 function zeroStats() {
   return {
     totalMarkets: 0,
@@ -50,7 +55,93 @@ function zeroStats() {
     totalTraders: 0,
     trades24h: 0,
     updatedAt: new Date().toISOString(),
+    live: false,
   };
+}
+
+/**
+ * M13/H10: on-chain-discovery stats path — devnet only, no DB dependency.
+ *
+ * Both the local indexer Postgres and Supabase have been dead in the
+ * playground (D-OPS2), which made this endpoint return $0/$0/0 under a "live"
+ * badge. This mirrors the v17 OI aggregation /api/markets already does:
+ * discoverMarkets() finds every v17 market-group account for the configured
+ * program, then a batched getMultipleAccountsInfo + parseMarketGroupV17OI
+ * sums long+short OI (base-asset "Q" quantities, scale 1e6) and converts to
+ * USD using each market's own live mark price (configV17.markEwmaE6) — no
+ * external price feed needed.
+ *
+ * There is no on-chain source for trade history, so totalVolume24h/trades24h/
+ * totalTraders stay 0 here — an honest empty state (PLAYGROUND.md already
+ * documents candles/24h stats as optional/degraded), not a fabricated number.
+ *
+ * Returns null (not zeroStats()) on any failure or when discovery finds
+ * nothing, so the caller falls through to the indexer/Supabase paths instead
+ * of masking a real outage as "0 markets".
+ */
+async function computeStatsFromOnChainDiscovery(): Promise<(ReturnType<typeof zeroStats>) | null> {
+  const cfg = getConfig();
+  if (cfg.network !== "devnet") return null;
+
+  try {
+    const connection = new Connection(getRpcEndpoint(), "confirmed");
+    const programId = new PublicKey(cfg.programId);
+    const found = await discoverMarkets(connection, programId, {
+      sequential: true,
+      maxTierQueries: 0, // v17-only — mirrors /api/markets discoverMarketsOnChain()
+    });
+    if (found.length === 0) return null;
+
+    const seen = new Set<string>();
+    const unique = found.filter((m) => {
+      const key = m.slabAddress.toBase58();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const v17Markets = unique.filter((m) => m.configV17);
+    if (v17Markets.length === 0) return null;
+
+    let totalOpenInterest = 0;
+    const CHUNK = 100; // getMultipleAccountsInfo cap
+    for (let start = 0; start < v17Markets.length; start += CHUNK) {
+      const chunk = v17Markets.slice(start, start + CHUNK);
+      const infos = await connection.getMultipleAccountsInfo(chunk.map((m) => m.slabAddress));
+      infos.forEach((info, i) => {
+        if (!info?.data) return;
+        const bytes = new Uint8Array(info.data);
+        if (!isV17Account(bytes)) return;
+        try {
+          const oi = parseMarketGroupV17OI(bytes);
+          const markPriceRaw = chunk[i].configV17?.markEwmaE6 ?? 0n;
+          const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : 0;
+          // No valid mark price → USD value of this market's OI is indeterminate;
+          // skip rather than fabricate (mirrors /api/markets' no-$1-fallback rule).
+          if (markPriceUsd <= 0) return;
+          const totalOiQ = Number(oi.totalLongOiQ + oi.totalShortOiQ);
+          totalOpenInterest += (totalOiQ / 1_000_000) * markPriceUsd;
+        } catch {
+          // Unparseable slab — contributes 0 to the total, not a crash
+        }
+      });
+    }
+
+    return {
+      totalMarkets: unique.length,
+      activeTotal: unique.length,
+      totalListedMarkets: unique.length,
+      totalVolume24h: 0,
+      totalOpenInterest,
+      totalTraders: 0,
+      trades24h: 0,
+      updatedAt: new Date().toISOString(),
+      live: true,
+    };
+  } catch (err) {
+    console.warn("[/api/stats] on-chain discovery path failed:", err);
+    return null;
+  }
 }
 
 /**
@@ -121,6 +212,7 @@ async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> 
     totalTraders: agg.uniqueTraders,
     trades24h: agg.trades24h,
     updatedAt: new Date().toISOString(),
+    live: true,
   };
 }
 
@@ -128,11 +220,19 @@ async function computeStatsFromIndexer(): Promise<ReturnType<typeof zeroStats>> 
  * GET /api/stats — Platform-wide aggregated statistics
  *
  * Read path (in priority order):
- *  1. Direct indexer Postgres + on-chain engine state when INDEXER_DATABASE_URL is set
+ *  1. M13/H10: on-chain discovery — devnet only, no DB dependency. Tried first
+ *     because both the local indexer Postgres and Supabase are dead in the
+ *     playground right now (D-OPS2); this is the one path guaranteed to
+ *     reflect real on-chain market count + OI regardless of DB config drift.
+ *  2. Direct indexer Postgres + on-chain engine state when INDEXER_DATABASE_URL is set
  *     (playground self-contained mode — no Supabase/Railway required).
- *  2. Supabase (production path — existing implementation).
- *  3. Zero-stats graceful degrade — returned when neither data source is configured,
+ *  3. Supabase (production path — existing implementation).
+ *  4. Zero-stats graceful degrade — returned when no data source is available,
  *     so the endpoint never returns 500 due to missing env vars.
+ *
+ * Every branch sets `live` — true for a genuine successful fetch, false for
+ * the zero-stats degrade — so consumers (ProtocolStatsBar) can gate a "live"
+ * indicator on real data instead of always showing green.
  *
  * Uses isActiveMarket() from shared activeMarketFilter for consistent
  * market counts across homepage, /api/stats, and markets page.
@@ -148,7 +248,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── PRIMARY PATH: indexer Postgres + chain (playground self-contained) ───
+  // ── PRIMARY PATH: on-chain discovery (devnet, no DB dependency) ──────────
+  const onChainStats = await computeStatsFromOnChainDiscovery();
+  if (onChainStats) {
+    return NextResponse.json(onChainStats, { headers: STATS_CACHE_HEADERS });
+  }
+
+  // ── SECONDARY PATH: indexer Postgres + chain (playground self-contained) ─
   if (hasIndexerDb()) {
     try {
       return NextResponse.json(await computeStatsFromIndexer(), {
@@ -159,7 +265,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ── SECONDARY PATH: Supabase (production) ────────────────────────────────
+  // ── TERTIARY PATH: Supabase (production) ─────────────────────────────────
   // Guard: if Supabase isn't configured, return zeros instead of crashing with
   // "Supabase env vars not set" (the failure mode the playground self-containment
   // task was opened to fix).
@@ -513,6 +619,7 @@ export async function GET(request: NextRequest) {
     totalTraders: uniqueTraders,
     trades24h,
     updatedAt: new Date().toISOString(),
+    live: true,
   }, {
     headers: {
       "Cache-Control": "public, s-maxage=15, stale-while-revalidate=45",

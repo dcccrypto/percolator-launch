@@ -125,7 +125,9 @@ const MarketCard: FC<{
   market: MyMarket;
   insuranceMintExists: boolean;
   insuranceMintChecking: boolean;
-}> = ({ market, insuranceMintExists, insuranceMintChecking }) => {
+  /** Current on-chain slot (from useMyMarkets' v17 enrichment fetch) — null until it resolves. */
+  chainCurrentSlot: bigint | null;
+}> = ({ market, insuranceMintExists, insuranceMintChecking, chainCurrentSlot }) => {
   const { toast } = useToast();
   const actions = useAdminActions();
   const wallet = useWalletCompat();
@@ -138,13 +140,37 @@ const MarketCard: FC<{
   // and their exact v17 replacements are unconfirmed, so we hide those controls
   // for v17 markets rather than surfacing buttons that always throw.
   const isV17 = !!market.configV17;
-  const oi = market.engine?.totalOpenInterest ?? 0n;
-  const vault = market.engine?.vault ?? 0n;
-  const insurance = market.engine?.insuranceFund?.balance ?? 0n;
-  const lastCrank = market.engine?.lastCrankSlot ?? 0n;
-  const currentSlot = market.engine?.currentSlot ?? 0n;
-  const staleness = Number(currentSlot - lastCrank);
-  const healthy = staleness < Number(market.engine?.maxCrankStalenessSlots ?? 100n);
+  const v17Stats = market.v17Stats;
+
+  // v12 legacy path — the `engine` block only ever populates on v12 slabs.
+  const v12Oi = market.engine?.totalOpenInterest ?? 0n;
+  const v12Vault = market.engine?.vault ?? 0n;
+  const v12Insurance = market.engine?.insuranceFund?.balance ?? 0n;
+  const v12LastCrank = market.engine?.lastCrankSlot ?? 0n;
+  const v12CurrentSlot = market.engine?.currentSlot ?? 0n;
+  const v12Staleness = Number(v12CurrentSlot - v12LastCrank);
+  const v12Healthy = v12Staleness < Number(market.engine?.maxCrankStalenessSlots ?? 100n);
+
+  // H11: v17 path — real OI/insurance come from useMyMarkets' parseMarketGroupV17OI
+  // enrichment; health is derived from the asset's accrue slot (slot_last, advances
+  // only via crank/trade) vs the current on-chain slot, using the same ~500-slot
+  // (~190s) accrue-cliff threshold as CrankHealthCard. `null` (not 0/false) while
+  // the enrichment fetch is still in flight — the UI shows "—"/"checking…" instead
+  // of a fabricated healthy/zero reading.
+  const V17_STALE_THRESHOLD_SLOTS = 500;
+  const oi = isV17 ? (v17Stats ? v17Stats.oi.totalLongOiQ + v17Stats.oi.totalShortOiQ : null) : v12Oi;
+  const insurance = isV17 ? (v17Stats?.oi.insuranceBalance ?? null) : v12Insurance;
+  // v17 has no market-group-level vault or active-account count exposed yet —
+  // "not tracked" beats a fabricated 0 that reads as a real empty vault.
+  const vault: bigint | null = isV17 ? null : v12Vault;
+  const v17StalenessSlots =
+    isV17 && v17Stats?.assetSlotLast != null && chainCurrentSlot != null
+      ? Math.max(0, Number(chainCurrentSlot - v17Stats.assetSlotLast))
+      : null;
+  const staleness = isV17 ? v17StalenessSlots : v12Staleness;
+  const healthy = isV17
+    ? (v17StalenessSlots != null ? v17StalenessSlots < V17_STALE_THRESHOLD_SLOTS : null)
+    : v12Healthy;
   // v17 markets carry an empty v12 config ({}) — config.authorityPriceE6 is always
   // absent, so every actively-priced v17 market showed "—". The live mark
   // (configV17.markEwmaE6, keeper-updated every crank) is the same field the trade
@@ -157,7 +183,7 @@ const MarketCard: FC<{
   const isOracleAuthority = wallet.publicKey?.toBase58() === oracleAuthority;
   const crankIsAuthority = cfg.crankWallet ? oracleAuthority === cfg.crankWallet : false;
   const riskThreshold = market.params?.riskReductionThreshold ?? 0n;
-  const riskGateActive = riskThreshold > 0n && vault <= riskThreshold;
+  const riskGateActive = riskThreshold > 0n && vault != null && vault <= riskThreshold;
 
   const [showBurnConfirm, setShowBurnConfirm] = useState(false);
   const [burnConfirmText, setBurnConfirmText] = useState("");
@@ -200,8 +226,8 @@ const MarketCard: FC<{
                 PAUSED
               </span>
             )}
-            <span className={`text-[10px] font-bold uppercase tracking-[0.1em] ${healthy ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
-              {healthy ? "● healthy" : "● stale"}
+            <span className={`text-[10px] font-bold uppercase tracking-[0.1em] ${healthy == null ? "text-[var(--text-dim)]" : healthy ? "text-[var(--long)]" : "text-[var(--short)]"}`}>
+              {healthy == null ? "○ checking…" : healthy ? "● healthy" : "● stale"}
             </span>
           </div>
         </div>
@@ -210,13 +236,23 @@ const MarketCard: FC<{
         <div className="grid grid-cols-2 sm:grid-cols-4">
           {[
             { label: "oracle price", value: oraclePrice > 0n ? formatUsdPriceE6(oraclePrice) : "—" },
-            { label: "open interest", value: fmt(oi) },
-            { label: "vault balance", value: fmt(vault) },
-            { label: "insurance", value: fmt(insurance) },
-            { label: "last crank", value: timeAgo(lastCrank, currentSlot) },
-            { label: "staleness", value: `${staleness} slots` },
+            { label: "open interest", value: oi != null ? fmt(oi) : "—" },
+            { label: "vault balance", value: vault != null ? fmt(vault) : "not tracked" },
+            { label: "insurance", value: insurance != null ? fmt(insurance) : "—" },
+            {
+              label: "last crank",
+              value: isV17
+                ? (v17Stats?.assetSlotLast != null && chainCurrentSlot != null
+                    ? timeAgo(v17Stats.assetSlotLast, chainCurrentSlot)
+                    : "—")
+                : timeAgo(v12LastCrank, v12CurrentSlot),
+            },
+            { label: "staleness", value: staleness != null ? `${staleness} slots` : "—" },
             { label: "oracle authority", value: hasOracleAuthority ? shortAddr(oracleAuthority) : "none" },
-            { label: "active accounts", value: sanitizeAccountCount(market.engine?.numUsedAccounts ?? 0).toString() },
+            {
+              label: "active accounts",
+              value: isV17 ? "not tracked" : sanitizeAccountCount(market.engine?.numUsedAccounts ?? 0).toString(),
+            },
           ].map((s, i) => (
             <div key={s.label} className="border-t border-[var(--border)]/30 px-4 py-3">
               <p className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-dim)]">{s.label}</p>
@@ -462,7 +498,7 @@ const LoadingSkeleton: FC = () => (
 
 /* main page */
 const MyMarketsPage: FC = () => {
-  const { myMarkets: realMyMarkets, loading: realLoading, error, connected: walletConnected, refetch: refetchMarkets } = useMyMarkets();
+  const { myMarkets: realMyMarkets, loading: realLoading, error, connected: walletConnected, refetch: refetchMarkets, currentSlot: chainCurrentSlot } = useMyMarkets();
   const mockMode = isMockMode();
   const connected = walletConnected || mockMode;
   const mockMarkets = useMemo(() => mockMode ? getMockMyMarkets() : [], [mockMode]);
@@ -621,12 +657,20 @@ const MyMarketsPage: FC = () => {
   }
 
   const totalMarkets = myMarkets.length;
-  // v17 markets carry an empty engine ({}) — optional-chain so the summary
-  // reducer doesn't throw "Cannot mix BigInt and other types" (was crashing the
-  // whole page whenever a v17 market was owned). v17 vault/insurance aren't on
-  // the discovered object, so they contribute 0 to these v12-oriented totals.
-  const totalVault = myMarkets.reduce((acc, m) => acc + (m.engine?.vault ?? 0n), 0n);
-  const totalInsurance = myMarkets.reduce((acc, m) => acc + (m.engine?.insuranceFund?.balance ?? 0n), 0n);
+  // H11: v17 markets carry an empty legacy `engine` block ({}) — optional-chain
+  // so the summary reducer doesn't throw "Cannot mix BigInt and other types"
+  // (was crashing the whole page whenever a v17 market was owned). Vault has
+  // no market-group-level equivalent on v17 yet, so TVL only sums v12 markets
+  // and is relabeled below rather than showing a fabricated $0. Insurance IS
+  // available on v17 via useMyMarkets' parseMarketGroupV17OI enrichment and is
+  // included for real instead of silently contributing 0.
+  const v12MarketsList = myMarkets.filter((m) => !m.configV17);
+  const hasVaultData = v12MarketsList.length > 0;
+  const totalVault = v12MarketsList.reduce((acc, m) => acc + (m.engine?.vault ?? 0n), 0n);
+  const totalInsurance = myMarkets.reduce((acc, m) => {
+    if (m.configV17) return acc + (m.v17Stats?.oi.insuranceBalance ?? 0n);
+    return acc + (m.engine?.insuranceFund?.balance ?? 0n);
+  }, 0n);
 
   return (
     <div className="min-h-[calc(100dvh-48px)] relative">
@@ -644,7 +688,7 @@ const MyMarketsPage: FC = () => {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
             {[
               { label: "Total Markets", value: totalMarkets.toString() },
-              { label: "TVL", value: "$" + fmt(totalVault) },
+              { label: "TVL", value: hasVaultData ? "$" + fmt(totalVault) : "not tracked" },
               { label: "Insurance", value: "$" + fmt(totalInsurance) },
             ].map((s) => (
               <span key={s.label} className="flex items-center gap-1.5">
@@ -695,6 +739,7 @@ const MyMarketsPage: FC = () => {
               market={m}
               insuranceMintExists={insuranceMintMap[m.slabAddress.toBase58()] ?? false}
               insuranceMintChecking={insuranceMintChecking}
+              chainCurrentSlot={chainCurrentSlot}
             />
           ))}
         </div>

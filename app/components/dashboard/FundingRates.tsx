@@ -81,10 +81,15 @@ export function FundingRates() {
           <p className="text-[11px] text-[var(--short)]">{error}</p>
         </div>
       ) : active.length === 0 ? (
+        // M19: on these devnet markets the applied funding rate is
+        // structurally clamped to 0 (max_abs_funding_e9_per_slot == 0), which
+        // is exactly why every market always lands in this branch — say so
+        // plainly instead of the old "rates appear once markets have open
+        // positions" copy, which implied funding was live and just quiet.
         <div className="px-5 py-8 text-center">
-          <p className="text-[11px] text-[var(--text-secondary)]">No active funding rates</p>
+          <p className="text-[11px] text-[var(--text-secondary)]">Funding: Off (disabled)</p>
           <p className="mt-1 text-[9px] text-[var(--text-secondary)]">
-            Rates appear once markets have open positions
+            The protocol&rsquo;s max funding rate is set to 0 on these markets — the applied rate is always 0
           </p>
         </div>
       ) : (
