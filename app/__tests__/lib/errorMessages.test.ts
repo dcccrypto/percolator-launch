@@ -8,22 +8,22 @@ import {
 
 describe("humanizeError", () => {
   it("maps known Custom(N) error codes", () => {
-    expect(humanizeError('{"InstructionError":[4,{"Custom":14}]}')).toContain(
-      "Undercollateralized"
+    expect(humanizeError('{"InstructionError":[4,{"Custom":49}]}')).toContain(
+      "Insufficient margin"
     );
   });
 
   it("maps hex error codes", () => {
-    // 0x0e = 14 decimal = Undercollateralized
-    expect(humanizeError("custom program error: 0x0e")).toContain(
-      "Undercollateralized"
+    // 0x31 = 49 decimal = Insufficient margin
+    expect(humanizeError("custom program error: 0x31")).toContain(
+      "Insufficient margin"
     );
   });
 
   it("provides instruction hint when available", () => {
-    const msg = '{"InstructionError":[4,{"Custom":14}]}';
-    // Custom(14) = Undercollateralized; humanizeError returns the mapped message directly
-    expect(humanizeError(msg)).toContain("Undercollateralized");
+    const msg = '{"InstructionError":[4,{"Custom":49}]}';
+    // Custom(49) = Insufficient margin; humanizeError returns the mapped message directly
+    expect(humanizeError(msg)).toContain("Insufficient margin");
   });
 
   it("handles blockhash expiry", () => {
@@ -64,30 +64,34 @@ describe("humanizeError", () => {
     expect(result.length).toBeLessThan(200);
   });
 
-  it("maps oracle stale error (code 6)", () => {
-    expect(humanizeError('Custom(6)')).toContain("Oracle price is stale");
+  it("maps oracle stale error (code 27)", () => {
+    expect(humanizeError('Custom(27)')).toContain("Oracle price is stale");
   });
 
-  it("maps market paused error (code 33)", () => {
-    expect(humanizeError('Custom(33)')).toContain("paused");
+  it("maps market paused error (code 32)", () => {
+    expect(humanizeError('Custom(32)')).toContain("paused");
   });
 
-  it("maps insurance errors (code 30)", () => {
-    expect(humanizeError('Custom(30)')).toContain("Insurance fund below");
+  it("maps invalid or unsupported instruction error (code 9)", () => {
+    expect(humanizeError('Custom(9)')).toContain("matcher config may be misaligned");
+  });
+
+  it("maps insurance errors (code 47)", () => {
+    expect(humanizeError('Custom(47)')).toContain("Insurance");
   });
 
   it("maps JSON Custom format", () => {
-    expect(humanizeError('"Custom":13')).toContain("Insufficient balance");
+    expect(humanizeError('"Custom":11')).toContain("Invalid token");
   });
 });
 
 describe("isTransientError", () => {
-  it("returns true for oracle stale (code 6)", () => {
-    expect(isTransientError("Custom(6)")).toBe(true);
+  it("returns true for oracle stale (code 27)", () => {
+    expect(isTransientError("Custom(27)")).toBe(true);
   });
 
-  it("returns true for oracle invalid (code 12)", () => {
-    expect(isTransientError("Custom(12)")).toBe(true);
+  it("returns true for oracle invalid (code 26)", () => {
+    expect(isTransientError("Custom(26)")).toBe(true);
   });
 
   it("returns true for blockhash expiry", () => {
@@ -112,12 +116,12 @@ describe("isTransientError", () => {
 });
 
 describe("isOracleStaleError", () => {
-  it("returns true for code 6", () => {
-    expect(isOracleStaleError("Custom(6)")).toBe(true);
+  it("returns true for code 27", () => {
+    expect(isOracleStaleError("Custom(27)")).toBe(true);
   });
 
-  it("returns true for code 12", () => {
-    expect(isOracleStaleError("Custom(12)")).toBe(true);
+  it("returns true for code 26", () => {
+    expect(isOracleStaleError("Custom(26)")).toBe(true);
   });
 
   it("returns false for other codes", () => {
@@ -136,7 +140,7 @@ describe("withTransientRetry", () => {
   it("retries on transient error then succeeds", async () => {
     const fn = vi
       .fn()
-      .mockRejectedValueOnce(new Error("Custom(6)"))
+      .mockRejectedValueOnce(new Error("Custom(27)"))
       .mockResolvedValueOnce("ok");
     const result = await withTransientRetry(fn, { maxRetries: 2, delayMs: 0 });
     expect(result).toBe("ok");

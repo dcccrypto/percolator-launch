@@ -1,14 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   formatTokenAmount,
-  formatPriceE6,
   formatBps,
   formatUsd,
   formatLiqPrice,
   LIQ_PRICE_UNLIQUIDATABLE,
   shortenAddress,
   formatSlotAge,
-  formatI128Amount,
   formatPnl,
   formatMarginPct,
   formatPercent,
@@ -24,17 +22,6 @@ describe("formatTokenAmount (extended)", () => {
   it("handles sub-unit with 9 decimals", () => expect(formatTokenAmount(1n, 9)).toBe("0.000000001"));
 });
 
-describe("formatPriceE6", () => {
-  it("delegates to formatTokenAmount with 6 decimals", () => {
-    expect(formatPriceE6(1_000_000n)).toBe("1");
-  });
-  it("formats fractional prices", () => {
-    expect(formatPriceE6(1_500_000n)).toBe("1.5");
-  });
-  it("formats sub-dollar prices", () => {
-    expect(formatPriceE6(500n)).toBe("0.0005");
-  });
-});
 
 describe("formatUsd (extended)", () => {
   it("returns $0.00 for null", () => expect(formatUsd(null)).toBe("$0.00"));
@@ -106,20 +93,6 @@ describe("formatSlotAge (extended)", () => {
   });
 });
 
-describe("formatI128Amount", () => {
-  it("formats positive value", () => {
-    expect(formatI128Amount(1_500_000n)).toBe("1");
-  });
-  it("formats negative value", () => {
-    expect(formatI128Amount(-2_000_000n)).toBe("-2");
-  });
-  it("formats zero", () => {
-    expect(formatI128Amount(0n)).toBe("0");
-  });
-  it("respects custom decimals", () => {
-    expect(formatI128Amount(1_500_000_000n, 9)).toBe("1");
-  });
-});
 
 describe("formatPnl (extended)", () => {
   it("returns '0' for null", () => expect(formatPnl(null)).toBe("0"));
