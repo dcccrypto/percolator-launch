@@ -30,8 +30,8 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
           <span className="font-normal text-[var(--text-secondary)]">LP </span>Vaults
         </h1>
         <p className="mt-2 text-[13px] text-[var(--text-secondary)] max-w-lg">
-          Provide liquidity to Percolator markets. Earn trading fees from every
-          perpetual trade. Fully on-chain, transparent yield.
+          Provide counterparty backing to Percolator markets — fully on-chain and
+          transparent.
         </p>
 
         {/* Stats row */}
