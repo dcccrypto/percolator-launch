@@ -180,7 +180,7 @@ export function useStakePool() {
   const slabAddress = params?.slab as string | undefined;
 
   const [state, setState] = useState<StakePoolState>(DEFAULT_STATE);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Stabilize wallet ref
@@ -217,7 +217,12 @@ export function useStakePool() {
   const requestIdRef = useRef(0);
 
   const refreshState = useCallback(async () => {
-    if (!pdas || !connection) return;
+    if (!pdas || !connection) {
+      requestIdRef.current += 1;
+      setLoading(false);
+      return;
+    }
+
     const requestId = ++requestIdRef.current;
     const stale = () => requestId !== requestIdRef.current;
 
@@ -361,6 +366,10 @@ export function useStakePool() {
       if (stale()) return;
       console.error('[useStakePool] Failed to refresh:', err);
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (!stale()) {
+        setLoading(false);
+      }
     }
   }, [pdas, connection, walletPubkeyStr, slabState.config]);
 
@@ -377,9 +386,18 @@ export function useStakePool() {
   // the full 10s interval period. Kept as a separate effect (rather than
   // adding these deps to the interval effect below) so the 10s ticker itself
   // stays stable and doesn't get torn down/rebuilt on every dependency change.
+  const hasConnection = Boolean(connection);
+
   useEffect(() => {
-    refreshRef.current();
-  }, [pdas, walletPubkeyStr, slabState.config]);
+    if (!pdas || !hasConnection) {
+      requestIdRef.current += 1;
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    void refreshRef.current();
+  }, [pdas, hasConnection, walletPubkeyStr, slabState.config]);
 
   useEffect(() => {
     const interval = setInterval(() => refreshRef.current(), 10_000);

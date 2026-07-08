@@ -78,13 +78,14 @@ function buildPoolAccountData(opts?: {
 }): Buffer {
   const buf = Buffer.alloc(352);
   buf[0] = 1;
-  mockLpMint.toBuffer().copy(buf, 65);
-  mockVault.toBuffer().copy(buf, 97);
-  mockVaultAuth.toBuffer().copy(buf, 129);
-  buf[161] = 254;
-  buf.writeBigUInt64LE(opts?.cooldownSlots ?? 0n, 162);
-  buf.writeBigUInt64LE(opts?.depositCap ?? 0n, 170);
-  buf.writeBigUInt64LE(opts?.totalDeposited ?? 0n, 178);
+
+  // Match the StakePool v1 layout decoded by the current playground useStakePool hook.
+  // lpMint @ 104, vault @ 136, cooldownSlots @ 184, depositCap @ 192.
+  mockLpMint.toBuffer().copy(buf, 104);
+  mockVault.toBuffer().copy(buf, 136);
+  buf.writeBigUInt64LE(opts?.cooldownSlots ?? 0n, 184);
+  buf.writeBigUInt64LE(opts?.depositCap ?? 0n, 192);
+
   return buf;
 }
 
@@ -188,8 +189,10 @@ describe('useStakePool', () => {
       expect(result.current.state.poolExists).toBe(true);
     });
 
-    expect(result.current.state.cooldownElapsed).toBe(true);
-    expect(result.current.state.cooldownSlots).toBe(100n);
+    await waitFor(() => {
+      expect(result.current.state.cooldownElapsed).toBe(true);
+      expect(result.current.state.cooldownSlots).toBe(100n);
+    });
   });
 
   it('detects cooldown NOT elapsed', async () => {
@@ -201,7 +204,9 @@ describe('useStakePool', () => {
       expect(result.current.state.poolExists).toBe(true);
     });
 
-    expect(result.current.state.cooldownElapsed).toBe(false);
+    await waitFor(() => {
+      expect(result.current.state.cooldownElapsed).toBe(false);
+    });
   });
 
   it('handles wallet not connected gracefully', async () => {
