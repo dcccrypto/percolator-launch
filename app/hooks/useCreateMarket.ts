@@ -1563,6 +1563,28 @@ export function useCreateMarket() {
         let keeperMessage: string | null = null;
         if (isKeeperOracle && params.dexPoolAddress) {
           try {
+            // H1 auth: keeper-register verifies slab ownership via a nonce + ed25519
+            // signature. Fetch a FRESH nonce here — nonces are single-use and shared
+            // with /api/markets, so the one spent on the markets POST above can't be
+            // reused. Non-fatal: on failure the market is still live on-chain.
+            const keeperDeployer = wallet.publicKey.toBase58();
+            let keeperNonce: string | null = null;
+            let keeperSignature: string | null = null;
+            if (wallet.signMessage) {
+              try {
+                const ch = await fetch(
+                  `/api/markets/challenge?deployer=${encodeURIComponent(keeperDeployer)}`,
+                );
+                if (ch.ok) {
+                  const { nonce: n } = (await ch.json()) as { nonce: string };
+                  keeperNonce = n;
+                  const sig = await wallet.signMessage(new TextEncoder().encode(n));
+                  keeperSignature = Buffer.from(sig).toString("base64");
+                }
+              } catch (sigErr) {
+                console.warn("[useCreateMarket] keeper-register nonce/sign failed (non-fatal):", sigErr);
+              }
+            }
             const keeperRegResp = await fetch("/api/playground/keeper-register", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1575,6 +1597,11 @@ export function useCreateMarket() {
                 // 400s and the market is orphaned (no price, no name).
                 dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "raydium-clmm",
                 symbol: params.symbol ?? null,
+                // H1 deployer proof (fresh nonce, see above)
+                deployer: keeperDeployer,
+                ...(keeperNonce && keeperSignature
+                  ? { nonce: keeperNonce, signature: keeperSignature }
+                  : {}),
               }),
             });
             const keeperRegData = await keeperRegResp.json() as {
