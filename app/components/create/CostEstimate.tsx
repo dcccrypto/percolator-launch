@@ -3,6 +3,7 @@
 import { FC, useMemo } from "react";
 import { type SlabTierKey, SLAB_TIERS } from "@/lib/slabTiers";
 import { DEFAULT_SLAB_SIZE } from "@/hooks/useCreateMarket";
+import { V17_PORTFOLIO_ACCOUNT_LEN, MATCHER_CONTEXT_LEN } from "@percolatorct/sdk";
 
 interface CostEstimateProps {
   slabTier: SlabTierKey;
@@ -36,6 +37,71 @@ const TX_FEE_ESTIMATE_SOL = 0.031; // ~10 transactions × 5000 lamports each + p
 const EARN_VAULT_AND_STAKE_RENT_BYTES = 176 + 82 + 82 + 165 + 352;
 
 /**
+ * W8 fix (2026-07-08): Step 2 (LP init, see useCreateMarket.ts) creates an LP
+ * portfolio account (V17_PORTFOLIO_ACCOUNT_LEN = 9347 bytes — InitPortfolio
+ * reallocs up to this and needs it pre-funded, so it's real client-paid rent, not
+ * a later top-up) and a matcher context account (MATCHER_CONTEXT_LEN = 320 bytes).
+ * Both were completely missing from every SOL-cost estimate — this file's own
+ * display AND CreateMarketWizard.tsx's `requiredSol` launch gate — under-counting
+ * required SOL by ~0.067 SOL (9667 bytes × 6960 lamports/byte). That's enough to
+ * pass the pre-launch gate and then strand the user mid-flow at Step 2 with
+ * "insufficient lamports."
+ */
+export const LP_PORTFOLIO_AND_MATCHER_RENT_BYTES = V17_PORTFOLIO_ACCOUNT_LEN + MATCHER_CONTEXT_LEN;
+
+export interface CreateMarketSolCostBreakdown {
+  slabRentSol: number;
+  tokenAccountRentSol: number;
+  lpPortfolioMatcherRentSol: number;
+  earnVaultStakeRentSol: number;
+  txFeeSol: number;
+  totalSolCost: number;
+}
+
+/**
+ * W8 fix: single source of truth for the market-creation SOL cost estimate,
+ * shared by this component's own display AND CreateMarketWizard's launch-gate
+ * check (`requiredSol`) — see that file's BUG W8 comment. Keeping one formula
+ * means the gate and the number shown to the user can never drift apart again
+ * (they previously used two independently-hand-rolled formulas with different
+ * TX_FEE_ESTIMATE_SOL constants on top of the missing LP-portfolio/matcher rent).
+ */
+export function computeCreateMarketSolCost(): CreateMarketSolCostBreakdown {
+  // BUG 1 fix: the v17 slab account length is FIXED at v17MarketAccountLen(14)
+  // (DEFAULT_SLAB_SIZE) regardless of tier — InitMarket always encodes
+  // maxPortfolioAssets:14, so it always sizes/rents the slab the same way no matter
+  // which tier the user picks.
+  const dataSize = DEFAULT_SLAB_SIZE;
+
+  // Rent-exempt minimum for the slab account
+  const slabRentSol = Math.ceil((dataSize + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+
+  // Additional rent for token accounts (vault ATA, LP mint, insurance LP mint)
+  // Each token account ~165 bytes, each mint ~82 bytes
+  const tokenAccountRentSol = (165 * 3 + 82 * 2) * RENT_PER_BYTE / LAMPORTS_PER_SOL;
+
+  // Rent for the Step 2 LP portfolio + matcher context accounts — see
+  // LP_PORTFOLIO_AND_MATCHER_RENT_BYTES doc comment above.
+  const lpPortfolioMatcherRentSol = (LP_PORTFOLIO_AND_MATCHER_RENT_BYTES * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+
+  // Rent for the Earn vault (Step 4) + stake pool (Step 5) accounts — see
+  // EARN_VAULT_AND_STAKE_RENT_BYTES doc comment above.
+  const earnVaultStakeRentSol = (EARN_VAULT_AND_STAKE_RENT_BYTES * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
+
+  const totalSolCost =
+    slabRentSol + tokenAccountRentSol + lpPortfolioMatcherRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL;
+
+  return {
+    slabRentSol,
+    tokenAccountRentSol,
+    lpPortfolioMatcherRentSol,
+    earnVaultStakeRentSol,
+    txFeeSol: TX_FEE_ESTIMATE_SOL,
+    totalSolCost,
+  };
+}
+
+/**
  * Detailed cost breakdown for market creation.
  * Shows rent costs, token requirements, and transaction fees.
  */
@@ -50,55 +116,38 @@ export const CostEstimate: FC<CostEstimateProps> = ({
 }) => {
   const estimate = useMemo(() => {
     const tier = SLAB_TIERS[slabTier];
-    // BUG 1 fix: the v17 slab account length is FIXED at v17MarketAccountLen(14)
-    // (DEFAULT_SLAB_SIZE) regardless of tier — InitMarket always encodes
-    // maxPortfolioAssets:14, so it always sizes/rents the slab the same way no matter
-    // which tier the user picks. Tier only selects which deployed program (trader-
-    // account capacity) InitMarket targets — it no longer scales the slab's byte size.
-    // Using the stale v12.19 tier.dataSize here grossly over-estimated rent (by ~0.67
-    // SOL) for a cost that was never actually charged this way.
-    const dataSize = DEFAULT_SLAB_SIZE;
+    const sol = computeCreateMarketSolCost();
 
-    // Rent-exempt minimum for the slab account
-    const slabRentLamports = Math.ceil((dataSize + RENT_OVERHEAD_BYTES) * RENT_PER_BYTE);
-    const slabRentSol = slabRentLamports / LAMPORTS_PER_SOL;
-
-    // Additional rent for token accounts (vault ATA, LP mint, insurance LP mint)
-    // Each token account ~165 bytes, each mint ~82 bytes
-    const tokenAccountRentSol = (165 * 3 + 82 * 2) * RENT_PER_BYTE / LAMPORTS_PER_SOL;
-
-    // Rent for the Earn vault (Step 4) + stake pool (Step 5) accounts — see
-    // EARN_VAULT_AND_STAKE_RENT_BYTES doc comment above.
-    const earnVaultStakeRentSol = (EARN_VAULT_AND_STAKE_RENT_BYTES * RENT_PER_BYTE) / LAMPORTS_PER_SOL;
-
-    // Total SOL cost
-    const totalSolCost = slabRentSol + tokenAccountRentSol + earnVaultStakeRentSol + TX_FEE_ESTIMATE_SOL;
-
-    // Token costs (vault seed is 500_000_000 raw = 500 at 6 decimals)
-    const seedAmount = 500_000_000 / Math.pow(10, tokenDecimals);
+    // Token costs.
+    // W11 fix (2026-07-08): useCreateMarket.ts no longer transfers a 500-token vault
+    // seed before InitMarket (launch-test-market.ts, the proven 8/8 reference, never
+    // seeds the vault and succeeds — the engine doesn't require or account for it).
+    // Showing a "Vault Seed (required)" line here would now be actively wrong —
+    // dropped; total tokens required is just LP collateral + insurance.
     const lpNum = parseFloat(lpCollateral) || 0;
     const insNum = parseFloat(insuranceAmount) || 0;
-    const totalTokens = seedAmount + lpNum + insNum;
+    const totalTokens = lpNum + insNum;
 
     // USD values if price available
     const tokenUsdValue = tokenPriceUsd ? totalTokens * tokenPriceUsd : null;
 
     return {
-      slabRentSol: slabRentSol.toFixed(4),
-      tokenAccountRentSol: tokenAccountRentSol.toFixed(4),
-      earnVaultStakeRentSol: earnVaultStakeRentSol.toFixed(4),
-      txFeeSol: TX_FEE_ESTIMATE_SOL.toFixed(4),
-      totalSolCost: totalSolCost.toFixed(4),
-      seedTokens: seedAmount,
+      slabRentSol: sol.slabRentSol.toFixed(4),
+      tokenAccountRentSol: sol.tokenAccountRentSol.toFixed(4),
+      lpPortfolioMatcherRentSol: sol.lpPortfolioMatcherRentSol.toFixed(4),
+      earnVaultStakeRentSol: sol.earnVaultStakeRentSol.toFixed(4),
+      txFeeSol: sol.txFeeSol.toFixed(4),
+      totalSolCost: sol.totalSolCost.toFixed(4),
       lpTokens: lpNum,
       insTokens: insNum,
       totalTokens,
       tokenUsdValue,
       tierLabel: tier.label,
       tierSlots: tier.maxAccounts,
-      dataSize,
+      dataSize: DEFAULT_SLAB_SIZE,
+      tokenDecimals,
     };
-  }, [slabTier, lpCollateral, insuranceAmount, tokenPriceUsd]);
+  }, [slabTier, lpCollateral, insuranceAmount, tokenPriceUsd, tokenDecimals]);
 
   return (
     <div className={`border border-[var(--border)] bg-[var(--bg)] ${className}`}>
@@ -121,6 +170,10 @@ export const CostEstimate: FC<CostEstimateProps> = ({
           <span className="font-mono text-[var(--text)]">{estimate.tokenAccountRentSol} SOL</span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
+          <span className="text-[var(--text-secondary)]">LP portfolio & matcher ctx</span>
+          <span className="font-mono text-[var(--text)]">{estimate.lpPortfolioMatcherRentSol} SOL</span>
+        </div>
+        <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-secondary)]">Earn vault & stake pool</span>
           <span className="font-mono text-[var(--text)]">{estimate.earnVaultStakeRentSol} SOL</span>
         </div>
@@ -138,12 +191,6 @@ export const CostEstimate: FC<CostEstimateProps> = ({
 
       {/* Token Costs */}
       <div className="px-4 py-3 space-y-2">
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text-secondary)]">Vault Seed (required)</span>
-          <span className="font-mono text-[var(--text)]">
-            {estimate.seedTokens.toLocaleString()} {tokenSymbol}
-          </span>
-        </div>
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-secondary)]">LP Collateral</span>
           <span className="font-mono text-[var(--text)]">

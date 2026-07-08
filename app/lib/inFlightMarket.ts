@@ -29,7 +29,20 @@ export type InFlightMarketState = {
   programId: string;
   network: "mainnet" | "devnet";
   createdAt: number;
-  lastStep: number; // 0 = before TX0 sent, 1 = TX0 done, 2 = TX1 done, 3 = TX2 done, 4 = TX3 done
+  // W1/W9 fix (2026-07-08): range corrected from the stale "0..4" — useCreateMarket.ts's
+  // create() has 6 on-chain steps (0-5), each calling updateInFlightStep(slab, N) with the
+  // NEXT step to run once step N-1 lands:
+  //   0 = before Step 0 (slab create + InitMarket) sent
+  //   1 = Step 0 done (slab initialized)              → resume enters at Step 1
+  //   2 = Step 1 done (oracle setup / nft_registry)    → resume enters at Step 2
+  //   3 = Step 2 done (LP portfolio + matcher init)    → resume enters at Step 3
+  //   4 = Step 3 done (deposit + insurance top-up)     → resume enters at Step 4
+  //   5 = Step 4 done (Earn vault)                     → resume enters at Step 5
+  //   6 = Step 5 done (stake pool) — market fully created; clearInFlightMarket() follows
+  // RecoverSolBanner's "RESUME CREATION" passes this value straight through to
+  // useCreateMarket's create(params, retryFromStep) so a cross-session resume starts at
+  // the correct step instead of always re-running Step 1 (see useStuckSlabs.ts / W1).
+  lastStep: number;
 };
 
 const isBrowser = () => typeof window !== "undefined" && !!window.localStorage;

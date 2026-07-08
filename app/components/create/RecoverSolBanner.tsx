@@ -8,10 +8,14 @@ import { useReclaimSlabRent } from "@/hooks/useReclaimSlabRent";
 interface RecoverSolBannerProps {
   /**
    * Called when user wants to resume market creation with the stuck slab.
-   * `fromStep` is 1 when the market is initialized (need oracle/LP/insurance),
-   * or 0 when the slab exists but InitMarket didn't complete (retry from scratch).
+   * `fromStep` is the on-chain step to resume from (see inFlightMarket.ts's
+   * `lastStep` doc comment for the full 0-6 mapping) — W1 fix (2026-07-08):
+   * previously always hardcoded to 1, which re-ran Step 1 (SetNftProgramId)
+   * on any market that had gotten further than that and reverted
+   * AlreadyInitialized. `0` still means "the slab exists but InitMarket
+   * didn't complete — retry from scratch."
    */
-  onResume?: (slabPublicKey: string, fromStep: 0 | 1) => void;
+  onResume?: (slabPublicKey: string, fromStep: number) => void;
   /** Called when user clicks "Clear & Start Fresh" or "Discard & Start New" to reset the wizard. */
   onReset?: () => void;
   /**
@@ -24,25 +28,62 @@ interface RecoverSolBannerProps {
 /**
  * Banner that detects stuck slab accounts from a previous failed market creation.
  *
- * Scenarios handled:
+ * Scenarios handled (one card per stuck slab — see W7 fix below):
  * 1. Account exists + initialized → "Resume creation from the next step"
  * 2. Account exists + NOT initialized → "Retry market creation" (re-use keypair)
  * 3. Account doesn't exist → silently clean up localStorage (atomic tx rolled back)
  *
  * With the atomic createAccount + InitMarket flow, scenario 2 is extremely rare —
  * it would only happen if the tx landed on-chain but the client lost the confirmation.
+ *
+ * W7 fix (2026-07-08): this used to render at most ONE card, for whichever slab
+ * useStuckSlabs() considered "the" stuck slab (the most-recently-touched one). If a
+ * user abandoned market A, then hit trouble again on market B, market A's locked rent
+ * became permanently invisible. Now maps over `stuckSlabs` (falling back to the
+ * singular `stuckSlab` when a caller/test mocks the hook with the old shape) so every
+ * in-flight market for the connected wallet gets its own card.
  */
 export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset, onReclaimSuccess }) => {
-  const { stuckSlab, loading, clearStuck, refresh } = useStuckSlabs();
-  const { closeSlab, loading: closeLoading, error: closeError } = useCloseMarket();
-  const [dismissed, setDismissed] = useState(false);
-  const [reclaimResult, setReclaimResult] = useState<{ sig: string; sol: number } | null>(null);
+  const hookResult = useStuckSlabs();
+  const { stuckSlab, loading, clearStuck } = hookResult;
+  // Backward-compat fallback: if the hook (or a test mock) doesn't supply the plural
+  // `stuckSlabs` array, fall back to treating the singular `stuckSlab` as a one-entry list.
+  const stuckSlabs: StuckSlab[] = hookResult.stuckSlabs ?? (stuckSlab ? [stuckSlab] : []);
 
   // Don't show while loading
   if (loading) return null;
 
-  // No stuck slab found
-  if (!stuckSlab) return null;
+  // No stuck slabs found
+  if (stuckSlabs.length === 0) return null;
+
+  return (
+    <>
+      {stuckSlabs.map((slab) => (
+        <StuckSlabCard
+          key={slab.publicKey.toBase58()}
+          stuckSlab={slab}
+          onResume={onResume}
+          onReset={onReset}
+          onReclaimSuccess={onReclaimSuccess}
+          clearStuck={() => clearStuck(slab.publicKey.toBase58())}
+        />
+      ))}
+    </>
+  );
+};
+
+/** One recovery card for a single stuck slab. Owns its own dismissed state so
+ *  dismissing one card (in a multi-card W7 render) never hides the others. */
+const StuckSlabCard: FC<{
+  stuckSlab: StuckSlab;
+  onResume?: (slabPublicKey: string, fromStep: number) => void;
+  onReset?: () => void;
+  onReclaimSuccess?: () => void;
+  clearStuck: () => void;
+}> = ({ stuckSlab, onResume, onReset, onReclaimSuccess, clearStuck }) => {
+  const { closeSlab, loading: closeLoading, error: closeError } = useCloseMarket();
+  const [dismissed, setDismissed] = useState(false);
+  const [reclaimResult, setReclaimResult] = useState<{ sig: string; sol: number } | null>(null);
 
   // Already dismissed this session
   if (dismissed) return null;
@@ -93,6 +134,15 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
   // Account exists and market IS initialized — resume from where we left off
   if (stuckSlab.isInitialized) {
     const rentSol = (stuckSlab.lamports / 1_000_000_000).toFixed(4);
+    // W1 fix (2026-07-08): resume from the actual last-completed step, not a hardcoded
+    // 1 — a market that got further (e.g. through LP init) would otherwise re-run Step
+    // 1's SetNftProgramId and revert AlreadyInitialized. Floor at 1 since `isInitialized`
+    // here guarantees Step 0 landed even if `lastStep` is stale (e.g. the tab closed
+    // right after Step 0 confirmed, before updateInFlightStep(1) ran). Guard against a
+    // missing/malformed lastStep (older persisted entries predating this field, or a
+    // NaN) the same defensive way loadAllInFlightMarkets() already treats malformed
+    // entries — fall back to 1 rather than propagating a NaN resume target.
+    const resumeFromStep = Number.isFinite(stuckSlab.lastStep) ? Math.max(stuckSlab.lastStep, 1) : 1;
 
     return (
       <div className="mb-4 border border-[var(--accent)]/30 bg-[var(--accent)]/[0.04] p-4">
@@ -137,7 +187,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
           {onResume && (
             <button
               type="button"
-              onClick={() => onResume(stuckSlab.publicKey.toBase58(), 1)}
+              onClick={() => onResume(stuckSlab.publicKey.toBase58(), resumeFromStep)}
               className="border border-[var(--accent)]/50 bg-[var(--accent)]/[0.08] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--accent)] hover:bg-[var(--accent)]/[0.15] transition-colors"
             >
               RESUME CREATION →
@@ -201,7 +251,7 @@ export const RecoverSolBanner: FC<RecoverSolBannerProps> = ({ onResume, onReset,
 /** Sub-component: handles the uninitialised slab case with ReclaimSlabRent. */
 const UninitialisedSlabBanner: FC<{
   stuckSlab: StuckSlab;
-  onResume?: (slabPublicKey: string, fromStep: 0 | 1) => void;
+  onResume?: (slabPublicKey: string, fromStep: number) => void;
   clearStuck: () => void;
   onReset?: () => void;
   onReclaimSuccess?: () => void;
@@ -307,7 +357,11 @@ const UninitialisedSlabBanner: FC<{
             {isSending ? "RECLAIMING…" : `RECLAIM ${rentSol} SOL →`}
           </button>
         )}
-        {/* Fallback: retry InitMarket if user wants to proceed with market creation */}
+        {/* Fallback: retry InitMarket if user wants to proceed with market creation.
+            W5 fix (2026-07-08): fromStep=0 here is what tells useCreateMarket's create()
+            to REUSE this stuck slab's keypair (handed over via restoreSlabKeypair before
+            this fires) instead of generating a brand-new one — see useCreateMarket.ts's
+            startStep===0 branch. */}
         {onResume && (
           <button
             type="button"

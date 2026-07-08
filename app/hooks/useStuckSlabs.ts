@@ -5,7 +5,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { isV17Account } from "@percolatorct/sdk";
 import {
-  loadLastInFlightMarket,
+  loadAllInFlightMarkets,
   clearInFlightMarket,
   type InFlightMarketState,
 } from "@/lib/inFlightMarket";
@@ -27,7 +27,7 @@ export interface StuckSlab {
   lamports: number;
   /** The program that owns the account */
   owner: string | null;
-  /** Last completed step from the in-flight save (0..4) */
+  /** Last completed step from the in-flight save (0..6 — see inFlightMarket.ts) */
   lastStep: number;
   /** Admin pubkey (for wallet-match check) */
   adminAddress: string;
@@ -45,32 +45,29 @@ export interface StuckSlab {
  * the admin keypair the user already has on disk and runs
  * scripts/close-market-reclaim-all.ts).
  *
- * Only returns a stuck-slab record if the persisted entry's adminAddress
- * matches the currently-connected wallet. That prevents the banner from
- * showing entries from other wallets and naturally handles two-tab races.
+ * Only returns stuck-slab records whose persisted adminAddress matches the
+ * currently-connected wallet. That prevents the banner from showing entries
+ * from other wallets and naturally handles two-tab races.
+ *
+ * W7 fix (2026-07-08): this used to surface ONLY the single most-recently
+ * touched in-flight market (loadLastInFlightMarket). If a user abandoned
+ * market A, then hit trouble again on market B, market A's stuck slab (and
+ * its locked rent) became permanently invisible to the recovery banner —
+ * `lib/inFlightMarket.ts`'s POINTER_KEY only ever points at the last one
+ * touched. `stuckSlabs` below now resolves EVERY persisted in-flight entry
+ * for the connected wallet (`loadAllInFlightMarkets`), so RecoverSolBanner
+ * can render one card per stuck market. `stuckSlab` (singular) is kept as
+ * the most-recently-created entry for backward compatibility with existing
+ * callers (e.g. CreateMarketWizard's own restoreSlabKeypair wiring).
  */
 export function useStuckSlabs() {
   const { connection } = useConnectionCompat();
   const wallet = useWalletCompat();
-  const [stuckSlab, setStuckSlab] = useState<StuckSlab | null>(null);
+  const [stuckSlabs, setStuckSlabs] = useState<StuckSlab[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const check = useCallback(async () => {
-    setLoading(true);
-    try {
-      const inFlight = loadLastInFlightMarket();
-      if (!inFlight) {
-        setStuckSlab(null);
-        return;
-      }
-
-      // Wallet-match gate: only show entries that belong to the connected wallet.
-      // Without this, two-tab race conditions could surface another tab's market.
-      if (!wallet.publicKey || wallet.publicKey.toBase58() !== inFlight.adminAddress) {
-        setStuckSlab(null);
-        return;
-      }
-
+  const resolveOne = useCallback(
+    async (inFlight: InFlightMarketState): Promise<StuckSlab> => {
       const slabPk = new PublicKey(inFlight.slabAddress);
 
       // Reconstruct the keypair from the persisted secret. Falls back to
@@ -90,7 +87,7 @@ export function useStuckSlabs() {
       if (!accountInfo) {
         // Account doesn't exist — the atomic TX0 rolled back or was never sent.
         // Surface a "didn't land" record so the banner can offer to clear stale state.
-        setStuckSlab({
+        return {
           publicKey: slabPk,
           isInitialized: false,
           exists: false,
@@ -101,8 +98,7 @@ export function useStuckSlabs() {
           adminAddress: inFlight.adminAddress,
           collateralAta: inFlight.collateralAta,
           state: inFlight,
-        });
-        return;
+        };
       }
 
       // Account exists — check if market was initialized via v17 magic (or v12 PERCOLAT magic).
@@ -118,7 +114,7 @@ export function useStuckSlabs() {
         ).getBigUint64(0, true) === PERCOLAT_MAGIC_V12;
       const isInitialized = isV17 || isV12;
 
-      setStuckSlab({
+      return {
         publicKey: slabPk,
         isInitialized,
         exists: true,
@@ -129,26 +125,66 @@ export function useStuckSlabs() {
         adminAddress: inFlight.adminAddress,
         collateralAta: inFlight.collateralAta,
         state: inFlight,
-      });
+      };
+    },
+    [connection],
+  );
+
+  const check = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Wallet-match gate: only show entries that belong to the connected wallet.
+      // Without this, two-tab race conditions could surface another tab's market.
+      if (!wallet.publicKey) {
+        setStuckSlabs([]);
+        return;
+      }
+      const walletB58 = wallet.publicKey.toBase58();
+      const all = loadAllInFlightMarkets().filter((s) => s.adminAddress === walletB58);
+      if (all.length === 0) {
+        setStuckSlabs([]);
+        return;
+      }
+      const resolved = await Promise.all(all.map(resolveOne));
+      // Most-recently-created first — matches the old single-banner ordering
+      // (loadLastInFlightMarket always pointed at the latest touch).
+      resolved.sort((a, b) => b.state.createdAt - a.state.createdAt);
+      setStuckSlabs(resolved);
     } catch (err) {
-      console.warn("[useStuckSlabs] Error checking stuck slab:", err);
+      console.warn("[useStuckSlabs] Error checking stuck slabs:", err);
       // Don't clear — might be a transient RPC error
-      setStuckSlab(null);
+      setStuckSlabs([]);
     } finally {
       setLoading(false);
     }
-  }, [connection, wallet.publicKey]);
+  }, [wallet.publicKey, resolveOne]);
 
   useEffect(() => {
     check();
   }, [check]);
 
-  const clearStuck = useCallback(() => {
-    if (stuckSlab) {
-      clearInFlightMarket(stuckSlab.publicKey.toBase58());
-    }
-    setStuckSlab(null);
-  }, [stuckSlab]);
+  /**
+   * Clears one in-flight entry by slab address. The no-arg form (backward
+   * compatible with pre-W7 callers) clears the most-recent entry — i.e. the
+   * same one `stuckSlab` (singular) below points at.
+   */
+  const clearStuck = useCallback(
+    (slabAddress?: string) => {
+      const target = slabAddress ?? stuckSlabs[0]?.publicKey.toBase58();
+      if (!target) return;
+      clearInFlightMarket(target);
+      setStuckSlabs((prev) => prev.filter((s) => s.publicKey.toBase58() !== target));
+    },
+    [stuckSlabs],
+  );
 
-  return { stuckSlab, loading, clearStuck, refresh: check };
+  return {
+    /** Most-recently-created stuck slab — kept for backward compatibility. */
+    stuckSlab: stuckSlabs[0] ?? null,
+    /** W7: every stuck slab for the connected wallet — drives multi-banner rendering. */
+    stuckSlabs,
+    loading,
+    clearStuck,
+    refresh: check,
+  };
 }
