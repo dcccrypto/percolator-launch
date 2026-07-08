@@ -9,6 +9,7 @@ import {
   CrankAction,
   ACCOUNTS_WITHDRAW_COLLATERAL,
   ACCOUNTS_KEEPER_CRANK,
+  ACCOUNTS_PERMISSIONLESS_CRANK_BASE,
   buildAccountMetas,
   WELL_KNOWN,
   buildIx,
@@ -95,6 +96,8 @@ export function useWithdraw(slabAddress: string) {
         } catch { /* fall through — layout detection best-effort */ }
 
         const isV17 = slabDataForLayout ? isV17Account(slabDataForLayout) : false;
+        // Set when the v17 path prepends a crank — bumps the CU budget below.
+        let v17CrankIncluded = false;
 
         if (isV17) {
           // ── v17 withdraw path ─────────────────────────────────────────────
@@ -150,9 +153,11 @@ export function useWithdraw(slabAddress: string) {
           // with "insufficient margin" if the withdrawal would under-collateralize
           // the open position). This check never blocks a valid withdrawal; it only
           // catches the unambiguous "more than the whole account" case early.
+          let hasActiveLegs = false;
           if (portfolioData) {
             try {
               const portfolio = parsePortfolioV17(portfolioData);
+              hasActiveLegs = portfolio.legs.some((l) => l.active);
               if (params.amount > portfolio.capital) {
                 throw new Error(
                   "Withdrawal amount exceeds your account balance. Reduce the amount and try again.",
@@ -167,6 +172,30 @@ export function useWithdraw(slabAddress: string) {
                 throw checkErr;
               }
             }
+          }
+
+          // With an OPEN POSITION the program must value the portfolio at fresh
+          // state before releasing margin — a standalone withdraw rejects with
+          // StaleData (code 19) unless something cranked recently. Trades solve
+          // this by prepending PermissionlessCrank(FeeSweep) in the same tx
+          // (see useTrade), which is why "close, then withdraw" worked while a
+          // plain withdraw said "market data is stale". Mirror the trade flow
+          // exactly: crank only when the portfolio has active legs (cranking an
+          // empty portfolio returns EngineNonProgress 0x16 and aborts the tx).
+          if (hasActiveLegs && portfolioPk) {
+            v17CrankIncluded = true;
+            const crankKeys = buildAccountMetas(ACCOUNTS_PERMISSIONLESS_CRANK_BASE, [
+              wallet.publicKey, slabPk, portfolioPk,
+            ]);
+            // For Pyth mode, append oracle feed account as tail (same as useTrade)
+            if (!useAdminOracle) {
+              crankKeys.push({ pubkey: oracleAccount, isSigner: false, isWritable: false });
+            }
+            instructions.push(buildIx({
+              programId,
+              keys: crankKeys,
+              data: encodePermissionlessCrank({ action: CrankAction.FeeSweep, assetIndex: 0, nowSlot: 0n, closeQ: 0n, feeBps: 0n, recoveryReason: 0 }),
+            }));
           }
 
           instructions.push(buildIx({
@@ -205,7 +234,9 @@ export function useWithdraw(slabAddress: string) {
           }));
         }
 
-        const sig = await sendTx({ connection, wallet, instructions, computeUnits: 300_000 });
+        // 600k CU when the v17 crank rides along (matches useTrade's
+        // crank+trade budget); all pre-existing paths keep the original 300k.
+        const sig = await sendTx({ connection, wallet, instructions, computeUnits: v17CrankIncluded ? 600_000 : 300_000 });
         // Force immediate slab re-read so balance updates without waiting for the next poll.
         refreshSlab();
         setTimeout(() => refreshSlab(), 2000);
