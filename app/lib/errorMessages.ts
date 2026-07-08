@@ -62,13 +62,22 @@ const ERROR_CODE_MAP: Record<number, string> = {
   16: "Account provenance mismatch - wrong market or account passed.",
   17: "Position has an unsettled leg - crank the market and retry.",
   18: "Invalid position leg.",
-  19: "Market data is stale - a fresh price/crank is needed. Try again in a moment.",
+  // LF1 (2026-07-08): EngineStale is the ~500-slot ACCRUE cliff, not a normal
+  // "wait a moment" blip - live-devnet verification found SOL/JUP/TRUMP sitting
+  // 273k-283k slots past it, permanently reverting every trade/close. Once
+  // tripped it does not self-clear from a normal price push or crank; only a
+  // maintainer re-seeding the market fixes it. See useEngineFreshness.ts and
+  // TRANSIENT_CODES below (removed from it, along with 21).
+  19: "Engine stalled - no crank has landed on this market recently enough to trade. This will not clear on its own; the market needs a fresh re-seed. Please report it.",
   20: "Counterparty (backing) state is stale - crank the market, then retry.",
-  // BUG 16: code 21 (loss_stale_active) only blocks risk-increasing trades on a
-  // stale asset row and self-clears via the ~20s keeper Refresh crank (closes
-  // always work) - it is not a market-wide lock, so don't tell the user to go
-  // trade elsewhere. See TRANSIENT_CODES below - this is now auto-retried.
-  21: "Price refreshing - retry in a few seconds.",
+  // LF1 (2026-07-08): EngineLockActive is the OTHER symptom of the same cliff
+  // as EngineStale(19) above - once a market crosses it, every trade/close
+  // reverts one of the two, permanently, until a maintainer re-seeds it. The
+  // previous copy here ("Price refreshing - retry") and the previous BUG 16
+  // comment (claiming this self-clears via the keeper's ~20s Refresh crank)
+  // were both disproven by the same live-devnet verification - see
+  // TRANSIENT_CODES below (removed from it).
+  21: "Engine lock is stuck (a crank/recovery never completed) - this will not clear on its own. The market needs a fresh re-seed before trading/closing can resume.",
   22: "Crank made no progress - the market may need attention. Try again shortly.",
   23: "This market is in recovery mode and must be cranked before trading resumes.",
   24: "Engine counter overflow.",
@@ -131,6 +140,20 @@ const NFT_ERROR_CODE_MAP: Record<number, string> = {
   18: "This account is an LP account and cannot be wrapped as an NFT - only trading accounts are eligible.",
   19: "Account id mismatch - slot was reallocated to a different account.",
   20: "Slab slot was closed and reassigned to a different owner after this NFT was minted - the NFT no longer represents that position.",
+  // EC (2026-07-08): 21-27 were missing entirely, so an NFT-program error in
+  // this range fell through to the generic ERROR_CODE_MAP lookup instead -
+  // e.g. code 22 is percolator-nft's LegNotActive ("no active leg trades this
+  // asset_index in the portfolio", typically a liquidated/force-closed
+  // wrapped position - see H8), but ERROR_CODE_MAP[22] is percolator-prog's
+  // unrelated EngineNonProgress ("crank made no progress"). A user burning or
+  // transferring an NFT that hit LegNotActive was shown the wrong error.
+  21: "Portfolio account is not owned by a known Percolator wrapper program - this NFT may be pointed at the wrong market.",
+  22: "This position has no active leg on this market anymore - it's likely already closed, liquidated, or force-closed. Burning may still be possible to reclaim the NFT's rent.",
+  23: "Portfolio account failed to decode - the NFT program is out of date relative to the deployed main program, or the account was corrupted.",
+  24: "Transfer blocked - this position isn't freely transferable right now (a close, resolve, or stale-market gate is active).",
+  25: "Market ID mismatch - the slab slot this NFT points to was reused by a newer position. This NFT no longer represents a valid position.",
+  26: "This market's NFT registry isn't configured yet - minting a Position NFT isn't available for this market.",
+  27: "This position spans multiple legs (cross-margin) and can't be wrapped as a single NFT - only single-position portfolios are eligible.",
 };
 
 /** Hard-coded NFT program id. Matches app/lib/nft-program.ts. Kept here to
@@ -189,11 +212,17 @@ function extractCustomIndex(msg: string): number | null {
 }
 
 // Transient = worth auto-retrying (a fresh price push / crank clears it).
-// v17 codes: EngineStale=19, EngineBStale=20, OracleInvalid=26, OracleStale=27.
-// BUG 16: LossStaleActive=21 self-clears via the ~20s keeper Refresh crank
-// (it only blocks risk-increasing trades on a stale asset row) - added here so
-// withTransientRetry auto-retries instead of hard-failing the trade.
-const TRANSIENT_CODES = new Set([19, 20, 21, 26, 27]);
+// v17 codes: EngineBStale=20, OracleInvalid=26, OracleStale=27.
+// LF1 (2026-07-08): EngineStale=19 and EngineLockActive=21 used to be listed
+// here too, on the theory (BUG 16) that 21 self-clears via the keeper's ~20s
+// Refresh crank. Live-devnet verification disproved that: SOL/JUP/TRUMP sat
+// 273k-283k slots past the ~500-slot accrue cliff, permanently reverting
+// EngineStale(19)/EngineLockActive(21) on every trade/close - no amount of
+// retrying clears them, only a market re-seed does. Removed both from this
+// set (and 21 from LONG_WINDOW_RETRY below) so withTransientRetry stops
+// silently retrying a dead market 8x before finally telling the user. See
+// ERROR_CODE_MAP[19]/[21] and useEngineFreshness.ts for the corrected model.
+const TRANSIENT_CODES = new Set([20, 26, 27]);
 
 export function isTransientError(msg: string): boolean {
   const code = extractErrorCode(msg);
@@ -206,12 +235,21 @@ export function isTransientError(msg: string): boolean {
 
 export function isOracleStaleError(msg: string): boolean {
   const code = extractErrorCode(msg);
-  // v17: OracleStale=27, OracleInvalid=26, EngineStale=19, EngineBStale=20 —
-  // all resolved by pushing a fresh price / cranking the market.
-  return code === 27 || code === 26 || code === 19 || code === 20;
+  // v17: OracleStale=27, OracleInvalid=26, EngineBStale=20 — all resolved by
+  // pushing a fresh price / cranking the market. EngineStale=19 is
+  // deliberately NOT included — see LF1 in TRANSIENT_CODES above: unlike
+  // these three, 19 is the ~500-slot accrue cliff and does not self-clear
+  // from a normal price push or crank once tripped; it needs a re-seed.
+  return code === 27 || code === 26 || code === 20;
 }
 
-export function humanizeError(rawMsg: string): string {
+/**
+ * @param context Optional call-site hint for disambiguating error codes that
+ *   mean different things depending on which instruction produced them (see
+ *   TX1 below). Omit for the generic case; pass "trade" from a trade()-CPI
+ *   submit path (open or close).
+ */
+export function humanizeError(rawMsg: string, context?: "trade"): string {
   // Log for debugging (only in browser)
   if (typeof window !== "undefined") {
     console.warn("[humanizeError] raw:", rawMsg);
@@ -256,6 +294,16 @@ export function humanizeError(rawMsg: string): string {
     // id before falling into the generic ERROR_CODE_MAP lookup below.
     if (code === 1 && !isNftProgramError(rawMsg) && isSplTokenProgramError(rawMsg)) {
       return SPL_TOKEN_INSUFFICIENT_FUNDS_MESSAGE;
+    }
+    // TX1 (2026-07-08): Custom(9) from a trade() CPI submit is the
+    // slippage/worst-fill-price rejection (the fill moved past the
+    // limitPriceE6 bound the ticket sent on-chain) — NOT the generic
+    // "invalid/unsupported instruction" text in ERROR_CODE_MAP[9], which is
+    // correct for deposit/withdraw/NFT/market-creation call sites (where
+    // code 9 really does mean an instruction-selector/matcher mismatch).
+    // Only trade-submit call sites pass context: "trade".
+    if (code === 9 && context === "trade") {
+      return "Price moved past your slippage tolerance before this order filled. Try again — the size and leverage are unchanged.";
     }
     if (ERROR_CODE_MAP[code]) {
       return ERROR_CODE_MAP[code];
@@ -307,15 +355,19 @@ export function humanizeError(rawMsg: string): string {
   return `Transaction failed: ${trimmed}`;
 }
 
-// BUG 16: code 21 (loss_stale_active) only clears once the keeper's Refresh
-// crank runs (~20s cadence) - a materially longer cadence than the "retry a
-// dropped RPC call" jitter withTransientRetry's default budget was sized for.
-// Callers (e.g. useClosePosition.ts) pass their own short maxRetries/delayMs,
-// so withTransientRetry widens its OWN budget once it recognizes one of these
-// codes, rather than requiring every call site to know the keeper's cadence.
-const LONG_WINDOW_RETRY: Record<number, { maxRetries: number; delayMs: number }> = {
-  21: { maxRetries: 8, delayMs: 4000 }, // up to ~32s total - spans one ~20-30s keeper Refresh
-};
+// Lets a caller-recognized transient code widen withTransientRetry's own
+// retry budget beyond what the call site requested (e.g. useClosePosition.ts
+// passes a short maxRetries/delayMs sized for "retry a dropped RPC call";
+// a genuinely longer-cadence transient condition needs more room than that).
+//
+// LF1 (2026-07-08) history: this used to carry `21: { maxRetries: 8,
+// delayMs: 4000 }` on the theory (BUG 16) that EngineLockActive(21)
+// self-clears via the keeper's ~20s Refresh crank. Live-devnet verification
+// disproved that for the cliff-dead case (see TRANSIENT_CODES above) - 21
+// was removed from TRANSIENT_CODES, so isTransientError() never reaches this
+// map for it anymore. Left empty as an extension point for any future
+// genuinely long-window transient code.
+const LONG_WINDOW_RETRY: Record<number, { maxRetries: number; delayMs: number }> = {};
 
 export async function withTransientRetry<T>(
   fn: () => Promise<T>,

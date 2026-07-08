@@ -61,6 +61,7 @@ import { TradeHistory } from "./TradeHistory";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
@@ -107,6 +108,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const { market: marketInfo } = useMarketInfo(slabAddress);
   const symbol = marketInfo?.symbol ?? collateralSymbol;
   const decimals = tokenMeta?.decimals ?? 6;
+  // T3-dd: `symbol` sometimes already carries a "-PERP" suffix from the
+  // market registry (e.g. "SOL-PERP") — appending "/USD" on top of that
+  // rendered "SOL-PERP/USD". Strip it once, just for the Market column label
+  // below; every other `symbol` usage in this row (token amounts, tooltips)
+  // is unaffected.
+  const marketDisplaySymbol = symbol.replace(/-PERP$/i, "");
 
   const { closePosition, loading: closeLoading, error: closeError } = useClosePosition(slabAddress);
   // Called unconditionally, before the `!activeInfo` early return below, per
@@ -115,7 +122,17 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const markFlash = usePriceFlash(livePriceE6 ?? null);
   const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
-  const oracleStale = !mockMode && (oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp")));
+  // H7: "keeper" added to the mode set — this gate previously only fired for
+  // admin/hyperp markets, so a stale keeper-priced market (all 5 live
+  // playground markets) never blocked closing.
+  const oracleStale = !mockMode && (oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp" || oracleMode === "keeper")));
+  // H6: engine accrue-staleness — distinct from the oracle-push freshness
+  // above. A market can look perfectly fresh here (keeper still pushing
+  // prices) while the ENGINE hasn't accrued in ~500 slots, cliff-dead and
+  // permanently reverting every close until a maintainer re-seeds it. See
+  // useEngineFreshness's file header.
+  const { engineStale } = useEngineFreshness();
+  const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
 
   const [showCloseModal, setShowCloseModal] = useState(false);
 
@@ -248,6 +265,14 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--warning)]">LP Underfunded</span>
         </div>
       )}
+      {/* H6: engine-stale takes priority over the generic oracle-stale copy
+          when it's specifically the engine accrue guard that tripped — tells
+          the user this needs a re-seed, not just "wait a moment". */}
+      {engineStale && !oracleStale && (
+        <div className="border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5 text-center">
+          <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--warning)]">Market Crank Behind — Trading Paused</span>
+        </div>
+      )}
       {isNftWrapped && (
         <div className="border-b border-[var(--accent)]/20 bg-[var(--accent)]/5 px-4 py-1.5 text-center">
           <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--accent)]">
@@ -272,7 +297,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           </thead>
           <tbody>
             <tr className="border-b border-[var(--border)]/20 transition-colors hover:bg-[var(--accent)]/[0.03]">
-              <td className="whitespace-nowrap px-4 py-2.5 text-left"><span className="text-[11px] font-medium text-[var(--text)]">{symbol}/USD</span></td>
+              <td className="whitespace-nowrap px-4 py-2.5 text-left"><span className="text-[11px] font-medium text-[var(--text)]">{marketDisplaySymbol}/USD</span></td>
               <td className="whitespace-nowrap px-3 py-2.5 text-left">
                 <span className={`inline-block rounded-sm px-1.5 py-0.5 text-[9px] font-bold uppercase ${isLong ? "bg-[var(--long)]/10 text-[var(--long)]" : "bg-[var(--short)]/10 text-[var(--short)]"}`}>
                   {isLong ? "LONG" : "SHORT"}
@@ -347,8 +372,8 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                 ) : (
                   <button
                     onClick={() => setShowCloseModal(true)}
-                    disabled={closeLoading || lpUnderfunded || !hasValidMark}
-                    title={!hasValidMark ? "Waiting for price data…" : undefined}
+                    disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
+                    title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : undefined}
                     className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Close
@@ -380,7 +405,11 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
           isLong={isLong}
           loading={closeLoading}
           tradingFeeBps={params?.tradingFeeBps}
-          oracleStale={oracleStale}
+          // Defense-in-depth: the row-level Close button above is already
+          // disabled on engineStale (with its own correctly-labeled title),
+          // but if the modal is somehow already open when engine-staleness
+          // is detected, keep its Confirm button blocked too.
+          oracleStale={closeBlockedByStaleness}
           onConfirm={handleConfirmClose}
           onCancel={() => setShowCloseModal(false)}
         />

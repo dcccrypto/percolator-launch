@@ -26,6 +26,7 @@ import { ClosePositionModal } from "./ClosePositionModal";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { sanitizeFundingRateBps, isSentinelValue } from "@/lib/health";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { getEntryPrice, getEntryLeverage, clearEntryPrice } from "@/lib/entry-price";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { getBackendUrl } from "@/lib/config";
@@ -212,9 +213,19 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [showAddMarginModal, setShowAddMarginModal] = useState(false);
 
   // GH#1842: Oracle staleness check — mirrors TradeForm guard
+  // H7: "keeper" added to the mode set — this gate previously only fired for
+  // admin/hyperp markets, so a stale keeper-priced market (all 5 live
+  // playground markets) never blocked closing.
   const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
-  const oracleStale = !mockMode && (oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp")));
+  const oracleStale = !mockMode && (oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp" || oracleMode === "keeper")));
+  // H6: engine accrue-staleness — distinct from the oracle-push freshness
+  // above. A market can look perfectly fresh here (keeper still pushing
+  // prices) while the ENGINE hasn't accrued in ~500 slots, cliff-dead and
+  // permanently reverting every close until a maintainer re-seeds it. See
+  // useEngineFreshness's file header.
+  const { engineStale } = useEngineFreshness();
+  const closeBlockedByStaleness = !mockMode && (oracleStale || engineStale);
 
   // 5.7: ADL rank — fetch once account is known; positionIdx = userAccount.idx
   const adlPositionIdx = userAccount ? userAccount.idx : null;
@@ -481,8 +492,8 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <div className="flex-1" />
             <button
               onClick={() => setShowCloseModal(true)}
-              disabled={closeLoading || lpUnderfunded || !hasValidMark}
-              title={!hasValidMark ? "Waiting for price data…" : "Close position"}
+              disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
+              title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : "Close position"}
               aria-label="Close position"
               className="text-[11px] text-[var(--short)]/70 transition-colors hover:text-[var(--short)] disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -618,6 +629,16 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </div>
             )}
 
+            {/* H6: engine crank-behind warning — see useEngineFreshness */}
+            {engineStale && !oracleStale && (
+              <div className="mt-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 p-2.5">
+                <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--warning)]">Market Crank Behind — Trading Paused</p>
+                <p className="mt-1 text-[10px] text-[var(--warning)]/70">
+                  This market's engine hasn't been cranked recently enough to close safely. Check back later or ask a maintainer to re-seed the market.
+                </p>
+              </div>
+            )}
+
             {/* 5.9: Add Margin + Close buttons */}
             <div className="mt-2 flex gap-1.5">
               <button
@@ -628,11 +649,11 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               </button>
               <button
                 onClick={() => setShowCloseModal(true)}
-                disabled={closeLoading || lpUnderfunded || !hasValidMark}
-                title={!hasValidMark ? "Waiting for price data…" : undefined}
+                disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
+                title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : undefined}
                 className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {!hasValidMark ? "Awaiting Price…" : "Close Position"}
+                {!hasValidMark ? "Awaiting Price…" : engineStale ? "Crank Behind" : "Close Position"}
               </button>
             </div>
 
@@ -658,7 +679,11 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           priceUsd={priceUsd}
           isLong={isLong}
           loading={closeLoading}
-          oracleStale={oracleStale}
+          // Defense-in-depth: the panel's own Close button above is already
+          // disabled on engineStale (with its own correctly-labeled title),
+          // but if the modal is somehow already open when engine-staleness
+          // is detected, keep its Confirm button blocked too.
+          oracleStale={closeBlockedByStaleness}
           onConfirm={handleConfirmClose}
           onCancel={() => setShowCloseModal(false)}
         />
