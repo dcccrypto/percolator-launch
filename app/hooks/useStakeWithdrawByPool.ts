@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
 import {
@@ -50,6 +50,15 @@ export function useStakeWithdrawByPool({ slabAddress, collateralMint }: StakeWit
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
+
+  // Reset UI state when the selected pool changes so stale loading/error
+  // indicators from a previous pool don't bleed into the new pool context.
+  // Do not touch inflightRef.current — the in-flight guard must stay intact
+  // until the withdrawal's finally block clears it.
+  useEffect(() => {
+    setError(null);
+    setLoading(false);
+  }, [slabAddress, collateralMint]);
 
   const withdraw = useCallback(
     async (lpAmount: bigint) => {
