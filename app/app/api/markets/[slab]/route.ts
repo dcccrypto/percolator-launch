@@ -13,6 +13,7 @@ import {
 } from "@percolatorct/sdk";
 import { getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
+import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
 
 /** Success responses only — matches GET /api/markets (errors omit this to avoid caching 404/500). */
 const MARKETS_CACHE_HEADERS = {
@@ -46,6 +47,13 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
     const markPriceRaw = cfg.markEwmaE6;
     const markPriceUsd = markPriceRaw > 0n ? Number(markPriceRaw) / 1_000_000 : null;
     const playgroundMeta = PLAYGROUND_SLAB_META[slab];
+    // Wizard-launched markets carry their metadata in the registration Blob —
+    // without this lookup the trade page header falls back to the collateral
+    // token and renders every user-created market as "USDC/USD".
+    const registered = playgroundMeta
+      ? null
+      : (await readRegisteredMarkets().catch(() => []))
+          .find((rm) => rm.slabAddress === slab) ?? null;
 
     // Live engine stats from the same raw bytes (mirrors the list route's
     // v17 enrichment). Degrades to zeros if the parse throws.
@@ -61,14 +69,15 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
       slab_address: slab,
       program_id: info.owner.toBase58(),
       mint_address: cfg.collateralMint.toBase58(),
-      symbol: playgroundMeta?.symbol ?? null,
-      name: playgroundMeta?.name ?? null,
+      symbol: playgroundMeta?.symbol ?? registered?.symbol ?? null,
+      name: playgroundMeta?.name ?? registered?.label ?? null,
       decimals: 6,
       deployer: cfg.marketauth.toBase58(),
       oracle_authority: cfg.marketauth.toBase58(),
-      oracle_mode: cfg.oracleMode === 1 ? "hyperp" : "admin",
-      dex_pool_address: playgroundMeta?.dex_pool_address ?? null,
-      mainnet_ca: playgroundMeta?.mainnet_ca ?? null,
+      // Match the list route: byte 3 = AUTH_MARK (keeper), byte 1 = hyperp.
+      oracle_mode: cfg.oracleMode === 1 ? "hyperp" : cfg.oracleMode === 3 ? "keeper" : "admin",
+      dex_pool_address: playgroundMeta?.dex_pool_address ?? registered?.poolAddress ?? null,
+      mainnet_ca: playgroundMeta?.mainnet_ca ?? registered?.mainnetCA ?? null,
       created_at: null,
       stats_updated_at: null,
       is_zombie: false,
