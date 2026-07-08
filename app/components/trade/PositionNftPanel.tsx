@@ -31,10 +31,15 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
   const { hasMintedNft, nftMint, nftPdaAddress, pendingSettlement, isLoading } = usePositionNft(slabAddress);
   const { mint: mintNft, loading: mintLoading, error: mintError } = useMintPositionNft(slabAddress);
 
-  // Once a position is wrapped into an NFT, MintPositionNft escrows the
-  // portfolio away from the wallet, so useUserAccount returns null. Fall back to
-  // the NFT-escrowed position so this panel keeps showing status + Send/Burn.
-  const wrapped = useNftWrappedPosition(slabAddress, userAccount === null);
+  // #13 fix: this scan must run unconditionally, not just when `userAccount`
+  // is null. It's the ONLY reliable signal for "the wallet currently holds an
+  // NFT-wrapped ACTIVE position" — either self-minted-and-still-held, or
+  // RECEIVED via transfer from someone else. Gating it off whenever the
+  // wallet ALSO has its own separate unwrapped position (the old
+  // `userAccount === null` condition) hid a co-existing received NFT
+  // entirely, which is what produced both bugs fixed below: Mint getting
+  // wrongly blocked, and the Send modal describing the wrong position.
+  const wrapped = useNftWrappedPosition(slabAddress, true);
 
   // usePositionNft's v17 owner-scan and useNftWrappedPosition's last_holder
   // scan answer different questions and can disagree: a wallet holding a
@@ -76,9 +81,30 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
     if (isNftPresent) setPendingMint(false);
   }, [isNftPresent]);
 
-  const effectiveAccount = userAccount ?? wrapped;
+  // #13 fix: `usePositionNft`'s single `hasMintedNft`/`isNftPresent` signal
+  // conflates two different identities — "my own leg already has an NFT" vs.
+  // "I happen to be holding SOME NFT (possibly someone else's, received via
+  // transfer)". Using that conflated signal for Mint gating meant a received
+  // NFT could permanently block minting on a totally unrelated, still-your-own,
+  // never-wrapped position; using `userAccount` for the Send modal's summary
+  // meant it could describe YOUR position while actually about to transfer
+  // SOMEONE ELSE'S wrapped one.
+  //
+  // `userAccount` (owner-scan) can only ever reflect a truly-unwrapped
+  // position — minting moves ownership to the escrow PDA, so a non-null,
+  // non-zero `userAccount` means "this leg has never been wrapped," full
+  // stop. That makes it the sole correct signal for Mint eligibility below.
+  // For display / Send / Burn, prefer `wrapped` (the NFT actually being
+  // acted on, self-held or received) over the own position whenever both
+  // exist — it's what `effectiveNftMint`/`effectiveNftPdaAddress` above
+  // already resolve to.
+  const ownUnwrappedPosition =
+    userAccount !== null && userAccount.account.positionSize !== 0n ? userAccount : null;
+  const effectiveAccount = wrapped ?? ownUnwrappedPosition;
 
-  const hasPosition = effectiveAccount !== null && effectiveAccount.account.positionSize !== 0n;
+  // Mint can ONLY ever act on the wallet's own unwrapped leg — never on a
+  // held/received NFT — so gate strictly on that, not on `isNftPresent`.
+  const hasOwnUnwrappedPosition = ownUnwrappedPosition !== null;
   const mintAddress = effectiveNftMint?.toBase58() ?? null;
 
   // Summary line for the send modal — e.g. "LONG 0.3507 SOL".
@@ -178,15 +204,13 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
               // user can retry.
               if (!sig) setPendingMint(false);
             }}
-            disabled={!hasPosition || isNftPresent || mintLoading || pendingMint}
+            disabled={!hasOwnUnwrappedPosition || mintLoading || pendingMint}
             title={
-              !hasPosition
-                ? "Open a position first"
-                : isNftPresent
-                ? "NFT already minted"
+              !hasOwnUnwrappedPosition
+                ? "Open a position first — or it's already wrapped into an NFT"
                 : mintLoading || pendingMint
                 ? "Minting…"
-                : "Mint a position NFT"
+                : "Mint a position NFT — escrows this ENTIRE sub-account (all free collateral) until burn"
             }
             className="flex-1 rounded-none border border-[var(--long)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--long)] transition-colors duration-150 hover:bg-[var(--long)]/8 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -228,6 +252,17 @@ export const PositionNftPanel: FC<{ slabAddress: string }> = ({ slabAddress }) =
             {burnLoading ? "Burning…" : "Burn NFT"}
           </button>
         </div>
+
+        {/* #36: Minting doesn't just tokenize this one position — the escrow
+            CPI moves the ENTIRE sub-account (all free collateral in it, not
+            only the margin backing this leg) into the NFT, and it stays
+            locked there until burn. Surface that before the user clicks Mint. */}
+        {hasOwnUnwrappedPosition && !isNftPresent && (
+          <p className="pt-0.5 text-[9px] leading-snug text-[var(--warning)]">
+            Minting escrows your ENTIRE sub-account — all free collateral, not just
+            this position — into the NFT until you burn it.
+          </p>
+        )}
 
         {/* Error display */}
         {(mintError || burnError || transferError) && (
