@@ -1,25 +1,28 @@
 /**
  * PERC-808: Live protocol Volume + OI bar for the dashboard
  *
- * Fetches aggregated 24h volume and total open interest from
- * the markets_with_stats Supabase view and displays them as
- * a compact stats strip. Polls every 30 seconds for live updates.
+ * M13/H10: previously queried the `markets_with_stats` Supabase view directly
+ * — dead in the playground (D-OPS2), so this silently rendered $0/$0/0 under
+ * an always-on pulsing "live" dot. Now fetches the same aggregate from
+ * /api/stats, which (as of this fix) has a devnet on-chain-discovery path
+ * that works with no DB dependency — see api/stats/route.ts. The "live" dot
+ * is gated on that endpoint's own `live` flag (true only for a genuine
+ * successful fetch, false for its zero-stats degrade) instead of being
+ * hardcoded on. Polls every 30 seconds for live updates.
  */
 
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getSupabase } from "@/lib/supabase";
-import { isActiveMarket, isSaneMarketValue } from "@/lib/activeMarketFilter";
-import { isBlockedSlab } from "@/lib/blocklist";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
-
 
 interface ProtocolStats {
   volume24h: number;
   openInterest: number;
   activeMarkets: number;
   traders: number | null;
+  /** true only when /api/stats served real data (not its zero-stats degrade). */
+  live: boolean;
 }
 
 function formatUsd(val: number): string {
@@ -39,7 +42,6 @@ function Pulse() {
 }
 
 const POLL_INTERVAL_MS = 30_000;
-const MAX_USD_PER_MARKET = 10_000_000; // $10M cap per market to filter corrupted data
 
 export function ProtocolStatsBar() {
   const [stats, setStats] = useState<ProtocolStats | null>(null);
@@ -48,101 +50,20 @@ export function ProtocolStatsBar() {
 
   async function fetchStats() {
     try {
-      let { data, error: dbErr } = await getSupabase()
-        .from("markets_with_stats")
-        .select("slab_address, symbol, volume_24h, last_price, decimals, total_open_interest, open_interest_long, open_interest_short, vault_balance, total_accounts")
-        // markets_with_stats runtime filter: generated Supabase types do not expose indexer_excluded.
-        // Keep excluding indexer-excluded rows without breaking TypeScript column narrowing.
-        .or("indexer_excluded.is.null,indexer_excluded.eq.false")
-        .returns<{
-          slab_address: string;
-          symbol: string | null;
-          volume_24h: number | null;
-          last_price: number | null;
-          decimals: number | null;
-          total_open_interest: number | null;
-          open_interest_long: number | null;
-          open_interest_short: number | null;
-          vault_balance: number | null;
-          total_accounts: number | null;
-        }[]>();
-
-      // PERC-8387/GH#2080: indexer_excluded column may not exist — retry without filter
-      if (dbErr && dbErr.message?.includes("indexer_excluded")) {
-        const retry = await getSupabase()
-          .from("markets_with_stats")
-          .select("slab_address, symbol, volume_24h, last_price, decimals, total_open_interest, open_interest_long, open_interest_short, vault_balance, total_accounts");
-        data = retry.data as typeof data;
-      }
-
-      if (!data || data.length === 0) {
-        setStats({ volume24h: 0, openInterest: 0, activeMarkets: 0, traders: null });
-        return;
-      }
-
-      // GH#1332: Match /api/stats exactly — $1M price cap, no $1 fallback for OI,
-      // phantom OI guard (vault < 1M or 0 accounts).
-      const MAX_SANE_PRICE_USD = 1_000_000; // matches /api/stats route
-      // GH#1297: Phantom OI guard threshold — matches /api/stats strict < 1M.
-      const MIN_VAULT_FOR_OI = 1_000_000;
-
-      let vol24h = 0;
-      let oi = 0;
-      let activeCount = 0;
-
-      for (const row of data) {
-        if (!row.slab_address || isBlockedSlab(row.slab_address)) continue;
-
-        const dec = Math.pow(10, Math.min(Math.max(row.decimals ?? 6, 0), 18));
-        const validPrice = row.last_price != null && row.last_price > 0 && row.last_price <= MAX_SANE_PRICE_USD;
-        // For volume: use $1 fallback so admin markets contribute volume at face value.
-        const priceForVol = validPrice ? row.last_price! : 1;
-        // For OI: no fallback — indeterminate USD value must be skipped (GH#1318 / GH#1332).
-        const priceForOi = validPrice ? row.last_price! : 0;
-
-        const toUsdVol = (raw: number): number => {
-          if (!isSaneMarketValue(raw) || priceForVol <= 0) return 0;
-          const usd = (raw / dec) * priceForVol;
-          return usd > MAX_USD_PER_MARKET ? 0 : usd;
-        };
-
-        // Volume: stored in token units, convert to USD
-        const capVol = toUsdVol(Number(row.volume_24h ?? 0));
-
-        // OI: fallback to long+short if total_open_interest is missing (GH#1268)
-        const rawOi = isSaneMarketValue(row.total_open_interest)
-          ? row.total_open_interest!
-          : (isSaneMarketValue((row.open_interest_long ?? 0) + (row.open_interest_short ?? 0))
-              ? (row.open_interest_long ?? 0) + (row.open_interest_short ?? 0)
-              : 0);
-
-        // GH#1297: Skip phantom markets — mirrors /api/stats isPhantomOI guard exactly.
-        // Strict < 1M (vault=1M creation-deposit markets are NOT phantom).
-        const accountsCount = row.total_accounts ?? 0;
-        const vaultBal = row.vault_balance ?? 0;
-        const isPhantomOI = accountsCount === 0 || vaultBal < MIN_VAULT_FOR_OI;
-
-        // GH#1332: No $1 fallback for OI — skip markets with no valid oracle price.
-        const capOi = (!isPhantomOI && priceForOi > 0 && isSaneMarketValue(rawOi))
-          ? Math.min((rawOi / dec) * priceForOi, MAX_USD_PER_MARKET)
-          : 0;
-
-        if (isActiveMarket({ volume_24h: capVol, total_open_interest: capOi })) {
-          activeCount++;
-        }
-
-        vol24h += capVol;
-        oi += capOi;
-      }
-
+      const res = await fetch("/api/stats");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
       setStats({
-        volume24h: vol24h,
-        openInterest: oi,
-        activeMarkets: activeCount,
-        traders: null, // Not available in current view
+        volume24h: Number(data.totalVolume24h) || 0,
+        openInterest: Number(data.totalOpenInterest) || 0,
+        activeMarkets: Number(data.activeTotal ?? data.totalMarkets) || 0,
+        traders: data.totalTraders != null ? Number(data.totalTraders) : null,
+        live: data.live === true,
       });
     } catch {
-      // non-fatal — keep showing stale stats
+      // non-fatal — keep showing stale stats, but the fetch itself failed so
+      // it's no longer "live".
+      setStats((prev) => (prev ? { ...prev, live: false } : prev));
     } finally {
       setLoading(false);
     }
@@ -156,11 +77,13 @@ export function ProtocolStatsBar() {
     };
   }, []);
 
+  const isLive = stats?.live === true;
+
   const items = [
     {
       label: "24h Volume",
       value: loading ? null : formatUsd(stats?.volume24h ?? 0),
-      live: true,
+      live: isLive,
       color: (stats?.volume24h ?? 0) > 0 ? "text-[var(--long)]" : "text-[var(--text-secondary)]",
     },
     {

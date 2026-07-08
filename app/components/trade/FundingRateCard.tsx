@@ -12,6 +12,29 @@ import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 import { sanitizeFundingRateBps } from "@/lib/health";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { V17_ENGINE_CONFIG_OFF } from "@/lib/v17-engine-config";
+
+/**
+ * M19: `max_abs_funding_e9_per_slot` — a V16ConfigAccount field (u64) at
+ * relative offset 126 (fully-packed repr(C) Pod struct, no padding — same
+ * derivation lib/v17-engine-config.ts already uses for the fields it reads:
+ * maxPortfolioAssets(2)+maxMarketSlots(4)+minNonzeroMmReq(16)+
+ * minNonzeroImReq(16)+hMin(8)+hMax(8)+maintenanceMarginBps(8)+
+ * initialMarginBps(8)+maxTradingFeeBps(8)+liquidationFeeBps(8)+
+ * liquidationFeeCap(16)+minLiquidationAbs(16)=118, then
+ * maxAccrualDtSlots(8)=126). When this is 0, the engine's accrue clamps the
+ * *applied* funding rate to exactly 0 on every crank — funding is
+ * structurally OFF for the market, not just quiet. Verified 0 on all 5 live
+ * devnet markets (DEFINITIVE-PLAN-2026-07-08.md, finding M19).
+ */
+const V17_MAX_ABS_FUNDING_REL = 126;
+
+function readV17MaxAbsFunding(data: Uint8Array): bigint | null {
+  const off = V17_ENGINE_CONFIG_OFF + V17_MAX_ABS_FUNDING_REL;
+  if (off + 8 > data.length) return null;
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return dv.getBigUint64(off, true);
+}
 
 /** P3-4: Mini bar chart showing last N 8h funding rate periods */
 function FundingMiniChart({ rates }: { rates: number[] }) {
@@ -74,13 +97,19 @@ function formatCountdown(slots: number): string {
 }
 
 export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) => {
-  const { params, config } = useSlabState();
-  const { engine, fundingRate } = useEngineState();
+  const { params, config, raw } = useSlabState();
+  const { engine, fundingRate, isV17 } = useEngineState();
   const userAccount = useUserAccount();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const collateralDecimals = tokenMeta?.decimals ?? 6;
   const mockMode = isMockMode() && isMockSlab(slabAddress);
-  
+
+  // M19: funding is OFF at the protocol level for this market when
+  // max_abs_funding_e9_per_slot is 0 — gate the whole funding surface on it
+  // rather than fetching/rendering a rate that can never actually apply.
+  const v17MaxAbsFunding = isV17 && raw ? readV17MaxAbsFunding(raw) : null;
+  const fundingDisabled = isV17 && v17MaxAbsFunding === 0n;
+
   const [fundingData, setFundingData] = useState<FundingData | null>(mockMode ? MOCK_FUNDING : null);
   const [loading, setLoading] = useState(!mockMode);
   const [error, setError] = useState<string | null>(null);
@@ -94,11 +123,17 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
   // overwriting the current market's data on fast market switches.
   useEffect(() => {
     if (mockMode) return;
+    if (fundingDisabled) {
+      // Funding can never apply on this market — don't fetch/poll a rate
+      // that's structurally clamped to 0, and don't leave loading spinning.
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
     const controller = new AbortController();
     const { signal } = controller;
-    
+
     const fetchFunding = async () => {
       try {
         setLoading(true);
@@ -183,7 +218,7 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
       controller.abort();
       clearInterval(interval);
     };
-  }, [slabAddress, mockMode, engine, fundingRate]);
+  }, [slabAddress, mockMode, engine, fundingRate, fundingDisabled]);
 
   // Update countdown every second
   useEffect(() => {
@@ -258,6 +293,23 @@ export const FundingRateCard: FC<{ slabAddress: string }> = ({ slabAddress }) =>
         <div className="flex items-center justify-between">
           <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Funding Rate</span>
           <ShimmerSkeleton className="h-4 w-16" rounded="none" />
+        </div>
+      </div>
+    );
+  }
+
+  // M19: funding is structurally OFF (max_abs_funding_e9_per_slot == 0) —
+  // say so plainly instead of presenting a full funding-rate/APR/countdown
+  // product that can never actually charge or pay anyone.
+  if (fundingDisabled) {
+    return (
+      <div className="rounded-none border border-[var(--border)]/50 bg-[var(--bg)]/80 p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">Funding Rate</span>
+            <InfoIcon tooltip="Funding is disabled for this market — the protocol's max funding rate is set to 0, so the applied rate is always exactly 0." />
+          </div>
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">Off (disabled)</span>
         </div>
       </div>
     );

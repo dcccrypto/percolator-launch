@@ -6,16 +6,25 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { useLivePrice } from "@/hooks/useLivePrice";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab } from "@/lib/mock-trade-data";
 
 interface OpenInterestData {
-  totalOi: string; // U128 as string (token units e6)
+  totalOi: string; // U128 as string
   longOi: string;
   shortOi: string;
   netLpPosition: string; // I128 as string (can be negative)
   historicalOi: Array<{ timestamp: number; totalOi: number; longOi: number; shortOi: number }>;
+  /**
+   * H12: v12's totalOi/longOi/shortOi are already collateral-notional (USD)
+   * atoms. v17's are base-asset "Q" quantities (fixed-point, scale 1e6) —
+   * printing them straight as `$` was the bug (no price multiplication).
+   * True on the v17 branch of /api/open-interest/[slab] (both possible
+   * shapes there); undefined/false elsewhere (v12, mock, on-chain fallback).
+   */
+  isV17?: boolean;
 }
 
 // Mock data for development — use fixed timestamps to avoid SSR/client hydration mismatch
@@ -34,15 +43,34 @@ const MOCK_OI: OpenInterestData = {
     { timestamp: MOCK_BASE_TS - 4 * 60 * 60 * 1000, totalOi: 5220000, longOi: 2840000, shortOi: 2380000 },
     { timestamp: MOCK_BASE_TS, totalOi: 5234123, longOi: 2850000, shortOi: 2384123 },
   ],
+  isV17: false,
 };
 
-function formatUsdAmount(amountRaw: string | bigint, decimals: number = 6): string {
-  const num = typeof amountRaw === "string" ? BigInt(amountRaw) : amountRaw;
-  const usd = Number(num) / (10 ** decimals);
-  return usd.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
+/** v17 base-asset "Q" fixed-point scale (matches parseMarketGroupV17OI / api/markets). */
+const V17_Q_SCALE = 1_000_000;
+
+/**
+ * H12: format a raw OI amount as USD.
+ *  - v12: the raw value is already collateral-notional (USD) atoms — divide
+ *    by the collateral token's decimals only, as before.
+ *  - v17: the raw value is a base-asset "Q" quantity — divide by the fixed
+ *    Q scale (1e6) and multiply by the live USD price. Returns null when the
+ *    price isn't available yet rather than silently printing a wrong number.
+ */
+function formatOiUsd(
+  amountRaw: string | bigint,
+  isV17: boolean,
+  priceUsd: number | null,
+  collateralDecimals: number,
+): string | null {
+  const num = typeof amountRaw === "string" ? BigInt(amountRaw || "0") : amountRaw;
+  if (isV17) {
+    if (priceUsd == null) return null;
+    const usd = (Number(num) / V17_Q_SCALE) * priceUsd;
+    return usd.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
+  const usd = Number(num) / (10 ** collateralDecimals);
+  return usd.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function formatSignedUsdAmount(amountRaw: string, decimals: number = 6): string {
@@ -59,10 +87,11 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
   slabAddress,
 }) => {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
-  const { engine } = useEngineState();
+  const { engine, isV17, oiLong, oiShort } = useEngineState();
   const { config } = useSlabState();
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   const tokenDecimals = tokenMeta?.decimals ?? 6;
+  const { priceUsd } = useLivePrice();
 
   const [oiData, setOiData] = useState<OpenInterestData | null>(
     mockMode ? MOCK_OI : null
@@ -84,10 +113,20 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
-        // Fallback to on-chain data when API unavailable.
-        // Use engine.longOi/shortOi directly — the old formula deriving from
-        // totalOI + netLpPos produced negative/wrong values (showed -50% long).
-        if (engine) {
+        // Fallback to on-chain data when API unavailable. useEngineState()
+        // unifies v12 (engine.longOi/shortOi) and v17 (parseMarketGroupV17OI,
+        // via oiLong/oiShort) — the old fallback only ever read the v12
+        // fields, so it silently produced nothing on v17 markets.
+        if (isV17 && oiLong != null && oiShort != null) {
+          setOiData({
+            totalOi: (oiLong + oiShort).toString(),
+            longOi: oiLong.toString(),
+            shortOi: oiShort.toString(),
+            netLpPosition: "0",
+            historicalOi: [],
+            isV17: true,
+          });
+        } else if (engine) {
           const longOi = engine.longOi ?? 0n;
           const shortOi = engine.shortOi ?? 0n;
           const totalOi = (longOi + shortOi).toString();
@@ -97,6 +136,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
             shortOi: shortOi.toString(),
             netLpPosition: (engine.netLpPos ?? 0n).toString(),
             historicalOi: [],
+            isV17: false,
           });
         }
       } finally {
@@ -107,10 +147,11 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     fetchOi();
     const interval = setInterval(fetchOi, 30000); // Refresh every 30s
     return () => clearInterval(interval);
-  }, [slabAddress, mockMode, engine]);
+  }, [slabAddress, mockMode, engine, isV17, oiLong, oiShort]);
 
-  // Calculate percentages, imbalance, and OI utilization
-  const { longPct, shortPct, imbalancePct, imbalanceLabel, imbalanceColor, oiUtilPct, oiUtilColor } =
+  // Calculate percentages and imbalance (unaffected by USD conversion — a
+  // uniform price multiplier cancels out of a long/short ratio).
+  const { longPct, shortPct, imbalancePct, imbalanceLabel, imbalanceColor } =
     useMemo(() => {
       if (!oiData) {
         return {
@@ -119,8 +160,6 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
           imbalancePct: 0,
           imbalanceLabel: "Balanced",
           imbalanceColor: "text-[var(--text-secondary)]",
-          oiUtilPct: 0,
-          oiUtilColor: "var(--accent)",
         };
       }
 
@@ -131,16 +170,6 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
       const longPercent = totalNum > 0 ? (longNum / totalNum) * 100 : 50;
       const shortPercent = totalNum > 0 ? (shortNum / totalNum) * 100 : 50;
       const imbalance = longPercent - shortPercent;
-
-      // OI Utilization: ratio of total OI to max capacity
-      // Use maxOpenInterest from market data if available, otherwise default to $5M
-      const maxOi = 5_000_000 * 1e6; // $5M in e6 units — placeholder until market.maxOpenInterest is available
-      const utilization = maxOi > 0 ? Math.min(totalNum / maxOi, 1) : 0;
-      // Dynamic color based on utilization level
-      const utilColor =
-        utilization < 0.5 ? "var(--accent)" :     // purple — normal
-        utilization < 0.8 ? "var(--warning)" :     // yellow — elevated
-        "var(--short)";                             // red — near capacity
 
       let label = "Balanced";
       let color = "text-[var(--text-secondary)]";
@@ -172,8 +201,6 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
         imbalancePct: imbalance,
         imbalanceLabel: label,
         imbalanceColor: color,
-        oiUtilPct: utilization * 100,
-        oiUtilColor: utilColor,
       };
     }, [oiData]);
 
@@ -203,9 +230,16 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
     );
   }
 
-  const totalOiUsd = formatUsdAmount(oiData.totalOi || "0", tokenDecimals);
-  const longOiUsd = formatUsdAmount(oiData.longOi || "0", tokenDecimals);
-  const shortOiUsd = formatUsdAmount(oiData.shortOi || "0", tokenDecimals);
+  // H12: oiData.isV17 (set by the fetch/fallback above) is the source of
+  // truth for how to interpret the raw numbers; fall back to the live hook's
+  // isV17 only for defensive/legacy shapes.
+  const dataIsV17 = oiData.isV17 ?? isV17;
+  const totalOiUsd = formatOiUsd(oiData.totalOi || "0", dataIsV17, priceUsd, tokenDecimals);
+  const longOiUsd = formatOiUsd(oiData.longOi || "0", dataIsV17, priceUsd, tokenDecimals);
+  const shortOiUsd = formatOiUsd(oiData.shortOi || "0", dataIsV17, priceUsd, tokenDecimals);
+  // v17 has no per-portfolio LP-net aggregation server-side yet (the API
+  // always returns "0") — showing it as real data would fabricate a $0 LP
+  // position. Only render it on v12, where it's genuinely computed.
   const lpNetUsd = formatSignedUsdAmount(oiData.netLpPosition || "0", tokenDecimals);
   const lpDirection = BigInt(oiData.netLpPosition ?? "0") >= 0n ? "long" : "short";
 
@@ -223,29 +257,8 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
           className="text-sm font-bold text-[var(--text)]"
           style={{ fontFamily: "var(--font-mono)" }}
         >
-          ${totalOiUsd}
+          {totalOiUsd != null ? `$${totalOiUsd}` : "—"}
         </span>
-      </div>
-
-      {/* OI Utilization bar with label */}
-      <div className="mb-1.5">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="text-[9px] uppercase tracking-[0.04em] text-[var(--text-secondary)]">
-            OI Utilization
-          </span>
-          <span
-            className="text-[9px] font-medium"
-            style={{ fontFamily: "var(--font-mono)", color: oiUtilColor, fontVariantNumeric: "tabular-nums" }}
-          >
-            {Math.round(oiUtilPct)}%
-          </span>
-        </div>
-        <div className="h-1.5 w-full overflow-hidden rounded-sm bg-[var(--border)]/30">
-          <div
-            className="h-full transition-all duration-500 ease-out rounded-sm"
-            style={{ width: `${oiUtilPct}%`, backgroundColor: oiUtilColor }}
-          />
-        </div>
       </div>
 
       {/* Long/Short bars — compact inline */}
@@ -254,7 +267,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
           <div className="mb-0.5 flex items-center justify-between">
             <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Long</span>
             <span className="text-[10px] font-medium text-[var(--long)]" style={{ fontFamily: "var(--font-mono)" }}>
-              ${longOiUsd} ({longPct.toFixed(1)}%)
+              {longOiUsd != null ? `$${longOiUsd}` : "—"} ({longPct.toFixed(1)}%)
             </span>
           </div>
           <div className="h-1 w-full overflow-hidden bg-[var(--border)]/30">
@@ -265,7 +278,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
           <div className="mb-0.5 flex items-center justify-between">
             <span className="text-[9px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Short</span>
             <span className="text-[10px] font-medium text-[var(--short)]" style={{ fontFamily: "var(--font-mono)" }}>
-              ${shortOiUsd} ({shortPct.toFixed(1)}%)
+              {shortOiUsd != null ? `$${shortOiUsd}` : "—"} ({shortPct.toFixed(1)}%)
             </span>
           </div>
           <div className="h-1 w-full overflow-hidden bg-[var(--border)]/30">
@@ -274,8 +287,9 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
         </div>
       </div>
 
-      {/* Imbalance + LP Net — compact two-column row */}
-      <div className="mb-1.5 grid grid-cols-2 gap-1">
+      {/* Imbalance + LP Net — compact two-column row. LP Net is v12-only real
+          data (v17 has no per-portfolio aggregation yet, see above). */}
+      <div className={`mb-1.5 grid gap-1 ${dataIsV17 ? "grid-cols-1" : "grid-cols-2"}`}>
         <div className="rounded-none border-l-2 border-l-[var(--border)] bg-[var(--bg-elevated)] px-1.5 py-1">
           <div className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Imbalance</div>
           <div className={`text-[11px] font-bold ${imbalanceColor}`} style={{ fontFamily: "var(--font-mono)" }}>
@@ -283,6 +297,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
           </div>
           <div className="text-[8px] text-[var(--text-secondary)]">{imbalanceLabel}</div>
         </div>
+        {!dataIsV17 && (
         <div className="rounded-none border border-[var(--border)]/30 bg-[var(--bg)] px-1.5 py-1">
           <div className="flex items-center gap-0.5">
             <span className="text-[8px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">LP Net</span>
@@ -293,6 +308,7 @@ export const OpenInterestCard: FC<{ slabAddress: string }> = ({
           </div>
           <div className="text-[8px] text-[var(--text-secondary)]">({lpDirection})</div>
         </div>
+        )}
       </div>
 
       {/* 24h OI mini chart */}
