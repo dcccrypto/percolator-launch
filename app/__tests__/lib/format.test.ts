@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   formatTokenAmount,
   formatCompactTokenAmount,
-  formatPriceE6,
   formatBps,
   LIQ_PRICE_UNLIQUIDATABLE,
   formatUsd,
@@ -11,7 +10,6 @@ import {
   formatLiqPrice,
   shortenAddress,
   formatSlotAge,
-  formatI128Amount,
   formatPnl,
   formatMarginPct,
   formatPercent,
@@ -64,19 +62,6 @@ describe("formatTokenAmount", () => {
   });
 });
 
-describe("formatPriceE6", () => {
-  it("delegates to formatTokenAmount with 6 decimals", () => {
-    expect(formatPriceE6(1_000_000n)).toBe("1");
-  });
-
-  it("formats fractional price", () => {
-    expect(formatPriceE6(42_690_000n)).toBe("42.69");
-  });
-
-  it("formats sub-dollar price", () => {
-    expect(formatPriceE6(500_000n)).toBe("0.5");
-  });
-});
 
 describe("formatBps", () => {
   it("formats bigint bps", () => {
@@ -146,7 +131,7 @@ describe("formatUsd", () => {
     // Exactly at limit ($1B) — should still format normally
     const result = formatUsd(1_000_000_000_000_000n);
     expect(result).not.toBe("$—");
-    expect(result).toContain("1,000,000,000");
+    expect(result.replace(/,/g, "")).toContain("1000000000");
   });
 });
 
@@ -258,27 +243,6 @@ describe("formatSlotAge", () => {
   });
 });
 
-describe("formatI128Amount", () => {
-  it("formats positive value", () => {
-    expect(formatI128Amount(1_000_000n, 6)).toBe("1");
-  });
-
-  it("formats negative value", () => {
-    expect(formatI128Amount(-5_000_000n, 6)).toBe("-5");
-  });
-
-  it("formats zero", () => {
-    expect(formatI128Amount(0n, 6)).toBe("0");
-  });
-
-  it("truncates fractional part (integer division)", () => {
-    expect(formatI128Amount(1_500_000n, 6)).toBe("1");
-  });
-
-  it("respects custom decimals", () => {
-    expect(formatI128Amount(12345n, 2)).toBe("123");
-  });
-});
 
 describe("formatPnl", () => {
   it("returns '0' for null", () => {

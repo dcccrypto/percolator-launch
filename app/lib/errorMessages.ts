@@ -52,7 +52,7 @@ const ERROR_CODE_MAP: Record<number, string> = {
   6: "Missing required signature.",
   7: "An account that must be writable was passed as read-only.",
   8: "Unauthorized - you don't have permission for this action.",
-  9: "Invalid or unsupported instruction.",
+  9: "Invalid or unsupported instruction. (If this is a market order, the market's matcher config may be misaligned on-chain. Please report this to the team.)",
   10: "Invalid mint account.",
   11: "Invalid token account.",
   12: "Invalid vault account.",

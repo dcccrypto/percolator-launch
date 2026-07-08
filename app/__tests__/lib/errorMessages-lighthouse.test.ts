@@ -24,11 +24,11 @@ describe("humanizeError — Lighthouse/Blowfish detection", () => {
     expect(humanizeError(raw)).toBe(LIGHTHOUSE_USER_MESSAGE);
   });
 
-  it("does NOT classify generic 0x0e (Percolator error 14) as Lighthouse", () => {
-    const raw = `Transaction simulation failed: custom program error: 0x0e`;
+  it("does NOT classify generic 0x31 (Percolator error 49) as Lighthouse", () => {
+    const raw = `Transaction simulation failed: custom program error: 0x31`;
     const result = humanizeError(raw);
     expect(result).not.toBe(LIGHTHOUSE_USER_MESSAGE);
-    expect(result).toContain("Undercollateralized");
+    expect(result).toContain("Insufficient margin");
   });
 
   it("does NOT classify generic unknown errors as Lighthouse", () => {
