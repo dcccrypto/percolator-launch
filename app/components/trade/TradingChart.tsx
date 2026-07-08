@@ -28,6 +28,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useLiqPrice } from "@/hooks/useLiqPrice";
 import { useChartTheme } from "@/hooks/useChartTheme";
 import { ChartEmptyState } from "./ChartEmptyState";
+import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { ChartStyleMenu } from "./ChartStyleMenu";
 import { ChartDisplayMenu } from "./ChartDisplayMenu";
 import { ChartPnlBadge } from "./ChartPnlBadge";
@@ -316,6 +317,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   const seriesRef = useRef<ISeriesApi<ChartSeriesKind> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const priceLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
+  // Tracks the previous tick's price purely to color the mark-price line —
+  // no React state involved (see the "Live tick -> chart" effect below),
+  // so this doesn't add a re-render on every tick.
+  const prevTickPriceRef = useRef<number | null>(null);
   const liqLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   const entryLineRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
   // Phase 2: the currently-forming bar/point, kept in sync by the structural
@@ -644,6 +649,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     priceLineRef.current = null;
     liqLineRef.current = null;
     entryLineRef.current = null;
+    prevTickPriceRef.current = null;
 
     // Series selection.
     //
@@ -931,7 +937,16 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
       const usd = snap.priceUsd;
 
       if (priceLineRef.current) {
-        priceLineRef.current.applyOptions({ price: usd });
+        // Hyperliquid-style: the mark price tag on the right axis tints
+        // long-green/short-red on each tick instead of sitting flat gray —
+        // same semantic tokens as MarketInfoBar's MarkPrice flash, applied
+        // here via the price line's own color (canvas can't read CSS vars,
+        // so these are the literal --long/--short hex values). Holds its
+        // last color on an exact-equal tick rather than resetting to gray.
+        const prev = prevTickPriceRef.current;
+        const color = prev == null ? "rgba(255,255,255,0.6)" : usd > prev ? "#14F195" : usd < prev ? "#FF3B5C" : undefined;
+        prevTickPriceRef.current = usd;
+        priceLineRef.current.applyOptions(color ? { price: usd, color } : { price: usd });
       }
 
       const series = seriesRef.current;
@@ -973,6 +988,12 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
   // so that lightweight-charts can create its canvas. Sparse/empty state is
   // rendered as an overlay inside the container below.
   const showEmptyOverlay = totalDataPoints === 0 || effectiveSparse;
+  // Distinguishes "still fetching, first paint hasn't happened yet" from
+  // "all three sources settled and there's genuinely no data" — previously
+  // both looked identical (instant "No chart data yet"), which reads as
+  // broken on a fresh page load even though a request is in flight.
+  const anySourceLoading = pythStatus === "loading" || externalStatus === "loading" || percolatorStatus === "loading";
+  const showLoadingOverlay = totalDataPoints === 0 && anySourceLoading;
 
   return (
     <div className="flex h-full flex-col rounded-none border border-[var(--border)] bg-[var(--panel-bg)] p-3">
@@ -1128,7 +1149,17 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
                 empty-state overlay. The price TEXT itself, once this branch
                 is chosen, is the isolated LiveMarkPriceLabel leaf so it still
                 updates live if the overlay stays visible for a while. */}
-            {getSnapshot(slabAddress).priceUsd != null && getSnapshot(slabAddress).priceUsd! > 0 ? (
+            {showLoadingOverlay ? (
+              <div className="flex items-end gap-1" aria-label="Loading chart data" role="status">
+                {/* Skyline of shimmer bars hints at the candlestick shape to
+                    come, rather than a generic spinner — same shimmer system
+                    (ShimmerSkeleton) already used for MarketBookCard's
+                    loading state. */}
+                {[14, 22, 10, 26, 16, 20, 12].map((h, i) => (
+                  <ShimmerSkeleton key={i} className="w-2" style={{ height: `${h}px` }} />
+                ))}
+              </div>
+            ) : getSnapshot(slabAddress).priceUsd != null && getSnapshot(slabAddress).priceUsd! > 0 ? (
               <>
                 <LiveMarkPriceLabel />
                 <div className="mt-1 text-[10px] uppercase tracking-[0.15em] text-[var(--text-dim)]">

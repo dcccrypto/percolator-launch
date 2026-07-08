@@ -61,6 +61,7 @@ import { TradeHistory } from "./TradeHistory";
 import { InfoIcon } from "@/components/ui/Tooltip";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
+import { usePriceFlash } from "@/hooks/usePriceFlash";
 import { getEntryPrice, clearEntryPrice } from "@/lib/entry-price";
 import { applyInvert, sanitizePriceE6 } from "@/lib/oraclePrice";
 import { isSentinelValue } from "@/lib/health";
@@ -108,6 +109,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const decimals = tokenMeta?.decimals ?? 6;
 
   const { closePosition, loading: closeLoading, error: closeError } = useClosePosition(slabAddress);
+  // Called unconditionally, before the `!activeInfo` early return below, per
+  // rules of hooks — mirrors MarketInfoBar's MarkPrice / MarketBookCard's
+  // Oracle cell (same shared hook, see hooks/usePriceFlash.ts).
+  const markFlash = usePriceFlash(livePriceE6 ?? null);
   const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
   const oracleStale = !mockMode && (oracleUnavailable || (oracleReady && oracleLevel === "stale" && (oracleMode === "admin" || oracleMode === "hyperp")));
@@ -285,8 +290,15 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {formatUsdPriceE6(entryPriceE6)}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
-                {hasValidMark ? formatUsdPriceE6(currentPriceE6) : <span className="text-[var(--text-dim)]">--</span>}
+              <td
+                className={`whitespace-nowrap px-3 py-2.5 text-right transition-colors duration-300 ease-out ${
+                  hasValidMark
+                    ? markFlash === "up" ? "text-[var(--long)]" : markFlash === "down" ? "text-[var(--short)]" : "text-[var(--text)]"
+                    : "text-[var(--text-dim)]"
+                }`}
+                style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}
+              >
+                {hasValidMark ? formatUsdPriceE6(currentPriceE6) : "--"}
               </td>
               <td
                 className={`whitespace-nowrap px-3 py-2.5 text-right font-medium ${liqPriceColor}`}

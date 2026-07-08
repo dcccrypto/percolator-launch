@@ -152,3 +152,62 @@ export function priceE6ToUsd(priceE6: bigint): number | null {
   if (priceE6 <= 0n) return null;
   return Number(priceE6) / 1_000_000;
 }
+
+export interface MarketSpreadInfo {
+  markPriceE6: bigint | null;
+  indexPriceE6: bigint | null;
+  spreadBps: number | null;
+  oracleMode: OracleMode | null;
+}
+
+/**
+ * Compute mark/index price and their spread (bps) for a market, mode-aware.
+ *
+ * Single source of truth for the mark-vs-index spread math shared by
+ * MarketStatsCard (analytics) and MarketInfoBar (always-visible top bar) —
+ * keep any bug fixes here rather than duplicating at call sites.
+ */
+export function computeMarketSpread(
+  mktConfig: {
+    oracleAuthority: PublicKey;
+    indexFeedId: PublicKey;
+    authorityPriceE6: bigint;
+    lastEffectivePriceE6: bigint;
+  } | null,
+  oracleModeByte?: number,
+): MarketSpreadInfo {
+  if (!mktConfig) return { markPriceE6: null, indexPriceE6: null, spreadBps: null, oracleMode: null };
+
+  const mode = detectOracleMode({ ...mktConfig, oracleModeByte });
+  let mark: bigint | null = null;
+  let index: bigint | null = null;
+
+  if (mode === "hyperp" || mode === "admin" || mode === "keeper") {
+    // authorityPriceE6 = latest pushed/mark price; lastEffectivePriceE6 = EMA/effective/index price.
+    // Bug #1131: for HYPERP/admin markets, authorityPriceE6 can be corrupted (e.g. raw token
+    // vault amounts stored as price). Guard: reject if price > MAX_PRICE_E6.
+    const rawMark = sanitizePriceE6(mktConfig.authorityPriceE6);
+    mark = rawMark > 0n && rawMark <= MAX_PRICE_E6 ? rawMark : null;
+    index = sanitizePriceE6(mktConfig.lastEffectivePriceE6);
+    if (index === 0n) index = null;
+    // Bug #843: for admin mode, lastEffectivePriceE6 may be uninitialized (e.g. 1000 = $0.001)
+    // when KeeperCrank hasn't run yet. If index is >100x smaller than mark, suppress it
+    // to avoid nonsensical spread display (e.g. +200,000,000%).
+    if (mode === "admin" && mark !== null && index !== null && index > 0n) {
+      const ratio = Number(mark) / Number(index);
+      if (ratio > 100) index = null;
+    }
+  } else {
+    // pyth-pinned: mark ≈ index (Pyth IS the oracle — no separate mark/index distinction)
+    const p = sanitizePriceE6(mktConfig.lastEffectivePriceE6);
+    mark = p > 0n ? p : null;
+    index = mark;
+  }
+
+  let bps: number | null = null;
+  if (mark !== null && index !== null && index > 0n) {
+    bps = (Number(mark - index) / Number(index)) * 10000;
+  }
+
+  return { markPriceE6: mark, indexPriceE6: index, spreadBps: bps, oracleMode: mode };
+}
