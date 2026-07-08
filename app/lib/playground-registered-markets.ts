@@ -21,6 +21,14 @@ import { list, put } from "@vercel/blob";
 /** Fixed, non-random-suffixed pathname — there is exactly one blob for this store. */
 export const REGISTERED_MARKETS_BLOB_PATHNAME = "playground/registered-markets.json";
 
+/**
+ * H1 hardening: cap the registry so an unbounded stream of registrations (the
+ * route was previously unauthenticated) can't grow this blob without limit —
+ * every entry is read back on every /api/markets and /api/playground/registered-markets
+ * request. Oldest-by-registeredAt entries are evicted first (see upsertRegisteredMarket).
+ */
+export const MAX_REGISTERED_MARKETS = 100;
+
 export interface RegisteredMarket {
   /** Devnet slab (market) account address. */
   slabAddress: string;
@@ -112,7 +120,11 @@ export async function writeRegisteredMarkets(
 
 /**
  * Upsert a single market by `slabAddress` (dedup — replace if present, else append)
- * and persist the result. Returns the updated array.
+ * and persist the result. Caps the registry at MAX_REGISTERED_MARKETS, evicting the
+ * oldest entries (by `registeredAt`) first when a fresh registration would exceed it
+ * — re-registering an existing slab refreshes its `registeredAt` (see the route),
+ * which keeps actively-used markets from aging out ahead of stale ones. Returns the
+ * updated array.
  */
 export async function upsertRegisteredMarket(
   entry: RegisteredMarket,
@@ -124,6 +136,19 @@ export async function upsertRegisteredMarket(
   } else {
     existing.push(entry);
   }
-  await writeRegisteredMarkets(existing);
-  return existing;
+
+  let capped = existing;
+  if (capped.length > MAX_REGISTERED_MARKETS) {
+    const overflow = capped.length - MAX_REGISTERED_MARKETS;
+    const evictSlabs = new Set(
+      [...capped]
+        .sort((a, b) => a.registeredAt - b.registeredAt)
+        .slice(0, overflow)
+        .map((m) => m.slabAddress),
+    );
+    capped = capped.filter((m) => !evictSlabs.has(m.slabAddress));
+  }
+
+  await writeRegisteredMarkets(capped);
+  return capped;
 }

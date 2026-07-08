@@ -11,6 +11,12 @@
  * Only callable on devnet. Global rate limiting (120 req/min/IP) is handled
  * by middleware.ts. mintAddress must be in DEVNET_ALLOWED_MINTS env var.
  *
+ * H3: balance is checked BEFORE the 24h per-wallet-per-mint rate gate is consulted.
+ * A single wizard launch calls this endpoint up to 3× (vault seed, LP collateral,
+ * insurance top-up) for the SAME wallet + SAME shared sim-USDC mint, so they'd
+ * otherwise collide on one gate claim. Sufficient-balance is a 200 no-op that never
+ * touches the gate; the gate is only consulted/consumed right before an actual mint.
+ *
  * Requires: DEVNET_MINT_AUTHORITY_KEYPAIR env var (JSON secret key bytes)
  * — the keypair must be the mint authority for the given mint.
  */
@@ -285,7 +291,62 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid walletAddress" }, { status: 400 });
     }
 
+    const cfg = getConfig();
+
+    // #873 defense-in-depth: verify RPC endpoint is devnet before any on-chain operation.
+    // getRpcEndpoint() returns the actual Helius URL server-side (not the /api/rpc proxy).
+    // Mainnet Helius URL contains "mainnet"; devnet contains "devnet".
+    // Public devnet RPC (api.devnet.solana.com) and localhost are also allowed.
+    try {
+      const rpcHostname = new URL(cfg.rpcUrl).hostname;
+      const isDevnetRpc =
+        rpcHostname.includes("devnet") ||
+        rpcHostname === "localhost" ||
+        rpcHostname === "127.0.0.1";
+      if (!isDevnetRpc) {
+        Sentry.captureMessage(
+          `devnet-pre-fund called with non-devnet RPC: ${rpcHostname}`,
+          { level: "warning", tags: { endpoint: "/api/devnet-pre-fund" } },
+        );
+        return NextResponse.json({ error: "Only available on devnet" }, { status: 403 });
+      }
+    } catch {
+      // Malformed RPC URL — getConfig() validated it, so this should never happen
+    }
+
+    const connection = new Connection(cfg.rpcUrl, "confirmed");
+
+    // H3: read the on-chain balance FIRST — before touching the 24h rate gate.
+    // All three devnet-pre-fund calls inside a single wizard launch (vault seed,
+    // LP collateral, insurance top-up — see hooks/useCreateMarket.ts) target the
+    // SAME shared sim-USDC collateral mint for the SAME wallet, so they all hash to
+    // one gate key (`rateKey` below). Checking the gate before the balance meant the
+    // 2nd/3rd call in one flow always hit the 1st call's still-open 24h claim and
+    // 429'd, throwing mid-launch. FUND_AMOUNT already tops up to 2× the full
+    // three-step requirement, so once the first call funds the wallet the remaining
+    // calls in the same flow see a sufficient balance here and return a 200 no-op —
+    // the gate is never touched again for the rest of that launch.
+    const ata = await getAssociatedTokenAddress(mintPk, walletPk);
+    let currentBalance = 0n;
+    let ataExists = false;
+    try {
+      const acct = await getAccount(connection, ata);
+      currentBalance = acct.amount;
+      ataExists = true;
+    } catch {
+      // ATA doesn't exist yet
+    }
+
+    if (currentBalance >= FULL_MARKET_TOKEN_REQUIREMENT) {
+      return NextResponse.json({
+        status: "sufficient",
+        balance: currentBalance.toString(),
+        message: "Wallet already has sufficient tokens",
+      });
+    }
+
     // Rate limit: DB-backed when Supabase available, in-memory fallback otherwise.
+    // Only consumed here — once we know a real mint is about to happen.
     const fundType = `devnet-pre-fund:${mintAddress}`;
     const rateKey = `${walletAddress}:${fundType}`;
     let supabaseForGate: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
@@ -326,31 +387,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const cfg = getConfig();
-
-    // #873 defense-in-depth: verify RPC endpoint is devnet before any on-chain operation.
-    // getRpcEndpoint() returns the actual Helius URL server-side (not the /api/rpc proxy).
-    // Mainnet Helius URL contains "mainnet"; devnet contains "devnet".
-    // Public devnet RPC (api.devnet.solana.com) and localhost are also allowed.
-    try {
-      const rpcHostname = new URL(cfg.rpcUrl).hostname;
-      const isDevnetRpc =
-        rpcHostname.includes("devnet") ||
-        rpcHostname === "localhost" ||
-        rpcHostname === "127.0.0.1";
-      if (!isDevnetRpc) {
-        Sentry.captureMessage(
-          `devnet-pre-fund called with non-devnet RPC: ${rpcHostname}`,
-          { level: "warning", tags: { endpoint: "/api/devnet-pre-fund" } },
-        );
-        return NextResponse.json({ error: "Only available on devnet" }, { status: 403 });
-      }
-    } catch {
-      // Malformed RPC URL — getConfig() validated it, so this should never happen
-    }
-
-    const connection = new Connection(cfg.rpcUrl, "confirmed");
-
     // Pre-flight: verify the configured keypair is actually the mint authority
     // This catches env misconfigurations early with a clear error instead of
     // a generic "Internal server error" from a failed mintTo instruction.
@@ -380,35 +416,6 @@ export async function POST(req: NextRequest) {
       // If we can't fetch mint info, proceed and let the tx fail naturally
       Sentry.captureException(e, {
         tags: { endpoint: "/api/devnet-pre-fund", phase: "authority-check" },
-      });
-    }
-
-    // Derive user's ATA
-    const ata = await getAssociatedTokenAddress(mintPk, walletPk);
-
-    // Check current balance — if already sufficient, skip minting
-    let currentBalance = 0n;
-    let ataExists = false;
-    try {
-      const acct = await getAccount(connection, ata);
-      currentBalance = acct.amount;
-      ataExists = true;
-    } catch {
-      // ATA doesn't exist yet
-    }
-
-    if (currentBalance >= FULL_MARKET_TOKEN_REQUIREMENT) {
-      // Release gate so concurrent requests (and future calls) aren't locked out
-      if (supabaseForGate && gate.claimId != null) {
-        try {
-          const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate");
-          await releaseFaucetClaim(supabaseForGate, gate.claimId);
-        } catch { /* best-effort */ }
-      }
-      return NextResponse.json({
-        status: "sufficient",
-        balance: currentBalance.toString(),
-        message: "Wallet already has sufficient tokens",
       });
     }
 
