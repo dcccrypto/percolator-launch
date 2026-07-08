@@ -263,6 +263,17 @@ export async function POST(req: NextRequest) {
     const supabaseForGate = getServiceClient();
     const fundType = `devnet-pre-fund:${mintAddress}`;
     const gate = await tryFaucetGate(supabaseForGate, walletAddress, fundType);
+    // GH#2216: gate could not verify/reserve a claim slot (DB unavailable).
+    // Fail closed with a retryable 503 — NOT a 429, the wallet isn't rate-limited.
+    if (gate.degraded) {
+      return NextResponse.json(
+        {
+          error: "Pre-fund temporarily unavailable. Please retry in a few minutes.",
+          retryable: true,
+        },
+        { status: 503 },
+      );
+    }
     if (!gate.allowed) {
       return NextResponse.json(
         {

@@ -18,7 +18,8 @@ const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 type ClaimGateResult =
   | { allowed: true; claimId: number }
-  | { allowed: false; nextClaimAt: string };
+  | { allowed: false; nextClaimAt: string }
+  | { allowed: false; degraded: true };
 
 /**
  * Pure logic version of tryAirdropClaimGate for unit testing.
@@ -53,8 +54,9 @@ function simulateClaimGate(params: {
     return { allowed: false, nextClaimAt: new Date(Date.now() + RATE_LIMIT_WINDOW_MS).toISOString() };
   }
 
-  // Unexpected DB error — fail open
-  return { allowed: true, claimId: -1 };
+  // GH#2216: unexpected DB error — fail CLOSED (no durable claim reservation
+  // → no server-funded transaction). Route surfaces a retryable 503.
+  return { allowed: false, degraded: true };
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -113,9 +115,12 @@ describe("GH#1588 — INSERT-as-gate rate limit for /api/airdrop", () => {
   });
 
   describe("unexpected DB error", () => {
-    it("fails open (allows claim) on unexpected DB errors to avoid blocking users", () => {
+    it("fails closed (denies claim, degraded) so a claim-table outage cannot mint unmetered (GH#2216)", () => {
       const result = simulateClaimGate({ deleteExpired: false, insertError: "other" });
-      expect(result.allowed).toBe(true);
+      expect(result.allowed).toBe(false);
+      if (!result.allowed && "degraded" in result) {
+        expect(result.degraded).toBe(true);
+      }
     });
   });
 

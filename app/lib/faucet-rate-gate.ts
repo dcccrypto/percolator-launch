@@ -20,6 +20,13 @@ export interface GateResult {
   allowed: boolean;
   nextClaimAt: string | null;
   claimId?: number;
+  /**
+   * GH#2216: true when the gate could not reach / verify the claim table.
+   * The invariant is "no durable claim reservation → no server-funded
+   * transaction", so DB failures deny (`allowed: false`) — but callers
+   * should surface a retryable 503 rather than a misleading 429.
+   */
+  degraded?: boolean;
 }
 
 /**
@@ -45,13 +52,22 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
     // The race applies to concurrent FIRST-time requests (two requests both see
     // no row and race to INSERT). For already-rate-limited wallets (active claim
     // already exists), the SELECT reliably returns the row without any race.
-    const { data: activeClaim } = await supabase
+    const { data: activeClaim, error: preCheckError } = await supabase
       .from("faucet_claims")
       .select("claimed_at")
       .eq("wallet", wallet)
       .eq("fund_type", fundType)
       .gte("claimed_at", windowStart)
       .maybeSingle();
+
+    // GH#2216: a failed pre-check must not be treated as "no active claim" —
+    // without a verified claim state we cannot reserve a slot, so deny.
+    if (preCheckError) {
+      console.warn(
+        `[faucet-gate] pre-check SELECT error (code=${preCheckError.code}): ${preCheckError.message}`,
+      );
+      return { allowed: false, nextClaimAt: null, degraded: true };
+    }
 
     if (activeClaim) {
       const nextClaimAt = new Date(
@@ -91,15 +107,19 @@ export async function tryFaucetGate(supabase: any, wallet: string, fundType: str
         return { allowed: false, nextClaimAt };
       }
 
-      // Unexpected DB error — fail open (devnet-only, don't block users)
+      // GH#2216: unexpected DB error — fail CLOSED. Proceeding here would run
+      // the server-funded path with no durable claim reservation, so a claim-
+      // table outage would allow unmetered airdrops/minting. Callers surface
+      // this as a retryable 503 via `degraded`.
       console.warn(`[faucet-gate] INSERT error (code=${error.code}): ${error.message}`);
-      return { allowed: true, nextClaimAt: null };
+      return { allowed: false, nextClaimAt: null, degraded: true };
     }
 
     return { allowed: true, nextClaimAt: null, claimId: (data as { id: number } | null)?.id };
   } catch (err) {
+    // GH#2216: thrown errors fail closed for the same reason as above.
     console.warn("[faucet-gate] threw:", err instanceof Error ? err.message : String(err));
-    return { allowed: true, nextClaimAt: null };
+    return { allowed: false, nextClaimAt: null, degraded: true };
   }
 }
 

@@ -123,6 +123,19 @@ export async function POST(req: NextRequest) {
     const supabase = getServiceClient();
     const gate = await tryFaucetGate(supabase, walletAddress, type);
 
+    // GH#2216: gate could not verify/reserve a claim slot (DB unavailable).
+    // Fail closed with a retryable 503 — NOT a 429, the wallet isn't rate-limited.
+    if (gate.degraded) {
+      return NextResponse.json(
+        {
+          error: "Faucet temporarily unavailable. Please retry in a few minutes.",
+          funded: false,
+          retryable: true,
+        },
+        { status: 503 },
+      );
+    }
+
     if (!gate.allowed) {
       return NextResponse.json(
         {

@@ -88,19 +88,25 @@ async function tryClaimGate(
   supabase: ReturnType<typeof getServiceClient>,
   walletAddress: string,
   mintAddress: string,
-): Promise<{ allowed: boolean; retryAfterSecs: number; claimId?: number }> {
+): Promise<{ allowed: boolean; retryAfterSecs: number; claimId?: number; degraded?: boolean }> {
   const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
 
   try {
     // Pre-check (GH#1803-style): active claim in window → deny before INSERT so a
     // transient INSERT error cannot fail-open into the mint path for rate-limited wallets.
-    const { data: activeClaim } = await supabase
+    const { data: activeClaim, error: preCheckError } = await supabase
       .from("devnet_airdrop_claims")
       .select("claimed_at")
       .eq("wallet", walletAddress)
       .eq("mint", mintAddress)
       .gte("claimed_at", windowStart)
       .maybeSingle();
+
+    // GH#2216: a failed pre-check must not be treated as "no active claim".
+    if (preCheckError) {
+      console.warn(`[devnet-airdrop] gate pre-check error (code=${preCheckError.code}): ${preCheckError.message}`);
+      return { allowed: false, retryAfterSecs: 0, degraded: true };
+    }
 
     if (activeClaim) {
       const age = Date.now() - new Date(activeClaim.claimed_at as string).getTime();
@@ -146,14 +152,16 @@ async function tryClaimGate(
         return { allowed: false, retryAfterSecs: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000) };
       }
 
-      // Unexpected DB error — fail open to avoid blocking users; capture for alerting.
+      // GH#2216: unexpected DB error — fail CLOSED. Without a durable claim
+      // reservation the server-funded mint path must not run; callers surface
+      // this as a retryable 503 via `degraded`. Capture for alerting.
       const dbErr = new Error(`[devnet-airdrop] gate INSERT failed: ${error.message}`);
       console.warn(dbErr.message);
       Sentry.captureException(dbErr, {
         tags: { endpoint: "/api/devnet-airdrop", step: "try_claim_gate" },
         extra: { supabase_code: error.code, walletAddress, mintAddress },
       });
-      return { allowed: true, retryAfterSecs: 0 };
+      return { allowed: false, retryAfterSecs: 0, degraded: true };
     }
 
     return { allowed: true, retryAfterSecs: 0, claimId: data?.id };
@@ -164,7 +172,8 @@ async function tryClaimGate(
       tags: { endpoint: "/api/devnet-airdrop", step: "try_claim_gate" },
       extra: { walletAddress, mintAddress },
     });
-    return { allowed: true, retryAfterSecs: 0 };
+    // GH#2216: fail closed — no verified claim state, no server-funded mint.
+    return { allowed: false, retryAfterSecs: 0, degraded: true };
   }
 }
 
@@ -505,7 +514,15 @@ export async function POST(req: NextRequest) {
 
     // 2. INSERT-as-gate: atomically reserve the claim slot BEFORE minting.
     //    This eliminates the TOCTOU race in the previous SELECT→UPSERT flow.
-    const { allowed, retryAfterSecs, claimId } = await tryClaimGate(supabase, walletAddress, mintAddress);
+    const { allowed, retryAfterSecs, claimId, degraded } = await tryClaimGate(supabase, walletAddress, mintAddress);
+    // GH#2216: gate could not verify/reserve a claim slot (DB unavailable).
+    // Fail closed with a retryable 503 — NOT a 429, the wallet isn't rate-limited.
+    if (degraded) {
+      return NextResponse.json(
+        { error: "Airdrop temporarily unavailable. Please retry in a few minutes.", retryable: true },
+        { status: 503 },
+      );
+    }
     if (!allowed) {
       const h = Math.floor(retryAfterSecs / 3600);
       const m = Math.floor((retryAfterSecs % 3600) / 60);
