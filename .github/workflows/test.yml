@@ -15,13 +15,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # hashFiles() is NOT valid in a job-level `if:` (only step-level) — using it there
+  # made GitHub reject the whole workflow ("workflow file issue"). Detect package
+  # presence once here and gate the backend jobs on this output instead.
+  detect-packages:
+    name: Detect packages
+    runs-on: ubuntu-latest
+    outputs:
+      has_packages: ${{ steps.check.outputs.has_packages }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Check for packages/*
+        id: check
+        run: |
+          if [ -f packages/shared/package.json ]; then
+            echo "has_packages=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_packages=false" >> "$GITHUB_OUTPUT"
+          fi
+
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Skip when packages/* workspaces are absent (e.g. waitlist-only forks).
-    # When packages/ is restored from upstream, the guard evaluates true and the job runs.
-    if: hashFiles('packages/shared/package.json') != ''
+    # Backend/monorepo job — runs only when packages/* is present (skips on the
+    # frontend-only playground; auto-runs if the monorepo packages are restored).
+    needs: detect-packages
+    if: needs.detect-packages.outputs.has_packages == 'true'
     env:
       HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
     
@@ -82,8 +103,8 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Skip when packages/* workspaces are absent (e.g. waitlist-only forks).
-    if: hashFiles('packages/shared/package.json') != ''
+    needs: detect-packages
+    if: needs.detect-packages.outputs.has_packages == 'true'
 
     env:
       RPC_URL: ${{ secrets.DEVNET_RPC_URL || 'https://api.devnet.solana.com' }}
@@ -130,8 +151,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Skip on the app-only playground (no packages/* backend + no e2e suite wired).
-    # Runs only when the full monorepo (packages/*) is present.
-    if: hashFiles('packages/shared/package.json') != ''
+    needs: detect-packages
+    if: needs.detect-packages.outputs.has_packages == 'true'
 
     env:
       RPC_URL: ${{ secrets.DEVNET_RPC_URL || 'https://api.devnet.solana.com' }}
@@ -222,8 +243,8 @@ jobs:
     name: Security Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Skip when packages/* workspaces are absent (e.g. waitlist-only forks).
-    if: hashFiles('packages/shared/package.json') != ''
+    needs: detect-packages
+    if: needs.detect-packages.outputs.has_packages == 'true'
 
     steps:
       - name: Checkout code
