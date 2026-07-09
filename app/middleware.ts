@@ -44,8 +44,11 @@ function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | nul
       prefix: "rl:rpc",
       analytics: false,
     });
-  } catch {
+  } catch (err) {
     // Redis init error — fall through to in-memory
+    if (process.env.NODE_ENV === "production") {
+      console.error("[RateLimit] ERROR: Upstash Redis initialization failed:", err);
+    }
     _generalLimiter = null;
     _rpcLimiter = null;
   }
@@ -111,8 +114,15 @@ async function getRateLimit(
         remaining: Math.max(0, remaining),
         reset: Math.max(0, Math.ceil((reset - Date.now()) / 1000)),
       };
-    } catch {
+    } catch (err) {
       // Redis request failed — degrade gracefully to in-memory
+      if (process.env.NODE_ENV === "production") {
+        console.error("[RateLimit] ERROR: Upstash Redis request failed, falling back to in-memory rate limiting:", err);
+      }
+    }
+  } else {
+    if (process.env.NODE_ENV === "production") {
+      console.warn("[RateLimit] WARNING: Upstash Redis is not configured. Falling back to in-memory rate limiting in production!");
     }
   }
 
