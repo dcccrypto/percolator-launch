@@ -7,7 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 import { parseWrapperConfigV17, isV17Account, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/priceStore";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
-import { computeMarkPnl, computeMarkPnlCollateral } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
 import { usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
@@ -51,6 +51,19 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
     }
   })();
 
+  // Live ROE — same basis as the portfolio cards: PnL ÷ the position's own
+  // locked initial margin, capital fallback, hook's pnlPercent last resort.
+  const pnlPct = (() => {
+    try {
+      const im = computePositionInitialMargin(posSize, posEntry, pos.initialMarginBps);
+      if (im > 0n) return computePnlPercent(pnl, im);
+      const capital = pos.account?.capital ?? 0n;
+      return capital > 0n ? computePnlPercent(pnl, capital) : pos.pnlPercent;
+    } catch {
+      return pos.pnlPercent;
+    }
+  })();
+
   const symbol = pos.symbol ?? `${pos.slabAddress.slice(0, 4)}…`;
   const colorClass =
     pnl > 0n ? "text-[var(--long)]" : pnl < 0n ? "text-[var(--short)]" : "text-[var(--text)]";
@@ -72,6 +85,11 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
       </span>
       <span className={`text-[11px] font-bold ${colorClass}`}>
         {sign}{formatTokenAmount(abs, decimals)}
+      </span>
+      {/* ROE — smaller + dimmed so the dollar figure stays the loud number;
+          no extra sign (color + the main value already carry direction). */}
+      <span className={`text-[10px] font-medium opacity-60 ${colorClass}`}>
+        {Math.abs(pnlPct).toFixed(1)}%
       </span>
     </Link>
   );
