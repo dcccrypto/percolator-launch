@@ -67,6 +67,15 @@ const LEVERAGE_SNAP_POINTS = [1, 3, 5, 10, 20];
 const SIZE_PRESETS = [25, 50, 75, 100];
 const MAX_DISPLAY_LEVERAGE = 200;
 
+function sanitizeDecimalInput(value: string): string {
+  const cleaned = value.replace(/[^0-9.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if (dotIndex === -1) return cleaned;
+  return cleaned.slice(0, dotIndex + 1) + cleaned.slice(dotIndex + 1).replace(/\./g, "");
+}
+
+
+
 function parsePercToNative(input: string, decimals = 6): bigint {
   const parts = input.split(".");
   if (parts.length > 2) return 0n;
@@ -396,7 +405,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const handleSizeChange = useCallback(
     (val: string) => {
-      const cleaned = val.replace(/[^0-9.]/g, "");
+      const cleaned = sanitizeDecimalInput(val);
       setSizeInput(cleaned);
       recomputeFromSize(cleaned, sizeUnit, leverage);
     },
@@ -749,7 +758,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
               type="text"
               value={leverageText}
               onChange={(e) => {
-                const raw = e.target.value.replace(/[^0-9.]/g, "");
+                const raw = sanitizeDecimalInput(e.target.value);
                 setLeverageText(raw);
                 const parsed = parseFloat(raw);
                 if (!isNaN(parsed)) updateLeverage(Math.max(1, Math.min(maxLeverage, Math.round(parsed))));
