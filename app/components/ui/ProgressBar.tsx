@@ -6,6 +6,7 @@ interface ProgressBarProps {
   /** Height in pixels (default 8) */
   height?: number;
   className?: string;
+  fillClassName?: string;
 }
 
 /**
@@ -13,8 +14,9 @@ interface ProgressBarProps {
  * - accent (purple) when < 80%
  * - warning (amber) when 80–95%
  * - short (red) when > 95%
+ * Supports custom gradient overlays via fillClassName.
  */
-export function ProgressBar({ value, height = 8, className = "" }: ProgressBarProps) {
+export function ProgressBar({ value, height = 8, className = "", fillClassName = "" }: ProgressBarProps) {
   const clamped = Math.max(0, Math.min(1, value));
   const pct = clamped * 100;
 
@@ -27,7 +29,7 @@ export function ProgressBar({ value, height = 8, className = "" }: ProgressBarPr
 
   return (
     <div
-      className={`w-full overflow-hidden rounded-full bg-[var(--border)] ${className}`}
+      className={`w-full overflow-hidden rounded-full bg-[var(--border)]/30 ${className}`}
       style={{ height }}
       role="progressbar"
       aria-valuenow={Math.round(pct)}
@@ -35,8 +37,11 @@ export function ProgressBar({ value, height = 8, className = "" }: ProgressBarPr
       aria-valuemax={100}
     >
       <div
-        className="h-full rounded-full transition-all duration-500 ease-out"
-        style={{ width: `${pct}%`, backgroundColor: fillColor }}
+        className={`h-full rounded-full transition-all duration-500 ease-out ${fillClassName}`}
+        style={{
+          width: `${pct}%`,
+          backgroundColor: fillClassName ? undefined : fillColor,
+        }}
       />
     </div>
   );

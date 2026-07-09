@@ -8,7 +8,7 @@ import {
   deriveStakePool,
   deriveDepositPda,
 } from "@percolatorct/sdk";
-import { STAKE_POOL_SIZE_V1, decodeStakePoolV1 } from "@/hooks/useStakePool";
+import { STAKE_POOL_SIZE_V1, decodeStakePoolV1, readU64LE } from "@/hooks/useStakePool";
 import { getConfig } from "@/lib/config";
 import { unpackAccount, getMint } from "@solana/spl-token";
 import { useStakeDepositByPool } from "@/hooks/useStakeDepositByPool";
@@ -16,7 +16,7 @@ import { useStakeWithdrawByPool } from "@/hooks/useStakeWithdrawByPool";
 import { InDevelopmentBanner } from "@/components/InDevelopmentBanner";
 import { parseHumanAmount, formatHumanAmount } from "@/lib/parseAmount";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
-import { formatMarkPrice } from "@/lib/format";
+import { formatMarkPrice, slotsToTime } from "@/lib/format";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -106,12 +106,6 @@ function formatUsd(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function slotsToTime(slots: number): string {
-  const seconds = Math.round(slots * 0.4);
-  if (seconds < 60) return `~${seconds}s`;
-  return `~${Math.round(seconds / 60)} min`;
 }
 
 /* ── Live Price ── */
@@ -211,9 +205,9 @@ async function fetchPoolPosition(
 
     const depInfo = await connection.getAccountInfo(depositPdaAddress);
     if (depInfo && depInfo.data.length >= 81) {
-      const depData = Buffer.from(depInfo.data);
+      const depData = new Uint8Array(depInfo.data);
       if (depData[0] === 1) {
-        userDepositSlot = depData.readBigUInt64LE(72);
+        userDepositSlot = readU64LE(depData, 72);
       }
     }
 
@@ -283,59 +277,66 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
     <section className="relative overflow-hidden py-12 lg:py-16">
       <div className="mx-auto max-w-[1100px] px-6">
         <ScrollReveal>
-          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
-            // insurance lp
-          </div>
-          <h1
-            className="mb-4 text-3xl font-medium tracking-[-0.02em] sm:text-4xl lg:text-[56px]"
-            style={{ fontFamily: "var(--font-heading)" }}
-          >
-            <span className="text-[var(--text)]">Stake. Earn.</span>
-            <br />
-            <span className="text-[var(--cyan)]">Back the Fund.</span>
-          </h1>
-          <p className="mb-6 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
-            Deposit collateral into insurance pools to back the Percolator insurance fund.
-          </p>
-
-          <div className="max-w-[640px]">
-            <InDevelopmentBanner>
-              Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
-              distribution on the deployed program — <span className="text-[var(--text)]">APR is
-              genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
-              yield product.
-            </InDevelopmentBanner>
-          </div>
-
-          {/* CTA buttons */}
-          <div className="mb-10 flex flex-wrap items-center gap-3">
-            <a
-              href="#deposit"
-              className="group inline-flex items-center gap-2 rounded-md bg-violet-700 px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-violet-600"
-            >
-              Deposit Now
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
-                <path d="M12 5v14M5 12l7 7 7-7" />
-              </svg>
-            </a>
-            <a
-              href="#pools"
-              className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--cyan)] border-b border-[var(--cyan)]/40 pb-px transition-colors hover:border-[var(--cyan)]/70"
-            >
-              Learn More <span aria-hidden="true">→</span>
-            </a>
-          </div>
-
-          {/* Metrics row */}
-          <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-4">
-            {metrics.map((m) => (
-              <div key={m.label} className="min-w-0 overflow-hidden bg-[var(--panel-bg)] p-3 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
-                <p className="mb-1.5 truncate text-[9px] font-medium uppercase tracking-[0.15em] text-[#9ca3af] sm:text-[10px] sm:tracking-[0.2em]">{m.label}</p>
-                <p className={`truncate text-base font-semibold tracking-tight tabular-nums sm:text-xl ${m.color}`} style={{ fontFamily: "var(--font-heading)" }}>
-                  {m.value}
-                </p>
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_380px] lg:gap-12 items-center">
+            {/* Left Pane: Heading, Description, Actions & Info */}
+            <div className="min-w-0 flex-1">
+              <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+                // insurance lp
               </div>
-            ))}
+              <h1
+                className="mb-4 text-3xl font-medium tracking-[-0.02em] sm:text-4xl lg:text-[52px]"
+                style={{ fontFamily: "var(--font-heading)" }}
+              >
+                <span className="text-[var(--text)]">Stake. Earn.</span>
+                <br />
+                <span className="text-[var(--cyan)]">Back the Fund.</span>
+              </h1>
+              <p className="mb-6 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
+                Deposit collateral into insurance pools to back the Percolator insurance fund.
+              </p>
+
+              {/* CTA buttons */}
+              <div className="mb-6 flex flex-wrap items-center gap-3">
+                <a
+                  href="#deposit"
+                  className="btn btn-md btn-secondary group inline-flex items-center gap-2"
+                >
+                  Deposit Now
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
+                    <path d="M12 5v14M5 12l7 7 7-7" />
+                  </svg>
+                </a>
+                <a
+                  href="#pools"
+                  className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--cyan)] border-b border-[var(--cyan)]/40 pb-px transition-colors hover:border-[var(--cyan)]/70"
+                >
+                  Learn More <span aria-hidden="true">→</span>
+                </a>
+              </div>
+
+              <div className="max-w-[640px]">
+                <InDevelopmentBanner>
+                  Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
+                  distribution on the deployed program — <span className="text-[var(--text)]">APR is
+                  genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
+                  yield product.
+                </InDevelopmentBanner>
+              </div>
+            </div>
+
+            {/* Right Pane: Metrics */}
+            <div className="w-full lg:w-[380px] shrink-0">
+              <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)]">
+                {metrics.map((m) => (
+                  <div key={m.label} className="min-w-0 overflow-hidden bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
+                    <p className="mb-1.5 truncate text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text-secondary)] sm:text-[11px] sm:tracking-[0.2em]">{m.label}</p>
+                    <p className={`truncate text-base font-semibold tracking-tight tabular-nums sm:text-xl ${m.color}`} style={{ fontFamily: "var(--font-heading)" }}>
+                      {m.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </ScrollReveal>
       </div>
@@ -345,29 +346,26 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
 
 /* ── Your Position Panel ── */
 
-/**
- * A single staked-LP position with its own withdraw controls. Split out from
- * YourPositionPanel (S-M1 fix) so each pool position gets its own
- * useStakeWithdrawByPool hook instance — Rules of Hooks means a single
- * component can't call the hook once per array entry, so multi-pool display
- * requires one component instance per position.
- */
-function PositionCard({
+function YourPositionPanel({
   position,
   onWithdrawSuccess,
+  onManage,
 }: {
-  position: UserPosition;
+  position: UserPosition | null;
   onWithdrawSuccess?: () => void;
+  onManage?: (poolId: string) => void;
 }) {
+  const { connected } = useWalletCompat();
+
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useStakeWithdrawByPool({
-    slabAddress: position.slabAddress,
-    collateralMint: position.collateralMint,
+    slabAddress: position?.slabAddress ?? "",
+    collateralMint: position?.collateralMint ?? "",
   });
 
   const [txStatus, setTxStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const handleWithdraw = useCallback(async () => {
-    if (!position.cooldownElapsed) return;
+    if (!position || !position.cooldownElapsed) return;
     setTxStatus(null);
     try {
       const sig = await withdraw(position.lpBalanceRaw);
@@ -379,6 +377,22 @@ function PositionCard({
     }
   }, [withdraw, position, onWithdrawSuccess]);
 
+  if (!connected) return null;
+  if (!position) {
+    return (
+      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-6 text-center">
+        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No open positions</p>
+        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">Deposit into a pool to get started</p>
+        <a
+          href="#deposit"
+          className="mt-3 inline-block text-[11px] font-medium text-[var(--accent)] transition-colors hover:text-[var(--text)]"
+        >
+          Deposit Now →
+        </a>
+      </div>
+    );
+  }
+
   const cooldownPct = position.cooldownTotal > 0
     ? 1 - position.cooldownRemaining / position.cooldownTotal
     : 1;
@@ -389,7 +403,7 @@ function PositionCard({
         <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">// your position</span>
       </div>
       <div className="p-4 space-y-3">
-        <div className="grid grid-cols-2 gap-3 text-[12px]">
+        <div className="grid grid-cols-3 gap-3 text-[12px]">
           <div>
             <span className="text-[var(--text-secondary)]">Pool</span>
             <p className="font-medium text-[var(--text)]">{position.poolName}</p>
@@ -419,7 +433,7 @@ function PositionCard({
               }
             </span>
           </div>
-          <ProgressBar value={cooldownPct} height={8} />
+          <ProgressBar value={cooldownPct} height={8} fillClassName="bg-gradient-to-r from-blue-500 to-[var(--cyan)]" />
         </div>
 
         {/* Tx feedback */}
@@ -432,64 +446,35 @@ function PositionCard({
           <p className="text-[11px] text-[var(--short)]">{withdrawError}</p>
         )}
 
-        {/* Withdraw button */}
-        <button
-          disabled={!position.cooldownElapsed || withdrawLoading}
-          onClick={handleWithdraw}
-          className={`w-full rounded-md py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
-            position.cooldownElapsed && !withdrawLoading
-              ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
-              : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
-          }`}
-        >
-          {withdrawLoading
-            ? "Withdrawing…"
-            : position.cooldownElapsed
-            ? "Withdraw LP →"
-            : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
-        </button>
+        {/* Action Buttons */}
+        <div className="space-y-2">
+          {/* Withdraw button */}
+          <button
+            disabled={!position.cooldownElapsed || withdrawLoading}
+            onClick={handleWithdraw}
+            className={`w-full rounded-md py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+              position.cooldownElapsed && !withdrawLoading
+                ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
+                : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
+            }`}
+          >
+            {withdrawLoading
+              ? "Withdrawing…"
+              : position.cooldownElapsed
+              ? "Withdraw LP →"
+              : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
+          </button>
+
+          {/* Manage / Withdraw Partial button */}
+          <button
+            type="button"
+            onClick={() => onManage?.(position.poolId)}
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--accent)] transition-all duration-200 cursor-pointer"
+          >
+            Manage / Withdraw Partial
+          </button>
+        </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * S-M1 fix: renders one PositionCard per pool the wallet holds a balance in.
- * Previously this component received a single `position` that StakePage's
- * scan effect stopped populating after the FIRST pool with a non-zero
- * balance — multi-pool stakers had every other position silently dropped
- * from both the UI and totalUserDeposited.
- */
-function YourPositionPanel({
-  positions,
-  onWithdrawSuccess,
-}: {
-  positions: UserPosition[];
-  onWithdrawSuccess?: () => void;
-}) {
-  const { connected } = useWalletCompat();
-
-  if (!connected) return null;
-  if (positions.length === 0) {
-    return (
-      <div className="border border-[var(--border)]/50 bg-[var(--panel-bg)] p-6 text-center">
-        <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">No open positions</p>
-        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">Deposit into a pool to get started</p>
-        <a
-          href="#deposit"
-          className="mt-3 inline-block text-[11px] font-medium text-[var(--accent)] transition-colors hover:text-[var(--text)]"
-        >
-          Deposit Now →
-        </a>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {positions.map((position) => (
-        <PositionCard key={position.poolId} position={position} onWithdrawSuccess={onWithdrawSuccess} />
-      ))}
     </div>
   );
 }
@@ -499,14 +484,20 @@ function YourPositionPanel({
 function DepositWidget({
   pools,
   onTxSuccess,
+  selectedPool,
+  setSelectedPool,
+  mode,
+  setMode,
 }: {
   pools: StakePool[];
   onTxSuccess?: () => void;
+  selectedPool: string;
+  setSelectedPool: (poolId: string) => void;
+  mode: "deposit" | "withdraw";
+  setMode: (mode: "deposit" | "withdraw") => void;
 }) {
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const [selectedPool, setSelectedPool] = useState(pools[0]?.id ?? "");
-  const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
   const [amount, setAmount] = useState("");
   const [walletBalanceRaw, setWalletBalanceRaw] = useState<bigint | null>(null);
   const [balanceDecimals, setBalanceDecimals] = useState(6);
@@ -540,12 +531,11 @@ function DepositWidget({
     collateralMint: pool?.collateralMint ?? "",
   });
 
-  // Sync selectedPool when pools list loads
+  // Reset inputs when selected pool or mode changes to prevent accidental actions
   useEffect(() => {
-    if (pools.length > 0 && !pools.find((p) => p.id === selectedPool)) {
-      setSelectedPool(pools[0].id);
-    }
-  }, [pools, selectedPool]);
+    setAmount("");
+    setWithdrawAmount("");
+  }, [selectedPool, mode]);
 
   // Fetch real SPL token balance for the selected pool's collateral mint
   useEffect(() => {
@@ -595,6 +585,15 @@ function DepositWidget({
     })();
     return () => { cancelled = true; };
   }, [connected, publicKey, pool, connection, withdrawRefreshKey]);
+
+  // Poll selected pool's position status every 10 seconds to update cooldown timer
+  useEffect(() => {
+    if (!connected || !publicKey) return;
+    const interval = setInterval(() => {
+      setWithdrawRefreshKey((k) => k + 1);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [connected, publicKey]);
 
   // Human-readable balance (null = unknown / not fetched)
   const walletBalance: number | null = walletBalanceRaw !== null
@@ -691,55 +690,98 @@ function DepositWidget({
         {/* Pool selector — shared between Deposit and Withdraw modes */}
         <div>
           <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Select Pool</label>
-          <select
-            value={selectedPool}
-            onChange={(e) => { setSelectedPool(e.target.value); setTxStatus(null); setWithdrawTxStatus(null); }}
-            className="w-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)]/50"
-            style={{ fontFamily: "var(--font-mono)" }}
-          >
-            {pools.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              value={selectedPool}
+              onChange={(e) => { setSelectedPool(e.target.value); setTxStatus(null); setWithdrawTxStatus(null); }}
+              className="w-full appearance-none border border-[var(--border)] bg-[var(--bg-surface)] pl-3 pr-10 py-2.5 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)]/50 cursor-pointer"
+              style={{ fontFamily: "var(--font-mono)" }}
+            >
+              {pools.map((p) => (
+                <option key={p.id} value={p.id} className="bg-[var(--bg-surface)]">{p.name}</option>
+              ))}
+            </select>
+            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-[var(--text-secondary)]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </div>
+          </div>
         </div>
 
         {mode === "deposit" ? (
           <>
             {/* Amount input */}
             <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
-                {connected && walletBalance !== null && (
-                  <button
-                    type="button"
-                    onClick={() => setAmount(String(walletBalance))}
-                    className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent)] cursor-pointer"
+              <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3.5 transition-all focus-within:border-[var(--accent)]/50">
+                <div className="mb-2 flex items-center justify-between text-[10px]">
+                  <span className="font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Amount</span>
+                  {connected && walletBalance !== null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAmount(String(walletBalance));
+                        setTxStatus(null);
+                      }}
+                      className="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors tabular-nums"
+                      style={{ fontFamily: "var(--font-mono)" }}
+                      title="Click to use max balance"
+                    >
+                      Balance: {walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => {
+                      setAmount(e.target.value);
+                      setTxStatus(null);
+                    }}
+                    placeholder="0.00"
+                    min="0"
+                    step="any"
+                    className="w-full min-w-0 bg-transparent text-lg font-semibold outline-none text-[var(--text)] placeholder:text-[var(--text-muted)] tabular-nums"
                     style={{ fontFamily: "var(--font-mono)" }}
-                    title="Click to use max balance"
-                  >
-                    Balance: {walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
-                  </button>
-                )}
+                  />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (walletBalance !== null && walletBalance > 0) {
+                          setAmount(String(walletBalance));
+                          setTxStatus(null);
+                        }
+                      }}
+                      className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.05em] text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--accent)] transition-colors"
+                    >
+                      MAX
+                    </button>
+                    <span className="text-[12px] font-bold text-[var(--text)] tracking-tight">USDC</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => { setAmount(e.target.value); setTxStatus(null); }}
-                  placeholder="0.00"
-                  min="0"
-                  step="any"
-                  className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums"
-                  style={{ fontFamily: "var(--font-mono)" }}
-                />
-                <button
-                  type="button"
-                  onClick={() => { if (walletBalance !== null && walletBalance > 0) setAmount(String(walletBalance)); }}
-                  className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)]"
-                >
-                  MAX
-                </button>
-              </div>
+
+              {/* Percentage Chips */}
+              {connected && walletBalance !== null && walletBalance > 0 && (
+                <div className="flex gap-1.5 mt-2">
+                  {[25, 50, 75, 100].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => {
+                        const val = (walletBalance * pct) / 100;
+                        setAmount(val.toFixed(2));
+                        setTxStatus(null);
+                      }}
+                      className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--bg)] py-1 text-[10px] font-medium text-[var(--text-secondary)] hover:border-[var(--accent)]/30 hover:text-[var(--accent)] transition-colors cursor-pointer"
+                    >
+                      {pct}%
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* LP estimate */}
@@ -763,7 +805,7 @@ function DepositWidget({
                       : `${formatUsd(pool.capUsed)} deposited · No cap`}
                   </span>
                 </div>
-                <ProgressBar value={capRatio} height={6} />
+                <ProgressBar value={capRatio} height={6} fillClassName="bg-gradient-to-r from-[var(--accent)]/60 to-[var(--accent)]" />
               </div>
             )}
 
@@ -807,42 +849,88 @@ function DepositWidget({
           <>
             {/* Withdraw amount input */}
             <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)]">Amount</label>
-                {connected && withdrawPosition && (
-                  <button
-                    type="button"
-                    onClick={() => setWithdrawAmount(formatHumanAmount(withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals))}
-                    className="text-[10px] text-[var(--text-muted)] tabular-nums transition-colors hover:text-[var(--accent)] cursor-pointer"
+              <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3.5 transition-all focus-within:border-[var(--cyan)]/50">
+                <div className="mb-2 flex items-center justify-between text-[10px]">
+                  <span className="font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Amount</span>
+                  {connected && withdrawPosition && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWithdrawAmount(formatHumanAmount(withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals));
+                        setWithdrawTxStatus(null);
+                      }}
+                      className="text-[10px] text-[var(--text-muted)] hover:text-[var(--cyan)] transition-colors tabular-nums"
+                      style={{ fontFamily: "var(--font-mono)" }}
+                      title="Click to use full staked balance"
+                    >
+                      Staked: {withdrawPosition.lpBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} LP
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={withdrawAmount}
+                    onChange={(e) => {
+                      setWithdrawAmount(e.target.value);
+                      setWithdrawTxStatus(null);
+                    }}
+                    placeholder="0.00"
+                    min="0"
+                    step="any"
+                    disabled={!withdrawPosition}
+                    className="w-full min-w-0 bg-transparent text-lg font-semibold outline-none text-[var(--text)] placeholder:text-[var(--text-muted)] tabular-nums disabled:opacity-50"
                     style={{ fontFamily: "var(--font-mono)" }}
-                    title="Click to use full staked balance"
-                  >
-                    Staked: {withdrawPosition.lpBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })} LP
-                  </button>
-                )}
+                  />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (withdrawPosition) {
+                          setWithdrawAmount(formatHumanAmount(withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals));
+                          setWithdrawTxStatus(null);
+                        }
+                      }}
+                      disabled={!withdrawPosition}
+                      className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.05em] text-[var(--text-secondary)] hover:border-[var(--cyan)]/30 hover:text-[var(--cyan)] transition-colors disabled:cursor-not-allowed"
+                    >
+                      MAX
+                    </button>
+                    <span className="text-[12px] font-bold text-[var(--text)] tracking-tight">LP</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={withdrawAmount}
-                  onChange={(e) => { setWithdrawAmount(e.target.value); setWithdrawTxStatus(null); }}
-                  placeholder="0.00"
-                  min="0"
-                  step="any"
-                  disabled={!withdrawPosition}
-                  className="flex-1 border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-[13px] text-[var(--text)] placeholder:text-[var(--text-muted)] outline-none transition-colors focus:border-[var(--accent)]/50 tabular-nums disabled:opacity-50"
-                  style={{ fontFamily: "var(--font-mono)" }}
-                />
-                <button
-                  type="button"
-                  onClick={() => { if (withdrawPosition) setWithdrawAmount(formatHumanAmount(withdrawPosition.lpBalanceRaw, withdrawPosition.lpDecimals)); }}
-                  disabled={!withdrawPosition}
-                  className="border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[10px] font-medium uppercase tracking-[0.15em] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  MAX
-                </button>
-              </div>
+
+              {/* Percentage Chips */}
+              {connected && withdrawPosition && withdrawPosition.lpBalance > 0 && (
+                <div className="flex gap-1.5 mt-2">
+                  {[25, 50, 75, 100].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => {
+                        const val = (withdrawPosition.lpBalance * pct) / 100;
+                        setWithdrawAmount(val.toFixed(4));
+                        setWithdrawTxStatus(null);
+                      }}
+                      className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--bg)] py-1 text-[10px] font-medium text-[var(--text-secondary)] hover:border-[var(--cyan)]/30 hover:text-[var(--cyan)] transition-colors cursor-pointer"
+                    >
+                      {pct}%
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* USD estimate */}
+            {withdrawAmountNum > 0 && lpSupplyHuman > 0 && pool && (
+              <div className="text-[12px] text-[var(--text-secondary)]">
+                You will receive ≈{" "}
+                <span className="font-medium text-[var(--text)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+                  {formatUsd((withdrawAmountNum / lpSupplyHuman) * pool.tvl)}
+                </span>
+              </div>
+            )}
 
             {/* Empty / loading state */}
             {withdrawPositionLoading && (
@@ -904,18 +992,42 @@ function DepositWidget({
 
 /* ── Pool Card ── */
 
-function PoolCard({ pool }: { pool: StakePool }) {
+function PoolCard({
+  pool,
+  isSelected,
+  onSelect,
+}: {
+  pool: StakePool;
+  isSelected: boolean;
+  onSelect: (mode: "deposit" | "withdraw") => void;
+}) {
   const capRatio = pool.capTotal > 0 ? pool.capUsed / pool.capTotal : 0;
 
   return (
-    <article className="group relative border border-[var(--border)] bg-[var(--panel-bg)] p-4 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)]">
+    <article
+      onClick={() => onSelect("deposit")}
+      className={`group relative border p-4 sm:p-5 transition-all duration-300 cursor-pointer rounded-md ${
+        isSelected
+          ? "border-[var(--accent)] bg-[var(--bg-elevated)] shadow-[0_4px_20px_rgba(153,69,255,0.15)] -translate-y-0.5"
+          : "border-[var(--border)] bg-[var(--panel-bg)] hover:bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] hover:-translate-y-0.5 hover:shadow-md"
+      }`}
+    >
       <div className="mb-4 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--accent)]/15 bg-[var(--accent)]/[0.04] text-[12px]">
+          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[12px] transition-colors ${
+            isSelected
+              ? "border-[var(--accent)]/30 bg-[var(--accent)]/[0.08]"
+              : "border-[var(--accent)]/15 bg-[var(--accent)]/[0.04]"
+          }`}>
             💧
           </div>
           <div className="min-w-0">
-            <h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{pool.symbol}</h3>
+            <div className="flex items-center gap-1.5">
+              <h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{pool.symbol}</h3>
+              {isSelected && (
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--cyan)] shadow-[0_0_6px_var(--cyan)] animate-pulse" />
+              )}
+            </div>
             <p className="text-[10px] text-[var(--text-muted)]">POOL</p>
           </div>
         </div>
@@ -938,7 +1050,12 @@ function PoolCard({ pool }: { pool: StakePool }) {
         <div className="flex justify-between">
           <span className="text-[var(--text-secondary)]">Cap</span>
           <span className="text-[var(--text-muted)] tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-            {pool.capTotal > 0 ? `${Math.round(capRatio * 100)}% full` : "No cap"}
+            {pool.capTotal > 0 ? (
+              <span>
+                <span className="text-[var(--text)] font-medium">{Math.round(capRatio * 100)}%</span>
+                <span className="text-[10px] ml-1">({formatUsd(pool.capUsed)} / {formatUsd(pool.capTotal)})</span>
+              </span>
+            ) : "No cap"}
           </span>
         </div>
         <div className="flex justify-between gap-x-2">
@@ -949,18 +1066,24 @@ function PoolCard({ pool }: { pool: StakePool }) {
 
       {/* Cap bar */}
       <div className="mt-3">
-        <ProgressBar value={capRatio} height={4} />
+        <ProgressBar value={capRatio} height={4} fillClassName="bg-gradient-to-r from-[var(--accent)]/60 to-[var(--accent)]" />
       </div>
 
-      {/* Deposit ghost button */}
-      <a
-        href="#deposit"
-        className="mt-4 flex w-full items-center justify-center gap-1.5 border border-[var(--accent)]/30 bg-transparent py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/[0.06]"
+      {/* Deposit button */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation(); // prevent select event bubbling
+          onSelect("deposit");
+        }}
+        className="mt-4 flex w-full items-center justify-center gap-1.5 border border-[var(--accent)]/30 bg-transparent py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--accent)] transition-all duration-200 hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/[0.06] cursor-pointer"
       >
         Deposit
-      </a>
+      </button>
 
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-[var(--accent)]/0 transition-all duration-300 group-hover:bg-[var(--accent)]/30" />
+      <div className={`absolute bottom-0 left-0 right-0 h-px transition-all duration-300 ${
+        isSelected ? "bg-[var(--accent)]/50" : "bg-[var(--accent)]/0 group-hover:bg-[var(--accent)]/30"
+      }`} />
     </article>
   );
 }
@@ -972,7 +1095,7 @@ function PoolPlaceholderCard() {
   return (
     <a
       href="/create"
-      className="group flex flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-4 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] sm:p-5"
+      className="group flex h-full flex-col items-center justify-center gap-2 border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/40 p-4 text-center transition-colors duration-200 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] sm:p-5"
     >
       <span className="text-xl text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent)]">＋</span>
       <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--accent)]">
@@ -985,7 +1108,17 @@ function PoolPlaceholderCard() {
 
 /* ── Pool List Section ── */
 
-function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) {
+function PoolList({
+  pools,
+  loading,
+  selectedPool,
+  onSelectPool,
+}: {
+  pools: StakePool[];
+  loading: boolean;
+  selectedPool: string;
+  onSelectPool: (poolId: string, mode: "deposit" | "withdraw") => void;
+}) {
   if (loading) {
     return (
       <section id="pools">
@@ -1044,7 +1177,12 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] lg:grid-cols-2">
         {pools.map((pool) => (
-          <PoolCard key={pool.id} pool={pool} />
+          <PoolCard
+            key={pool.id}
+            pool={pool}
+            isSelected={pool.id === selectedPool}
+            onSelect={(mode) => onSelectPool(pool.id, mode)}
+          />
         ))}
         {Array.from({ length: fillerCount }).map((_, i) => (
           <PoolPlaceholderCard key={`filler-${i}`} />
@@ -1059,11 +1197,11 @@ function PoolList({ pools, loading }: { pools: StakePool[]; loading: boolean }) 
 export default function StakePage() {
   const [pools, setPools] = useState<StakePool[]>([]);
   const [poolsLoading, setPoolsLoading] = useState(true);
-  // S-M1 fix: ALL positions the wallet holds across pools, not just the first
-  // one found.
-  const [positions, setPositions] = useState<UserPosition[]>([]);
+  const [position, setPosition] = useState<UserPosition | null>(null);
   const [positionRefreshKey, setPositionRefreshKey] = useState(0);
-  const [poolsRefreshKey, setPoolsRefreshKey] = useState(0);
+
+  const [selectedPool, setSelectedPool] = useState("");
+  const [widgetMode, setWidgetMode] = useState<"deposit" | "withdraw">("deposit");
 
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -1076,7 +1214,13 @@ export default function StakePage() {
         const res = await fetch("/api/stake/pools");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json() as { pools: ApiPool[] };
-        if (!cancelled) setPools((json.pools ?? []).map(apiPoolToStakePool));
+        if (!cancelled) {
+          const mapped = (json.pools ?? []).map(apiPoolToStakePool);
+          setPools(mapped);
+          if (mapped.length > 0) {
+            setSelectedPool((curr) => curr || mapped[0].id);
+          }
+        }
       } catch (err) {
         console.error("[StakePage] Failed to fetch pools:", err);
       } finally {
@@ -1084,18 +1228,12 @@ export default function StakePage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [poolsRefreshKey]);
+  }, []);
 
-  // Fetch user positions from on-chain data when wallet connected + pools loaded.
-  // S-M1 fix: scan ALL pools and aggregate every position the wallet holds —
-  // previously this returned after the FIRST pool with a non-zero balance
-  // ("found a position, stop scanning"), so a wallet staked in 2+ pools had
-  // every position after the first silently dropped from "Your Position" and
-  // from totalUserDeposited. Fetches concurrently and aggregates via
-  // Promise.allSettled, mirroring useLpPositions.ts.
+  // Fetch user position from on-chain data when wallet connected + pools loaded
   useEffect(() => {
     if (!connected || !publicKey || pools.length === 0) {
-      setPositions([]);
+      setPosition(null);
       return;
     }
     let cancelled = false;
@@ -1108,43 +1246,41 @@ export default function StakePage() {
           (getConfig() as { vaultProgramId?: string }).vaultProgramId
           ?? "51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ"
         );
-        // Check every pool for user's LP position — same detection logic the
+        // Check each pool for user's LP position — same detection logic the
         // Withdraw tab uses for a single selected pool (fetchPoolPosition).
-        // allSettled: one bad pool/RPC hiccup must not blank out the rest.
-        const results = await Promise.allSettled(
-          pools.map((pool) => fetchPoolPosition(pool, publicKey, connection, stakeProgramId)),
-        );
-        if (cancelled) return;
-        const found = results
-          .filter((r): r is PromiseFulfilledResult<UserPosition | null> => r.status === "fulfilled")
-          .map((r) => r.value)
-          .filter((p): p is UserPosition => p !== null);
-        setPositions(found);
+        for (const pool of pools) {
+          const found = await fetchPoolPosition(pool, publicKey, connection, stakeProgramId);
+          if (found) {
+            if (!cancelled) setPosition(found);
+            return; // found a position, stop scanning
+          }
+        }
+        // No position found across all pools
+        if (!cancelled) setPosition(null);
       } catch (err) {
-        console.error("[StakePage] Failed to fetch user positions:", err);
-        if (!cancelled) setPositions([]);
+        console.error("[StakePage] Failed to fetch user position:", err);
+        if (!cancelled) setPosition(null);
       }
     })();
 
     return () => { cancelled = true; };
   }, [connected, publicKey, pools, connection, positionRefreshKey]);
 
-  const handleTxSuccess = useCallback(() => {
-    // Re-fetch both the user's LP position and pool-level TVL/cap data after
-    // deposit/withdraw. Without refreshing pools, successful deposits can leave
-    // pool cards showing stale TVL until the user manually reloads.
-    setPositionRefreshKey((k) => k + 1);
-    setPoolsRefreshKey((k) => k + 1);
+  // Poll position/slot status every 10 seconds to update cooldown timer
+  useEffect(() => {
+    if (!connected || !publicKey) return;
+    const interval = setInterval(() => {
+      setPositionRefreshKey((k) => k + 1);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [connected, publicKey]);
 
-    // RPC/indexer reads can lag just after confirmation, so do one follow-up
-    // refresh to catch the settled vault balance without requiring a reload.
-    window.setTimeout(() => setPoolsRefreshKey((k) => k + 1), 2_000);
+  const handleTxSuccess = useCallback(() => {
+    // Re-fetch position after deposit/withdraw
+    setPositionRefreshKey((k) => k + 1);
   }, []);
 
-  // S-M1 fix: sum across ALL positions, not just a single (possibly-missing) one.
-  const totalUserDeposited = positions.length > 0
-    ? positions.reduce((sum, p) => sum + p.estimatedValue, 0)
-    : connected ? 0 : null;
+  const totalUserDeposited = position ? position.estimatedValue : connected ? 0 : null;
 
   return (
     <div className="relative min-h-screen overflow-x-hidden">
@@ -1163,10 +1299,25 @@ export default function StakePage() {
             {/* pb-24 on mobile ensures deposit widget clears the fixed bottom nav (56px) */}
             <div className="space-y-4 pb-24 lg:pb-0">
               <ErrorBoundary label="Your Position">
-                <YourPositionPanel positions={positions} onWithdrawSuccess={handleTxSuccess} />
+                <YourPositionPanel
+                  position={position}
+                  onWithdrawSuccess={handleTxSuccess}
+                  onManage={(poolId) => {
+                    setSelectedPool(poolId);
+                    setWidgetMode("withdraw");
+                    document.getElementById("deposit")?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                />
               </ErrorBoundary>
               <ErrorBoundary label="Deposit Widget">
-                <DepositWidget pools={pools} onTxSuccess={handleTxSuccess} />
+                <DepositWidget
+                  pools={pools}
+                  onTxSuccess={handleTxSuccess}
+                  selectedPool={selectedPool}
+                  setSelectedPool={setSelectedPool}
+                  mode={widgetMode}
+                  setMode={setWidgetMode}
+                />
               </ErrorBoundary>
             </div>
 
@@ -1174,7 +1325,16 @@ export default function StakePage() {
             {/* pb-24 on mobile clears the fixed bottom nav (56px + safe-area) */}
             <div className="min-w-0 pb-24 lg:pb-0">
               <ErrorBoundary label="Pool List">
-                <PoolList pools={pools} loading={poolsLoading} />
+                <PoolList
+                  pools={pools}
+                  loading={poolsLoading}
+                  selectedPool={selectedPool}
+                  onSelectPool={(poolId, mode) => {
+                    setSelectedPool(poolId);
+                    setWidgetMode(mode);
+                    document.getElementById("deposit")?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                />
               </ErrorBoundary>
             </div>
           </div>

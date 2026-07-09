@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type LpPosition } from "@/hooks/useLpPositions";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+import { slotsToTime } from "@/lib/format";
 
 // ═══════════════════════════════════════════════════════════════
 // Helpers
@@ -50,14 +51,6 @@ function getDisplaySymbol(pos: { symbol: string; name: string }): string {
     if (!isAddressHash(nameSymbol)) return nameSymbol;
   }
   return pos.symbol;
-}
-
-function slotsToTime(slots: number): string {
-  const seconds = Math.round(slots * 0.4);
-  if (seconds < 60) return `~${seconds}s`;
-  const mins = Math.round(seconds / 60);
-  if (mins < 60) return `~${mins} min`;
-  return `~${Math.round(mins / 60)}h`;
 }
 
 // ═══════════════════════════════════════════════════════════════

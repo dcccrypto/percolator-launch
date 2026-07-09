@@ -35,6 +35,20 @@ export function formatTokenAmount(
   return negative ? `-${formatted}` : formatted;
 }
 
+/**
+ * Format an oracle price in E6 format (price * 10^6) into a readable decimal string.
+ * Convenience wrapper around formatTokenAmount for 6-decimal prices.
+ * 
+ * @param priceE6 - Price value with 6 decimal places (E6 format)
+ * @returns Formatted price string (e.g. "0.05" for 50000 E6)
+ * 
+ * @example
+ * formatPriceE6(50000n) // → "0.05"
+ * formatPriceE6(1000000n) // → "1"
+ */
+export function formatPriceE6(priceE6: bigint): string {
+  return formatTokenAmount(priceE6, 6);
+}
 
 /**
  * Format a basis points value (1/100th of a percent) into a percentage string.
@@ -258,6 +272,26 @@ export function formatSlotAge(currentSlot: bigint | null | undefined, targetSlot
   return `${(seconds / 3600).toFixed(1)}h`;
 }
 
+/**
+ * Format a signed 128-bit integer into a whole number string.
+ * Useful for displaying net PnL or balance changes that can be negative.
+ * 
+ * @param raw - Signed i128 value in smallest units
+ * @param decimals - Number of decimal places (default: 6)
+ * @returns Formatted integer string with optional minus sign (e.g. "-100" or "50")
+ * 
+ * @example
+ * formatI128Amount(500000000n, 6) // → "500"
+ * formatI128Amount(-250000000n, 6) // → "-250"
+ */
+export function formatI128Amount(raw: bigint, decimals: number = 6): string {
+  const negative = raw < 0n;
+  const abs = negative ? -raw : raw;
+  const divisor = 10n ** BigInt(decimals);
+  const whole = abs / divisor;
+  const formatted = whole.toString();
+  return negative ? `-${formatted}` : formatted;
+}
 
 /**
  * Format a profit/loss amount with signed indicator and full fractional precision.
@@ -304,4 +338,13 @@ export function formatFundingRate(bpsPerSlot: bigint): string {
   const annualized = (Number(bpsPerSlot) * slotsPerYear) / 100; // bps/slot × slots/yr / 100 = %/yr
   const sign = annualized > 0 ? "+" : "";
   return `${sign}${annualized.toFixed(2)}%`;
+}
+
+/** Convert Solana slot counts to approximate human-readable duration strings */
+export function slotsToTime(slots: number): string {
+  const seconds = Math.round(slots * 0.4);
+  if (seconds < 60) return `~${seconds}s`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `~${mins} min`;
+  return `~${Math.round(mins / 60)}h`;
 }

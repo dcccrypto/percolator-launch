@@ -81,7 +81,7 @@ const DEFAULT_STATE: StakePoolState = {
 
 // Browser-safe u64 reader — DataView instead of Buffer.readBigUInt64LE
 // (Buffer BigInt methods are Node.js-only; the browser polyfill may lack them)
-function readU64LE(data: Uint8Array, off: number): bigint {
+export function readU64LE(data: Uint8Array, off: number): bigint {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   return view.getBigUint64(off, /* littleEndian= */ true);
 }
