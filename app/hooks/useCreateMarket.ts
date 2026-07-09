@@ -1429,6 +1429,93 @@ export function useCreateMarket() {
           updateInFlightStep(slabPk.toBase58(), 5);
         }
 
+        // Keeper registration — non-fatal; market is live regardless. MUST run here,
+        // BEFORE Step 5 (Stake InitPool) below — not after it as originally written.
+        //
+        // ROOT CAUSE (confirmed by live end-to-end reproduction): Step 5 rotates
+        // on-chain marketauth from this wallet to the stake-pool PDA. keeper-register's
+        // H1 auth requires `deployer` (this wallet) to match the slab's LIVE on-chain
+        // admin/marketauth. Calling it after Step 5 meant that check compared the
+        // creator wallet against the stake-pool PDA — always a mismatch — so every
+        // keeper-oracle market failed registration with 403 "Deployer does not match
+        // slab admin", permanently (marketauth never rotates back). Registering here,
+        // while marketauth is still this wallet (Step 4 already ran; Step 5 hasn't
+        // yet), fixes it structurally instead of teaching the route about the stake
+        // PDA as a second valid authority.
+        //
+        // Registers { marketAddress, poolAddress, dexType } with the keeper service so
+        // PushAuthMark price-push starts within the next keeper cycle (~30s).
+        let keeperDelegated = false;
+        let keeperMessage: string | null = null;
+        if (isKeeperOracle && params.dexPoolAddress) {
+          try {
+            // H1v2 auth: keeper-register verifies slab ownership via a STATELESS
+            // deployer-signed proof — sign `keeper-register:<slabAddress>:<unix-minute>`
+            // and the route independently reconstructs + verifies it against a small
+            // window around its own clock. No server-stored nonce.
+            //
+            // This replaced a nonce+challenge flow (GET /api/markets/challenge, sign,
+            // claim) backed by a process-local Map (lib/playground-nonce-store.ts) —
+            // on Vercel that Map is per-lambda-instance, so the GET that issued a nonce
+            // and this POST that claimed it could land on different instances with no
+            // shared memory. That contributed to the same real launch failing with
+            // "Missing required fields: deployer, nonce, signature" / random "invalid
+            // nonce" errors, layered on top of the ordering bug above. The stateless
+            // message needs no shared state between requests, so it works regardless
+            // of which instance handles it. Non-fatal either way: on failure the
+            // market is still live on-chain.
+            const keeperDeployer = wallet.publicKey.toBase58();
+            let keeperSignature: string | null = null;
+            if (wallet.signMessage) {
+              try {
+                const unixMinute = Math.floor(Date.now() / 60_000);
+                const proofMsg = new TextEncoder().encode(
+                  `keeper-register:${slabPk.toBase58()}:${unixMinute}`,
+                );
+                const sig = await wallet.signMessage(proofMsg);
+                keeperSignature = Buffer.from(sig).toString("base64");
+              } catch (sigErr) {
+                console.warn("[useCreateMarket] keeper-register sign failed (non-fatal):", sigErr);
+              }
+            }
+            const keeperRegResp = await fetch("/api/playground/keeper-register", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                slabAddress: slabPk.toBase58(),
+                mainnetCA: params.mainnetCA ?? null,
+                dexPoolAddress: params.dexPoolAddress,
+                // params.dexType carries DexScreener's raw dexId ("meteora",
+                // "raydium") — normalize to the keeper vocabulary or the route
+                // 400s and the market is orphaned (no price, no name).
+                dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "raydium-clmm",
+                symbol: params.symbol ?? null,
+                // H1v2 deployer proof (stateless, see above)
+                deployer: keeperDeployer,
+                ...(keeperSignature ? { signature: keeperSignature } : {}),
+              }),
+            });
+            const keeperRegData = await keeperRegResp.json() as {
+              registered?: boolean;
+              message?: string;
+              error?: string;
+            };
+            keeperDelegated = keeperRegData.registered ?? false;
+            // Error responses put their reason in `error`, not `message` —
+            // previously a 400/502 left keeperMessage null and the wizard
+            // showed nothing, so users had no idea their market wasn't priced.
+            keeperMessage =
+              keeperRegData.message ??
+              (keeperRegData.error
+                ? `Keeper registration failed: ${keeperRegData.error} — the market is live on-chain but won't be priced or listed until it's registered.`
+                : null);
+            console.log("[useCreateMarket] Keeper registration:", keeperRegData);
+          } catch (keeperErr) {
+            console.warn("[useCreateMarket] Keeper registration failed (non-fatal):", keeperErr);
+            keeperMessage = "Keeper registration failed — the market is live on-chain but won't be priced or listed until it's registered.";
+          }
+        }
+
         // Step 5 (FINAL on-chain step): percolator-stake InitPool. Creates the
         // per-market stake pool and — critically — ROTATES on-chain
         // marketauth from this wallet to the stake-pool PDA
@@ -1553,75 +1640,6 @@ export function useCreateMarket() {
               devnetMint: mintAddr, // Still set so "Mint & Trade" button appears
               devnetMintError: mintErr instanceof Error ? mintErr.message : "Airdrop request failed",
             }));
-          }
-        }
-
-        // Keeper registration — non-fatal; market is live regardless.
-        // Registers { marketAddress, poolAddress, dexType } with the keeper service so
-        // PushAuthMark price-push starts within the next keeper cycle (~30s).
-        let keeperDelegated = false;
-        let keeperMessage: string | null = null;
-        if (isKeeperOracle && params.dexPoolAddress) {
-          try {
-            // H1 auth: keeper-register verifies slab ownership via a nonce + ed25519
-            // signature. Fetch a FRESH nonce here — nonces are single-use and shared
-            // with /api/markets, so the one spent on the markets POST above can't be
-            // reused. Non-fatal: on failure the market is still live on-chain.
-            const keeperDeployer = wallet.publicKey.toBase58();
-            let keeperNonce: string | null = null;
-            let keeperSignature: string | null = null;
-            if (wallet.signMessage) {
-              try {
-                const ch = await fetch(
-                  `/api/markets/challenge?deployer=${encodeURIComponent(keeperDeployer)}`,
-                );
-                if (ch.ok) {
-                  const { nonce: n } = (await ch.json()) as { nonce: string };
-                  keeperNonce = n;
-                  const sig = await wallet.signMessage(new TextEncoder().encode(n));
-                  keeperSignature = Buffer.from(sig).toString("base64");
-                }
-              } catch (sigErr) {
-                console.warn("[useCreateMarket] keeper-register nonce/sign failed (non-fatal):", sigErr);
-              }
-            }
-            const keeperRegResp = await fetch("/api/playground/keeper-register", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                slabAddress: slabPk.toBase58(),
-                mainnetCA: params.mainnetCA ?? null,
-                dexPoolAddress: params.dexPoolAddress,
-                // params.dexType carries DexScreener's raw dexId ("meteora",
-                // "raydium") — normalize to the keeper vocabulary or the route
-                // 400s and the market is orphaned (no price, no name).
-                dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "raydium-clmm",
-                symbol: params.symbol ?? null,
-                // H1 deployer proof (fresh nonce, see above)
-                deployer: keeperDeployer,
-                ...(keeperNonce && keeperSignature
-                  ? { nonce: keeperNonce, signature: keeperSignature }
-                  : {}),
-              }),
-            });
-            const keeperRegData = await keeperRegResp.json() as {
-              registered?: boolean;
-              message?: string;
-              error?: string;
-            };
-            keeperDelegated = keeperRegData.registered ?? false;
-            // Error responses put their reason in `error`, not `message` —
-            // previously a 400/502 left keeperMessage null and the wizard
-            // showed nothing, so users had no idea their market wasn't priced.
-            keeperMessage =
-              keeperRegData.message ??
-              (keeperRegData.error
-                ? `Keeper registration failed: ${keeperRegData.error} — the market is live on-chain but won't be priced or listed until it's registered.`
-                : null);
-            console.log("[useCreateMarket] Keeper registration:", keeperRegData);
-          } catch (keeperErr) {
-            console.warn("[useCreateMarket] Keeper registration failed (non-fatal):", keeperErr);
-            keeperMessage = "Keeper registration failed — the market is live on-chain but won't be priced or listed until it's registered.";
           }
         }
 

@@ -13,13 +13,19 @@ describe("normalizeDexType", () => {
     // the exact mismatch that silently orphaned wizard-launched markets.
     expect(normalizeDexType("meteora")).toBe("meteora-dlmm");
     expect(normalizeDexType("raydium")).toBe("raydium-clmm");
-    expect(normalizeDexType("pumpswap")).toBe("pumpswap");
   });
 
   it("is case- and whitespace-insensitive", () => {
     expect(normalizeDexType(" Meteora ")).toBe("meteora-dlmm");
     expect(normalizeDexType("RAYDIUM-CLMM")).toBe("raydium-clmm");
-    expect(normalizeDexType("PumpSwap")).toBe("pumpswap");
+  });
+
+  it("returns null for PumpSwap — keeper pricing is broken for it (wrong byte offsets, no SOL→USD conversion)", () => {
+    expect(normalizeDexType("pumpswap")).toBeNull();
+    expect(normalizeDexType("PumpSwap")).toBeNull();
+    expect(normalizeDexType("pump")).toBeNull();
+    expect(normalizeDexType("pumpfun")).toBeNull();
+    expect(normalizeDexType("pump-swap")).toBeNull();
   });
 
   it("returns null for unpriceable or unknown dexes", () => {

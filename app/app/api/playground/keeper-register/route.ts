@@ -29,23 +29,48 @@
  *      message if the Blob write fails (never throws uncaught — market creation
  *      itself already landed on-chain regardless of this route's outcome).
  *
- * Authentication (H1): two accepted paths —
- *   a) Wallet-signed proof of slab ownership — the normal path, mirroring the
- *      PERC-8332 nonce+ed25519 flow already used by POST /api/markets:
- *        1. GET /api/markets/challenge?deployer=<pubkey> → { nonce }  (fresh nonce —
- *           nonces are single-use and shared with /api/markets, so a caller that
- *           already spent one registering with /api/markets needs a new one here)
- *        2. Sign the nonce bytes (UTF-8) with the deployer keypair → base64 signature
- *        3. POST here with { ...body, deployer, nonce, signature }
- *      The route verifies the ed25519 signature over the nonce, atomically claims
- *      the nonce, then reads the slab account on devnet and requires `deployer` to
- *      match its on-chain admin/marketauth field — cryptographic proof of the key
- *      PLUS proof that key actually administers this specific market.
+ * Authentication (H1v2): two accepted paths —
+ *   a) Wallet-signed STATELESS deployer proof — no server-stored nonce:
+ *        1. Sign the UTF-8 message `keeper-register:<slabAddress>:<unix-minute>`
+ *           (unix-minute = Math.floor(Date.now()/60000), computed client-side) with
+ *           the deployer keypair → base64 signature.
+ *        2. POST here with { ...body, deployer, signature }.
+ *      The route independently reconstructs that message for a small window of
+ *      minutes around its OWN clock (tolerates clock skew + wallet-sign latency,
+ *      no round trip needed) and accepts if the ed25519 signature verifies for any
+ *      candidate. It then reads the slab account on devnet and requires `deployer`
+ *      to match its on-chain admin/marketauth field — cryptographic proof of the
+ *      key PLUS proof that key actually administers this specific market.
+ *
+ *      H1v1 (superseded) used a nonce+claim flow mirroring PERC-8332
+ *      (GET /api/markets/challenge → nonce, sign it, claim it here) backed by a
+ *      process-local Map (lib/playground-nonce-store.ts). On Vercel that Map is
+ *      per-lambda-instance: the GET that issued the nonce and the POST that claimed
+ *      it could land on different instances with no shared memory, so a real launch
+ *      would 400 "Missing required fields: deployer, nonce, signature" (client sent
+ *      them; a stale deployed bundle predating the wiring fix, or the nonce simply
+ *      not existing in this instance's Map) or 401 "invalid/expired nonce" — often
+ *      enough to make registration effectively unreliable in production. The
+ *      stateless message scheme above needs no shared state between requests, so it
+ *      works correctly regardless of which instance handles the call. (The
+ *      /api/markets nonce+challenge flow is unaffected by this change and keeps
+ *      using lib/playground-nonce-store.ts — see that file's header for the same
+ *      latent race, out of scope here.)
  *   b) Admin bypass: header `x-admin-secret` matching ADMIN_API_SECRET (the same
  *      shared secret already used by /api/oracle/set-price-cap) — for maintainer
  *      manual fixes (e.g. re-registering an orphaned market, as done for ANSEM).
  *      Timing-safe compare; unset/empty ADMIN_API_SECRET disables this path
  *      entirely (fails closed, matches the set-price-cap convention).
+ *
+ * CALLER ORDERING REQUIREMENT (confirmed by live end-to-end repro): `deployer` is
+ * checked against the slab's LIVE on-chain admin/marketauth (see below), not a
+ * point-in-time snapshot. percolator-stake's InitPool ROTATES marketauth from the
+ * creator wallet to the stake-pool PDA — once that instruction lands, no wallet can
+ * pass this check again for that slab (the PDA has no private key to sign with).
+ * Callers MUST invoke this route BEFORE InitPool, while marketauth is still the
+ * creator wallet — see hooks/useCreateMarket.ts, which now registers between Step 4
+ * (Earn LP vault) and Step 5 (Stake InitPool) for exactly this reason. Calling it
+ * after InitPool always 403s with "Deployer does not match slab admin", permanently.
  *
  * Body: {
  *   slabAddress:    string  — devnet market account
@@ -56,8 +81,9 @@
  *   symbol?:        string  — token symbol (e.g. "SOL")
  *   label?:         string  — human label (e.g. "SOL/USDC — Raydium CLMM")
  *   deployer?:      string  — required unless using the admin bypass; see above
- *   nonce?:         string  — required unless using the admin bypass; see above
- *   signature?:     string  — required unless using the admin bypass; see above
+ *   signature?:     string  — required unless using the admin bypass; base64
+ *                             ed25519 signature over the stateless proof message;
+ *                             see above
  * }
  *
  * Environment:
@@ -74,7 +100,6 @@ import { isV17Account, parseWrapperConfigV17, parseHeader, V17_HEADER_LEN } from
 import type { RegisteredMarket } from "@/lib/playground-registered-markets";
 import { upsertRegisteredMarket } from "@/lib/playground-registered-markets";
 import { normalizeDexType, KEEPER_DEX_TYPES, type KeeperDexType } from "@/lib/dex-type";
-import { claimPlaygroundChallenge } from "@/lib/playground-nonce-store";
 import { getConfig, getAllProgramIds } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +115,43 @@ function isAdminBypass(req: NextRequest): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** H1v2 stateless deployer proof — see "Authentication (H1v2)" in the file header
+ *  for why this replaced the nonce+claim scheme. No server-stored state: the
+ *  message is fully determined by (slabAddress, unix-minute), so any lambda
+ *  instance can verify it without having "seen" an issuance step. */
+const STATELESS_PROOF_PREFIX = "keeper-register";
+/** Tolerance window: candidate minutes tried are [now - BACK, now + FWD]. Generous
+ *  enough to absorb clock skew and wallet-approval latency without meaningfully
+ *  weakening the check — a signature is still scoped to one specific slab and only
+ *  useful if the signer also holds that slab's on-chain admin key (checked below). */
+const STATELESS_PROOF_WINDOW_BACK_MIN = 5;
+const STATELESS_PROOF_WINDOW_FWD_MIN = 1;
+
+function statelessProofMessage(slabAddress: string, unixMinute: number): Uint8Array {
+  return new TextEncoder().encode(`${STATELESS_PROOF_PREFIX}:${slabAddress}:${unixMinute}`);
+}
+
+/** Verify `signatureBytes` is a valid ed25519 signature by `deployerPubkeyBytes` over
+ *  `keeper-register:<slabAddress>:<unix-minute>` for some minute within the tolerance
+ *  window of the server's own clock. Stateless — no nonce store, no shared memory
+ *  needed between the "issuing" and "verifying" request (there is no issuing request). */
+function verifyStatelessDeployerProof(
+  slabAddress: string,
+  deployerPubkeyBytes: Uint8Array,
+  signatureBytes: Uint8Array,
+): boolean {
+  const nowMinute = Math.floor(Date.now() / 60_000);
+  for (let d = -STATELESS_PROOF_WINDOW_BACK_MIN; d <= STATELESS_PROOF_WINDOW_FWD_MIN; d++) {
+    const msg = statelessProofMessage(slabAddress, nowMinute + d);
+    try {
+      if (nacl.sign.detached.verify(msg, signatureBytes, deployerPubkeyBytes)) return true;
+    } catch {
+      // Malformed input for this candidate — try the next one.
+    }
+  }
+  return false;
+}
+
 /** Mainnet DEX program → keeper dexType. The AUTHORITATIVE classification:
  *  the keeper parses the pool with the layout this type names, so the binding
  *  must come from the pool account's owner program, not from a client string.
@@ -97,11 +159,17 @@ function isAdminBypass(req: NextRequest): boolean {
  *  for CLMM and CPMM — trusting it risks handing the keeper a pool whose byte
  *  layout doesn't match its parser.) Verified against the curated playground
  *  pools: SOL→CAMM (CLMM), JUP/TRUMP/PENGU→LBUZ (DLMM).
+ *
+ *  PumpSwap (pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA) intentionally NOT
+ *  mapped here — falls through to "unsupported" below. percolator-sdk's
+ *  dex-oracle.ts PumpSwap parser has wrong byte offsets and no SOL→USD
+ *  conversion (keeper audit finding), so a PumpSwap-priced market gets
+ *  garbage/zero prices. This is defense-in-depth: the wizard also blocks
+ *  selecting a PumpSwap pool client-side (see StepOracleSelect.tsx).
  */
 const DEX_PROGRAM_TO_TYPE: Record<string, KeeperDexType> = {
   CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK: "raydium-clmm", // Raydium Concentrated Liquidity
   LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo: "meteora-dlmm", // Meteora DLMM
-  pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA: "pumpswap", // PumpSwap AMM
 };
 
 const MAINNET_RPC_URL = process.env.MAINNET_RPC_URL?.trim() || "https://api.mainnet-beta.solana.com";
@@ -149,7 +217,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { slabAddress, mainnetCA, dexPoolAddress, dexType, symbol, label, deployer, nonce, signature } = body as {
+  const { slabAddress, mainnetCA, dexPoolAddress, dexType, symbol, label, deployer, signature } = body as {
     slabAddress?: string;
     mainnetCA?: string;
     dexPoolAddress?: string;
@@ -157,7 +225,6 @@ export async function POST(req: NextRequest) {
     symbol?: string;
     label?: string;
     deployer?: string;
-    nonce?: string;
     signature?: string;
   };
 
@@ -183,14 +250,14 @@ export async function POST(req: NextRequest) {
   // file header doc comment): admin bypass, or wallet-signed proof that the
   // caller actually administers this specific slab.
   if (!isAdminBypass(req)) {
-    if (!deployer || !nonce || !signature) {
+    if (!deployer || !signature) {
       return NextResponse.json(
         {
           error:
-            "Missing required fields: deployer, nonce, signature. " +
-            "Call GET /api/markets/challenge?deployer=<pubkey> for a fresh nonce " +
-            "(nonces are single-use — don't reuse one already spent on /api/markets), " +
-            "sign it with the deployer keypair, and include the base64 signature.",
+            "Missing required fields: deployer, signature. " +
+            'Sign the message "keeper-register:<slabAddress>:<unix-minute>" (UTF-8, ' +
+            "unix-minute = Math.floor(Date.now()/60000)) with the deployer keypair and " +
+            "include the base64 signature. No separate challenge call needed.",
         },
         { status: 400 },
       );
@@ -214,15 +281,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify the cryptographic proof BEFORE claiming the nonce (mirrors GH#2018 in
-    // /api/markets — an invalid signature must never burn a victim's pending nonce).
-    const nonceBytes = new Uint8Array(Buffer.from(nonce, "utf-8"));
-    let sigValid = false;
-    try {
-      sigValid = nacl.sign.detached.verify(nonceBytes, signatureBytes, deployerPubkeyBytes);
-    } catch {
-      sigValid = false;
-    }
+    // H1v2: stateless deployer proof — no nonce to claim, so no server-stored state to
+    // race across serverless lambda instances (see file header for why this replaced
+    // the nonce+claim scheme).
+    const sigValid = verifyStatelessDeployerProof(slabAddress, deployerPubkeyBytes, signatureBytes);
     if (!sigValid) {
       Sentry.captureMessage("[playground/keeper-register] Deployer signature verification failed", {
         level: "warning",
@@ -230,14 +292,11 @@ export async function POST(req: NextRequest) {
         extra: { deployer, slabAddress },
       });
       return NextResponse.json(
-        { error: "Signature verification failed. Ensure you signed the nonce bytes with the deployer keypair." },
-        { status: 401 },
-      );
-    }
-
-    if (!claimPlaygroundChallenge(nonce, deployer)) {
-      return NextResponse.json(
-        { error: "Invalid, expired, or already-used nonce. Call GET /api/markets/challenge to get a fresh nonce." },
+        {
+          error:
+            'Signature verification failed. Ensure you signed "keeper-register:<slabAddress>:<unix-minute>" ' +
+            "with the deployer keypair within the last few minutes.",
+        },
         { status: 401 },
       );
     }

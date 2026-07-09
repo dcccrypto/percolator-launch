@@ -10,16 +10,19 @@ export const dynamic = "force-dynamic";
  *
  * Flow:
  *   1. Deployer calls GET /api/markets/challenge?deployer=<pubkey>
- *   2. Server stores a UUID nonce (process-local Map — no Supabase required locally)
+ *   2. Server stores a UUID nonce (Vercel Blob-backed — lib/playground-nonce-store.ts)
  *   3. Deployer signs the nonce bytes with their ed25519 keypair
  *   4. POST /api/markets includes { nonce, signature } for verification
  *
- * Playground (local dev): uses a process-local Map (lib/playground-nonce-store.ts)
- * so the endpoint works without a Supabase connection.
+ * Store: lib/playground-nonce-store.ts, a small Vercel Blob JSON store (same pattern
+ * as lib/playground-registered-markets.ts) — durable across serverless invocations,
+ * so the GET that issues a nonce here and the POST that later claims it can land on
+ * different Vercel lambda instances without losing it. (This used to be a process-
+ * local Map, which broke exactly that way in production — see the store's header.)
  *
  * Production: same endpoint; the POST handler validates via nacl + the same store.
- * (The market_challenges Supabase table is no longer used — the in-process store
- * is sufficient for the playground use case and avoids the cold-start 500.)
+ * (The market_challenges Supabase table is no longer used — this store is
+ * sufficient for the playground use case and avoids the cold-start 500.)
  */
 export async function GET(req: NextRequest) {
   try {
@@ -42,7 +45,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const result = createPlaygroundChallenge(deployer);
+    const result = await createPlaygroundChallenge(deployer);
 
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: result.status });
