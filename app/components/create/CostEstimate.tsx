@@ -128,8 +128,9 @@ export const CostEstimate: FC<CostEstimateProps> = ({
     const insNum = parseFloat(insuranceAmount) || 0;
     const totalTokens = lpNum + insNum;
 
-    // USD values if price available
-    const tokenUsdValue = tokenPriceUsd ? totalTokens * tokenPriceUsd : null;
+    // Collateral (LP + insurance) is the universal Sim-USDC mint — 1:1 with USD,
+    // NOT the launched token. Value it at $1 each, not the token's price.
+    const tokenUsdValue = totalTokens;
 
     return {
       slabRentSol: sol.slabRentSol.toFixed(4),
@@ -194,20 +195,20 @@ export const CostEstimate: FC<CostEstimateProps> = ({
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-secondary)]">LP Collateral</span>
           <span className="font-mono text-[var(--text)]">
-            {estimate.lpTokens > 0 ? estimate.lpTokens.toLocaleString() : "—"} {tokenSymbol}
+            {estimate.lpTokens > 0 ? estimate.lpTokens.toLocaleString() : "—"} Sim-USDC
           </span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-[var(--text-secondary)]">Insurance Fund</span>
           <span className="font-mono text-[var(--text)]">
-            {estimate.insTokens > 0 ? estimate.insTokens.toLocaleString() : "—"} {tokenSymbol}
+            {estimate.insTokens > 0 ? estimate.insTokens.toLocaleString() : "—"} Sim-USDC
           </span>
         </div>
         <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
-          <span className="text-[11px] font-semibold text-[var(--text)]">Total Tokens Required</span>
+          <span className="text-[11px] font-semibold text-[var(--text)]">Total Collateral Required</span>
           <div className="text-right">
             <span className="text-[13px] font-bold font-mono text-[var(--text)]">
-              {estimate.totalTokens > 0 ? estimate.totalTokens.toLocaleString() : "—"} {tokenSymbol}
+              {estimate.totalTokens > 0 ? estimate.totalTokens.toLocaleString() : "—"} Sim-USDC
             </span>
             {estimate.tokenUsdValue !== null && estimate.tokenUsdValue > 0 && (
               <p className="text-[10px] text-[var(--text-secondary)]">

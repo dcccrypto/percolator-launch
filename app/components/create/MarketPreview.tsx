@@ -97,13 +97,13 @@ export const MarketPreview: FC<MarketPreviewProps> = ({
           <div>
             <p className="text-[8px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">LP Collateral</p>
             <p className="mt-0.5 text-[12px] font-semibold text-[var(--text)]">
-              {parseFloat(lpCollateral) > 0 ? `${parseFloat(lpCollateral).toLocaleString()} ${symbol}` : "—"}
+              {parseFloat(lpCollateral) > 0 ? `${parseFloat(lpCollateral).toLocaleString()} Sim-USDC` : "—"}
             </p>
           </div>
           <div>
             <p className="text-[8px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">Insurance Fund</p>
             <p className="mt-0.5 text-[12px] font-semibold text-[var(--text)]">
-              {parseFloat(insuranceAmount) > 0 ? `${parseFloat(insuranceAmount).toLocaleString()} ${symbol}` : "—"}
+              {parseFloat(insuranceAmount) > 0 ? `${parseFloat(insuranceAmount).toLocaleString()} Sim-USDC` : "—"}
             </p>
           </div>
         </div>
