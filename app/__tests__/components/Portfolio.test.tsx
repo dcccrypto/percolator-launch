@@ -389,7 +389,7 @@ describe("Portfolio Component Tests", () => {
         positions: [
           {
             slabAddress: "test-slab-abc",
-            symbol: null,
+            symbol: "SOL",
             idx: 0,
             collateralMint: mockPublicKey,
             account: {
@@ -428,7 +428,8 @@ describe("Portfolio Component Tests", () => {
 
       render(<PortfolioPage />);
 
-      // Should display SOL/USD
+      // Should display SOL/USD — labeled by the MARKET's symbol (resolved by
+      // usePortfolio), not the shared sim-USDC collateral token's symbol.
       expect(screen.getByText(/SOL\/USD/i)).toBeInTheDocument();
     });
   });
@@ -452,7 +453,7 @@ describe("Portfolio Component Tests", () => {
 
       render(<PortfolioPage />);
 
-      expect(screen.getByText(/No positions yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/No open positions/i)).toBeInTheDocument();
       expect(screen.getByText(/Browse markets to start trading/i)).toBeInTheDocument();
     });
 

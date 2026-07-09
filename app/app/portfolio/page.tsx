@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
+import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
+import { SlabProvider } from "@/components/providers/SlabProvider";
+import { useClosePosition } from "@/hooks/useClosePosition";
+import { useEngineFreshness } from "@/hooks/useEngineFreshness";
+import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
+import { clearEntryPrice } from "@/lib/entry-price";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio, getLiquidationSeverity, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useLpPositions } from "@/hooks/useLpPositions";
@@ -12,6 +19,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { GlowButton } from "@/components/ui/GlowButton";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
+import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
@@ -36,6 +44,338 @@ function formatPnlPct(pct: number | null | undefined): string {
   if (pct == null) return "0.00%";
   const sign = pct >= 0 ? "+" : "";
   return `${sign}${pct.toFixed(2)}%`;
+}
+
+/** On-demand close flow. Mounted (with its own SlabProvider — useClosePosition
+ *  needs slab context) only while the modal is open, so the portfolio page
+ *  never pays N providers' RPC cost for rows the user isn't closing. */
+function PortfolioCloseFlow({
+  pos,
+  markE6,
+  priceUsd,
+  baseSymbol,
+  collateralSymbol,
+  decimals,
+  onDone,
+}: {
+  pos: PortfolioPosition;
+  markE6: bigint;
+  priceUsd: number | null;
+  baseSymbol: string;
+  collateralSymbol: string;
+  decimals: number;
+  onDone: (closed: boolean) => void;
+}) {
+  const { closePosition, loading, error } = useClosePosition(pos.slabAddress);
+  // Reviewer blocker fix: PortfolioCloseFlow previously dropped `error` from
+  // useClosePosition, so a failed close just silently re-enabled the modal
+  // with no feedback. Also mirror the trade-page's engine-staleness guard
+  // (PositionPanel.tsx) — this component always mounts inside a per-slab
+  // SlabProvider (see the call site below), so useEngineFreshness() has the
+  // context it needs.
+  const { engineStale } = useEngineFreshness();
+  const posSize = pos.account?.positionSize ?? 0n;
+  return (
+    <ClosePositionModal
+      positionSize={posSize}
+      entryPrice={pos.effectiveEntryPrice}
+      currentPrice={markE6}
+      capital={pos.account?.capital ?? 0n}
+      symbol={baseSymbol}
+      collateralSymbol={collateralSymbol}
+      decimals={decimals}
+      priceUsd={priceUsd}
+      isLong={posSize > 0n}
+      loading={loading}
+      error={error}
+      oracleStale={engineStale}
+      onConfirm={async (percent) => {
+        try {
+          await closePosition(percent);
+          if (percent === 100) {
+            clearEntryPrice(pos.slabAddress, pos.idx, pos.account?.owner?.toBase58?.() ?? "");
+          }
+          onDone(true);
+        } catch {
+          /* keep the modal open; the tx error is logged by the hook */
+        }
+      }}
+      onCancel={() => onDone(false)}
+    />
+  );
+}
+
+/** One open-position card. A component (not inline map body) because each row
+ *  needs hooks: a live price-store subscription so PnL / mark / liq distance
+ *  tick in real time (previously frozen at the 30s portfolio poll), and
+ *  close-modal state for the in-place Close button. */
+function PositionCard({
+  pos,
+  label,
+  baseSymbol,
+  collateralSymbol,
+  decimals,
+  onRefresh,
+}: {
+  pos: PortfolioPosition;
+  label: string;
+  baseSymbol: string;
+  collateralSymbol: string;
+  decimals: number;
+  onRefresh: () => void;
+}) {
+  const [showClose, setShowClose] = useState(false);
+
+  // Live mark from the shared WS price store (same feed as the trade page);
+  // falls back to the portfolio poll's oracle price until the first tick.
+  const subscribe = useCallback((cb: () => void) => subscribeSlab(pos.slabAddress, cb), [pos.slabAddress]);
+  const getSnap = useCallback(() => getSnapshot(pos.slabAddress).priceE6, [pos.slabAddress]);
+  const livePriceE6 = useSyncExternalStore(subscribe, getSnap, () => null);
+
+  const posSize = pos.account?.positionSize ?? 0n;
+  const posCapital = pos.account?.capital ?? 0n;
+  const posEntry = pos.effectiveEntryPrice;
+  const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
+  const sizeAbs = posSize < 0n ? -posSize : posSize;
+  const { liquidationPriceE6, leverage } = pos;
+  const hasPosition = posSize !== 0n;
+
+  const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
+  // Live PnL: EXACTLY usePortfolio's corrected math with the live mark
+  // substituted — computeMarkPnl yields coin-margined NATIVE units, which
+  // must be converted to collateral via computeMarkPnlCollateral before
+  // display, and ROE divides by the position's INITIAL MARGIN (capital
+  // fallback), not total account capital. See enrichPosition in usePortfolio.
+  const pnlTokens = (() => {
+    if (!hasPosition || posEntry <= 0n || markE6 <= 0n) return pos.unrealizedPnl;
+    try {
+      return computeMarkPnlCollateral(computeMarkPnl(posSize, posEntry, markE6), markE6);
+    } catch {
+      return pos.unrealizedPnl;
+    }
+  })();
+  const pnlPct = (() => {
+    try {
+      const positionInitialMargin = computePositionInitialMargin(posSize, posEntry, pos.initialMarginBps);
+      return positionInitialMargin > 0n
+        ? computePnlPercent(pnlTokens, positionInitialMargin)
+        : posCapital > 0n
+          ? computePnlPercent(pnlTokens, posCapital)
+          : pos.pnlPercent;
+    } catch {
+      return pos.pnlPercent;
+    }
+  })();
+  const liquidationDistancePct =
+    hasPosition && liquidationPriceE6 > 0n && markE6 > 0n
+      ? Math.max(0, Math.min(100, (Math.abs(Number(markE6) - Number(liquidationPriceE6)) / Number(markE6)) * 100))
+      : pos.liquidationDistancePct;
+  const pnlPositive = pnlTokens >= 0n;
+  const severity = getLiquidationSeverity(liquidationDistancePct);
+  const livePriceUsd = getSnapshot(pos.slabAddress).priceUsd ?? (markE6 > 0n ? Number(markE6) / 1e6 : null);
+
+  return (
+    <>
+      <Link
+        href={`/trade/${pos.slabAddress}`}
+        className={[
+          "block border bg-[var(--panel-bg)] transition-all duration-200 hover:bg-[var(--bg-elevated)]",
+          severity === "danger" && hasPosition
+            ? "border-[var(--short)]/40 hover:border-[var(--short)]/60"
+            : severity === "warning" && hasPosition
+            ? "border-[var(--warning)]/30 hover:border-[var(--warning)]/50"
+            : "border-[var(--border)] hover:border-[var(--accent)]/30",
+        ].join(" ")}
+      >
+        {/* Liquidation warning banner */}
+        {severity === "danger" && hasPosition && (
+          <div className="flex items-center gap-2 border-b border-[var(--short)]/20 bg-[var(--short)]/5 px-4 py-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--short)]">
+              ⚠ Liquidation Risk — {liquidationDistancePct.toFixed(1)}% away
+            </span>
+          </div>
+        )}
+        {severity === "warning" && hasPosition && (
+          <div className="flex items-center gap-2 border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--warning)]">
+              ⚡ Approaching Liquidation — {liquidationDistancePct.toFixed(1)}% away
+            </span>
+          </div>
+        )}
+
+        <div className="p-4">
+          {/* Row 1: Market name, side, PnL, Close */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {label}
+              </span>
+              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                side === "Long"
+                  ? "bg-[var(--long)]/10 text-[var(--long)]"
+                  : side === "Short"
+                  ? "bg-[var(--short)]/10 text-[var(--short)]"
+                  : "bg-[var(--bg-elevated)] text-[var(--text-secondary)]"
+              }`}>
+                {side.toUpperCase()}
+              </span>
+              {leverage > 0 && (
+                <span
+                  className="rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)]"
+                  title={RISK_LEVERAGE_TITLE}
+                >
+                  Risk {formatLeverage(leverage)}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <span
+                  className={`text-sm font-bold ${pnlPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
+                  style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
+                >
+                  {formatPnl(pnlTokens, decimals)}
+                </span>
+                <span
+                  className={`ml-2 text-[10px] font-medium ${pnlPositive ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
+                >
+                  {formatPnlPct(pnlPct)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  // Card is a Link — keep the click from navigating.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowClose(true);
+                }}
+                className="shrink-0 rounded-none border border-[var(--short)]/30 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-all duration-150 hover:border-[var(--short)]/60 hover:bg-[var(--short)]/10"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          {/* Row 2: Details grid */}
+          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-6">
+            <div>
+              <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Size</p>
+              <p className="text-[12px] text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {formatTokenAmount(sizeAbs, decimals)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Entry</p>
+              <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {formatUsdPriceE6(posEntry)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Mark Price</p>
+              <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {markE6 > 0n ? formatUsdPriceE6(markE6) : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Capital</p>
+              <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {formatTokenAmount(posCapital, decimals)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]" title={RISK_LEVERAGE_TITLE}>
+                {RISK_LEVERAGE_LABEL}
+              </p>
+              <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                {leverage > 0 ? formatLeverage(leverage) : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Liq. Price</p>
+              <div className="flex items-center gap-1.5">
+                {hasPosition && (
+                  <span
+                    className={`inline-block h-1.5 w-1.5 rounded-full ${
+                      severity === "danger"
+                        ? "bg-[var(--short)] shadow-[0_0_6px_var(--short)]"
+                        : severity === "warning"
+                        ? "bg-[var(--warning)] shadow-[0_0_6px_var(--warning)]"
+                        : "bg-[var(--long)]"
+                    }`}
+                  />
+                )}
+                <p
+                  className={`text-[12px] ${
+                    severity === "danger" && hasPosition
+                      ? "font-semibold text-[var(--short)]"
+                      : severity === "warning" && hasPosition
+                      ? "text-[var(--warning)]"
+                      : "text-[var(--text-secondary)]"
+                  }`}
+                  style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
+                >
+                  {hasPosition && liquidationPriceE6 > 0n
+                    ? formatUsdPriceE6(liquidationPriceE6)
+                    : "—"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Liquidation distance bar */}
+          {hasPosition && liquidationDistancePct < 100 && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[9px] text-[var(--text)]">
+                <span>Liquidation Distance</span>
+                <span className={
+                  severity === "danger"
+                    ? "font-bold text-[var(--short)]"
+                    : severity === "warning"
+                    ? "font-bold text-[var(--warning)]"
+                    : "text-[var(--text-secondary)]"
+                }>
+                  {liquidationDistancePct.toFixed(1)}%
+                </span>
+              </div>
+              <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(liquidationDistancePct, 100)}%`,
+                    backgroundColor:
+                      severity === "danger"
+                        ? "var(--short)"
+                        : severity === "warning"
+                        ? "var(--warning)"
+                        : "var(--long)",
+                  }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </Link>
+
+      {/* Close flow — provider mounts only while the modal is open */}
+      {showClose && (
+        <SlabProvider slabAddress={pos.slabAddress}>
+          <PortfolioCloseFlow
+            pos={pos}
+            markE6={markE6}
+            priceUsd={livePriceUsd}
+            baseSymbol={baseSymbol}
+            collateralSymbol={collateralSymbol}
+            decimals={decimals}
+            onDone={(closed) => {
+              setShowClose(false);
+              if (closed) onRefresh();
+            }}
+          />
+        </SlabProvider>
+      )}
+    </>
+  );
 }
 
 export default function PortfolioPage() {
@@ -84,6 +424,24 @@ export default function PortfolioPage() {
   const activePositions = positions.filter(
     (pos) => pos.account.positionSize !== 0n || pos.account.capital > 0n
   );
+
+  // Split real trades from idle deposits. A funded-but-flat account is the
+  // user's parked collateral, not a position — rendering both identically
+  // (and counting deposits in the POSITIONS stat) read as bogus data.
+  const openPositions = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) !== 0n);
+  const idleDeposits = activePositions.filter((pos) => (pos.account?.positionSize ?? 0n) === 0n);
+
+  // Market symbol/name per slab — the row label used to show the COLLATERAL
+  // token's symbol, which is the same sim-USDC mint (with no token-list
+  // metadata → raw address) for every playground market: every row read
+  // "DJ54…N8eC/USD" with no way to tell markets apart.
+  const { statsMap } = useAllMarketStats();
+  // Prefer the symbol usePortfolio itself resolved (upstream P1 fix: API
+  // directory + curated static fallback), then the stats map, then a slab stub.
+  const marketLabel = (pos: { slabAddress: string; symbol: string | null }): string => {
+    const sym = pos.symbol ?? statsMap.get(pos.slabAddress)?.symbol;
+    return sym ? `${sym}/USD` : `${pos.slabAddress.slice(0, 8)}…`;
+  };
 
   // GH#1808: Only block on tokenMetas if positions are still loading too. If positions have
   // loaded (loading=false) but tokenMetas haven't resolved, the fetch likely failed silently —
@@ -201,9 +559,9 @@ export default function PortfolioPage() {
               },
               {
                 label: "Positions",
-                value: !walletConnected ? "—" : loading ? "\u2026" : activePositions.length.toString(),
+                value: !walletConnected ? "—" : loading ? "\u2026" : openPositions.length.toString(),
                 color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
-                sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
+                sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : walletConnected && idleDeposits.length > 0 ? `${idleDeposits.length} market deposit${idleDeposits.length === 1 ? "" : "s"}` : undefined,
                 subColor: atRiskCount > 0 ? "text-[var(--short)]" : undefined,
               },
             ].map((stat, idx, arr) => (
@@ -251,205 +609,75 @@ export default function PortfolioPage() {
                 </div>
               ))}
             </div>
-          ) : activePositions.length === 0 ? (
+          ) : openPositions.length === 0 ? (
             <div className="border border-[var(--border)] bg-[var(--panel-bg)] p-10 text-center">
-              <h3 className="mb-1 text-[15px] font-semibold text-[var(--text)]">No positions yet</h3>
-              <p className="mb-4 text-[13px] text-[var(--text-secondary)]">Browse markets to start trading.</p>
+              <h3 className="mb-1 text-[15px] font-semibold text-[var(--text)]">No open positions</h3>
+              <p className="mb-4 text-[13px] text-[var(--text-secondary)]">
+                {idleDeposits.length > 0
+                  ? "Your deposited collateral is listed under Market Deposits below."
+                  : "Browse markets to start trading."}
+              </p>
               <Link href="/markets">
                 <GlowButton>Browse Markets</GlowButton>
               </Link>
             </div>
           ) : (
             <div className="space-y-3">
-              {activePositions.map((pos, i) => {
-                const posSize = pos.account?.positionSize ?? 0n;
-                const posCapital = pos.account?.capital ?? 0n;
-                const posEntry = pos.effectiveEntryPrice;
-                const side = posSize > 0n ? "Long" : posSize < 0n ? "Short" : "Flat";
-                const sizeAbs = posSize < 0n ? -posSize : posSize;
-                const { unrealizedPnl, pnlPercent, oraclePriceE6, liquidationPriceE6, liquidationDistancePct, leverage } = pos;
-                const pnlPositive = unrealizedPnl >= 0n;
-                const severity = getLiquidationSeverity(liquidationDistancePct);
-                const hasPosition = posSize !== 0n;
-
-                return (
-                  <Link
-                    key={`${pos.slabAddress}-${i}`}
-                    href={`/trade/${pos.slabAddress}`}
-                    className={[
-                      "block border bg-[var(--panel-bg)] transition-all duration-200 hover:bg-[var(--bg-elevated)]",
-                      severity === "danger" && hasPosition
-                        ? "border-[var(--short)]/40 hover:border-[var(--short)]/60"
-                        : severity === "warning" && hasPosition
-                        ? "border-[var(--warning)]/30 hover:border-[var(--warning)]/50"
-                        : "border-[var(--border)] hover:border-[var(--accent)]/30",
-                    ].join(" ")}
-                  >
-                    {/* Liquidation warning banner */}
-                    {severity === "danger" && hasPosition && (
-                      <div className="flex items-center gap-2 border-b border-[var(--short)]/20 bg-[var(--short)]/5 px-4 py-1.5">
-                        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--short)]">
-                          ⚠ Liquidation Risk — {liquidationDistancePct.toFixed(1)}% away
-                        </span>
-                      </div>
-                    )}
-                    {severity === "warning" && hasPosition && (
-                      <div className="flex items-center gap-2 border-b border-[var(--warning)]/20 bg-[var(--warning)]/5 px-4 py-1.5">
-                        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--warning)]">
-                          ⚡ Approaching Liquidation — {liquidationDistancePct.toFixed(1)}% away
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="p-4">
-                      {/* Row 1: Market name, side, PnL */}
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {/* P1: label by the market's own symbol (e.g. "SOL-PERP"), not the
-                                collateral token \u2014 sim-USDC is the SAME collateral across every
-                                market (see PLAYGROUND.md), so the old collateralMint lookup
-                                rendered "USDC/USD" for every position regardless of market. */}
-                            {pos.symbol ?? (tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? pos.slabAddress.slice(0, 8) + "\u2026")}/USD
-                          </span>
-                          <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${
-                            side === "Long"
-                              ? "bg-[var(--long)]/10 text-[var(--long)]"
-                              : side === "Short"
-                              ? "bg-[var(--short)]/10 text-[var(--short)]"
-                              : "bg-[var(--bg-elevated)] text-[var(--text-secondary)]"
-                          }`}>
-                            {side.toUpperCase()}
-                          </span>
-                          {leverage > 0 && (
-                            <span
-                              className="rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)]"
-                              title={RISK_LEVERAGE_TITLE}
-                            >
-                              Risk {formatLeverage(leverage)}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <span
-                            className={`text-sm font-bold ${pnlPositive ? "text-[var(--long)]" : "text-[var(--short)]"}`}
-                            style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
-                          >
-                            {formatPnl(unrealizedPnl, getDecimals(pos))}
-                          </span>
-                          <span
-                            className={`ml-2 text-[10px] font-medium ${pnlPositive ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
-                          >
-                            {formatPnlPct(pnlPercent)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Row 2: Details grid */}
-                      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-6">
-                        <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Size</p>
-                          <p className="text-[12px] text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {formatTokenAmount(sizeAbs, getDecimals(pos))}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Entry</p>
-                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {formatUsdPriceE6(posEntry)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Mark Price</p>
-                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {oraclePriceE6 > 0n ? formatUsdPriceE6(oraclePriceE6) : "—"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Capital</p>
-                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {formatTokenAmount(posCapital, getDecimals(pos))}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]" title={RISK_LEVERAGE_TITLE}>
-                            {RISK_LEVERAGE_LABEL}
-                          </p>
-                          <p className="text-[12px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                            {leverage > 0 ? formatLeverage(leverage) : "—"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--text)]">Liq. Price</p>
-                          <div className="flex items-center gap-1.5">
-                            {/* Liquidation severity dot */}
-                            {hasPosition && (
-                              <span
-                                className={`inline-block h-1.5 w-1.5 rounded-full ${
-                                  severity === "danger"
-                                    ? "bg-[var(--short)] shadow-[0_0_6px_var(--short)]"
-                                    : severity === "warning"
-                                    ? "bg-[var(--warning)] shadow-[0_0_6px_var(--warning)]"
-                                    : "bg-[var(--long)]"
-                                }`}
-                              />
-                            )}
-                            <p
-                              className={`text-[12px] ${
-                                severity === "danger" && hasPosition
-                                  ? "font-semibold text-[var(--short)]"
-                                  : severity === "warning" && hasPosition
-                                  ? "text-[var(--warning)]"
-                                  : "text-[var(--text-secondary)]"
-                              }`}
-                              style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
-                            >
-                              {hasPosition && liquidationPriceE6 > 0n
-                                ? formatUsdPriceE6(liquidationPriceE6)
-                                : "—"}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Liquidation distance bar */}
-                      {hasPosition && liquidationDistancePct < 100 && (
-                        <div className="mt-3">
-                          <div className="flex items-center justify-between text-[9px] text-[var(--text)]">
-                            <span>Liquidation Distance</span>
-                            <span className={
-                              severity === "danger"
-                                ? "font-bold text-[var(--short)]"
-                                : severity === "warning"
-                                ? "font-bold text-[var(--warning)]"
-                                : "text-[var(--text-secondary)]"
-                            }>
-                              {liquidationDistancePct.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
-                            <div
-                              className="h-full rounded-full transition-all duration-500"
-                              style={{
-                                width: `${Math.min(liquidationDistancePct, 100)}%`,
-                                backgroundColor:
-                                  severity === "danger"
-                                    ? "var(--short)"
-                                    : severity === "warning"
-                                    ? "var(--warning)"
-                                    : "var(--long)",
-                              }}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </Link>
-                );
-              })}
+              {openPositions.map((pos, i) => (
+                <PositionCard
+                  key={`${pos.slabAddress}-${i}`}
+                  pos={pos}
+                  label={marketLabel(pos)}
+                  baseSymbol={(pos.symbol ?? statsMap.get(pos.slabAddress)?.symbol ?? pos.slabAddress.slice(0, 6)).replace(/-PERP$/i, "")}
+                  collateralSymbol={tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? "USDC"}
+                  decimals={getDecimals(pos)}
+                  onRefresh={refresh}
+                />
+              ))}
             </div>
           )}
         </ScrollReveal>
+
+        {/* Market deposits — funded accounts with NO open position. Shown
+            separately from positions: it's the user's parked collateral, and
+            mixing it into the positions list (as identical flat rows) read as
+            broken/mock data. */}
+        {connected && !loading && idleDeposits.length > 0 && (
+          <ScrollReveal delay={0.22}>
+            <div className="mt-8">
+              <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+                // market deposits
+              </h2>
+              <div className="space-y-px border border-[var(--border)]">
+                {idleDeposits.map((pos, i) => (
+                  <Link
+                    key={`${pos.slabAddress}-dep-${i}`}
+                    href={`/trade/${pos.slabAddress}`}
+                    className="flex items-center justify-between gap-4 bg-[var(--panel-bg)] px-4 py-3 transition-colors hover:bg-[var(--bg-elevated)]"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-[13px] font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
+                        {marketLabel(pos)}
+                      </span>
+                      <span className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                        idle collateral
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-[12px] tabular-nums text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
+                        {formatTokenAmount(pos.account?.capital ?? 0n, getDecimals(pos), 3)}{" "}
+                        <span className="text-[10px] text-[var(--text-secondary)]">
+                          {tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? "USDC"}
+                        </span>
+                      </span>
+                      <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--accent)]">Trade →</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </ScrollReveal>
+        )}
 
         {/* LP positions */}
         <ScrollReveal delay={0.25}>
