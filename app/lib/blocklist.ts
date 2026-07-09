@@ -74,6 +74,12 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   "GRAgHm9utZy6kWJj1ZpAVntbyFxCBJyZJ1nSJmiMPPpq",
   // Orphaned dead-end from the keeper-register ordering-bug repro (never registered).
   "6QSHWb4Vm1M6f1r14t1jB7Jc4en2uieQuLpKqey71Y2S",
+  // 2026-07-09: retired markets. BONK — un-tradeable (price too coarse → engine clamp
+  // floor → LockActive on every trade); dropped from the lineup. Old SOL (im=667/14.99x)
+  // — replaced by Fs13SX1b… (im=666/clean 15x). Both blocklisted so on-chain discovery
+  // (getProgramAccounts) doesn't re-surface them.
+  "4txSGha4zABqt2NUbBtbkzv3vA4rfi9J6Yr95adA4fc5",
+  "DxrZXhTC11gCVtv4b2nkbszScgZPqm9DFqit5X7FvsF7",
 ];
 
 /**

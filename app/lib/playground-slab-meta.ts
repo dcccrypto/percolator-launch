@@ -14,21 +14,14 @@ export const PLAYGROUND_SLAB_META: Record<string, {
   mainnet_ca: string;
   dex_pool_address: string;
 }> = {
-  // SOL/USDC — raydium-clmm — new 2026-07-09 (20x SOL, 10x rest, no Earn vault)
-  "DxrZXhTC11gCVtv4b2nkbszScgZPqm9DFqit5X7FvsF7": {
+  // SOL/USDC — raydium-clmm — 2026-07-09 (15x SOL im=666, 10x rest, no Earn vault; BONK dropped)
+  "Fs13SX1b33wRh3DBbh1NmkuHSz5Z89oRb2ew7aNn1jMH": {
     symbol: "SOL-PERP",
     name: "SOL/USDC Perpetual",
     mainnet_ca: "So11111111111111111111111111111111111111112",
     dex_pool_address: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
   },
-  // BONK/USDC — raydium-clmm — new 2026-07-09 (20x SOL, 10x rest, no Earn vault)
-  "4txSGha4zABqt2NUbBtbkzv3vA4rfi9J6Yr95adA4fc5": {
-    symbol: "BONK-PERP",
-    name: "BONK/USDC Perpetual",
-    mainnet_ca: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-    dex_pool_address: "3UwfrdLTpAjxTRni1boc5HUWe6hzc4HgE5yLdvEp2Noc",
-  },
-  // JUP/USDC — meteora-dlmm — new 2026-07-09 (20x SOL, 10x rest, no Earn vault)
+  // JUP/USDC — meteora-dlmm — 2026-07-09 (10x, no Earn vault)
   "J9unPVyDykcoQyxGxF1MfSE6mGyaaCfZhGEAk5eQokXG": {
     symbol: "JUP-PERP",
     name: "JUP/USDC Perpetual",
