@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { SystemProgram } from "@solana/web3.js";
 import { LaunchProgress } from "@/components/create/LaunchProgress";
 import { LaunchSuccess } from "@/components/create/LaunchSuccess";
 
@@ -14,6 +15,23 @@ vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: React.ReactNode; href: string }) => (
     <a href={href} {...props}>{children}</a>
   ),
+}));
+
+// LaunchSuccess calls useWalletCompat() for the "Mint & Trade"/"Get Sim-USDC & Trade"
+// CTA gate (isDevnet && devnetMint && publicKey). Existing tests never set devnetMint,
+// so this fixed publicKey has no effect on them (the condition still short-circuits);
+// the new collateral-copy tests below need it non-null to exercise that CTA branch.
+vi.mock("@/hooks/useWalletCompat", () => ({
+  useWalletCompat: () => ({
+    publicKey: SystemProgram.programId,
+    connected: true,
+    connecting: false,
+    wallet: null,
+    signTransaction: undefined,
+    signAndSendTransaction: undefined,
+    signMessage: undefined,
+    disconnect: async () => {},
+  }),
 }));
 
 // Mock next/navigation — LaunchSuccess calls useRouter() for post-mint navigation
@@ -243,6 +261,96 @@ describe("LaunchSuccess", () => {
     // After click, should show checkmark
     await vi.waitFor(() => {
       expect(copyBtn.textContent).toBe("✓");
+    });
+  });
+
+  describe("keeper registration retry (2026-07-09 fix)", () => {
+    it("shows a Retry registration button when registration failed and a retry handler is provided", () => {
+      const onRetry = vi.fn();
+      render(
+        <LaunchSuccess
+          {...defaultProps}
+          keeperDelegated={false}
+          keeperMessage="Signature verification failed."
+          onRetryKeeperRegistration={onRetry}
+        />
+      );
+      const retryBtn = screen.getByText("RETRY REGISTRATION");
+      fireEvent.click(retryBtn);
+      expect(onRetry).toHaveBeenCalledOnce();
+    });
+
+    it("disables the retry button and shows a spinner while keeperRegistering is true", () => {
+      render(
+        <LaunchSuccess
+          {...defaultProps}
+          keeperDelegated={false}
+          keeperMessage="Signature verification failed."
+          onRetryKeeperRegistration={vi.fn()}
+          keeperRegistering
+        />
+      );
+      expect(screen.getByText(/RETRYING/)).toBeDefined();
+      const retryBtn = screen.getByText(/RETRYING/).closest("button");
+      expect(retryBtn?.hasAttribute("disabled")).toBe(true);
+    });
+
+    it("does not show a retry button when registration succeeded", () => {
+      render(
+        <LaunchSuccess
+          {...defaultProps}
+          keeperDelegated
+          keeperMessage="Registered."
+          onRetryKeeperRegistration={vi.fn()}
+        />
+      );
+      expect(screen.queryByText("RETRY REGISTRATION")).toBeNull();
+    });
+
+    it("does not show a retry button when no retry handler is provided", () => {
+      render(
+        <LaunchSuccess
+          {...defaultProps}
+          keeperDelegated={false}
+          keeperMessage="Signature verification failed."
+        />
+      );
+      expect(screen.queryByText("RETRY REGISTRATION")).toBeNull();
+    });
+  });
+
+  describe("collateral copy accuracy (2026-07-09 fix)", () => {
+    const simUsdcMint = "DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC";
+
+    it("frames the airdropped mint as Sim-USDC collateral, not the launched token", () => {
+      render(
+        <LaunchSuccess
+          {...defaultProps}
+          mainnetCA="9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump"
+          devnetMint={simUsdcMint}
+          devnetAirdropAmount={500}
+          devnetAirdropSymbol="USDC"
+        />
+      );
+      expect(screen.getByText("COLLATERAL & PRICING")).toBeDefined();
+      expect(screen.getByText(simUsdcMint)).toBeDefined();
+      // The old copy claimed devnet used "a different mint address than mainnet"
+      // for the launched token — that framing must be gone.
+      expect(screen.queryByText(/different mint address/i)).toBeNull();
+      expect(screen.queryByText(/Airdropped/)).toBeNull();
+      // New copy explains the token is a price reference, not something you hold.
+      expect(screen.getByText(/price reference only/)).toBeDefined();
+    });
+
+    it("shows a Sim-USDC-flavored CTA instead of 'MINT & TRADE'", () => {
+      render(
+        <LaunchSuccess
+          {...defaultProps}
+          devnetMint={simUsdcMint}
+        />
+      );
+      expect(screen.queryByText("MINT & TRADE →")).toBeNull();
+      expect(screen.getByText(/SIM-USDC/)).toBeDefined();
     });
   });
 });

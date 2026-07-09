@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { usePrivy } from "@privy-io/react-auth";
-import { useWallets, useSignTransaction, useSignAndSendTransaction } from "@privy-io/react-auth/solana";
+import { useWallets, useSignTransaction, useSignAndSendTransaction, useSignMessage } from "@privy-io/react-auth/solana";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 // bs58 v6: default export is the codec object
@@ -63,6 +63,7 @@ function useWalletCompatPrivyInner() {
   const { wallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();
   const { signAndSendTransaction: privySignAndSend } = useSignAndSendTransaction();
+  const { signMessage: privySignMessage } = useSignMessage();
   const { preferredAddress } = usePreferredWallet();
 
   const activeWallet = useMemo(() => {
@@ -125,6 +126,29 @@ function useWalletCompatPrivyInner() {
     };
   }, [activeWallet, privySignAndSend]);
 
+  /**
+   * BUG FIX (2026-07-09): this previously hardcoded `undefined` with a comment
+   * claiming "Privy embedded wallets do not expose signMessage via this hook" —
+   * that was wrong. @privy-io/react-auth/solana exports a dedicated
+   * `useSignMessage()` hook (confirmed against the installed 3.14.1 solana.d.ts)
+   * that signs a message for ANY connected Solana Standard Wallet, embedded or
+   * external, the same way `useSignTransaction`/`useSignAndSendTransaction`
+   * above already do for transactions. Because signMessage was always
+   * `undefined` in Privy mode (the default/primary auth path for the hosted
+   * playground), every signMessage-gated flow silently degraded for the
+   * majority of users — e.g. useCreateMarket.ts's keeper-register step, which
+   * needs a signed stateless deployer proof and instead posted with no
+   * `signature` field, so the route rejected it with "Missing required fields:
+   * deployer, signature" and the market landed on-chain but never got priced.
+   */
+  const signMessage = useMemo(() => {
+    if (!activeWallet) return undefined;
+    return async (message: Uint8Array): Promise<Uint8Array> => {
+      const result = await privySignMessage({ message, wallet: activeWallet });
+      return result.signature;
+    };
+  }, [activeWallet, privySignMessage]);
+
   return {
     publicKey,
     connected,
@@ -132,8 +156,7 @@ function useWalletCompatPrivyInner() {
     wallet: activeWallet,
     signTransaction,
     signAndSendTransaction,
-    /** Privy embedded wallets do not expose signMessage via this hook — undefined in Privy mode. */
-    signMessage: undefined as ((message: Uint8Array) => Promise<Uint8Array>) | undefined,
+    signMessage,
     disconnect: logout,
   };
 }

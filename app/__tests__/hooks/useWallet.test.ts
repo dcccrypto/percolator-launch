@@ -19,6 +19,7 @@ const mockUsePrivy = vi.fn();
 const mockUseWallets = vi.fn();
 const mockUseSignTransaction = vi.fn();
 const mockUseSignAndSendTransaction = vi.fn();
+const mockUseSignMessage = vi.fn();
 
 vi.mock("@privy-io/react-auth", () => ({
   usePrivy: () => mockUsePrivy(),
@@ -28,6 +29,7 @@ vi.mock("@privy-io/react-auth/solana", () => ({
   useWallets: () => mockUseWallets(),
   useSignTransaction: () => mockUseSignTransaction(),
   useSignAndSendTransaction: () => mockUseSignAndSendTransaction(),
+  useSignMessage: () => mockUseSignMessage(),
 }));
 
 vi.mock("@/hooks/usePrivySafe", () => ({
@@ -53,6 +55,7 @@ describe("useWalletCompat", () => {
     vi.clearAllMocks();
     mockUseSignTransaction.mockReturnValue({ signTransaction: vi.fn() });
     mockUseSignAndSendTransaction.mockReturnValue({ signAndSendTransaction: vi.fn() });
+    mockUseSignMessage.mockReturnValue({ signMessage: vi.fn() });
   });
 
   describe("Connection State", () => {
@@ -132,6 +135,34 @@ describe("useWalletCompat", () => {
 
       const { result } = renderHook(() => useWalletCompat());
       expect(result.current.disconnect).toBe(mockLogout);
+    });
+  });
+
+  describe("signMessage (2026-07-09 fix)", () => {
+    it("should expose a working signMessage backed by Privy's useSignMessage when a wallet is connected", async () => {
+      const wallet = { address: mockAddress, standardWallet: { name: "Privy" } };
+      const signature = new Uint8Array([1, 2, 3]);
+      const privySignMessage = vi.fn().mockResolvedValue({ signature });
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: true, user: { id: "1" }, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({ wallets: [wallet] });
+      mockUseSignMessage.mockReturnValue({ signMessage: privySignMessage });
+
+      const { result } = renderHook(() => useWalletCompat());
+      expect(result.current.signMessage).toBeInstanceOf(Function);
+
+      const message = new TextEncoder().encode("keeper-register:Slab111:12345");
+      const sig = await result.current.signMessage!(message);
+
+      expect(privySignMessage).toHaveBeenCalledWith({ message, wallet });
+      expect(sig).toBe(signature);
+    });
+
+    it("should leave signMessage undefined when no wallet is connected", () => {
+      mockUsePrivy.mockReturnValue({ ready: true, authenticated: false, user: null, logout: vi.fn() });
+      mockUseWallets.mockReturnValue({ wallets: [] });
+
+      const { result } = renderHook(() => useWalletCompat());
+      expect(result.current.signMessage).toBeUndefined();
     });
   });
 });

@@ -232,6 +232,136 @@ export interface CreateMarketState {
   keeperDelegated: boolean;
   /** Keeper registration result message */
   keeperMessage: string | null;
+  /** True while a manual "Retry registration" call (see retryKeeperRegistration) is in flight. */
+  keeperRegistering: boolean;
+}
+
+/** Minimal shape retryKeeperRegistration needs to re-run keeper-register for an
+ *  already-live slab — a subset of CreateMarketParams, since the market is already
+ *  on-chain and everything else about it is fixed. */
+export interface KeeperRegisterRetryParams {
+  slabAddress: string;
+  mainnetCA?: string | null;
+  dexPoolAddress: string;
+  dexType?: string | null;
+  symbol?: string | null;
+}
+
+interface KeeperRegisterOutcome {
+  registered: boolean;
+  message: string;
+}
+
+/**
+ * Signs the H1v2 stateless deployer proof and POSTs /api/playground/keeper-register.
+ * Extracted as a standalone function (not a hook) so it can be called both from
+ * create()'s Step 4/5 gap and from retryKeeperRegistration() below without
+ * duplicating the sign+fetch logic — the two call sites previously used to diverge
+ * (create() silently posted without a signature when wallet.signMessage was
+ * unavailable; retry didn't exist at all).
+ *
+ * NEVER throws — always resolves with an outcome describing what happened, so
+ * callers can surface it directly as UI state.
+ */
+async function registerMarketWithKeeper(
+  wallet: {
+    publicKey: PublicKey | null;
+    signMessage?: (message: Uint8Array) => Promise<Uint8Array>;
+  },
+  params: KeeperRegisterRetryParams,
+): Promise<KeeperRegisterOutcome> {
+  if (!wallet.publicKey) {
+    return {
+      registered: false,
+      message: "Wallet not connected — connect your wallet, then click Retry registration.",
+    };
+  }
+
+  // BUG FIX (2026-07-09): previously this fell through with keeperSignature = null
+  // and POSTed the request anyway, minus the `signature` field — the route always
+  // 400'd with "Missing required fields: deployer, signature" and the wizard
+  // reported a generic non-actionable warning. Now that useWalletCompat.ts wires a
+  // real signMessage for Privy (the primary auth path), this should be rare, but
+  // some wallet-standard adapters genuinely don't implement it — surface that
+  // explicitly instead of silently sending a doomed request.
+  if (!wallet.signMessage) {
+    return {
+      registered: false,
+      message:
+        "Your connected wallet can't sign messages, so it can't prove it administers this " +
+        "market. The market is live on-chain but won't be priced until it's registered — " +
+        "try reconnecting your wallet, then click Retry registration.",
+    };
+  }
+
+  const keeperDeployer = wallet.publicKey.toBase58();
+  let keeperSignature: string;
+  try {
+    // H1v2 auth: keeper-register verifies slab ownership via a STATELESS
+    // deployer-signed proof — sign `keeper-register:<slabAddress>:<unix-minute>`
+    // and the route independently reconstructs + verifies it against a small
+    // window around its own clock. No server-stored nonce (see route.ts header).
+    const unixMinute = Math.floor(Date.now() / 60_000);
+    const proofMsg = new TextEncoder().encode(
+      `keeper-register:${params.slabAddress}:${unixMinute}`,
+    );
+    const sig = await wallet.signMessage(proofMsg);
+    keeperSignature = Buffer.from(sig).toString("base64");
+  } catch (sigErr) {
+    // Sign throws/rejects (user declined, wallet popup closed, timeout, etc.) —
+    // don't proceed with an unsigned request. Actionable + retryable.
+    console.warn("[useCreateMarket] keeper-register sign failed:", sigErr);
+    return {
+      registered: false,
+      message:
+        "Signature request was cancelled or failed — the market is live on-chain but won't " +
+        "be priced until it's registered. Click Retry registration to try again.",
+    };
+  }
+
+  try {
+    const keeperRegResp = await fetch("/api/playground/keeper-register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slabAddress: params.slabAddress,
+        mainnetCA: params.mainnetCA ?? null,
+        dexPoolAddress: params.dexPoolAddress,
+        // params.dexType carries DexScreener's raw dexId ("meteora",
+        // "raydium") — normalize to the keeper vocabulary or the route
+        // 400s and the market is orphaned (no price, no name).
+        dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "raydium-clmm",
+        symbol: params.symbol ?? null,
+        // H1v2 deployer proof (stateless, see above)
+        deployer: keeperDeployer,
+        signature: keeperSignature,
+      }),
+    });
+    const keeperRegData = (await keeperRegResp.json()) as {
+      registered?: boolean;
+      message?: string;
+      error?: string;
+    };
+    const registered = keeperRegData.registered ?? false;
+    // Error responses put their reason in `error`, not `message` — a 400/502 with
+    // no `message` previously left the wizard showing nothing.
+    const message =
+      keeperRegData.message ??
+      (keeperRegData.error
+        ? `Keeper registration failed: ${keeperRegData.error} — the market is live on-chain but won't be priced or listed until it's registered.`
+        : registered
+          ? "Registered — the keeper will pick this up on its next poll."
+          : "Keeper registration failed — the market is live on-chain but won't be priced or listed until it's registered.");
+    console.log("[useCreateMarket] Keeper registration:", keeperRegData);
+    return { registered, message };
+  } catch (keeperErr) {
+    console.warn("[useCreateMarket] Keeper registration failed:", keeperErr);
+    return {
+      registered: false,
+      message:
+        "Keeper registration failed — the market is live on-chain but won't be priced or listed until it's registered. Click Retry registration to try again.",
+    };
+  }
 }
 
 const STEP_LABELS = [
@@ -260,6 +390,7 @@ export function useCreateMarket() {
     insuranceMintFailed: false,
     keeperDelegated: false,
     keeperMessage: null,
+    keeperRegistering: false,
   });
 
   // PERC-8329 / GH#1964: Slab keypair is normally kept in-memory ONLY (this ref), not
@@ -1445,75 +1576,27 @@ export function useCreateMarket() {
         //
         // Registers { marketAddress, poolAddress, dexType } with the keeper service so
         // PushAuthMark price-push starts within the next keeper cycle (~30s).
+        //
+        // BUG FIX (2026-07-09): this used to inline its own sign+POST logic here,
+        // duplicated by nothing (there was no retry path). It's now
+        // registerMarketWithKeeper() (module scope above) — a single implementation
+        // shared with retryKeeperRegistration(), which LaunchSuccess's "Retry
+        // registration" button calls when this first attempt fails (see that
+        // function's BUG FIX comment for what changed and why: signMessage
+        // unavailability and sign failures are now surfaced explicitly instead of
+        // silently posting a request with no `signature` field).
         let keeperDelegated = false;
         let keeperMessage: string | null = null;
         if (isKeeperOracle && params.dexPoolAddress) {
-          try {
-            // H1v2 auth: keeper-register verifies slab ownership via a STATELESS
-            // deployer-signed proof — sign `keeper-register:<slabAddress>:<unix-minute>`
-            // and the route independently reconstructs + verifies it against a small
-            // window around its own clock. No server-stored nonce.
-            //
-            // This replaced a nonce+challenge flow (GET /api/markets/challenge, sign,
-            // claim) backed by a process-local Map (lib/playground-nonce-store.ts) —
-            // on Vercel that Map is per-lambda-instance, so the GET that issued a nonce
-            // and this POST that claimed it could land on different instances with no
-            // shared memory. That contributed to the same real launch failing with
-            // "Missing required fields: deployer, nonce, signature" / random "invalid
-            // nonce" errors, layered on top of the ordering bug above. The stateless
-            // message needs no shared state between requests, so it works regardless
-            // of which instance handles it. Non-fatal either way: on failure the
-            // market is still live on-chain.
-            const keeperDeployer = wallet.publicKey.toBase58();
-            let keeperSignature: string | null = null;
-            if (wallet.signMessage) {
-              try {
-                const unixMinute = Math.floor(Date.now() / 60_000);
-                const proofMsg = new TextEncoder().encode(
-                  `keeper-register:${slabPk.toBase58()}:${unixMinute}`,
-                );
-                const sig = await wallet.signMessage(proofMsg);
-                keeperSignature = Buffer.from(sig).toString("base64");
-              } catch (sigErr) {
-                console.warn("[useCreateMarket] keeper-register sign failed (non-fatal):", sigErr);
-              }
-            }
-            const keeperRegResp = await fetch("/api/playground/keeper-register", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                slabAddress: slabPk.toBase58(),
-                mainnetCA: params.mainnetCA ?? null,
-                dexPoolAddress: params.dexPoolAddress,
-                // params.dexType carries DexScreener's raw dexId ("meteora",
-                // "raydium") — normalize to the keeper vocabulary or the route
-                // 400s and the market is orphaned (no price, no name).
-                dexType: normalizeDexType(params.dexType) ?? params.dexType ?? "raydium-clmm",
-                symbol: params.symbol ?? null,
-                // H1v2 deployer proof (stateless, see above)
-                deployer: keeperDeployer,
-                ...(keeperSignature ? { signature: keeperSignature } : {}),
-              }),
-            });
-            const keeperRegData = await keeperRegResp.json() as {
-              registered?: boolean;
-              message?: string;
-              error?: string;
-            };
-            keeperDelegated = keeperRegData.registered ?? false;
-            // Error responses put their reason in `error`, not `message` —
-            // previously a 400/502 left keeperMessage null and the wizard
-            // showed nothing, so users had no idea their market wasn't priced.
-            keeperMessage =
-              keeperRegData.message ??
-              (keeperRegData.error
-                ? `Keeper registration failed: ${keeperRegData.error} — the market is live on-chain but won't be priced or listed until it's registered.`
-                : null);
-            console.log("[useCreateMarket] Keeper registration:", keeperRegData);
-          } catch (keeperErr) {
-            console.warn("[useCreateMarket] Keeper registration failed (non-fatal):", keeperErr);
-            keeperMessage = "Keeper registration failed — the market is live on-chain but won't be priced or listed until it's registered.";
-          }
+          const outcome = await registerMarketWithKeeper(wallet, {
+            slabAddress: slabPk.toBase58(),
+            mainnetCA: params.mainnetCA,
+            dexPoolAddress: params.dexPoolAddress,
+            dexType: params.dexType,
+            symbol: params.symbol,
+          });
+          keeperDelegated = outcome.registered;
+          keeperMessage = outcome.message;
         }
 
         // Step 5 (FINAL on-chain step): percolator-stake InitPool. Creates the
@@ -1690,8 +1773,31 @@ export function useCreateMarket() {
       insuranceMintFailed: false,
       keeperDelegated: false,
       keeperMessage: null,
+      keeperRegistering: false,
     });
   }, []);
 
-  return { state, create, reset, restoreSlabKeypair };
+  /**
+   * Standalone "Retry registration" entry point for LaunchSuccess (see BUG FIX
+   * 2026-07-09 above) — the market is already live on-chain, so this just re-runs
+   * the sign+POST keeper-register step without touching the slab or redoing any
+   * on-chain instructions. Safe to call repeatedly; the route's upsert is
+   * idempotent per slabAddress.
+   */
+  const retryKeeperRegistration = useCallback(
+    async (params: KeeperRegisterRetryParams) => {
+      setState((s) => ({ ...s, keeperRegistering: true }));
+      const outcome = await registerMarketWithKeeper(wallet, params);
+      setState((s) => ({
+        ...s,
+        keeperRegistering: false,
+        keeperDelegated: outcome.registered,
+        keeperMessage: outcome.message,
+      }));
+      return outcome;
+    },
+    [wallet],
+  );
+
+  return { state, create, reset, restoreSlabKeypair, retryKeeperRegistration };
 }

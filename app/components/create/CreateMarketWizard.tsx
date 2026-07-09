@@ -90,7 +90,7 @@ const DEFAULT_STATE: WizardState = {
 export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }) => {
   const { publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const { state: createState, create, reset: resetCreate, restoreSlabKeypair } = useCreateMarket();
+  const { state: createState, create, reset: resetCreate, restoreSlabKeypair, retryKeeperRegistration } = useCreateMarket();
   // BUG 7 fix: RecoverSolBanner's onResume callback only forwards (slabAddress, fromStep) —
   // it's a shared component out of this fix's scope, so rather than changing its signature,
   // call useStuckSlabs() here too (same hook RecoverSolBanner uses internally) to get our own
@@ -766,6 +766,26 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
     create(params, createState.step);
   };
 
+  // Retry ONLY the keeper-register step for an already-live market (LaunchSuccess's
+  // "Retry registration" action — see useCreateMarket.ts's retryKeeperRegistration
+  // BUG FIX comment). Deliberately does not touch on-chain state — the market is
+  // already fully created; this just re-signs the stateless deployer proof and
+  // re-POSTs it. Mirrors the same dexPoolAddress/dexType/symbol derivation used
+  // for the "keeper" oracle branch in handleLaunch/handleRetry above.
+  const handleRetryKeeperRegistration = useCallback(async () => {
+    if (!createState.slabAddress) return;
+    const dexPoolAddress = wizard.dexPool?.poolAddress ??
+      (isValidBase58Pubkey(wizard.oracleFeed) ? wizard.oracleFeed : undefined);
+    if (!dexPoolAddress) return;
+    await retryKeeperRegistration({
+      slabAddress: createState.slabAddress,
+      mainnetCA: wizard.mintAddress,
+      dexPoolAddress,
+      dexType: wizard.dexPool?.dexId ?? "raydium-clmm",
+      symbol: wizard.tokenMeta?.symbol ?? "UNKNOWN",
+    });
+  }, [createState.slabAddress, wizard.dexPool, wizard.oracleFeed, wizard.mintAddress, wizard.tokenMeta, retryKeeperRegistration]);
+
   // Reset wizard completely
   // Issue #1141: Re-apply initialMint from URL param so 'Clear & Start Fresh'
   // doesn't lose the ?mint= address the user navigated here with.
@@ -826,6 +846,8 @@ export const CreateMarketWizard: FC<{ initialMint?: string }> = ({ initialMint }
         insuranceMintFailed={createState.insuranceMintFailed}
         keeperDelegated={createState.keeperDelegated}
         keeperMessage={createState.keeperMessage}
+        keeperRegistering={createState.keeperRegistering}
+        onRetryKeeperRegistration={handleRetryKeeperRegistration}
       />
     );
   }

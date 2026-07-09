@@ -34,6 +34,17 @@ interface LaunchSuccessProps {
   keeperDelegated?: boolean;
   /** Keeper registration message */
   keeperMessage?: string | null;
+  /** True while a "Retry registration" call is in flight */
+  keeperRegistering?: boolean;
+  /**
+   * BUG FIX (2026-07-09): re-runs just the keeper-register step for an
+   * already-on-chain market. Registration can fail non-fatally for reasons the
+   * user CAN fix (wallet couldn't sign, transient network error) — without this,
+   * a market that lands on-chain but fails registration stayed permanently
+   * unpriced with no recourse short of re-deploying. See useCreateMarket.ts's
+   * retryKeeperRegistration.
+   */
+  onRetryKeeperRegistration?: () => void | Promise<void>;
 }
 
 /**
@@ -56,6 +67,8 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   insuranceMintFailed,
   keeperDelegated,
   keeperMessage,
+  keeperRegistering,
+  onRetryKeeperRegistration,
 }) => {
   const [copied, setCopied] = useState(false);
   const [copiedDevnet, setCopiedDevnet] = useState(false);
@@ -65,9 +78,16 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
   const { publicKey } = useWalletCompat();
   const router = useRouter();
 
-  /** PERC-475: Mint $500 worth of devnet tokens then navigate to the trade page.
-   *  GH#1266: Always navigate to trade page regardless of auto-mint outcome.
-   *  Mint failure is non-fatal — user can get tokens via the airdrop button on the trade page. */
+  /**
+   * PERC-475: Claim ~$500 of Sim-USDC collateral, then navigate to the trade page.
+   * GH#1266: Always navigate to trade page regardless of the claim's outcome.
+   *
+   * BUG FIX (2026-07-09): `devnetMint` here is the Sim-USDC collateral mint, NOT a
+   * devnet mint of the token the user just launched — Percolator markets don't have
+   * one; the launched token is a price reference only (see the collateral/pricing
+   * card below). Renamed from the previous "mint tokens" framing, which implied
+   * this was minting the launched asset.
+   */
   const handleMintAndTrade = useCallback(async () => {
     if (!publicKey || !devnetMint || mintLoading) return;
     setMintLoading(true);
@@ -81,16 +101,16 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           walletAddress: publicKey.toBase58(),
         }),
       });
-      // GH#1266: On mint failure, show a brief warning but still navigate.
+      // GH#1266: On claim failure, show a brief warning but still navigate.
       // Previously we returned early here, leaving the user stranded with an error banner.
       if (!resp.ok && resp.status !== 429) {
         const d = await resp.json().catch(() => ({}));
-        setMintError(d.error ?? "Auto-mint failed — you can airdrop tokens from the trade page");
+        setMintError(d.error ?? "Sim-USDC faucet claim failed — you can claim it from the faucet on the trade page");
       }
     } catch {
       // Network error — still navigate
     }
-    // Always navigate regardless of mint outcome
+    // Always navigate regardless of claim outcome
     router.push(`/trade/${marketAddress}`);
   }, [publicKey, devnetMint, mintLoading, marketAddress, router]);
 
@@ -153,8 +173,24 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         </div>
       )}
       {!keeperDelegated && keeperMessage && (
-        <div className="mb-4 border border-[var(--warning)]/30 bg-[var(--warning)]/[0.04] px-4 py-2.5 text-[11px] text-[var(--text-secondary)]">
-          Keeper registration: {keeperMessage}
+        <div className="mb-4 border border-[var(--warning)]/30 bg-[var(--warning)]/[0.04] px-4 py-2.5 text-left text-[11px] text-[var(--text-secondary)]">
+          <p>Keeper registration: {keeperMessage}</p>
+          {onRetryKeeperRegistration && (
+            <button
+              type="button"
+              onClick={() => void onRetryKeeperRegistration()}
+              disabled={keeperRegistering}
+              className="mt-2.5 border border-[var(--warning)]/40 bg-[var(--warning)]/[0.06] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--warning)] transition-colors hover:bg-[var(--warning)]/[0.12] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {keeperRegistering ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="animate-spin">⟳</span> RETRYING…
+                </span>
+              ) : (
+                "RETRY REGISTRATION"
+              )}
+            </button>
+          )}
         </div>
       )}
 
@@ -192,62 +228,78 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
         </div>
       )}
 
-      {/* Devnet Token Info — CA mismatch notice + airdrop confirmation + mint errors */}
+      {/*
+        Collateral & pricing — BUG FIX (2026-07-09): this card previously called
+        itself "DEVNET TOKEN INFO" and showed `devnetMint` as if it were a devnet
+        mint of the token the user just launched ("Airdropped 1,000 TOKEN...
+        Devnet uses a different mint address than mainnet"). That's wrong on both
+        counts:
+          1. Percolator markets don't have a devnet mint of the traded token at
+             all — `devnetMint` here is always the Sim-USDC collateral mint (see
+             CreateMarketWizard.tsx's collateralMintAddress: on devnet it's
+             ALWAYS testUsdcMint, never a per-market mirror of the launched
+             token — that mirror-mint collateral model was removed).
+          2. The launched token (mainnetCA) is a PRICE REFERENCE only — this
+             market is priced off its live mainnet DEX pool via the keeper. You
+             never hold or receive that token on devnet; you trade with Sim-USDC,
+             the same collateral shared by every Percolator market.
+        Reframed below to describe what's actually happening: a Sim-USDC
+        collateral top-up, plus a note on how the market gets its price.
+      */}
       {isDevnet && (devnetMint || devnetAirdropAmount || devnetMintError) && (
         <div className="border border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] p-4 mb-6 text-left w-full max-w-sm mx-auto space-y-3">
           <p className="text-[9px] font-medium uppercase tracking-[0.15em] text-[var(--accent)]">
-            DEVNET TOKEN INFO
+            COLLATERAL &amp; PRICING
+          </p>
+
+          <p className="text-[10px] text-[var(--text-secondary)] leading-relaxed">
+            You trade with <strong className="text-[var(--text)]">Sim-USDC</strong> — one collateral
+            balance shared across every Percolator market, topped up once from the faucet.
           </p>
 
           {devnetAirdropAmount && devnetAirdropSymbol && (
             <div className="flex items-center gap-2 text-[12px]">
               <span className="text-[var(--long)]">✓</span>
               <span className="text-[var(--text)]">
-                Airdropped <strong>{devnetAirdropAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {devnetAirdropSymbol}</strong>{" "}
-                <span className="text-[var(--text-secondary)]">(~$500 worth)</span>
+                Sent <strong>{devnetAirdropAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {devnetAirdropSymbol}</strong>{" "}
+                <span className="text-[var(--text-secondary)]">(~$500 of Sim-USDC) to your wallet</span>
               </span>
             </div>
           )}
 
           {devnetMint && (
-            <div className="space-y-1">
-              <p className="text-[10px] text-[var(--text-secondary)]">
-                ⚠️ Devnet uses a <strong>different mint address</strong> than mainnet:
-              </p>
-              {mainnetCA && (
-                <div className="flex items-center gap-2 text-[10px]">
-                  <span className="text-[var(--text-secondary)] w-16 flex-shrink-0">Mainnet:</span>
-                  <code className="font-mono text-[9px] text-[var(--text-secondary)] truncate">{mainnetCA}</code>
-                </div>
-              )}
-              <div className="flex items-center gap-2 text-[10px]">
-                <span className="text-[var(--accent)] w-16 flex-shrink-0 font-medium">Devnet:</span>
-                <code className="font-mono text-[9px] text-[var(--accent)] truncate flex-1">{devnetMint}</code>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(devnetMint);
-                      setCopiedDevnet(true);
-                      setTimeout(() => setCopiedDevnet(false), 2000);
-                    } catch {}
-                  }}
-                  className="border border-[var(--border)] px-1.5 py-0.5 text-[8px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors flex-shrink-0"
-                >
-                  {copiedDevnet ? "✓" : "copy"}
-                </button>
-              </div>
-              <p className="text-[9px] text-[var(--text-secondary)] mt-1">
-                Use the devnet mint address when adding tokens to your wallet or trading.
-              </p>
+            <div className="flex items-center gap-2 text-[10px]">
+              <span className="text-[var(--accent)] w-16 flex-shrink-0 font-medium">Sim-USDC:</span>
+              <code className="font-mono text-[9px] text-[var(--accent)] truncate flex-1">{devnetMint}</code>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(devnetMint);
+                    setCopiedDevnet(true);
+                    setTimeout(() => setCopiedDevnet(false), 2000);
+                  } catch {}
+                }}
+                className="border border-[var(--border)] px-1.5 py-0.5 text-[8px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors flex-shrink-0"
+              >
+                {copiedDevnet ? "✓" : "copy"}
+              </button>
             </div>
+          )}
+
+          {mainnetCA && (
+            <p className="text-[9px] text-[var(--text-secondary)] leading-relaxed">
+              {tokenSymbol} itself is a <strong className="text-[var(--text)]">price reference only</strong> —
+              this market is priced off its live mainnet DEX pool via the keeper. You never hold or
+              receive {tokenSymbol} on devnet.
+            </p>
           )}
 
           {devnetMintError && (
             <div className="flex items-center gap-2 text-[11px]">
               <span className="text-[var(--short)]">✗</span>
               <span className="text-[var(--short)]">
-                Token mint failed: {devnetMintError}
+                Sim-USDC faucet claim failed: {devnetMintError}
               </span>
             </div>
           )}
@@ -256,23 +308,23 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
             <div className="flex items-center gap-2 text-[11px]">
               <span className="text-[var(--text-dim)]">⏳</span>
               <span className="text-[var(--text-dim)]">
-                Devnet token minting in progress...
+                Sending Sim-USDC collateral...
               </span>
             </div>
           )}
         </div>
       )}
 
-      {/* Devnet mint error — show inline error (minting is automatic, no manual faucet link) */}
+      {/* Sim-USDC faucet claim error — shown inline (claiming is automatic, no manual link needed) */}
       {isDevnet && devnetMintError && !devnetMint && !devnetAirdropAmount && (
         <div className="mb-6 text-[11px] text-[var(--text-secondary)]">
-          Auto-mint failed ({devnetMintError}). Click &ldquo;Trade This Market&rdquo; and use the airdrop button to get devnet tokens.
+          Sim-USDC faucet claim failed ({devnetMintError}). Click &ldquo;Trade This Market&rdquo; and use the faucet button there to get Sim-USDC.
         </div>
       )}
 
       {/* CTAs */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-        {/* PERC-475: Show "Mint & Trade" on devnet when a mirror mint is available */}
+        {/* PERC-475: Claim Sim-USDC collateral + trade on devnet when a collateral mint is available */}
         {isDevnet && devnetMint && publicKey ? (
           <button
             type="button"
@@ -282,10 +334,10 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
           >
             {mintLoading ? (
               <span className="flex items-center gap-2">
-                <span className="animate-spin">⟳</span> MINTING…
+                <span className="animate-spin">⟳</span> FUNDING…
               </span>
             ) : (
-              "MINT & TRADE →"
+              "GET SIM-USDC & TRADE →"
             )}
           </button>
         ) : (
