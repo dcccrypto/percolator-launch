@@ -27,6 +27,18 @@ const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x4
 const PORTFOLIO_PROVENANCE_MARKET_GROUP_OFF = 16;
 /** sizeof(PortfolioMatcherConfigV16), appended at the end of the account. */
 const PORTFOLIO_MATCHER_CONFIG_LEN = 104;
+/**
+ * Fixed byte-length of every v17 portfolio account (SDK's
+ * V17_PORTFOLIO_ACCOUNT_LEN = HEADER_LEN(16) + PortfolioAccountV16Account(9227)
+ * + PORTFOLIO_MATCHER_CONFIG_LEN(104) = 9347). Every portfolio account on the
+ * wrapper program — LP or trader — is this exact size, so it doubles as a
+ * cheap `dataSize` filter for the all-markets scan below.
+ */
+const V17_PORTFOLIO_ACCOUNT_LEN = 9347;
+/** Absolute byte offset of PortfolioMatcherConfigV16.enabled (u64) within a full-length portfolio account. */
+const PORTFOLIO_ENABLED_ABS_OFFSET = V17_PORTFOLIO_ACCOUNT_LEN - PORTFOLIO_MATCHER_CONFIG_LEN + 96;
+/** u64 LE bytes for `enabled == 1`, base64-encoded — used as a memcmp filter value. */
+const ENABLED_TRUE_B64 = Buffer.from([1, 0, 0, 0, 0, 0, 0, 0]).toString("base64");
 
 /** True if the account's trailing PortfolioMatcherConfigV16.enabled == 1. */
 function isMatcherEnabled(data: Buffer): boolean {
@@ -82,6 +94,53 @@ export async function getKnownMarketLpCapitals(
     });
   } catch {
     // RPC failure — callers keep their existing vault_balance/c_tot fallback.
+  }
+  return result;
+}
+
+/**
+ * Batched real Market-LP lookup for EVERY market on the wrapper program,
+ * including wizard-launched markets that have no hardcoded
+ * `lp_portfolio_address` in PLAYGROUND_SLAB_META (getKnownMarketLpCapitals
+ * only covers the curated seeds). One getProgramAccounts scan, filtered
+ * server-side to exactly the *enabled* LP-matcher portfolio accounts (magic +
+ * fixed account length + matcher-enabled memcmp — see
+ * PORTFOLIO_ENABLED_ABS_OFFSET), grouped by `marketGroupId` (== the market's
+ * slab address). Unlike discoverMarketLpCapital (one getProgramAccounts call
+ * per market), this is a single call that covers all markets at once — safe
+ * to call once per /api/markets request.
+ */
+export async function scanEnabledMarketLpCapitals(
+  connection: Connection,
+  programId: PublicKey,
+): Promise<Map<string, bigint>> {
+  const result = new Map<string, bigint>();
+  try {
+    const accounts = await connection.getProgramAccounts(programId, {
+      filters: [
+        { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
+        { dataSize: V17_PORTFOLIO_ACCOUNT_LEN },
+        { memcmp: { offset: PORTFOLIO_ENABLED_ABS_OFFSET, bytes: ENABLED_TRUE_B64, encoding: "base64" } },
+      ],
+    });
+    for (const { account } of accounts) {
+      const data = Buffer.from(account.data);
+      try {
+        const parsed = parsePortfolioV17(new Uint8Array(data));
+        const slab = parsed.marketGroupId.toBase58();
+        // Guard against a theoretical duplicate-enabled-portfolio-per-market
+        // case — never regress an already-found value.
+        const existing = result.get(slab);
+        if (existing == null || parsed.capital > existing) {
+          result.set(slab, parsed.capital);
+        }
+      } catch {
+        // Skip unparsable accounts — never let one bad row break the scan.
+      }
+    }
+  } catch {
+    // RPC failure (unsupported on this cluster, rate-limited, etc.) —
+    // callers keep their existing vault_balance/c_tot fallback.
   }
   return result;
 }

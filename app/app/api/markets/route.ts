@@ -15,7 +15,7 @@ import nacl from "tweetnacl";
 import * as fs from "fs";
 import * as path from "path";
 import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeMarketFilter";
-import { getKnownMarketLpCapitals } from "@/lib/lp-portfolio";
+import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-portfolio";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
 import { computeMarketHealthFromStats } from "@/lib/health";
@@ -524,10 +524,24 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
             .map((m) => String((m as Record<string, unknown>).slab_address ?? ""))
             .filter((s) => !!s);
           if (candidateSlabs.length > 0) {
-            const knownLpCapitals = await getKnownMarketLpCapitals(
-              new Connection(getRpcEndpoint(), "confirmed"),
-              candidateSlabs,
-            );
+            const lpConnection = new Connection(getRpcEndpoint(), "confirmed");
+            const knownLpCapitals = await getKnownMarketLpCapitals(lpConnection, candidateSlabs);
+
+            // Wizard-launched markets (e.g. Percolator, BURNIE) have no
+            // hardcoded lp_portfolio_address in PLAYGROUND_SLAB_META, so
+            // getKnownMarketLpCapitals never covers them. One additional
+            // batched getProgramAccounts scan (not per-market) covers every
+            // remaining candidate by grouping enabled LP-matcher portfolios
+            // by their marketGroupId (== slab address).
+            const stillMissing = candidateSlabs.filter((s) => !knownLpCapitals.has(s));
+            if (stillMissing.length > 0) {
+              const scanned = await scanEnabledMarketLpCapitals(lpConnection, new PublicKey(getConfig().programId));
+              for (const slab of stillMissing) {
+                const capital = scanned.get(slab);
+                if (capital != null) knownLpCapitals.set(slab, capital);
+              }
+            }
+
             if (knownLpCapitals.size > 0) {
               filteredWithLp = filtered.map((m) => {
                 const row = m as Record<string, unknown>;
@@ -1235,10 +1249,24 @@ export async function GET(request: NextRequest) {
         .filter((s): s is string => !!s);
 
       if (candidateSlabs.length > 0) {
-        const knownLpCapitals = await getKnownMarketLpCapitals(
-          new Connection(getRpcEndpoint(), "confirmed"),
-          candidateSlabs,
-        );
+        const lpConnection = new Connection(getRpcEndpoint(), "confirmed");
+        const knownLpCapitals = await getKnownMarketLpCapitals(lpConnection, candidateSlabs);
+
+        // Wizard-launched markets (e.g. Percolator, BURNIE) have no hardcoded
+        // lp_portfolio_address in PLAYGROUND_SLAB_META, so
+        // getKnownMarketLpCapitals never covers them. One additional batched
+        // getProgramAccounts scan (not per-market) covers every remaining
+        // candidate by grouping enabled LP-matcher portfolios by their
+        // marketGroupId (== slab address) — see scanEnabledMarketLpCapitals.
+        const stillMissing = candidateSlabs.filter((s) => !knownLpCapitals.has(s));
+        if (stillMissing.length > 0) {
+          const scanned = await scanEnabledMarketLpCapitals(lpConnection, new PublicKey(getConfig().programId));
+          for (const slab of stillMissing) {
+            const capital = scanned.get(slab);
+            if (capital != null) knownLpCapitals.set(slab, capital);
+          }
+        }
+
         if (knownLpCapitals.size > 0) {
           // Note: spread `m` directly (not a `Record<string, unknown>`-cast
           // copy) so TS preserves its real inferred shape — spreading a bare
