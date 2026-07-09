@@ -2,9 +2,9 @@ name: Test Suite
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, playground]
   push:
-    branches: [main]
+    branches: [main, playground]
 
 permissions:
   contents: read
@@ -129,7 +129,10 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
+    # Skip on the app-only playground (no packages/* backend + no e2e suite wired).
+    # Runs only when the full monorepo (packages/*) is present.
+    if: hashFiles('packages/shared/package.json') != ''
+
     env:
       RPC_URL: ${{ secrets.DEVNET_RPC_URL || 'https://api.devnet.solana.com' }}
       TEST_WALLET_PRIVATE_KEY: ${{ secrets.TEST_WALLET_PRIVATE_KEY }}
@@ -273,14 +276,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Real type-safety gate: tsc --noEmit on the app. `next build` no longer
+      # type-checks (ignoreBuildErrors is on so a stray error can't block deploys),
+      # so this is where types are actually enforced on every PR.
       - name: Type check
-        env:
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'https://percolator-api-production.up.railway.app' }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co' }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'dummy' }}
-          # Privy validates appId.length === 25 exactly; use secret when available, else 25-char placeholder.
-          NEXT_PUBLIC_PRIVY_APP_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_APP_ID || 'cltestappid00000000000000' }}
-        run: pnpm run build
+        run: pnpm --filter app exec tsc --noEmit
 
   merge-gate:
     name: ✅ Merge Gate

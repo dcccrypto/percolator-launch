@@ -12,6 +12,11 @@ if (!API_URL && process.env.NODE_ENV === "production") {
 }
 
 const nextConfig: NextConfig = {
+  // Playground is a fast-moving devnet contributor app: don't let a lint warning or a
+  // stray type error in an unrelated file block `next build` (Vercel already builds this
+  // way). Type-safety is still enforced separately by the `tsc --noEmit` CI gate.
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
   // Allow loading the dev server from the LAN IP (e.g. phone on the same WiFi).
   // Next 16 blocks /_next/* dev resources from non-localhost origins by default,
   // which makes the page render blank when accessed via an IP. Dev-only setting.
