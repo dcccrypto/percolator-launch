@@ -57,6 +57,10 @@ function _preFundRecord(key: string): void {
   _preFundClaims.set(key, Date.now());
 }
 
+function _preFundRelease(key: string): void {
+  _preFundClaims.delete(key);
+}
+
 export const dynamic = "force-dynamic";
 
 // Canonical env var first, legacy fallback; undefined = non-devnet (fail-closed).
@@ -162,6 +166,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function POST(req: NextRequest) {
+  let releaseInMemoryFallbackGateOnError: (() => void) | null = null;
+
   try {
     // Allow if: explicitly on devnet network OR the mint is a mirror mint (DB-gated)
     // Mirror mints are always safe to fund — their authority is our keypair and they
@@ -349,6 +355,18 @@ export async function POST(req: NextRequest) {
     // Only consumed here — once we know a real mint is about to happen.
     const fundType = `devnet-pre-fund:${mintAddress}`;
     const rateKey = `${walletAddress}:${fundType}`;
+
+    let usingInMemoryFallbackGate = false;
+    let reservedInMemoryFallbackGate = false;
+
+    const releaseInMemoryFallbackGate = () => {
+      if (reservedInMemoryFallbackGate) {
+        _preFundRelease(rateKey);
+        reservedInMemoryFallbackGate = false;
+      }
+    };
+
+    releaseInMemoryFallbackGateOnError = releaseInMemoryFallbackGate;
     let supabaseForGate: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
     let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
     try {
@@ -359,6 +377,7 @@ export async function POST(req: NextRequest) {
     } catch {
       const { limited, nextClaimAt } = _preFundIsLimited(rateKey);
       gate = { allowed: !limited, nextClaimAt };
+      usingInMemoryFallbackGate = true;
     }
     if (!gate.allowed) {
       return NextResponse.json(
@@ -422,6 +441,22 @@ export async function POST(req: NextRequest) {
     // Need to fund: amount = FUND_AMOUNT - currentBalance (top up to 2× minimum)
     const toMint = FUND_AMOUNT - currentBalance;
 
+    // Reserve the in-memory fallback gate immediately before mint work.
+    // Re-checking here closes the check-before-record race in degraded/fallback mode.
+    if (usingInMemoryFallbackGate) {
+      const { limited, nextClaimAt } = _preFundIsLimited(rateKey);
+
+      if (limited) {
+        return NextResponse.json(
+          { error: "Already pre-funded recently", nextClaimAt },
+          { status: 429 },
+        );
+      }
+
+      _preFundRecord(rateKey);
+      reservedInMemoryFallbackGate = true;
+    }
+
     const tx = new Transaction();
 
     // Create ATA if it doesn't exist
@@ -453,17 +488,27 @@ export async function POST(req: NextRequest) {
         30_000,
       );
     } catch (txErr) {
-      // TX failed — release DB gate if available, else in-memory is already set
+      // TX failed — release DB gate if available.
       if (supabaseForGate && gate.claimId != null) {
         try {
           const { releaseFaucetClaim } = await import("@/lib/faucet-rate-gate");
           await releaseFaucetClaim(supabaseForGate, gate.claimId);
-        } catch { /* best-effort */ }
+        } catch {
+          /* best-effort */
+        }
       }
+
+      // TX failed after reserving the in-memory fallback gate.
+      // Release it so a failed mint does not lock the wallet/mint pair for 24h.
+      releaseInMemoryFallbackGate();
+
       throw txErr;
     }
-    // On success, record in-memory claim
-    _preFundRecord(rateKey);
+    // On success, keep the pre-mint fallback reservation.
+    // For the DB-backed gate path, retain the existing in-memory success marker.
+    if (!reservedInMemoryFallbackGate) {
+      _preFundRecord(rateKey);
+    }
 
     return NextResponse.json({
       status: "funded",
@@ -472,6 +517,12 @@ export async function POST(req: NextRequest) {
       signature: sig,
     });
   } catch (error) {
+    try {
+      releaseInMemoryFallbackGateOnError?.();
+    } catch {
+      /* best-effort */
+    }
+
     Sentry.captureException(error, {
       tags: { endpoint: "/api/devnet-pre-fund", method: "POST" },
     });
