@@ -482,6 +482,7 @@ export function getMockPortfolioPositions(): PortfolioPosition[] {
       pnlPercent,
       leverage,
       maintenanceMarginBps: maintenanceBps,
+      initialMarginBps: BigInt(m.initialMarginBps),
       account: {
         kind: AccountKind.User,
         accountId: BigInt(positions.length + 1),

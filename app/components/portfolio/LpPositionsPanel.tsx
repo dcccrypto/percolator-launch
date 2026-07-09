@@ -100,7 +100,10 @@ function LpPositionCard({ position: pos }: LpPositionCardProps) {
             )}
             <div className="min-w-0">
               <p className="text-sm font-semibold text-[var(--text)] truncate" style={{ fontFamily: "var(--font-jetbrains-mono)" }}>
-                {displaySymbol}-PERP
+                {/* Pool symbols on the new markets already carry "-PERP"
+                    (e.g. "BONK-PERP") — appending unconditionally rendered
+                    "BONK-PERP-PERP". */}
+                {displaySymbol.toUpperCase().endsWith("-PERP") ? displaySymbol : `${displaySymbol}-PERP`}
               </p>
               <p className="text-[10px] text-[var(--text-secondary)] truncate">
                 {pos.poolMode === 0 ? "Insurance LP" : "Trading LP"}
