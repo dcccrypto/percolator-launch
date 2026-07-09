@@ -337,6 +337,16 @@ function TradePageInner({ slab }: { slab: string }) {
   // Resolve symbol: Supabase market symbol (trading pair) → on-chain (collateral) → truncated address
   const collateralMintAddress = config?.collateralMint?.toBase58() ?? "";
   const mintAddress = supabaseMarket?.mainnet_ca ?? collateralMintAddress;
+  // GH#chart-empty: TradingChart's GeckoTerminal lookup (useTokenChart) needs the market's
+  // MAINNET token CA, never the devnet Sim-USDC collateral mint (`collateralMintAddress`) —
+  // charting "Sim-USDC vs itself" is meaningless. `mintAddress` above intentionally falls
+  // back to the collateral mint (for symbol/logo resolution elsewhere), but on first render
+  // (before the `/api/markets/[slab]` fetch above resolves) that fallback fires, so
+  // useTokenChart briefly fetches the WRONG mint before re-fetching the correct one once
+  // `supabaseMarket` loads — a wasted request today (GeckoTerminal 404s either way while the
+  // indexer backend is down) and a real wrong-chart flash once it's back. Pass `undefined`
+  // instead of the collateral mint while the real CA is still unknown.
+  const chartMintAddress = supabaseMarket?.mainnet_ca ?? undefined;
   const onChainSymbol = tokenMeta?.symbol ?? null;
   const supabaseSymbol = supabaseMarket?.symbol ?? null;
   const symbol = (() => {
@@ -541,7 +551,7 @@ function TradePageInner({ slab }: { slab: string }) {
             <ErrorBoundary label="TradingChart">
               <RenderProfiler id="TradingChart">
                 <div className="h-full overflow-hidden">
-                  <TradingChart slabAddress={slab} mintAddress={mintAddress || undefined} />
+                  <TradingChart slabAddress={slab} mintAddress={chartMintAddress} />
                 </div>
               </RenderProfiler>
             </ErrorBoundary>
@@ -586,7 +596,7 @@ function TradePageInner({ slab }: { slab: string }) {
           <ErrorBoundary label="TradingChart">
             <RenderProfiler id="TradingChart">
               <div className="w-full overflow-hidden">
-                <TradingChart slabAddress={slab} mintAddress={mintAddress || undefined} />
+                <TradingChart slabAddress={slab} mintAddress={chartMintAddress} />
               </div>
             </RenderProfiler>
           </ErrorBoundary>

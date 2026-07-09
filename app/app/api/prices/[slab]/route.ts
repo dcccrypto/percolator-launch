@@ -85,6 +85,80 @@ async function pythStatsFallback(slab: string): Promise<Stats24h | null> {
   return result;
 }
 
+const GECKOTERMINAL_OHLCV_BASE = "https://api.geckoterminal.com/api/v2/networks/solana/pools";
+
+/** [timestamp, open, high, low, close, volume] — GeckoTerminal's OHLCV row shape. */
+type GeckoOhlcvBar = [number, number, number, number, number, number];
+
+/**
+ * Fallback 24h stats derived directly from GeckoTerminal's public OHLCV API,
+ * for markets `pythStatsFallback` can't cover — anything without a
+ * `PLAYGROUND_SLAB_META` entry (every wizard/community-launched market) or
+ * without a mapped Pyth feed for its underlying asset. Same shape/caching
+ * discipline as `pythStatsFallback`; the only difference is the upstream
+ * source and that the DEX pool address comes from this app's OWN
+ * Supabase-backed `/api/markets/:slab` (reliable, independent of the
+ * Railway-hosted indexer the primary path above already degrades away from)
+ * instead of a hardcoded symbol map — so it works for ANY market, including
+ * ones for tokens Pyth has never heard of (e.g. a freshly-launched pump.fun
+ * coin), as long as GeckoTerminal has indexed its pool.
+ */
+async function geckoTerminalStatsFallback(slab: string, origin: string): Promise<Stats24h | null> {
+  const cacheKey = `gt:${slab}`;
+  const cached = fallbackCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+  const setCache = (value: Stats24h | null): Stats24h | null => {
+    fallbackCache.set(cacheKey, { value, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS });
+    return value;
+  };
+
+  try {
+    // Self-referential call rather than a fresh Supabase query here: /api/markets/:slab
+    // already owns blocklist filtering, network (devnet/mainnet) scoping, slug resolution,
+    // and the on-chain fallback for when Supabase itself isn't configured — reusing it keeps
+    // this route from having to duplicate (and risk drifting from) all of that.
+    const marketRes = await fetch(`${origin}/api/markets/${slab}`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!marketRes.ok) return setCache(null);
+    const marketJson = (await marketRes.json()) as { market?: { dex_pool_address?: string | null } };
+    const pool = marketJson.market?.dex_pool_address;
+    if (!pool) return setCache(null);
+
+    const url = `${GECKOTERMINAL_OHLCV_BASE}/${encodeURIComponent(pool)}/ohlcv/hour?aggregate=1&limit=24`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "percolator-prices-proxy/1.0" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return setCache(null);
+    const data = (await res.json()) as {
+      data?: { attributes?: { ohlcv_list?: GeckoOhlcvBar[] } };
+    };
+    const bars = data.data?.attributes?.ohlcv_list ?? [];
+    if (bars.length === 0) return setCache(null);
+
+    // Newest-first per GeckoTerminal's API contract.
+    const high = Math.max(...bars.map((b) => b[2]));
+    const low = Math.min(...bars.map((b) => b[3]));
+    const last = bars[0][4];                 // newest close
+    const first = bars[bars.length - 1][1];  // oldest open
+    if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(first) || first <= 0) {
+      return setCache(null);
+    }
+
+    const toE6Str = (v: number) => BigInt(Math.round(v * 1_000_000)).toString();
+    return setCache({
+      change24h: ((last - first) / first) * 100,
+      high24h: toE6Str(high),
+      low24h: toE6Str(low),
+    });
+  } catch {
+    return setCache(null);
+  }
+}
+
 /**
  * GET /api/prices/[slab]
  *
@@ -99,11 +173,11 @@ async function pythStatsFallback(slab: string): Promise<Stats24h | null> {
  * We compute 24h stats from the history:
  *  - high24h / low24h: max/min price_e6 in the window
  *  - change24h: % change from oldest entry in window vs latest
- * 
+ *
  * MEDIUM-003: Added slab parameter validation.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ slab: string }> }
 ) {
   try {
@@ -139,11 +213,20 @@ export async function GET(
     }
 
     if (prices.length === 0) {
-      const stats = await pythStatsFallback(validSlab).catch(() => null);
+      // pythStatsFallback only covers the curated PLAYGROUND_SLAB_META markets
+      // (SOL/BONK/JUP/TRUMP/PENGU) — null for anything else, including every
+      // wizard/community-launched market. geckoTerminalStatsFallback picks up
+      // there: it works for ANY market (looks up the pool via /api/markets/:slab)
+      // as long as GeckoTerminal has indexed the pool, which is the common case
+      // even for a brand-new pump.fun-style coin.
+      let stats = await pythStatsFallback(validSlab).catch(() => null);
+      if (!stats) {
+        stats = await geckoTerminalStatsFallback(validSlab, req.nextUrl.origin).catch(() => null);
+      }
       // BUG 18 fix: was NO_STORE — this is the live path on the hosted playground
       // (no indexer backend), polled every ~10s by every viewer. Cache it briefly
-      // so repeated polls within the window don't each re-hit Pyth (see
-      // FALLBACK_CACHE_HEADERS / fallbackCache above).
+      // so repeated polls within the window don't each re-hit Pyth/GeckoTerminal
+      // (see FALLBACK_CACHE_HEADERS / fallbackCache above).
       return NextResponse.json({ stats }, { headers: FALLBACK_CACHE_HEADERS });
     }
 

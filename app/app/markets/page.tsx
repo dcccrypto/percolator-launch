@@ -898,7 +898,7 @@ function MarketsPageInner() {
                   <div className="text-right">price</div>
                   <div className="hidden sm:block text-right">OI</div>
                   <div className="hidden sm:block text-right">vol</div>
-                  <div className="hidden sm:block text-right">insurance</div>
+                  <div className="hidden sm:block text-right">market lp</div>
                   <div className="text-right"><span className="sm:hidden">lev</span><span className="hidden sm:inline">max lev</span></div>
                   <div className="text-right">health</div>
                 </div>
@@ -992,10 +992,20 @@ function MarketsPageInner() {
                         const safe = isSentinelNum(v) ? 0 : Math.max(0, v);
                         return BigInt(Math.round(safe));
                       })();
-                  const insuranceTokensRaw = m.onChain && !m.onChain.configV17
-                    ? sanitizeOnChainValue(m.onChain.engine.insuranceFund.balance)
+                  // "Market LP" — the LP-vault collateral that actually backs trades on this
+                  // market, NOT the (separately admin-managed) insurance fund. Same
+                  // "prefer vault_balance, fall back to c_tot" precedent already used for the
+                  // oracle-down guard above (m.supabase?.vault_balance / c_tot, ~line 945) —
+                  // vault_balance is the external LP-vault account's balance; c_tot (total
+                  // on-chain collateral across all accounts) is the best available proxy for
+                  // markets that store collateral in-slab instead (e.g. FF7K keeper markets,
+                  // see lib/activeMarketFilter.ts). On-chain v12 path uses engine.vault, the
+                  // same field SystemCapitalCard.tsx labels "Total collateral deposited in
+                  // this market's vault".
+                  const marketLpTokensRaw = m.onChain && !m.onChain.configV17
+                    ? sanitizeOnChainValue(m.onChain.engine.vault || m.onChain.engine.cTot)
                     : (() => {
-                        const v = m.supabase?.insurance_balance ?? m.supabase?.insurance_fund ?? 0;
+                        const v = m.supabase?.vault_balance ?? m.supabase?.c_tot ?? 0;
                         const safe = isSentinelNum(v) ? 0 : Math.max(0, v);
                         return BigInt(Math.round(safe));
                       })();
@@ -1010,13 +1020,13 @@ function MarketsPageInner() {
                     : null;
                   const oiDisplay = oiTokensRaw === 0n ? "—"
                     : oiUsd != null ? (oiUsd > 0 ? formatNum(oiUsd) : "—") : formatStatValue(oiTokensRaw, 'number', mintDecimals);
-                  // Insurance is denominated in the COLLATERAL mint (Sim-USDC, 6dp) — it is
+                  // Market LP is denominated in the COLLATERAL mint (Sim-USDC, 6dp) — it is
                   // already a USD amount, so it is NEVER multiplied by the token price (unlike
                   // OI, which is a base-token quantity). Divide by the collateral decimals,
                   // independent of the market's base-token decimals or the USD/token toggle.
-                  const insVal = Math.round((Number(insuranceTokensRaw) / 1e6) * 100) / 100;
-                  const insuranceDisplay = insuranceTokensRaw === 0n ? "—"
-                    : insVal > 0 ? formatNum(insVal) : "—";
+                  const marketLpVal = Math.round((Number(marketLpTokensRaw) / 1e6) * 100) / 100;
+                  const marketLpDisplay = marketLpTokensRaw === 0n ? "—"
+                    : marketLpVal > 0 ? formatNum(marketLpVal) : "—";
                   const volumeDisplay = volume24hRaw != null && volume24hRaw > 0n
                     ? (showUsd && lastPrice != null
                         ? formatNum(Math.round((Number(volume24hRaw) / tokenDivisor) * lastPrice * 100) / 100)
@@ -1077,7 +1087,7 @@ function MarketsPageInner() {
                       <div className="hidden sm:block text-right text-sm text-[var(--text-secondary)] truncate tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                         {volumeDisplay ?? "\u2014"}
                       </div>
-                      <div className="hidden sm:block text-right text-sm text-[var(--text)] truncate tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>{insuranceDisplay}</div>
+                      <div className="hidden sm:block text-right text-sm text-[var(--text)] truncate tabular-nums" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>{marketLpDisplay}</div>
                       <div className="text-right text-sm text-[var(--text-secondary)] tabular-nums" style={{ fontVariantNumeric: "tabular-nums" }}>{m.maxLeverage}x</div>
                       <div className="text-right"><HealthBadge level={effectiveHealth.level} /></div>
                     </Link>

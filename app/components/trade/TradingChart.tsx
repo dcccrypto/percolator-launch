@@ -457,6 +457,58 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     });
   }, [config, slabAddress]);
 
+  // Fallback poll: when no Percolator/Pyth/DEX candle source has data, the two
+  // effects above are the ONLY way `oraclePrices` ever grows — a one-shot
+  // history fetch (above, silently no-ops if the indexer backend is
+  // unreachable) and live WS ticks (also above, silently no-ops if the WS
+  // feed never covers this market or the backend is down). With both dark
+  // (e.g. the shared indexer/WS backend is unreachable — confirmed via the
+  // hosted playground returning "Application not found" for every indexer
+  // route, 2026-07), `oraclePrices` gets at most the single DB-seeded point
+  // `useLivePrice()` applies once on mount and then never grows — permanently
+  // stuck below `hasRenderableData`'s 2-point "sparse" threshold, so a fresh
+  // market's chart shows "Price chart building…" forever instead of an
+  // actual line. Poll the already-reliable `/api/markets/:slab` endpoint
+  // (Supabase-backed, independent of the indexer/WS backend — the same
+  // source MarketInfoBar's price already relies on) so the fallback line
+  // keeps building over time even when nothing else is available. No-ops the
+  // moment a real candle source has data.
+  useEffect(() => {
+    if (!slabAddress) return;
+    if (hasPercolatorData || hasPythData || hasExternalData) return;
+    // Wait for the real sources to SETTLE (not just "not successful yet")
+    // before engaging — otherwise this adds the first oraclePrices point
+    // while Pyth/Percolator/GeckoTerminal are still resolving (typically
+    // well under a second), which would prematurely swap the loading
+    // skeleton for the sparse "building…" overlay on a market that ends up
+    // with a real candle source moments later (e.g. every seeded market).
+    if (pythStatus === "loading" || percolatorStatus === "loading" || externalStatus === "loading") return;
+
+    let cancelled = false;
+    const poll = () => {
+      fetch(`/api/markets/${slabAddress}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled) return;
+          const price = d.market?.mark_price ?? d.market?.last_price;
+          if (typeof price !== "number" || !(price > 0)) return;
+          const now = Date.now();
+          setOraclePrices((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && now - last.timestamp < 5000) return prev;
+            return [...prev, { timestamp: now, price }].slice(-1000);
+          });
+        })
+        .catch(() => {});
+    };
+    poll();
+    const interval = setInterval(poll, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [slabAddress, hasPercolatorData, hasPythData, hasExternalData, pythStatus, percolatorStatus, externalStatus]);
+
   // Derive data. Memoed because oraclePrices only changes on the 5s-gated
   // live-price effect (line ~287), so the filtered slice is reference-stable
   // between most renders. Same WS-tick churn argument as percolatorCandles
