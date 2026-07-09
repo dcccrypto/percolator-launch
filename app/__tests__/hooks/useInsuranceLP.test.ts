@@ -323,6 +323,29 @@ describe("useInsuranceLP", () => {
         expect(result.current.state.insuranceBalance).toBe(largeBalance);
       });
     });
+
+    it("should catch and log error on math overflow (MAX_U128)", async () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const overflowingBalance = 340282366920938463463374607431768211456n; // > MAX_U128
+      mockSlabState.engine.insuranceFund.balance = overflowingBalance;
+      mockConnection.getAccountInfo.mockResolvedValue({
+        data: Buffer.alloc(82),
+        executable: false,
+        lamports: 1_000_000,
+        owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      });
+      vi.mocked(unpackMint).mockReturnValue({ supply: 1n, decimals: 6, isInitialized: true });
+
+      renderHook(() => useInsuranceLP());
+
+      await waitFor(() => {
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          "[useInsuranceLP] Error fetching LP info:",
+          expect.any(Error)
+        );
+      });
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe("LP Token Supply & Redemption Rate", () => {

@@ -26,30 +26,28 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
-// Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
+// Three tiers: RPC proxy, general API endpoints, and warmup endpoint (strict limit).
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 120;         // General API endpoints
 const RPC_RATE_LIMIT_MAX = 600;     // /api/rpc — Solana needs many RPC calls per page
+const WARMUP_RATE_LIMIT_MAX = 20;    // /api/warmup/* — strict limit to prevent PnL timing scraping
 
 // ── Upstash Redis distributed rate limiter (GH#1213) ─────────────────────────
 // Primary: Upstash Redis + @upstash/ratelimit — globally consistent across
 //          Vercel serverless instances (uses REST API, Edge Runtime compatible).
 // Fallback: in-memory sliding window — for local dev / CI / when Redis is unconfigured.
-//
-// The previous pure in-memory Map approach was per-instance: on Vercel each cold
-// start resets counters independently, so an attacker distributing requests across
-// instances could bypass the limit entirely. Upstash Redis solves this.
 let _generalLimiter: Ratelimit | null = null;
 let _rpcLimiter: Ratelimit | null = null;
+let _warmupLimiter: Ratelimit | null = null;
 let _limitersInitialized = false;
 
-function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | null } {
-  if (_limitersInitialized) return { general: _generalLimiter, rpc: _rpcLimiter };
+function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | null; warmup: Ratelimit | null } {
+  if (_limitersInitialized) return { general: _generalLimiter, rpc: _rpcLimiter, warmup: _warmupLimiter };
   _limitersInitialized = true;
 
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return { general: null, rpc: null };
+  if (!url || !token) return { general: null, rpc: null, warmup: null };
 
   try {
     const redis = new Redis({ url, token });
@@ -65,6 +63,12 @@ function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | nul
       prefix: "rl:rpc",
       analytics: false,
     });
+    _warmupLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(WARMUP_RATE_LIMIT_MAX, "60 s"),
+      prefix: "rl:warmup",
+      analytics: false,
+    });
   } catch (err) {
     // Redis init error — fall through to in-memory
     if (process.env.NODE_ENV === "production") {
@@ -72,9 +76,10 @@ function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | nul
     }
     _generalLimiter = null;
     _rpcLimiter = null;
+    _warmupLimiter = null;
   }
 
-  return { general: _generalLimiter, rpc: _rpcLimiter };
+  return { general: _generalLimiter, rpc: _rpcLimiter, warmup: _warmupLimiter };
 }
 
 // ── In-memory fallback (per-instance) ────────────────────────────────────────
@@ -84,11 +89,15 @@ function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | nul
 // via UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN env vars.
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const rpcRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const warmupRateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
-function _getInMemoryRateLimit(ip: string, isRpc: boolean): { allowed: boolean; remaining: number; reset: number } {
+function _getInMemoryRateLimit(
+  ip: string,
+  type: "general" | "rpc" | "warmup",
+): { allowed: boolean; remaining: number; reset: number } {
   const now = Date.now();
-  const map = isRpc ? rpcRateLimitMap : rateLimitMap;
-  const max = isRpc ? RPC_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
+  const map = type === "rpc" ? rpcRateLimitMap : type === "warmup" ? warmupRateLimitMap : rateLimitMap;
+  const max = type === "rpc" ? RPC_RATE_LIMIT_MAX : type === "warmup" ? WARMUP_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
 
   let entry = map.get(ip);
   if (!entry || now > entry.resetAt) {
@@ -105,9 +114,7 @@ function _getInMemoryRateLimit(ip: string, isRpc: boolean): { allowed: boolean; 
   }
 
   // FIX(GH#1245): use strict inequality so request #max is the last ALLOWED
-  // one (not the first blocked one).  Previously `remaining = max - count`
-  // meant count=max → remaining=0 → `remaining <= 0` blocked that request,
-  // allowing only max-1 requests through instead of max.
+  // one (not the first blocked one).
   const allowed = entry.count <= max;
   return {
     allowed,
@@ -118,18 +125,16 @@ function _getInMemoryRateLimit(ip: string, isRpc: boolean): { allowed: boolean; 
 
 async function getRateLimit(
   ip: string,
-  isRpc: boolean = false,
+  type: "general" | "rpc" | "warmup" = "general",
 ): Promise<{ allowed: boolean; remaining: number; reset: number }> {
-  const { general, rpc } = getUpstashLimiters();
-  const limiter = isRpc ? rpc : general;
+  const { general, rpc, warmup } = getUpstashLimiters();
+  const limiter = type === "rpc" ? rpc : type === "warmup" ? warmup : general;
 
   if (limiter) {
     try {
       const { success, remaining, reset } = await limiter.limit(ip);
       // FIX(GH#1245): use `success` (the boolean Upstash provides) to drive
-      // the allow/block decision — NOT `remaining`.  When success=true and
-      // remaining=0 (the last allowed request), the old code returned
-      // remaining=0 and the `remaining <= 0` guard incorrectly blocked it.
+      // the allow/block decision — NOT `remaining`.
       return {
         allowed: success,
         remaining: Math.max(0, remaining),
@@ -147,7 +152,7 @@ async function getRateLimit(
     }
   }
 
-  return _getInMemoryRateLimit(ip, isRpc);
+  return _getInMemoryRateLimit(ip, type);
 }
 
 // ── IP Blocklist ────────────────────────────────────────────────────────────
@@ -411,16 +416,35 @@ export async function middleware(request: NextRequest) {
   //   • Every /api/admin/* route gates on requireAdminSession(req) server-
   //     side, so even if the page leaked HTML the data is locked down.
   //
+  // Defense-in-depth: Reject any request to /admin/* or /api/admin/* that does
+  // not have a Bearer token in the Authorization header or a privy-token cookie.
   // We still attach the security headers + skip /admin/login from any host-
   // level redirects above.
   const isAdminRoute =
     request.nextUrl.pathname.startsWith("/admin") &&
     !request.nextUrl.pathname.startsWith("/admin/login");
+  const isAdminApiRoute = request.nextUrl.pathname.startsWith("/api/admin");
 
-  if (isAdminRoute) {
-    const response = NextResponse.next();
-    addSecurityHeaders(response);
-    return response;
+  if (isAdminRoute || isAdminApiRoute) {
+    const auth = request.headers.get("authorization");
+    const privyToken = request.cookies.get("privy-token");
+    if (!auth?.startsWith("Bearer ") && !privyToken) {
+      if (isAdminApiRoute) {
+        return new NextResponse(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      } else {
+        const url = request.nextUrl.clone();
+        url.pathname = "/admin/login";
+        return NextResponse.redirect(url);
+      }
+    }
+    if (isAdminRoute) {
+      const response = NextResponse.next();
+      addSecurityHeaders(response);
+      return response;
+    }
   }
 
   // Extract client IP respecting TRUSTED_PROXY_DEPTH env var.
@@ -442,8 +466,10 @@ export async function middleware(request: NextRequest) {
 
   if (isApi) {
     const isRpc = request.nextUrl.pathname === "/api/rpc";
-    const { allowed, remaining, reset } = await getRateLimit(ip, isRpc);
-    const limit = isRpc ? RPC_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
+    const isWarmup = request.nextUrl.pathname.startsWith("/api/warmup");
+    const rateLimitType = isRpc ? "rpc" : isWarmup ? "warmup" : "general";
+    const { allowed, remaining, reset } = await getRateLimit(ip, rateLimitType);
+    const limit = isRpc ? RPC_RATE_LIMIT_MAX : isWarmup ? WARMUP_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
 
     // FIX(GH#1245): gate on `allowed` (the authoritative boolean) rather than
     // `remaining <= 0`.  The old guard blocked the last *allowed* request
@@ -455,7 +481,7 @@ export async function middleware(request: NextRequest) {
       const logContext = {
         ip,
         path: request.nextUrl.pathname,
-        rpcLimit: isRpc,
+        limitType: rateLimitType,
         limit,
         remaining,
         reset,
