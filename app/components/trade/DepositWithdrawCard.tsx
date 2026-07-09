@@ -28,6 +28,13 @@ interface DepositWithdrawCardProps {
   initialMode?: "deposit" | "withdraw";
 }
 
+function sanitizeDecimalInput(value: string): string {
+  const cleaned = value.replace(/[^0-9.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if (dotIndex === -1) return cleaned;
+  return cleaned.slice(0, dotIndex + 1) + cleaned.slice(dotIndex + 1).replace(/\./g, "");
+}
+
 export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress, isDevnetMirror = false, initialMode = "deposit" }) => {
   const { connected: walletConnected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
@@ -270,7 +277,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
             type="text"
             value={amount}
             onChange={(e) => { 
-              const newValue = e.target.value.replace(/[^0-9.]/g, "");
+              const newValue = sanitizeDecimalInput(e.target.value);
               if (newValue !== amount) {
                 maxRawRef.current = null;
               }
