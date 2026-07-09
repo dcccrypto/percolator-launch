@@ -3,6 +3,7 @@
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import type { EarnStats } from '@/hooks/useEarnStats';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+import { formatCompact } from '@/lib/formatters';
 
 interface InsuranceFundDisplayProps {
   stats: EarnStats;
@@ -154,8 +155,3 @@ function CoverageItem({
   );
 }
 
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toFixed(0);
-}

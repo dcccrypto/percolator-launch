@@ -2,14 +2,13 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
-import { deriveLpVaultRegistry, parseLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
+import { deriveLpVaultRegistry, parseLpVaultRegistry } from '@percolatorct/sdk';
 import { getBackendUrl, getConfig, getRpcEndpoint } from '@/lib/config';
 import { getSupabase } from '@/lib/supabase';
 import { isMockMode } from '@/lib/mock-mode';
 import { isBlockedSlab } from '@/lib/blocklist';
 import { sanitizeOnChainValue } from '@/lib/health';
 import { PLAYGROUND_SLAB_META } from '@/lib/playground-slab-meta';
-import { parseV17RiskParams } from '@/lib/v17-engine-config';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -168,6 +167,12 @@ function generateMockStats(): EarnStats {
 /** Sim-USDC collateral decimals — the single collateral token shared by every playground market. */
 const CURATED_COLLATERAL_DECIMALS = 6;
 
+let _rpcConnection: Connection | null = null;
+function getRpcConnection(): Connection {
+  if (!_rpcConnection) _rpcConnection = new Connection(getRpcEndpoint(), 'confirmed');
+  return _rpcConnection;
+}
+
 interface CuratedVaultOnChain {
   /** Total atoms backing the LP vault (shares outstanding + distributed fee atoms). */
   tvlAtoms: bigint;
@@ -241,7 +246,7 @@ async function fetchCuratedVaultsOnChain(slabs: string[]): Promise<Record<string
 
   try {
     const programId = new PublicKey(getConfig().programId);
-    const connection = new Connection(getRpcEndpoint(), 'confirmed');
+    const connection = getRpcConnection();
     const registryPdas = slabs.map(
       (slab) => deriveLpVaultRegistry(programId, new PublicKey(slab))[0],
     );
@@ -271,57 +276,6 @@ async function fetchCuratedVaultsOnChain(slabs: string[]): Promise<Record<string
 }
 
 /**
- * Bug fix (leverage display): per-market on-chain `initialMarginBps` varies
- * (e.g. re-seeded devnet SOL=667bps -> 14x, others=1000bps -> 10x). This used
- * to read ONLY `row?.max_leverage` (Supabase), which is blank on the local
- * playground (no Supabase configured) — every vault card silently fell back to
- * a hardcoded 10x, including SOL. Mirrors computeMaxLeverage() in
- * app/api/markets/route.ts.
- */
-function computeMaxLeverageFromBps(bps: bigint | null | undefined): number {
-  if (bps == null || bps <= 0n) return 10;
-  const lev = Math.floor(10000 / Number(bps));
-  return Number.isFinite(lev) && lev > 0 ? lev : 10;
-}
-
-/**
- * Read each slab's real per-market `initialMarginBps` directly on-chain (batched
- * via getMultipleAccountsInfo) and convert to a display max-leverage. This is the
- * accuracy-critical source for Max Leverage / Max OI — NOT Supabase's
- * `max_leverage` column, which is blank on the local playground.
- *
- * Never throws — on any failure (RPC hiccup, parse mismatch) the affected
- * slab(s) are simply absent from the result and callers fall back to the
- * Supabase/default value, same degrade-gracefully spirit as
- * fetchCuratedVaultsOnChain above.
- */
-async function fetchOnChainMaxLeverage(slabs: string[]): Promise<Record<string, number>> {
-  const result: Record<string, number> = {};
-  if (slabs.length === 0) return result;
-
-  try {
-    const connection = new Connection(getRpcEndpoint(), 'confirmed');
-    const pks = slabs.map((s) => new PublicKey(s));
-    const infos = await connection.getMultipleAccountsInfo(pks);
-
-    infos.forEach((info, i) => {
-      if (!info?.data) return;
-      const data = new Uint8Array(info.data);
-      if (!isV17Account(data)) return;
-      // tradeFeeBps is unused for the leverage derivation (initialMarginBps
-      // only) — 0n is a safe placeholder here, unlike the RiskParams consumers
-      // elsewhere that also need the real trading fee.
-      const params = parseV17RiskParams(data, 0n);
-      if (params) result[slabs[i]] = computeMaxLeverageFromBps(params.initialMarginBps);
-    });
-  } catch (err) {
-    console.error('[useEarnStats] Failed to fetch on-chain max leverage:', err);
-  }
-
-  return result;
-}
-
-/**
  * Build a single market's MarketVaultInfo from its on-chain vault data + optional
  * Supabase cosmetic row. Shared by both the curated (PLAYGROUND_SLAB_META) markets
  * and the registered (user-launched) markets below.
@@ -332,7 +286,6 @@ function buildMarketVaultInfo(
   name: string,
   curatedVaults: Record<string, CuratedVaultOnChain>,
   supabaseBySlab: Map<string, Record<string, unknown>>,
-  onChainMaxLeverage: Record<string, number> = {},
 ): MarketVaultInfo {
   const isSentinel = (v: number) => v > 1e18;
   const row = supabaseBySlab.get(slab);
@@ -348,10 +301,7 @@ function buildMarketVaultInfo(
   const totalOIRaw = Number(row?.total_open_interest ?? oiLongRaw + oiShortRaw);
   const totalOI = isSentinel(totalOIRaw) ? 0 : totalOIRaw / collDivisor;
 
-  // Real on-chain initialMarginBps first (accurate per-market cap); Supabase
-  // max_leverage as secondary (populated on networks where the DB is live);
-  // 10 only as the genuine last resort (both sources unavailable).
-  const maxLeverage = onChainMaxLeverage[slab] ?? (Number(row?.max_leverage) || 10);
+  const maxLeverage = Number(row?.max_leverage) || 10;
   const tradingFeeBpsRaw = Number(row?.trading_fee_bps ?? 10);
   const tradingFeeBps = tradingFeeBpsRaw > 5_000 ? 0 : tradingFeeBpsRaw;
 
@@ -410,12 +360,11 @@ function buildCuratedMarkets(
   curatedVaults: Record<string, CuratedVaultOnChain>,
   supabaseBySlab: Map<string, Record<string, unknown>>,
   registeredMarkets: RegisteredMarketMeta[] = [],
-  onChainMaxLeverage: Record<string, number> = {},
 ): MarketVaultInfo[] {
   const curated = Object.entries(PLAYGROUND_SLAB_META)
     .filter(([slab]) => !isBlockedSlab(slab))
     .map(([slab, meta]) =>
-      buildMarketVaultInfo(slab, meta.symbol, meta.name, curatedVaults, supabaseBySlab, onChainMaxLeverage),
+      buildMarketVaultInfo(slab, meta.symbol, meta.name, curatedVaults, supabaseBySlab),
     );
 
   const curatedSlabs = new Set(Object.keys(PLAYGROUND_SLAB_META));
@@ -432,7 +381,7 @@ function buildCuratedMarkets(
     // never a fabricated $0 phantom for a market that hasn't created one yet.
     .filter((m) => curatedVaults[m.slabAddress]?.found === true)
     .map((m) =>
-      buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, curatedVaults, supabaseBySlab, onChainMaxLeverage),
+      buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, curatedVaults, supabaseBySlab),
     );
 
   return [...curated, ...registered];
@@ -476,16 +425,10 @@ export function useEarnStats() {
           ...registeredMarkets.map((m) => m.slabAddress),
         ]),
       );
-      // Max leverage is likewise read straight from each slab's real on-chain
-      // initialMarginBps (accuracy-critical, same rationale as curatedVaults
-      // above) — fetched in parallel, independent of Supabase's availability.
-      const [curatedVaults, onChainMaxLeverage] = await Promise.all([
-        fetchCuratedVaultsOnChain(allSlabs),
-        fetchOnChainMaxLeverage(allSlabs),
-      ]);
+      const curatedVaults = await fetchCuratedVaultsOnChain(allSlabs);
 
-      // Supabase is optional enrichment only (name/volume/OI/insurance) — never
-      // a hard requirement for the curated market list, its TVL, or its leverage.
+      // Supabase is optional enrichment only (name/volume/OI/insurance/leverage)
+      // — never a hard requirement for the curated market list or its TVL.
       let supabaseBySlab = new Map<string, Record<string, unknown>>();
       try {
         const supabase = getSupabase();
@@ -501,11 +444,11 @@ export function useEarnStats() {
         }
       } catch {
         // No Supabase configured, or the query failed — enrichment degrades to
-        // defaults (0 volume/OI/insurance, typical fee), same spirit as
+        // defaults (0 volume/OI/insurance, typical fee/leverage), same spirit as
         // PLAYGROUND.md's "external indexer is optional" guarantee elsewhere.
       }
 
-      const markets = buildCuratedMarkets(curatedVaults, supabaseBySlab, registeredMarkets, onChainMaxLeverage);
+      const markets = buildCuratedMarkets(curatedVaults, supabaseBySlab, registeredMarkets);
 
       const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
       const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);

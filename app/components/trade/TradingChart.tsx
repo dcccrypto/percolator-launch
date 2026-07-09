@@ -754,7 +754,7 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           });
           const volumeData = candleData.map((c) => ({
             time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
-            value: c.volume ?? 0,
+            value: Number.isFinite(c.volume) ? c.volume! : 0,
             color: c.close >= c.open ? chartTheme.volUpColor : chartTheme.volDownColor,
           }));
           volumeSeries.setData(volumeData);

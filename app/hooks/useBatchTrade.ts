@@ -22,7 +22,7 @@
  * limitPrice=0n disables per-leg slippage checking for that leg.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { PublicKey, AccountMeta } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
@@ -59,9 +59,12 @@ export function useBatchTrade() {
   const wallet = useWalletCompat();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inflightRef = useRef(false);
 
   const batchTrade = useCallback(
     async (params: BatchTradeParams): Promise<string> => {
+      if (inflightRef.current) throw new Error("Batch trade already in progress");
+      inflightRef.current = true;
       setLoading(true);
       setError(null);
       try {
@@ -108,6 +111,7 @@ export function useBatchTrade() {
         setError(msg);
         throw e;
       } finally {
+        inflightRef.current = false;
         setLoading(false);
       }
     },

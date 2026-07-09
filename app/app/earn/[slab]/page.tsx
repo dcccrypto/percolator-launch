@@ -15,6 +15,7 @@ import { OiCapMeter } from '@/components/earn/OiCapMeter';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+import { formatCompact } from '@/lib/formatters';
 const DepositWithdrawPanel = dynamic(
   () =>
     import('@/components/earn/DepositWithdrawPanel').then(
@@ -133,7 +134,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const collateralDecimals = collateralTokenMeta?.decimals ?? 6;
 
   // Get market info from earn stats
-  const { stats: earnStats, loading: earnLoading } = useEarnStats();
+  const { stats: earnStats, loading: earnLoading, error: earnError } = useEarnStats();
   const marketInfo = useMemo<MarketVaultInfo | null>(() => {
     return earnStats.markets.find((m) => m.slabAddress === slabAddress) ?? null;
   }, [earnStats.markets, slabAddress]);
@@ -170,12 +171,8 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
 
   const handleWithdraw = useCallback(
     async (lpAmount: bigint) => {
-      // S2 fix: propagate which redemption step ran (RequestRedeemLpShares vs
-      // ExecuteRedemption) so DepositWithdrawPanel can show the correct toast
-      // instead of a blanket "Withdrawal successful!".
-      const result = await lpVaultWithdraw(lpAmount);
+      await lpVaultWithdraw(lpAmount);
       await refreshState();
-      return result;
     },
     [lpVaultWithdraw, refreshState],
   );
@@ -333,9 +330,6 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               loading={loading || lpVaultLoading}
               cooldownElapsed={lpVaultState.cooldownElapsed}
               cooldownSlots={lpVaultState.redemptionCooldownSlots}
-              hasPendingRedemption={lpVaultState.hasPendingRedemption}
-              pendingRedemptionShares={lpVaultState.pendingRedemptionShares}
-              cooldownRemainingSlots={lpVaultState.cooldownRemainingSlots}
               onDeposit={handleDeposit}
               onWithdraw={handleWithdraw}
             />
@@ -384,6 +378,12 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           </div>
         </ScrollReveal>
       </div>
+
+      {earnError && (
+        <div className="mb-6 border border-[var(--short)]/30 bg-[var(--short)]/5 rounded-sm px-4 py-3">
+          <p className="text-[11px] text-[var(--short)]">{earnError}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -436,8 +436,3 @@ function InfoRow({
   );
 }
 
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toFixed(2);
-}

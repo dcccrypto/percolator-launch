@@ -47,6 +47,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
+import { useLivePrice } from "@/hooks/useLivePrice";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { AccountKind, computePreTradeLiqPrice, computeLiqPrice } from "@percolatorct/sdk";
@@ -202,8 +203,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
   const { accounts, config: mktConfig, header, refresh: refreshSlab } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
-  // Non-reactive — see file-header comment. NOT `useLivePrice()`.
-  const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
+  // Reactive price read to ensure order ticket receipt updates live
+  const { priceUsd, priceE6: livePriceE6 } = useLivePrice();
   const { level: oracleLevel, mode: oracleMode, ready: oracleReady } = useOracleFreshness();
   const oracleUnavailable = oracleLevel === "unavailable";
   // H7: this gate was dead for keeper-mode markets (byte=3/AUTH_MARK) — the
@@ -937,6 +938,25 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             // where "read via getLivePriceSnapshot at submit" needs to mean
             // literally at this instant, not merely non-reactive.
             const freshPriceE6 = getLivePriceSnapshot(slabAddress).priceE6;
+            const freshOracleE6 = freshPriceE6 ?? 0n;
+
+            const freshEstEntry = hasOrder ? computeEstimatedEntryPrice(freshOracleE6, tradingFeeBps, direction) : 0n;
+            const freshCombinedEntryPriceE6 = sameDirection
+              ? (existingAbsSize + positionSize > 0n
+                  ? (existingEntryPriceE6 * existingAbsSize + freshEstEntry * positionSize) / (existingAbsSize + positionSize)
+                  : 0n)
+              : (positionSize < existingAbsSize ? existingEntryPriceE6 : freshEstEntry);
+
+            const freshLiqPrice = hasOrder
+              ? (existingPositionSize === 0n
+                  ? computePreTradeLiqPrice(freshOracleE6, marginNative, positionSize, maintenanceMarginBps, tradingFeeBps, direction)
+                  : (combinedSignedSize !== 0n && freshCombinedEntryPriceE6 > 0n
+                      ? computeLiqPrice(freshCombinedEntryPriceE6, capital, combinedSignedSize, maintenanceMarginBps)
+                      : 0n))
+              : 0n;
+
+            const freshFee = hasOrder ? computeTradingFee((positionSize * freshOracleE6) / 1_000_000n, tradingFeeBps) : 0n;
+
             let worstFillPriceE6 = 0n;
             try {
               worstFillPriceE6 = freshPriceE6 && freshPriceE6 > 0n ? computeLimitPriceE6({ markE6: freshPriceE6, size: signedSize }) : 0n;
@@ -946,8 +966,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             setConfirmSnapshot({
               positionSize,
               marginNative,
-              estimatedLiqPrice: afterLiqPrice,
-              tradingFee: fee,
+              estimatedLiqPrice: freshLiqPrice,
+              tradingFee: freshFee,
               worstFillPriceE6,
             });
             setShowConfirmModal(true);

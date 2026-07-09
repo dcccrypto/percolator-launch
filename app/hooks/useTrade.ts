@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
@@ -144,6 +144,8 @@ export function useTrade(slabAddress: string) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const trade = useCallback(
     async (params: { lpIdx: number; userIdx: number; size: bigint; limitPriceE6?: bigint }) => {
@@ -394,7 +396,7 @@ export function useTrade(slabAddress: string) {
         // on the (30s when WS-active) background poll. Fixes "balance doesn't
         // update after I trade". Mirrors useDeposit/useWithdraw.
         refreshSlab();
-        [1200, 2200, 3500].forEach((ms) => setTimeout(() => refreshSlab(), ms));
+        [1200, 2200, 3500].forEach((ms) => setTimeout(() => { if (mountedRef.current) refreshSlab(); }, ms));
         return sig;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

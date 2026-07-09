@@ -19,6 +19,7 @@
  * formatCompact(45.678) // → "45.68"
  */
 export function formatCompact(n: number): string {
+  if (!Number.isFinite(n)) return '\u2014';
   if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T';
   if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';

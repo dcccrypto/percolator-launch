@@ -55,6 +55,7 @@ const TEARDOWN_DELAY_MS = 20_000;
  */
 const STALE_CONNECTION_MS = 45_000;
 const STALE_CHECK_INTERVAL_MS = 5_000;
+const MAX_RETRIES = 20;
 
 interface ManagerState {
   url: string;
@@ -69,6 +70,7 @@ interface ManagerState {
   rawListeners: Set<(data: unknown) => void>;
   statusListeners: Set<(status: WsConnectionStatus) => void>;
   destroyed: boolean;
+  retryCount: number;
 }
 
 const managers = new Map<string, ManagerState>();
@@ -97,6 +99,11 @@ function resubscribeAllChannels(state: ManagerState): void {
 
 function scheduleReconnect(state: ManagerState): void {
   if (state.destroyed || state.reconnectTimer) return;
+  state.retryCount++;
+  if (state.retryCount > MAX_RETRIES) {
+    console.error("[wsManager] Max reconnect retries reached, giving up.");
+    return;
+  }
   const delay = jitter(state.reconnectDelay);
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
@@ -121,6 +128,7 @@ function connect(state: ManagerState): void {
   ws.onopen = () => {
     if (state.ws !== ws) return; // superseded by a later connect() call
     state.reconnectDelay = RECONNECT_BASE_MS;
+    state.retryCount = 0;
     state.lastMessageAt = Date.now();
     setStatus(state, "open");
     resubscribeAllChannels(state);
@@ -191,6 +199,7 @@ function getOrCreateManager(url: string): ManagerState {
     rawListeners: new Set(),
     statusListeners: new Set(),
     destroyed: false,
+    retryCount: 0,
   };
   managers.set(url, state);
   return state;

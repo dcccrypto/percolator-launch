@@ -16,8 +16,6 @@ import { parseHumanAmount } from "@/lib/parseAmount";
 import { formatTokenAmount } from "@/lib/format";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
-import { computePositionInitialMargin } from "@/lib/trading";
-import { getEntryPrice } from "@/lib/entry-price";
 
 interface DepositWithdrawCardProps {
   slabAddress: string;
@@ -38,7 +36,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const { deposit, loading: depositLoading, error: depositError } = useDeposit(slabAddress);
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useWithdraw(slabAddress);
   const { initUser, loading: initLoading, error: initError } = useInitUser(slabAddress);
-  const { config: mktConfig, params: slabParams } = useSlabState();
+  const { config: mktConfig } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const symbol = tokenMeta?.symbol ?? "Token";
 
@@ -146,21 +144,6 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
 
   const capital = userAccount.account.capital;
   const positionSize = userAccount.account.positionSize ?? 0n;
-  const hasOpenPosition = positionSize !== 0n;
-  // M7: gate withdraw on FREE margin (capital minus the open position's own
-  // locked initial margin), not total capital — total capital includes
-  // margin backing an open position that the on-chain program refuses to
-  // release. v17 doesn't store entry_price on-chain, so recover it the same
-  // way the rest of the trade UI does (client-side cache from trade-open
-  // time — see lib/entry-price.ts).
-  const effectiveEntryPrice = hasOpenPosition && publicKey
-    ? getEntryPrice(slabAddress, userAccount.idx, publicKey.toBase58())
-    : 0n;
-  const initialMarginBps = slabParams?.initialMarginBps ?? 1000n;
-  const lockedMargin = hasOpenPosition
-    ? computePositionInitialMargin(positionSize, effectiveEntryPrice, initialMarginBps)
-    : 0n;
-  const freeMargin = capital > lockedMargin ? capital - lockedMargin : 0n;
   const loading = mode === "deposit" ? depositLoading : withdrawLoading;
   const error = mode === "deposit" ? depositError : withdrawError;
 
@@ -175,15 +158,16 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
       parseError = `Too many decimal places (max ${decimals})`;
     }
   }
-  const isOverWithdraw = !parseError && mode === "withdraw" && parsedAmount > 0n && parsedAmount > freeMargin;
+  const isOverWithdraw = !parseError && mode === "withdraw" && parsedAmount > 0n && parsedAmount > capital;
   const isOverDeposit = !parseError && mode === "deposit" && parsedAmount > 0n && walletBalance !== null && parsedAmount > walletBalance;
   const validationError = parseError
     ? parseError
     : isOverWithdraw
-    ? (hasOpenPosition ? "Exceeds free margin (position open)" : "Insufficient capital")
+    ? "Insufficient capital"
     : isOverDeposit
     ? "Insufficient wallet balance"
     : null;
+  const hasOpenPosition = positionSize !== 0n;
 
   async function handleSubmit() {
     if (!amount || !userAccount || validationError) return;
@@ -199,6 +183,9 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
         sig = await deposit({ userIdx: userAccount.idx, amount: amtNative, accountExists: true });
       } else {
         sig = await withdraw({ userIdx: userAccount.idx, amount: amtNative });
+      }
+      if (sig) {
+        try { await connection.confirmTransaction(sig, "confirmed"); } catch { /* confirmation may fail on some RPCs, proceed anyway */ }
       }
       setLastSig(sig ?? null);
       setAmount("");
@@ -280,13 +267,10 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
             style={{ fontFamily: "var(--font-mono)" }}
             className="w-full rounded-none border border-[var(--border)]/50 bg-[var(--bg)] px-3 py-2 pr-14 text-sm text-[var(--text)] placeholder-[var(--text-muted)] focus:border-[var(--accent)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]/20"
           />
-          {mode === "withdraw" && freeMargin > 0n && (
+          {mode === "withdraw" && capital > 0n && (
             <button
               type="button"
-              // M7: Max = FREE margin, not total capital — total capital
-              // includes margin locked by an open position, which the
-              // on-chain program refuses to release.
-              onClick={() => { maxRawRef.current = freeMargin; setAmount(formatTokenAmount(freeMargin, decimals)); }}
+              onClick={() => { maxRawRef.current = capital; setAmount(formatTokenAmount(capital, decimals)); }}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-none px-2 py-0.5 text-[9px] font-semibold uppercase text-[var(--accent)] hover:bg-[var(--accent)]/10"
             >
               Max
@@ -308,14 +292,8 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
       </div>
 
       {mode === "withdraw" && hasOpenPosition && (
-        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2 space-y-1">
+        <div className="mb-2 border border-[var(--warning)]/20 bg-[var(--warning)]/[0.04] p-2">
           <p className="text-[10px] text-[var(--warning)]">⚠ Withdrawing margin with an open position may trigger liquidation</p>
-          <p className="text-[10px] text-[var(--text-secondary)]">
-            Part of your balance is locked as margin backing the position — the
-            program rejects withdrawals that would under-collateralize it, so
-            MAX only offers your free (unlocked) margin, not your full account
-            balance, until the position is closed.
-          </p>
         </div>
       )}
 

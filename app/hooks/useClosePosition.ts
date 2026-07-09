@@ -147,6 +147,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         } else {
           const partialAbs = (freshAbs * BigInt(closePercent)) / 100n;
           closeSize = freshIsLong ? -partialAbs : partialAbs;
+          if (closeSize === 0n) throw new Error("Position size too small to close at this percentage. Use 100% to close fully.");
         }
 
         // Read the current mark price NON-reactively, at call time — not via

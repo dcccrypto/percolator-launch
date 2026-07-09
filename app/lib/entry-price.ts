@@ -57,7 +57,9 @@ export function getEntryPrice(slab: string, accountIdx: number, wallet?: string)
     const raw = localStorage.getItem(key(slab, accountIdx, wallet));
     if (!raw) return 0n;
     const record: EntryRecord = JSON.parse(raw);
-    return BigInt(record.entryPriceE6);
+    const val = BigInt(record.entryPriceE6);
+    if (val < 0n) return 0n;
+    return val;
   } catch {
     return 0n;
   }
