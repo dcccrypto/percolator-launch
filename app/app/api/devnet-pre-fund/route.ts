@@ -38,28 +38,12 @@ import {
 } from "@solana/spl-token";
 import { getConfig } from "@/lib/config";
 import * as Sentry from "@sentry/nextjs";
-
-// ── In-memory rate limiter (fallback when Supabase unavailable) ───────────────
-const _preFundClaims = new Map<string, number>();
-const _PRE_FUND_RATE_MS = 24 * 60 * 60 * 1000;
-
-function _preFundIsLimited(key: string): { limited: boolean; nextClaimAt: string | null } {
-  const last = _preFundClaims.get(key);
-  if (last === undefined) return { limited: false, nextClaimAt: null };
-  const elapsed = Date.now() - last;
-  if (elapsed < _PRE_FUND_RATE_MS) {
-    return { limited: true, nextClaimAt: new Date(last + _PRE_FUND_RATE_MS).toISOString() };
-  }
-  return { limited: false, nextClaimAt: null };
-}
-
-function _preFundRecord(key: string): void {
-  _preFundClaims.set(key, Date.now());
-}
-
-function _preFundRelease(key: string): void {
-  _preFundClaims.delete(key);
-}
+// GH#2335: the fallback limiter used when Supabase is unavailable must itself be
+// cross-instance safe — a module-level Map is per-lambda-instance on Vercel and lets
+// concurrent requests on different instances all pass the "not limited" check. This
+// store is Vercel Blob-backed (same pattern as playground-nonce-store.ts), so all
+// instances share one durable view of outstanding claims.
+import { reserveClaim, releaseClaim, peekClaim, PREFUND_CLAIM_TTL_MS } from "@/lib/prefund-claim-store";
 
 export const dynamic = "force-dynamic";
 
@@ -166,7 +150,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function POST(req: NextRequest) {
-  let releaseInMemoryFallbackGateOnError: (() => void) | null = null;
+  let releaseFallbackClaimOnError: (() => Promise<void>) | null = null;
 
   try {
     // Allow if: explicitly on devnet network OR the mint is a mirror mint (DB-gated)
@@ -351,22 +335,23 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Rate limit: DB-backed when Supabase available, in-memory fallback otherwise.
-    // Only consumed here — once we know a real mint is about to happen.
+    // Rate limit: DB-backed (Supabase) primary gate, durable Blob-backed fallback
+    // (prefund-claim-store.ts) when Supabase is unavailable. Only consumed here —
+    // once we know a real mint is about to happen.
     const fundType = `devnet-pre-fund:${mintAddress}`;
     const rateKey = `${walletAddress}:${fundType}`;
 
-    let usingInMemoryFallbackGate = false;
-    let reservedInMemoryFallbackGate = false;
+    let usingFallbackGate = false;
+    let reservedFallbackClaim = false;
 
-    const releaseInMemoryFallbackGate = () => {
-      if (reservedInMemoryFallbackGate) {
-        _preFundRelease(rateKey);
-        reservedInMemoryFallbackGate = false;
+    const releaseFallbackClaim = async () => {
+      if (reservedFallbackClaim) {
+        reservedFallbackClaim = false;
+        await releaseClaim(rateKey);
       }
     };
 
-    releaseInMemoryFallbackGateOnError = releaseInMemoryFallbackGate;
+    releaseFallbackClaimOnError = releaseFallbackClaim;
     let supabaseForGate: ReturnType<typeof import("@/lib/supabase").getServiceClient> | null = null;
     let gate: { allowed: boolean; nextClaimAt: string | null; claimId?: number } = { allowed: true, nextClaimAt: null };
     try {
@@ -375,9 +360,14 @@ export async function POST(req: NextRequest) {
       supabaseForGate = sbMod.getServiceClient();
       gate = await gateMod.tryFaucetGate(supabaseForGate, walletAddress, fundType);
     } catch {
-      const { limited, nextClaimAt } = _preFundIsLimited(rateKey);
+      usingFallbackGate = true;
+      // Read-only pre-check (mirrors the Supabase pre-check SELECT in
+      // faucet-rate-gate.ts): does NOT reserve. A cheap early-exit 429 before doing
+      // any mint-adjacent work below. The authoritative check-and-reserve happens via
+      // reserveClaim() immediately before the mint transaction is built — that's what
+      // actually closes the check-before-record race, not this pre-check.
+      const { limited, nextClaimAt } = await peekClaim(rateKey);
       gate = { allowed: !limited, nextClaimAt };
-      usingInMemoryFallbackGate = true;
     }
     if (!gate.allowed) {
       return NextResponse.json(
@@ -441,20 +431,21 @@ export async function POST(req: NextRequest) {
     // Need to fund: amount = FUND_AMOUNT - currentBalance (top up to 2× minimum)
     const toMint = FUND_AMOUNT - currentBalance;
 
-    // Reserve the in-memory fallback gate immediately before mint work.
-    // Re-checking here closes the check-before-record race in degraded/fallback mode.
-    if (usingInMemoryFallbackGate) {
-      const { limited, nextClaimAt } = _preFundIsLimited(rateKey);
+    // Reserve the durable fallback claim immediately before mint work.
+    // reserveClaim() atomically-enough (see prefund-claim-store.ts) re-checks AND
+    // records in one Blob read-modify-write, closing the check-before-record race
+    // across concurrent requests/instances in degraded/fallback mode.
+    if (usingFallbackGate) {
+      const { reserved, nextClaimAt } = await reserveClaim(rateKey, PREFUND_CLAIM_TTL_MS);
 
-      if (limited) {
+      if (!reserved) {
         return NextResponse.json(
           { error: "Already pre-funded recently", nextClaimAt },
           { status: 429 },
         );
       }
 
-      _preFundRecord(rateKey);
-      reservedInMemoryFallbackGate = true;
+      reservedFallbackClaim = true;
     }
 
     const tx = new Transaction();
@@ -498,17 +489,25 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // TX failed after reserving the in-memory fallback gate.
+      // TX failed after reserving the durable fallback claim.
       // Release it so a failed mint does not lock the wallet/mint pair for 24h.
-      releaseInMemoryFallbackGate();
+      await releaseFallbackClaim();
 
       throw txErr;
     }
-    // On success, keep the pre-mint fallback reservation.
-    // For the DB-backed gate path, retain the existing in-memory success marker.
-    if (!reservedInMemoryFallbackGate) {
-      _preFundRecord(rateKey);
-    }
+
+    // Mint confirmed. If we reserved a fallback claim, COMMIT it now by clearing the
+    // "reserved" flag — this is the fix for the release-after-success edge case: the
+    // outer catch below calls releaseFallbackClaimOnError() on ANY thrown error, but
+    // until this line the reserved flag stayed true even after a successful mint. A
+    // throw between a confirmed mint (e.g. response serialization) and the `return`
+    // would otherwise wrongly release a real mint's claim, letting the wallet
+    // immediately re-claim and over-mint. Flipping the flag off here makes
+    // releaseFallbackClaim() (and the outer-catch call to it) a no-op from this point
+    // on — the claim stays recorded in the durable store for its full TTL, which is
+    // exactly what a genuine successful mint should do. Nothing further to write:
+    // reserveClaim() above already durably persisted the claim.
+    reservedFallbackClaim = false;
 
     return NextResponse.json({
       status: "funded",
@@ -518,7 +517,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     try {
-      releaseInMemoryFallbackGateOnError?.();
+      await releaseFallbackClaimOnError?.();
     } catch {
       /* best-effort */
     }
