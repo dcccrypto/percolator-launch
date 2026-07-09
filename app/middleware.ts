@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
+import { getClientIp } from "@/lib/get-client-ip";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.
@@ -332,21 +333,15 @@ export async function middleware(request: NextRequest) {
   }
 
   // ── IP Blocklist check ─────────────────────────────────────────────────────
-  // Resolve client IP using the same proxy-depth logic as the rate limiter.
+  // Resolve client IP via the shared hardened helper (GH#2218) — validated,
+  // trusted-header-first, proxy-depth-aware. Same identity the rate limiter
+  // uses below.
+  // NOTE: depth=0 means "no proxy" — getClientIp returns "unknown" and
+  // _isBlocked("unknown") returns false, effectively disabling the
+  // Edge Runtime blocklist. The Hono ip-blocklist.ts middleware
+  // handles depth=0 correctly for the API server path.
   if (_blocklist.length > 0) {
-    const _proxyDepth = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
-    let _clientIp = "unknown";
-    // NOTE: depth=0 means "no proxy" — _clientIp stays "unknown" and
-    // _isBlocked("unknown") returns false, effectively disabling the
-    // Edge Runtime blocklist. The Hono ip-blocklist.ts middleware
-    // handles depth=0 correctly for the API server path.
-    if (_proxyDepth > 0) {
-      const _fwd = request.headers.get("x-forwarded-for");
-      if (_fwd) {
-        const _ips = _fwd.split(",").map((s) => s.trim());
-        _clientIp = _ips[Math.max(0, _ips.length - _proxyDepth)] ?? "unknown";
-      }
-    }
+    const _clientIp = getClientIp(request);
     if (_isBlocked(_clientIp)) {
       return new NextResponse(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
@@ -392,21 +387,14 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Extract client IP respecting TRUSTED_PROXY_DEPTH env var.
-  // - TRUSTED_PROXY_DEPTH=0: Ignore X-Forwarded-For (direct exposure, no proxy)
-  // - TRUSTED_PROXY_DEPTH=1: One proxy layer (Vercel, Cloudflare) — use last IP
-  // - TRUSTED_PROXY_DEPTH=2: Two proxy layers — use second-to-last IP
-  // This prevents IP spoofing attacks via forged X-Forwarded-For headers.
-  const PROXY_DEPTH = Math.max(0, Number(process.env.TRUSTED_PROXY_DEPTH ?? 1));
-  let ip = "unknown";
-  if (PROXY_DEPTH > 0) {
-    const forwarded = request.headers.get("x-forwarded-for");
-    if (forwarded) {
-      const ips = forwarded.split(",").map((s) => s.trim());
-      const idx = Math.max(0, ips.length - PROXY_DEPTH);
-      ip = ips[idx] ?? "unknown";
-    }
-  }
+  // Extract client IP via the shared hardened helper (GH#2218):
+  // trusted single-IP headers (cf-connecting-ip, x-real-ip) first, then the
+  // TRUSTED_PROXY_DEPTH-selected x-forwarded-for hop, every candidate
+  // validated as a real IPv4/IPv6 address before it becomes a rate-limit key.
+  // - TRUSTED_PROXY_DEPTH=0: no trusted proxy — ignore all forwarding headers
+  // - TRUSTED_PROXY_DEPTH=1: one proxy layer (Vercel, Cloudflare) — use last IP
+  // - TRUSTED_PROXY_DEPTH=2: two proxy layers — use second-to-last IP
+  const ip = getClientIp(request);
   const isApi = request.nextUrl.pathname.startsWith("/api/");
 
   if (isApi) {
