@@ -377,6 +377,8 @@ body::before {
 /* ─── HUD Corner Brackets (cards) ─── */
 .hud-corners {
   position: relative;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .hud-corners::before {
   content: "";
@@ -1290,6 +1292,29 @@ input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
     box-shadow: var(--btn-disabled-shadow) !important;
     cursor: var(--btn-disabled-cursor);
     pointer-events: none;
+  }
+
+  /* Global Inputs Focus Glow — keyboard focus-visible outline for plain
+     form controls (accessibility: WCAG 2.4.7). Buttons already get their
+     own focus ring via .btn:focus-visible above; this fills the gap for
+     raw <input>/<textarea>/<select> elements used across the trading UI. */
+  input[type="text"],
+  input[type="number"],
+  input[type="password"],
+  input[type="email"],
+  textarea,
+  select {
+    transition: border-color var(--timing-fast) ease, box-shadow var(--timing-fast) ease;
+  }
+  input[type="text"]:focus-visible,
+  input[type="number"]:focus-visible,
+  input[type="password"]:focus-visible,
+  input[type="email"]:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    border-color: rgba(153, 69, 255, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(153, 69, 255, 0.15) !important;
+    outline: none !important;
   }
 }
 
