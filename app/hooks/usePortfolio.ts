@@ -153,6 +153,11 @@ export interface PortfolioPosition {
   leverage: number;
   /** Maintenance margin bps for this market */
   maintenanceMarginBps: bigint;
+  /** Initial margin bps for this market — consumers recomputing PnL% with a
+   *  LIVE mark (portfolio PositionCard) must divide by the position's initial
+   *  margin (computePositionInitialMargin), matching this hook's own
+   *  pnlPercent, NOT by total account capital. */
+  initialMarginBps: bigint;
   /**
    * True when this position is escrowed inside a Position NFT (v17). Minting an
    * NFT B-3-transfers `portfolio.owner` to the NFT program's escrow PDA, so the
@@ -292,6 +297,7 @@ function buildV17Position(
     pnlPercent,
     leverage,
     maintenanceMarginBps,
+    initialMarginBps,
     nftWrapped,
   };
 }
@@ -614,6 +620,7 @@ export function usePortfolio(): PortfolioData {
                     pnlPercent,
                     leverage,
                     maintenanceMarginBps,
+                    initialMarginBps,
                   });
                   // Guard account.pnl against u64::MAX sentinel values before accumulating.
                   // Uninitialized / flat positions store u64::MAX as a sentinel — summing them

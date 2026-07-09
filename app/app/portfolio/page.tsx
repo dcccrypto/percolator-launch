@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
-import { computeMarkPnl, computePnlPercent } from "@/lib/trading";
+import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
@@ -131,11 +131,27 @@ function PositionCard({
   const hasPosition = posSize !== 0n;
 
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
-  const pnlTokens =
-    hasPosition && posEntry > 0n && markE6 > 0n ? computeMarkPnl(posSize, posEntry, markE6) : pos.unrealizedPnl;
+  // Live PnL: EXACTLY usePortfolio's corrected math with the live mark
+  // substituted — computeMarkPnl yields coin-margined NATIVE units, which
+  // must be converted to collateral via computeMarkPnlCollateral before
+  // display, and ROE divides by the position's INITIAL MARGIN (capital
+  // fallback), not total account capital. See enrichPosition in usePortfolio.
+  const pnlTokens = (() => {
+    if (!hasPosition || posEntry <= 0n || markE6 <= 0n) return pos.unrealizedPnl;
+    try {
+      return computeMarkPnlCollateral(computeMarkPnl(posSize, posEntry, markE6), markE6);
+    } catch {
+      return pos.unrealizedPnl;
+    }
+  })();
   const pnlPct = (() => {
     try {
-      return posCapital > 0n ? computePnlPercent(pnlTokens, posCapital) : pos.pnlPercent;
+      const positionInitialMargin = computePositionInitialMargin(posSize, posEntry, pos.initialMarginBps);
+      return positionInitialMargin > 0n
+        ? computePnlPercent(pnlTokens, positionInitialMargin)
+        : posCapital > 0n
+          ? computePnlPercent(pnlTokens, posCapital)
+          : pos.pnlPercent;
     } catch {
       return pos.pnlPercent;
     }
@@ -410,9 +426,11 @@ export default function PortfolioPage() {
   // metadata → raw address) for every playground market: every row read
   // "DJ54…N8eC/USD" with no way to tell markets apart.
   const { statsMap } = useAllMarketStats();
-  const marketLabel = (slabAddress: string): string => {
-    const sym = statsMap.get(slabAddress)?.symbol;
-    return sym ? `${sym}/USD` : `${slabAddress.slice(0, 8)}…`;
+  // Prefer the symbol usePortfolio itself resolved (upstream P1 fix: API
+  // directory + curated static fallback), then the stats map, then a slab stub.
+  const marketLabel = (pos: { slabAddress: string; symbol: string | null }): string => {
+    const sym = pos.symbol ?? statsMap.get(pos.slabAddress)?.symbol;
+    return sym ? `${sym}/USD` : `${pos.slabAddress.slice(0, 8)}…`;
   };
 
   // GH#1808: Only block on tokenMetas if positions are still loading too. If positions have
@@ -599,8 +617,8 @@ export default function PortfolioPage() {
                 <PositionCard
                   key={`${pos.slabAddress}-${i}`}
                   pos={pos}
-                  label={marketLabel(pos.slabAddress)}
-                  baseSymbol={(statsMap.get(pos.slabAddress)?.symbol ?? pos.slabAddress.slice(0, 6)).replace(/-PERP$/i, "")}
+                  label={marketLabel(pos)}
+                  baseSymbol={(pos.symbol ?? statsMap.get(pos.slabAddress)?.symbol ?? pos.slabAddress.slice(0, 6)).replace(/-PERP$/i, "")}
                   collateralSymbol={tokenMetaMap.get(pos.collateralMint.toBase58())?.symbol ?? "USDC"}
                   decimals={getDecimals(pos)}
                   onRefresh={refresh}
@@ -629,7 +647,7 @@ export default function PortfolioPage() {
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-[13px] font-semibold text-[var(--text)]" style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
-                        {marketLabel(pos.slabAddress)}
+                        {marketLabel(pos)}
                       </span>
                       <span className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">
                         idle collateral
