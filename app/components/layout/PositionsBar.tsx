@@ -28,7 +28,15 @@ const RPC_ACCOUNT_BATCH_CAP = 100;
 // information gain. Perf-review fix: this list gates the usePortfolio HOOK
 // itself (via `enabled`), not just the render below — see the `hidden`
 // derivation and its use as `usePortfolio(!hidden && ...)`.
-const HIDDEN_ROUTES = ["/portfolio", "/dashboard"];
+//
+// "/trade" is hidden too: the trade page's PositionsDock now renders its own
+// OtherMarketPositions list (all-markets, via its own usePortfolio call) in
+// the Positions tab, so the strip is redundant chrome there. usePortfolio has
+// no cross-instance dedup — without this, every /trade page would run TWO
+// concurrent wallet-wide portfolio scans (market discovery + batched
+// getMultipleAccountsInfo + up to two getProgramAccounts/market, each on its
+// own 30s poll) for the same data.
+const HIDDEN_ROUTES = ["/portfolio", "/dashboard", "/trade"];
 
 /** One position chip: ticker + live PnL, colored by sign, linking to the market. */
 function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: number }) {
