@@ -25,6 +25,11 @@ interface ClosePositionModalProps {
   tradingFeeBps?: bigint;
   /** GH#1842: Block submission when oracle price is stale or unavailable */
   oracleStale?: boolean;
+  /** PERC-2312: Surfaced close-tx failure (from useClosePosition's `error`) — rendered
+   *  inside the modal itself so it's visible to the user regardless of which page
+   *  mounts this modal, instead of relying on a banner elsewhere in the page that a
+   *  full-screen modal portal would visually cover. */
+  error?: string | null;
   onConfirm: (percent: number) => void;
   onCancel: () => void;
 }
@@ -57,6 +62,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   loading,
   tradingFeeBps = 0n,
   oracleStale = false,
+  error = null,
   onConfirm,
   onCancel,
 }) => {
@@ -333,6 +339,17 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
             <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">
               The oracle price has not been updated recently. Closing is temporarily disabled to prevent failed transactions.
             </p>
+          </div>
+        )}
+
+        {/* PERC-2312: Close-tx failure — was previously swallowed by callers that
+            only destructured { closePosition, loading } from useClosePosition and
+            dropped `error`, so a failed close just silently re-enabled the modal
+            with no feedback. Rendered here (inside the modal) rather than only in
+            the parent page so it's visible for however long the modal stays open. */}
+        {error && (
+          <div className="mb-4 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
+            <p className="text-[10px] text-[var(--short)]">{error}</p>
           </div>
         )}
 

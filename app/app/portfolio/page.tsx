@@ -6,6 +6,7 @@ import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
+import { useEngineFreshness } from "@/hooks/useEngineFreshness";
 import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { clearEntryPrice } from "@/lib/entry-price";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
@@ -65,7 +66,14 @@ function PortfolioCloseFlow({
   decimals: number;
   onDone: (closed: boolean) => void;
 }) {
-  const { closePosition, loading } = useClosePosition(pos.slabAddress);
+  const { closePosition, loading, error } = useClosePosition(pos.slabAddress);
+  // Reviewer blocker fix: PortfolioCloseFlow previously dropped `error` from
+  // useClosePosition, so a failed close just silently re-enabled the modal
+  // with no feedback. Also mirror the trade-page's engine-staleness guard
+  // (PositionPanel.tsx) — this component always mounts inside a per-slab
+  // SlabProvider (see the call site below), so useEngineFreshness() has the
+  // context it needs.
+  const { engineStale } = useEngineFreshness();
   const posSize = pos.account?.positionSize ?? 0n;
   return (
     <ClosePositionModal
@@ -79,6 +87,8 @@ function PortfolioCloseFlow({
       priceUsd={priceUsd}
       isLong={posSize > 0n}
       loading={loading}
+      error={error}
+      oracleStale={engineStale}
       onConfirm={async (percent) => {
         try {
           await closePosition(percent);
