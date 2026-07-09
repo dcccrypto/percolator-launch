@@ -321,8 +321,20 @@ export interface PortfolioData {
 /**
  * Fetches all markets and finds positions for the connected wallet.
  * Enriches each position with liquidation price, PnL %, and risk leverage.
+ *
+ * @param enabled - Gates the HOOK itself, not just what a caller does with its
+ *   output. When `false`, both the fetch effect (market discovery + a batched
+ *   `getMultipleAccountsInfo` + up to two `getProgramAccounts` scans per
+ *   market) and the 30s auto-refresh interval are short-circuited — nothing
+ *   fires and no RPC calls are made. Defaults to `true` so every existing
+ *   call site (portfolio page, dashboard widgets) is unaffected. Callers
+ *   that only conditionally need portfolio data — e.g. a site-wide strip
+ *   that must not double-scan on a page that already mounts its own
+ *   `usePortfolio()`, or must not scan at all while hidden — must pass
+ *   `enabled` here rather than gate their render only, otherwise this hook
+ *   still pays the full RPC cost even though nothing reads its output.
  */
-export function usePortfolio(): PortfolioData {
+export function usePortfolio(enabled: boolean = true): PortfolioData {
   const { connection } = useConnectionCompat();
   const { publicKey } = useWalletCompat();
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
@@ -348,13 +360,17 @@ export function usePortfolio(): PortfolioData {
   }, [publicKey]);
 
   useEffect(() => {
-    if (!publicKey) {
+    if (!enabled || !publicKey) {
       setPositions([]);
       setTotalPnl(0n);
       setTotalDeposited(0n);
       setTotalValue(0n);
       setTotalUnrealizedPnl(0n);
       setAtRiskCount(0);
+      // Only clear the loading flag when there's truly nothing to wait on.
+      // `enabled` flipping false shouldn't leave a stale "loading" state
+      // behind for when it flips back to true, but it also shouldn't fire
+      // any of the fetch work below — the early return already prevents that.
       setLoading(false);
       setIsRefreshing(false);
       hasLoadedOnce.current = false;
@@ -743,13 +759,17 @@ export function usePortfolio(): PortfolioData {
 
     load();
     return () => { cancelled = true; };
-  }, [connection, publicKey, refreshCounter]);
+  }, [enabled, connection, publicKey, refreshCounter]);
 
   const refresh = () => setRefreshCounter((c) => c + 1);
 
   // Auto-refresh when tab becomes visible (e.g., after closing position on trade page)
-  // and every 30s while visible
+  // and every 30s while visible. Gated on `enabled` too — otherwise a
+  // disabled hook instance (e.g. PositionsBar on a hidden route) would still
+  // bump `refreshCounter` every 30s, which the fetch effect above depends on
+  // and would just re-run (uselessly, since it early-returns) forever.
   useEffect(() => {
+    if (!enabled) return;
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         setRefreshCounter((c) => c + 1);
@@ -765,7 +785,7 @@ export function usePortfolio(): PortfolioData {
       document.removeEventListener("visibilitychange", onVisible);
       clearInterval(interval);
     };
-  }, []);
+  }, [enabled]);
 
   return { positions, totalPnl, totalDeposited, totalValue, totalUnrealizedPnl, atRiskCount, loading, isRefreshing, refresh };
 }
