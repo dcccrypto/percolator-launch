@@ -1297,19 +1297,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Atomically claim the nonce.
+    // Atomically-enough claim the nonce (see lib/playground-nonce-store.ts header for
+    // the accepted read-modify-write tradeoff on its Vercel Blob backing).
     // BUG 6 fix: the challenge ISSUER (GET /api/markets/challenge, see
     // lib/playground-nonce-store.ts createPlaygroundChallenge) only ever writes
-    // nonces to the in-process Map — it does NOT insert into the Supabase
-    // market_challenges table (that table is no longer populated; see the doc
-    // comment in app/api/markets/challenge/route.ts). That means the UPDATE below
-    // always matches 0 rows whenever Supabase IS configured (prod), leaving
-    // nonceClaimed=false and every registration 401ing — the Map fallback was
+    // nonces to that store — it does NOT insert into the Supabase market_challenges
+    // table (that table is no longer populated; see the doc comment in
+    // app/api/markets/challenge/route.ts). That means the UPDATE below always
+    // matches 0 rows whenever Supabase IS configured (prod), leaving
+    // nonceClaimed=false and every registration 401ing — the store-based fallback was
     // previously only reached inside the `catch` (i.e. only when Supabase is NOT
     // configured at all), so it never ran in that case.
-    // Fix: attempt the Map claim whenever the DB path didn't already claim the
-    // nonce (0 rows OR Supabase absent), not only on a thrown exception. This
-    // makes the in-Map store the authoritative source for the playground's
+    // Fix: attempt the store claim whenever the DB path didn't already claim the
+    // nonce (0 rows OR Supabase absent), not only on a thrown exception. This makes
+    // lib/playground-nonce-store.ts the authoritative source for the playground's
     // actual issuance path in both the Supabase-configured and no-Supabase cases,
     // while still honoring a legitimate DB-side claim (count>0) if one exists.
     let nonceClaimed = false;
@@ -1338,9 +1339,9 @@ export async function POST(req: NextRequest) {
 
     if (!nonceClaimed) {
       // Not claimed via Supabase (either not configured, or configured but the
-      // issuer never wrote a row there) — try the in-process Map, which is the
-      // store the issuer actually writes to.
-      nonceClaimed = claimPlaygroundChallenge(nonce, deployer);
+      // issuer never wrote a row there) — try the Blob-backed store, which is the
+      // one the issuer actually writes to.
+      nonceClaimed = await claimPlaygroundChallenge(nonce, deployer);
     }
 
     if (!nonceClaimed) {

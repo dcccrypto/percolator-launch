@@ -5,8 +5,16 @@
  * imports the server-only @vercel/blob SDK.
  */
 
-/** The dex types the keeper can price against. */
-export const KEEPER_DEX_TYPES = ["raydium-clmm", "meteora-dlmm", "pumpswap"] as const;
+/**
+ * The dex types the keeper can price against.
+ *
+ * PumpSwap deliberately excluded: percolator-sdk's dex-oracle.ts
+ * parsePumpSwapPool/computePumpSwapPriceE6 has wrong byte offsets and no
+ * SOL→USD conversion (found in the keeper audit), so any market pointed at a
+ * PumpSwap pool gets garbage/zero prices from the keeper. Re-add once that
+ * parser is fixed upstream.
+ */
+export const KEEPER_DEX_TYPES = ["raydium-clmm", "meteora-dlmm"] as const;
 export type KeeperDexType = (typeof KEEPER_DEX_TYPES)[number];
 
 /**
@@ -32,6 +40,7 @@ export function normalizeDexType(raw: string | null | undefined): KeeperDexType 
   if ((KEEPER_DEX_TYPES as readonly string[]).includes(v)) return v as KeeperDexType;
   if (v === "meteora" || v === "meteora-damm" || v === "meteoradlmm") return "meteora-dlmm";
   if (v === "raydium" || v === "raydium-cpmm" || v === "raydium-amm") return "raydium-clmm";
-  if (v === "pump" || v === "pumpfun" || v === "pump-swap") return "pumpswap";
+  // "pumpswap"/"pump"/"pumpfun"/"pump-swap" intentionally fall through to null —
+  // the keeper can't price PumpSwap pools correctly yet (see KEEPER_DEX_TYPES doc).
   return null;
 }
