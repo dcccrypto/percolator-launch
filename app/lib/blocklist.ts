@@ -80,6 +80,10 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   // (getProgramAccounts) doesn't re-surface them.
   "4txSGha4zABqt2NUbBtbkzv3vA4rfi9J6Yr95adA4fc5",
   "DxrZXhTC11gCVtv4b2nkbszScgZPqm9DFqit5X7FvsF7",
+  // 2026-07-09: ANSEM — leftover PumpSwap test market, mispriced (missing SOL→USD
+  // conversion). Hidden from the UI; kept in the keeper registry as the PumpSwap
+  // parser-fix verification reference. Lineup is now SOL/JUP/TRUMP/PENGU only.
+  "7mzqfnuAhANvDV8PiqJBG3jehyv3rPrCMr9V6j2bCHPV",
 ];
 
 /**
