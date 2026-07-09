@@ -6,8 +6,8 @@ can execute the whole thing top to bottom.
 
 > **The playground** is a pro perpetual-futures trading terminal on Solana **devnet**.
 > Anyone connects a wallet, gets test funds, and trades perps on real mainnet tokens
-> (SOL, BONK, JUP, TRUMP, PENGU) priced off live mainnet DEX pools. The trading app is
-> the **`app/`** directory of this repo.
+> (SOL, JUP, TRUMP, PENGU, BURNIE, Percolator) priced off live mainnet DEX pools. The
+> trading app is the **`app/`** directory of this repo.
 >
 > **▶ Live playground: https://percolator-playground.vercel.app** — connect a devnet
 > wallet and trade, no setup. (This guide is for contributing to it.)
@@ -341,12 +341,15 @@ Run `npx tsc --noEmit` and `pnpm test` locally before pushing so CI passes first
   - matcher `4seJWjv3R5qfXY8R5ntuPHWsoqcVvaxvfFSnU2AnGMhT`
   - nft `5TnritLtHS76s5iV8axqDmqhcmJKMRUekMGrk9rBTqSP`
   - vault/stake `51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ`
-- **Live markets** (devnet slabs):
-  - SOL `CsPuA8jjvHhg6UZSjH4s61E5v339ZjBGinQzbm1Nh1Xc`
-  - BONK `4s7HrCoHekfMKB2F45z4bEq3K1WuS9ihS73gffNhtj1i`
-  - JUP `qBhFaHzj3qi7xh6piTidKyyiuWacBepF1sK6EGM4xoR`
-  - TRUMP `Az9jziKXA8mQjQtGBLaNH9uYGhF6dyqMuzm5R8UYWy6v`
-  - PENGU `B3JTEUcBgFFuHozpEP8rZLgDTbYPt29ytijPoHy8x4He`
+- **Live markets** (devnet slabs) — 2026-07-10 born-immortal re-seed (both backing-bucket
+  domains seeded to a non-lapsing expiry via TopUpBackingBucket, fixing the freshness-
+  deadlock that could brick a market after an idle gap):
+  - SOL `7RXTVmGcJMDqqTCFu5ADQRyLDvVZBi3r5U5WXzoULHJV`
+  - JUP `B22quVNFuuEYwx4dQigwn41BMBuk9ZcTdMik4UH7PshY`
+  - TRUMP `6Hqn4VoMHjvCb1XWQkpnJ1UE3xAverJezVdk3czvgQxh`
+  - PENGU `Gbpuam5UYV4MpC1DmGeTVZWtT4UGDmahMW2vo4p1MBAf`
+  - BURNIE `GPpyVaHAEJ8u6W9UAyCPp6tuQB2Chm1Z6uLUKA9ePJBC`
+  - Percolator `FGaUkXepxCggbmpbgXDWUZ3V2CGSh6MeDCU6KLTLShbH`
 - **Common commands** (from `app/`): `pnpm dev` · `pnpm dev:price-ws` ·
   `npx tsc --noEmit` · `pnpm test`.
 
