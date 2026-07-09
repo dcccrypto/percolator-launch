@@ -56,6 +56,7 @@ import {
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccount } from "@/lib/mock-trade-data";
 import { ClosePositionModal } from "./ClosePositionModal";
+import { OtherMarketPositions } from "./OtherMarketPositions";
 import { WarmupProgress } from "./WarmupProgress";
 import { TradeHistory } from "./TradeHistory";
 import { InfoIcon } from "@/components/ui/Tooltip";
@@ -458,9 +459,20 @@ const PositionsDockInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           PositionsDock boundary's count (see BUILD-LOG.md Phase 5) — i.e.
           the shell isn't adding re-renders on top of what the row itself
           needs. */}
-      <RenderProfiler id="PositionRow">
-        <PositionRow slabAddress={slabAddress} />
-      </RenderProfiler>
+      <div>
+        {/* This market's position stays pinned first, its own labeled
+            section; every other market the wallet holds follows below so a
+            trader never navigates away just to watch or close elsewhere. */}
+        <div className="flex items-center gap-2 px-4 pb-1 pt-3">
+          <span className="text-[9px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/80">
+            // this market
+          </span>
+        </div>
+        <RenderProfiler id="PositionRow">
+          <PositionRow slabAddress={slabAddress} />
+        </RenderProfiler>
+        <OtherMarketPositions currentSlab={slabAddress} />
+      </div>
       <TradeHistory slabAddress={slabAddress} />
     </DockTabs>
   );
