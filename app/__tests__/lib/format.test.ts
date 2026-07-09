@@ -14,6 +14,7 @@ import {
   formatMarginPct,
   formatPercent,
   formatFundingRate,
+  chartPricePrecision,
 } from "../../lib/format";
 
 describe("formatTokenAmount", () => {
@@ -391,5 +392,45 @@ describe("formatCompactTokenAmount", () => {
     // 0.5 tokens with 6 decimals = 500_000n raw
     const raw = 500_000n;
     expect(formatCompactTokenAmount(raw, 6)).toBe("0.5");
+  });
+});
+
+describe("chartPricePrecision", () => {
+  it("gives sub-cent tokens (BURNIE @ $0.002573) enough decimals to be non-zero", () => {
+    const { precision, minMove } = chartPricePrecision(0.002573);
+    expect(precision).toBe(6);
+    expect(minMove).toBe(0.000001);
+    expect(0.002573.toFixed(precision)).not.toBe((0).toFixed(precision));
+  });
+
+  it("gives Percolator @ $0.0018 enough decimals to be non-zero", () => {
+    const { precision, minMove } = chartPricePrecision(0.0018);
+    expect(precision).toBe(6);
+    expect(minMove).toBe(0.000001);
+    expect(0.0018.toFixed(precision)).not.toBe((0).toFixed(precision));
+  });
+
+  it("keeps big prices (SOL @ $78) short — no over-long decimals", () => {
+    expect(chartPricePrecision(78.42)).toEqual({ precision: 2, minMove: 0.01 });
+  });
+
+  it("keeps TRUMP @ $1.6 at 2dp", () => {
+    expect(chartPricePrecision(1.6)).toEqual({ precision: 2, minMove: 0.01 });
+  });
+
+  it("uses 4dp for the 1c-$1 band", () => {
+    expect(chartPricePrecision(0.4231)).toEqual({ precision: 4, minMove: 0.0001 });
+  });
+
+  it("uses 8dp for sub-0.0001 micro prices", () => {
+    expect(chartPricePrecision(0.00003182)).toEqual({ precision: 8, minMove: 0.00000001 });
+  });
+
+  it("falls back to the library default (2dp) for null/zero/invalid input", () => {
+    expect(chartPricePrecision(null)).toEqual({ precision: 2, minMove: 0.01 });
+    expect(chartPricePrecision(undefined)).toEqual({ precision: 2, minMove: 0.01 });
+    expect(chartPricePrecision(0)).toEqual({ precision: 2, minMove: 0.01 });
+    expect(chartPricePrecision(NaN)).toEqual({ precision: 2, minMove: 0.01 });
+    expect(chartPricePrecision(-5)).toEqual({ precision: 2, minMove: 0.01 });
   });
 });

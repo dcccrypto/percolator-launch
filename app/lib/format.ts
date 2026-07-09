@@ -143,6 +143,38 @@ export function formatMarkPrice(priceUsd: number | null | undefined, fallback = 
 }
 
 /**
+ * Derive a lightweight-charts `priceFormat: { type: 'price', precision, minMove }`
+ * pair from a reference price, mirroring formatMarkPrice's magnitude bands.
+ *
+ * lightweight-charts defaults every series to `precision: 2, minMove: 0.01`
+ * when no priceFormat is supplied. That's fine for SOL/TRUMP-sized prices but
+ * rounds anything under a cent (e.g. BURNIE @ $0.002573) to "0.00" on BOTH
+ * the Y-axis ticks and any `createPriceLine` label (Mark/Liq/Entry) — those
+ * price lines have no formatter of their own; they always render through the
+ * series' priceFormat. Passing an adaptive precision/minMove here (computed
+ * from the market's current price) is the fix for both at once.
+ *
+ *   - >= 1      → 2dp  (0.01)        e.g. "78.42" / "1.60"   — matches formatMarkPrice's whole-dollar band
+ *   - >= 0.01   → 4dp  (0.0001)      e.g. "0.4231"
+ *   - >= 0.0001 → 6dp  (0.000001)    e.g. "0.002573"          — BURNIE / Percolator land here
+ *   - >  0      → 8dp  (0.00000001) e.g. "0.00003182"
+ *   - unknown/zero → 2dp fallback (same as the library default)
+ *
+ * @param referencePrice - A representative price for the market (e.g. last
+ *   candle close or live snapshot price), used only to pick a magnitude band.
+ */
+export function chartPricePrecision(
+  referencePrice: number | null | undefined,
+): { precision: number; minMove: number } {
+  const abs = referencePrice != null && Number.isFinite(referencePrice) ? Math.abs(referencePrice) : 0;
+  if (abs <= 0) return { precision: 2, minMove: 0.01 };
+  if (abs >= 1) return { precision: 2, minMove: 0.01 };
+  if (abs >= 0.01) return { precision: 4, minMove: 0.0001 };
+  if (abs >= 0.0001) return { precision: 6, minMove: 0.000001 };
+  return { precision: 8, minMove: 0.00000001 };
+}
+
+/**
  * Format a liquidation price in e6 format.
  * Returns "∞" when the position is unliquidatable (liqPrice === max u64),
  * "-" when zero/null, otherwise delegates to formatUsd.

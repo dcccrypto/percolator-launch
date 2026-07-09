@@ -55,7 +55,7 @@ import {
   type ChartSeriesKind,
 } from "@/lib/chart-style";
 import { assertNever } from "@/lib/exhaustive";
-import { formatUsdFromNumber } from "@/lib/format";
+import { formatUsdFromNumber, chartPricePrecision } from "@/lib/format";
 
 // Phase 2: added 15m timeframe
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "7d" | "30d";
@@ -703,6 +703,21 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
     entryLineRef.current = null;
     prevTickPriceRef.current = null;
 
+    // Adaptive price-scale precision. lightweight-charts defaults every
+    // series to precision:2/minMove:0.01 when priceFormat is omitted — fine
+    // for SOL/TRUMP-sized markets, but it rounds anything under a cent (e.g.
+    // BURNIE @ $0.002573) to "0.00" on both the Y-axis ticks AND every
+    // createPriceLine label (Mark/Liq/Entry all render through the series'
+    // priceFormat — they have no formatter of their own). Derive a reference
+    // price from the freshest data we have (last candle/line close, falling
+    // back to the live snapshot) so small-price tokens get enough decimals.
+    const referencePriceUsd =
+      candleData[candleData.length - 1]?.close ??
+      lineData[lineData.length - 1]?.price ??
+      getSnapshot(slabAddress).priceUsd ??
+      null;
+    const priceFormat = { type: "price" as const, ...chartPricePrecision(referencePriceUsd) };
+
     // Series selection.
     //
     // The switch is exhaustive over ChartStyle: a future variant added to
@@ -772,6 +787,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           // createPriceLine below draws the mark price as the only price label.
           lastValueVisible: false,
           priceLineVisible: false,
+          // Adaptive precision — see `priceFormat` comment above.
+          priceFormat,
         });
 
         const formatted = candleData.map((c) => ({
@@ -836,6 +853,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           thinBars: false,
           lastValueVisible: false,
           priceLineVisible: false,
+          // Adaptive precision — see `priceFormat` comment above.
+          priceFormat,
         });
         const formatted = candleData.map((c) => ({
           time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
@@ -862,6 +881,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           // as a price-axis label. DEX last-close goes away.
           lastValueVisible: false,
           priceLineVisible: false,
+          // Adaptive precision — see `priceFormat` comment above.
+          priceFormat,
         });
         const formatted = lineData.map((p) => ({
           time: (Math.floor(p.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
@@ -888,6 +909,8 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           lineWidth: 2,
           lastValueVisible: false,
           priceLineVisible: false,
+          // Adaptive precision — see `priceFormat` comment above.
+          priceFormat,
         });
         const formatted = lineData.map((p) => ({
           time: (Math.floor(p.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
