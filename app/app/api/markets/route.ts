@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { validateNumericParam } from "@/lib/route-validators";
-import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, parseMarketGroupV17OI, type V17MarketGroupOI, V17_HEADER_LEN, V17_WRAPPER_CONFIG_LEN } from "@percolatorct/sdk";
+import { parseHeader, parseConfig, discoverMarkets, type DiscoveredMarket, isV17Account, parseWrapperConfigV17, parseAssetOracleProfileV17, parseMarketGroupV17OI, type V17MarketGroupOI, type RiskParams, V17_HEADER_LEN, V17_WRAPPER_CONFIG_LEN } from "@percolatorct/sdk";
 import { getServiceClient, getServerNetwork } from "@/lib/supabase";
 import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { readRegisteredMarkets, type RegisteredMarket } from "@/lib/playground-registered-markets";
+import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { getClientIp } from "@/lib/get-client-ip";
 import { claimPlaygroundChallenge } from "@/lib/playground-nonce-store";
 import { signKeeperRequest } from "@/lib/keeper-hmac";
@@ -260,14 +261,36 @@ function numericOrNull(v: unknown): number | null {
 }
 
 /**
+ * Bug fix (leverage display/cap): per-market on-chain `initialMarginBps` varies
+ * (e.g. re-seeded devnet SOL=667bps → 14x, BONK/JUP/TRUMP/PENGU=1000bps → 10x),
+ * but this route used to hardcode every market's max_leverage to 10. Derive the
+ * true cap from the real on-chain bps (`maxLeverage = floor(10000 / imBps)`,
+ * mirroring the on-chain margin check) and only fall back to 10 when the config
+ * is genuinely unavailable (parse failure / short read).
+ */
+const FALLBACK_MAX_LEVERAGE = 10;
+function computeMaxLeverage(initialMarginBps: bigint | null | undefined): number {
+  if (initialMarginBps == null || initialMarginBps <= 0n) return FALLBACK_MAX_LEVERAGE;
+  const lev = Math.floor(10000 / Number(initialMarginBps));
+  return Number.isFinite(lev) && lev > 0 ? lev : FALLBACK_MAX_LEVERAGE;
+}
+
+/**
  * Map a DiscoveredMarket to the API response row format.
  * For v17 markets, configV17 carries all config fields.
  * For v12 slabs, config has the fields; engine/params hold stats.
+ *
+ * @param riskParams v17 markets only — the real per-market RiskParams parsed
+ *   from the raw slab bytes (see lib/v17-engine-config.ts). configV17
+ *   (WrapperConfigV17) does not itself carry initialMarginBps — that field
+ *   lives in the embedded V16ConfigAccount region, which the raw-bytes parse
+ *   in discoverMarketsOnChain() supplies here.
  */
 function discoveredToApiRow(
   m: DiscoveredMarket,
   v17Oi?: V17MarketGroupOI,
   registered?: RegisteredMarket,
+  riskParams?: RiskParams | null,
 ): Record<string, unknown> {
   const slabAddress = m.slabAddress.toBase58();
   const programId = m.programId.toBase58();
@@ -301,6 +324,9 @@ function discoveredToApiRow(
       oracle_mode: cfg.oracleMode === 1 ? "hyperp" : cfg.oracleMode === 3 ? "keeper" : "admin",
       dex_pool_address: playgroundMeta?.dex_pool_address ?? registered?.poolAddress ?? null,
       mainnet_ca: playgroundMeta?.mainnet_ca ?? registered?.mainnetCA ?? null,
+      // Real per-market cap (e.g. SOL 667bps -> 14x, others 1000bps -> 10x) — see
+      // computeMaxLeverage() doc comment. NOT a hardcoded 10 for every market.
+      max_leverage: computeMaxLeverage(riskParams?.initialMarginBps),
       created_at: null,
       stats_updated_at: null,
       is_zombie: false,
@@ -329,7 +355,8 @@ function discoveredToApiRow(
     };
   }
 
-  // v12 slab — config is a real MarketConfig
+  // v12 slab — config is a real MarketConfig; params (RiskParams) carries the
+  // real initialMarginBps directly (no separate raw-bytes parse needed here).
   const collateralMint = (m.config as { collateralMint?: { toBase58: () => string } })?.collateralMint;
   return {
     slab_address: slabAddress,
@@ -343,6 +370,7 @@ function discoveredToApiRow(
     oracle_mode: null,
     dex_pool_address: null,
     mainnet_ca: null,
+    max_leverage: computeMaxLeverage(m.params?.initialMarginBps),
     created_at: null,
     stats_updated_at: null,
     is_zombie: false,
@@ -396,11 +424,15 @@ async function discoverMarketsOnChain(
       return true;
     });
 
-    // Enrich v17 rows with live OI + insurance parsed from the raw account
-    // bytes (discoverMarkets returns parsed configs only, not raws) — one
-    // batched RPC read for all v17 slabs. Degrades gracefully: on failure the
-    // rows keep zeroed stats, which is exactly the pre-enrichment behavior.
+    // Enrich v17 rows with live OI + insurance, AND real per-market RiskParams
+    // (initialMarginBps -> max_leverage), all parsed from the same raw account
+    // bytes (discoverMarkets returns parsed WrapperConfigV17 only, not the
+    // embedded V16ConfigAccount that carries initialMarginBps — see
+    // lib/v17-engine-config.ts) — one batched RPC read for all v17 slabs.
+    // Degrades gracefully: on failure the rows keep zeroed stats / fall back to
+    // the default max_leverage, which is exactly the pre-enrichment behavior.
     const v17Stats = new Map<string, V17MarketGroupOI>();
+    const v17RiskParams = new Map<string, RiskParams | null>();
     const v17Markets = unique.filter((m) => m.configV17);
     // getMultipleAccountsInfo caps at 100 accounts per call — chunk the reads.
     const CHUNK = 100;
@@ -412,16 +444,18 @@ async function discoverMarketsOnChain(
           if (!info?.data) return;
           const data = new Uint8Array(info.data);
           if (!isV17Account(data)) return;
-          v17Stats.set(chunk[i].slabAddress.toBase58(), parseMarketGroupV17OI(data));
+          const slab = chunk[i].slabAddress.toBase58();
+          v17Stats.set(slab, parseMarketGroupV17OI(data));
+          v17RiskParams.set(slab, parseV17RiskParams(data, chunk[i].configV17!.tradeFeeBps));
         });
       } catch {
-        /* this chunk's stats stay zeroed */
+        /* this chunk's stats/risk-params stay unset — callers fall back gracefully */
       }
     }
 
     return unique.map((m) => {
       const slab = m.slabAddress.toBase58();
-      return discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab));
+      return discoveredToApiRow(m, v17Stats.get(slab), registeredBySlab?.get(slab), v17RiskParams.get(slab));
     });
   } catch {
     return [];
