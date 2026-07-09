@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import {
@@ -144,6 +144,18 @@ export function useTrade(slabAddress: string) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef(false);
+  // Guards the catch/finally setState calls below against firing after this
+  // component has unmounted — trade() does several sequential on-chain
+  // awaits (portfolio scans, sendTx confirmation), and OrderTicket/PositionPanel
+  // can unmount (market switch, navigation) while one of those is still in
+  // flight, e.g. on a slow devnet RPC round trip.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const trade = useCallback(
     async (params: { lpIdx: number; userIdx: number; size: bigint; limitPriceE6?: bigint }) => {
@@ -398,11 +410,11 @@ export function useTrade(slabAddress: string) {
         return sig;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
+        if (mountedRef.current) setError(msg);
         throw e;
       } finally {
         inflightRef.current = false;
-        setLoading(false);
+        if (mountedRef.current) setLoading(false);
       }
     },
     [connection, wallet, mktConfig, accounts, raw, slabAddress, slabProgramId, refreshSlab]

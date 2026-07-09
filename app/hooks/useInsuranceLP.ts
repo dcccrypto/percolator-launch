@@ -130,7 +130,16 @@ export function useInsuranceLP() {
     cooldownRemainingSlots: 0n,
     cooldownElapsed: true,
   });
-  const [loading, setLoading] = useState(false);
+  // Starts true: this hook backs the Earn page's real data (vault TVL, LP
+  // balance, redemption state) via refreshState() below. Starting at `false`
+  // meant the very first render — before refreshState's first async fetch had
+  // resolved — looked identical to "loaded, and everything is genuinely
+  // zero," so the Earn page briefly rendered a $0 vault/empty LP position as
+  // if that were confirmed on-chain truth. refreshState() clears this via its
+  // early-return branches and a `finally` (see below); the dependency-change
+  // effect further down re-arms it to `true` on market/wallet switch so a
+  // switch doesn't keep showing the PREVIOUS market's numbers labeled as loaded.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Stabilize wallet.publicKey reference — PublicKey is not referentially stable
@@ -178,7 +187,12 @@ export function useInsuranceLP() {
 
   // Poll insurance state
   const refreshState = useCallback(async () => {
-    if (!slabState || !lpMintInfo || !connection) return;
+    if (!slabState || !lpMintInfo || !connection) {
+      // Nothing to fetch yet (market/programId not resolved) — don't leave
+      // the UI stuck on a loading skeleton forever.
+      setLoading(false);
+      return;
+    }
     const requestId = ++requestIdRef.current;
     const stale = () => requestId !== requestIdRef.current;
 
@@ -358,6 +372,11 @@ export function useInsuranceLP() {
       });
     } catch (err) {
       console.error('Failed to refresh insurance LP state:', err);
+    } finally {
+      // Covers every path through the try block above — success, each
+      // `if (stale()) return;` bail-out, and the catch branch — so loading
+      // never gets stuck true after this call settles.
+      setLoading(false);
     }
   }, [slabState, lpMintInfo, registryInfo, connection, walletPubkeyStr]);
 
@@ -374,6 +393,11 @@ export function useInsuranceLP() {
   // balance / pending-redemption state for up to the full 10s interval
   // period. Mirrors the equivalent fix in useStakePool.ts.
   useEffect(() => {
+    // Re-arm loading on market/wallet switch: without this, switching markets
+    // (or connecting/switching wallets) kept showing the PREVIOUS market's
+    // numbers as if they were the freshly-loaded state for the new one, since
+    // `loading` had already flipped false from the prior fetch.
+    setLoading(true);
     refreshStateRef.current();
   }, [lpMintInfo, registryInfo, walletPubkeyStr, slabState.config]);
 

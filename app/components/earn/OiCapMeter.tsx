@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { formatCompact } from '@/lib/formatters';
 
 interface OiCapMeterProps {
   currentOI: number;
@@ -135,11 +136,4 @@ export function OiCapMeter({
       </div>
     </div>
   );
-}
-
-/** Format large numbers compactly: 1,234,567 → 1.23M */
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toFixed(0);
 }

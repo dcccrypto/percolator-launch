@@ -56,6 +56,19 @@ const TEARDOWN_DELAY_MS = 20_000;
 const STALE_CONNECTION_MS = 45_000;
 const STALE_CHECK_INTERVAL_MS = 5_000;
 
+/**
+ * Circuit breaker: stop the automatic reconnect loop after this many
+ * consecutive failed attempts. Without a cap, a genuinely dead endpoint (WS
+ * server permanently down, DNS gone, etc.) leaves every open browser tab
+ * retrying every ~30s forever — pure CPU/battery/log noise with no path to
+ * success. A fresh subscriber (a new component mounting and calling
+ * `getWsManager`) still gets exactly one more attempt via the "closed && no
+ * timer" check in `getWsManager` below, which also resets this counter — so
+ * tripping the breaker doesn't permanently wedge the app, it just stops the
+ * unattended background retry storm.
+ */
+const MAX_RECONNECT_ATTEMPTS = 10;
+
 interface ManagerState {
   url: string;
   ws: WebSocket | null;
@@ -69,6 +82,8 @@ interface ManagerState {
   rawListeners: Set<(data: unknown) => void>;
   statusListeners: Set<(status: WsConnectionStatus) => void>;
   destroyed: boolean;
+  /** Consecutive failed reconnect attempts since the last successful `open`. */
+  reconnectAttempts: number;
 }
 
 const managers = new Map<string, ManagerState>();
@@ -97,6 +112,9 @@ function resubscribeAllChannels(state: ManagerState): void {
 
 function scheduleReconnect(state: ManagerState): void {
   if (state.destroyed || state.reconnectTimer) return;
+  // Circuit breaker — see MAX_RECONNECT_ATTEMPTS doc comment above.
+  if (state.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
+  state.reconnectAttempts += 1;
   const delay = jitter(state.reconnectDelay);
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
@@ -121,6 +139,7 @@ function connect(state: ManagerState): void {
   ws.onopen = () => {
     if (state.ws !== ws) return; // superseded by a later connect() call
     state.reconnectDelay = RECONNECT_BASE_MS;
+    state.reconnectAttempts = 0;
     state.lastMessageAt = Date.now();
     setStatus(state, "open");
     resubscribeAllChannels(state);
@@ -191,6 +210,7 @@ function getOrCreateManager(url: string): ManagerState {
     rawListeners: new Set(),
     statusListeners: new Set(),
     destroyed: false,
+    reconnectAttempts: 0,
   };
   managers.set(url, state);
   return state;
@@ -251,6 +271,11 @@ export function getWsManager(url: string): WsManagerHandle {
 
   const state = getOrCreateManager(url);
   if (state.status === "closed" && !state.ws && !state.reconnectTimer) {
+    // A fresh subscriber is a new reason to try, independent of how many
+    // automatic retries already failed — give it a full fresh attempt budget
+    // rather than inheriting an already-tripped circuit breaker.
+    state.reconnectAttempts = 0;
+    state.reconnectDelay = RECONNECT_BASE_MS;
     connect(state);
     ensureStaleCheck(state);
   }

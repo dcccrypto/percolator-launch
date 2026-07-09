@@ -17,8 +17,12 @@
  * formatCompact(2500000) // → "2.50M"
  * formatCompact(1200) // → "1.20K"
  * formatCompact(45.678) // → "45.68"
+ * formatCompact(NaN) // → "—" (invalid input, e.g. from an upstream 0/0 division)
  */
 export function formatCompact(n: number): string {
+  // Defense-in-depth: NaN/±Infinity can leak in from upstream division-by-zero
+  // or malformed on-chain data. Render "—" instead of "NaN"/"Infinity".
+  if (!Number.isFinite(n)) return '—';
   if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T';
   if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';

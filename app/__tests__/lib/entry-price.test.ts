@@ -40,4 +40,13 @@ describe("entry-price local storage", () => {
     expect(getEntryPrice(SLAB, IDX)).toBe(0n);
     expect(getEntryLeverage(SLAB, IDX)).toBeNull();
   });
+
+  it("treats a corrupted negative entryPriceE6 the same as not found", () => {
+    localStorage.setItem(
+      `perc:entry:${SLAB}:${IDX}`,
+      JSON.stringify({ entryPriceE6: "-83922808", timestamp: Date.now() }),
+    );
+
+    expect(getEntryPrice(SLAB, IDX)).toBe(0n);
+  });
 });

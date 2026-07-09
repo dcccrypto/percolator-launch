@@ -21,10 +21,16 @@ export function formatTokenAmount(
   if (raw == null) return "0";
   const negative = raw < 0n;
   const abs = negative ? -raw : raw;
-  const divisor = 10n ** BigInt(decimals);
+  // Defense-in-depth: `10n ** BigInt(decimals)` throws RangeError for a
+  // negative exponent (bigint exponentiation has no fractional/negative
+  // result). A negative `decimals` has no sane meaning for a token amount —
+  // clamp to 0 instead of letting a malformed caller (e.g. a corrupted
+  // on-chain mint.decimals read) crash the render.
+  const safeDecimals = decimals < 0 ? 0 : decimals;
+  const divisor = 10n ** BigInt(safeDecimals);
   const whole = abs / divisor;
   const frac = abs % divisor;
-  let fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
+  let fracStr = frac.toString().padStart(safeDecimals, "0").replace(/0+$/, "");
 
   // Optionally truncate to maxDisplayDecimals (rounds down)
   if (maxDisplayDecimals != null && fracStr.length > maxDisplayDecimals) {
@@ -294,6 +300,9 @@ export function formatMarginPct(marginBps: number): string {
 
 /** Format a number as a signed percentage string e.g. "+12.34%" or "-5.67%" */
 export function formatPercent(value: number, decimals: number = 2): string {
+  // Defense-in-depth: NaN/±Infinity (e.g. from a 0/0 ROE division upstream)
+  // would otherwise render literally as "NaN%" / "Infinity%".
+  if (!Number.isFinite(value)) return "—";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(decimals)}%`;
 }
