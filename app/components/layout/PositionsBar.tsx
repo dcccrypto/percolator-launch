@@ -1,0 +1,127 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useSyncExternalStore } from "react";
+import { usePathname } from "next/navigation";
+import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
+import { computeMarkPnl, computeMarkPnlCollateral } from "@/lib/trading";
+import { usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { useWalletCompat } from "@/hooks/useWalletCompat";
+import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
+import { formatTokenAmount } from "@/lib/format";
+import { isMockMode } from "@/lib/mock-mode";
+import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
+
+// The portfolio page already renders every position in full (and mounts its
+// own usePortfolio) — showing the strip there doubles both the chrome and
+// the RPC scan for no information gain.
+const HIDDEN_ROUTES = ["/portfolio"];
+
+/** One position chip: ticker + live PnL, colored by sign, linking to the market. */
+function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: number }) {
+  // Live mark from the shared WS price store (same feed as the trade page);
+  // falls back to the portfolio poll's oracle price until the first tick.
+  const subscribe = useCallback((cb: () => void) => subscribeSlab(pos.slabAddress, cb), [pos.slabAddress]);
+  const getSnap = useCallback(() => getSnapshot(pos.slabAddress).priceE6, [pos.slabAddress]);
+  const livePriceE6 = useSyncExternalStore(subscribe, getSnap, () => null);
+
+  const posSize = pos.account?.positionSize ?? 0n;
+  const posEntry = pos.effectiveEntryPrice;
+  const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
+
+  // Same collateral-unit conversion as usePortfolio / the portfolio cards:
+  // computeMarkPnl is coin-margined native units, NOT collateral — convert
+  // via computeMarkPnlCollateral. Falls back to the hook's own (already
+  // collateral-converted) unrealizedPnl when entry/mark are unavailable.
+  const pnl = (() => {
+    if (posSize === 0n || posEntry <= 0n || markE6 <= 0n) return pos.unrealizedPnl;
+    try {
+      return computeMarkPnlCollateral(computeMarkPnl(posSize, posEntry, markE6), markE6);
+    } catch {
+      return pos.unrealizedPnl;
+    }
+  })();
+
+  const symbol = pos.symbol ?? `${pos.slabAddress.slice(0, 4)}…`;
+  const colorClass =
+    pnl > 0n ? "text-[var(--long)]" : pnl < 0n ? "text-[var(--short)]" : "text-[var(--text)]";
+  const sign = pnl > 0n ? "+" : pnl < 0n ? "-" : "";
+  const abs = pnl < 0n ? -pnl : pnl;
+
+  return (
+    <Link
+      href={`/trade/${pos.slabAddress}`}
+      className="group flex shrink-0 items-center gap-1.5 px-3 py-1 transition-colors hover:bg-[var(--bg-elevated)]"
+      style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
+    >
+      <span
+        className={`h-1 w-1 rounded-full ${posSize > 0n ? "bg-[var(--long)]" : "bg-[var(--short)]"}`}
+        aria-hidden
+      />
+      <span className="text-[11px] font-semibold text-[var(--text-secondary)] transition-colors group-hover:text-[var(--text)]">
+        {symbol.replace(/-PERP$/i, "")}
+      </span>
+      <span className={`text-[11px] font-bold ${colorClass}`}>
+        {sign}{formatTokenAmount(abs, decimals)}
+      </span>
+    </Link>
+  );
+}
+
+/**
+ * Site-wide open-positions strip, rendered directly under the sticky header.
+ * One chip per open position — ticker + live PnL (green/red/white by sign) —
+ * so a trader navigating anywhere on the site can watch their book and jump
+ * straight to a market that's moving against them.
+ *
+ * Renders nothing (zero height) when the wallet is disconnected, the
+ * portfolio is still on its first load, or there are no open positions.
+ */
+export function PositionsBar() {
+  const pathname = usePathname();
+  const { connected: walletConnected } = useWalletCompat();
+  const mockMode = isMockMode();
+  const portfolio = usePortfolio();
+
+  const hidden =
+    pathname != null && HIDDEN_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
+
+  const mockPositions = mockMode && !walletConnected ? getMockPortfolioPositions() : null;
+  const positions = mockPositions ?? portfolio.positions;
+  // Largest book exposure first (left → right). Notional (|size| × oracle
+  // price) rather than raw size so positions are comparable across markets
+  // (1000 WIF ≠ 1000 SOL). Sorted on the poll's oracle price, not the live
+  // mark, so chips don't reshuffle on every price tick.
+  const notionalOf = (pos: PortfolioPosition): bigint => {
+    const size = pos.account?.positionSize ?? 0n;
+    const abs = size < 0n ? -size : size;
+    return pos.oraclePriceE6 > 0n ? (abs * pos.oraclePriceE6) / 1_000_000n : abs;
+  };
+  const openPositions = positions
+    .filter((pos) => (pos.account?.positionSize ?? 0n) !== 0n)
+    .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0));
+
+  // Collateral decimals per mint (all playground markets use 6-decimal
+  // sim-USDC; resolved properly anyway, matching the portfolio page).
+  const tokenMetaMap = useMultiTokenMeta(openPositions.map((pos) => pos.collateralMint));
+
+  if (hidden || (!walletConnected && !mockPositions) || openPositions.length === 0) return null;
+
+  return (
+    <div
+      className="sticky top-14 z-40 flex items-center overflow-x-auto border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-md [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      data-testid="positions-bar"
+    >
+      <span className="shrink-0 select-none border-r border-[var(--border)] px-3 py-1 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+        Positions
+      </span>
+      {openPositions.map((pos, i) => (
+        <PositionChip
+          key={`${pos.slabAddress}-${pos.idx ?? i}`}
+          pos={pos}
+          decimals={tokenMetaMap.get(pos.collateralMint.toBase58())?.decimals ?? 6}
+        />
+      ))}
+    </div>
+  );
+}
