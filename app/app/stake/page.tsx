@@ -114,6 +114,18 @@ function slotsToTime(slots: number): string {
   return `~${Math.round(seconds / 60)} min`;
 }
 
+/**
+ * Browser-safe u64 LE reader. Buffer.readBigUInt64LE relies on Node's Buffer
+ * BigInt methods, which this bundle's Buffer polyfill doesn't reliably
+ * provide in the browser (see the same DataView-based fix already used in
+ * useStakePool.ts / useLpPositions.ts). DataView.getBigUint64 is a native
+ * browser API and works on any Buffer/Uint8Array.
+ */
+function readU64LE(data: Uint8Array, offset: number): bigint {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return view.getBigUint64(offset, /* littleEndian= */ true);
+}
+
 /* ── Live Price ── */
 
 /**
@@ -211,9 +223,9 @@ async function fetchPoolPosition(
 
     const depInfo = await connection.getAccountInfo(depositPdaAddress);
     if (depInfo && depInfo.data.length >= 81) {
-      const depData = Buffer.from(depInfo.data);
+      const depData = depInfo.data;
       if (depData[0] === 1) {
-        userDepositSlot = depData.readBigUInt64LE(72);
+        userDepositSlot = readU64LE(depData, 72);
       }
     }
 
@@ -283,59 +295,68 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
     <section className="relative overflow-hidden py-12 lg:py-16">
       <div className="mx-auto max-w-[1100px] px-6">
         <ScrollReveal>
-          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
-            // insurance lp
-          </div>
-          <h1
-            className="mb-4 text-3xl font-medium tracking-[-0.02em] sm:text-4xl lg:text-[56px]"
-            style={{ fontFamily: "var(--font-heading)" }}
-          >
-            <span className="text-[var(--text)]">Stake. Earn.</span>
-            <br />
-            <span className="text-[var(--cyan)]">Back the Fund.</span>
-          </h1>
-          <p className="mb-6 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
-            Deposit collateral into insurance pools to back the Percolator insurance fund.
-          </p>
-
-          <div className="max-w-[640px]">
-            <InDevelopmentBanner>
-              Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
-              distribution on the deployed program — <span className="text-[var(--text)]">APR is
-              genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
-              yield product.
-            </InDevelopmentBanner>
-          </div>
-
-          {/* CTA buttons */}
-          <div className="mb-10 flex flex-wrap items-center gap-3">
-            <a
-              href="#deposit"
-              className="group inline-flex items-center gap-2 rounded-md bg-violet-700 px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-violet-600"
-            >
-              Deposit Now
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
-                <path d="M12 5v14M5 12l7 7 7-7" />
-              </svg>
-            </a>
-            <a
-              href="#pools"
-              className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--cyan)] border-b border-[var(--cyan)]/40 pb-px transition-colors hover:border-[var(--cyan)]/70"
-            >
-              Learn More <span aria-hidden="true">→</span>
-            </a>
-          </div>
-
-          {/* Metrics row */}
-          <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] md:grid-cols-4">
-            {metrics.map((m) => (
-              <div key={m.label} className="min-w-0 overflow-hidden bg-[var(--panel-bg)] p-3 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
-                <p className="mb-1.5 truncate text-[9px] font-medium uppercase tracking-[0.15em] text-[#9ca3af] sm:text-[10px] sm:tracking-[0.2em]">{m.label}</p>
-                <p className={`truncate text-base font-semibold tracking-tight tabular-nums sm:text-xl ${m.color}`} style={{ fontFamily: "var(--font-heading)" }}>
-                  {m.value}
-                </p>
+          {/* Two-pane hero: heading/CTA/banner on the left, metrics on the
+              right (stacks to a single column below lg). */}
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_380px] lg:items-center lg:gap-12">
+            {/* Left pane */}
+            <div className="min-w-0">
+              <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
+                // insurance lp
               </div>
-            ))}
+              <h1
+                className="mb-4 text-3xl font-medium tracking-[-0.02em] sm:text-4xl lg:text-[52px]"
+                style={{ fontFamily: "var(--font-heading)" }}
+              >
+                <span className="text-[var(--text)]">Stake. Earn.</span>
+                <br />
+                <span className="text-[var(--cyan)]">Back the Fund.</span>
+              </h1>
+              <p className="mb-6 max-w-[520px] text-base leading-[1.6] text-[var(--text-secondary)]">
+                Deposit collateral into insurance pools to back the Percolator insurance fund.
+              </p>
+
+              {/* CTA buttons */}
+              <div className="mb-6 flex flex-wrap items-center gap-3">
+                <a
+                  href="#deposit"
+                  className="group inline-flex items-center gap-2 rounded-md bg-violet-700 px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-violet-600"
+                >
+                  Deposit Now
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-y-0.5">
+                    <path d="M12 5v14M5 12l7 7 7-7" />
+                  </svg>
+                </a>
+                <a
+                  href="#pools"
+                  className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--cyan)] border-b border-[var(--cyan)]/40 pb-px transition-colors hover:border-[var(--cyan)]/70"
+                >
+                  Learn More <span aria-hidden="true">→</span>
+                </a>
+              </div>
+
+              <div className="max-w-[640px]">
+                <InDevelopmentBanner>
+                  Staking backs the insurance fund and withdrawals work, but there&apos;s no yield
+                  distribution on the deployed program — <span className="text-[var(--text)]">APR is
+                  genuinely 0%</span>, and flushes to insurance reduce staked value. Experimental, not a
+                  yield product.
+                </InDevelopmentBanner>
+              </div>
+            </div>
+
+            {/* Right pane: metrics */}
+            <div className="w-full shrink-0 lg:w-[380px]">
+              <div className="grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)]">
+                {metrics.map((m) => (
+                  <div key={m.label} className="min-w-0 overflow-hidden bg-[var(--panel-bg)] p-3 sm:p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
+                    <p className="mb-1.5 truncate text-[9px] font-medium uppercase tracking-[0.15em] text-[#9ca3af] sm:text-[10px] sm:tracking-[0.2em]">{m.label}</p>
+                    <p className={`truncate text-base font-semibold tracking-tight tabular-nums sm:text-xl ${m.color}`} style={{ fontFamily: "var(--font-heading)" }}>
+                      {m.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </ScrollReveal>
       </div>
@@ -355,9 +376,13 @@ function StakeHero({ pools, totalUserDeposited }: { pools: StakePool[]; totalUse
 function PositionCard({
   position,
   onWithdrawSuccess,
+  onManage,
 }: {
   position: UserPosition;
   onWithdrawSuccess?: () => void;
+  /** Hands off to DepositWidget's Withdraw tab, pre-selected to this pool —
+   *  see the "Manage / Withdraw Partial" button below. */
+  onManage?: (poolId: string) => void;
 }) {
   const { withdraw, loading: withdrawLoading, error: withdrawError } = useStakeWithdrawByPool({
     slabAddress: position.slabAddress,
@@ -419,7 +444,7 @@ function PositionCard({
               }
             </span>
           </div>
-          <ProgressBar value={cooldownPct} height={8} />
+          <ProgressBar value={cooldownPct} height={8} fillClassName="bg-gradient-to-r from-blue-500 to-[var(--cyan)]" />
         </div>
 
         {/* Tx feedback */}
@@ -432,22 +457,36 @@ function PositionCard({
           <p className="text-[11px] text-[var(--short)]">{withdrawError}</p>
         )}
 
-        {/* Withdraw button */}
-        <button
-          disabled={!position.cooldownElapsed || withdrawLoading}
-          onClick={handleWithdraw}
-          className={`w-full rounded-md py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
-            position.cooldownElapsed && !withdrawLoading
-              ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
-              : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
-          }`}
-        >
-          {withdrawLoading
-            ? "Withdrawing…"
-            : position.cooldownElapsed
-            ? "Withdraw LP →"
-            : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
-        </button>
+        {/* Action buttons */}
+        <div className="space-y-2">
+          {/* Withdraw button — all-or-nothing, full LP balance */}
+          <button
+            disabled={!position.cooldownElapsed || withdrawLoading}
+            onClick={handleWithdraw}
+            className={`w-full rounded-md py-2.5 text-[12px] font-semibold uppercase tracking-[0.1em] transition-all duration-200 ${
+              position.cooldownElapsed && !withdrawLoading
+                ? "border border-[var(--cyan)]/50 bg-[var(--cyan)]/[0.10] text-[var(--cyan)] hover:border-[var(--cyan)] hover:bg-[var(--cyan)]/[0.18]"
+                : "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] cursor-not-allowed"
+            }`}
+          >
+            {withdrawLoading
+              ? "Withdrawing…"
+              : position.cooldownElapsed
+              ? "Withdraw LP →"
+              : `Withdraw in ${position.cooldownRemaining.toLocaleString()} slots`}
+          </button>
+
+          {/* Manage / Withdraw Partial — jumps to DepositWidget's Withdraw
+              tab pre-selected to this pool, for a partial (not all-or-nothing)
+              withdrawal. */}
+          <button
+            type="button"
+            onClick={() => onManage?.(position.poolId)}
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all duration-200 hover:border-[var(--accent)]/30 hover:text-[var(--accent)]"
+          >
+            Manage / Withdraw Partial
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -463,9 +502,13 @@ function PositionCard({
 function YourPositionPanel({
   positions,
   onWithdrawSuccess,
+  onManage,
 }: {
   positions: UserPosition[];
   onWithdrawSuccess?: () => void;
+  /** Threaded through to each PositionCard's "Manage / Withdraw Partial"
+   *  button — see PositionCard for what it does. */
+  onManage?: (poolId: string) => void;
 }) {
   const { connected } = useWalletCompat();
 
@@ -488,7 +531,7 @@ function YourPositionPanel({
   return (
     <div className="space-y-3">
       {positions.map((position) => (
-        <PositionCard key={position.poolId} position={position} onWithdrawSuccess={onWithdrawSuccess} />
+        <PositionCard key={position.poolId} position={position} onWithdrawSuccess={onWithdrawSuccess} onManage={onManage} />
       ))}
     </div>
   );
@@ -499,14 +542,24 @@ function YourPositionPanel({
 function DepositWidget({
   pools,
   onTxSuccess,
+  selectedPool,
+  setSelectedPool,
+  mode,
+  setMode,
 }: {
   pools: StakePool[];
   onTxSuccess?: () => void;
+  /** Lifted to StakePage (rather than local state) so a PositionCard's
+   *  "Manage / Withdraw Partial" button can jump here pre-selected to a
+   *  specific pool + withdraw mode instead of leaving the user to find it
+   *  themselves via the dropdown below. */
+  selectedPool: string;
+  setSelectedPool: (poolId: string) => void;
+  mode: "deposit" | "withdraw";
+  setMode: (mode: "deposit" | "withdraw") => void;
 }) {
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
-  const [selectedPool, setSelectedPool] = useState(pools[0]?.id ?? "");
-  const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
   const [amount, setAmount] = useState("");
   const [walletBalanceRaw, setWalletBalanceRaw] = useState<bigint | null>(null);
   const [balanceDecimals, setBalanceDecimals] = useState(6);
@@ -545,7 +598,16 @@ function DepositWidget({
     if (pools.length > 0 && !pools.find((p) => p.id === selectedPool)) {
       setSelectedPool(pools[0].id);
     }
-  }, [pools, selectedPool]);
+  }, [pools, selectedPool, setSelectedPool]);
+
+  // Reset both amount inputs whenever the selected pool or mode changes —
+  // now that selectedPool/mode are lifted to the parent (so PositionCard's
+  // "Manage" button can jump here), a stale amount from a previous pool/tab
+  // must not silently carry over into a different pool's deposit/withdraw.
+  useEffect(() => {
+    setAmount("");
+    setWithdrawAmount("");
+  }, [selectedPool, mode]);
 
   // Fetch real SPL token balance for the selected pool's collateral mint
   useEffect(() => {
@@ -740,6 +802,26 @@ function DepositWidget({
                   MAX
                 </button>
               </div>
+
+              {/* Percentage chips */}
+              {connected && walletBalance !== null && walletBalance > 0 && (
+                <div className="mt-2 flex gap-1.5">
+                  {[25, 50, 75, 100].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => {
+                        const val = (walletBalance * pct) / 100;
+                        setAmount(val.toFixed(2));
+                        setTxStatus(null);
+                      }}
+                      className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--bg)] py-1 text-[10px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/30 hover:text-[var(--accent)]"
+                    >
+                      {pct}%
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* LP estimate */}
@@ -763,7 +845,7 @@ function DepositWidget({
                       : `${formatUsd(pool.capUsed)} deposited · No cap`}
                   </span>
                 </div>
-                <ProgressBar value={capRatio} height={6} />
+                <ProgressBar value={capRatio} height={6} fillClassName="bg-gradient-to-r from-[var(--accent)]/60 to-[var(--accent)]" />
               </div>
             )}
 
@@ -842,6 +924,26 @@ function DepositWidget({
                   MAX
                 </button>
               </div>
+
+              {/* Percentage chips */}
+              {connected && withdrawPosition && withdrawPosition.lpBalance > 0 && (
+                <div className="mt-2 flex gap-1.5">
+                  {[25, 50, 75, 100].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => {
+                        const val = (withdrawPosition.lpBalance * pct) / 100;
+                        setWithdrawAmount(val.toFixed(4));
+                        setWithdrawTxStatus(null);
+                      }}
+                      className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--bg)] py-1 text-[10px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--cyan)]/30 hover:text-[var(--cyan)]"
+                    >
+                      {pct}%
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Empty / loading state */}
@@ -949,7 +1051,7 @@ function PoolCard({ pool }: { pool: StakePool }) {
 
       {/* Cap bar */}
       <div className="mt-3">
-        <ProgressBar value={capRatio} height={4} />
+        <ProgressBar value={capRatio} height={4} fillClassName="bg-gradient-to-r from-[var(--accent)]/60 to-[var(--accent)]" />
       </div>
 
       {/* Deposit ghost button */}
@@ -1065,6 +1167,11 @@ export default function StakePage() {
   const [positionRefreshKey, setPositionRefreshKey] = useState(0);
   const [poolsRefreshKey, setPoolsRefreshKey] = useState(0);
 
+  // Lifted (rather than local to DepositWidget) so a PositionCard's
+  // "Manage / Withdraw Partial" button can drive both from StakePage.
+  const [selectedPool, setSelectedPool] = useState("");
+  const [widgetMode, setWidgetMode] = useState<"deposit" | "withdraw">("deposit");
+
   const { connected, publicKey } = useWalletCompat();
   const { connection } = useConnectionCompat();
 
@@ -1163,10 +1270,25 @@ export default function StakePage() {
             {/* pb-24 on mobile ensures deposit widget clears the fixed bottom nav (56px) */}
             <div className="space-y-4 pb-24 lg:pb-0">
               <ErrorBoundary label="Your Position">
-                <YourPositionPanel positions={positions} onWithdrawSuccess={handleTxSuccess} />
+                <YourPositionPanel
+                  positions={positions}
+                  onWithdrawSuccess={handleTxSuccess}
+                  onManage={(poolId) => {
+                    setSelectedPool(poolId);
+                    setWidgetMode("withdraw");
+                    document.getElementById("deposit")?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                />
               </ErrorBoundary>
               <ErrorBoundary label="Deposit Widget">
-                <DepositWidget pools={pools} onTxSuccess={handleTxSuccess} />
+                <DepositWidget
+                  pools={pools}
+                  onTxSuccess={handleTxSuccess}
+                  selectedPool={selectedPool}
+                  setSelectedPool={setSelectedPool}
+                  mode={widgetMode}
+                  setMode={setWidgetMode}
+                />
               </ErrorBoundary>
             </div>
 

@@ -1,30 +1,23 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
-import { PublicKey, TransactionInstruction } from '@solana/web3.js';
-import { useWalletCompat, useConnectionCompat } from '@/hooks/useWalletCompat';
-import {
-  deriveStakePool,
-  deriveStakeVaultAuth,
-  deriveDepositPda,
-  encodeStakeWithdraw,
-  withdrawAccounts,
-} from '@percolatorct/sdk';
-import { STAKE_POOL_SIZE_V1, decodeStakePoolV1 } from '@/hooks/useStakePool';
-import {
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-} from '@solana/spl-token';
-import { sendTx } from '@/lib/tx';
-import { getConfig } from '@/lib/config';
 import { useSlabState } from '@/components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
+import { useStakeWithdrawByPool } from './useStakeWithdrawByPool';
 
 /**
- * Hook for withdrawing collateral from a percolator-stake pool.
+ * Hook for withdrawing collateral from a percolator-stake pool from a
+ * per-market route (`/trade/[slab]`) — derives slabAddress/collateralMint
+ * from route params + SlabProvider context.
  *
- * Burns LP tokens and returns the pro-rata share of collateral from the vault.
- * Subject to cooldown — will fail on-chain if cooldown hasn't elapsed.
+ * Thin wrapper around `useStakeWithdrawByPool`, which holds the actual PDA
+ * derivation, ATA handling, and tx-building logic. Kept as a separate hook
+ * (rather than callers reaching for useStakeWithdrawByPool directly) purely
+ * so route-context wiring lives in one place instead of being duplicated at
+ * every call site.
+ *
+ * Burns LP tokens and returns the pro-rata share of collateral from the
+ * vault. Subject to cooldown — will fail on-chain if cooldown hasn't
+ * elapsed.
  *
  * Usage:
  * ```tsx
@@ -33,126 +26,13 @@ import { useParams } from 'next/navigation';
  * ```
  */
 export function useStakeWithdraw() {
-  const { connection } = useConnectionCompat();
-  const wallet = useWalletCompat();
   const slabState = useSlabState();
   const params = useParams();
   const slabAddress = params?.slab as string | undefined;
+  const collateralMint = slabState.config?.collateralMint?.toBase58();
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const inflightRef = useRef(false);
-
-  const withdraw = useCallback(
-    async (lpAmount: bigint) => {
-      if (inflightRef.current) throw new Error('Stake withdrawal already in progress');
-      inflightRef.current = true;
-      setLoading(true);
-      setError(null);
-
-      try {
-        if (!wallet.publicKey || !wallet.signTransaction) {
-          throw new Error('Wallet not connected');
-        }
-        if (!slabAddress || !slabState.config) {
-          throw new Error('Market not loaded');
-        }
-        if (lpAmount <= 0n) {
-          throw new Error('Withdraw LP amount must be greater than zero');
-        }
-
-        const slabPk = new PublicKey(slabAddress);
-
-        // Validate slab exists on-chain (P-CRITICAL-3: network check)
-        try {
-          const slabInfo = await connection.getAccountInfo(slabPk);
-          if (!slabInfo) {
-            throw new Error('Market not found on current network. Please switch networks in your wallet and refresh.');
-          }
-        } catch (e) {
-          if (e instanceof Error && e.message.includes('Market not found')) throw e;
-        }
-
-        // Stake pools are owned by this deployment's vault program (getConfig().vaultProgramId),
-        // NOT the SDK's default stake program id. Derive all PDAs against the correct program.
-        const stakeProgramId = new PublicKey(
-          (getConfig() as { vaultProgramId?: string }).vaultProgramId
-          ?? '51CeUNpbXovK2BRADPyssuf3Q1xWGabEK9pYkp5mqVhQ'
-        );
-
-        // Derive all PDAs
-        const [pool] = deriveStakePool(slabPk, stakeProgramId);
-        const [vaultAuth] = deriveStakeVaultAuth(pool, stakeProgramId);
-        const [depositPda] = deriveDepositPda(pool, wallet.publicKey, stakeProgramId);
-
-        // Fetch pool account to get lpMint and vault
-        const poolInfo = await connection.getAccountInfo(pool);
-        if (!poolInfo || poolInfo.data.length < STAKE_POOL_SIZE_V1) {
-          throw new Error('Stake pool not initialized for this market.');
-        }
-        if (!poolInfo.owner.equals(stakeProgramId)) {
-          throw new Error('Stake pool account owner mismatch — possible network misconfiguration.');
-        }
-
-        // Decode pool using the REAL deployed 352-byte v1 layout — NOT the SDK's
-        // decodeStakePool, which assumes a 384-byte v2 layout that was never
-        // deployed here (see STAKE_POOL_SIZE_V1 comment in useStakePool.ts).
-        const { lpMint, vault } = decodeStakePoolV1(poolInfo.data);
-
-        // Get user's ATAs
-        const collateralMint = slabState.config.collateralMint;
-        const userCollateralAta = await getAssociatedTokenAddress(collateralMint, wallet.publicKey);
-        const userLpAta = await getAssociatedTokenAddress(lpMint, wallet.publicKey);
-
-        const instructions: TransactionInstruction[] = [];
-
-        // Create collateral ATA if it doesn't exist (user might have closed it)
-        const collAtaInfo = await connection.getAccountInfo(userCollateralAta);
-        if (!collAtaInfo) {
-          instructions.push(
-            createAssociatedTokenAccountInstruction(
-              wallet.publicKey,
-              userCollateralAta,
-              wallet.publicKey,
-              collateralMint,
-            ),
-          );
-        }
-
-        // Build stake withdraw instruction
-        const data = Buffer.from(encodeStakeWithdraw(lpAmount));
-        const keys = withdrawAccounts({
-          user: wallet.publicKey,
-          pool,
-          userLpAta,
-          lpMint,
-          vault,
-          userCollateralAta,
-          vaultAuth,
-          depositPda,
-        });
-
-        instructions.push(
-          new TransactionInstruction({
-            programId: stakeProgramId,
-            keys,
-            data,
-          }),
-        );
-
-        const sig = await sendTx({ connection, wallet, instructions });
-        return sig;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
-        throw e;
-      } finally {
-        inflightRef.current = false;
-        setLoading(false);
-      }
-    },
-    [connection, wallet, slabState.config, slabAddress],
-  );
-
-  return { withdraw, loading, error };
+  return useStakeWithdrawByPool({
+    slabAddress: slabAddress ?? '',
+    collateralMint: collateralMint ?? '',
+  });
 }
