@@ -39,7 +39,7 @@ import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "rea
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useTrade } from "@/hooks/useTrade";
-import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
+import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { computeLimitPriceE6 } from "@/lib/slippage";
@@ -88,6 +88,7 @@ interface TicketValidationCtx {
   oracleUnavailable: boolean;
   oracleStale: boolean;
   engineStale: boolean;
+  engineLockError: string | null;
   hasPrice: boolean;
   mockMode: boolean;
   exceedsBalance: boolean;
@@ -213,7 +214,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // H6: engine accrue-staleness — see useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
-  const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
+
+const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
 
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
@@ -257,6 +259,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "confirming" | "error">("idle");
   const [humanError, setHumanError] = useState<string | null>(null);
+  const [engineLockError, setEngineLockError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmSnapshot, setConfirmSnapshot] = useState<{
     positionSize: bigint;
@@ -374,6 +377,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setLeverageText("1");
     setLastSig(null);
     setHumanError(null);
+    setEngineLockError(null);
     setTradePhase("idle");
   }, [slabAddress]);
 
@@ -519,6 +523,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     oracleUnavailable,
     oracleStale,
     engineStale,
+    engineLockError,
     hasPrice: priceUsd != null,
     mockMode,
     exceedsBalance,
@@ -546,6 +551,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
 
     setHumanError(null);
+setEngineLockError(null);
     setTradePhase("submitting");
     try {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
@@ -557,6 +563,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       );
       setTradePhase("confirming");
       setLastSig(sig ?? null);
+setEngineLockError(null);
       setMarginInput("");
       setSizeInput("");
       if (livePriceE6 && livePriceE6 > 0n && userAccount) {
@@ -589,7 +596,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // it as the slippage/worst-fill-price rejection it actually is here,
       // not the generic "invalid instruction" text (still correct for
       // deposit/withdraw/NFT/market-creation call sites).
-      setHumanError(humanizeError(msg, "trade"));
+      const friendlyMsg = humanizeError(msg, "trade");
+    if (isEngineLockError(msg)) {
+      setEngineLockError(friendlyMsg);
+    }
+    setHumanError(friendlyMsg)
       // Brief "Failed" flash on the submit button itself (matches the
       // "Confirmed!" success flash below) before reverting to idle — the
       // detailed reason stays in the humanError banner underneath.
