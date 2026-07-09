@@ -66,6 +66,14 @@ const HARDCODED_BLOCKED_SLABS: readonly string[] = [
   "8NY7rvQJXNTinJkAQG1GUV8NQ1hQzdtF7iWNjK9p7tQN",
   // Closed: EWMA stuck at $61 due to oracle authority misconfiguration
   "9TGSmPLTLMii4UqstL629twGeVJ9Ndr8VD3pexnvQTsV",
+  // 2026-07-09: throwaway markets from live launch-flow testing. Discovered
+  // on-chain (getProgramAccounts) so removing from the registry/Blob isn't enough.
+  // WIF-E2E — end-to-end launch proof market.
+  "5Rdxh3n4CbLEpzovbMtUJ7M3iaZkoso8jGdfVwkv2eV8",
+  // Percolator-PERP — user wizard test on a PumpSwap pool (unpriceable; PumpSwap parser bugs).
+  "GRAgHm9utZy6kWJj1ZpAVntbyFxCBJyZJ1nSJmiMPPpq",
+  // Orphaned dead-end from the keeper-register ordering-bug repro (never registered).
+  "6QSHWb4Vm1M6f1r14t1jB7Jc4en2uieQuLpKqey71Y2S",
 ];
 
 /**
