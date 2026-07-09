@@ -160,16 +160,15 @@ function verifyStatelessDeployerProof(
  *  layout doesn't match its parser.) Verified against the curated playground
  *  pools: SOL→CAMM (CLMM), JUP/TRUMP/PENGU→LBUZ (DLMM).
  *
- *  PumpSwap (pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA) intentionally NOT
- *  mapped here — falls through to "unsupported" below. percolator-sdk's
- *  dex-oracle.ts PumpSwap parser has wrong byte offsets and no SOL→USD
- *  conversion (keeper audit finding), so a PumpSwap-priced market gets
- *  garbage/zero prices. This is defense-in-depth: the wizard also blocks
- *  selecting a PumpSwap pool client-side (see StepOracleSelect.tsx).
+ *  PumpSwap (pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA) re-enabled
+ *  (percolator-sdk@3.1.0+): the parser's byte offsets, decimal handling, and
+ *  SOL→USD conversion were all fixed and verified against live mainnet pools
+ *  — see dex-type.ts's KEEPER_DEX_TYPES doc and the SDK CHANGELOG [3.1.0].
  */
 const DEX_PROGRAM_TO_TYPE: Record<string, KeeperDexType> = {
   CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK: "raydium-clmm", // Raydium Concentrated Liquidity
   LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo: "meteora-dlmm", // Meteora DLMM
+  pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA: "pumpswap", // pump.fun AMM (PumpSwap)
 };
 
 const MAINNET_RPC_URL = process.env.MAINNET_RPC_URL?.trim() || "https://api.mainnet-beta.solana.com";

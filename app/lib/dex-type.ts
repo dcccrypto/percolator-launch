@@ -8,13 +8,15 @@
 /**
  * The dex types the keeper can price against.
  *
- * PumpSwap deliberately excluded: percolator-sdk's dex-oracle.ts
- * parsePumpSwapPool/computePumpSwapPriceE6 has wrong byte offsets and no
- * SOL→USD conversion (found in the keeper audit), so any market pointed at a
- * PumpSwap pool gets garbage/zero prices from the keeper. Re-add once that
- * parser is fixed upstream.
+ * PumpSwap re-enabled (percolator-sdk@3.1.0+): dex-oracle.ts's
+ * parsePumpSwapPool/computePumpSwapPriceE6 had wrong byte offsets (35/67/131/163
+ * instead of the real 43/75/139/171), no decimal adjustment (pump.fun base
+ * tokens are 6dp, WSOL quote is 9dp — a 1000x error), and no SOL→USD
+ * conversion — all three fixed and verified against live mainnet pools
+ * (ANSEM + 2 others, within 0.5% of Jupiter/DexScreener references). See the
+ * SDK CHANGELOG [3.1.0] entry for the full writeup.
  */
-export const KEEPER_DEX_TYPES = ["raydium-clmm", "meteora-dlmm"] as const;
+export const KEEPER_DEX_TYPES = ["raydium-clmm", "meteora-dlmm", "pumpswap"] as const;
 export type KeeperDexType = (typeof KEEPER_DEX_TYPES)[number];
 
 /**
@@ -40,7 +42,6 @@ export function normalizeDexType(raw: string | null | undefined): KeeperDexType 
   if ((KEEPER_DEX_TYPES as readonly string[]).includes(v)) return v as KeeperDexType;
   if (v === "meteora" || v === "meteora-damm" || v === "meteoradlmm") return "meteora-dlmm";
   if (v === "raydium" || v === "raydium-cpmm" || v === "raydium-amm") return "raydium-clmm";
-  // "pumpswap"/"pump"/"pumpfun"/"pump-swap" intentionally fall through to null —
-  // the keeper can't price PumpSwap pools correctly yet (see KEEPER_DEX_TYPES doc).
+  if (v === "pumpswap" || v === "pump" || v === "pumpfun" || v === "pump-swap") return "pumpswap";
   return null;
 }

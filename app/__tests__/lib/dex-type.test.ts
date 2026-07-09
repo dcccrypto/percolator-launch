@@ -20,12 +20,12 @@ describe("normalizeDexType", () => {
     expect(normalizeDexType("RAYDIUM-CLMM")).toBe("raydium-clmm");
   });
 
-  it("returns null for PumpSwap — keeper pricing is broken for it (wrong byte offsets, no SOL→USD conversion)", () => {
-    expect(normalizeDexType("pumpswap")).toBeNull();
-    expect(normalizeDexType("PumpSwap")).toBeNull();
-    expect(normalizeDexType("pump")).toBeNull();
-    expect(normalizeDexType("pumpfun")).toBeNull();
-    expect(normalizeDexType("pump-swap")).toBeNull();
+  it("maps PumpSwap aliases to 'pumpswap' — percolator-sdk@3.1.0+ fixed the byte offsets, decimals, and SOL→USD conversion", () => {
+    expect(normalizeDexType("pumpswap")).toBe("pumpswap");
+    expect(normalizeDexType("PumpSwap")).toBe("pumpswap");
+    expect(normalizeDexType("pump")).toBe("pumpswap");
+    expect(normalizeDexType("pumpfun")).toBe("pumpswap");
+    expect(normalizeDexType("pump-swap")).toBe("pumpswap");
   });
 
   it("returns null for unpriceable or unknown dexes", () => {

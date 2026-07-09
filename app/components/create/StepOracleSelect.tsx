@@ -68,19 +68,6 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
   const dexSearchMint = (mode === "manual" && (oracleType === "hyperp_ema" || oracleType === "keeper")) && mintValid ? mintAddress : null;
   const { pools: dexPools, loading: dexPoolsLoading } = useDexPoolSearch(dexSearchMint);
 
-  // Keeper mode only: PumpSwap pools are excluded from selection. percolator-sdk's
-  // dex-oracle.ts parsePumpSwapPool/computePumpSwapPriceE6 has wrong byte offsets and
-  // no SOL→USD conversion (keeper audit finding) — a market pointed at a PumpSwap pool
-  // gets garbage/zero prices from the keeper, live on-chain but permanently unpriceable.
-  // The keeper-register route also rejects PumpSwap server-side (defense-in-depth); this
-  // stops the user from ever launching one in the first place. hyperp_ema is unaffected
-  // — that mode reads the pool on-chain (a separate, Rust implementation), not via this
-  // SDK function.
-  const keeperDexPools = dexPools.filter((p) => p.dexId !== "pumpswap");
-  const pumpSwapPoolAddresses = new Set(
-    dexPools.filter((p) => p.dexId === "pumpswap").map((p) => p.poolAddress),
-  );
-
   const [selectedPythFeedName, setSelectedPythFeedName] = useState<string | null>(null);
   const [selectedDexPool, setSelectedDexPool] = useState<DexPoolResult | null>(null);
   const [dexPoolInput, setDexPoolInput] = useState("");
@@ -395,9 +382,9 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
           <p className="text-[11px] text-[var(--text-secondary)]">
             The keeper service reads live prices from this mainnet pool and pushes them to your devnet market via PushAuthMark every ~30s.
           </p>
-          {keeperDexPools.length > 0 && !dexPoolInput && (
+          {dexPools.length > 0 && !dexPoolInput && (
             <div className="space-y-1 max-h-40 overflow-y-auto">
-              {keeperDexPools.map((pool) => (
+              {dexPools.map((pool) => (
                 <button
                   key={pool.poolAddress}
                   type="button"
@@ -424,14 +411,6 @@ export const StepOracleSelect: FC<StepOracleSelectProps> = ({
           )}
           {dexPoolsLoading && (
             <p className="text-[10px] text-[var(--text-dim)]">Searching mainnet DEX pools...</p>
-          )}
-          {!dexPoolsLoading && !dexPoolInput && keeperDexPools.length === 0 && pumpSwapPoolAddresses.size > 0 && (
-            <div className="border border-[var(--short)]/40 bg-[var(--short)]/[0.06] px-3 py-2.5 text-[11px]">
-              <p className="text-[var(--short)] font-medium">✗ PumpSwap pricing isn&apos;t supported yet</p>
-              <p className="text-[var(--text-secondary)] mt-1">
-                This token only has a PumpSwap pool — pick a token with a Raydium or Meteora pool instead.
-              </p>
-            </div>
           )}
           {selectedDexPool && dexPoolInput && (
             <div className="flex items-center justify-between border border-[var(--accent)]/20 bg-[var(--accent)]/[0.03] p-2.5">
