@@ -60,6 +60,10 @@ describe("formatTokenAmount", () => {
   it("strips trailing zeros from fractional part", () => {
     expect(formatTokenAmount(1_100_000n, 6)).toBe("1.1");
   });
+
+  it("clamps a negative decimals count to 0 instead of throwing", () => {
+    expect(formatTokenAmount(12345n, -2)).toBe("12345");
+  });
 });
 
 
@@ -319,6 +323,14 @@ describe("formatPercent", () => {
 
   it("formats with 0 decimals", () => {
     expect(formatPercent(42.7, 0)).toBe("+43%");
+  });
+
+  it("guards against NaN", () => {
+    expect(formatPercent(NaN)).toBe("—");
+  });
+
+  it("guards against Infinity", () => {
+    expect(formatPercent(Infinity)).toBe("—");
   });
 });
 

@@ -7,8 +7,11 @@ describe('OiCapMeter', () => {
     const { container } = render(
       <OiCapMeter currentOI={45000} maxOI={250000} />,
     );
-    expect(container.textContent).toContain('$45.0K');
-    expect(container.textContent).toContain('$250.0K');
+    // formatCompact now comes from the shared lib/formatters.ts (deduped from
+    // this component's own local copy) — 2 decimal places on the K tier,
+    // matching lib/formatters.ts's canonical formatting used app-wide.
+    expect(container.textContent).toContain('$45.00K');
+    expect(container.textContent).toContain('$250.00K');
   });
 
   it('calculates utilization percentage correctly', () => {

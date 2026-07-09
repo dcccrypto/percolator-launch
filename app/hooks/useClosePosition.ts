@@ -149,6 +149,19 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           closeSize = freshIsLong ? -partialAbs : partialAbs;
         }
 
+        // Guard against integer-division rounding to zero: a tiny position
+        // (e.g. freshAbs=1) closed at a low percent (e.g. 10%) computes
+        // (1 * 10) / 100 = 0 via floor division above. A 0-size TradeCpi leg
+        // is a no-op at best and a rejected/confusing on-chain tx at worst —
+        // short-circuit the same way the freshPositionSize === 0n guard above
+        // does, rather than sending a trade for a size the user didn't ask for.
+        if (closeSize === 0n) {
+          setPhase("idle");
+          inflightRef.current = false;
+          setLoading(false);
+          return { signature: null };
+        }
+
         // Read the current mark price NON-reactively, at call time — not via
         // the useLivePrice() hook (same rationale as useTrade.ts: this hook
         // is called from PositionPanel/ClosePositionModal at top level, so a

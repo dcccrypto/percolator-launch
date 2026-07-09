@@ -57,7 +57,13 @@ export function getEntryPrice(slab: string, accountIdx: number, wallet?: string)
     const raw = localStorage.getItem(key(slab, accountIdx, wallet));
     if (!raw) return 0n;
     const record: EntryRecord = JSON.parse(raw);
-    return BigInt(record.entryPriceE6);
+    const value = BigInt(record.entryPriceE6);
+    // Defense-in-depth: a corrupted or hand-edited localStorage entry could
+    // carry a negative entryPriceE6 — on-chain entry price is always >= 0.
+    // BigInt("-5") parses fine (no SyntaxError), so this needs an explicit
+    // check. Treat it the same as "not found" rather than feeding a negative
+    // entry into downstream PnL math ((mark - entry) * position / mark).
+    return value < 0n ? 0n : value;
   } catch {
     return 0n;
   }

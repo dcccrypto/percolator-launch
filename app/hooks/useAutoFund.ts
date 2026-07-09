@@ -47,7 +47,12 @@ export function useAutoFund() {
   const [result, setResult] = useState<AutoFundResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const fund = useCallback(async (wallet: string) => {
+  // `isCancelled` is threaded through from the effect below rather than a
+  // hook-level ref, so it's scoped to the specific fund() call the effect
+  // kicked off (fire-and-forget) — if the component unmounts (or the effect
+  // re-fires for a wallet change) while the fetch is in flight, none of the
+  // setState calls below run against the unmounted/superseded instance.
+  const fund = useCallback(async (wallet: string, isCancelled: () => boolean) => {
     try {
       setFunding(true);
       setError(null);
@@ -57,6 +62,7 @@ export function useAutoFund() {
         body: JSON.stringify({ wallet }),
       });
       const data = await resp.json();
+      if (isCancelled()) return;
       if (resp.ok && data.funded) {
         setResult(data);
       } else if (resp.status === 429) {
@@ -66,9 +72,9 @@ export function useAutoFund() {
         setError(data.error ?? "Auto-fund failed");
       }
     } catch (e: any) {
-      setError(e.message ?? "Network error");
+      if (!isCancelled()) setError(e.message ?? "Network error");
     } finally {
-      setFunding(false);
+      if (!isCancelled()) setFunding(false);
     }
   }, []);
 
@@ -83,8 +89,14 @@ export function useAutoFund() {
     if (getAutoFundAttempted().has(walletAddr)) return;
     markAutoFundAttempted(walletAddr);
 
-    // Fire and forget — don't block UI
-    fund(walletAddr);
+    // Fire and forget — don't block UI. `cancelled` guards the setState calls
+    // inside fund() against firing after this effect's cleanup (unmount, or a
+    // wallet switch re-running the effect) — see the comment on fund() above.
+    let cancelled = false;
+    fund(walletAddr, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
   }, [connected, publicKey, fund]);
 
   return { funding, result, error };

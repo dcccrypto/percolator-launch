@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { OiCapMeter } from './OiCapMeter';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
+import { formatCompact } from '@/lib/formatters';
 
 interface VaultCardProps {
   vault: MarketVaultInfo;
@@ -107,10 +108,4 @@ function MetricCell({ label, value }: { label: string; value: string }) {
       <div className="text-sm font-mono tabular-nums text-[var(--text)]">{value}</div>
     </div>
   );
-}
-
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toFixed(0);
 }

@@ -71,6 +71,23 @@ const DEFAULT_STATS: EarnStats = {
   dailyFeeRevenue: 0,
 };
 
+/**
+ * Module-level singleton RPC connection shared by fetchCuratedVaultsOnChain and
+ * fetchOnChainMaxLeverage below. Both used to construct their own `new
+ * Connection(...)` on every invocation — this hook's 15s auto-refresh interval
+ * (see the effect at the bottom of the file) means that was a fresh Connection
+ * object every 15s for the lifetime of the Earn page, for no benefit: the RPC
+ * endpoint (`getRpcEndpoint()`) is a static config value for the life of the
+ * session, so there's nothing per-call that requires a fresh instance.
+ */
+let sharedEarnStatsConnection: Connection | null = null;
+function getSharedEarnStatsConnection(): Connection {
+  if (!sharedEarnStatsConnection) {
+    sharedEarnStatsConnection = new Connection(getRpcEndpoint(), 'confirmed');
+  }
+  return sharedEarnStatsConnection;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Mock data for devnet / offline
 // ═══════════════════════════════════════════════════════════════
@@ -241,7 +258,7 @@ async function fetchCuratedVaultsOnChain(slabs: string[]): Promise<Record<string
 
   try {
     const programId = new PublicKey(getConfig().programId);
-    const connection = new Connection(getRpcEndpoint(), 'confirmed');
+    const connection = getSharedEarnStatsConnection();
     const registryPdas = slabs.map(
       (slab) => deriveLpVaultRegistry(programId, new PublicKey(slab))[0],
     );
@@ -300,7 +317,7 @@ async function fetchOnChainMaxLeverage(slabs: string[]): Promise<Record<string, 
   if (slabs.length === 0) return result;
 
   try {
-    const connection = new Connection(getRpcEndpoint(), 'confirmed');
+    const connection = getSharedEarnStatsConnection();
     const pks = slabs.map((s) => new PublicKey(s));
     const infos = await connection.getMultipleAccountsInfo(pks);
 

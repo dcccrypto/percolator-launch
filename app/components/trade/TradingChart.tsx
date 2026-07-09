@@ -754,7 +754,10 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
           });
           const volumeData = candleData.map((c) => ({
             time: (Math.floor(c.timestamp / 1000)) as import("lightweight-charts").UTCTimestamp,
-            value: c.volume ?? 0,
+            // `?? 0` alone only catches null/undefined — a malformed upstream
+            // candle (e.g. a 0/0 division from the indexer) can hand back NaN,
+            // which lightweight-charts would otherwise render as a broken bar.
+            value: Number.isFinite(c.volume) ? c.volume : 0,
             color: c.close >= c.open ? chartTheme.volUpColor : chartTheme.volDownColor,
           }));
           volumeSeries.setData(volumeData);

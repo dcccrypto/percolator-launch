@@ -50,4 +50,16 @@ describe("formatCompact", () => {
     // formatCompact doesn't handle negatives specially, so it falls through
     expect(formatCompact(-500)).toBe("-500.00");
   });
+
+  it("guards against NaN", () => {
+    expect(formatCompact(NaN)).toBe("—");
+  });
+
+  it("guards against +Infinity", () => {
+    expect(formatCompact(Infinity)).toBe("—");
+  });
+
+  it("guards against -Infinity", () => {
+    expect(formatCompact(-Infinity)).toBe("—");
+  });
 });

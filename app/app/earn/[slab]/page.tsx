@@ -15,6 +15,7 @@ import { OiCapMeter } from '@/components/earn/OiCapMeter';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
+import { formatCompact } from '@/lib/formatters';
 const DepositWithdrawPanel = dynamic(
   () =>
     import('@/components/earn/DepositWithdrawPanel').then(
@@ -133,7 +134,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const collateralDecimals = collateralTokenMeta?.decimals ?? 6;
 
   // Get market info from earn stats
-  const { stats: earnStats, loading: earnLoading } = useEarnStats();
+  const { stats: earnStats, loading: earnLoading, error: earnStatsError } = useEarnStats();
   const marketInfo = useMemo<MarketVaultInfo | null>(() => {
     return earnStats.markets.find((m) => m.slabAddress === slabAddress) ?? null;
   }, [earnStats.markets, slabAddress]);
@@ -208,6 +209,20 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           <span className="text-[var(--text-muted)]">/</span>
           <span className="text-[var(--text)]">{symbol}-PERP Vault</span>
         </div>
+
+        {/* Earn-stats fetch error — stats (volume/insurance/APY) may be stale or
+            zeroed; the on-chain LP vault figures above (TVL, deposit/withdraw)
+            are unaffected since they're read independently by useInsuranceLP. */}
+        {!earnLoading && earnStatsError && (
+          <div className="mb-6 border border-[var(--short)]/30 bg-[var(--short)]/5 rounded-sm px-4 py-3">
+            <p className="text-[12px] font-medium text-[var(--short)]">
+              ⚠ Couldn&apos;t refresh market stats
+            </p>
+            <p className="text-[11px] text-[var(--text-secondary)] mt-1">
+              {earnStatsError} — volume, insurance, and APY figures below may be stale. Vault balance and deposit/withdraw are unaffected.
+            </p>
+          </div>
+        )}
 
         {/* Not Initialized Warning */}
         {!loading && !lpVaultState.registryExists && (
@@ -434,10 +449,4 @@ function InfoRow({
       </span>
     </div>
   );
-}
-
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toFixed(2);
 }
