@@ -11,7 +11,9 @@ if (!API_URL && process.env.NODE_ENV === "production") {
   );
 }
 
-const nextConfig: NextConfig = {
+// `eslint`/`typescript` are valid next.config runtime keys, but this @types/next
+// version omits them from the NextConfig type — hence the `as NextConfig` cast below.
+const nextConfig = {
   // Playground is a fast-moving devnet contributor app: don't let a lint warning or a
   // stray type error in an unrelated file block `next build` (Vercel already builds this
   // way). Type-safety is still enforced separately by the `tsc --noEmit` CI gate.
@@ -128,7 +130,7 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-};
+} as NextConfig;
 
 export default withSentryConfig(nextConfig, {
   // Sentry webpack plugin options
