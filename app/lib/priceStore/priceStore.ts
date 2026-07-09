@@ -108,6 +108,10 @@ interface SlabEntry {
    *  invert atomically inside `resolveMarketPriceE6`, and live WS ticks
    *  read `entry.invert` fresh on every message. */
   lastDbRawE6: bigint | null;
+  /** Wall-clock ms of the last applied LIVE WS tick — lets `applyOnChainPoll`
+   *  distinguish "feed is streaming, don't touch" from "feed went quiet /
+   *  never covered this market, poll data is the freshest we have". */
+  lastLiveTickAt: number;
 }
 
 const entries = new Map<string, SlabEntry>();
@@ -126,6 +130,7 @@ function getOrCreateEntry(slab: string): SlabEntry {
       invert: undefined,
       source: null,
       lastDbRawE6: null,
+      lastLiveTickAt: 0,
     };
     entries.set(slab, entry);
   }
@@ -162,6 +167,7 @@ function flushEntry(entry: SlabEntry): void {
   entry.pendingTick = null;
   if (tick) {
     entry.source = "live";
+    entry.lastLiveTickAt = Date.now();
     const prevHigh = entry.snapshot.high24h;
     const prevLow = entry.snapshot.low24h;
     applyPatch(entry, {
@@ -343,6 +349,34 @@ export function seedFromDbIfEmpty(slab: string, dbPrice: number, invert: number 
   const usd = e6 > 0n ? Number(e6) / 1_000_000 : dbPrice;
   entry.source = "seed-db";
   applyPatch(entry, { price: usd, priceUsd: usd, priceE6: e6, loading: false });
+}
+
+/** How long the live WS feed may go silent on a slab before a recurring
+ *  on-chain poll is allowed to update its price. Live ticks arrive
+ *  sub-second when a feed exists, so 10s of silence means the feed is down,
+ *  reconnecting, or never covered this market. */
+const LIVE_TICK_STALE_MS = 10_000;
+
+/**
+ * Recurring on-chain poll update (PositionsBar's ≤4s freshness floor for
+ * markets the WS feed isn't covering). Unlike `seedFromOnChain` (one-shot,
+ * only-if-empty), this MAY overwrite an existing price — but never a live
+ * one: it applies only when the slab has no live WS tick in the last
+ * `LIVE_TICK_STALE_MS`, so a streaming feed always outranks the poll and
+ * the flicker-to-stale-price bug `seedFromDbIfEmpty`'s doc describes can't
+ * come back through this path.
+ *
+ * Expects an already-sanitized post-invert e6 price (callers read
+ * `wrapperConfigV17.markEwmaE6` via `sanitizePriceE6`, exactly the value
+ * usePortfolio publishes as `oraclePriceE6`).
+ */
+export function applyOnChainPoll(slab: string, onChainE6: bigint): void {
+  if (onChainE6 <= 0n) return;
+  const entry = getOrCreateEntry(slab);
+  if (entry.source === "live" && Date.now() - entry.lastLiveTickAt < LIVE_TICK_STALE_MS) return;
+  const usd = Number(onChainE6) / 1_000_000;
+  if (entry.source === null) entry.source = "seed-onchain";
+  applyPatch(entry, { price: usd, priceUsd: usd, priceE6: onChainE6, loading: false });
 }
 
 /** On-chain oracle fallback — only-if-empty, same semantics as the pre-refactor hook. */
