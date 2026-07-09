@@ -931,23 +931,65 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         <button
           onClick={() => {
             if (submitDisabled) return;
-            const signedSize = direction === "short" ? -positionSize : positionSize;
-            // Submit-time: re-fetch rather than trust the render-scoped
-            // `livePriceE6` above — this is the one value in this component
-            // where "read via getLivePriceSnapshot at submit" needs to mean
-            // literally at this instant, not merely non-reactive.
+            // Recalculate click-time values to prevent state batching/desync issues!
             const freshPriceE6 = getLivePriceSnapshot(slabAddress).priceE6;
+            const freshPriceUsd = priceUsd ?? 0;
+            const freshDecimals = decimals;
+            const freshLeverage = leverage;
+
+            let freshMarginNative = 0n;
+            let freshPositionSize = 0n;
+
+            if (sizeInput && freshPriceUsd > 0) {
+              const n = parseFloat(sizeInput);
+              if (!isNaN(n)) {
+                const notionalUsd = sizeUnit === "token" ? n * freshPriceUsd : n;
+                const marginAmt = notionalUsd / freshLeverage;
+                freshMarginNative = parsePercToNative(marginAmt.toFixed(freshDecimals), freshDecimals);
+                const notionalNative = freshMarginNative * BigInt(freshLeverage);
+                const rawPositionSize = freshPriceE6 && freshPriceE6 > 0n ? (notionalNative * 1_000_000n) / freshPriceE6 : 0n;
+                freshPositionSize = rawPositionSize < 0n ? 0n : rawPositionSize;
+              }
+            }
+
+            const signedSize = direction === "short" ? -freshPositionSize : freshPositionSize;
             let worstFillPriceE6 = 0n;
             try {
               worstFillPriceE6 = freshPriceE6 && freshPriceE6 > 0n ? computeLimitPriceE6({ markE6: freshPriceE6, size: signedSize }) : 0n;
             } catch {
               worstFillPriceE6 = 0n;
             }
+
+            // Calculate fresh fee
+            const freshOracleE6 = freshPriceUsd ? toE6(freshPriceUsd) : 0n;
+            const freshHasOrder = freshMarginNative > 0n && freshPositionSize > 0n && !(freshMarginNative > effectiveBalance);
+            const freshFee = freshHasOrder ? computeTradingFee((freshPositionSize * freshOracleE6) / 1_000_000n, tradingFeeBps) : 0n;
+
+            // Calculate fresh afterLiqPrice
+            const freshNewSignedSize = direction === "short" ? -freshPositionSize : freshPositionSize;
+            const freshCombinedSignedSize = existingPositionSize + freshNewSignedSize;
+            const freshExistingAbsSize = existingPositionSize < 0n ? -existingPositionSize : existingPositionSize;
+            const freshSameDirection = existingPositionSize === 0n || (existingPositionSize > 0n) === (freshNewSignedSize > 0n);
+            const freshEstEntry = freshHasOrder ? computeEstimatedEntryPrice(freshOracleE6, tradingFeeBps, direction) : 0n;
+            const freshCombinedEntryPriceE6 = freshSameDirection
+              ? (freshExistingAbsSize + freshPositionSize > 0n
+                  ? (existingEntryPriceE6 * freshExistingAbsSize + freshEstEntry * freshPositionSize) / (freshExistingAbsSize + freshPositionSize)
+                  : 0n)
+              : (freshPositionSize < freshExistingAbsSize ? existingEntryPriceE6 : freshEstEntry);
+
+            const freshAfterLiqPrice = freshHasOrder
+              ? (existingPositionSize === 0n
+                  ? computePreTradeLiqPrice(freshOracleE6, freshMarginNative, freshPositionSize, maintenanceMarginBps, tradingFeeBps, direction)
+                  : (freshCombinedSignedSize !== 0n && freshCombinedEntryPriceE6 > 0n
+                      ? computeLiqPrice(freshCombinedEntryPriceE6, capital, freshCombinedSignedSize, maintenanceMarginBps)
+                      : 0n))
+              : 0n;
+
             setConfirmSnapshot({
-              positionSize,
-              marginNative,
-              estimatedLiqPrice: afterLiqPrice,
-              tradingFee: fee,
+              positionSize: freshPositionSize,
+              marginNative: freshMarginNative,
+              estimatedLiqPrice: freshAfterLiqPrice,
+              tradingFee: freshFee,
               worstFillPriceE6,
             });
             setShowConfirmModal(true);

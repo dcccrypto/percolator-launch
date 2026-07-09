@@ -92,64 +92,9 @@ async function computeAprs(
       .limit(slabAddresses.length * 10),
   ]);
 
-  // Handle network column fallback for all three queries in parallel
-  const networkFallbackPromises: PromiseLike<{ data: InsuranceSnapshotRow[] | null }>[] = [];
-  
-  if (result7d.error && result7d.error.message?.includes("network")) {
-    networkFallbackPromises.push(
-      db
-        .from("insurance_snapshots")
-        .select("slab, redemption_rate_e6, created_at")
-        .in("slab", slabAddresses)
-        .gte("created_at", since7d)
-        .order("created_at", { ascending: true })
-    );
-  } else {
-    networkFallbackPromises.push(Promise.resolve({ data: result7d.data }));
-  }
-
-  if (result30d.error && result30d.error.message?.includes("network")) {
-    networkFallbackPromises.push(
-      db
-        .from("insurance_snapshots")
-        .select("slab, redemption_rate_e6, created_at")
-        .in("slab", slabAddresses)
-        .gte("created_at", since30d)
-        .order("created_at", { ascending: true })
-    );
-  } else {
-    networkFallbackPromises.push(Promise.resolve({ data: result30d.data }));
-  }
-
-  if (resultLatest.error && resultLatest.error.message?.includes("network")) {
-    console.warn(
-      "[/api/stake/pools] PERC-8256: network column missing on insurance_snapshots — falling back to unfiltered query. " +
-      "Apply 20260329180000_add_network_column.sql to fix."
-    );
-    networkFallbackPromises.push(
-      db
-        .from("insurance_snapshots")
-        .select("slab, redemption_rate_e6, created_at")
-        .in("slab", slabAddresses)
-        .order("created_at", { ascending: false })
-        .limit(slabAddresses.length * 10)
-    );
-  } else {
-    networkFallbackPromises.push(Promise.resolve({ data: resultLatest.data }));
-  }
-
-  // Resolve all fallback queries in parallel
-  const [fallback7d, fallback30d, fallbackLatest] = await Promise.all(
-    networkFallbackPromises
-  );
-
-  const earliest7dRaw = result7d.data ?? fallback7d.data;
-  const earliest30dRaw = result30d.data ?? fallback30d.data;
-  const latestRaw = resultLatest.data ?? fallbackLatest.data;
-
-  const earliest7d: InsuranceSnapshotRow[] = earliest7dRaw ?? [];
-  const earliest30d: InsuranceSnapshotRow[] = earliest30dRaw ?? [];
-  const latest: InsuranceSnapshotRow[] = latestRaw ?? [];
+  const earliest7d: InsuranceSnapshotRow[] = result7d.data ?? [];
+  const earliest30d: InsuranceSnapshotRow[] = result30d.data ?? [];
+  const latest: InsuranceSnapshotRow[] = resultLatest.data ?? [];
 
   // Build lookup maps: slab → first record in window
   const earliest7dBySlab = new Map<string, { rate: number; ts: number }>();
@@ -204,12 +149,12 @@ async function computeAprs(
       continue;
     }
 
-    const growth = (cur.rate - old.rate) / old.rate;
-    const annualized = growth * (365 * MS_PER_DAY) / elapsed;
+    const periods = (365 * MS_PER_DAY) / elapsed;
+    const compounded = Math.pow(cur.rate / old.rate, periods) - 1;
 
-    // Clamp to 0: negative APR (insurance drawdown) would confuse stakers.
-    result[slab] = isFinite(annualized)
-      ? Math.max(0, Math.round(annualized * 10_000) / 100)  // → percentage, 2dp, floor 0
+    // Clamp to 0: negative APY (insurance drawdown) would confuse stakers.
+    result[slab] = isFinite(compounded)
+      ? Math.max(0, Math.round(compounded * 10_000) / 100)  // → percentage, 2dp, floor 0
       : 0;
   }
 
@@ -470,14 +415,7 @@ export async function GET() {
           computeAprs(slabAddresses, supabase),
         ]);
 
-        let marketsData = marketsResult.data;
-        if (marketsResult.error && marketsResult.error.message?.includes("network")) {
-          const fallback = await supabase
-            .from("markets_with_stats")
-            .select("slab_address,symbol,name,logo_url,insurance_balance,vault_balance")
-            .in("slab_address", slabAddresses);
-          marketsData = fallback.data;
-        }
+        const marketsData = marketsResult.data;
         markets = marketsData as _MarketRow[] | null;
         aprBySlab = aprResult;
       } catch (sbErr) {

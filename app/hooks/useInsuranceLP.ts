@@ -34,6 +34,17 @@ import { assertKnownProgram } from '@/lib/programAllowlist';
 import { useParams } from 'next/navigation';
 import { sanitizeOnChainValue } from '@/lib/health';
 
+const MAX_U128 = 340282366920938463463374607431768211455n;
+
+function safeMulDiv(a: bigint, b: bigint, denominator: bigint): bigint {
+  if (denominator === 0n) return 0n;
+  const product = a * b;
+  if (product > MAX_U128) {
+    throw new Error("Math overflow: intermediate product exceeds u128 limit");
+  }
+  return product / denominator;
+}
+
 /**
  * Which LP-vault redemption step a `withdraw()` call actually ran:
  *  - 'requested' — RequestRedeemLpShares (tag 76) fired. This only starts the
@@ -243,15 +254,15 @@ export function useInsuranceLP() {
 
       // Calculate derived values
       const redemptionRateE6 = lpSupply > 0n
-        ? (insuranceBalance * 1_000_000n) / lpSupply
+        ? safeMulDiv(insuranceBalance, 1_000_000n, lpSupply)
         : 1_000_000n; // 1:1 if no supply
 
       const userSharePct = lpSupply > 0n
-        ? Number((userLpBalance * 10000n) / lpSupply) / 100
+        ? Number(safeMulDiv(userLpBalance, 10000n, lpSupply)) / 100
         : 0;
 
       const userRedeemableValue = lpSupply > 0n
-        ? (userLpBalance * insuranceBalance) / lpSupply
+        ? safeMulDiv(userLpBalance, insuranceBalance, lpSupply)
         : 0n;
 
       // User's collateral ATA balance (available to deposit into the LP vault).
@@ -309,10 +320,10 @@ export function useInsuranceLP() {
             // denominator — it's read from the same mint as userLpBalance, so the two
             // stay consistent with each other.
             vaultSharePriceE6 = lpSupply > 0n
-              ? (vaultTotalAtoms * 1_000_000n) / lpSupply
+              ? safeMulDiv(vaultTotalAtoms, 1_000_000n, lpSupply)
               : 1_000_000n;
             userVaultValueAtoms = lpSupply > 0n
-              ? (userLpBalance * vaultTotalAtoms) / lpSupply
+              ? safeMulDiv(userLpBalance, vaultTotalAtoms, lpSupply)
               : 0n;
 
             // Pending redemption ticket (RequestRedeemLpShares → cooldown → ExecuteRedemption).
