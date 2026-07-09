@@ -14,7 +14,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { FC, ReactNode } from "react";
 import { PublicKey } from "@solana/web3.js";
 
-const ALLOWED_PROGRAM = "FxfD37s1AZTeWfFQps9Zpebi2dNQ9QSSDtfMKdbsfKrD"; // devnet default + large tier
+const ALLOWED_PROGRAM = "69VUZ7a2BeXBTpRRManLamF5UWTaNR9B1hy5Se3cdXy9"; // v17 devnet default
 const ATTACKER_PROGRAM = "11111111111111111111111111111112";
 const SLAB_ADDRESS = "So11111111111111111111111111111111111111112";
 

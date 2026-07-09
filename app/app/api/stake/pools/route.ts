@@ -204,12 +204,12 @@ async function computeAprs(
       continue;
     }
 
-    const growth = (cur.rate - old.rate) / old.rate;
-    const annualized = growth * (365 * MS_PER_DAY) / elapsed;
+    const periods = (365 * MS_PER_DAY) / elapsed;
+    const compounded = Math.pow(cur.rate / old.rate, periods) - 1;
 
-    // Clamp to 0: negative APR (insurance drawdown) would confuse stakers.
-    result[slab] = isFinite(annualized)
-      ? Math.max(0, Math.round(annualized * 10_000) / 100)  // → percentage, 2dp, floor 0
+    // Clamp to 0: negative APY (insurance drawdown) would confuse stakers.
+    result[slab] = isFinite(compounded)
+      ? Math.max(0, Math.round(compounded * 10_000) / 100)  // → percentage, 2dp, floor 0
       : 0;
   }
 
