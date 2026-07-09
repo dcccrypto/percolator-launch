@@ -22,7 +22,7 @@
  * SDK's, not reimplemented here.
  *
  * Market list below mirrors `~/percolator-oracle-keeper/registry.json`
- * (the "new consistent markets 2026-07-01" registration) — devnet slab to
+ * (the "new consistent markets 2026-07-09 (20x SOL, 10x rest, no Earn vault)" registration) — devnet slab to
  * mainnet DEX pool, for the same 5 markets the trade terminal ships with.
  *
  * Usage:
@@ -56,11 +56,11 @@ const POLL_INTERVAL_MS = Number(process.env.PRICE_WS_POLL_MS ?? 500);
 const HERMES_BASE = process.env.HERMES_BASE ?? "https://hermes.pyth.network";
 // Pyth mainnet crypto price-feed IDs, keyed by the CURRENT devnet slab.
 const PYTH_FEED: Record<string, string> = {
-  "9NqrXtHxgkYKWERxuC3rQ5q3LABc8iDgJBoZPqCbf2Cy": "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", // SOL
-  "EC5jrkpRkPG47ZCXH6GDUCLYK9Yfszv9Bv1LVsvgcZH7": "72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419", // BONK
-  "CBcVebWVTxqbh75PW12nN9uvZBHDrkPf1UL92ja3hzK2": "0a0408d619e9380abad35060f9192039ed5042fa6f82301d0e48bb52be830996", // JUP
-  "AXU3BPEB3GjEfCJirYejtiqSkAqDvrTtaDqcvjvhPoqb": "879551021853eec7a7dc827578e8e69da7e4fa8148339aa0d3d5296405be4b1a", // TRUMP
-  "6fXCu33Wrhwtsd2srFGJt8xMV2GB16DYM5Bn9s12ShZH": "bed3097008b9b5e3c93bec20be79cb43986b85a996475589351a21e67bae9b61", // PENGU
+  "DxrZXhTC11gCVtv4b2nkbszScgZPqm9DFqit5X7FvsF7": "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d", // SOL
+  "4txSGha4zABqt2NUbBtbkzv3vA4rfi9J6Yr95adA4fc5": "72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419", // BONK
+  "J9unPVyDykcoQyxGxF1MfSE6mGyaaCfZhGEAk5eQokXG": "0a0408d619e9380abad35060f9192039ed5042fa6f82301d0e48bb52be830996", // JUP
+  "8WNAuxLDvo3S5Yf9Z5sm2me69N4d1RLvxoS1tCnPpo83": "879551021853eec7a7dc827578e8e69da7e4fa8148339aa0d3d5296405be4b1a", // TRUMP
+  "DeWGMtVo8VHjUJ5qsPXSZsQS9rFJhnB3gE4tPGWrEcCB": "bed3097008b9b5e3c93bec20be79cb43986b85a996475589351a21e67bae9b61", // PENGU
 };
 const idToSlab = new Map(Object.entries(PYTH_FEED).map(([slab, id]) => [id.toLowerCase(), slab]));
 
@@ -71,13 +71,13 @@ interface MarketEntry {
   label: string;
 }
 
-/** Mirrors ~/percolator-oracle-keeper/registry.json as of 2026-07-01. */
+/** Mirrors ~/percolator-oracle-keeper/registry.json as of 2026-07-09 (20x SOL, 10x rest, no Earn vault). */
 const MARKETS: MarketEntry[] = [
-  { slab: "9NqrXtHxgkYKWERxuC3rQ5q3LABc8iDgJBoZPqCbf2Cy", pool: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj", dexType: "raydium-clmm", label: "SOL/USDC" },
-  { slab: "EC5jrkpRkPG47ZCXH6GDUCLYK9Yfszv9Bv1LVsvgcZH7", pool: "3UwfrdLTpAjxTRni1boc5HUWe6hzc4HgE5yLdvEp2Noc", dexType: "raydium-clmm", label: "BONK/USDC" },
-  { slab: "CBcVebWVTxqbh75PW12nN9uvZBHDrkPf1UL92ja3hzK2", pool: "HfgjZDmexhFVD28Vkb1NbQwWeXP3uDcVTLPjSGHmRHhL", dexType: "meteora-dlmm", label: "JUP/USDC" },
-  { slab: "AXU3BPEB3GjEfCJirYejtiqSkAqDvrTtaDqcvjvhPoqb", pool: "9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2", dexType: "meteora-dlmm", label: "TRUMP/USDC" },
-  { slab: "6fXCu33Wrhwtsd2srFGJt8xMV2GB16DYM5Bn9s12ShZH", pool: "DdMA1cHcHEqYfttc1z1sJEY978CcU1pyjNuTWTNmdvzU", dexType: "meteora-dlmm", label: "PENGU/USDC" },
+  { slab: "DxrZXhTC11gCVtv4b2nkbszScgZPqm9DFqit5X7FvsF7", pool: "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj", dexType: "raydium-clmm", label: "SOL/USDC" },
+  { slab: "4txSGha4zABqt2NUbBtbkzv3vA4rfi9J6Yr95adA4fc5", pool: "3UwfrdLTpAjxTRni1boc5HUWe6hzc4HgE5yLdvEp2Noc", dexType: "raydium-clmm", label: "BONK/USDC" },
+  { slab: "J9unPVyDykcoQyxGxF1MfSE6mGyaaCfZhGEAk5eQokXG", pool: "HfgjZDmexhFVD28Vkb1NbQwWeXP3uDcVTLPjSGHmRHhL", dexType: "meteora-dlmm", label: "JUP/USDC" },
+  { slab: "8WNAuxLDvo3S5Yf9Z5sm2me69N4d1RLvxoS1tCnPpo83", pool: "9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2", dexType: "meteora-dlmm", label: "TRUMP/USDC" },
+  { slab: "DeWGMtVo8VHjUJ5qsPXSZsQS9rFJhnB3gE4tPGWrEcCB", pool: "DdMA1cHcHEqYfttc1z1sJEY978CcU1pyjNuTWTNmdvzU", dexType: "meteora-dlmm", label: "PENGU/USDC" },
 ];
 
 const lastPriceE6 = new Map<string, bigint>();
