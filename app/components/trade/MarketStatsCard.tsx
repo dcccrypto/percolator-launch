@@ -95,8 +95,21 @@ export const MarketStatsCard: FC = () => {
       : formatTokenAmount(atoms, decimals);
   const oiDisplay = fmtOI(totalOI);
   const oiFullDisplay = fmtOIFull(totalOI);
-  const vaultDisplay = vaultAtoms != null ? fmtOI(vaultAtoms) : "—";
-  const vaultFullDisplay = vaultAtoms != null ? fmtOIFull(vaultAtoms) : "—";
+  // GH#2334 follow-up: "Vault"/"Market LP" — engine.vault is v12-only (always
+  // null on v17, which every playground market is now). On v17, fall back to
+  // /api/markets/[slab]'s vault_balance — the real on-chain LP-portfolio
+  // capital (see lib/lp-portfolio.ts), not the Supabase-only value that used
+  // to be null for every v17 row. Mirrors the same vault_balance ?? c_tot
+  // precedent used on the /markets list page.
+  const marketLpFromApi = (() => {
+    const raw = marketInfo?.vault_balance ?? marketInfo?.c_tot;
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? BigInt(Math.round(n)) : null;
+  })();
+  const marketLpAtoms = vaultAtoms ?? marketLpFromApi;
+  const vaultDisplay = marketLpAtoms != null ? fmtOI(marketLpAtoms) : "—";
+  const vaultFullDisplay = marketLpAtoms != null ? fmtOIFull(marketLpAtoms) : "—";
   const oiLongDisplay = oiLongAtoms != null ? fmtOI(oiLongAtoms) : "—";
   const oiLongFullDisplay = oiLongAtoms != null ? fmtOIFull(oiLongAtoms) : "—";
   const oiShortDisplay = oiShortAtoms != null ? fmtOI(oiShortAtoms) : "—";
@@ -167,7 +180,7 @@ export const MarketStatsCard: FC = () => {
     { label: "Open Interest", value: oiDisplay, tooltip: oiFullDisplay },
     { label: "OI Long", value: oiLongDisplay, tooltip: oiLongFullDisplay, valueClass: oiLongAtoms != null ? "text-[var(--long)]" : undefined },
     { label: "OI Short", value: oiShortDisplay, tooltip: oiShortFullDisplay, valueClass: oiShortAtoms != null ? "text-[var(--short)]" : undefined },
-    { label: "Vault", value: vaultDisplay, tooltip: vaultFullDisplay },
+    { label: "Market LP", value: vaultDisplay, tooltip: vaultFullDisplay },
     {
       label: "Funding/8h",
       value: fundingDisplay,

@@ -19,6 +19,8 @@ export interface MarketVaultInfo {
   slabAddress: string;
   symbol: string;
   name: string;
+  /** Mainnet contract address of the underlying token — resolves the card's real DEX logo. Null when unknown. */
+  mainnetCa: string | null;
   /** Vault collateral balance (lamports) */
   vaultBalance: number;
   /** Total open interest (long + short, in USD) */
@@ -98,6 +100,7 @@ function generateMockStats(): EarnStats {
       slabAddress: 'mock-sol-perp',
       symbol: 'SOL',
       name: 'Solana',
+      mainnetCa: null,
       vaultBalance: 125_000_000_000, // 125 SOL
       totalOI: 45_200,
       maxOI: 250_000,
@@ -112,6 +115,7 @@ function generateMockStats(): EarnStats {
       slabAddress: 'mock-bonk-perp',
       symbol: 'BONK',
       name: 'Bonk',
+      mainnetCa: null,
       vaultBalance: 85_000_000_000,
       totalOI: 22_100,
       maxOI: 170_000,
@@ -126,6 +130,7 @@ function generateMockStats(): EarnStats {
       slabAddress: 'mock-wif-perp',
       symbol: 'WIF',
       name: 'dogwifhat',
+      mainnetCa: null,
       vaultBalance: 42_000_000_000,
       totalOI: 15_800,
       maxOI: 84_000,
@@ -140,6 +145,7 @@ function generateMockStats(): EarnStats {
       slabAddress: 'mock-jup-perp',
       symbol: 'JUP',
       name: 'Jupiter',
+      mainnetCa: null,
       vaultBalance: 38_000_000_000,
       totalOI: 9_400,
       maxOI: 76_000,
@@ -199,6 +205,7 @@ interface RegisteredMarketMeta {
   slabAddress: string;
   symbol: string;
   name: string;
+  mainnetCa: string | null;
 }
 
 /**
@@ -224,7 +231,8 @@ async function fetchRegisteredMarketsMeta(): Promise<RegisteredMarketMeta[]> {
       const label = typeof m.label === 'string' && m.label ? m.label : null;
       const symbol = typeof m.symbol === 'string' && m.symbol ? m.symbol : (label ?? `${slabAddress.slice(0, 6)}-PERP`);
       const name = label ?? symbol;
-      acc.push({ slabAddress, symbol, name });
+      const mainnetCa = typeof m.mainnetCA === 'string' && m.mainnetCA ? m.mainnetCA : null;
+      acc.push({ slabAddress, symbol, name, mainnetCa });
       return acc;
     }, []);
   } catch {
@@ -347,6 +355,7 @@ function buildMarketVaultInfo(
   slab: string,
   symbol: string,
   name: string,
+  mainnetCa: string | null,
   curatedVaults: Record<string, CuratedVaultOnChain>,
   supabaseBySlab: Map<string, Record<string, unknown>>,
   onChainMaxLeverage: Record<string, number> = {},
@@ -390,6 +399,7 @@ function buildMarketVaultInfo(
     slabAddress: slab,
     symbol,
     name,
+    mainnetCa,
     vaultBalance,
     totalOI,
     maxOI,
@@ -432,7 +442,7 @@ function buildCuratedMarkets(
   const curated = Object.entries(PLAYGROUND_SLAB_META)
     .filter(([slab]) => !isBlockedSlab(slab))
     .map(([slab, meta]) =>
-      buildMarketVaultInfo(slab, meta.symbol, meta.name, curatedVaults, supabaseBySlab, onChainMaxLeverage),
+      buildMarketVaultInfo(slab, meta.symbol, meta.name, meta.mainnet_ca, curatedVaults, supabaseBySlab, onChainMaxLeverage),
     );
 
   const curatedSlabs = new Set(Object.keys(PLAYGROUND_SLAB_META));
@@ -449,7 +459,7 @@ function buildCuratedMarkets(
     // never a fabricated $0 phantom for a market that hasn't created one yet.
     .filter((m) => curatedVaults[m.slabAddress]?.found === true)
     .map((m) =>
-      buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, curatedVaults, supabaseBySlab, onChainMaxLeverage),
+      buildMarketVaultInfo(m.slabAddress, m.symbol, m.name, m.mainnetCa, curatedVaults, supabaseBySlab, onChainMaxLeverage),
     );
 
   return [...curated, ...registered];

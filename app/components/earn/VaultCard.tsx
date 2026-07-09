@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { OiCapMeter } from './OiCapMeter';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
 import { formatCompact } from '@/lib/formatters';
+import { MarketLogo } from '@/components/market/MarketLogo';
 
 interface VaultCardProps {
   vault: MarketVaultInfo;
@@ -29,10 +30,7 @@ export function VaultCard({ vault }: VaultCardProps) {
           {/* Token header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              {/* Token icon placeholder */}
-              <div className="w-8 h-8 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center text-xs font-bold text-[var(--accent)]">
-                {vault.symbol.slice(0, 2)}
-              </div>
+              <MarketLogo mainnetCa={vault.mainnetCa} symbol={vault.symbol} pixelOverride={32} />
               <div>
                 <h3 className="text-sm font-semibold text-[var(--text)]">
                   {vault.symbol}-PERP

@@ -1054,6 +1054,7 @@ function MarketsPageInner() {
                           <MarketLogo
                             logoUrl={m.supabase?.logo_url}
                             mintAddress={logoMintAddress}
+                            mainnetCa={m.supabase?.mainnet_ca ?? null}
                             symbol={displaySymbol ?? undefined}
                             size="sm"
                           />

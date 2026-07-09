@@ -1,6 +1,7 @@
 "use client";
 
 import { FC } from "react";
+import { MarketLogo } from "@/components/market/MarketLogo";
 
 interface MarketPreviewProps {
   symbol: string;
@@ -52,9 +53,7 @@ export const MarketPreview: FC<MarketPreviewProps> = ({
       {/* Header — mimics trade page market header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--accent)]/10">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center border border-[var(--accent)]/30 bg-[var(--accent)]/[0.08] text-[12px] font-bold text-[var(--accent)]">
-            {symbol.slice(0, 2).toUpperCase()}
-          </div>
+          <MarketLogo mainnetCa={tokenMint} symbol={symbol} pixelOverride={36} />
           <div>
             <h3 className="text-[14px] font-bold text-white" style={{ fontFamily: "var(--font-heading)" }}>
               {symbol}/USD

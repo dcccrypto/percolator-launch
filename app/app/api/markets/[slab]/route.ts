@@ -11,9 +11,43 @@ import {
   isV17Account,
   V17_HEADER_LEN,
 } from "@percolatorct/sdk";
-import { getRpcEndpoint } from "@/lib/config";
+import { getConfig, getRpcEndpoint } from "@/lib/config";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
 import { readRegisteredMarkets } from "@/lib/playground-registered-markets";
+import { getMarketLpCapital } from "@/lib/lp-portfolio";
+
+/**
+ * GH#2334 follow-up: `vault_balance`/`c_tot` are NULL for every v17 market in
+ * the Supabase view (the v12 stats collector never ran against v17), so
+ * "Market LP" rendered as "—" everywhere. When both are null, read the real
+ * LP-portfolio `capital` on-chain (known address fast path for curated seeds,
+ * getProgramAccounts scan otherwise — see lib/lp-portfolio.ts) and use it as
+ * the displayed vault_balance. Never throws — degrades to the original null
+ * ("—") on any RPC failure.
+ */
+async function withOnChainMarketLp(
+  market: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const hasVault = market.vault_balance != null && Number.isFinite(Number(market.vault_balance));
+  const hasCtot = market.c_tot != null && Number.isFinite(Number(market.c_tot));
+  if (hasVault || hasCtot) return market;
+
+  const slab = market.slab_address as string | undefined;
+  if (!slab) return market;
+
+  try {
+    const programId = new PublicKey(getConfig().programId as string);
+    const rpcUrl = getRpcEndpoint();
+    const connection = new Connection(rpcUrl, "confirmed");
+    const capital = await getMarketLpCapital(connection, programId, slab);
+    if (capital != null) {
+      return { ...market, vault_balance: Number(capital) };
+    }
+  } catch {
+    // Degrade to the original null — the UI already renders that as "—".
+  }
+  return market;
+}
 
 /** Success responses only — matches GET /api/markets (errors omit this to avoid caching 404/500). */
 const MARKETS_CACHE_HEADERS = {
@@ -105,8 +139,22 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
       vault_balance: null,
     };
 
+    // Real Market-LP on-chain (see withOnChainMarketLp doc comment above) —
+    // this path already knows the wrapper program id from the fetched slab
+    // account's owner, so reuse the same connection instead of re-deriving
+    // getConfig().programId.
+    let marketWithLp: Record<string, unknown> = market;
+    try {
+      const capital = await getMarketLpCapital(connection, info.owner, slab);
+      if (capital != null) {
+        marketWithLp = { ...market, vault_balance: Number(capital) };
+      }
+    } catch {
+      // Degrade to the original null — the UI already renders that as "—".
+    }
+
     return NextResponse.json(
-      { market },
+      { market: marketWithLp },
       { headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "on-chain-direct" } },
     );
   } catch {
@@ -314,7 +362,12 @@ export async function GET(
       index_price: sanitizePrice(data.index_price),
     };
 
-    return NextResponse.json({ market: sanitized }, { headers: MARKETS_CACHE_HEADERS });
+    // GH#2334 follow-up: the Supabase view has no v17 vault_balance/c_tot data
+    // (see withOnChainMarketLp doc comment) — read the real LP-portfolio
+    // capital on-chain for the trade-page detail view when both are null.
+    const withLp = await withOnChainMarketLp(sanitized);
+
+    return NextResponse.json({ market: withLp }, { headers: MARKETS_CACHE_HEADERS });
   } catch (error) {
     Sentry.captureException(error, {
       tags: { endpoint: "/api/markets/[slab]", method: "GET", slab },

@@ -1,11 +1,20 @@
 "use client";
 
-import { FC, useState } from "react";
+import { FC, useEffect, useState } from "react";
 import Image from "next/image";
+import { useTokenLogo } from "@/hooks/useTokenLogo";
 
 interface MarketLogoProps {
   logoUrl?: string | null;
   mintAddress?: string | null;
+  /**
+   * Mainnet contract address for this market's underlying token — used to
+   * resolve a real DEX logo (GeckoTerminal → DexScreener, see
+   * hooks/useTokenLogo.ts) when no explicit logoUrl is set. Distinct from
+   * mintAddress: on the playground, mintAddress is often the *devnet*
+   * collateral/mirror mint, which DEX APIs (mainnet-only) can't resolve.
+   */
+  mainnetCa?: string | null;
   symbol?: string;
   size?: "sm" | "md" | "lg";
   /** Override pixel size directly, bypassing the size preset. */
@@ -14,14 +23,27 @@ interface MarketLogoProps {
 
 const sizes = { sm: 24, md: 32, lg: 48 };
 
-export const MarketLogo: FC<MarketLogoProps> = ({ logoUrl, mintAddress, symbol, size = "md", pixelOverride }) => {
+/**
+ * Precedence: an explicitly-uploaded `logoUrl` wins; otherwise the real DEX
+ * logo resolved by `mainnetCa`; otherwise the symbol-initials placeholder.
+ * `<img onError>` guards every remote URL so a broken/expired logo never
+ * renders as a broken image — it just drops to the next tier.
+ */
+export const MarketLogo: FC<MarketLogoProps> = ({ logoUrl, mintAddress, mainnetCa, symbol, size = "md", pixelOverride }) => {
   const [error, setError] = useState(false);
-  const [cdnError, setCdnError] = useState(false);
   const px = pixelOverride ?? sizes[size];
 
-  // Try CDN logo when DB logoUrl is unavailable
-  const cdnUrl = mintAddress ? `https://img.fotofolio.xyz/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsolana-labs%2Ftoken-list%2Fmain%2Fassets%2Fmainnet%2F${mintAddress}%2Flogo.png&w=${px * 2}&h=${px * 2}` : null;
-  const effectiveUrl = logoUrl ?? (cdnError ? null : cdnUrl);
+  // Skip the DEX lookup entirely when an explicit logo is already set — no
+  // need to hit /api/token-logo for a market that already has one.
+  const dexLogoUrl = useTokenLogo(logoUrl ? null : mainnetCa);
+  const effectiveUrl = logoUrl ?? dexLogoUrl;
+
+  // Reset the broken-image flag when the resolved URL changes (e.g. the
+  // MarketSwitcher/MarketSelector instance persists across a market switch —
+  // a stale error from the previous market must not stick to the new one).
+  useEffect(() => {
+    setError(false);
+  }, [effectiveUrl]);
 
   if (!effectiveUrl || error) {
     // GH#1544: Fallback label priority:
@@ -49,10 +71,7 @@ export const MarketLogo: FC<MarketLogoProps> = ({ logoUrl, mintAddress, symbol, 
       width={px}
       height={px}
       className="border border-[var(--border)]"
-      onError={() => {
-        if (logoUrl) setError(true);
-        else setCdnError(true);
-      }}
+      onError={() => setError(true)}
       unoptimized
     />
   );

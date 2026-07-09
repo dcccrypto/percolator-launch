@@ -17,6 +17,8 @@ interface MarketInfoBarProps {
   symbol: string;
   logoUrl?: string | null;
   mintAddress?: string | null;
+  /** Mainnet contract address — used to resolve a real DEX logo when logoUrl is unset. */
+  mainnetCa?: string | null;
 }
 
 function formatCompact(n: number | null | undefined): string {
@@ -91,7 +93,7 @@ function MarkPrice({ priceUsd, priceE6 }: { priceUsd: number | null; priceE6: bi
   );
 }
 
-export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, logoUrl, mintAddress }) => {
+export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, logoUrl, mintAddress, mainnetCa }) => {
   const { priceUsd, priceE6, change24h, high24h, low24h } = useLivePrice();
   const { market } = useMarketInfo(slabAddress);
   const { fundingRate, engine, totalOI, insuranceBalance, hasData: engineHasData } = useEngineState();
@@ -176,7 +178,7 @@ export const MarketInfoBar: FC<MarketInfoBarProps> = ({ slabAddress, symbol, log
       className="sticky top-0 z-30 w-full border-b border-[var(--border)] bg-[var(--bg)]/95 backdrop-blur-sm px-4 py-3 flex items-center gap-5 overflow-x-auto whitespace-nowrap scrollbar-none"
     >
       {/* Symbol + Logo — now a dropdown market switcher (top markets + search) */}
-      <MarketSwitcher slabAddress={slabAddress} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} />
+      <MarketSwitcher slabAddress={slabAddress} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} mainnetCa={mainnetCa} />
 
       <span className="h-6 w-px bg-[var(--border)] shrink-0" />
 

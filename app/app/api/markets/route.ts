@@ -15,6 +15,7 @@ import nacl from "tweetnacl";
 import * as fs from "fs";
 import * as path from "path";
 import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeMarketFilter";
+import { getKnownMarketLpCapitals } from "@/lib/lp-portfolio";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
 import { computeMarketHealthFromStats } from "@/lib/health";
@@ -512,8 +513,35 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
         const marketsWithPrice = filtered.filter(
           (m) => isSaneMarketValue(numericOrNull((m as Record<string, unknown>).last_price as number | null))
         ).length;
+
+        // GH#2334 follow-up: discoveredToApiRow() hardcodes vault_balance: null
+        // for v17 markets (no cheap on-chain source there) — overlay the real
+        // LP-portfolio capital for curated markets with a known address, same
+        // as the Supabase-backed path below.
+        let filteredWithLp = filtered;
+        try {
+          const candidateSlabs = filtered
+            .map((m) => String((m as Record<string, unknown>).slab_address ?? ""))
+            .filter((s) => !!s);
+          if (candidateSlabs.length > 0) {
+            const knownLpCapitals = await getKnownMarketLpCapitals(
+              new Connection(getRpcEndpoint(), "confirmed"),
+              candidateSlabs,
+            );
+            if (knownLpCapitals.size > 0) {
+              filteredWithLp = filtered.map((m) => {
+                const row = m as Record<string, unknown>;
+                const capital = knownLpCapitals.get(String(row.slab_address ?? ""));
+                return capital != null ? { ...row, vault_balance: Number(capital) } : m;
+              });
+            }
+          }
+        } catch {
+          // Degrade to the original null — never let the LP overlay break discovery.
+        }
+
         return NextResponse.json(
-          { total: filtered.length, activeTotal: filtered.length, marketsWithPrice, zombieCount: 0, markets: filtered },
+          { total: filteredWithLp.length, activeTotal: filteredWithLp.length, marketsWithPrice, zombieCount: 0, markets: filteredWithLp },
           { headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "on-chain-discovery" } },
         );
       }
@@ -1184,7 +1212,49 @@ export async function GET(request: NextRequest) {
     const paged = offsetNum > 0 ? sorted.slice(offsetNum) : sorted;
     const limited = limitNum > 0 ? paged.slice(0, limitNum) : paged;
 
-    return NextResponse.json({ total: sorted.length, activeTotal, marketsWithPrice, zombieCount, markets: limited }, {
+    // GH#2334 follow-up: vault_balance/c_tot are NULL for every v17 market in
+    // the Supabase view (the v12 stats collector never ran against v17), so
+    // "Market LP" rendered as "—" everywhere. Overlay the real on-chain
+    // LP-portfolio capital for curated markets with a known address — one
+    // batched getMultipleAccountsInfo call, applied ONLY to the final page
+    // returned (not the full discovery set) and ONLY as a display value:
+    // it runs after every zombie/phantom-OI/health/sort computation above,
+    // so none of that upstream logic is affected. Markets without a known
+    // LP-portfolio address (wizard-launched) keep the existing "—" — see
+    // lib/lp-portfolio.ts's getMarketLpCapital (used by /api/markets/[slab])
+    // for the full on-chain scan used on the trade-page detail view instead.
+    let limitedWithLp = limited;
+    try {
+      const candidateSlabs = limited
+        .map((m) => {
+          const row = m as Record<string, unknown>;
+          const hasVault = row.vault_balance != null && Number.isFinite(Number(row.vault_balance));
+          const hasCtot = row.c_tot != null && Number.isFinite(Number(row.c_tot));
+          return hasVault || hasCtot ? null : String(row.slab_address ?? "");
+        })
+        .filter((s): s is string => !!s);
+
+      if (candidateSlabs.length > 0) {
+        const knownLpCapitals = await getKnownMarketLpCapitals(
+          new Connection(getRpcEndpoint(), "confirmed"),
+          candidateSlabs,
+        );
+        if (knownLpCapitals.size > 0) {
+          // Note: spread `m` directly (not a `Record<string, unknown>`-cast
+          // copy) so TS preserves its real inferred shape — spreading a bare
+          // index-signature type loses all named properties from the result.
+          limitedWithLp = limited.map((m) => {
+            const slabAddr = String((m as Record<string, unknown>).slab_address ?? "");
+            const capital = knownLpCapitals.get(slabAddr);
+            return capital != null ? { ...m, vault_balance: Number(capital) } : m;
+          });
+        }
+      }
+    } catch {
+      // Degrade to the original "—" — never let the LP overlay break the list.
+    }
+
+    return NextResponse.json({ total: sorted.length, activeTotal, marketsWithPrice, zombieCount, markets: limitedWithLp }, {
       headers: {
         "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30",
       },

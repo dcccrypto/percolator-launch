@@ -361,7 +361,7 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
       )}
 
       {/* Logo upload */}
-      <LogoUpload slabAddress={marketAddress} />
+      <LogoUpload slabAddress={marketAddress} mainnetCa={mainnetCA} />
 
       {/* Transaction signatures */}
       {txSigs.length > 0 && (

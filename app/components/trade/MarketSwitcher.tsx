@@ -11,6 +11,8 @@ interface MarketSwitcherProps {
   symbol: string;
   logoUrl?: string | null;
   mintAddress?: string | null;
+  /** Mainnet contract address — used to resolve a real DEX logo when logoUrl is unset. */
+  mainnetCa?: string | null;
 }
 
 interface SwitcherRow {
@@ -35,7 +37,7 @@ interface SwitcherRow {
  * PORTALED to document.body and placed from the trigger's
  * boundingClientRect, clamped to the viewport.
  */
-export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, logoUrl, mintAddress }) => {
+export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, logoUrl, mintAddress, mainnetCa }) => {
   const router = useRouter();
   const { statsMap } = useAllMarketStats();
   const [open, setOpen] = useState(false);
@@ -138,7 +140,7 @@ export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, l
         title="Switch market"
         className="group flex shrink-0 items-center gap-2 rounded-sm px-1 py-0.5 transition-colors hover:bg-[var(--bg-elevated)]"
       >
-        <MarketLogo logoUrl={logoUrl} mintAddress={mintAddress} symbol={symbol} size="sm" />
+        <MarketLogo logoUrl={logoUrl} mintAddress={mintAddress} mainnetCa={mainnetCa} symbol={symbol} size="sm" />
         <span className="text-sm font-bold text-[var(--text)]" style={{ fontFamily: "var(--font-mono)" }}>
           {symbol}/USD
           <span className="ml-1.5 text-[9px] font-normal uppercase tracking-[0.12em] text-[var(--text-secondary)]">PERP</span>

@@ -8,10 +8,18 @@ interface LogoUploadProps {
   slabAddress?: string;
   /** Upload by mint address (no market required — for faucet) */
   mintAddress?: string;
+  /**
+   * Mainnet contract address of the token this market prices — when set and
+   * no logo has been manually uploaded yet, the preview shows the token's
+   * real DEX logo (GeckoTerminal → DexScreener) instead of just initials, so
+   * "Upload Logo" reads as optional rather than mandatory for tokens that
+   * already have a known logo.
+   */
+  mainnetCa?: string | null;
   symbol?: string;
 }
 
-export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, symbol }) => {
+export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, mainnetCa, symbol }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -92,7 +100,7 @@ export const LogoUpload: FC<LogoUploadProps> = ({ slabAddress, mintAddress, symb
               className="h-12 w-12 border border-[var(--border)] object-cover"
             />
           ) : (
-            <MarketLogo logoUrl={logoUrl} symbol={symbol} size="lg" />
+            <MarketLogo logoUrl={logoUrl} mainnetCa={mainnetCa} symbol={symbol} size="lg" />
           )}
         </div>
 

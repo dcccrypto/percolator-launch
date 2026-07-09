@@ -539,7 +539,7 @@ function TradePageInner({ slab }: { slab: string }) {
       </div>
 
       {/* MarketBar — always mounted, already responsive/scrollable on mobile */}
-      <MarketInfoBar slabAddress={slab} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} />
+      <MarketInfoBar slabAddress={slab} symbol={symbol} logoUrl={logoUrl} mintAddress={mintAddress} mainnetCa={chartMintAddress} />
 
       {/* ════════════════ DESKTOP (≥ lg) — named grid ════════════════ */}
       {isLargeScreen && (

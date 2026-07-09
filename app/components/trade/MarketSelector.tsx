@@ -125,6 +125,7 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
         <MarketLogo
           logoUrl={logoUrl}
           mintAddress={currentMarket?.mint_address ?? null}
+          mainnetCa={currentMarket?.mainnet_ca ?? null}
           symbol={symbol}
           size="sm"
           pixelOverride={16}
@@ -199,6 +200,7 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
                   <MarketLogo
                     logoUrl={currentMarket.logo_url}
                     mintAddress={currentMarket.mint_address ?? null}
+                    mainnetCa={currentMarket.mainnet_ca ?? null}
                     symbol={currentMarket.symbol ?? undefined}
                     size="sm"
                     pixelOverride={14}
@@ -293,6 +295,7 @@ export const MarketSelector: FC<MarketSelectorProps> = ({
                       <MarketLogo
                         logoUrl={m.logo_url}
                         mintAddress={m.mint_address ?? null}
+                        mainnetCa={m.mainnet_ca ?? null}
                         symbol={m.symbol ?? undefined}
                         size="sm"
                         pixelOverride={14}
