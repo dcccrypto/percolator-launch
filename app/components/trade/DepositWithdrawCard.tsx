@@ -43,15 +43,28 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
   const symbol = tokenMeta?.symbol ?? "Token";
 
   const [mode, setMode] = useState<"deposit" | "withdraw">(initialMode);
-
-  // Follow the parent's trigger while open (footer Deposit vs Withdraw links).
-  useEffect(() => { setMode(initialMode); }, [initialMode]);
   const [amount, setAmount] = useState("");
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<bigint | null>(mockMode ? 500_000_000n : null);
   const maxRawRef = useRef<bigint | null>(null);
   const [onChainDecimals, setOnChainDecimals] = useState<number | null>(null);
   const decimals = onChainDecimals ?? tokenMeta?.decimals ?? 6;
+
+  // Keep the mode-specific MAX raw value from leaking across Deposit/Withdraw.
+  // MAX stores exact BigInt precision in maxRawRef, so switching tabs must clear
+  // both the display amount and the raw ref before the opposite action can submit.
+  useEffect(() => {
+    setMode(initialMode);
+    setAmount("");
+    maxRawRef.current = null;
+  }, [initialMode]);
+
+  const switchMode = (nextMode: "deposit" | "withdraw") => {
+    if (nextMode === mode) return;
+    maxRawRef.current = null;
+    setAmount("");
+    setMode(nextMode);
+  };
   useEffect(() => {
     if (!publicKey || !mktConfig?.collateralMint) { setWalletBalance(null); setOnChainDecimals(null); return; }
     let cancelled = false;
@@ -201,6 +214,7 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
         sig = await withdraw({ userIdx: userAccount.idx, amount: amtNative });
       }
       setLastSig(sig ?? null);
+      maxRawRef.current = null;
       setAmount("");
     } catch (err) {
       if (process.env.NODE_ENV === 'development') {
@@ -260,8 +274,8 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
       )}
 
       <div className="mb-2 flex gap-1">
-        <button onClick={() => setMode("deposit")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "deposit" ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Deposit</button>
-        <button onClick={() => setMode("withdraw")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "withdraw" ? "bg-[var(--warning)] text-[var(--bg)]" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Withdraw</button>
+        <button onClick={() => switchMode("deposit")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "deposit" ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Deposit</button>
+        <button onClick={() => switchMode("withdraw")} className={`flex-1 rounded-none py-1.5 text-[10px] font-medium uppercase tracking-[0.1em] ${mode === "withdraw" ? "bg-[var(--warning)] text-[var(--bg)]" : "border border-[var(--border)]/30 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>Withdraw</button>
       </div>
 
       <div className="mb-2">
