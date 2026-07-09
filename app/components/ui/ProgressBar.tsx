@@ -6,6 +6,10 @@ interface ProgressBarProps {
   /** Height in pixels (default 8) */
   height?: number;
   className?: string;
+  /** Optional Tailwind classes (e.g. a gradient) applied to the fill instead
+   *  of the dynamic solid `fillColor`. When set, `fillColor` is not applied
+   *  as an inline background so the class's gradient/color wins. */
+  fillClassName?: string;
 }
 
 /**
@@ -13,8 +17,10 @@ interface ProgressBarProps {
  * - accent (purple) when < 80%
  * - warning (amber) when 80–95%
  * - short (red) when > 95%
+ * Pass `fillClassName` to override with a custom fill (e.g. a gradient) —
+ * the dynamic color above is skipped whenever it's set.
  */
-export function ProgressBar({ value, height = 8, className = "" }: ProgressBarProps) {
+export function ProgressBar({ value, height = 8, className = "", fillClassName = "" }: ProgressBarProps) {
   const clamped = Math.max(0, Math.min(1, value));
   const pct = clamped * 100;
 
@@ -35,8 +41,11 @@ export function ProgressBar({ value, height = 8, className = "" }: ProgressBarPr
       aria-valuemax={100}
     >
       <div
-        className="h-full rounded-full transition-all duration-500 ease-out"
-        style={{ width: `${pct}%`, backgroundColor: fillColor }}
+        className={`h-full rounded-full transition-all duration-500 ease-out ${fillClassName}`}
+        style={{
+          width: `${pct}%`,
+          backgroundColor: fillClassName ? undefined : fillColor,
+        }}
       />
     </div>
   );

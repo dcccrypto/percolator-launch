@@ -1,29 +1,19 @@
 /**
  * useStakeDeposit Hook Tests
+ *
+ * useStakeDeposit is a thin wrapper around useStakeDepositByPool: it derives
+ * slabAddress (route params) + collateralMint (SlabProvider) and delegates
+ * everything else. The PDA derivation / ATA handling / tx-building logic
+ * itself is exercised by useStakeDepositByPool.test.ts — this file only
+ * verifies the wrapper derives the right params and passes through the
+ * delegate's return value untouched.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { PublicKey, Keypair } from '@solana/web3.js';
 
-// ── Hoisted values (available inside vi.mock factories) ────────
-const { mockPool, mockVaultAuth, mockDepositPda, mockLpMint, mockVault } = vi.hoisted(() => {
-  const { Keypair: Kp } = require('@solana/web3.js');
-  return {
-    mockPool: Kp.generate().publicKey,
-    mockVaultAuth: Kp.generate().publicKey,
-    mockDepositPda: Kp.generate().publicKey,
-    mockLpMint: Kp.generate().publicKey,
-    mockVault: Kp.generate().publicKey,
-  };
-});
-
-// ── Mocks ──────────────────────────────────────────────────────
-
-vi.mock('@/hooks/useWalletCompat', () => ({
-  useConnectionCompat: vi.fn(),
-  useWalletCompat: vi.fn(),
-}));
+const useStakeDepositByPoolMock = vi.fn();
 
 vi.mock('@/components/providers/SlabProvider', () => ({
   useSlabState: vi.fn(),
@@ -33,228 +23,68 @@ vi.mock('next/navigation', () => ({
   useParams: vi.fn(),
 }));
 
-vi.mock('@/lib/tx', () => ({
-  sendTx: vi.fn(),
+vi.mock('@/hooks/useStakeDepositByPool', () => ({
+  useStakeDepositByPool: (params: unknown) => useStakeDepositByPoolMock(params),
 }));
 
-vi.mock('@percolatorct/sdk', () => {
-  const { PublicKey: PK } = require('@solana/web3.js');
-  const devnetProgramId = new PK('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k');
-  return {
-    STAKE_PROGRAM_ID: devnetProgramId,
-    STAKE_POOL_SIZE: 352,
-    getStakeProgramId: vi.fn().mockReturnValue(devnetProgramId),
-    deriveStakePool: vi.fn().mockReturnValue([mockPool, 255]),
-    deriveStakeVaultAuth: vi.fn().mockReturnValue([mockVaultAuth, 254]),
-    deriveDepositPda: vi.fn().mockReturnValue([mockDepositPda, 253]),
-    encodeStakeDeposit: vi.fn().mockReturnValue(Buffer.concat([Buffer.from([1]), Buffer.alloc(8)])),
-    decodeStakePool: vi.fn().mockReturnValue({ lpMint: mockLpMint, vault: mockVault }),
-    depositAccounts: vi.fn().mockReturnValue([
-      { pubkey: new PK('7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'), isSigner: true, isWritable: false },
-    ]),
-  };
-});
-
-vi.mock('@solana/spl-token', () => {
-  const { Keypair: Kp } = require('@solana/web3.js');
-  const fakeAta = Kp.generate().publicKey;
-  const { PublicKey: PK } = require('@solana/web3.js');
-  return {
-    getAssociatedTokenAddress: vi.fn().mockResolvedValue(fakeAta),
-    createAssociatedTokenAccountInstruction: vi.fn().mockReturnValue({
-      programId: new PK('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
-      keys: [],
-      data: Buffer.alloc(0),
-    }),
-  };
-});
-
 import { useStakeDeposit } from '../../hooks/useStakeDeposit';
-import { useConnectionCompat, useWalletCompat } from '@/hooks/useWalletCompat';
 import { useSlabState } from '@/components/providers/SlabProvider';
 import { useParams } from 'next/navigation';
-import { sendTx } from '@/lib/tx';
-import { encodeStakeDeposit, depositAccounts } from '@percolatorct/sdk';
 
-// Build a fake pool account buffer sized like the real StakePool account.
-function buildPoolAccountData(): Buffer {
-  const buf = Buffer.alloc(352);
-  buf[0] = 1; // is_initialized
-  mockLpMint.toBuffer().copy(buf, 65);
-  mockVault.toBuffer().copy(buf, 97);
-  return buf;
-}
-
-const mockWalletPubkey = new PublicKey('7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU');
 const mockSlabAddress = Keypair.generate().publicKey.toBase58();
 const mockCollateralMint = new PublicKey('So11111111111111111111111111111111111111112');
 
 describe('useStakeDeposit', () => {
-  let mockConnection: any;
-  let mockWallet: any;
-
   beforeEach(() => {
     vi.clearAllMocks();
+    useStakeDepositByPoolMock.mockReturnValue({
+      deposit: vi.fn().mockResolvedValue('fakeSig123'),
+      loading: false,
+      error: null,
+    });
+  });
 
-    mockConnection = {
-      getAccountInfo: vi.fn().mockImplementation(async (pubkey: PublicKey) => {
-        if (pubkey.equals(mockPool)) {
-          return { data: buildPoolAccountData(), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
-        }
-        return { data: Buffer.alloc(165), owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
-      }),
-    };
-
-    mockWallet = {
-      publicKey: mockWalletPubkey,
-      connected: true,
-      connecting: false,
-      wallet: null,
-      signTransaction: vi.fn(),
-      disconnect: vi.fn(),
-    };
-
-    vi.mocked(useConnectionCompat).mockReturnValue({ connection: mockConnection });
-    vi.mocked(useWalletCompat).mockReturnValue(mockWallet);
+  it('derives slabAddress from route params and collateralMint from SlabProvider', () => {
+    vi.mocked(useParams).mockReturnValue({ slab: mockSlabAddress });
     vi.mocked(useSlabState).mockReturnValue({
-      config: { collateralMint: mockCollateralMint, vaultPubkey: mockVault },
+      config: { collateralMint: mockCollateralMint, vaultPubkey: Keypair.generate().publicKey },
       programId: new PublicKey('5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf'),
     });
-    vi.mocked(useParams).mockReturnValue({ slab: mockSlabAddress });
-    vi.mocked(sendTx).mockResolvedValue('fakeSig123');
+
+    renderHook(() => useStakeDeposit());
+
+    expect(useStakeDepositByPoolMock).toHaveBeenCalledWith({
+      slabAddress: mockSlabAddress,
+      collateralMint: mockCollateralMint.toBase58(),
+    });
   });
 
-  it('successfully deposits and returns tx signature', async () => {
-    const { result } = renderHook(() => useStakeDeposit());
-
-    let sig: string | undefined;
-    await act(async () => {
-      sig = await result.current.deposit(1_000_000n);
-    });
-
-    expect(sig).toBe('fakeSig123');
-    expect(result.current.loading).toBe(false);
-    expect(result.current.error).toBeNull();
-    expect(encodeStakeDeposit).toHaveBeenCalledWith(1_000_000n);
-    expect(depositAccounts).toHaveBeenCalled();
-    expect(sendTx).toHaveBeenCalled();
-  });
-
-  it('rejects when wallet not connected', async () => {
-    vi.mocked(useWalletCompat).mockReturnValue({
-      publicKey: null,
-      connected: false,
-      signTransaction: undefined,
-      disconnect: vi.fn(),
-    });
-
-    const { result } = renderHook(() => useStakeDeposit());
-
-    await act(async () => {
-      await expect(result.current.deposit(1_000_000n)).rejects.toThrow('Wallet not connected');
-    });
-    expect(result.current.error).toBe('Wallet not connected');
-  });
-
-  it('rejects when market not loaded', async () => {
+  it('falls back to empty strings when route params or market config are missing', () => {
+    vi.mocked(useParams).mockReturnValue({});
     vi.mocked(useSlabState).mockReturnValue({ config: null, programId: null });
 
-    const { result } = renderHook(() => useStakeDeposit());
+    renderHook(() => useStakeDeposit());
 
-    await act(async () => {
-      await expect(result.current.deposit(1_000_000n)).rejects.toThrow('Market not loaded');
+    expect(useStakeDepositByPoolMock).toHaveBeenCalledWith({
+      slabAddress: '',
+      collateralMint: '',
     });
   });
 
-  it('rejects zero amount', async () => {
-    const { result } = renderHook(() => useStakeDeposit());
-
-    await act(async () => {
-      await expect(result.current.deposit(0n)).rejects.toThrow('greater than zero');
+  it('passes through the delegate deposit/loading/error unchanged', async () => {
+    vi.mocked(useParams).mockReturnValue({ slab: mockSlabAddress });
+    vi.mocked(useSlabState).mockReturnValue({
+      config: { collateralMint: mockCollateralMint, vaultPubkey: Keypair.generate().publicKey },
+      programId: new PublicKey('5BZWY6XWPxuWFxs2nPCLLsVaKRWZVnzZh3FkJDLJBkJf'),
     });
-  });
-
-  it('rejects when stake pool not initialized', async () => {
-    mockConnection.getAccountInfo.mockImplementation(async (pubkey: PublicKey) => {
-      if (pubkey.equals(mockPool)) return null;
-      return { data: Buffer.alloc(165), owner: PublicKey.default };
-    });
+    const deposit = vi.fn().mockResolvedValue('fakeSig123');
+    useStakeDepositByPoolMock.mockReturnValue({ deposit, loading: true, error: 'boom' });
 
     const { result } = renderHook(() => useStakeDeposit());
 
-    await act(async () => {
-      await expect(result.current.deposit(1_000_000n)).rejects.toThrow('Stake pool not initialized');
-    });
-  });
-
-  it('creates LP ATA when it does not exist', async () => {
-    const { createAssociatedTokenAccountInstruction } = await import('@solana/spl-token');
-
-    let callIdx = 0;
-    mockConnection.getAccountInfo.mockImplementation(async (pubkey: PublicKey) => {
-      if (pubkey.equals(mockPool)) {
-        return { data: buildPoolAccountData(), owner: new PublicKey('6aJb1F9CDCVWCNYFwj8aQsVb696YnW6J1FznteHq4Q6k') };
-      }
-      callIdx++;
-      if (callIdx >= 3) return null; // LP ATA doesn't exist
-      return { data: Buffer.alloc(165), owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
-    });
-
-    const { result } = renderHook(() => useStakeDeposit());
-
-    await act(async () => {
-      await result.current.deposit(1_000_000n);
-    });
-
-    expect(createAssociatedTokenAccountInstruction).toHaveBeenCalled();
-  });
-
-  it('sets loading state correctly during deposit', async () => {
-    const { result } = renderHook(() => useStakeDeposit());
-    expect(result.current.loading).toBe(false);
-
-    await act(async () => {
-      await result.current.deposit(1_000_000n);
-    });
-
-    expect(result.current.loading).toBe(false);
-  });
-
-  it('prevents double-submit', async () => {
-    let resolveFirst!: (v: string) => void;
-    vi.mocked(sendTx).mockImplementationOnce(
-      () => new Promise<string>((resolve) => { resolveFirst = resolve; }),
-    );
-
-    const { result } = renderHook(() => useStakeDeposit());
-
-    let firstPromise: Promise<string>;
-    act(() => {
-      firstPromise = result.current.deposit(1_000_000n);
-    });
-
-    await act(async () => {
-      await expect(result.current.deposit(500_000n)).rejects.toThrow('already in progress');
-    });
-
-    await act(async () => {
-      resolveFirst('sig1');
-      await firstPromise!;
-    });
-  });
-
-  it('handles network mismatch (P-CRITICAL-3)', async () => {
-    let callIdx = 0;
-    mockConnection.getAccountInfo.mockImplementation(async () => {
-      callIdx++;
-      if (callIdx === 1) return null; // slab not found
-      return { data: buildPoolAccountData(), owner: PublicKey.default };
-    });
-
-    const { result } = renderHook(() => useStakeDeposit());
-
-    await act(async () => {
-      await expect(result.current.deposit(1_000_000n)).rejects.toThrow('Market not found');
-    });
+    expect(result.current.loading).toBe(true);
+    expect(result.current.error).toBe('boom');
+    await expect(result.current.deposit(1_000_000n)).resolves.toBe('fakeSig123');
+    expect(deposit).toHaveBeenCalledWith(1_000_000n);
   });
 });
