@@ -708,7 +708,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           />
           <button
             onClick={toggleSizeUnit}
-            className="w-16 shrink-0 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--border-hover)] hover:text-[var(--text)]"
+            title={`Switch size unit (currently ${sizeUnit === "token" ? symbol : "USD"})`}
+            className="w-16 shrink-0 truncate rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--border-hover)] hover:text-[var(--text)]"
           >
             {sizeUnit === "token" ? symbol : "USD"}
           </button>
