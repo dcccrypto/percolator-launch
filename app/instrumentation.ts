@@ -1,42 +1,17 @@
 /**
  * Next.js Instrumentation — runs once on server startup.
- * Used by @sentry/nextjs for proper server-side initialization.
+ *
+ * Sentry instrumentation was REMOVED here. Its edge imports — `sentry.edge.config`
+ * (register(), NEXT_RUNTIME === "edge") and the dynamic `import("@sentry/nextjs")`
+ * in onRequestError — got co-bundled into the Edge middleware's shared chunk, and
+ * Vercel's deploy-time Edge validator rejected the Node-referencing code
+ * ("The Edge Function 'middleware' is referencing unsupported modules: @/lib/blocklist").
+ * Sentry is also disabled at the build level (withSentryConfig removed from
+ * next.config.ts). Re-introduce Sentry only via a strictly nodejs-runtime-guarded
+ * path that the Edge bundle cannot reach.
+ *
  * @see https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation
  */
-export async function register() {
-  if (process.env.NEXT_RUNTIME === "nodejs") {
-    // Server-side Sentry initialization
-    await import("./sentry.server.config");
-  }
-
-  if (process.env.NEXT_RUNTIME === "edge") {
-    // Edge runtime Sentry initialization
-    await import("./sentry.edge.config");
-  }
-}
-
-/**
- * Called when an uncaught error occurs during server-side rendering.
- * Reports to Sentry for production visibility.
- */
-export function onRequestError(
-  error: Error,
-  request: { path: string; method: string; headers: Record<string, string> },
-  context: { routerKind: string; routePath: string; routeType: string; renderSource: string }
-) {
-  // Dynamic import to avoid pulling Sentry into edge bundles unnecessarily
-  import("@sentry/nextjs").then((Sentry) => {
-    Sentry.captureException(error, {
-      tags: {
-        routerKind: context.routerKind,
-        routePath: context.routePath,
-        routeType: context.routeType,
-        renderSource: context.renderSource,
-      },
-      extra: {
-        path: request.path,
-        method: request.method,
-      },
-    });
-  });
+export function register(): void {
+  // no-op — Sentry disabled (see note above)
 }

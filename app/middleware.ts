@@ -313,7 +313,7 @@ function isAllowedOnWaitlistHost(pathname: string): boolean {
   return false;
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   // ── Hostname routing ───────────────────────────────────────────────────────
   const host = (request.headers.get("host") ?? "").toLowerCase().split(":")[0];
 

@@ -64,8 +64,8 @@ async function freshMiddleware(): Promise<MiddlewareFn> {
   vi.resetModules();
   // middleware.ts was migrated to proxy.ts (Next 16 Node-runtime proxy). The
   // handler is now exported as `proxy` instead of `middleware`.
-  const mod = await import("@/proxy");
-  return mod.proxy as unknown as MiddlewareFn;
+  const mod = await import("@/middleware");
+  return mod.middleware as unknown as MiddlewareFn;
 }
 
 // ── Suite 1: Redis path — limit exhausted → all 429 ───────────────────────
