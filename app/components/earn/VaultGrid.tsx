@@ -2,8 +2,8 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { VaultCard } from './VaultCard';
+import { VaultCardSkeleton } from './VaultCardSkeleton';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
-import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 
 type SortKey = 'tvl' | 'volume' | 'utilization';
 
@@ -55,16 +55,8 @@ export function VaultGrid({ markets, loading, error }: VaultGridProps) {
     setDisplayCount(PAGE_SIZE);
   }, [searchQuery, sortBy]);
 
-  // Progressive auto-reveal (loads batches via rAF)
-  useEffect(() => {
-    if (loading || displayCount >= sorted.length) return;
-    const handle = requestAnimationFrame(() => {
-      setDisplayCount((prev) => Math.min(prev + PAGE_SIZE, sorted.length));
-    });
-    return () => cancelAnimationFrame(handle);
-  }, [displayCount, sorted.length, loading]);
-
-  // IntersectionObserver backup for scroll-triggered loading
+  // Scroll-triggered progressive loading — reveals the next page once the
+  // sentinel div at the bottom of the grid enters the viewport.
   useEffect(() => {
     const target = observerTarget.current;
     if (!target) return;
@@ -142,34 +134,7 @@ export function VaultGrid({ markets, loading, error }: VaultGridProps) {
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <ShimmerSkeleton className="w-8 h-8 rounded-full" />
-                  <div>
-                    <ShimmerSkeleton className="h-4 w-20 mb-1" />
-                    <ShimmerSkeleton className="h-3 w-16" />
-                  </div>
-                </div>
-                <div className="text-right space-y-1">
-                  <ShimmerSkeleton className="h-2.5 w-12" />
-                  <ShimmerSkeleton className="h-5 w-16" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[1, 2, 3, 4].map(j => (
-                  <div key={j} className="space-y-1">
-                    <ShimmerSkeleton className="h-2 w-10" />
-                    <ShimmerSkeleton className="h-4.5 w-16" />
-                  </div>
-                ))}
-              </div>
-              <ShimmerSkeleton className="h-2 w-full mt-2" />
-              <div className="flex justify-between items-center pt-2 border-t border-[var(--border)]/30">
-                <ShimmerSkeleton className="h-3.5 w-16" />
-                <ShimmerSkeleton className="h-3.5 w-12" />
-              </div>
-            </div>
+            <VaultCardSkeleton key={i} />
           ))}
         </div>
       ) : sorted.length === 0 ? (
@@ -194,34 +159,7 @@ export function VaultGrid({ markets, loading, error }: VaultGridProps) {
             <div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <ShimmerSkeleton className="w-8 h-8 rounded-full" />
-                        <div>
-                          <ShimmerSkeleton className="h-4 w-20 mb-1" />
-                          <ShimmerSkeleton className="h-3 w-16" />
-                        </div>
-                      </div>
-                      <div className="text-right space-y-1">
-                        <ShimmerSkeleton className="h-2.5 w-12" />
-                        <ShimmerSkeleton className="h-5 w-16" />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[1, 2, 3, 4].map(j => (
-                        <div key={j} className="space-y-1">
-                          <ShimmerSkeleton className="h-2 w-10" />
-                          <ShimmerSkeleton className="h-4.5 w-16" />
-                        </div>
-                      ))}
-                    </div>
-                    <ShimmerSkeleton className="h-2 w-full mt-2" />
-                    <div className="flex justify-between items-center pt-2 border-t border-[var(--border)]/30">
-                      <ShimmerSkeleton className="h-3.5 w-16" />
-                      <ShimmerSkeleton className="h-3.5 w-12" />
-                    </div>
-                  </div>
+                  <VaultCardSkeleton key={i} />
                 ))}
               </div>
               <div ref={observerTarget} className="h-2 w-full" />

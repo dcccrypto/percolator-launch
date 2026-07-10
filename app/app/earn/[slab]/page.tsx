@@ -106,11 +106,6 @@ export default function VaultDetailPage() {
 }
 
 function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
-
-  useEffect(() => {
-    document.title = 'Vault — Percolator';
-  }, []);
-
   // LP Vault ("Earn") state for this market — v17 CreateLpVault/DepositToLpVault/
   // RequestRedeemLpShares/ExecuteRedemption mechanism (wrapper program, tags 74-77).
   // NOT the percolator-stake pool — that's a separate on-chain account backing the
