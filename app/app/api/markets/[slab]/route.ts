@@ -155,7 +155,7 @@ async function onChainSlabFallback(slab: string): Promise<NextResponse> {
 
     return NextResponse.json(
       { market: marketWithLp },
-      { headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "on-chain-direct" } },
+      { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30", "X-Percolator-Data-Source": "on-chain-direct" } },
     );
   } catch {
     return NextResponse.json({ error: "Market not found" }, { status: 404 });

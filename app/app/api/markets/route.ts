@@ -556,7 +556,7 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
 
         return NextResponse.json(
           { total: filteredWithLp.length, activeTotal: filteredWithLp.length, marketsWithPrice, zombieCount: 0, markets: filteredWithLp },
-          { headers: { "Cache-Control": "no-store", "X-Percolator-Data-Source": "on-chain-discovery" } },
+          { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30", "X-Percolator-Data-Source": "on-chain-discovery" } },
         );
       }
     }

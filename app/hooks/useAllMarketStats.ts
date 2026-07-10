@@ -13,6 +13,16 @@ type MarketsApiResponse = {
 /** Stable SWR cache key — shared across all mounting hook instances. */
 const SWR_KEY = "/api/markets?include_zombie=true&limit=500";
 
+/**
+ * Stable identity fallback so downstream memos don't churn while loading.
+ * Read-only by convention only — unlike EMPTY_MARKETS (a frozen array) in
+ * useMarketDiscovery.ts, Object.freeze() on a Map does NOT block .set()/
+ * .delete()/.clear() (they're prototype methods, not own properties), so
+ * this shared singleton relies on every caller treating it as read-only.
+ * Do not mutate this Map — copy it first if you need to add/remove entries.
+ */
+const EMPTY_STATS_MAP: Map<string, MarketWithStats> = new Map();
+
 async function fetchMarketStats(): Promise<Map<string, MarketWithStats>> {
   const res = await fetch(SWR_KEY, {
     headers: { Accept: "application/json" },
@@ -57,7 +67,7 @@ export function useAllMarketStats() {
   );
 
   return {
-    statsMap: data ?? new Map<string, MarketWithStats>(),
+    statsMap: data ?? EMPTY_STATS_MAP,
     loading: isLoading,
     error: error instanceof Error
       ? error.message
