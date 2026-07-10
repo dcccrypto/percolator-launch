@@ -348,6 +348,15 @@ export const LaunchSuccess: FC<LaunchSuccessProps> = ({
             TRADE THIS MARKET →
           </Link>
         )}
+        {/* /my-markets had zero navigational entry point — link to it here, at
+            the moment a creator has just proven they own a market, so they can
+            find their creator dashboard again later. */}
+        <Link
+          href="/my-markets"
+          className="w-full sm:w-auto border border-[var(--border)] bg-transparent px-8 py-3 text-center text-[12px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-all hud-btn-corners hover:border-[var(--accent)]/30 hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]"
+        >
+          VIEW MY MARKETS
+        </Link>
         <button
           type="button"
           onClick={onDeployAnother}

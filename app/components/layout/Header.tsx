@@ -52,6 +52,7 @@ const tradeLinks: NavItem[] = [
 
 const buildLinks: NavItem[] = [
   { href: "/create", label: "Create a Market" },
+  { href: "/my-markets", label: "My Markets" },
   { href: "/developers", label: "Developers" },
   { href: "/faucet", label: "Faucet" },
   { href: "/stake", label: "Stake" },
@@ -177,7 +178,27 @@ export const Header: FC = () => {
           {/* Desktop nav — dropdown groups */}
           <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main navigation">
             {!isWaitlistHost && (
-              <NavDropdown label="Trade" items={filterForWaitlistHost(filterForNetwork(tradeLinks, network), "trade", isWaitlistHost)} />
+              <>
+                {/* Always-visible top-level entry into the trade terminal itself
+                    (redirects to the default SOL-PERP slab). The "Trade" dropdown
+                    next to it links to markets/dashboard/earn/etc — the terminal
+                    had no top-level nav item of its own even though mobile already
+                    has a dedicated Trade tab (MobileBottomNav). Styled distinctly
+                    (filled/accent) so it doesn't read as just another dropdown. */}
+                <Link
+                  href="/trade"
+                  aria-label="Trade terminal"
+                  aria-current={pathname === "/trade" || pathname.startsWith("/trade/") ? "page" : undefined}
+                  className={`mr-1 flex min-h-8 items-center rounded-sm px-3 text-[13px] font-semibold text-[var(--text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] ${
+                    pathname === "/trade" || pathname.startsWith("/trade/")
+                      ? "bg-[var(--accent)]/25"
+                      : "bg-[var(--accent)]/15 hover:bg-[var(--accent)]/25"
+                  }`}
+                >
+                  Trade
+                </Link>
+                <NavDropdown label="Trade" items={filterForWaitlistHost(filterForNetwork(tradeLinks, network), "trade", isWaitlistHost)} />
+              </>
             )}
             <NavDropdown label="Build" items={filterForWaitlistHost(filterForNetwork(buildLinks, network), "build", isWaitlistHost)} />
             <NavDropdown label="Community" items={filterForWaitlistHost(filterForNetwork(communityLinks, network), "community", isWaitlistHost)} />

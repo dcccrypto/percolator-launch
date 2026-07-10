@@ -377,9 +377,11 @@ export function getBatchRpc(): ReturnType<typeof createBatchRpc> {
       // on the trade page to coalesce into fewer batch requests. The wider window
       // reduces the ~6 sequential batch flushes per render cycle to ~3.
       batchWindowMs: 100,
-      // 50 slots (up from 30) accommodates the ~40 RPC calls per trade page mount
-      // in a single batch when they all arrive within the 100ms window.
-      maxBatchSize: 50,
+      // 40 slots (up from 30) accommodates the ~40 RPC calls per trade page mount
+      // in a single batch when they all arrive within the 100ms window. Must not
+      // exceed the server's MAX_BATCH_SIZE (app/api/rpc/route.ts) or every batch
+      // above the cap gets rejected with HTTP 400 for all callers in it.
+      maxBatchSize: 40,
     });
   }
   return _batchRpc;

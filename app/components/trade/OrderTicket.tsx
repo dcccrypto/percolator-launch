@@ -53,7 +53,9 @@ import { AccountKind, computePreTradeLiqPrice, computeLiqPrice } from "@percolat
 import { computeEstimatedEntryPrice, computeTradingFee, computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { TradeConfirmationModal } from "@/components/trade/TradeConfirmationModal";
 import { InfoIcon } from "@/components/ui/Tooltip";
-import { usePrivyLogin } from "@/hooks/usePrivySafe";
+import { usePrivyLogin, usePrivyAvailable } from "@/hooks/usePrivySafe";
+import { useWalletAdapterAvailable } from "@/hooks/useWalletAdapterAvailable";
+import { ConnectButton } from "@/components/wallet/ConnectButton";
 import { isMockMode } from "@/lib/mock-mode";
 import { isMockSlab, getMockUserAccountIdle } from "@/lib/mock-trade-data";
 import { sanitizeSymbol } from "@/lib/symbol-utils";
@@ -222,6 +224,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   // H6: engine accrue-staleness — see useEngineFreshness's file header.
   const { engineStale } = useEngineFreshness();
   const openWalletModal = usePrivyLogin();
+  const privyAvailable = usePrivyAvailable();
+  const adapterAvailable = useWalletAdapterAvailable();
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
   const collateralSymbol = sanitizeSymbol(tokenMeta?.symbol, mintAddress);
 
@@ -897,12 +901,28 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
       {/* ONE big full-width submit */}
       {needsWallet ? (
-        <button
-          onClick={() => openWalletModal()}
-          className="w-full rounded-none bg-[var(--accent)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter] duration-150 hover:brightness-110"
-        >
-          Connect Wallet
-        </button>
+        // Mode-aware connect CTA — mirrors app/faucet/page.tsx's connect-prompt
+        // pattern. usePrivyLogin() alone is a no-op in the default wallet-adapter
+        // deployment (no PrivyProvider mounted), which left this button dead.
+        adapterAvailable ? (
+          <div className="w-full [&>*]:w-full [&_button]:w-full [&_button]:rounded-none [&_button]:py-2.5 [&_button]:text-[11px] [&_button]:font-medium [&_button]:uppercase [&_button]:tracking-[0.1em]">
+            <ConnectButton />
+          </div>
+        ) : privyAvailable ? (
+          <button
+            onClick={() => openWalletModal()}
+            className="w-full rounded-none bg-[var(--accent)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter] duration-150 hover:brightness-110"
+          >
+            Connect Wallet
+          </button>
+        ) : (
+          <button
+            disabled
+            className="w-full cursor-not-allowed rounded-none bg-[var(--border)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+          >
+            Wallet Unavailable
+          </button>
+        )
       ) : needsAccount || needsDeposit ? (
         <>
           {(() => {

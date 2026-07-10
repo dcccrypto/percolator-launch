@@ -283,7 +283,14 @@ export const TradeConfirmationModal: FC<TradeConfirmationModalProps> = ({
           <button
             onClick={handleConfirm}
             disabled={submitting}
-            className={`flex-1 rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[background-color,filter,opacity] duration-150 hover:brightness-110 disabled:opacity-50 ${
+            // Contrast: white-on-#14F195 (--long) is ~1.5:1 and white-on-#FF3B5C
+            // (--short) is ~3.5:1 at this size — both fail WCAG AA (4.5:1) for
+            // normal-weight 11px text. Black clears ~14:1 on --long and ~6:1 on
+            // --short, so it's used for both directions on this, the single most
+            // important (irreversible) action in the ticket. Matches the
+            // direction-conditional text-black pattern already used for --long
+            // in OrderTicket.tsx (~645, 925, 968).
+            className={`flex-1 rounded-none py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-black transition-[background-color,filter,opacity] duration-150 hover:brightness-110 disabled:opacity-50 ${
               direction === "long" ? "bg-[var(--long)]" : "bg-[var(--short)]"
             }`}
           >

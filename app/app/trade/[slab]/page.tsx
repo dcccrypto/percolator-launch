@@ -13,6 +13,7 @@ import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { formatUsdFromNumber } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -507,13 +508,21 @@ function TradePageInner({ slab }: { slab: string }) {
           <CopyButton text={slab} />
         </span>
         {header?.admin && (
-          <span className={`text-[9px] font-medium uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-sm border ${
-            header.admin.toBase58() === "11111111111111111111111111111111"
-              ? "border-[var(--long)]/30 bg-[var(--long)]/5 text-[var(--long)]"
-              : "border-[var(--warning)]/30 bg-[var(--warning)]/5 text-[var(--warning)]"
-          }`}>
-            {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
-          </span>
+          <Tooltip
+            text={
+              header.admin.toBase58() === "11111111111111111111111111111111"
+                ? "Admin key burned (set to the system program's default null address). No one can change this market's config, pause it, or touch its funds — it runs purely on its own code from here on."
+                : "This market still has a live admin key that can change config, pause the market, or adjust parameters. Not yet renounced."
+            }
+          >
+            <span className={`text-[9px] font-medium uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-sm border ${
+              header.admin.toBase58() === "11111111111111111111111111111111"
+                ? "border-[var(--long)]/30 bg-[var(--long)]/5 text-[var(--long)]"
+                : "border-[var(--warning)]/30 bg-[var(--warning)]/5 text-[var(--warning)]"
+            }`}>
+              {header.admin.toBase58() === "11111111111111111111111111111111" ? "Admin Renounced" : "Admin Active"}
+            </span>
+          </Tooltip>
         )}
         <ShareButton slabAddress={slab} />
         <UsdToggleButton />
