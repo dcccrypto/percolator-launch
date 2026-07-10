@@ -503,7 +503,11 @@ async function onChainOrStaticResponse(request: NextRequest, reason: string): Pr
           const name = String(m.name ?? "").toLowerCase();
           const slab = String(m.slab_address ?? "").toLowerCase();
           const mint = String(m.mint_address ?? "").toLowerCase();
-          return symbol.includes(searchTrimmed) || name.includes(searchTrimmed) || slab.includes(searchTrimmed) || mint.includes(searchTrimmed);
+          // mainnet_ca is the TOKEN's identity on the playground (mint_address
+          // is the shared sim-USDC collateral) — searching by a token's CA must
+          // find its market (create-wizard duplicate check + markets search box).
+          const ca = String(m.mainnet_ca ?? "").toLowerCase();
+          return symbol.includes(searchTrimmed) || name.includes(searchTrimmed) || slab.includes(searchTrimmed) || mint.includes(searchTrimmed) || ca.includes(searchTrimmed);
         });
 
       if (filtered.length > 0) {
@@ -590,10 +594,14 @@ function fallbackMarketsResponse(request: NextRequest, reason: string): NextResp
       const name = String(m.name ?? "").toLowerCase();
       const slab = String(m.slab_address ?? "").toLowerCase();
       const mint = String(m.mint_address ?? "").toLowerCase();
+      // Same mainnet_ca match as the on-chain-discovery path above — the CA is
+      // the token's identity on the playground (mint_address is shared sim-USDC).
+      const ca = String((m as Record<string, unknown>).mainnet_ca ?? "").toLowerCase();
       return symbol.includes(searchTrimmed) ||
         name.includes(searchTrimmed) ||
         slab.includes(searchTrimmed) ||
-        mint.includes(searchTrimmed);
+        mint.includes(searchTrimmed) ||
+        ca.includes(searchTrimmed);
     })
     .filter((m) => !dbOracleMode || m.oracle_mode === dbOracleMode);
 
@@ -1040,6 +1048,17 @@ export async function GET(request: NextRequest) {
             const mintAddress = ((m as Record<string, unknown>).mint_address as string | null) ?? "";
             const mainnetCa = ((m as Record<string, unknown>).mainnet_ca as string | null) ?? "";
             if (matchingMints.has(mintAddress) || matchingMints.has(mainnetCa)) return true;
+            // Direct address match: searching a token's CA (or mint/slab) must find
+            // its market — used by the create-wizard's one-market-per-token check
+            // and CA lookups in the markets search box. Substring like the other
+            // GET paths' filters.
+            if (
+              mintAddress.toLowerCase().includes(q) ||
+              mainnetCa.toLowerCase().includes(q) ||
+              (((m as Record<string, unknown>).slab_address as string | null) ?? "").toLowerCase().includes(q)
+            ) {
+              return true;
+            }
             return false;
           });
         })()
@@ -1528,9 +1547,12 @@ export async function POST(req: NextRequest) {
 
   // GH#1963: Validate mainnet_ca is a valid Solana pubkey (when provided).
   // Previously inserted raw — could accept arbitrary strings that poison downstream UI/parsers.
+  // Canonicalized (PublicKey round-trip) so the one-market-per-token dedupe below can't be
+  // dodged with a non-canonical base58 encoding of the same key.
+  let canonicalMainnetCa: string | null = null;
   if (mainnet_ca) {
     try {
-      new PublicKey(mainnet_ca);
+      canonicalMainnetCa = new PublicKey(mainnet_ca).toBase58();
     } catch {
       return NextResponse.json(
         { error: "Invalid mainnet_ca: must be a valid Solana public key" },
@@ -1748,6 +1770,36 @@ export async function POST(req: NextRequest) {
     supabase = getServiceClient();
   } catch {
     // Supabase not configured — register in the playground-local registry.
+    //
+    // One market per token: even without a DB, reject a SECOND market for the
+    // same underlying token. Keyed on mainnet_ca (the token's identity field —
+    // mint_address is the COLLATERAL mint, the same sim-USDC for every
+    // playground market, so deduping on it would false-positive everything).
+    // The Blob keeper-registry is the closest thing to a cross-instance
+    // market list in this mode; best-effort — an unreadable registry must not
+    // block legitimate launches (fail-open here; the Supabase path below is
+    // the authoritative gate on deployments that have a DB).
+    if (canonicalMainnetCa) {
+      try {
+        const registered = await readRegisteredMarkets();
+        const dup = registered.find(
+          (r) => r.mainnetCA === canonicalMainnetCa && r.slabAddress !== slab_address,
+        );
+        if (dup) {
+          return NextResponse.json(
+            {
+              error:
+                `A market for this token already exists (${dup.symbol ?? dup.label} — slab ${dup.slabAddress}). ` +
+                "One market per token: trade the existing market instead of launching a duplicate.",
+              existing_slab: dup.slabAddress,
+            },
+            { status: 409 },
+          );
+        }
+      } catch {
+        /* registry unreadable — fail open, see comment above */
+      }
+    }
     registerPlaygroundSlab(slab_address);
     // Return a synthetic market row so the client flow can continue.
     const syntheticMarket = {
@@ -1792,6 +1844,44 @@ export async function POST(req: NextRequest) {
       },
       { status: 409 },
     );
+  }
+
+  // One market per token: reject registering a SECOND market for the same
+  // underlying token on this network. Keyed on mainnet_ca — the token identity
+  // field the wizard always sends — NOT mint_address, which is the on-chain
+  // COLLATERAL mint (the same sim-USDC for every playground market; deduping
+  // on it would 409 every launch). canonicalMainnetCa is the PublicKey
+  // round-trip of the validated input, so alternate encodings of the same key
+  // can't dodge the check. Duplicates fragment liquidity and let a clone
+  // impersonate an existing listing; each market is isolated so this is a
+  // UX/trust policy, not a fund-safety guard.
+  if (canonicalMainnetCa) {
+    const { data: dupTokenRows, error: dupTokenError } = await supabase
+      .from("markets")
+      .select("slab_address, symbol")
+      .eq("network", insertNetwork)
+      .eq("mainnet_ca", canonicalMainnetCa)
+      .limit(1);
+
+    if (dupTokenError) {
+      return NextResponse.json(
+        { error: "Failed to validate existing markets for this token" },
+        { status: 500 },
+      );
+    }
+
+    const dupToken = dupTokenRows?.[0];
+    if (dupToken) {
+      return NextResponse.json(
+        {
+          error:
+            `A market for this token already exists (${dupToken.symbol ?? "unnamed"} — slab ${dupToken.slab_address}). ` +
+            "One market per token: trade the existing market instead of launching a duplicate.",
+          existing_slab: dupToken.slab_address,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Insert market
