@@ -1270,13 +1270,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
                 </svg>
                 <div
                   className="text-[15px] font-semibold text-[var(--text-secondary)]"
-                  style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+                  style={{ fontFamily: "var(--font-display)" }}
                 >
                   No chart data yet
                 </div>
                 <div
                   className="mt-1 text-xs text-[var(--text-muted)]"
-                  style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+                  style={{ fontFamily: "var(--font-display)" }}
                 >
                   Price history will appear once trading begins
                 </div>
