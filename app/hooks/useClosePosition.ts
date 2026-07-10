@@ -84,52 +84,113 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           return { signature: null };
         }
 
-        // Fetch fresh on-chain position size to avoid stale state.
-        let freshPositionSize = userAccount.account.positionSize;
+        // Fetch the authoritative on-chain position size before closing.
+    // Never fall back to cached UI state: an outdated size can over-close
+    // the actual position and unintentionally open exposure in the
+    // opposite direction.
+    let freshPositionSize: bigint | null = null;
 
-        if (isV17Market) {
-          // v17: re-fetch via getProgramAccounts + parsePortfolioV17.
-          // parseAccount(bitmap, idx) is a v12-only function and throws on v17 data.
-          try {
-            if (programId && publicKey) {
-              const slabPk = new PublicKey(slabAddress);
-              const results = await connection.getProgramAccounts(programId, {
-                filters: [
-                  { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_CP.toString("base64"), encoding: "base64" } },
-                  { memcmp: { offset: V17_PF_MARKET_OFF_CP, bytes: slabPk.toBase58() } },
-                  { memcmp: { offset: V17_PF_OWNER_OFF_CP, bytes: publicKey.toBase58() } },
-                ],
-              });
-              if (results.length > 0) {
-                const data = results[0].account.data;
-                const portfolio = parsePortfolioV17(
-                  data instanceof Buffer ? data : Buffer.from(data),
-                );
-                // Defense-in-depth: re-verify the mutable owner actually matches
-                // after fetch — memcmp filters are advisory server-side; don't
-                // trust them blindly. Otherwise fall through and use cached state.
-                if (portfolio.owner.equals(publicKey)) {
-                  const activeLeg = portfolio.legs.find((l) => l.active);
-                  freshPositionSize = activeLeg ? activeLeg.basisPosQ : 0n;
-                }
-              }
-            }
-          } catch {
-            console.warn("[useClosePosition] v17 fresh portfolio fetch failed — using cached state");
-          }
-        } else {
-          // v12: re-fetch via fetchSlab + parseAccount (bitmap-based).
-          try {
-            const { fetchSlab, parseAccount } = await import("@percolatorct/sdk");
-            const freshData = await fetchSlab(connection, new PublicKey(slabAddress));
-            const freshAccount = parseAccount(freshData, userAccount.idx);
-            freshPositionSize = freshAccount.positionSize;
-          } catch {
-            console.warn("[useClosePosition] Could not fetch fresh position — using cached state");
-          }
+    if (isV17Market) {
+      // v17: re-fetch via getProgramAccounts + parsePortfolioV17.
+      // parseAccount(bitmap, idx) is a v12-only function and throws on v17 data.
+      try {
+        if (!programId || !publicKey) {
+          throw new Error(
+            "Wallet or market program is unavailable for position verification.",
+          );
         }
 
-        if (freshPositionSize === 0n) {
+        const slabPk = new PublicKey(slabAddress);
+        const results = await connection.getProgramAccounts(programId, {
+          filters: [
+            {
+              memcmp: {
+                offset: 0,
+                bytes: V17_PORTFOLIO_MAGIC_CP.toString("base64"),
+                encoding: "base64",
+              },
+            },
+            {
+              memcmp: {
+                offset: V17_PF_MARKET_OFF_CP,
+                bytes: slabPk.toBase58(),
+              },
+            },
+            {
+              memcmp: {
+                offset: V17_PF_OWNER_OFF_CP,
+                bytes: publicKey.toBase58(),
+              },
+            },
+          ],
+        });
+
+        if (results.length === 0) {
+          // The query completed successfully and found no current
+          // portfolio for this wallet and market.
+          freshPositionSize = 0n;
+        } else {
+          const data = results[0].account.data;
+          const portfolio = parsePortfolioV17(
+            data instanceof Buffer ? data : Buffer.from(data),
+          );
+
+          // Re-check the mutable owner after the RPC-side memcmp filter.
+          if (!portfolio.owner.equals(publicKey)) {
+            throw new Error(
+              "Fresh portfolio owner does not match the connected wallet.",
+            );
+          }
+
+          const activeLeg = portfolio.legs.find((leg) => leg.active);
+          freshPositionSize = activeLeg ? activeLeg.basisPosQ : 0n;
+        }
+      } catch (cause) {
+        console.warn(
+          "[useClosePosition] v17 fresh portfolio verification failed",
+          cause,
+        );
+
+        throw new Error(
+          "Could not verify current on-chain position. Please try again.",
+        );
+      }
+    } else {
+      // v12: re-fetch via fetchSlab + parseAccount (bitmap-based).
+      try {
+        const { fetchSlab, parseAccount } =
+          await import("@percolatorct/sdk");
+
+        const freshData = await fetchSlab(
+          connection,
+          new PublicKey(slabAddress),
+        );
+
+        const freshAccount = parseAccount(
+          freshData,
+          userAccount.idx,
+        );
+
+        freshPositionSize = freshAccount.positionSize;
+      } catch (cause) {
+        console.warn(
+          "[useClosePosition] v12 fresh position verification failed",
+          cause,
+        );
+
+        throw new Error(
+          "Could not verify current on-chain position. Please try again.",
+        );
+      }
+    }
+
+    if (freshPositionSize === null) {
+      throw new Error(
+        "Could not verify current on-chain position. Please try again.",
+      );
+    }
+
+    if (freshPositionSize === 0n) {
           setPhase("idle");
           inflightRef.current = false;
           setLoading(false);
