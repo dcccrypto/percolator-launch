@@ -125,7 +125,7 @@ function PositionSummary({ slabAddress }: PositionSummaryProps) {
 
   const isLong = account.positionSize > 0n;
   const direction = isLong ? "LONG" : "SHORT";
-  const dirColor = isLong ? "text-green-400" : "text-red-400";
+  const dirColor = isLong ? "text-[var(--long)]" : "text-[var(--short)]";
 
   return (
     <div className="flex items-center gap-1.5 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 backdrop-blur-sm">
@@ -1270,13 +1270,13 @@ const TradingChartInner: FC<{ slabAddress: string; mintAddress?: string }> = ({
                 </svg>
                 <div
                   className="text-[15px] font-semibold text-[var(--text-secondary)]"
-                  style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+                  style={{ fontFamily: "var(--font-display)" }}
                 >
                   No chart data yet
                 </div>
                 <div
                   className="mt-1 text-xs text-[var(--text-muted)]"
-                  style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}
+                  style={{ fontFamily: "var(--font-display)" }}
                 >
                   Price history will appear once trading begins
                 </div>

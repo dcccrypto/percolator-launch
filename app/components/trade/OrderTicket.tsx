@@ -703,13 +703,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
       {/* Size — single input + unit toggle + quick-fill chips */}
       <div className="mb-2">
-        <label className="mb-1.5 block text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
+        <label htmlFor="order-size-input" className="mb-1.5 block text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
           Size
           <InfoIcon tooltip="Position size in the toggled unit. Switch between token and USD - both stay in sync." />
         </label>
         <div className="flex gap-1.5">
           <input
+            id="order-size-input"
             type="text"
+            inputMode="decimal"
             value={sizeInput}
             onChange={(e) => handleSizeChange(e.target.value)}
             placeholder={sizeUnit === "token" ? "0.000000" : "$0.00"}
@@ -720,7 +722,8 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           />
           <button
             onClick={toggleSizeUnit}
-            className="w-16 shrink-0 rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--border-hover)] hover:text-[var(--text)]"
+            title={`Switch size unit (currently ${sizeUnit === "token" ? symbol : "USD"})`}
+            className="w-16 shrink-0 truncate rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--border-hover)] hover:text-[var(--text)]"
           >
             {sizeUnit === "token" ? symbol : "USD"}
           </button>
@@ -763,13 +766,15 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           instead of one continuous unbroken stack. */}
       <div className="mb-4 border-t border-[var(--border)]/20 pt-3">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
+          <label htmlFor="order-leverage-input" className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
             Leverage
             <InfoIcon tooltip="The multiplier used to size this order. On-chain margin params are the authoritative cap." />
           </label>
           <div className="flex items-center gap-1">
             <input
+              id="order-leverage-input"
               type="text"
+              inputMode="numeric"
               value={leverageText}
               onChange={(e) => {
                 const raw = sanitizeDecimalInput(e.target.value);

@@ -80,7 +80,7 @@ export const ChartPnlBadge: FC<ChartPnlBadgeProps> = ({ slabAddress }) => {
 
   const { display, sign } = formatPnl(pnlUsd, roe);
   const colorClass =
-    sign === "positive" ? "text-green-400" : sign === "negative" ? "text-red-400" : "text-[var(--text-secondary)]";
+    sign === "positive" ? "text-[var(--long)]" : sign === "negative" ? "text-[var(--short)]" : "text-[var(--text-secondary)]";
 
   // Positioning is owned by DraggableChartBadges in TradingChart — this chip
   // stacks under PositionSummary and drags with it as one unit.

@@ -41,55 +41,77 @@ export default function TradingPageLoading() {
         </div>
       </div>
 
-      {/* Mobile layout skeleton */}
+      {/* Mobile layout skeleton — mirrors the real mobile stack: chart,
+          positions dock (2 tabs: Positions / Trades), bottom order-sheet
+          trigger. The order ticket itself is a tap-to-open bottom sheet, so
+          it isn't shown inline here. */}
       <div className="flex flex-col gap-1.5 px-2 pt-2 pb-4 lg:hidden">
         {/* Chart */}
-        <ShimmerSkeleton className="h-[400px] w-full" />
-        {/* Trade form */}
-        <ShimmerSkeleton className="h-[300px] w-full" />
-        {/* Position */}
-        <ShimmerSkeleton className="h-[200px] w-full" />
-        {/* Tabs */}
-        <div className="border border-[var(--border)]">
+        <ShimmerSkeleton className="h-[360px] w-full" />
+        {/* Positions dock — 2 tabs */}
+        <div className="h-[45vh] min-h-[280px] border border-[var(--border)]">
           <div className="flex border-b border-[var(--border)]/50">
-            {[1, 2, 3, 4].map((i) => (
-              <ShimmerSkeleton key={i} className="h-8 flex-1 rounded-none" />
+            {[1, 2].map((i) => (
+              <ShimmerSkeleton key={i} className="h-8 w-24 rounded-none" />
             ))}
           </div>
-          <ShimmerSkeleton className="h-[250px] w-full rounded-none" />
+          <ShimmerSkeleton className="h-[calc(100%-2rem)] w-full rounded-none" />
         </div>
+        {/* Bottom order-ticket trigger bar */}
+        <ShimmerSkeleton className="h-10 w-full" />
       </div>
 
-      {/* Desktop layout skeleton */}
-      <div className="hidden lg:grid grid-cols-[1fr_340px] gap-1.5 px-3 pb-3 pt-1.5">
-        {/* Left column */}
-        <div className="min-w-0 space-y-1.5">
-          {/* Chart */}
-          <ShimmerSkeleton className="h-[500px] w-full" />
-          {/* Tabs */}
-          <div className="border border-[var(--border)]">
-            <div className="flex border-b border-[var(--border)]/50">
-              {[1, 2, 3].map((i) => (
-                <ShimmerSkeleton key={i} className="h-10 flex-1 rounded-none" />
-              ))}
-            </div>
-            <ShimmerSkeleton className="h-[200px] w-full rounded-none" />
-          </div>
+      {/* Desktop layout skeleton — mirrors the named grid in page.tsx: chart
+          (left, dominant), order-ticket rail (right, 340px, spans both rows),
+          positions dock (bottom-left, 2 tabs). */}
+      <div
+        className="hidden lg:grid gap-3 px-4 lg:px-6 pb-3 pt-2"
+        style={{
+          gridTemplateAreas: '"Chart OrderTicket" "PositionsDock OrderTicket"',
+          gridTemplateColumns: "minmax(0,1fr) 340px",
+          gridTemplateRows: "minmax(0,1fr) minmax(220px,340px)",
+        }}
+      >
+        {/* Chart */}
+        <div style={{ gridArea: "Chart" }} className="min-w-0">
+          <ShimmerSkeleton className="h-[460px] w-full" />
         </div>
 
-        {/* Right column */}
-        <div className="min-w-0 space-y-1.5">
-          {/* Trade form */}
-          <ShimmerSkeleton className="h-[350px] w-full" />
-          {/* Info tabs */}
-          <div className="border border-[var(--border)]">
-            <div className="flex border-b border-[var(--border)]/50">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <ShimmerSkeleton key={i} className="h-10 flex-1 rounded-none" />
-              ))}
-            </div>
-            <ShimmerSkeleton className="h-[300px] w-full rounded-none" />
+        {/* Order-ticket rail — single framed panel (order ticket + NFT panel) */}
+        <div style={{ gridArea: "OrderTicket" }} className="border border-[var(--border)] p-3.5 space-y-3">
+          {/* Long / Short segmented */}
+          <div className="flex gap-1">
+            <ShimmerSkeleton className="h-9 flex-1" />
+            <ShimmerSkeleton className="h-9 flex-1" />
           </div>
+          {/* Size input */}
+          <ShimmerSkeleton className="h-10 w-full" />
+          {/* Quick-fill chips */}
+          <div className="flex gap-1">
+            {[1, 2, 3, 4].map((i) => (
+              <ShimmerSkeleton key={i} className="h-6 flex-1" />
+            ))}
+          </div>
+          {/* Leverage slider */}
+          <ShimmerSkeleton className="h-8 w-full" />
+          {/* Receipt rows */}
+          <div className="space-y-2 pt-1">
+            {[1, 2, 3, 4].map((i) => (
+              <ShimmerSkeleton key={i} className="h-3.5 w-full" />
+            ))}
+          </div>
+          {/* Submit */}
+          <ShimmerSkeleton className="h-11 w-full" />
+        </div>
+
+        {/* Positions dock — 2 tabs (Positions / Trades) */}
+        <div style={{ gridArea: "PositionsDock" }} className="min-w-0 border border-[var(--border)]">
+          <div className="flex border-b border-[var(--border)]/50">
+            {[1, 2].map((i) => (
+              <ShimmerSkeleton key={i} className="h-9 w-28 rounded-none" />
+            ))}
+          </div>
+          <ShimmerSkeleton className="h-[200px] w-full rounded-none" />
         </div>
       </div>
     </div>
