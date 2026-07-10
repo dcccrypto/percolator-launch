@@ -332,8 +332,8 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
 
         {/* GH#1842: Oracle staleness warning — mirrors TradeForm oracle stale block */}
         {oracleStale && (
-          <div className="mb-4 rounded-none border border-amber-500/30 bg-amber-500/[0.07] p-2.5">
-            <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-amber-400">
+          <div className="mb-4 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/[0.07] p-2.5">
+            <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">
               ⚠ Oracle Stale
             </p>
             <p className="mt-1 text-[9px] text-[var(--text-secondary)] leading-relaxed">

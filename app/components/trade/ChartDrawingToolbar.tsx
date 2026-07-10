@@ -234,7 +234,7 @@ export const ChartDrawingToolbar: FC<ChartDrawingToolbarProps> = ({
           // accent-foreground discipline as the active tools, but
           // semantically different (this is a destructive op, not a
           // selectable mode).
-          "text-[var(--text-secondary)] enabled:hover:bg-[var(--bg-surface)] enabled:hover:text-red-400",
+          "text-[var(--text-secondary)] enabled:hover:bg-[var(--bg-surface)] enabled:hover:text-[var(--short)]",
           // Disabled state: drop the cursor affordance and dim the
           // icon further. The button still focuses (we don't add
           // tabIndex=-1) so keyboard users can find it and learn

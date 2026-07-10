@@ -125,7 +125,7 @@ function PositionSummary({ slabAddress }: PositionSummaryProps) {
 
   const isLong = account.positionSize > 0n;
   const direction = isLong ? "LONG" : "SHORT";
-  const dirColor = isLong ? "text-green-400" : "text-red-400";
+  const dirColor = isLong ? "text-[var(--long)]" : "text-[var(--short)]";
 
   return (
     <div className="flex items-center gap-1.5 rounded-none border border-[var(--border)]/60 bg-[var(--bg)]/90 px-2 py-1 backdrop-blur-sm">
