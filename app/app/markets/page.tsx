@@ -221,8 +221,15 @@ function MarketsPageInner() {
     if (oracleFilter !== "all") params.set("oracle", oracleFilter);
     if (!showUsd) params.set("usd", "false");
     
-    const newUrl = params.toString() ? `?${params.toString()}` : "/markets";
-    router.replace(newUrl, { scroll: false });
+    // Only navigate when the query string would actually change. On mount with
+    // default filters the URL is already canonical (/markets), so an
+    // unconditional router.replace() re-fetches the route's RSC payload,
+    // re-suspends the page's <Suspense> boundary, and remounts the whole list —
+    // which re-runs this effect and repeats. That remount cascade is the
+    // "the page refreshes several times before I can click a market" bug.
+    const nextSearch = params.toString() ? `?${params.toString()}` : "";
+    if (nextSearch === window.location.search) return;
+    router.replace(nextSearch || "/markets", { scroll: false });
   }, [debouncedSearch, sortBy, leverageFilter, oracleFilter, showUsd, router]);
 
   const merged = useMemo<MergedMarket[]>(() => {
