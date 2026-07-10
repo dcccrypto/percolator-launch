@@ -1,133 +1,104 @@
 /**
- * GH#1165 — /earn TVL sentinel filter for vault_balance
- * GH#1204 — /earn TVL uses vault_balance (actual deposits), not lp_collateral (bootstrap config)
+ * GH#1165 — /earn TVL sentinel filter for the on-chain LP Vault Registry balance
+ * GH#1204 — /earn TVL uses the LP Vault Registry's real backing, not a bootstrap
+ * config value
  *
- * Root cause (GH#1165): corrupt vault_balance values (e.g. ~4e14 at 6 decimals = $400M)
- * passed the existing sentinel filter (isSentinel = v > 1e18) but produced
- * wildly inflated TVL on the /earn page.
+ * Root cause (GH#1165): corrupt vault_balance values (e.g. ~4e14 at 6 decimals =
+ * $400M) passed the old u64::MAX-class sentinel filter but produced wildly
+ * inflated TVL on the /earn page.
  *
- * Root cause (GH#1204): lp_collateral was used instead of vault_balance.
- * lp_collateral = 10^11 for NNOB-PERP at 6 decimals = $100K TVL even when
- * vault has zero actual deposits (vault_balance = 0).
+ * Root cause (GH#1204): a bootstrap config value was used instead of the vault's
+ * actual on-chain deposits.
  *
- * Fix: use vault_balance (actual on-chain deposits) and apply sentinel + USD cap.
+ * Fix: apply a sane USD cap on top of the sentinel filter, in the same code path
+ * the /earn page actually renders from (`buildMarketVaultInfo` in
+ * hooks/useEarnStats.ts) — not a re-implementation that can silently drift from it.
  */
 
 import { describe, it, expect } from 'vitest';
+import {
+  buildMarketVaultInfo,
+  CURATED_COLLATERAL_DECIMALS,
+  MAX_VAULT_USD,
+  type CuratedVaultOnChain,
+} from '@/hooks/useEarnStats';
 
-// ─── Inline the same logic as hooks/useEarnStats.ts ───────────────────────
-const isSentinel = (v: number) => v > 1e18;
-const MAX_VAULT_USD = 10_000_000; // $10M cap per vault
+const emptySupabase = new Map<string, Record<string, unknown>>();
 
-function computeVaultBalance(vault_balance: number | null, collDivisor: number): number {
-  const vaultBalanceRaw = vault_balance ?? 0;
-  const vaultBalanceHuman = isSentinel(vaultBalanceRaw) ? Infinity : vaultBalanceRaw / collDivisor;
-  return vaultBalanceHuman > MAX_VAULT_USD ? 0 : vaultBalanceRaw;
+/** Build the curatedVaults map buildMarketVaultInfo expects, for a single slab. */
+function vaultsFor(slab: string, tvlAtoms: bigint): Record<string, CuratedVaultOnChain> {
+  return { [slab]: { tvlAtoms, cooldownSlots: 0n, found: true } };
 }
 
-function computeTvl(markets: { vault_balance: number | null; decimals: number }[]): number {
-  return markets.reduce((s, m) => {
-    const collDivisor = 10 ** m.decimals;
-    const vaultBalance = computeVaultBalance(m.vault_balance, collDivisor);
-    return s + vaultBalance / collDivisor;
-  }, 0);
+function tvlUsdFor(slab: string, tvlAtoms: bigint): number {
+  const info = buildMarketVaultInfo(slab, 'TEST', 'Test Market', null, vaultsFor(slab, tvlAtoms), emptySupabase);
+  return info.vaultBalance / (10 ** info.decimals);
 }
-// ──────────────────────────────────────────────────────────────────────────
 
-describe('useEarnStats — vault_balance sentinel filter (GH#1165, GH#1204)', () => {
-  it('passes legitimate USDC LP (e.g. 1,000 USDC at 6 decimals)', () => {
-    const raw = 1_000 * 1e6; // 1,000 USDC
-    const bal = computeVaultBalance(raw, 1e6);
-    expect(bal).toBe(raw);
+describe('useEarnStats — buildMarketVaultInfo TVL sentinel + cap (GH#1165, GH#1204)', () => {
+  it('collateral decimals are the shared Sim-USDC constant (6)', () => {
+    expect(CURATED_COLLATERAL_DECIMALS).toBe(6);
   });
 
-  it('passes legitimate SOL LP (e.g. 500 SOL at 9 decimals)', () => {
-    const raw = 500 * 1e9; // 500 SOL
-    const bal = computeVaultBalance(raw, 1e9);
-    expect(bal).toBe(raw);
-    expect(bal / 1e9).toBe(500); // 500 SOL in human units
+  it('passes legitimate LP vault TVL (1,000 Sim-USDC at 6 decimals)', () => {
+    const atoms = BigInt(1_000 * 1e6);
+    expect(tvlUsdFor('slabA', atoms)).toBe(1_000);
   });
 
-  it('blocks corrupt USDC value producing $400M TVL (4e14 at 6 decimals)', () => {
-    // 4e14 / 1e6 = 4e8 = $400M — should be zeroed
-    const corrupt = 4e14;
-    const bal = computeVaultBalance(corrupt, 1e6);
-    expect(bal).toBe(0);
+  it('blocks corrupt value producing $400M TVL (4e14 atoms at 6 decimals)', () => {
+    // 4e14 / 1e6 = 4e8 = $400M — below the u64::MAX-class sentinel threshold but
+    // still implausible; must be zeroed by the $10M cap.
+    const atoms = 4_00_000_000_000_000n;
+    expect(tvlUsdFor('slabA', atoms)).toBe(0);
   });
 
-  it('blocks corrupt SOL value producing $400M TVL (4e17 at 9 decimals)', () => {
-    // 4e17 / 1e9 = 4e8 = $400M SOL (at any price this is huge) — should be zeroed
-    const corrupt = 4e17;
-    const bal = computeVaultBalance(corrupt, 1e9);
-    expect(bal).toBe(0);
+  it('blocks sentinel-range values (>= 18e18, ~u64::MAX)', () => {
+    const atoms = 18_000_000_000_000_000_001n;
+    expect(tvlUsdFor('slabA', atoms)).toBe(0);
   });
 
-  it('blocks sentinel values > 1e18', () => {
-    const sentinel = 1.844e19; // u64::MAX approx
-    const bal = computeVaultBalance(sentinel, 1e6);
-    expect(bal).toBe(0);
+  it('blocks negative-looking (impossible) atoms defensively via 0 fallback', () => {
+    const info = buildMarketVaultInfo('slabA', 'TEST', 'Test Market', null, {}, emptySupabase);
+    expect(info.vaultBalance).toBe(0);
   });
 
-  it('handles null vault_balance as 0', () => {
-    const bal = computeVaultBalance(null, 1e6);
-    expect(bal).toBe(0);
+  it(`$${(MAX_VAULT_USD - 100_000).toLocaleString()} vault is allowed (just under the cap)`, () => {
+    const underCapUsd = MAX_VAULT_USD - 100_000;
+    const atoms = BigInt(underCapUsd) * 1_000_000n;
+    expect(tvlUsdFor('slabA', atoms)).toBe(underCapUsd);
   });
 
-  it('TVL with one corrupt market is not inflated', () => {
-    const markets = [
-      { vault_balance: 1_000 * 1e6, decimals: 6 },   // 1,000 USDC — legit
-      { vault_balance: 4e14, decimals: 6 },            // $400M USDC — corrupt
-      { vault_balance: 500 * 1e9, decimals: 9 },      // 500 SOL — legit
-    ];
-    const tvl = computeTvl(markets);
-    // Should only include the two legit vaults: 1,000 + 500 = 1,500 human units
-    expect(tvl).toBe(1_500);
+  it(`$${(MAX_VAULT_USD + 100_000).toLocaleString()} vault is blocked (just over the cap)`, () => {
+    const overCapUsd = MAX_VAULT_USD + 100_000;
+    const atoms = BigInt(overCapUsd) * 1_000_000n;
+    expect(tvlUsdFor('slabA', atoms)).toBe(0);
   });
 
-  it('TVL with all legit markets aggregates correctly', () => {
-    const markets = [
-      { vault_balance: 100 * 1e6, decimals: 6 },   // 100 USDC
-      { vault_balance: 200 * 1e6, decimals: 6 },   // 200 USDC
-      { vault_balance: 50 * 1e9,  decimals: 9 },   // 50 SOL
-    ];
-    const tvl = computeTvl(markets);
-    expect(tvl).toBeCloseTo(350, 5); // 100 + 200 + 50
+  it('a market with no LP Vault Registry entry shows $0 TVL, not a fabricated value', () => {
+    // GH#1204 shape: the registry hasn't been read/created for this slab yet.
+    expect(tvlUsdFor('slabA', 0n)).toBe(0);
   });
 
-  it('$9.9M vault is allowed (just under cap)', () => {
-    // $9,900,000 in USDC micro-units
-    const raw = 9_900_000 * 1e6; // 9.9e12
-    const bal = computeVaultBalance(raw, 1e6);
-    expect(bal).toBe(raw);
-  });
-
-  it('$10.1M vault is blocked (just over cap)', () => {
-    // $10,100,000 in USDC micro-units
-    const raw = 10_100_000 * 1e6; // 1.01e13
-    const bal = computeVaultBalance(raw, 1e6);
-    expect(bal).toBe(0);
-  });
-
-  // ─── GH#1204 regression test ─────────────────────────────────────────────
-  it('GH#1204: NNOB-PERP shows $0 TVL when vault_balance=0 despite lp_collateral=10^11', () => {
-    // lp_collateral = 100000000000 (bootstrap config) — NOT the actual deposits
-    // vault_balance = 0 (actual on-chain SOL in vault)
-    // Before fix: would show $100K TVL using lp_collateral / 10^6
-    // After fix: must show $0 using vault_balance
-    const vault_balance = 0;
-    const decimals = 6;
-    const collDivisor = 10 ** decimals;
-    const bal = computeVaultBalance(vault_balance, collDivisor);
-    expect(bal).toBe(0);
-    expect(bal / collDivisor).toBe(0); // TVL = $0
-  });
-
-  it('GH#1204: market with small real deposits shows correct TVL', () => {
-    // vault_balance = 5_000 USDC (5e9 micro-units at 6 decimals) — real deposits
-    const vault_balance = 5_000 * 1e6;
-    const decimals = 6;
-    const collDivisor = 10 ** decimals;
-    const bal = computeVaultBalance(vault_balance, collDivisor);
-    expect(bal / collDivisor).toBe(5_000); // TVL = $5,000
+  it('one corrupt market does not inflate the aggregate TVL across markets', () => {
+    const legitA = buildMarketVaultInfo(
+      'slabA', 'A', 'Market A', null,
+      { slabA: { tvlAtoms: BigInt(1_000 * 1e6), cooldownSlots: 0n, found: true } },
+      emptySupabase,
+    );
+    const corruptB = buildMarketVaultInfo(
+      'slabB', 'B', 'Market B', null,
+      { slabB: { tvlAtoms: 4_00_000_000_000_000n, cooldownSlots: 0n, found: true } },
+      emptySupabase,
+    );
+    const legitC = buildMarketVaultInfo(
+      'slabC', 'C', 'Market C', null,
+      { slabC: { tvlAtoms: BigInt(500 * 1e6), cooldownSlots: 0n, found: true } },
+      emptySupabase,
+    );
+    const tvl = [legitA, corruptB, legitC].reduce(
+      (s, m) => s + m.vaultBalance / (10 ** m.decimals),
+      0,
+    );
+    expect(tvl).toBe(1_500); // only the two legit vaults: 1,000 + 500
   });
 });

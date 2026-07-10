@@ -2,8 +2,8 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { VaultCard } from './VaultCard';
+import { VaultCardSkeleton } from './VaultCardSkeleton';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
-import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 
 type SortKey = 'tvl' | 'volume' | 'utilization';
 
@@ -12,9 +12,11 @@ const PAGE_SIZE = 24;
 interface VaultGridProps {
   markets: MarketVaultInfo[];
   loading: boolean;
+  /** Set when the last fetch failed — distinguishes "genuinely no vaults" from "couldn't load". */
+  error?: string | null;
 }
 
-export function VaultGrid({ markets, loading }: VaultGridProps) {
+export function VaultGrid({ markets, loading, error }: VaultGridProps) {
   const [sortBy, setSortBy] = useState<SortKey>('tvl');
   const [searchQuery, setSearchQuery] = useState('');
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
@@ -53,16 +55,8 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
     setDisplayCount(PAGE_SIZE);
   }, [searchQuery, sortBy]);
 
-  // Progressive auto-reveal (loads batches via rAF)
-  useEffect(() => {
-    if (loading || displayCount >= sorted.length) return;
-    const handle = requestAnimationFrame(() => {
-      setDisplayCount((prev) => Math.min(prev + PAGE_SIZE, sorted.length));
-    });
-    return () => cancelAnimationFrame(handle);
-  }, [displayCount, sorted.length, loading]);
-
-  // IntersectionObserver backup for scroll-triggered loading
+  // Scroll-triggered progressive loading — reveals the next page once the
+  // sentinel div at the bottom of the grid enters the viewport.
   useEffect(() => {
     const target = observerTarget.current;
     if (!target) return;
@@ -86,12 +80,14 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
         <div className="relative w-full sm:w-64">
           <input
             type="text"
+            aria-label="Search markets"
             placeholder="Search markets..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full h-9 px-3 pl-8 text-[13px] bg-[var(--panel-bg)] border border-[var(--border)] rounded-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]/30 transition-colors"
           />
           <svg
+            aria-hidden="true"
             className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]"
             fill="none"
             viewBox="0 0 24 24"
@@ -121,6 +117,7 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
             <button
               key={key}
               onClick={() => setSortBy(key)}
+              aria-pressed={sortBy === key}
               className={`px-3 py-1.5 text-[11px] rounded-sm border transition-all duration-150 ${
                 sortBy === key
                   ? 'border-[var(--accent)]/40 bg-[var(--accent)]/[0.06] text-[var(--accent)]'
@@ -137,43 +134,18 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <ShimmerSkeleton className="w-8 h-8 rounded-full" />
-                  <div>
-                    <ShimmerSkeleton className="h-4 w-20 mb-1" />
-                    <ShimmerSkeleton className="h-3 w-16" />
-                  </div>
-                </div>
-                <div className="text-right space-y-1">
-                  <ShimmerSkeleton className="h-2.5 w-12" />
-                  <ShimmerSkeleton className="h-5 w-16" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[1, 2, 3, 4].map(j => (
-                  <div key={j} className="space-y-1">
-                    <ShimmerSkeleton className="h-2 w-10" />
-                    <ShimmerSkeleton className="h-4.5 w-16" />
-                  </div>
-                ))}
-              </div>
-              <ShimmerSkeleton className="h-2 w-full mt-2" />
-              <div className="flex justify-between items-center pt-2 border-t border-[var(--border)]/30">
-                <ShimmerSkeleton className="h-3.5 w-16" />
-                <ShimmerSkeleton className="h-3.5 w-12" />
-              </div>
-            </div>
+            <VaultCardSkeleton key={i} />
           ))}
         </div>
       ) : sorted.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-12 text-center">
-          <div className="text-3xl mb-3">🔍</div>
+          <div aria-hidden="true" className="text-3xl mb-3">{error && !searchQuery ? '⚠' : '🔍'}</div>
           <p className="text-[13px] text-[var(--text-secondary)]">
             {searchQuery
               ? `No vaults matching "${searchQuery}"`
-              : 'No active vaults found'}
+              : error
+                ? "Couldn't load vaults — please try again shortly"
+                : 'No active vaults found'}
           </p>
         </div>
       ) : (
@@ -187,34 +159,7 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
             <div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="border border-[var(--border)] bg-[var(--panel-bg)] p-5 space-y-4 rounded-sm">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <ShimmerSkeleton className="w-8 h-8 rounded-full" />
-                        <div>
-                          <ShimmerSkeleton className="h-4 w-20 mb-1" />
-                          <ShimmerSkeleton className="h-3 w-16" />
-                        </div>
-                      </div>
-                      <div className="text-right space-y-1">
-                        <ShimmerSkeleton className="h-2.5 w-12" />
-                        <ShimmerSkeleton className="h-5 w-16" />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[1, 2, 3, 4].map(j => (
-                        <div key={j} className="space-y-1">
-                          <ShimmerSkeleton className="h-2 w-10" />
-                          <ShimmerSkeleton className="h-4.5 w-16" />
-                        </div>
-                      ))}
-                    </div>
-                    <ShimmerSkeleton className="h-2 w-full mt-2" />
-                    <div className="flex justify-between items-center pt-2 border-t border-[var(--border)]/30">
-                      <ShimmerSkeleton className="h-3.5 w-16" />
-                      <ShimmerSkeleton className="h-3.5 w-12" />
-                    </div>
-                  </div>
+                  <VaultCardSkeleton key={i} />
                 ))}
               </div>
               <div ref={observerTarget} className="h-2 w-full" />
@@ -226,7 +171,7 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
               </span>
               <button
                 onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                className="text-[11px] text-[var(--accent)]/60 hover:text-[var(--accent)] transition-colors"
+                className="text-[12px] text-[var(--accent)] hover:text-[var(--accent)]/80 transition-colors"
               >
                 ↑ top
               </button>

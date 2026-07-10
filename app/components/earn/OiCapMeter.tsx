@@ -30,7 +30,7 @@ export function OiCapMeter({
   const barColor = useMemo(() => {
     if (utilPct >= 90) return 'var(--short)';
     if (utilPct >= 75) return 'var(--warning)';
-    if (utilPct >= 50) return '#E5A100';
+    if (utilPct >= 50) return 'var(--warning)';
     return 'var(--cyan)';
   }, [utilPct]);
 
@@ -51,7 +51,15 @@ export function OiCapMeter({
   if (compact) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
-        <div className="flex-1 h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
+        <div
+          role="progressbar"
+          aria-label="OI capacity utilization"
+          aria-valuenow={Math.round(utilPct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuetext={`${utilPct.toFixed(0)}% — ${statusLabel}`}
+          className="flex-1 h-1.5 bg-[var(--border)] rounded-full overflow-hidden"
+        >
           <div
             className="h-full rounded-full transition-all duration-700 ease-out"
             style={{
@@ -82,8 +90,8 @@ export function OiCapMeter({
           className="text-[10px] uppercase tracking-[0.15em] font-medium px-2 py-0.5 rounded-sm border"
           style={{
             color: barColor,
-            borderColor: `${barColor}33`,
-            backgroundColor: `${barColor}0A`,
+            borderColor: `color-mix(in srgb, ${barColor} 20%, transparent)`,
+            backgroundColor: `color-mix(in srgb, ${barColor} 4%, transparent)`,
           }}
         >
           {statusLabel}
@@ -91,7 +99,15 @@ export function OiCapMeter({
       </div>
 
       {/* Meter bar */}
-      <div className="relative h-3 bg-[var(--border)] rounded-sm overflow-hidden">
+      <div
+        role="progressbar"
+        aria-label="OI capacity utilization"
+        aria-valuenow={Math.round(utilPct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuetext={`${utilPct.toFixed(1)}% — ${statusLabel}`}
+        className="relative h-3 bg-[var(--border)] rounded-sm overflow-hidden"
+      >
         {/* Segment markers */}
         <div className="absolute inset-0 flex">
           <div className="w-1/2 border-r border-[var(--bg)]/30" />

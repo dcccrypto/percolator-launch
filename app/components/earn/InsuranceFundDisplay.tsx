@@ -54,7 +54,7 @@ export function InsuranceFundDisplay({
       <div className="p-5">
         {/* Header */}
         <div className="flex items-center gap-2 mb-4">
-          <div className="w-6 h-6 rounded-sm bg-[var(--warning)]/10 flex items-center justify-center text-xs">
+          <div aria-hidden="true" className="w-6 h-6 rounded-sm bg-[var(--warning)]/10 flex items-center justify-center text-xs">
             🛡️
           </div>
           <h3
@@ -109,7 +109,7 @@ export function InsuranceFundDisplay({
               By Market
             </div>
             <div className="space-y-2">
-              {stats.markets
+              {[...stats.markets]
                 .sort((a, b) => b.insuranceFund - a.insuranceFund)
                 .slice(0, 5)
                 .map((m) => (
@@ -144,7 +144,7 @@ function CoverageItem({
 }) {
   return (
     <div className="flex items-start gap-2">
-      <span className="text-xs mt-0.5">{icon}</span>
+      <span aria-hidden="true" className="text-xs mt-0.5">{icon}</span>
       <div>
         <div className="text-[12px] text-[var(--text)] font-medium">{label}</div>
         <div className="text-[11px] text-[var(--text-secondary)]">

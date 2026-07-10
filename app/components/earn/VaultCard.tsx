@@ -56,7 +56,7 @@ export function VaultCard({ vault }: VaultCardProps) {
             />
             <MetricCell
               label="Max Leverage"
-              value={`${vault.maxLeverage || 10}×`}
+              value={`${vault.maxLeverage ?? 10}×`}
             />
           </div>
 
@@ -72,7 +72,7 @@ export function VaultCard({ vault }: VaultCardProps) {
             <span className="text-[11px] text-[var(--text-secondary)]">
               Fee: {(vault.tradingFeeBps / 100).toFixed(2)}%
             </span>
-            <span className="text-[11px] font-medium text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <span className="text-[11px] font-medium text-[var(--accent)] opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-visible:opacity-100 transition-opacity duration-200">
               Deposit →
             </span>
           </div>
