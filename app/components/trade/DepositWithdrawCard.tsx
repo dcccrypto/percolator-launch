@@ -289,8 +289,9 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
         <div className="relative">
           <input
             type="text"
+            inputMode="decimal"
             value={amount}
-            onChange={(e) => { 
+            onChange={(e) => {
               const newValue = sanitizeDecimalInput(e.target.value);
               if (newValue !== amount) {
                 maxRawRef.current = null;

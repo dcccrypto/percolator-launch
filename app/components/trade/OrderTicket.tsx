@@ -697,6 +697,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           <input
             id="order-size-input"
             type="text"
+            inputMode="decimal"
             value={sizeInput}
             onChange={(e) => handleSizeChange(e.target.value)}
             placeholder={sizeUnit === "token" ? "0.000000" : "$0.00"}
@@ -758,6 +759,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             <input
               id="order-leverage-input"
               type="text"
+              inputMode="numeric"
               value={leverageText}
               onChange={(e) => {
                 const raw = sanitizeDecimalInput(e.target.value);
