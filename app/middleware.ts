@@ -23,7 +23,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
-import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
+import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
 // Two tiers: RPC proxy gets a higher limit since Solana web3.js generates many calls per page load.

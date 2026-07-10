@@ -118,3 +118,10 @@ app/.env.vercel-prod
 *.preseed.bak
 docs/NORTH-STAR.md
 docs/superpowers/
+
+# session junk (auto-added by mistake)
+.claude/
+*.bak.*
+/BUG-HUNT-FINDINGS-*.md
+/DEFINITIVE-PLAN-*.md
+/MASTER-PLAN-*.md
