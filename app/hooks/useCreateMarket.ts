@@ -28,8 +28,6 @@ import {
   encodeSetNftProgramId,
   encodeCreateLpVaultV17,
   encodeStakeInitPool,
-  encodeTopUpBackingBucket,
-  MAX_BACKING_BUCKET_EXPIRY_SLOT,
   CrankAction,
   detectDexType,
   parseDexPool,
@@ -41,7 +39,6 @@ import {
   ACCOUNTS_INIT_MATCHER_CTX,
   ACCOUNTS_INIT_USER,
   ACCOUNTS_CREATE_LP_VAULT,
-  ACCOUNTS_TOP_UP_BACKING_BUCKET,
   buildAccountMetas,
   WELL_KNOWN,
   buildIx,
@@ -88,17 +85,6 @@ export const V17_MAX_PORTFOLIO_ASSETS = 14;
 // tier and made every InitMarket revert with InvalidSlabLen while over-charging ~0.67 SOL rent.
 export const DEFAULT_SLAB_SIZE = v17MarketAccountLen(V17_MAX_PORTFOLIO_ASSETS); // 26_364 bytes (cap-14)
 const ALL_ZEROS_FEED = "0".repeat(64);
-
-// BACKING-BUCKET-FRESHNESS DEADLOCK PREVENTION (2026-07-09): dust amount used to
-// seed BOTH backing-bucket domains (long=2*assetIndex, short=2*assetIndex+1) of
-// asset 0 to Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT via TopUpBackingBucket, inside
-// Step 3 below, right after DepositCollateral lands (buckets are still Empty —
-// nothing in Steps 0-5 ever calls TradeCpi). See the Step 3 block for the full
-// root-cause writeup. No engine-enforced minimum floor
-// (percolator/src/v16.rs deposit_fresh_counterparty_backing_not_atomic only
-// requires amount != 0) — 0.01 test-USDC is real (not spoofed) collateral and
-// negligible next to lpCollateral/insuranceAmount.
-const BACKING_BUCKET_DUST_AMOUNT = 10_000n; // 0.01 test-USDC (6 decimals)
 
 /**
  * PERC-465: Fetch the current USD price for a token from Jupiter price API.
@@ -1202,10 +1188,7 @@ export function useCreateMarket() {
           // Pre-flight: verify user has enough tokens for LP deposit + insurance top-up.
           // Fixes #757/#758 — pre-fund only checked seed amount (500), but TX4 also
           // needs lpCollateral + insuranceAmount (default 1,000 + 100 = 1,100 more).
-          // Also covers the two backing-bucket dust deposits (long+short domains,
-          // see BACKING_BUCKET_DUST_AMOUNT above) so the deadlock-prevention TopUp
-          // below never fails on a wallet funded to the exact old minimum.
-          const tx4Required = params.lpCollateral + params.insuranceAmount + 2n * BACKING_BUCKET_DUST_AMOUNT;
+          const tx4Required = params.lpCollateral + params.insuranceAmount;
           let tx4Balance = 0n;
           try {
             const tx4Acct = await getAccount(connection, userAta);
@@ -1332,82 +1315,6 @@ export function useCreateMarket() {
             setState((s) => ({ ...s, txSigs: [...s.txSigs, depositSig] }));
           } else {
             console.log("[useCreateMarket] Step 3 deposit already landed (portfolio capital >= target) — skipping.");
-          }
-
-          // ── Backing-bucket-freshness deadlock prevention (2026-07-09) ──────────
-          // ROOT CAUSE (percolator/src/v16.rs prepare_counterparty_backing_add_delta,
-          // ~line 755): a source-domain backing bucket that is Fresh-but-lapsed
-          // (current_slot >= expiry_slot) permanently reverts Custom(21) LockActive
-          // the next time ANYTHING requests a new (later) finite expiry for it —
-          // which happens AUTOMATICALLY inside the engine's loss-reserve path
-          // (reserve_new_capital_backed_loss_for_source_domain_not_atomic) the
-          // first time either side of a trade realizes a genuine loss. The only
-          // escape (expire_source_backing_bucket_not_atomic) is reachable exclusively
-          // from a Resolved-market terminal close — dead code for a Live market.
-          //
-          // CreateLpVault (Step 4 below) does NOT protect against this: it only
-          // creates the LP-vault registry/mint PDAs (handle_create_lp_vault,
-          // v16_program.rs:11646) — it never calls DepositToLpVault, so it never
-          // touches a backing bucket. Seeding only ever happens if/when someone
-          // later, optionally, calls the permissionless DepositToLpVault from the
-          // Earn page (by design — "anyone, including the creator, later" — see the
-          // Step 4 comment) — not guaranteed for any given market, and even then
-          // only for domain 0 (long); there is no equivalent for domain 1 (short).
-          //
-          // FIX: explicitly seed BOTH domains (long=0, short=1) to
-          // Fresh@MAX_BACKING_BUCKET_EXPIRY_SLOT (u64::MAX/2) here, deterministically,
-          // as part of market creation — while both buckets are still Empty (no
-          // Step 0-5 instruction ever calls TradeCpi). fresh_counterparty_backing_
-          // expiry_slot() then always returns this same MAX value, so every later
-          // automatic loss-reserve request matches the existing expiry and hits the
-          // harmless no-op arm — the LockActive trap becomes unreachable for this
-          // market's lifetime. backing_bucket_authority defaults to config.marketauth
-          // at InitMarket (== wallet.publicKey, the creator, set in Step 0) and
-          // nothing in Steps 0-5 ever rotates it (Stake InitPool, Step 5, makes no
-          // wrapper CPI at all — verified against percolator-stake/src/processor.rs),
-          // so the connected wallet can sign this here with no prior authority setup.
-          //
-          // v17-only (backing-bucket domains are a v16/v17 engine concept; v12
-          // legacy markets have no equivalent trap or instruction). Best-effort/
-          // non-fatal like the insurance top-up above: a transient RPC failure here
-          // must not strand an otherwise-successful market creation — a retry of
-          // this step (or a later maintainer backfill) is safe because a repeat
-          // TopUp against an already-Fresh-at-MAX bucket hits the harmless no-op arm.
-          if (isV17SlabDeposit) {
-            try {
-              const backingVaultToken = vaultTokenAta;
-              const LONG_DOMAIN = 0; // 2*assetIndex, assetIndex=0
-              const SHORT_DOMAIN = 1; // 2*assetIndex+1
-              const backingIxs: TransactionInstruction[] = [];
-              for (const domain of [LONG_DOMAIN, SHORT_DOMAIN]) {
-                backingIxs.push(
-                  buildIx({
-                    programId,
-                    keys: buildAccountMetas(ACCOUNTS_TOP_UP_BACKING_BUCKET, [
-                      wallet.publicKey, slabPk, userAta, backingVaultToken, WELL_KNOWN.tokenProgram,
-                    ]),
-                    data: encodeTopUpBackingBucket({
-                      domain,
-                      amount: BACKING_BUCKET_DUST_AMOUNT.toString(),
-                      expirySlot: MAX_BACKING_BUCKET_EXPIRY_SLOT.toString(),
-                    }),
-                  }),
-                );
-              }
-              const backingSig = await sendTx({
-                connection, wallet,
-                instructions: backingIxs,
-                computeUnits: 200_000,
-              });
-              setState((s) => ({ ...s, txSigs: [...s.txSigs, backingSig] }));
-            } catch (backingBucketErr) {
-              console.warn(
-                "[useCreateMarket] Step 3 backing-bucket seeding (deadlock prevention) failed — " +
-                "market is otherwise live, but domains 0/1 may still be vulnerable to the freshness " +
-                "deadlock until this is retried or backfilled:",
-                backingBucketErr,
-              );
-            }
           }
 
           // TopUpInsurance + final crank — NOT part of the proven on-chain sequence
