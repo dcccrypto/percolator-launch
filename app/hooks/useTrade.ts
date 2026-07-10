@@ -126,12 +126,19 @@ async function findV17Portfolio(
       ],
     });
     if (accounts.length === 0) return null;
+
+    // getProgramAccounts() does not guarantee stable result ordering.
+    // Use the same canonical pubkey ordering as deposit and withdraw
+    // so every owner+market flow targets the same portfolio account.
+    const sorted = [...accounts].sort((a, b) =>
+      a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
+    );
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
     // memcmp filters are advisory server-side; don't trust them blindly.
-    const data = Buffer.from(accounts[0].account.data);
+    const data = Buffer.from(sorted[0].account.data);
     const portfolio = parsePortfolioV17(data);
     if (!portfolio.owner.equals(ownerPk)) return null;
-    return accounts[0].pubkey;
+    return sorted[0].pubkey;
   } catch {
     return null;
   }
