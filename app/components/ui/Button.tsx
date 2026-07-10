@@ -8,8 +8,16 @@ import {
 
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement> {
-  /** Visual style variant. Defaults to `secondary`. */
-  variant?: "primary" | "secondary" | "destructive";
+  /** Visual style variant. Defaults to `secondary`.
+   *
+   * `glow` is an elevated ghost treatment (transparent fill, brand-purple
+   * hairline border, HUD corner brackets, press-scale feedback) for
+   * moments that need extra visual weight — e.g. primary CTAs on hero /
+   * marketing surfaces. Reproduces the legacy `GlowButton` look via the
+   * shared `--accent` brand-purple token so it stays in sync with theme
+   * retones automatically.
+   */
+  variant?: "primary" | "secondary" | "destructive" | "glow";
   /** Size preset. Defaults to `md`. */
   size?: "sm" | "md" | "lg";
   /** Show a spinner and disable interaction while an async action is in progress. */
@@ -37,9 +45,25 @@ const iconSizeClass: Record<string, string> = {
 };
 
 const variantClass: Record<string, string> = {
+  // Reads the retoned --btn-primary-* tokens (brand purple) from
+  // globals.css — no color values live here.
   primary: "btn-primary",
   secondary: "btn-secondary",
   destructive: "btn-destructive",
+  // Elevated purple-ghost treatment: transparent fill, hairline
+  // --accent border, HUD corner brackets, press-scale feedback.
+  // Mirrors GlowButton's `primary` variant but sourced from the shared
+  // brand-purple token so it can't drift from theme retones.
+  glow: [
+    "border",
+    "border-[var(--accent)]/40",
+    "bg-transparent",
+    "text-[var(--accent)]",
+    "hud-btn-corners",
+    "hover:border-[var(--accent)]/70",
+    "hover:bg-[var(--accent)]/[0.08]",
+    "active:scale-[0.98]",
+  ].join(" "),
 };
 
 const spinnerSize: Record<string, number> = {
@@ -66,6 +90,9 @@ const spinnerSize: Record<string, number> = {
  *
  * @example Loading state
  * <Button variant="primary" loading>Submitting…</Button>
+ *
+ * @example Elevated ghost CTA (HUD corner brackets, brand-purple hairline)
+ * <Button variant="glow" size="lg">Enter Playground</Button>
  */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   (

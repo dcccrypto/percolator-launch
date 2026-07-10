@@ -105,7 +105,7 @@ function WalletPageInner() {
     <WalletLayout>
       <ScrollReveal stagger={0.08}>
         <div className="grid gap-4 lg:grid-cols-2">
-          <GlassCard glow accent>
+          <GlassCard accent>
             <div className="flex items-start justify-between gap-6">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">

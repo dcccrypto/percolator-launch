@@ -27,6 +27,8 @@
   --long: #14F195;
   --short: #FF3B5C;
   --warning: #E5A100;
+  --good: #14F195;
+  --critical: #FF3B5C;
 
   /* Timing */
   --timing-fast: 150ms;
@@ -36,6 +38,28 @@
   /* HUD Lines */
   --hud-line: rgba(153,69,255,0.20);
   --hud-line-hover: rgba(153,69,255,0.45);
+
+  /* ─── Elevation / Shadow Scale — neutral depth, no color halo ─── */
+  --shadow-none: none;
+  --shadow-xs:   0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-sm:   0 2px 6px rgba(0, 0, 0, 0.45);
+  --shadow-md:   0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-lg:   0 16px 48px rgba(0, 0, 0, 0.60);
+  --shadow-xl:   0 32px 80px rgba(0, 0, 0, 0.70);
+
+  /* ─── Radius Scale — kept sharp/small; this is a terminal, not rounded-lg SaaS ─── */
+  --radius-none: 0px;
+  --radius-xs:   2px;
+  --radius-sm:   3px;
+  --radius-md:   4px;
+  --radius-lg:   6px;
+
+  /* ─── Type Scale — size / line-height / letter-spacing per step ─── */
+  --fs-display: 3.5rem;    --lh-display: 1.05; --ls-display: -0.02em;
+  --fs-h1:      2.25rem;   --lh-h1:      1.15; --ls-h1:      -0.02em;
+  --fs-h2:      1.5rem;    --lh-h2:      1.25; --ls-h2:      -0.01em;
+  --fs-body:    0.875rem;  --lh-body:    1.5;  --ls-body:    0em;
+  --fs-label:   0.6875rem; --lh-label:   1.3;  --ls-label:   0.08em;
 
   /* ─── Button Tokens ─── */
 
@@ -64,15 +88,21 @@
   --btn-fs-lg:   16px;
   --btn-icon-lg: 18px;
 
-  /* ─── PRIMARY ─── (sky-blue — main CTA) */
-  --btn-primary-bg:           #0ea5e9;
-  --btn-primary-bg-hover:     #38bdf8;
-  --btn-primary-bg-active:    #0284c7;
+  /* ─── PRIMARY ─── (brand purple — main CTA)
+     Retoned off var(--accent) (#9945FF, 4.46:1 vs --btn-primary-text) and
+     var(--accent-muted) (#7B38CC, 3.15:1) — both fell below WCAG AA's 4.5:1
+     floor for text-on-fill. All three interaction states below are literal,
+     button-scoped tones (not var(--accent)/var(--accent-muted)) chosen so
+     DEFAULT/HOVER/ACTIVE each independently clear 4.5:1 against
+     --btn-primary-text, with the pressed state never dropping to the floor. */
+  --btn-primary-bg:           #AD62FF; /* 5.73:1 */
+  --btn-primary-bg-hover:     #C280FF; /* 7.51:1 */
+  --btn-primary-bg-active:    #A052FF; /* 4.94:1 — pressed, still clears AA */
   --btn-primary-text:         #06070a;
   --btn-primary-border:       transparent;
-  --btn-primary-shadow:       0 0 16px rgba(56, 189, 248, 0.35);
-  --btn-primary-shadow-hover: 0 0 28px rgba(56, 189, 248, 0.55);
-  --btn-primary-focus-ring:   rgba(56, 189, 248, 0.60);
+  --btn-primary-shadow:       var(--shadow-none);
+  --btn-primary-shadow-hover: var(--shadow-xs);
+  --btn-primary-focus-ring:   rgba(173, 98, 255, 0.55);
 
   /* ─── SECONDARY ─── (ghost / outlined) */
   --btn-secondary-bg:           rgba(255, 255, 255, 0.04);
@@ -103,9 +133,6 @@
   --btn-disabled-border: rgba(255, 255, 255, 0.06);
   --btn-disabled-cursor: not-allowed;
   --btn-disabled-shadow: none;
-
-  /* Ambient glow */
-  --glow-ambient: rgba(153, 69, 255, 0.03);
 }
 
 /* ─── Light Mode Overrides ─── */
@@ -132,7 +159,13 @@
   --hud-line:       rgba(153, 69, 255, 0.15);
   --hud-line-hover: rgba(153, 69, 255, 0.35);
   --cyan-muted:     rgba(20, 241, 149, 0.10);
-  --glow-ambient:   rgba(153, 69, 255, 0.04);
+
+  /* Elevation — lighter neutral shadows read correctly on a white surface */
+  --shadow-xs: 0 1px 2px rgba(13, 14, 21, 0.06);
+  --shadow-sm: 0 2px 6px rgba(13, 14, 21, 0.08);
+  --shadow-md: 0 8px 24px rgba(13, 14, 21, 0.10);
+  --shadow-lg: 0 16px 48px rgba(13, 14, 21, 0.14);
+  --shadow-xl: 0 32px 80px rgba(13, 14, 21, 0.18);
 
   /* Buttons: secondary needs higher contrast on light */
   --btn-secondary-bg:           rgba(0, 0, 0, 0.04);
@@ -299,11 +332,6 @@ body::before {
   100% { opacity: 0.5; }
 }
 
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(153, 69, 255, 0.08); }
-  50% { box-shadow: 0 0 40px rgba(153, 69, 255, 0.15); }
-}
-
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
@@ -346,20 +374,6 @@ body::before {
   100% {
     transform: translateX(100%);
   }
-}
-
-
-.deposit-shimmer {
-  animation: pulse-glow 2s ease-in-out infinite;
-  position: relative;
-  overflow: hidden;
-}
-.deposit-shimmer::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(153, 69, 255, 0.15), transparent);
-  animation: shimmer-sweep 2s ease-in-out infinite;
 }
 
 
@@ -633,57 +647,6 @@ input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
   color: var(--text);
 }
 
-/* ─── Cursor Glow (set via JS) ─── */
-.cursor-glow {
-  position: fixed;
-  width: 500px;
-  height: 500px;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: -1;
-  background: radial-gradient(circle, rgba(153, 69, 255, 0.08) 0%, transparent 70%);
-  transform: translate(-50%, -50%);
-  transition: opacity 0.3s ease;
-  opacity: 0;
-}
-.cursor-glow.active {
-  opacity: 1;
-}
-
-/* ─── Hero Data Stream Background ─── */
-.hero-data-stream {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  overflow: hidden;
-  opacity: 0.4;
-}
-.hero-data-stream::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse 600px 200px at 20% 50%, rgba(153, 69, 255, 0.06), transparent),
-    radial-gradient(ellipse 600px 200px at 80% 50%, rgba(20, 241, 149, 0.04), transparent);
-}
-.hero-data-stream::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 800px;
-  height: 800px;
-  background: radial-gradient(circle, rgba(153, 69, 255, 0.05) 0%, transparent 70%);
-  animation: hero-pulse 6s ease-in-out infinite;
-}
-
-@keyframes hero-pulse {
-  0%, 100% { opacity: 0.3; transform: translate(-50%, -50%) scale(1); }
-  50% { opacity: 0.6; transform: translate(-50%, -50%) scale(1.05); }
-}
-
 /* ─── Hero Horizontal Rules ─── */
 .hero-hud-lines {
   position: absolute;
@@ -770,48 +733,6 @@ input[type="range"].leverage-slider:focus-visible::-moz-range-thumb {
 
 @keyframes border-spin {
   to { transform: rotate(360deg); }
-}
-
-/* ─── Hero Refresh Animations (PERC-158) ─── */
-@keyframes market-card-float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
-}
-
-.animate-market-card-float {
-  animation: market-card-float 4s ease-in-out infinite;
-  will-change: transform;
-}
-
-@keyframes hero-particle-rise {
-  0% { transform: translateY(0) translateX(0); opacity: 0; }
-  10% { opacity: var(--particle-opacity, 0.3); }
-  90% { opacity: var(--particle-opacity, 0.3); }
-  100% { transform: translateY(-100vh) translateX(var(--particle-drift, 20px)); opacity: 0; }
-}
-
-.hero-particle {
-  animation: hero-particle-rise var(--particle-duration, 10s) ease-in-out infinite;
-  animation-delay: var(--particle-delay, 0s);
-}
-
-@keyframes chip-float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-6px); }
-}
-
-@keyframes chip-float-reverse {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(6px); }
-}
-
-.hero-chip-float {
-  animation: chip-float 3.5s ease-in-out infinite;
-}
-
-.hero-chip-float-reverse {
-  animation: chip-float-reverse 3.5s ease-in-out infinite;
-  animation-delay: 1.5s;
 }
 
 /* ─── Reduced Motion ─── */
