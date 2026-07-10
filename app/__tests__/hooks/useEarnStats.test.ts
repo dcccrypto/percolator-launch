@@ -45,12 +45,10 @@ describe('EarnStats types', () => {
       volume24h: 25000,
       tradingFeeBps: 10,
       maxLeverage: 20,
-      estimatedApyPct: 15.5,
       oiUtilPct: 10,
     };
 
     expect(sampleVault.slabAddress).toBe('test-address');
-    expect(sampleVault.estimatedApyPct).toBe(15.5);
     expect(sampleVault.oiUtilPct).toBe(10);
   });
 
@@ -59,7 +57,6 @@ describe('EarnStats types', () => {
       tvl: 100000,
       totalOI: 50000,
       maxOI: 500000,
-      avgApyPct: 20.5,
       oiUtilPct: 10,
       totalInsurance: 10000,
       markets: [],
@@ -67,7 +64,6 @@ describe('EarnStats types', () => {
     };
 
     expect(sampleStats.tvl).toBe(100000);
-    expect(sampleStats.avgApyPct).toBe(20.5);
     expect(sampleStats.dailyFeeRevenue).toBe(500);
   });
 });

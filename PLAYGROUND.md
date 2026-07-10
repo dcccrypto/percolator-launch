@@ -213,7 +213,7 @@ app/
 **Key trade components** (`app/components/trade/`):
 `OrderTicket` (place trades) · `PositionsDock` / `PositionPanel` (open positions) ·
 `TradingChart` (price chart) · `PositionNftPanel` (wrap/transfer/burn position NFTs) ·
-`AccountRiskSidebar` · `ClosePositionModal` · `TradeConfirmationModal` ·
+`ClosePositionModal` · `TradeConfirmationModal` ·
 `FundingRateCard` · `MarketStatsCard` · `EngineHealthCard` / `CrankHealthCard`.
 
 **Key hooks** (`app/hooks/`):

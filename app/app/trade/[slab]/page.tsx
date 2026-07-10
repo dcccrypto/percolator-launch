@@ -8,12 +8,10 @@ import { UsdToggleProvider, useUsdToggle } from "@/components/providers/UsdToggl
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { PositionNftPanel } from "@/components/trade/PositionNftPanel";
 import { PositionsDock } from "@/components/trade/PositionsDock";
-import { MarketBookCard } from "@/components/trade/MarketBookCard";
 import { TradingChart } from "@/components/trade/TradingChart";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
-import { useOrderBookVisibility } from "@/hooks/useOrderBookVisibility";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { formatUsdFromNumber } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
@@ -35,8 +33,8 @@ import TradingPageLoading from "./loading";
  *   custom property + styled-components (this codebase has neither
  *   styled-components nor a CSS-in-JS layer — Tailwind + plain `style` is
  *   the native equivalent here). Areas: MarketBar (top strip) / Chart
- *   (dominant center) / Orderbook (optional column, hidden by default) /
- *   OrderTicket (~340px right rail) / PositionsDock (bottom-docked tabs).
+ *   (dominant center) / OrderTicket (~340px right rail) / PositionsDock
+ *   (bottom-docked tabs).
  * - Desktop vs. mobile is a JS boolean fork (`useIsLargeScreen`), not a CSS
  *   dual-mount — same reasoning the pre-rebuild page already used for
  *   `TradingChart` specifically (avoid double-mounting live-subscribing
@@ -306,7 +304,6 @@ function MobileOrderSheet({ slab }: { slab: string }) {
 
 function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
-  const [orderBookVisible, toggleOrderBook] = useOrderBookVisibility();
 
   const { engine, config, header, loading: slabLoading, error: slabError } = useSlabState();
   useAdvanceOraclePhase(slab);
@@ -484,21 +481,11 @@ function TradePageInner({ slab }: { slab: string }) {
   const hasNoPriceData = !slabLoading && !!config && priceUsd == null;
 
   // Desktop grid — named areas (dYdX pattern, see file-header comment).
-  // Orderbook column width collapses to 0 when hidden; the area itself is
-  // still declared in the template (simpler than swapping two full
-  // template strings) but nothing is placed in it.
   const gridStyle: CSSProperties = {
     gridTemplateAreas: '"MarketBar MarketBar" "Chart OrderTicket" "PositionsDock OrderTicket"',
     gridTemplateColumns: "minmax(0,1fr) 340px",
     gridTemplateRows: "auto minmax(0,1fr) minmax(220px,340px)",
   };
-  // When the order book is visible it takes its own column between Chart and
-  // OrderTicket — swap in a 3-column template rather than trying to make one
-  // template string cover both states.
-  if (orderBookVisible) {
-    gridStyle.gridTemplateAreas = '"MarketBar MarketBar MarketBar" "Chart Orderbook OrderTicket" "PositionsDock PositionsDock OrderTicket"';
-    gridStyle.gridTemplateColumns = "minmax(0,1fr) 220px 340px";
-  }
 
   return (
     <RenderProfiler id="TradePageInner">
@@ -557,12 +544,6 @@ function TradePageInner({ slab }: { slab: string }) {
             </ErrorBoundary>
           </div>
 
-          {orderBookVisible && (
-            <div style={{ gridArea: "Orderbook" }} className="min-w-0 min-h-0 overflow-y-auto border border-[var(--border)] bg-[var(--panel-bg)]">
-              <ErrorBoundary label="MarketBookCard"><MarketBookCard /></ErrorBoundary>
-            </div>
-          )}
-
           <div style={{ gridArea: "OrderTicket" }} className="min-w-0 min-h-0">
             <RenderProfiler id="OrderTicketRail">
               <OrderTicketRail slab={slab} framed />
@@ -576,13 +557,6 @@ function TradePageInner({ slab }: { slab: string }) {
                   <ErrorBoundary label="PositionsDock"><PositionsDock slabAddress={slab} /></ErrorBoundary>
                 </div>
               </RenderProfiler>
-              <button
-                type="button"
-                onClick={toggleOrderBook}
-                className="mr-1.5 mt-1.5 shrink-0 self-start rounded-sm border border-[var(--border)] px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-[var(--text-dim)] transition-colors duration-150 hover:border-[var(--accent)]/40 hover:text-[var(--text-secondary)]"
-              >
-                {orderBookVisible ? "Hide book" : "Show book"}
-              </button>
             </div>
           </div>
         </div>

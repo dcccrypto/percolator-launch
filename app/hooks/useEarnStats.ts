@@ -35,8 +35,6 @@ export interface MarketVaultInfo {
   tradingFeeBps: number;
   /** Max leverage */
   maxLeverage: number;
-  /** Annualised APY estimate based on fee revenue */
-  estimatedApyPct: number;
   /** OI utilization percentage (totalOI / maxOI × 100) */
   oiUtilPct: number;
   /** Collateral token decimals */
@@ -50,8 +48,6 @@ export interface EarnStats {
   totalOI: number;
   /** Platform-wide max OI capacity */
   maxOI: number;
-  /** Platform-wide average APY */
-  avgApyPct: number;
   /** Platform-wide OI utilization */
   oiUtilPct: number;
   /** Insurance fund total */
@@ -66,7 +62,6 @@ const DEFAULT_STATS: EarnStats = {
   tvl: 0,
   totalOI: 0,
   maxOI: 0,
-  avgApyPct: 0,
   oiUtilPct: 0,
   totalInsurance: 0,
   markets: [],
@@ -108,7 +103,6 @@ function generateMockStats(): EarnStats {
       volume24h: 128_450,
       tradingFeeBps: 10,
       maxLeverage: 20,
-      estimatedApyPct: 18.7,
       oiUtilPct: 18.1, decimals: 9,
     },
     {
@@ -123,7 +117,6 @@ function generateMockStats(): EarnStats {
       volume24h: 89_200,
       tradingFeeBps: 15,
       maxLeverage: 10,
-      estimatedApyPct: 24.3,
       oiUtilPct: 13.0, decimals: 6,
     },
     {
@@ -138,7 +131,6 @@ function generateMockStats(): EarnStats {
       volume24h: 67_300,
       tradingFeeBps: 15,
       maxLeverage: 10,
-      estimatedApyPct: 31.2,
       oiUtilPct: 18.8, decimals: 6,
     },
     {
@@ -153,7 +145,6 @@ function generateMockStats(): EarnStats {
       volume24h: 41_600,
       tradingFeeBps: 12,
       maxLeverage: 15,
-      estimatedApyPct: 15.8,
       oiUtilPct: 12.4, decimals: 6,
     },
   ];
@@ -167,16 +158,10 @@ function generateMockStats(): EarnStats {
     0,
   );
 
-  const avgApy =
-    markets.length > 0
-      ? markets.reduce((s, m) => s + m.estimatedApyPct, 0) / markets.length
-      : 0;
-
   return {
     tvl: tvl * 150, // Convert SOL to rough USD at $150
     totalOI,
     maxOI,
-    avgApyPct: avgApy,
     oiUtilPct: maxOI > 0 ? (totalOI / maxOI) * 100 : 0,
     totalInsurance: totalInsurance * 150,
     markets,
@@ -391,10 +376,6 @@ function buildMarketVaultInfo(
   const maxOI = Math.max(rawMaxOI, totalOI);
   const oiUtilPct = maxOI > 0 ? Math.min((totalOI / maxOI) * 100, 100) : 0;
 
-  const dailyFees = (volume24h * tradingFeeBps) / 10_000;
-  const annualFees = dailyFees * 365;
-  const estimatedApyPct = vaultUsd > 0 ? Math.min((annualFees / vaultUsd) * 100, 999) : 0;
-
   return {
     slabAddress: slab,
     symbol,
@@ -407,7 +388,6 @@ function buildMarketVaultInfo(
     volume24h,
     tradingFeeBps,
     maxLeverage,
-    estimatedApyPct,
     oiUtilPct,
     decimals,
   } satisfies MarketVaultInfo;
@@ -545,16 +525,10 @@ export function useEarnStats() {
         (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
         0,
       );
-      const avgApy =
-        markets.length > 0
-          ? markets.reduce((s, m) => s + m.estimatedApyPct, 0) / markets.length
-          : 0;
-
       setStats({
         tvl,
         totalOI,
         maxOI,
-        avgApyPct: avgApy,
         oiUtilPct: maxOI > 0 ? (totalOI / maxOI) * 100 : 0,
         totalInsurance,
         markets,
