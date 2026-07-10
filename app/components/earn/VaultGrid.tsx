@@ -86,12 +86,14 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
         <div className="relative w-full sm:w-64">
           <input
             type="text"
+            aria-label="Search markets"
             placeholder="Search markets..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full h-9 px-3 pl-8 text-[13px] bg-[var(--panel-bg)] border border-[var(--border)] rounded-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]/30 transition-colors"
           />
           <svg
+            aria-hidden="true"
             className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]"
             fill="none"
             viewBox="0 0 24 24"
@@ -121,6 +123,7 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
             <button
               key={key}
               onClick={() => setSortBy(key)}
+              aria-pressed={sortBy === key}
               className={`px-3 py-1.5 text-[11px] rounded-sm border transition-all duration-150 ${
                 sortBy === key
                   ? 'border-[var(--accent)]/40 bg-[var(--accent)]/[0.06] text-[var(--accent)]'
@@ -226,7 +229,7 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
               </span>
               <button
                 onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                className="text-[11px] text-[var(--accent)]/60 hover:text-[var(--accent)] transition-colors"
+                className="text-[12px] text-[var(--accent)] hover:text-[var(--accent)]/80 transition-colors"
               >
                 ↑ top
               </button>

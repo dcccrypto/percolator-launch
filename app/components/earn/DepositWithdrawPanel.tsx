@@ -282,10 +282,10 @@ export function DepositWithdrawPanel({
           </p>
 
           {claimError && (
-            <p className="mb-2 text-[11px] text-[var(--short)]">{claimError}</p>
+            <p role="alert" className="mb-2 text-[11px] text-[var(--short)]">{claimError}</p>
           )}
           {claimSuccess && (
-            <p className="mb-2 text-[11px] text-[var(--cyan)]">{claimSuccess}</p>
+            <p role="status" aria-live="polite" className="mb-2 text-[11px] text-[var(--cyan)]">{claimSuccess}</p>
           )}
 
           <GlowButton
@@ -308,11 +308,12 @@ export function DepositWithdrawPanel({
         {/* Amount input */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
-            <label className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+            <label htmlFor="earn-amount-input" className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-secondary)]">
               {tab === 'deposit' ? 'Deposit Amount' : 'LP Tokens to Burn'}
             </label>
             <button
               onClick={handleSetMax}
+              aria-label={`Set maximum amount: ${displayMaxAmount} ${tab === 'deposit' ? collateralSymbol : 'LP'}`}
               className="text-[10px] text-[var(--accent)] hover:text-[var(--accent)]/80 transition-colors"
             >
               Max: {displayMaxAmount} {tab === 'deposit' ? collateralSymbol : 'LP'}
@@ -321,6 +322,7 @@ export function DepositWithdrawPanel({
 
           <div className="relative">
             <input
+              id="earn-amount-input"
               type="text"
               inputMode="decimal"
               placeholder="0.00"
@@ -451,12 +453,12 @@ export function DepositWithdrawPanel({
 
         {/* Error / Success */}
         {txError && (
-          <div className="mb-4 p-3 bg-[var(--short)]/5 border border-[var(--short)]/20 rounded-sm">
+          <div role="alert" className="mb-4 p-3 bg-[var(--short)]/5 border border-[var(--short)]/20 rounded-sm">
             <p className="text-[11px] text-[var(--short)]">{txError}</p>
           </div>
         )}
         {txSuccess && (
-          <div className="mb-4 p-3 bg-[var(--cyan)]/5 border border-[var(--cyan)]/20 rounded-sm">
+          <div role="status" aria-live="polite" className="mb-4 p-3 bg-[var(--cyan)]/5 border border-[var(--cyan)]/20 rounded-sm">
             <p className="text-[11px] text-[var(--cyan)]">{txSuccess}</p>
           </div>
         )}

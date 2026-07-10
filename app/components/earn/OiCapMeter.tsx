@@ -51,7 +51,15 @@ export function OiCapMeter({
   if (compact) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
-        <div className="flex-1 h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
+        <div
+          role="progressbar"
+          aria-label="OI capacity utilization"
+          aria-valuenow={Math.round(utilPct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuetext={`${utilPct.toFixed(0)}% — ${statusLabel}`}
+          className="flex-1 h-1.5 bg-[var(--border)] rounded-full overflow-hidden"
+        >
           <div
             className="h-full rounded-full transition-all duration-700 ease-out"
             style={{
@@ -91,7 +99,15 @@ export function OiCapMeter({
       </div>
 
       {/* Meter bar */}
-      <div className="relative h-3 bg-[var(--border)] rounded-sm overflow-hidden">
+      <div
+        role="progressbar"
+        aria-label="OI capacity utilization"
+        aria-valuenow={Math.round(utilPct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuetext={`${utilPct.toFixed(1)}% — ${statusLabel}`}
+        className="relative h-3 bg-[var(--border)] rounded-sm overflow-hidden"
+      >
         {/* Segment markers */}
         <div className="absolute inset-0 flex">
           <div className="w-1/2 border-r border-[var(--bg)]/30" />

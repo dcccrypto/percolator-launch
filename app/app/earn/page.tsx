@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useEarnStats } from '@/hooks/useEarnStats';
 import { ScrollReveal } from '@/components/ui/ScrollReveal';
@@ -134,11 +134,9 @@ const InsuranceFundDisplay = dynamic(
 );
 
 export default function EarnPage() {
-  useEffect(() => {
-    document.title = 'Earn — Percolator';
-  }, []);
-
   const { stats, loading, error } = useEarnStats();
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const showError = error && error !== dismissedError;
 
   return (
     <div className="min-h-[calc(100dvh-48px)] animate-fade-in">
@@ -232,9 +230,19 @@ export default function EarnPage() {
         </div>
 
         {/* Error toast */}
-        {error && (
-          <div className="fixed bottom-4 right-4 z-50 bg-[var(--short)]/10 border border-[var(--short)]/30 rounded-sm px-4 py-3 text-[12px] text-[var(--short)]">
-            {error}
+        {showError && (
+          <div
+            role="alert"
+            className="fixed bottom-4 right-4 z-50 flex items-start gap-3 bg-[var(--short)]/10 border border-[var(--short)]/30 rounded-sm px-4 py-3 text-[12px] text-[var(--short)]"
+          >
+            <span>{error}</span>
+            <button
+              onClick={() => setDismissedError(error)}
+              aria-label="Dismiss error"
+              className="text-[var(--short)]/70 hover:text-[var(--short)] transition-colors"
+            >
+              ✕
+            </button>
           </div>
         )}
       </div>
