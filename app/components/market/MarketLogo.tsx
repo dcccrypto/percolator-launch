@@ -19,6 +19,14 @@ interface MarketLogoProps {
   size?: "sm" | "md" | "lg";
   /** Override pixel size directly, bypassing the size preset. */
   pixelOverride?: number;
+  /**
+   * Mark the logo as purely decorative — used when the adjacent symbol/name
+   * text already conveys the same information (e.g. a market row where the
+   * logo sits next to a visible "SOL" label). Sets `alt=""` on the resolved
+   * `<Image>` and `aria-hidden` on the initials-fallback tile so screen
+   * readers don't announce the symbol twice for one link/row.
+   */
+  decorative?: boolean;
 }
 
 const sizes = { sm: 24, md: 32, lg: 48 };
@@ -29,7 +37,7 @@ const sizes = { sm: 24, md: 32, lg: 48 };
  * `<img onError>` guards every remote URL so a broken/expired logo never
  * renders as a broken image — it just drops to the next tier.
  */
-export const MarketLogo: FC<MarketLogoProps> = ({ logoUrl, mintAddress, mainnetCa, symbol, size = "md", pixelOverride }) => {
+export const MarketLogo: FC<MarketLogoProps> = ({ logoUrl, mintAddress, mainnetCa, symbol, size = "md", pixelOverride, decorative = false }) => {
   const [error, setError] = useState(false);
   const px = pixelOverride ?? sizes[size];
 
@@ -56,6 +64,7 @@ export const MarketLogo: FC<MarketLogoProps> = ({ logoUrl, mintAddress, mainnetC
         : "?";
     return (
       <div
+        aria-hidden={decorative || undefined}
         className="flex items-center justify-center border border-[var(--border)] bg-[var(--panel-bg)] text-[var(--text-dim)] font-mono font-bold"
         style={{ width: px, height: px, fontSize: px * (fallbackLabel.length > 2 ? 0.28 : 0.4) }}
       >
@@ -67,7 +76,7 @@ export const MarketLogo: FC<MarketLogoProps> = ({ logoUrl, mintAddress, mainnetC
   return (
     <Image
       src={effectiveUrl}
-      alt={symbol ?? "token"}
+      alt={decorative ? "" : (symbol ?? "token")}
       width={px}
       height={px}
       className="border border-[var(--border)]"

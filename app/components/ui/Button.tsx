@@ -2,9 +2,11 @@
 
 import {
   forwardRef,
+  type AnchorHTMLAttributes,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
+import Link, { type LinkProps } from "next/link";
 
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -166,5 +168,77 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 );
 
 Button.displayName = "Button";
+
+export interface ButtonLinkProps
+  extends LinkProps,
+    Omit<AnchorHTMLAttributes<HTMLAnchorElement>, keyof LinkProps | "className" | "children"> {
+  variant?: "primary" | "secondary" | "destructive" | "glow";
+  size?: "sm" | "md" | "lg";
+  iconLeft?: ReactNode;
+  iconRight?: ReactNode;
+  fullWidth?: boolean;
+  children?: ReactNode;
+  className?: string;
+}
+
+/**
+ * `<Link>` rendered with the exact same `.btn` classes as {@link Button} —
+ * for CTAs that navigate rather than submit/act. Never wrap a `<Button>` in
+ * a `<Link>`: nesting a `<button>` inside an `<a>` is invalid HTML (two
+ * nested interactive elements) and breaks keyboard/AT navigation. Use this
+ * instead so the anchor itself is the single interactive element.
+ *
+ * @example
+ * <ButtonLink href="/trade" variant="primary" size="lg" iconRight={ARROW}>
+ *   Start trading
+ * </ButtonLink>
+ */
+export const ButtonLink = forwardRef<HTMLAnchorElement, ButtonLinkProps>(
+  (
+    {
+      variant = "secondary",
+      size = "md",
+      iconLeft,
+      iconRight,
+      fullWidth = false,
+      className = "",
+      children,
+      ...props
+    },
+    ref,
+  ) => {
+    const sizeKey = size ?? "md";
+
+    return (
+      <Link
+        ref={ref}
+        className={[
+          "btn",
+          sizeClass[sizeKey],
+          variantClass[variant],
+          fullWidth ? "w-full" : "",
+          className,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        {...props}
+      >
+        {iconLeft && (
+          <span aria-hidden="true" className="shrink-0">
+            {iconLeft}
+          </span>
+        )}
+        {children}
+        {iconRight && (
+          <span aria-hidden="true" className="shrink-0">
+            {iconRight}
+          </span>
+        )}
+      </Link>
+    );
+  },
+);
+
+ButtonLink.displayName = "ButtonLink";
 
 export default Button;

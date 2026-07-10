@@ -43,6 +43,18 @@ async function fetchMarketStats(): Promise<Map<string, MarketWithStats>> {
   return map;
 }
 
+export interface UseAllMarketStatsOptions {
+  /**
+   * When `false`, skips firing the request entirely (SWR's conditional-key
+   * pattern — passing `null` as the key). Defaults to `true`. Lets a caller
+   * whose stats are secondary/below-the-fold (e.g. the landing page's live
+   * rail, which only needs this for two decorative columns) defer the
+   * ~500-market fetch until after its primary content — the live price feed
+   * — has had a chance to paint, instead of competing for bandwidth on mount.
+   */
+  enabled?: boolean;
+}
+
 /**
  * Hook to fetch all markets with their latest stats through the app API.
  * Returns a map of slab_address -> stats for easy lookup.
@@ -53,9 +65,10 @@ async function fetchMarketStats(): Promise<Map<string, MarketWithStats>> {
  * request per 30-second dedup window and get stale-while-revalidate for
  * instant paint on revisit.
  */
-export function useAllMarketStats() {
+export function useAllMarketStats(options?: UseAllMarketStatsOptions) {
+  const enabled = options?.enabled ?? true;
   const { data, error, isLoading } = useSWR<Map<string, MarketWithStats>, Error>(
-    SWR_KEY,
+    enabled ? SWR_KEY : null,
     fetchMarketStats,
     {
       // Collapse all concurrent hook instances to 1 request per 30 s.
