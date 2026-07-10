@@ -689,12 +689,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
       {/* Size — single input + unit toggle + quick-fill chips */}
       <div className="mb-2">
-        <label className="mb-1.5 block text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
+        <label htmlFor="order-size-input" className="mb-1.5 block text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
           Size
           <InfoIcon tooltip="Position size in the toggled unit. Switch between token and USD - both stay in sync." />
         </label>
         <div className="flex gap-1.5">
           <input
+            id="order-size-input"
             type="text"
             value={sizeInput}
             onChange={(e) => handleSizeChange(e.target.value)}
@@ -749,12 +750,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           instead of one continuous unbroken stack. */}
       <div className="mb-4 border-t border-[var(--border)]/20 pt-3">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
+          <label htmlFor="order-leverage-input" className="text-[10px] uppercase tracking-[0.15em] text-[var(--text)]">
             Leverage
             <InfoIcon tooltip="The multiplier used to size this order. On-chain margin params are the authoritative cap." />
           </label>
           <div className="flex items-center gap-1">
             <input
+              id="order-leverage-input"
               type="text"
               value={leverageText}
               onChange={(e) => {

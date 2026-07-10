@@ -13,7 +13,6 @@ import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { formatUsdFromNumber } from "@/lib/format";
 import { useLivePrice } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
@@ -357,22 +356,20 @@ function TradePageInner({ slab }: { slab: string }) {
   })();
   const logoUrl = supabaseMarket?.logo_url ?? null;
 
-  // Dynamic page title and meta tags
+  // Dynamic tab title — the symbol is resolved client-side (Supabase → on-chain
+  // → truncated address), which is strictly more available than the server's
+  // generateMetadata() `fetchMarketMeta`: on a devnet market the indexer doesn't
+  // know, the server title falls back to the generic "Perpetual Futures Market"
+  // while this still shows the real ticker. Only document.title is touched here.
+  //
+  // The og:*/meta[description] tags are intentionally NOT rewritten client-side:
+  // social crawlers (Twitter/Discord/Facebook) never execute JS, so mutating
+  // them after hydration is a no-op for their only purpose (link previews) —
+  // layout.tsx's server-rendered generateMetadata is the sole source of truth
+  // for those.
   useEffect(() => {
     document.title = `Trade ${symbol} | Percolator`;
-    const metaDesc = document.querySelector('meta[name="description"]');
-    if (metaDesc) {
-      const priceText = priceUsd != null ? `Current price: ${formatUsdFromNumber(priceUsd)}` : "";
-      metaDesc.setAttribute("content", `Trade ${symbol} perpetual futures on Percolator. ${priceText}`);
-    }
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    if (ogTitle) ogTitle.setAttribute("content", `Trade ${symbol} | Percolator`);
-    const ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogDesc) {
-      const priceText = priceUsd != null ? `Current price: ${formatUsdFromNumber(priceUsd)}` : "";
-      ogDesc.setAttribute("content", `Trade ${symbol} perpetual futures on Percolator. ${priceText}`);
-    }
-  }, [symbol, priceUsd]);
+  }, [symbol]);
 
   if (slabLoading && !engine) {
     return <TradingPageLoading />;
