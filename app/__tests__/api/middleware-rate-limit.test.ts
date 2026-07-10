@@ -59,11 +59,13 @@ function makeReq(path = "/api/markets", ip = "1.2.3.4"): NextRequest {
 
 type MiddlewareFn = (req: NextRequest) => Promise<Response>;
 
-/** Returns a freshly imported middleware (resets module-level singletons). */
+/** Returns a freshly imported proxy handler (resets module-level singletons). */
 async function freshMiddleware(): Promise<MiddlewareFn> {
   vi.resetModules();
-  const mod = await import("@/middleware");
-  return mod.middleware as unknown as MiddlewareFn;
+  // middleware.ts was migrated to proxy.ts (Next 16 Node-runtime proxy). The
+  // handler is now exported as `proxy` instead of `middleware`.
+  const mod = await import("@/proxy");
+  return mod.proxy as unknown as MiddlewareFn;
 }
 
 // ── Suite 1: Redis path — limit exhausted → all 429 ───────────────────────

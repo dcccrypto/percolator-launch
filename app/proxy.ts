@@ -1,3 +1,24 @@
+// ── Proxy (formerly middleware.ts) ───────────────────────────────────────────
+// Next 16 renamed the `middleware` file convention to `proxy`, and a `proxy.ts`
+// file ALWAYS runs on the Node.js runtime (never the Edge runtime). We migrated
+// middleware.ts → proxy.ts specifically to leave the Edge runtime:
+//
+//   The Edge middleware bundle co-bundled @sentry/nextjs's edge build (pulled in
+//   via instrumentation.ts) and a shared "[root-of-the-server]" chunk that also
+//   carries this file's `@/lib/blocklist` import. Vercel's deploy-time Edge
+//   validator ("Deploying outputs") rejected the Node-referencing code in that
+//   shared chunk and mis-attributed it to the userland import it could name:
+//     The Edge Function "middleware" is referencing unsupported modules:
+//       - @/lib/blocklist
+//   Running as a Node proxy removes the Edge Function entirely, so that
+//   validation cannot run against this code. All APIs used below (NextResponse,
+//   @upstash/* REST clients, Web Crypto `crypto.getRandomValues`, `btoa`,
+//   `process.env`) are Node-runtime-native, so behavior is preserved 1:1.
+//
+// The proxy still runs before the Next.js router (same as middleware did), so
+// the rate-limiting, blocklist, redirect, and CSP-nonce guarantees are intact.
+// NOTE: `proxy.ts` must export a `proxy` (or default) function; a route-segment
+// `export const runtime = ...` is NOT allowed (proxy is always Node.js).
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
@@ -219,7 +240,7 @@ function _blockedSlabFromPath(pathname: string): string | null {
 // next.config.ts redirects are processed by the Next.js router, but when an RSC
 // hits BAILOUT_TO_CLIENT_SIDE_RENDERING the redirect is swallowed by the JS
 // navigation layer and the HTTP response comes back as 200 (not 308).
-// Middleware runs at the Edge before the Next.js router, so it is guaranteed to
+// The proxy runs before the Next.js router, so it is guaranteed to
 // emit the correct 308 status code for all clients (curl, crawlers, JS-disabled).
 // This is belt-and-suspenders alongside the next.config.ts entry (kept for dev).
 const _marketsSlabRe = /^\/markets\/([^/]+)\/?$/;
@@ -292,7 +313,7 @@ function isAllowedOnWaitlistHost(pathname: string): boolean {
   return false;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // ── Hostname routing ───────────────────────────────────────────────────────
   const host = (request.headers.get("host") ?? "").toLowerCase().split(":")[0];
 
