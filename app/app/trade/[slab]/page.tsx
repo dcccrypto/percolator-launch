@@ -33,8 +33,8 @@ import TradingPageLoading from "./loading";
  *   custom property + styled-components (this codebase has neither
  *   styled-components nor a CSS-in-JS layer — Tailwind + plain `style` is
  *   the native equivalent here). Areas: MarketBar (top strip) / Chart
- *   (dominant center) / Orderbook (optional column, hidden by default) /
- *   OrderTicket (~340px right rail) / PositionsDock (bottom-docked tabs).
+ *   (dominant center) / OrderTicket (~340px right rail) / PositionsDock
+ *   (bottom-docked tabs).
  * - Desktop vs. mobile is a JS boolean fork (`useIsLargeScreen`), not a CSS
  *   dual-mount — same reasoning the pre-rebuild page already used for
  *   `TradingChart` specifically (avoid double-mounting live-subscribing
@@ -481,9 +481,6 @@ function TradePageInner({ slab }: { slab: string }) {
   const hasNoPriceData = !slabLoading && !!config && priceUsd == null;
 
   // Desktop grid — named areas (dYdX pattern, see file-header comment).
-  // Orderbook column width collapses to 0 when hidden; the area itself is
-  // still declared in the template (simpler than swapping two full
-  // template strings) but nothing is placed in it.
   const gridStyle: CSSProperties = {
     gridTemplateAreas: '"MarketBar MarketBar" "Chart OrderTicket" "PositionsDock OrderTicket"',
     gridTemplateColumns: "minmax(0,1fr) 340px",

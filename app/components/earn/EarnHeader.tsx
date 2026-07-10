@@ -45,7 +45,7 @@ export function EarnHeader({ stats, loading }: EarnHeaderProps) {
         </div>
 
         {/* Stats row */}
-        <div className="mt-6 grid grid-cols-2 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3" aria-label="Earn statistics">
+        <div className="mt-6 grid grid-cols-1 gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3" aria-label="Earn statistics">
           <StatCell
             label="Total Value Locked"
             loading={loading}

@@ -104,11 +104,9 @@ function AnalyticsPageInner({ slab }: { slab: string }) {
         <ErrorBoundary label="MarketStatsCard">
           <Section title="Market stats"><MarketStatsCard /></Section>
         </ErrorBoundary>
-        {!isV17 && (
-          <ErrorBoundary label="EngineHealthCard">
-            <Section title="Engine health"><EngineHealthCard /></Section>
-          </ErrorBoundary>
-        )}
+        <ErrorBoundary label="EngineHealthCard">
+          <Section title="Engine health"><EngineHealthCard /></Section>
+        </ErrorBoundary>
         <ErrorBoundary label="CrankHealthCard">
           <Section title="Crank health"><CrankHealthCard /></Section>
         </ErrorBoundary>
