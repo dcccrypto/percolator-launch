@@ -134,7 +134,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const collateralDecimals = collateralTokenMeta?.decimals ?? 6;
 
   // Get market info from earn stats
-  const { stats: earnStats, loading: earnLoading, error: earnStatsError } = useEarnStats();
+  const { stats: earnStats, loading: earnLoading, error: earnStatsError, refresh: refreshEarnStats } = useEarnStats();
   const marketInfo = useMemo<MarketVaultInfo | null>(() => {
     return earnStats.markets.find((m) => m.slabAddress === slabAddress) ?? null;
   }, [earnStats.markets, slabAddress]);
@@ -174,8 +174,13 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     async (amount: bigint) => {
       await lpVaultDeposit(amount);
       await refreshState();
+      // marketInfo (maxOI, insurance, APY) comes from a separate useEarnStats
+      // instance that only advances on its own 15s timer — without this the
+      // OI meter/APY/insurance figures would sit stale for up to 15s after a
+      // deposit changes the vault's TVL.
+      refreshEarnStats();
     },
-    [lpVaultDeposit, refreshState],
+    [lpVaultDeposit, refreshState, refreshEarnStats],
   );
 
   const handleWithdraw = useCallback(
@@ -185,9 +190,10 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
       // instead of a blanket "Withdrawal successful!".
       const result = await lpVaultWithdraw(lpAmount);
       await refreshState();
+      refreshEarnStats();
       return result;
     },
-    [lpVaultWithdraw, refreshState],
+    [lpVaultWithdraw, refreshState, refreshEarnStats],
   );
 
   const symbol = marketInfo?.symbol ?? fallbackSymbol ?? 'UNKNOWN';
@@ -336,6 +342,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               lpSupply={lpVaultState.lpSupply}
               vaultBalance={lpVaultState.vaultTotalAtoms}
               decimals={collateralDecimals}
+              lpDecimals={lpVaultState.lpDecimals}
               collateralSymbol={collateralSymbol}
               redemptionRateE6={lpVaultState.vaultSharePriceE6}
               loading={loading}

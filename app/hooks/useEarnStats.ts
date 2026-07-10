@@ -174,9 +174,12 @@ function generateMockStats(): EarnStats {
 // ═══════════════════════════════════════════════════════════════
 
 /** Sim-USDC collateral decimals — the single collateral token shared by every playground market. */
-const CURATED_COLLATERAL_DECIMALS = 6;
+export const CURATED_COLLATERAL_DECIMALS = 6;
 
-interface CuratedVaultOnChain {
+/** GH#1165 — sanity cap on any single vault's displayed TVL (USD). */
+export const MAX_VAULT_USD = 10_000_000;
+
+export interface CuratedVaultOnChain {
   /** Total atoms backing the LP vault (shares outstanding + distributed fee atoms). */
   tvlAtoms: bigint;
   /** Redemption cooldown period from the registry, in slots. */
@@ -336,7 +339,7 @@ async function fetchOnChainMaxLeverage(slabs: string[]): Promise<Record<string, 
  * Supabase cosmetic row. Shared by both the curated (PLAYGROUND_SLAB_META) markets
  * and the registered (user-launched) markets below.
  */
-function buildMarketVaultInfo(
+export function buildMarketVaultInfo(
   slab: string,
   symbol: string,
   name: string,
@@ -351,7 +354,12 @@ function buildMarketVaultInfo(
   const collDivisor = 10 ** decimals;
 
   const vaultAtoms = curatedVaults[slab]?.tvlAtoms ?? 0n;
-  const vaultBalance = Number(vaultAtoms); // atoms — matches MarketVaultInfo.vaultBalance convention
+  const vaultBalanceRaw = Number(vaultAtoms); // atoms — matches MarketVaultInfo.vaultBalance convention
+  // GH#1165: a corrupt-but-sub-sentinel atom count (e.g. 4e14 at 6 decimals =
+  // $400M) passes sanitizeOnChainValue's u64::MAX-class filter untouched. Cap
+  // any single vault's displayed TVL at a sane ceiling rather than trust it blind.
+  const vaultUsdUncapped = vaultBalanceRaw / collDivisor;
+  const vaultBalance = vaultUsdUncapped > MAX_VAULT_USD ? 0 : vaultBalanceRaw;
   const vaultUsd = vaultBalance / collDivisor;
 
   const oiLongRaw = Number(row?.open_interest_long ?? 0);
@@ -538,11 +546,36 @@ export function useEarnStats() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load earn stats');
       // Total failure (e.g. RPC unreachable) — still show the 5 curated markets
-      // with zeroed stats rather than fabricated mock ones.
-      setStats((prev) => ({
-        ...prev,
-        markets: buildCuratedMarkets({}, new Map()),
-      }));
+      // with zeroed stats rather than fabricated mock ones. Recompute the
+      // aggregates from the zeroed markets too — otherwise the header keeps
+      // showing a stale non-zero TVL/APY while every card reads $0, which
+      // reads as two contradictory sources of truth.
+      const markets = buildCuratedMarkets({}, new Map());
+      const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
+      const totalOI = markets.reduce((s, m) => s + m.totalOI, 0);
+      const maxOI = markets.reduce((s, m) => s + m.maxOI, 0);
+      const totalInsurance = markets.reduce(
+        (s, m) => s + m.insuranceFund / (10 ** m.decimals),
+        0,
+      );
+      const dailyFeeRevenue = markets.reduce(
+        (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
+        0,
+      );
+      const avgApy =
+        markets.length > 0
+          ? markets.reduce((s, m) => s + m.estimatedApyPct, 0) / markets.length
+          : 0;
+      setStats({
+        tvl,
+        totalOI,
+        maxOI,
+        avgApyPct: avgApy,
+        oiUtilPct: maxOI > 0 ? (totalOI / maxOI) * 100 : 0,
+        totalInsurance,
+        markets,
+        dailyFeeRevenue,
+      });
     } finally {
       setLoading(false);
     }

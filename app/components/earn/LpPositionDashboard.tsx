@@ -13,6 +13,8 @@ interface LpPositionDashboardProps {
   vaultBalance: bigint;
   /** Decimals for collateral */
   decimals: number;
+  /** Decimals for the LP token mint — NOT necessarily the same as collateral decimals */
+  lpDecimals: number;
   /** Collateral symbol */
   collateralSymbol: string;
   /** Redemption rate (e6) */
@@ -26,6 +28,7 @@ export function LpPositionDashboard({
   lpSupply,
   vaultBalance,
   decimals,
+  lpDecimals,
   collateralSymbol,
   redemptionRateE6,
   loading,
@@ -118,7 +121,7 @@ export function LpPositionDashboard({
             <div className="grid grid-cols-2 gap-4">
               <MetricCell
                 label="LP Tokens"
-                value={formatRaw(userLpBalance, decimals)}
+                value={formatRaw(userLpBalance, lpDecimals)}
               />
               <MetricCell
                 label="Pool Share"
