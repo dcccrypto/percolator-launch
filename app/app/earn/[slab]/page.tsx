@@ -196,6 +196,13 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
     [lpVaultWithdraw, refreshState, refreshEarnStats],
   );
 
+  // No signal about this slab from any source (not in earn stats, no Supabase
+  // row, no on-chain LP vault registry) once both loads have settled — a
+  // genuinely bad/unknown slab, distinct from a market that's just excluded
+  // from useEarnStats (e.g. non-'active' status) but still has a real vault.
+  const marketNotFound =
+    !loading && !marketInfo && !fallbackSymbol && !lpVaultState.registryExists;
+
   const symbol = marketInfo?.symbol ?? fallbackSymbol ?? 'UNKNOWN';
   // maxOI is only known once marketInfo resolves — without it we can't tell "no OI
   // cap" (real 0) apart from "cap unknown" (marketInfo not loaded yet / market not
@@ -209,6 +216,21 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   // percolator-stake pool (poolState.vaultBalance, wrong account — see hook comment above).
   const vaultUsd = Number(lpVaultState.vaultTotalAtoms) / collateralScale;
   const insuranceFund = marketInfo?.insuranceFund ?? 0;
+
+  if (marketNotFound) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center space-y-4 px-4">
+          <div className="text-[var(--text-secondary)] text-sm">
+            This market could not be found.
+          </div>
+          <Link href="/earn" className="text-[var(--accent)] text-sm hover:underline">
+            ← Back to Earn
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[calc(100dvh-48px)] animate-fade-in">
@@ -314,7 +336,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             </StatCell>
             <StatCell label="Max Leverage" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
-                {marketInfo?.maxLeverage || 10}×
+                {marketInfo?.maxLeverage ?? 10}×
               </span>
             </StatCell>
           </div>
@@ -402,7 +424,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               <InfoRow label="Deposit Cap" value="Unlimited" />
               <InfoRow
                 label="Trading Fee"
-                value={`${(marketInfo?.tradingFeeBps ?? 10) / 100}%`}
+                value={`${((marketInfo?.tradingFeeBps ?? 10) / 100).toFixed(2)}%`}
               />
               <InfoRow
                 label="Pool Status"

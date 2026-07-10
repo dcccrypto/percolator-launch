@@ -277,7 +277,7 @@ export function DepositWithdrawPanel({
             {cooldownElapsed
               ? 'Cooldown elapsed — claim your redemption to receive the underlying collateral.'
               : cooldownRemainingSlots > 0n
-                ? `Cooldown in progress — ~${Math.ceil(Number(cooldownRemainingSlots) * 0.4)}s remaining.`
+                ? `Cooldown in progress — ~${slotsToSeconds(cooldownRemainingSlots)}s remaining.`
                 : 'Cooldown in progress.'}
           </p>
 
@@ -404,23 +404,28 @@ export function DepositWithdrawPanel({
                 <div className="flex items-center justify-between text-[12px]">
                   <span className="text-[var(--text-secondary)]">Rate (1 LP)</span>
                   <span className="font-mono tabular-nums text-[var(--text)]">
-                    ≈ {lpSupply > 0n
-                        ? formatRaw((vaultBalance * divisor) / lpSupply, decimals)
-                        : '1.0000'
-                      } {collateralSymbol}
+                    ≈ {formatRaw((vaultBalance * divisor) / lpSupply, decimals)} {collateralSymbol}
                   </span>
                 </div>
               )}
 
-              {/* Cooldown status */}
+              {/* Cooldown status — withdraw() only ever REQUESTS a redemption when
+                  there's no pending ticket yet (hasPendingRedemption === false);
+                  cooldownElapsed defaults to true in that state (nothing to wait
+                  on), so it must not drive this copy or it reads as "ready to
+                  withdraw now" when the action actually just starts the cooldown. */}
               <div className="flex items-center justify-between text-[12px]">
                 <span className="text-[var(--text-secondary)]">Cooldown</span>
-                <span className={`font-medium ${cooldownElapsed ? 'text-[var(--cyan)]' : 'text-[var(--warning)]'}`}>
-                  {cooldownElapsed
-                    ? 'Elapsed — ready to withdraw'
-                    : cooldownSlots && cooldownSlots > 0n
-                      ? `~${Math.ceil(Number(cooldownSlots) * 0.4)}s remaining`
-                      : 'Not elapsed'
+                <span className={`font-medium ${!hasPendingRedemption || cooldownElapsed ? 'text-[var(--cyan)]' : 'text-[var(--warning)]'}`}>
+                  {!hasPendingRedemption
+                    ? cooldownSlots && cooldownSlots > 0n
+                      ? `Starts on request (~${slotsToSeconds(cooldownSlots)}s)`
+                      : 'Starts on request'
+                    : cooldownElapsed
+                      ? 'Elapsed — ready to claim'
+                      : cooldownSlots && cooldownSlots > 0n
+                        ? `~${slotsToSeconds(cooldownSlots)}s remaining`
+                        : 'Not elapsed'
                   }
                 </span>
               </div>
@@ -435,7 +440,9 @@ export function DepositWithdrawPanel({
             {withdrawConfirming && (
               <div className="mt-3 pt-3 border-t border-[var(--warning)]/20">
                 <p className="text-[11px] text-[var(--warning)]">
-                  LP tokens will be permanently burned. This action cannot be undone.
+                  {hasPendingRedemption
+                    ? 'LP tokens will be permanently burned. This action cannot be undone.'
+                    : 'LP tokens will be locked in escrow until the cooldown completes and you claim the redemption.'}
                 </p>
               </div>
             )}
@@ -484,14 +491,21 @@ export function DepositWithdrawPanel({
               ? 'Confirming...'
               : tab === 'deposit'
                 ? 'Deposit'
-                : withdrawConfirming
-                  ? 'Confirm Withdrawal'
-                  : 'Withdraw'}
+                : hasPendingRedemption
+                  ? (withdrawConfirming ? 'Confirm Withdrawal' : 'Withdraw')
+                  : (withdrawConfirming ? 'Confirm Request' : 'Request Withdrawal')}
           </GlowButton>
         </div>
       </div>
     </div>
   );
+}
+
+/** Solana devnet slot time, used to render cooldowns as an approximate wall-clock duration. */
+const SLOT_SECONDS = 0.4;
+
+function slotsToSeconds(slots: bigint): number {
+  return Math.ceil(Number(slots) * SLOT_SECONDS);
 }
 
 /** Format raw bigint to human-readable decimal string */

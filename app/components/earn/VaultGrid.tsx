@@ -12,9 +12,11 @@ const PAGE_SIZE = 24;
 interface VaultGridProps {
   markets: MarketVaultInfo[];
   loading: boolean;
+  /** Set when the last fetch failed — distinguishes "genuinely no vaults" from "couldn't load". */
+  error?: string | null;
 }
 
-export function VaultGrid({ markets, loading }: VaultGridProps) {
+export function VaultGrid({ markets, loading, error }: VaultGridProps) {
   const [sortBy, setSortBy] = useState<SortKey>('tvl');
   const [searchQuery, setSearchQuery] = useState('');
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
@@ -172,11 +174,13 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
         </div>
       ) : sorted.length === 0 ? (
         <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-12 text-center">
-          <div className="text-3xl mb-3">🔍</div>
+          <div aria-hidden="true" className="text-3xl mb-3">{error && !searchQuery ? '⚠' : '🔍'}</div>
           <p className="text-[13px] text-[var(--text-secondary)]">
             {searchQuery
               ? `No vaults matching "${searchQuery}"`
-              : 'No active vaults found'}
+              : error
+                ? "Couldn't load vaults — please try again shortly"
+                : 'No active vaults found'}
           </p>
         </div>
       ) : (

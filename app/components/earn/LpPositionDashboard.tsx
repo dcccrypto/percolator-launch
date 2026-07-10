@@ -47,12 +47,6 @@ export function LpPositionDashboard({
 
   const userRedeemableFloat = Number(userRedeemableValue) / Number(divisor);
 
-  // Share value (how much 1 LP token is worth)
-  const shareValue =
-    lpSupply > 0n
-      ? Number(vaultBalance * 1_000_000n / lpSupply) / 1_000_000
-      : 1;
-
   if (loading) {
     return (
       <div className="border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners">
@@ -128,9 +122,13 @@ export function LpPositionDashboard({
                 value={`${userSharePct.toFixed(2)}%`}
                 highlight
               />
+              {/* "Share Value" — how much 1 LP token redeems for. Sourced from the
+                  on-chain redemption rate (vaultTotalAtoms / lpSupply, read fresh
+                  by useInsuranceLP) rather than recomputed locally — the two used
+                  to be shown as separate cells that could visibly disagree. */}
               <MetricCell
                 label="Share Value"
-                value={`${shareValue.toFixed(4)} ${collateralSymbol}`}
+                value={`${(Number(redemptionRateE6) / 1_000_000).toFixed(4)} ${collateralSymbol}`}
               />
               <MetricCell
                 label="Redemption Rate"

@@ -170,7 +170,7 @@ export default function EarnPage() {
                   {stats.markets.length} market{stats.markets.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              <VaultGrid markets={stats.markets} loading={loading} />
+              <VaultGrid markets={stats.markets} loading={loading} error={error} />
             </ScrollReveal>
           </div>
 
