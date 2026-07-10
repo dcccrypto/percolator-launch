@@ -16,18 +16,29 @@ export interface UseTokenChartResult {
 // Phase 2: 15m added
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "7d" | "30d";
 
+/**
+ * Timeframe → GeckoTerminal request. The selector means CANDLE SIZE (like
+ * every trading terminal), not window length: "1h" = 1-hour candles with as
+ * much history as one request allows, NOT "one hour of data".
+ *
+ * The previous mapping used window semantics with 12–42 bar limits — "1h"
+ * fetched twelve 5-minute bars — so every chart was a couple of lines with
+ * nothing to scroll back into (user report). GeckoTerminal serves up to
+ * 1000 bars per request at no extra call cost; ask for the full depth.
+ * (GT aggregates: minute 1/5/15, hour 1/4/12, day 1.)
+ */
 const TIMEFRAME_TO_API: Record<
   Timeframe,
   { timeframe: "minute" | "hour" | "day"; aggregate: number; limit: number }
 > = {
-  "1m":  { timeframe: "minute", aggregate: 1,  limit: 30 },  // 1-min candles, 30min of data
-  "5m":  { timeframe: "minute", aggregate: 5,  limit: 24 },  // 5-min candles, 2h of data
-  "15m": { timeframe: "minute", aggregate: 15, limit: 24 },  // 15-min candles, 6h of data
-  "1h":  { timeframe: "minute", aggregate: 5,  limit: 12 },  // 5-min candles, 1h of data
-  "4h":  { timeframe: "minute", aggregate: 15, limit: 16 },  // 15-min candles, 4h of data
-  "1d":  { timeframe: "hour",   aggregate: 1,  limit: 24 },  // 1-hour candles, 1d of data
-  "7d":  { timeframe: "hour",   aggregate: 4,  limit: 42 },  // 4-hour candles, 7d of data
-  "30d": { timeframe: "day",    aggregate: 1,  limit: 30 },  // 1-day candles, 30d of data
+  "1m":  { timeframe: "minute", aggregate: 1,  limit: 1000 }, // ~16h of history
+  "5m":  { timeframe: "minute", aggregate: 5,  limit: 1000 }, // ~3.5d
+  "15m": { timeframe: "minute", aggregate: 15, limit: 1000 }, // ~10d
+  "1h":  { timeframe: "hour",   aggregate: 1,  limit: 1000 }, // ~41d
+  "4h":  { timeframe: "hour",   aggregate: 4,  limit: 1000 }, // ~5.5mo
+  "1d":  { timeframe: "day",    aggregate: 1,  limit: 365 },  // 1y
+  "7d":  { timeframe: "day",    aggregate: 1,  limit: 730 },  // 2y of daily bars
+  "30d": { timeframe: "day",    aggregate: 1,  limit: 1000 }, // ~3y of daily bars
 };
 
 /** Fetch interval: 60s for short timeframes, 5min for daily */
