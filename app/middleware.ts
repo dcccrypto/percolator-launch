@@ -21,8 +21,12 @@
 // `export const runtime = ...` is NOT allowed (proxy is always Node.js).
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { Redis } from "@upstash/redis";
-import { Ratelimit } from "@upstash/ratelimit";
+// @upstash/redis + @upstash/ratelimit were REMOVED from this Edge middleware:
+// their code references Node-only APIs, so Vercel's deploy-time Edge validator
+// rejected the bundle ("Edge Function referencing unsupported modules" — mis-named
+// as the userland module sharing the chunk). Rate limiting falls back to the
+// per-instance in-memory limiter below. TODO: restore distributed rate limiting via
+// an Edge-safe path (Upstash REST fetch, or a Node route handler).
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist-edge";
 
 // ── Rate limiter configuration ───────────────────────────────────────────────
@@ -39,43 +43,8 @@ const RPC_RATE_LIMIT_MAX = 600;     // /api/rpc — Solana needs many RPC calls 
 // The previous pure in-memory Map approach was per-instance: on Vercel each cold
 // start resets counters independently, so an attacker distributing requests across
 // instances could bypass the limit entirely. Upstash Redis solves this.
-let _generalLimiter: Ratelimit | null = null;
-let _rpcLimiter: Ratelimit | null = null;
-let _limitersInitialized = false;
-
-function getUpstashLimiters(): { general: Ratelimit | null; rpc: Ratelimit | null } {
-  if (_limitersInitialized) return { general: _generalLimiter, rpc: _rpcLimiter };
-  _limitersInitialized = true;
-
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return { general: null, rpc: null };
-
-  try {
-    const redis = new Redis({ url, token });
-    _generalLimiter = new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(RATE_LIMIT_MAX, "60 s"),
-      prefix: "rl:api",
-      analytics: false,
-    });
-    _rpcLimiter = new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(RPC_RATE_LIMIT_MAX, "60 s"),
-      prefix: "rl:rpc",
-      analytics: false,
-    });
-  } catch (err) {
-    // Redis init error — fall through to in-memory
-    if (process.env.NODE_ENV === "production") {
-      console.error("[RateLimit] ERROR: Upstash Redis initialization failed:", err);
-    }
-    _generalLimiter = null;
-    _rpcLimiter = null;
-  }
-
-  return { general: _generalLimiter, rpc: _rpcLimiter };
-}
+// getUpstashLimiters() removed — see the import note above. Rate limiting now uses
+// the per-instance in-memory sliding window only (_getInMemoryRateLimit).
 
 // ── In-memory fallback (per-instance) ────────────────────────────────────────
 // Used when Upstash is unconfigured (local dev / CI) or if Redis throws.
@@ -120,33 +89,7 @@ async function getRateLimit(
   ip: string,
   isRpc: boolean = false,
 ): Promise<{ allowed: boolean; remaining: number; reset: number }> {
-  const { general, rpc } = getUpstashLimiters();
-  const limiter = isRpc ? rpc : general;
-
-  if (limiter) {
-    try {
-      const { success, remaining, reset } = await limiter.limit(ip);
-      // FIX(GH#1245): use `success` (the boolean Upstash provides) to drive
-      // the allow/block decision — NOT `remaining`.  When success=true and
-      // remaining=0 (the last allowed request), the old code returned
-      // remaining=0 and the `remaining <= 0` guard incorrectly blocked it.
-      return {
-        allowed: success,
-        remaining: Math.max(0, remaining),
-        reset: Math.max(0, Math.ceil((reset - Date.now()) / 1000)),
-      };
-    } catch (err) {
-      // Redis request failed — degrade gracefully to in-memory
-      if (process.env.NODE_ENV === "production") {
-        console.error("[RateLimit] ERROR: Upstash Redis request failed, falling back to in-memory rate limiting:", err);
-      }
-    }
-  } else {
-    if (process.env.NODE_ENV === "production") {
-      console.warn("[RateLimit] WARNING: Upstash Redis is not configured. Falling back to in-memory rate limiting in production!");
-    }
-  }
-
+  // @upstash removed from the Edge bundle (Node-only code) — in-memory only.
   return _getInMemoryRateLimit(ip, isRpc);
 }
 
