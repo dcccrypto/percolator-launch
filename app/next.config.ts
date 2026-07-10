@@ -1,5 +1,9 @@
 import type { NextConfig } from "next";
-import { withSentryConfig } from "@sentry/nextjs";
+// withSentryConfig disabled — its build-time instrumentation is not Turbopack-
+// compatible (Next 16 builds with Turbopack) and injects Node-only code into the
+// Edge middleware bundle, which Vercel rejects at deploy ("referencing unsupported
+// modules"). See the export at the bottom of this file.
+// import { withSentryConfig } from "@sentry/nextjs";
 
 // NEXT_PUBLIC_API_URL must be explicitly set — no hardcoded fallback
 // This ensures misconfigured deployments fail loudly, not silently to production
@@ -132,29 +136,12 @@ const nextConfig = {
   },
 } as NextConfig;
 
-export default withSentryConfig(nextConfig, {
-  // Sentry webpack plugin options
-  silent: true, // Suppress verbose upload logs in CI
-
-  // Source maps: enabled when SENTRY_AUTH_TOKEN is set (CI/Vercel only).
-  // To enable: add SENTRY_AUTH_TOKEN + SENTRY_ORG + SENTRY_PROJECT to Vercel env vars.
-  //   SENTRY_ORG=dcc-pz
-  //   SENTRY_PROJECT=percolator-frontend
-  //   SENTRY_AUTH_TOKEN=<token from https://sentry.io/settings/auth-tokens/>
-  sourcemaps: {
-    disable: !process.env.SENTRY_AUTH_TOKEN,
-    deleteSourcemapsAfterUpload: true, // do not ship source maps to browsers
-  },
-
-  // Sentry org/project — must match your Sentry workspace.
-  // Defaults are the production values; override via env vars if needed.
-  org: process.env.SENTRY_ORG || "dcc-pz",
-  project: process.env.SENTRY_PROJECT || "percolator-frontend",
-  authToken: process.env.SENTRY_AUTH_TOKEN,
-
-  // Automatically instrument server components and route handlers
-  autoInstrumentServerFunctions: true,
-
-  // Disable the Sentry telemetry/privacy popup in the Next.js dev overlay
-  disableLogger: true,
-});
+// Export the config directly, WITHOUT Sentry's build wrapper. withSentryConfig
+// auto-instruments the middleware/edge bundle, but under Turbopack (Next 16's
+// default builder) that instrumentation injects Node-only code into middleware.js
+// → Vercel deploy fails with 'Edge Function "middleware" referencing unsupported
+// modules'. Sentry was already non-functional under Turbopack (see the build-log
+// deprecation warnings) and is optional telemetry for this devnet playground.
+// Runtime Sentry.init in sentry.*.config.* is unaffected. Re-wrap with
+// withSentryConfig only once Sentry supports Turbopack (or the build returns to webpack).
+export default nextConfig;
