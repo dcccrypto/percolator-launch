@@ -43,6 +43,7 @@ import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { computeLimitPriceE6 } from "@/lib/slippage";
+import { bindConfirmedLimitPrice } from "@/lib/confirmedTrade";
 import { useEngineState } from "@/hooks/useEngineState";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
@@ -539,7 +540,10 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const needsAccount = connected && !userAccount;
   const needsDeposit = connected && userAccount && capital === 0n;
 
-  async function handleTrade(snapshotSize?: bigint) {
+  async function handleTrade(
+    snapshotSize?: bigint,
+    snapshotLimitPriceE6?: bigint,
+  ) {
     const effectiveSize = snapshotSize ?? positionSize;
     if (!marginInput || !userAccount || effectiveSize <= 0n || exceedsBalance) return;
 
@@ -558,10 +562,16 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setTradePhase("submitting");
     try {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
-      // limitPriceE6 omitted — useTrade derives it from the live mark (its
-      // existing, unchanged market-order behaviour — see hooks/useTrade.ts).
+      // Confirmed submissions carry the exact worst-fill bound reviewed
+      // in the modal. Other callers retain useTrade's live-mark fallback.
       const sig = await withTransientRetry(
-        async () => trade({ lpIdx, userIdx: userAccount!.idx, size }),
+        async () =>
+          trade(
+            bindConfirmedLimitPrice(
+              { lpIdx, userIdx: userAccount!.idx, size },
+              snapshotLimitPriceE6,
+            ),
+          ),
         { maxRetries: 2, delayMs: 3000 },
       );
       setTradePhase("confirming");
@@ -1046,10 +1056,13 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           collateralSymbol={collateralSymbol}
           decimals={decimals}
           onConfirm={() => {
-            const snapSize = confirmSnapshot.positionSize;
+            const snapshot = confirmSnapshot;
             setShowConfirmModal(false);
             setConfirmSnapshot(null);
-            handleTrade(snapSize);
+            void handleTrade(
+              snapshot.positionSize,
+              snapshot.worstFillPriceE6,
+            );
           }}
           onCancel={() => { setShowConfirmModal(false); setConfirmSnapshot(null); }}
         />
