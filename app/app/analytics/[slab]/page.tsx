@@ -42,7 +42,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function AnalyticsPageInner({ slab }: { slab: string }) {
-  const { loading, error } = useSlabState();
+  const { loading, error, wrapperConfigV17 } = useSlabState();
+  // v17 slabs carry no legacy engine block (SlabProvider always sets engine:
+  // null there) — wrapperConfigV17 is non-null exactly on v17 slabs, so it's
+  // the canonical gate for cards that only make sense on the v12 engine path.
+  const isV17 = wrapperConfigV17 !== null;
 
   if (loading) {
     return (
@@ -100,30 +104,38 @@ function AnalyticsPageInner({ slab }: { slab: string }) {
         <ErrorBoundary label="MarketStatsCard">
           <Section title="Market stats"><MarketStatsCard /></Section>
         </ErrorBoundary>
-        <ErrorBoundary label="EngineHealthCard">
-          <Section title="Engine health"><EngineHealthCard /></Section>
-        </ErrorBoundary>
+        {!isV17 && (
+          <ErrorBoundary label="EngineHealthCard">
+            <Section title="Engine health"><EngineHealthCard /></Section>
+          </ErrorBoundary>
+        )}
         <ErrorBoundary label="CrankHealthCard">
           <Section title="Crank health"><CrankHealthCard /></Section>
         </ErrorBoundary>
         <ErrorBoundary label="OpenInterestCard">
           <Section title="Open interest"><OpenInterestCard slabAddress={slab} /></Section>
         </ErrorBoundary>
-        <ErrorBoundary label="InsuranceDashboard">
-          <Section title="Insurance"><InsuranceDashboard slabAddress={slab} /></Section>
-        </ErrorBoundary>
+        {!isV17 && (
+          <ErrorBoundary label="InsuranceDashboard">
+            <Section title="Insurance"><InsuranceDashboard slabAddress={slab} /></Section>
+          </ErrorBoundary>
+        )}
         <ErrorBoundary label="LiquidationAnalytics">
           <Section title="Liquidations"><LiquidationAnalytics /></Section>
         </ErrorBoundary>
         <ErrorBoundary label="SystemCapitalCard">
           <Section title="System capital"><SystemCapitalCard /></Section>
         </ErrorBoundary>
-        <ErrorBoundary label="AdlLeaderboard">
-          <Section title="ADL leaderboard"><AdlLeaderboard slabAddress={slab} /></Section>
-        </ErrorBoundary>
-        <ErrorBoundary label="AccountsCard">
-          <Section title="All accounts & liqs"><AccountsCard /></Section>
-        </ErrorBoundary>
+        {!isV17 && (
+          <ErrorBoundary label="AdlLeaderboard">
+            <Section title="ADL leaderboard"><AdlLeaderboard slabAddress={slab} /></Section>
+          </ErrorBoundary>
+        )}
+        {!isV17 && (
+          <ErrorBoundary label="AccountsCard">
+            <Section title="All accounts & liqs"><AccountsCard /></Section>
+          </ErrorBoundary>
+        )}
       </div>
     </div>
   );

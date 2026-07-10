@@ -94,9 +94,16 @@ export const LiquidationAnalytics: FC = () => {
     coverageText = `${coveragePercent.toFixed(1)}%`;
   }
 
+  // Lifetime Liquidations/Force Closes live in the legacy engine block and
+  // are dead ("—") on v17 — omit those tiles entirely rather than rendering
+  // dead cells. Liq. Fee/Buffer come from `params`, which IS populated on v17.
   const stats = [
-    { label: "Liquidations", value: lifetimeLiquidationsStr, tip: "Total lifetime liquidations on this market" },
-    { label: "Force Closes", value: lifetimeForceClosesStr, tip: "Emergency position closures by the risk engine" },
+    ...(engine
+      ? [
+          { label: "Liquidations", value: lifetimeLiquidationsStr, tip: "Total lifetime liquidations on this market" },
+          { label: "Force Closes", value: lifetimeForceClosesStr, tip: "Emergency position closures by the risk engine" },
+        ]
+      : []),
     { label: "Liq. Fee", value: params ? `${(liqFeeBps / 100).toFixed(2)}%` : "—", tip: "Fee charged on liquidated positions" },
     { label: "Buffer", value: params ? `${(bufferBps / 100).toFixed(2)}%` : "—", tip: "Margin buffer above maintenance to prevent re-liquidation" },
   ];
