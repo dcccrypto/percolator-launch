@@ -548,7 +548,7 @@ export function useEarnStats() {
       // Total failure (e.g. RPC unreachable) — still show the 5 curated markets
       // with zeroed stats rather than fabricated mock ones. Recompute the
       // aggregates from the zeroed markets too — otherwise the header keeps
-      // showing a stale non-zero TVL/APY while every card reads $0, which
+      // showing a stale non-zero TVL while every card reads $0, which
       // reads as two contradictory sources of truth.
       const markets = buildCuratedMarkets({}, new Map());
       const tvl = markets.reduce((s, m) => s + m.vaultBalance / (10 ** m.decimals), 0);
@@ -562,15 +562,10 @@ export function useEarnStats() {
         (s, m) => s + (m.volume24h * m.tradingFeeBps) / 10_000,
         0,
       );
-      const avgApy =
-        markets.length > 0
-          ? markets.reduce((s, m) => s + m.estimatedApyPct, 0) / markets.length
-          : 0;
       setStats({
         tvl,
         totalOI,
         maxOI,
-        avgApyPct: avgApy,
         oiUtilPct: maxOI > 0 ? (totalOI / maxOI) * 100 : 0,
         totalInsurance,
         markets,
