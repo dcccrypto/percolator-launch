@@ -15,8 +15,6 @@ interface LpPositionDashboardProps {
   decimals: number;
   /** Collateral symbol */
   collateralSymbol: string;
-  /** Estimated APY % */
-  estimatedApyPct: number;
   /** Redemption rate (e6) */
   redemptionRateE6: bigint;
   /** Loading */
@@ -29,7 +27,6 @@ export function LpPositionDashboard({
   vaultBalance,
   decimals,
   collateralSymbol,
-  estimatedApyPct,
   redemptionRateE6,
   loading,
 }: LpPositionDashboardProps) {
@@ -131,13 +128,6 @@ export function LpPositionDashboard({
               <MetricCell
                 label="Share Value"
                 value={`${shareValue.toFixed(4)} ${collateralSymbol}`}
-              />
-              <MetricCell
-                label="Est. APY"
-                value={`${estimatedApyPct.toFixed(1)}%`}
-                highlight
-                color="var(--cyan)"
-                tooltip="Estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
               />
               <MetricCell
                 label="Redemption Rate"

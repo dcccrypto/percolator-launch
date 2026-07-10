@@ -206,7 +206,7 @@ export default function EarnPage() {
                   <Step
                     num={3}
                     title="Track Yield"
-                    desc="Monitor your APY, share value, and position in real-time"
+                    desc="Monitor your share value and position in real-time"
                   />
                   <Step
                     num={4}

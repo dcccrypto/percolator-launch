@@ -5,7 +5,7 @@ import { VaultCard } from './VaultCard';
 import type { MarketVaultInfo } from '@/hooks/useEarnStats';
 import { ShimmerSkeleton } from '@/components/ui/ShimmerSkeleton';
 
-type SortKey = 'apy' | 'tvl' | 'volume' | 'utilization';
+type SortKey = 'tvl' | 'volume' | 'utilization';
 
 const PAGE_SIZE = 24;
 
@@ -15,7 +15,7 @@ interface VaultGridProps {
 }
 
 export function VaultGrid({ markets, loading }: VaultGridProps) {
-  const [sortBy, setSortBy] = useState<SortKey>('apy');
+  const [sortBy, setSortBy] = useState<SortKey>('tvl');
   const [searchQuery, setSearchQuery] = useState('');
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -36,8 +36,6 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
     // Sort
     return [...filtered].sort((a, b) => {
       switch (sortBy) {
-        case 'apy':
-          return b.estimatedApyPct - a.estimatedApyPct;
         case 'tvl':
           return b.vaultBalance - a.vaultBalance;
         case 'volume':
@@ -115,7 +113,6 @@ export function VaultGrid({ markets, loading }: VaultGridProps) {
           </span>
           {(
             [
-              ['apy', 'APY'],
               ['tvl', 'TVL'],
               ['volume', 'Volume'],
               ['utilization', 'Utilization'],

@@ -185,7 +185,6 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   const maxOI = marketInfo?.maxOI ?? 0;
   const collDivisor = 10 ** collateralDecimals;
   const currentOI = marketInfo?.totalOI ?? (totalOI ? Number(totalOI) / collDivisor : 0);
-  const estimatedApy = marketInfo?.estimatedApyPct ?? 0;
   const collateralScale = Math.pow(10, collateralDecimals);
   // TVL = the LP Vault Registry's own backing (shares + distributed fees), NOT the
   // percolator-stake pool (poolState.vaultBalance, wrong account — see hook comment above).
@@ -219,7 +218,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               ⚠ Couldn&apos;t refresh market stats
             </p>
             <p className="text-[11px] text-[var(--text-secondary)] mt-1">
-              {earnStatsError} — volume, insurance, and APY figures below may be stale. Vault balance and deposit/withdraw are unaffected.
+              {earnStatsError} — volume and insurance figures below may be stale. Vault balance and deposit/withdraw are unaffected.
             </p>
           </div>
         )}
@@ -257,17 +256,6 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
           </div>
 
           <div className="flex items-center gap-6">
-            <div className="text-right">
-              <div
-                className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)] cursor-help underline decoration-dotted decoration-[var(--text-muted)]"
-                title="APY is estimated from the last 30 days of insurance fund fee revenue. Past performance does not guarantee future returns."
-              >
-                Est. APY
-              </div>
-              <div className="text-2xl font-bold text-[var(--cyan)] font-mono tabular-nums">
-                {estimatedApy.toFixed(1)}%
-              </div>
-            </div>
             <div className="text-right">
               <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-secondary)]">
                 TVL
@@ -330,7 +318,6 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
               vaultBalance={lpVaultState.vaultTotalAtoms}
               decimals={collateralDecimals}
               collateralSymbol={collateralSymbol}
-              estimatedApyPct={estimatedApy}
               redemptionRateE6={lpVaultState.vaultSharePriceE6}
               loading={loading}
             />
