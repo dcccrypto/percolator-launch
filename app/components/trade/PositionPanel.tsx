@@ -95,9 +95,10 @@ interface AddMarginModalProps {
   symbol: string;
   decimals: number;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
-const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol, decimals, onClose }) => {
+export const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol, decimals, onClose, onSuccess}) => {
   const [amount, setAmount] = useState("");
   const [lastSig, setLastSig] = useState<string | null>(null);
   const { deposit, loading, error } = useDeposit(slabAddress);
@@ -120,6 +121,10 @@ const AddMarginModal: FC<AddMarginModalProps> = ({ slabAddress, userIdx, symbol,
       const sig = await deposit({ userIdx, amount: parsedAmount, accountExists: true });
       setLastSig(sig ?? null);
       setAmount("");
+
+    // Add margin mutates the slab account. Refresh immediately so capital,
+    // liquidation risk, and position health do not stay stale until polling.
+    onSuccess?.();
     } catch {
       // error shown via hook
     }
@@ -199,7 +204,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccount(slabAddress) : null);
   const config = useMarketConfig();
   const { engine: engineState, fundingRate } = useEngineState();
-  const { accounts, config: mktConfig, params } = useSlabState();
+  const { accounts, config: mktConfig, params, refresh: refreshSlab } = useSlabState();
   const { priceE6: livePriceE6, priceUsd } = useLivePrice();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   const mintAddress = mktConfig?.collateralMint?.toBase58() ?? "";
@@ -697,6 +702,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
           symbol={symbol}
           decimals={decimals}
           onClose={() => setShowAddMarginModal(false)}
+        onSuccess={refreshSlab}
         />
       )}
     </div>
