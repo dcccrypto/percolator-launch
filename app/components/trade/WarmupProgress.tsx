@@ -151,7 +151,14 @@ export const WarmupProgress: FC<{
           </button>
 
           {/* Thin progress bar */}
-          <div className="flex-1 h-1 overflow-hidden rounded-full bg-[var(--border)]/20">
+          <div
+            className="flex-1 h-1 overflow-hidden rounded-full bg-[var(--border)]/20"
+            role="progressbar"
+            aria-valuenow={Math.round(progress)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext={`Profit unlock ${progress.toFixed(0)}% complete`}
+          >
             <div
               className="h-full rounded-full bg-[var(--accent)]/60 transition-[width] duration-1000 ease-linear"
               style={{ width: `${progress}%` }}
