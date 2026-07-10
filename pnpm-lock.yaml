@@ -87,7 +87,7 @@ importers:
         specifier: ^3.14.1
         version: 3.14.1(6ba7a9d9e0172521f33b8d058dae8da3)
       '@sentry/nextjs':
-        specifier: ^10.39.0
+        specifier: 10.39.0
         version: 10.39.0(@opentelemetry/context-async-hooks@2.5.1(@opentelemetry/api@1.9.0))(@opentelemetry/core@2.5.1(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.5.1(@opentelemetry/api@1.9.0))(next@16.2.9(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react@18.3.1)(webpack@5.105.2(esbuild@0.27.3))
       '@solana-program/memo':
         specifier: ^0.11.0
@@ -117,10 +117,10 @@ importers:
         specifier: ^2.97.0
         version: 2.98.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       '@upstash/ratelimit':
-        specifier: ^2.0.8
+        specifier: 2.0.8
         version: 2.0.8(@upstash/redis@1.36.4)
       '@upstash/redis':
-        specifier: ^1.36.4
+        specifier: 1.36.4
         version: 1.36.4
       '@vercel/analytics':
         specifier: ^2.0.1
@@ -16775,9 +16775,9 @@ snapshots:
       mime-types: 3.0.2
       negotiator: 1.0.0
 
-  acorn-import-attributes@1.9.5(acorn@8.15.0):
+  acorn-import-attributes@1.9.5(acorn@8.16.0):
     dependencies:
-      acorn: 8.15.0
+      acorn: 8.16.0
 
   acorn-import-phases@1.0.4(acorn@8.16.0):
     dependencies:
@@ -18598,8 +18598,8 @@ snapshots:
 
   import-in-the-middle@2.0.6:
     dependencies:
-      acorn: 8.15.0
-      acorn-import-attributes: 1.9.5(acorn@8.15.0)
+      acorn: 8.16.0
+      acorn-import-attributes: 1.9.5(acorn@8.16.0)
       cjs-module-lexer: 2.2.0
       module-details-from-path: 1.0.4
 
@@ -21248,7 +21248,7 @@ snapshots:
 
   unplugin@1.0.1:
     dependencies:
-      acorn: 8.15.0
+      acorn: 8.16.0
       chokidar: 3.6.0
       webpack-sources: 3.3.4
       webpack-virtual-modules: 0.5.0
