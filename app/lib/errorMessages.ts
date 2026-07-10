@@ -243,6 +243,12 @@ export function isOracleStaleError(msg: string): boolean {
   return code === 27 || code === 26 || code === 20;
 }
 
+export function isEngineLockError(msg: string): boolean {
+  const code = extractErrorCode(msg);
+  return code === 21 || code === 19;
+}
+
+
 /**
  * @param context Optional call-site hint for disambiguating error codes that
  *   mean different things depending on which instruction produced them (see

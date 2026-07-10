@@ -39,7 +39,7 @@ import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "rea
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useTrade } from "@/hooks/useTrade";
-import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
+import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
 import { computeLimitPriceE6 } from "@/lib/slippage";
@@ -271,6 +271,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [tradePhase, setTradePhase] = useState<"idle" | "submitting" | "confirming" | "error">("idle");
   const [humanError, setHumanError] = useState<string | null>(null);
+  const [engineLockError, setEngineLockError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmSnapshot, setConfirmSnapshot] = useState<{
     positionSize: bigint;
@@ -388,6 +389,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     setLeverageText("1");
     setLastSig(null);
     setHumanError(null);
+    setEngineLockError(null);
     setTradePhase("idle");
   }, [slabAddress]);
 
@@ -563,6 +565,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
     }
 
     setHumanError(null);
+setEngineLockError(null);
     setTradePhase("submitting");
     try {
       const size = direction === "short" ? -effectiveSize : effectiveSize;
@@ -580,6 +583,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       );
       setTradePhase("confirming");
       setLastSig(sig ?? null);
+setEngineLockError(null);
       setMarginInput("");
       setSizeInput("");
       if (livePriceE6 && livePriceE6 > 0n && userAccount) {
@@ -612,7 +616,11 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       // it as the slippage/worst-fill-price rejection it actually is here,
       // not the generic "invalid instruction" text (still correct for
       // deposit/withdraw/NFT/market-creation call sites).
-      setHumanError(humanizeError(msg, "trade"));
+      const friendlyMsg = humanizeError(msg, "trade");
+    if (isEngineLockError(msg)) {
+      setEngineLockError(friendlyMsg);
+    }
+    setHumanError(friendlyMsg)
       // Brief "Failed" flash on the submit button itself (matches the
       // "Confirmed!" success flash below) before reverting to idle — the
       // detailed reason stays in the humanError banner underneath.
@@ -1015,11 +1023,24 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
         </button>
       )}
 
-      {humanError && (
+      {/* A trade that reverted with an engine-lock error (EngineStale/
+          EngineLockActive) persists here in a distinct, retryable amber notice
+          rather than the generic red failure banner — the market is temporarily
+          un-tradeable, not the order malformed. Non-blocking (submit stays
+          enabled): retrying clears it (see the submit handler) and re-attempts.
+          engineLockError takes precedence over humanError since a lock failure
+          sets both. */}
+      {engineLockError ? (
+        <div className="mt-2 rounded-none border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-3 py-2">
+          <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[var(--warning)]">Market temporarily locked</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">{engineLockError}</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-muted)]">This usually clears once the market is cranked again — try again shortly.</p>
+        </div>
+      ) : humanError ? (
         <div className="mt-2 rounded-none border border-[var(--short)]/20 bg-[var(--short)]/5 px-3 py-2">
           <p className="text-[10px] text-[var(--short)]">{humanError}</p>
         </div>
-      )}
+      ) : null}
       {lastSig && (
         <p className="mt-2 text-[10px] text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-mono)" }}>
           Tx: <a href={explorerTxUrl(lastSig)} target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">{lastSig.slice(0, 16)}...</a>
