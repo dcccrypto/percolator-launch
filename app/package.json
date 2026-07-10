@@ -16,7 +16,7 @@
     "@percolatorct/sdk": "github:dcccrypto/percolator-sdk#45cd6cce007416430d8a9b69f803a87eef2d0dc8",
     "@privy-io/node": "^0.18.0",
     "@privy-io/react-auth": "^3.14.1",
-    "@sentry/nextjs": "^10.39.0",
+    "@sentry/nextjs": "10.39.0",
     "@solana-program/memo": "^0.11.0",
     "@solana/kit": "^6.1.0",
     "@solana/spl-token": "^0.4.14",
@@ -62,8 +62,12 @@
     "vitest": "^4.0.18",
     "ws": "^8.21.0"
   },
-  "//overrides": "Pin @upstash/redis to the last Edge-safe version. 1.37.0/1.38.0 (published Jul 2026) drag Node-only code into the Edge middleware bundle -> Vercel 'referencing unsupported modules' deploy failure. app/ has no lockfile so npm floats the ^ range; this override forces 1.36.4 everywhere (direct + @upstash/ratelimit's transitive dep).",
+  "//overrides": "app/ has no lockfile, so Vercel's `npm install` floats these ^ ranges to versions newer than the last clean deploy (86be4c11). @sentry/nextjs auto-instruments middleware.ts and @upstash/* is imported by it directly; newer versions drag Node-only code into the Edge middleware bundle -> Vercel 'referencing unsupported modules' deploy failure (mis-attributed to whatever userland file shares that chunk). Pin the entire middleware dep subtree to the exact versions in the tested root pnpm-lock.yaml. Regenerate/re-pin after any intentional bump of these.",
   "overrides": {
-    "@upstash/redis": "1.36.4"
+    "@sentry/nextjs": "10.39.0",
+    "@upstash/redis": "1.36.4",
+    "@upstash/ratelimit": "2.0.8",
+    "@upstash/core-analytics": "0.0.10",
+    "uncrypto": "0.1.3"
   }
 }
