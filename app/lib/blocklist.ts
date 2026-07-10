@@ -159,6 +159,9 @@ export function validateBlocklist(): void {
   }
 }
 
-// Auto-run at module load so the warning fires during both dev and production
-// startup without requiring an explicit call site.
-validateBlocklist();
+// NOTE: previously this module auto-ran `validateBlocklist()` at import time.
+// blocklist.ts is imported by the Edge middleware, and a top-level side effect that
+// reads a server-only env var (process.env.BLOCKED_MARKET_ADDRESSES) at module
+// evaluation makes Vercel's Edge-Function analyzer reject the module ("referencing
+// unsupported modules"). Call validateBlocklist() explicitly from a Node-runtime
+// entrypoint (e.g. instrumentation.ts) instead of running it at import.
