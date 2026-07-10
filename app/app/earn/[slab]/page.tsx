@@ -145,16 +145,25 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   useEffect(() => {
     if (marketInfo || earnLoading) return;
     let cancelled = false;
-    getSupabase()
-      .from('markets_with_stats')
-      .select('symbol, name')
-      .eq('slab_address', slabAddress)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!cancelled && data?.symbol) {
-          setFallbackSymbol(data.symbol);
-        }
-      });
+    try {
+      getSupabase()
+        .from('markets_with_stats')
+        .select('symbol, name')
+        .eq('slab_address', slabAddress)
+        .maybeSingle()
+        .then(
+          ({ data }) => {
+            if (!cancelled && data?.symbol) {
+              setFallbackSymbol(data.symbol);
+            }
+          },
+          (err: unknown) => {
+            console.error('[earn/[slab]] fallback symbol lookup failed:', err);
+          },
+        );
+    } catch (err) {
+      console.error('[earn/[slab]] fallback symbol lookup failed:', err);
+    }
     return () => { cancelled = true; };
   }, [marketInfo, earnLoading, slabAddress]);
 
@@ -182,7 +191,11 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
   );
 
   const symbol = marketInfo?.symbol ?? fallbackSymbol ?? 'UNKNOWN';
+  // maxOI is only known once marketInfo resolves — without it we can't tell "no OI
+  // cap" (real 0) apart from "cap unknown" (marketInfo not loaded yet / market not
+  // in earn stats), so the meter must not claim a health status in the latter case.
   const maxOI = marketInfo?.maxOI ?? 0;
+  const oiCapKnown = marketInfo != null;
   const collDivisor = 10 ** collateralDecimals;
   const currentOI = marketInfo?.totalOI ?? (totalOI ? Number(totalOI) / collDivisor : 0);
   const collateralScale = Math.pow(10, collateralDecimals);
@@ -285,7 +298,7 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
             </StatCell>
             <StatCell label="Open Interest" loading={loading}>
               <span className="text-sm font-mono tabular-nums text-[var(--text)]">
-                ${formatCompact(currentOI)}
+                {oiCapKnown ? `$${formatCompact(currentOI)}` : '—'}
               </span>
             </StatCell>
             <StatCell label="Insurance" loading={loading}>
@@ -304,7 +317,13 @@ function VaultDetailInner({ slabAddress }: { slabAddress: string }) {
         {/* OI meter */}
         <ScrollReveal>
           <div className="mb-8 border border-[var(--border)] bg-[var(--panel-bg)] rounded-sm p-5 hud-corners">
-            <OiCapMeter currentOI={currentOI} maxOI={maxOI} />
+            {oiCapKnown ? (
+              <OiCapMeter currentOI={currentOI} maxOI={maxOI} />
+            ) : (
+              <div className="text-[11px] text-[var(--text-secondary)]">
+                OI capacity data unavailable for this market.
+              </div>
+            )}
           </div>
         </ScrollReveal>
 

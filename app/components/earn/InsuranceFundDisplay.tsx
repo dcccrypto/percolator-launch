@@ -109,7 +109,7 @@ export function InsuranceFundDisplay({
               By Market
             </div>
             <div className="space-y-2">
-              {stats.markets
+              {[...stats.markets]
                 .sort((a, b) => b.insuranceFund - a.insuranceFund)
                 .slice(0, 5)
                 .map((m) => (

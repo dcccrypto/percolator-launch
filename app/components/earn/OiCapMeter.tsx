@@ -30,7 +30,7 @@ export function OiCapMeter({
   const barColor = useMemo(() => {
     if (utilPct >= 90) return 'var(--short)';
     if (utilPct >= 75) return 'var(--warning)';
-    if (utilPct >= 50) return '#E5A100';
+    if (utilPct >= 50) return 'var(--warning)';
     return 'var(--cyan)';
   }, [utilPct]);
 
@@ -82,8 +82,8 @@ export function OiCapMeter({
           className="text-[10px] uppercase tracking-[0.15em] font-medium px-2 py-0.5 rounded-sm border"
           style={{
             color: barColor,
-            borderColor: `${barColor}33`,
-            backgroundColor: `${barColor}0A`,
+            borderColor: `color-mix(in srgb, ${barColor} 20%, transparent)`,
+            backgroundColor: `color-mix(in srgb, ${barColor} 4%, transparent)`,
           }}
         >
           {statusLabel}
