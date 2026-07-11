@@ -2,8 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import * as Sentry from "@sentry/nextjs";
 import { createPlaygroundChallenge } from "@/lib/playground-nonce-store";
+import { createUpstashRateLimiter } from "@/lib/upstash-rate-limit";
+import { getClientIp } from "@/lib/get-client-ip";
 
 export const dynamic = "force-dynamic";
+
+// SEC: per-IP rate limit. This endpoint was unauthenticated and unlimited,
+// and each call does a Blob read-modify-write on the shared nonce store. An
+// attacker could (a) spam a VICTIM's deployer pubkey (public, on-chain) to
+// fill its 10 pending-challenge slots and lock the victim out of registering
+// for the 5-min TTL, or (b) flood random deployers to thrash/evict the global
+// store so legit nonces expire before they're claimed. A per-IP cap bounds a
+// single-IP attacker below the per-deployer slot count, so they can't fill a
+// victim's slots or churn the store from one address. 30/min is generous for
+// a human (a launch needs 1-2). Same shared Upstash limiter as /api/rpc, with
+// the in-memory fallback for dev/CI. Tunable via env.
+const CHALLENGE_RATE_LIMIT_MAX = Number(
+  process.env.MARKETS_CHALLENGE_RATE_LIMIT_PER_WINDOW ?? "30",
+); // per IP / 60s
+const challengeRateLimiter = createUpstashRateLimiter({
+  limit: CHALLENGE_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+  prefix: "rl:markets-challenge",
+});
 
 /**
  * PERC-8332: Nonce challenge endpoint for deployer wallet-sig verification.
@@ -26,6 +47,18 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: NextRequest) {
   try {
+    // Rate-limit before the deployer param is even read — the expensive part
+    // (and the abuse target) is createPlaygroundChallenge's Blob write below.
+    if (Number.isFinite(CHALLENGE_RATE_LIMIT_MAX) && CHALLENGE_RATE_LIMIT_MAX > 0) {
+      const rl = await challengeRateLimiter.check(getClientIp(req));
+      if (!rl.allowed) {
+        return NextResponse.json(
+          { error: "Too many challenge requests — try again shortly." },
+          { status: 429, headers: { "Retry-After": String(rl.retryAfterSecs) } },
+        );
+      }
+    }
+
     const deployer = req.nextUrl.searchParams.get("deployer");
 
     if (!deployer) {
