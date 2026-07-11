@@ -28,6 +28,7 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
+import { boundedSet } from "@/lib/bounded-map";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +79,13 @@ const POOL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const POOL_MISS_TTL_MS = 60 * 1000;
 const CANDLE_CACHE_TTL_MS = 45 * 1000;
 const CANDLE_STALE_MAX_MS = 15 * 60 * 1000;
+// Hard entry cap per cache. The route validates `mint` only as a well-formed
+// pubkey (not a real token), and resolveTopPool caches even NULL misses — so a
+// warm/long-lived instance hit with millions of distinct random pubkeys would
+// grow these Maps without bound (memory DoS). TTL is checked only on read,
+// never evicted, so the cap is the real backstop. ~10k small entries is far
+// above the handful of live markets yet trivially bounded (~sub-MB).
+const CACHE_MAX_ENTRIES = 10_000;
 const poolCache = new Map<string, { pool: string | null; at: number }>();
 const candleCache = new Map<string, { candles: CandleData[]; at: number }>();
 
@@ -123,7 +131,7 @@ async function resolveTopPool(mint: string): Promise<string | null> {
   const pool = await resolveTopPoolUncached(mint);
   // A resolved pool is durable knowledge; a null may just be a 429 — the
   // short miss-TTL above keeps us from hammering GT while never pinning it.
-  poolCache.set(mint, { pool: pool ?? cached?.pool ?? null, at: Date.now() });
+  boundedSet(poolCache, mint, { pool: pool ?? cached?.pool ?? null, at: Date.now() }, CACHE_MAX_ENTRIES);
   // If this attempt failed but we have ANY previously-known pool, keep using
   // it — pools don't move, and a rate-limited lookup must not blank a chart
   // that worked a minute ago.
@@ -238,7 +246,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ mint
 
     const candles = await fetchCandles(pool, timeframe, aggregate, limit);
     if (candles.length > 0) {
-      candleCache.set(cacheKey, { candles, at: Date.now() });
+      boundedSet(candleCache, cacheKey, { candles, at: Date.now() }, CACHE_MAX_ENTRIES);
       return NextResponse.json({ candles, poolAddress: pool, cached: false }, { headers: CACHE_HEADERS });
     }
 
