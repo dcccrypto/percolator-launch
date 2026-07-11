@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
 import { SlabProvider } from "@/components/providers/SlabProvider";
@@ -406,7 +406,7 @@ export default function PortfolioPage() {
   // `market.configV17.collateralMint`) — use the pre-resolved `pos.collateralMint`
   // (set by usePortfolio) instead of touching `pos.market.config.collateralMint`
   // directly, which is undefined for v17 markets and crashes `.toBase58()`.
-  const collateralMints = positions.map((pos) => pos.collateralMint);
+  const collateralMints = useMemo(() => positions.map((pos) => pos.collateralMint), [positions]);
   const tokenMetaMap = useMultiTokenMeta(collateralMints);
 
   // Helper: get collateral decimals for a position from token metadata

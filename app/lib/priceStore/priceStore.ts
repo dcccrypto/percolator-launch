@@ -272,7 +272,7 @@ export function subscribeSlab(slab: string, onStoreChange: () => void): () => vo
     }
     const manager = getWsManager(WS_URL);
     entry.releaseWs = manager.subscribeChannel(slab);
-    entry.releaseMsg = manager.onMessage((data) => handleRawMessage(slab, entry, data));
+    entry.releaseMsg = manager.onMessageForChannel(slab, (data) => handleRawMessage(slab, entry, data));
   }
 
   let released = false;

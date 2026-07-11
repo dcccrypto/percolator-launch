@@ -3,7 +3,7 @@
 import { Component, FC, ReactNode, useMemo, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { AutoFundProvider } from "./AutoFundProvider";
-import { PrivyAvailableContext, PrivyLoginContext } from "@/hooks/usePrivySafe";
+import { PrivyAvailableContext } from "@/hooks/usePrivySafe";
 import { WalletAdapterAvailableContext } from "@/hooks/useWalletAdapterAvailable";
 import { DevnetFaucetModal } from "@/components/devnet/DevnetFaucetModal";
 import {

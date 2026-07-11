@@ -1,6 +1,6 @@
 "use client";
 
-import { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FC, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
@@ -37,7 +37,7 @@ interface SwitcherRow {
  * PORTALED to document.body and placed from the trigger's
  * boundingClientRect, clamped to the viewport.
  */
-export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, logoUrl, mintAddress, mainnetCa }) => {
+const MarketSwitcherInner: FC<MarketSwitcherProps> = ({ slabAddress, symbol, logoUrl, mintAddress, mainnetCa }) => {
   const router = useRouter();
   const { statsMap } = useAllMarketStats();
   const [open, setOpen] = useState(false);
@@ -232,3 +232,5 @@ export const MarketSwitcher: FC<MarketSwitcherProps> = ({ slabAddress, symbol, l
     </>
   );
 };
+
+export const MarketSwitcher = memo(MarketSwitcherInner);

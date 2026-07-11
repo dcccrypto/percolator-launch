@@ -2,7 +2,7 @@ import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 
 export default function TradingPageLoading() {
   return (
-    <div className="min-h-[calc(100dvh-48px)]">
+    <div className="mx-auto max-w-[1920px] min-h-[calc(100dvh-48px)]">
       {/* Mobile: Sticky header skeleton */}
       <div className="sticky top-0 z-30 border-b border-[var(--border)]/50 bg-[var(--bg)]/95 px-3 py-2 backdrop-blur-sm lg:hidden">
         <div className="flex items-center justify-between">
@@ -65,7 +65,7 @@ export default function TradingPageLoading() {
           (left, dominant), order-ticket rail (right, 340px, spans both rows),
           positions dock (bottom-left, 2 tabs). */}
       <div
-        className="hidden lg:grid gap-3 px-4 lg:px-6 pb-3 pt-2"
+        className="hidden lg:grid gap-3 px-4 lg:px-6 pb-3 pt-2 min-h-[calc(100dvh-150px)]"
         style={{
           gridTemplateAreas: '"Chart OrderTicket" "PositionsDock OrderTicket"',
           gridTemplateColumns: "minmax(0,1fr) 340px",
@@ -73,8 +73,8 @@ export default function TradingPageLoading() {
         }}
       >
         {/* Chart */}
-        <div style={{ gridArea: "Chart" }} className="min-w-0">
-          <ShimmerSkeleton className="h-[460px] w-full" />
+        <div style={{ gridArea: "Chart" }} className="min-w-0 min-h-0">
+          <ShimmerSkeleton className="h-full w-full" />
         </div>
 
         {/* Order-ticket rail — single framed panel (order ticket + NFT panel) */}

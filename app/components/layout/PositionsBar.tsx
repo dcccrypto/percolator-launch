@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { parseWrapperConfigV17, isV17Account, V17_HEADER_LEN } from "@percolatorct/sdk";
@@ -152,9 +152,9 @@ export function PositionsBar() {
     const abs = size < 0n ? -size : size;
     return pos.oraclePriceE6 > 0n ? (abs * pos.oraclePriceE6) / 1_000_000n : abs;
   };
-  const openPositions = positions
+  const openPositions = useMemo(() => positions
     .filter((pos) => (pos.account?.positionSize ?? 0n) !== 0n)
-    .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0));
+    .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0)), [positions]);
 
   // Collateral decimals per mint (all playground markets use 6-decimal
   // sim-USDC; resolved properly anyway, matching the portfolio page).

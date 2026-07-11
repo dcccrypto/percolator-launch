@@ -30,6 +30,17 @@ const nextConfig = {
   // @solana/kit must be transpiled: its browser export resolves to an ESM .mjs file
   // that webpack includes verbatim, causing "Unexpected token 'export'" in production bundles.
   transpilePackages: ["@percolator/sdk", "@solana/kit"],
+  // Tree-shake named imports out of large barrel packages so only the used
+  // members land in the bundle. @solana/wallet-adapter-wallets re-exports ~36
+  // adapters but we use one (Solflare); spl-token / wallet-adapter-react are
+  // wide barrels too. Behavior-identical — pure build-time import rewriting.
+  experimental: {
+    optimizePackageImports: [
+      "@solana/wallet-adapter-wallets",
+      "@solana/wallet-adapter-react",
+      "@solana/spl-token",
+    ],
+  },
   async headers() {
     // Security headers are set here as a baseline. CSP is NOT set here because
     // middleware.ts handles it with per-request nonce generation. When both

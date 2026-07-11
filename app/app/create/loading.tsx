@@ -4,9 +4,13 @@ export default function CreateLoading() {
   return (
     <div className="min-h-[calc(100dvh-48px)] relative">
       {/* Grid background */}
-      <div className="absolute inset-x-0 top-0 h-32 bg-grid pointer-events-none" />
+      <div className="absolute inset-x-0 top-0 h-16 bg-grid pointer-events-none opacity-50" />
 
       <div className="relative mx-auto max-w-4xl px-4 pt-4 pb-10">
+        {/* Back-nav row */}
+        <div className="mb-4">
+          <ShimmerSkeleton className="h-3 w-24" />
+        </div>
         {/* Page header skeleton */}
         <div className="mb-8">
           <ShimmerSkeleton className="h-3 w-16 mb-2" />

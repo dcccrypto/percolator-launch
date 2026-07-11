@@ -28,7 +28,7 @@
  * information — usePortfolio has no cross-instance dedup.
  */
 
-import { FC, memo, useCallback, useState, useSyncExternalStore } from "react";
+import { FC, memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
@@ -293,9 +293,9 @@ const OtherMarketPositionsInner: FC<{ currentSlab: string }> = ({ currentSlab })
     const a = size < 0n ? -size : size;
     return pos.oraclePriceE6 > 0n ? (a * pos.oraclePriceE6) / 1_000_000n : a;
   };
-  const others = positions
+  const others = useMemo(() => positions
     .filter((pos) => pos.slabAddress !== currentSlab && (pos.account?.positionSize ?? 0n) !== 0n)
-    .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0));
+    .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0)), [positions, currentSlab]);
   const tokenMetaMap = useMultiTokenMeta(others.map((pos) => pos.collateralMint));
 
   if (others.length === 0) return null;

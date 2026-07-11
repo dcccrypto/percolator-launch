@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode, type OracleMode } from "@/lib/oraclePrice";
 
@@ -121,9 +121,16 @@ export function useOracleFreshness(): OracleFreshnessState {
   // indexFeedId=ZERO for all non-admin v17 modes, so key-based detection alone can't
   // tell keeper apart from hyperp). Matches the other detectOracleMode call sites
   // (MarketStatsCard, MarketBrowser, markets/page.tsx).
-  const mode = (config && hasOracleKeys)
-    ? detectOracleMode({ ...config, oracleModeByte: wrapperConfigV17?.oracleMode })
-    : null;
+  // Memoized: detectOracleMode was recomputed with a fresh {...config} spread on
+  // every render. config identity is stable between on-chain updates, so this
+  // now recomputes only when the inputs actually change. (The effect below keeps
+  // its own recompute — it runs far less often than render.)
+  const mode = useMemo(
+    () => (config && hasOracleKeys)
+      ? detectOracleMode({ ...config, oracleModeByte: wrapperConfigV17?.oracleMode })
+      : null,
+    [config, hasOracleKeys, wrapperConfigV17?.oracleMode],
+  );
 
   // Track price changes to detect updates
   useEffect(() => {
