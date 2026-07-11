@@ -113,6 +113,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             `,
           }}
         />
+        {/* Network hints: token logos are fetched cross-origin (next/image
+            unoptimized), so resolve/warm the logo CDN's connection early.
+            Cheap and safe — a no-op when unused. */}
+        <link rel="dns-prefetch" href="https://assets.coingecko.com" />
+        <link rel="preconnect" href="https://assets.coingecko.com" crossOrigin="anonymous" />
       </head>
         <body suppressHydrationWarning className="min-h-screen antialiased" data-nonce={nonce}>
         <JsonLd data={[organizationSchema(), websiteSchema()]} />
