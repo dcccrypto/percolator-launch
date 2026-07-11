@@ -60,6 +60,43 @@ export function prefetchSlab(connection: Connection, slab: string): void {
   inflight.set(slab, p);
 }
 
+/**
+ * Warm the cache for MANY slabs in one batched RPC (getMultipleAccountsInfo,
+ * chunked at 100) — call once when the markets list loads so EVERY market opens
+ * instantly, not just hovered ones. Skips slabs already fresh or in flight.
+ */
+export function prefetchSlabsBatch(connection: Connection, slabs: string[]): void {
+  const keys: string[] = [];
+  const pks: PublicKey[] = [];
+  for (const s of slabs) {
+    if (getCachedSlab(s) || inflight.has(s)) continue;
+    try {
+      pks.push(new PublicKey(s));
+      keys.push(s);
+    } catch {
+      /* skip invalid */
+    }
+  }
+  if (pks.length === 0) return;
+  const p = (async () => {
+    try {
+      for (let i = 0; i < pks.length; i += 100) {
+        const chunkPks = pks.slice(i, i + 100);
+        const chunkKeys = keys.slice(i, i + 100);
+        const infos = await connection.getMultipleAccountsInfo(chunkPks);
+        infos.forEach((info, j) => {
+          if (info) setCachedSlab(chunkKeys[j], new Uint8Array(info.data), info.owner);
+        });
+      }
+    } catch {
+      /* best-effort */
+    } finally {
+      keys.forEach((k) => inflight.delete(k));
+    }
+  })();
+  keys.forEach((k) => inflight.set(k, p));
+}
+
 function dateNow(): number {
   return Date.now();
 }

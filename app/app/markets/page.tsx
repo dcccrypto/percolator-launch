@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useRef, useCallback, useSyncExternalStore
 import type { Metadata } from "next";
 import Link from "next/link";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
-import { prefetchSlab } from "@/lib/slabCache";
+import { prefetchSlab, prefetchSlabsBatch } from "@/lib/slabCache";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue } from "@/lib/health";
@@ -317,6 +317,14 @@ function MarketsPageInner() {
 
   // Only show mock data in development (never in production)
   const effectiveMarkets = merged.length > 0 ? merged : (process.env.NODE_ENV === "development" ? MOCK_MARKETS : []);
+
+  // Batch-warm the slab cache for every listed market in ONE getMultipleAccountsInfo
+  // so clicking ANY market opens the terminal instantly (not just hovered rows).
+  useEffect(() => {
+    if (effectiveMarkets.length > 0) {
+      prefetchSlabsBatch(connection, effectiveMarkets.map((m) => m.slabAddress));
+    }
+  }, [effectiveMarkets, connection]);
 
   // Fetch on-chain token metadata for ALL markets (no Supabase)
   const allMints = useMemo(() => {
