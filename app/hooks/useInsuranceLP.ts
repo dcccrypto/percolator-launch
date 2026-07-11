@@ -418,7 +418,8 @@ export function useInsuranceLP() {
    *
    * Account list (ACCOUNTS_CREATE_LP_VAULT):
    *   [0] admin (signer, writable)
-   *   [1] market (readonly)
+   *   [1] market (WRITABLE on the current deployed program — see the meta
+   *       override below; older SDK snapshots still say readonly)
    *   [2] registry (writable, PDA: ["lp_vault_registry", market])
    *   [3] lpMint (writable, PDA: ["lp_vault_mint", market])
    *   [4] systemProgram
@@ -449,6 +450,13 @@ export function useInsuranceLP() {
         WELL_KNOWN.systemProgram,
         WELL_KNOWN.tokenProgram,
       ]);
+      // The deployed wrapper program writes to the market account in
+      // CreateLpVault, but some snapshots of the git-pinned SDK still mark it
+      // read-only (both report v3.0.0) — on-chain error 7 AccountNotWritable.
+      // Same override as useCreateMarket's Earn-vault step; see the full
+      // simulation-proven explanation there. Drop when the SDK bump ships.
+      const marketMeta = keys.find((k) => k.pubkey.equals(marketPk));
+      if (marketMeta) marketMeta.isWritable = true;
       const data = encodeCreateLpVaultV17({
         feeShareBps: 2000,          // 20% of insurance earnings to LP providers
         oiReservationThresholdBps: 5000, // 50% OI reservation threshold

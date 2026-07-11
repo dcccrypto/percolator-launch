@@ -1624,16 +1624,33 @@ export function useCreateMarket() {
           // even though the overall create() call subsequently failed/threw.
           const existingRegistry = await connection.getAccountInfo(lpVaultRegistry);
           if (!existingRegistry) {
+            const createLpVaultKeys = buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, {
+              admin: wallet.publicKey,
+              market: slabPk,
+              registry: lpVaultRegistry,
+              lpMint: lpVaultMint,
+              systemProgram: WELL_KNOWN.systemProgram,
+              tokenProgram: WELL_KNOWN.tokenProgram,
+            });
+            // The DEPLOYED wrapper program (updated with the born-immortal
+            // re-seed) writes to the market account in CreateLpVault, but
+            // whether ACCOUNTS_CREATE_LP_VAULT marks `market` writable depends
+            // on which snapshot of the git-pinned SDK an install resolved
+            // (both report version 3.0.0): the known-good tree the hosted
+            // deploy was reverted to (fba2a6d, Vercel Edge-bundle regression)
+            // ships it READ-ONLY — so every hosted wizard "Create Earn vault"
+            // step failed on-chain with error 7 (AccountNotWritable),
+            // surfaced as "Unexpected error". Proven by devnet simulation:
+            // read-only → 0x7 at ~1.8k CU; writable → past the check (0x8
+            // Unauthorized for a non-marketauth signer, the very next gate).
+            // Force the flag here — a no-op on SDK snapshots that already
+            // carry the fix, the bugfix on the ones that don't. Drop only
+            // once the SDK bump has actually shipped to the hosted deploy.
+            const marketMeta = createLpVaultKeys.find((k) => k.pubkey.equals(slabPk));
+            if (marketMeta) marketMeta.isWritable = true;
             const createLpVaultIx = buildIx({
               programId,
-              keys: buildAccountMetas(ACCOUNTS_CREATE_LP_VAULT, {
-                admin: wallet.publicKey,
-                market: slabPk,
-                registry: lpVaultRegistry,
-                lpMint: lpVaultMint,
-                systemProgram: WELL_KNOWN.systemProgram,
-                tokenProgram: WELL_KNOWN.tokenProgram,
-              }),
+              keys: createLpVaultKeys,
               data: encodeCreateLpVaultV17({
                 feeShareBps: 1000, // 10% fee share — matches the 5 seeded markets
                 oiReservationThresholdBps: 8000,
