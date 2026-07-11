@@ -5,6 +5,7 @@ import { PublicKey, Keypair, TransactionInstruction, SYSVAR_RENT_PUBKEY, SystemP
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { assertKnownProgram } from "@/lib/programAllowlist";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
@@ -34,11 +35,18 @@ export function useMintPositionNft(slabAddress: string) {
       setError("Wallet not connected or market not loaded");
       return;
     }
-
     setLoading(true);
     setError(null);
 
     try {
+      // Defense-in-depth parity with useTrade/useDeposit/useWithdraw: these
+      // NFT hooks derive PDAs from `programId` (useSlabState) and use it as an
+      // account, but relied solely on SlabProvider nulling programId for an
+      // unknown-owner slab. Assert it's a known program before building a
+      // signable tx, so a phishing slab can never reach the tx-build path.
+      // Inside the try so the existing catch surfaces it like any other error.
+      assertKnownProgram(programId);
+
       const slabPk = new PublicKey(slabAddress);
       const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
       const isV17 = raw != null && raw.length > 0 && isV17Account(raw);

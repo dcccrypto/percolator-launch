@@ -5,6 +5,7 @@ import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
+import { assertKnownProgram } from "@/lib/programAllowlist";
 import { usePositionNft } from "@/hooks/usePositionNft";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
@@ -82,6 +83,11 @@ export function useBurnPositionNft(slabAddress: string, override?: PositionNftOv
     setError(null);
 
     try {
+      // Defense-in-depth parity with the other fund/position hooks: assert
+      // the slab's programId is a known Percolator program before deriving
+      // PDAs from it and building a signable tx (see useMintPositionNft).
+      assertKnownProgram(programId);
+
       const nftProgId = PERCOLATOR_NFT_PROGRAM_ID;
       const nftPda = new PublicKey(nftPdaAddress);
       const [mintAuth]    = deriveMintAuthority(nftProgId);
