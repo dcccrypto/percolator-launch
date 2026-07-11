@@ -1589,10 +1589,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // #813: Validate dex_pool_address is a valid Solana pubkey (when provided)
+  // #813: Validate dex_pool_address is a valid Solana pubkey (when provided).
+  // Canonicalized (PublicKey round-trip) so it's a reliable second dedupe key
+  // below — the pool is the token's on-chain identity when mainnet_ca is
+  // omitted, and a non-canonical encoding must not dodge the check.
+  let canonicalDexPool: string | null = null;
   if (dex_pool_address) {
     try {
-      new PublicKey(dex_pool_address);
+      canonicalDexPool = new PublicKey(dex_pool_address).toBase58();
     } catch {
       return NextResponse.json(
         { error: "Invalid dex_pool_address: must be a valid Solana public key" },
@@ -1779,11 +1783,19 @@ export async function POST(req: NextRequest) {
     // market list in this mode; best-effort — an unreadable registry must not
     // block legitimate launches (fail-open here; the Supabase path below is
     // the authoritative gate on deployments that have a DB).
-    if (canonicalMainnetCa) {
+    // Dedupe on the token's identity — mainnet_ca OR the DEX pool. Keying on
+    // BOTH closes the bypass where omitting the optional mainnet_ca skipped
+    // the check entirely: any keeper-priced market still carries a pool, so a
+    // clone is caught even with no CA. (A pure admin-price market with neither
+    // has no external token identity to duplicate.)
+    if (canonicalMainnetCa || canonicalDexPool) {
       try {
         const registered = await readRegisteredMarkets();
         const dup = registered.find(
-          (r) => r.mainnetCA === canonicalMainnetCa && r.slabAddress !== slab_address,
+          (r) =>
+            r.slabAddress !== slab_address &&
+            ((canonicalMainnetCa != null && r.mainnetCA === canonicalMainnetCa) ||
+              (canonicalDexPool != null && r.poolAddress === canonicalDexPool)),
         );
         if (dup) {
           return NextResponse.json(
@@ -1811,8 +1823,8 @@ export async function POST(req: NextRequest) {
       deployer,
       oracle_authority: oracle_authority || deployer,
       oracle_mode: resolvedOracleMode,
-      dex_pool_address: dex_pool_address || null,
-      mainnet_ca: mainnet_ca || null,
+      dex_pool_address: canonicalDexPool,
+      mainnet_ca: canonicalMainnetCa,
       max_leverage: max_leverage || 10,
       trading_fee_bps: trading_fee_bps || 10,
     };
@@ -1847,20 +1859,32 @@ export async function POST(req: NextRequest) {
   }
 
   // One market per token: reject registering a SECOND market for the same
-  // underlying token on this network. Keyed on mainnet_ca — the token identity
-  // field the wizard always sends — NOT mint_address, which is the on-chain
+  // underlying token on this network. Keyed on the token's identity —
+  // mainnet_ca OR the DEX pool — NOT mint_address, which is the on-chain
   // COLLATERAL mint (the same sim-USDC for every playground market; deduping
-  // on it would 409 every launch). canonicalMainnetCa is the PublicKey
-  // round-trip of the validated input, so alternate encodings of the same key
-  // can't dodge the check. Duplicates fragment liquidity and let a clone
-  // impersonate an existing listing; each market is isolated so this is a
-  // UX/trust policy, not a fund-safety guard.
-  if (canonicalMainnetCa) {
+  // on it would 409 every launch). Both keys are PublicKey round-trips of the
+  // validated input, so alternate encodings can't dodge the check.
+  //
+  // SEC: mainnet_ca is OPTIONAL, so keying on it alone let a hand-crafted POST
+  // skip the gate by omitting it. dex_pool_address is the keeper's pricing
+  // source — a clone that omits mainnet_ca still names the same pool, so
+  // deduping on either key closes that bypass. (A pure admin-price market with
+  // neither key has no external token identity to duplicate.) Both base58
+  // canonical values are safe to interpolate into the PostgREST .or() filter —
+  // the base58 alphabet contains none of its delimiters (',' '.' '(' ')').
+  // Duplicates fragment liquidity and let a clone impersonate an existing
+  // listing; each market is isolated so this is a UX/trust policy, not a
+  // fund-safety guard.
+  const dedupeFilters: string[] = [];
+  if (canonicalMainnetCa) dedupeFilters.push(`mainnet_ca.eq.${canonicalMainnetCa}`);
+  if (canonicalDexPool) dedupeFilters.push(`dex_pool_address.eq.${canonicalDexPool}`);
+  if (dedupeFilters.length > 0) {
     const { data: dupTokenRows, error: dupTokenError } = await supabase
       .from("markets")
       .select("slab_address, symbol")
       .eq("network", insertNetwork)
-      .eq("mainnet_ca", canonicalMainnetCa)
+      .neq("slab_address", slab_address)
+      .or(dedupeFilters.join(","))
       .limit(1);
 
     if (dupTokenError) {
@@ -1901,9 +1925,11 @@ export async function POST(req: NextRequest) {
       lp_collateral,
       matcher_context,
       logo_url: logo_url || null,
-      mainnet_ca: mainnet_ca || null,
+      // Store the canonical (PublicKey round-trip) forms so the dedupe keys
+      // above match on re-registration — a raw value could differ by encoding.
+      mainnet_ca: canonicalMainnetCa,
       oracle_mode: resolvedOracleMode,
-      dex_pool_address: dex_pool_address || null,
+      dex_pool_address: canonicalDexPool,
       network: insertNetwork,
     })
     .select()
@@ -1924,10 +1950,10 @@ export async function POST(req: NextRequest) {
   });
 
   // PERC-465: Hot-register with oracle keeper service (server-to-server, non-fatal)
-  if (mainnet_ca && process.env.KEEPER_REGISTER_SECRET) {
+  if (canonicalMainnetCa && process.env.KEEPER_REGISTER_SECRET) {
     try {
       const keeperRegisterUrl = `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/oracle-keeper/register`;
-      const keeperBody = JSON.stringify({ slabAddress: slab_address, mainnetCA: mainnet_ca });
+      const keeperBody = JSON.stringify({ slabAddress: slab_address, mainnetCA: canonicalMainnetCa });
       // LAUNCH-16: sign instead of forwarding KEEPER_REGISTER_SECRET as a raw header —
       // /api/oracle-keeper/register verifies this same HMAC-SHA256 scheme.
       const { timestamp, signature } = signKeeperRequest(process.env.KEEPER_REGISTER_SECRET, keeperBody);
@@ -1965,11 +1991,11 @@ export async function POST(req: NextRequest) {
   // this ensures the airdrop endpoint can still resolve the token metadata.
   // Only write if we have a valid mint_address and mainnet_ca (to avoid polluting the
   // table with self-referencing devnet-native entries that have no real mainnet CA).
-  if (mint_address && mainnet_ca && mainnet_ca !== mint_address) {
+  if (mint_address && canonicalMainnetCa && canonicalMainnetCa !== mint_address) {
     try {
       await (supabase.from("devnet_mints")).upsert(
         {
-          mainnet_ca,
+          mainnet_ca: canonicalMainnetCa,
           devnet_mint: mint_address,
           // GH#1963: use pre-validated resolvedSymbol/resolvedName
           symbol: resolvedSymbol,
