@@ -158,7 +158,8 @@ export function PositionsBar() {
 
   // Collateral decimals per mint (all playground markets use 6-decimal
   // sim-USDC; resolved properly anyway, matching the portfolio page).
-  const tokenMetaMap = useMultiTokenMeta(openPositions.map((pos) => pos.collateralMint));
+  const positionMints = useMemo(() => openPositions.map((pos) => pos.collateralMint), [openPositions]);
+  const tokenMetaMap = useMultiTokenMeta(positionMints);
 
   // Freshness floor for markets the WS feed isn't ticking: read every
   // position slab's markEwmaE6 (the exact field usePortfolio publishes as

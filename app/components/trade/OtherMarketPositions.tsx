@@ -296,7 +296,8 @@ const OtherMarketPositionsInner: FC<{ currentSlab: string }> = ({ currentSlab })
   const others = useMemo(() => positions
     .filter((pos) => pos.slabAddress !== currentSlab && (pos.account?.positionSize ?? 0n) !== 0n)
     .sort((a, b) => (notionalOf(b) > notionalOf(a) ? 1 : notionalOf(b) < notionalOf(a) ? -1 : 0)), [positions, currentSlab]);
-  const tokenMetaMap = useMultiTokenMeta(others.map((pos) => pos.collateralMint));
+  const otherMints = useMemo(() => others.map((pos) => pos.collateralMint), [others]);
+  const tokenMetaMap = useMultiTokenMeta(otherMints);
 
   if (others.length === 0) return null;
 

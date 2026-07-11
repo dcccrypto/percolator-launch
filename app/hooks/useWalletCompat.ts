@@ -149,7 +149,9 @@ function useWalletCompatPrivyInner() {
     };
   }, [activeWallet, privySignMessage]);
 
-  return {
+  // Memoized so the object IDENTITY is stable across renders — consumers that
+  // list the wallet in a dep array (useInitUser -> useAutoDeposit) stop churning.
+  return useMemo(() => ({
     publicKey,
     connected,
     connecting: !ready,
@@ -158,7 +160,7 @@ function useWalletCompatPrivyInner() {
     signAndSendTransaction,
     signMessage,
     disconnect: logout,
-  };
+  }), [publicKey, connected, ready, activeWallet, signTransaction, signAndSendTransaction, signMessage, logout]);
 }
 
 /**
@@ -214,7 +216,8 @@ function useWalletCompatAdapterInner() {
     };
   }, [adapterSignTx, publicKey, cfg.rpcUrl]);
 
-  return {
+  // Memoized so the object identity is stable across renders (see the Privy branch).
+  return useMemo(() => ({
     publicKey,
     connected,
     connecting,
@@ -224,7 +227,7 @@ function useWalletCompatAdapterInner() {
     /** signMessage: available on most Wallet Standard adapters (Phantom, Solflare, etc.). */
     signMessage: adapterSignMessage,
     disconnect,
-  };
+  }), [publicKey, connected, connecting, wallet, signTransaction, signAndSendTransaction, adapterSignMessage, disconnect]);
 }
 
 /**
