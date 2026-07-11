@@ -51,7 +51,7 @@ import {
 } from "@/lib/priceStore/priceStore";
 
 /** SWR fetcher: fail fast on HTTP error (unchanged from pre-refactor). */
-async function livePriceJsonFetcher<T>(url: string): Promise<T> {
+export async function livePriceJsonFetcher<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json() as Promise<T>;

@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useRef, type CSSProperties } from "react";
+import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { SlabProvider, useSlabState } from "@/components/providers/SlabProvider";
@@ -14,7 +15,7 @@ import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Tooltip } from "@/components/ui/Tooltip";
-import { useLivePriceHasData } from "@/hooks/useLivePrice";
+import { useLivePriceHasData, livePriceJsonFetcher } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
@@ -302,6 +303,8 @@ function MobileOrderSheet({ slab }: { slab: string }) {
 
 /* ── Main inner page ──────────────────────────────────────── */
 
+const MARKET_META_SWR_OPTS = { dedupingInterval: 10_000, refreshInterval: 0, revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false } as const;
+
 function TradePageInner({ slab }: { slab: string }) {
   const isLargeScreen = useIsLargeScreen();
 
@@ -315,24 +318,16 @@ function TradePageInner({ slab }: { slab: string }) {
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
   // Fetch Supabase market data (symbol, name, logo, mainnet_ca) as fallback for on-chain resolution
+  // Shares the SAME SWR key useLivePrice already fetches (/api/markets/[slab]) via
+  // the same exported fetcher, so the two dedupe into one request per load
+  // instead of a raw fetch() + an SWR fetch of the identical URL.
+  const { data: marketMetaJson } = useSWR<{ market?: { symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } }>(`/api/markets/${slab}`, livePriceJsonFetcher, MARKET_META_SWR_OPTS);
   const [supabaseMarket, setSupabaseMarket] = useState<{ symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } | null>(null);
   useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/markets/${slab}`)
-      .then(r => r.json())
-      .then(d => {
-        if (!cancelled && d.market) {
-          setSupabaseMarket({
-            symbol: d.market.symbol ?? undefined,
-            name: d.market.name ?? undefined,
-            logo_url: d.market.logo_url ?? undefined,
-            mainnet_ca: d.market.mainnet_ca ?? null,
-          });
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [slab]);
+    const m = marketMetaJson?.market;
+    if (!m) return;
+    setSupabaseMarket({ symbol: m.symbol ?? undefined, name: m.name ?? undefined, logo_url: m.logo_url ?? undefined, mainnet_ca: m.mainnet_ca ?? null });
+  }, [marketMetaJson]);
 
   // Resolve symbol: Supabase market symbol (trading pair) → on-chain (collateral) → truncated address
   const collateralMintAddress = config?.collateralMint?.toBase58() ?? "";

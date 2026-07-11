@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { deriveLpVaultRegistry, parseLpVaultRegistry, isV17Account } from '@percolatorct/sdk';
-import { getBackendUrl, getConfig, getRpcEndpoint } from '@/lib/config';
+import { getConfig, getRpcEndpoint } from '@/lib/config';
 import { getSupabase } from '@/lib/supabase';
 import { isMockMode } from '@/lib/mock-mode';
 import { isBlockedSlab } from '@/lib/blocklist';

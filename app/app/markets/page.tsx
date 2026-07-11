@@ -5,10 +5,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
-import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue, isSentinelValue } from "@/lib/health";
+import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue } from "@/lib/health";
 import { HealthBadge } from "@/components/market/HealthBadge";
 import { formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
-import { isSaneMarketValue, isZombieMarket } from "@/lib/activeMarketFilter";
+import { isZombieMarket } from "@/lib/activeMarketFilter";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 

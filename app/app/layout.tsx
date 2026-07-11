@@ -118,6 +118,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             Cheap and safe — a no-op when unused. */}
         <link rel="dns-prefetch" href="https://assets.coingecko.com" />
         <link rel="preconnect" href="https://assets.coingecko.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://coin-images.coingecko.com" />
+        <link rel="preconnect" href="https://coin-images.coingecko.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://cdn.dexscreener.com" />
       </head>
         <body suppressHydrationWarning className="min-h-screen antialiased" data-nonce={nonce}>
         <JsonLd data={[organizationSchema(), websiteSchema()]} />

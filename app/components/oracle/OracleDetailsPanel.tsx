@@ -4,7 +4,6 @@ import { FC, useEffect, useCallback, useRef, useState } from "react";
 import { useOracleFreshness } from "@/hooks/useOracleFreshness";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { useLivePrice } from "@/hooks/useLivePrice";
-import { detectOracleMode } from "@/lib/oraclePrice";
 import { formatUsdFromNumber } from "@/lib/format";
 import { OracleBadge } from "./OracleBadge";
 import { useOraclePublishers, type PublisherInfo } from "@/hooks/useOraclePublishers";

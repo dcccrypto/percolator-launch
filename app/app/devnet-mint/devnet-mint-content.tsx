@@ -27,7 +27,6 @@ import {
 import gsap from "gsap";
 import Link from "next/link";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
-import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
 import { LogoUpload } from "@/components/create/LogoUpload";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { getBatchRpc } from "@/lib/batchRpc";

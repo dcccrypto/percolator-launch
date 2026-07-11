@@ -35,7 +35,6 @@ import { SlabTierPicker } from "./SlabTierPicker";
 // file's computeCreateMarketSolCost doc comment.
 import { computeCreateMarketSolCost } from "./CostEstimate";
 import { isValidBase58Pubkey, isValidHex64 } from "@/lib/createWizardUtils";
-import { useToast } from "@/hooks/useToast";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockTokenByMint } from "@/lib/mock-trade-data";
 
