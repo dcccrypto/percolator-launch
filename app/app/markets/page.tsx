@@ -3,6 +3,8 @@
 import { useEffect, useState, useMemo, useRef, useCallback, useSyncExternalStore, Suspense, type FC } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { prefetchSlab } from "@/lib/slabCache";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue } from "@/lib/health";
@@ -177,6 +179,7 @@ function MarketsPageInner() {
   }, []);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { connection } = useConnectionCompat();
   const { markets: discovered, loading: discoveryLoading, error: discoveryError } = useMarketDiscovery();
   const { statsMap, loading: statsLoading, error: statsError } = useAllMarketStats();
 
@@ -1052,6 +1055,9 @@ function MarketsPageInner() {
                     <Link
                       key={m.slabAddress}
                       href={`/trade/${m.slabAddress}`}
+                      onMouseEnter={() => prefetchSlab(connection, m.slabAddress)}
+                      onFocus={() => prefetchSlab(connection, m.slabAddress)}
+                      onTouchStart={() => prefetchSlab(connection, m.slabAddress)}
                       className={[
                         "grid w-full min-w-[500px] sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(50px,0.6fr)_minmax(75px,0.8fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 items-center px-3 sm:px-5 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.06] border-l-2 border-l-transparent hover:border-l-[var(--accent)]/40",
                         i > 0 ? "border-t border-[var(--border)]" : "",

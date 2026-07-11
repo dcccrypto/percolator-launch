@@ -6,6 +6,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useState,
   useRef,
   useCallback,
@@ -13,6 +14,7 @@ import {
 } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
+import { getCachedSlab, setCachedSlab } from "@/lib/slabCache";
 import {
   parseHeader,
   parseConfig,
@@ -120,13 +122,20 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+// Seed-before-paint: on the client the slab data effect runs as a LAYOUT effect,
+// so a slab prefetched on market-row hover (see lib/slabCache) is parsed and
+// committed BEFORE the browser paints — eliminating even the one-frame loading
+// skeleton on navigation. useLayoutEffect is a no-op on the server, so fall back
+// to useEffect there to avoid the SSR warning.
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({ children, slabAddress }) => {
   const { connection } = useConnectionCompat();
   const [state, setState] = useState<SlabState>({ ...defaultSlabState, slabAddress });
   const wsActive = useRef(false);
   const fetchRef = useRef<() => void>(() => {});
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!slabAddress) {
       setState((s) => ({ ...s, slabAddress, loading: false, error: "No slab address" }));
       return;
@@ -416,7 +425,9 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       subId = connection.onAccountChange(slabPk, (info) => {
         if (cancelled) return;
         wsActive.current = true;
-        parseSlab(new Uint8Array(info.data), info.owner);
+        const bytes = new Uint8Array(info.data);
+        setCachedSlab(slabAddress, bytes, info.owner);
+        parseSlab(bytes, info.owner);
       });
     } catch { /* ws not available */ }
 
@@ -426,7 +437,9 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
       try {
         const info = await connection.getAccountInfo(slabPk);
         if (info) {
-          parseSlab(new Uint8Array(info.data), info.owner);
+          const bytes = new Uint8Array(info.data);
+          setCachedSlab(slabAddress, bytes, info.owner);
+          parseSlab(bytes, info.owner);
         } else {
           // Slab account doesn't exist on-chain. This bypasses parseSlab entirely
           // (no bytes to parse), so it must flip lastHadError itself — otherwise a
@@ -459,6 +472,12 @@ export const SlabProvider: FC<{ children: ReactNode; slabAddress: string }> = ({
     }
 
     fetchRef.current = poll;
+    // 0-loading: if the slab bytes were prefetched on market-row hover, parse them
+    // synchronously NOW so the terminal renders immediately instead of showing a
+    // skeleton for the getAccountInfo round-trip. The poll below still runs and
+    // byte-equality-dedups the no-op re-parse when the fetched bytes match.
+    const cachedSeed = getCachedSlab(slabAddress);
+    if (cachedSeed) parseSlab(cachedSeed.data, cachedSeed.owner);
     poll().then(schedulePoll);
 
     return () => {
