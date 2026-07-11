@@ -35,7 +35,14 @@ export function parseHumanAmount(input: string, decimals: number): bigint {
   if (parts.length > 2) return 0n; // reject "1.2.3"
   const whole = parts[0] || "0";
   const fracPart = parts[1] || "";
-  
+
+  // Honor the documented "invalid input -> 0n" contract. `whole`/`fracPart`
+  // must be pure digit strings; anything else ("abc", "1e6", "0x5", "1,000")
+  // would otherwise reach `BigInt(...)` below and THROW, contradicting the
+  // JSDoc and risking an unhandled throw in a caller that parses live input.
+  // (The decimals-exceed case below is a genuine, documented @throws.)
+  if (!/^\d+$/.test(whole) || !/^\d*$/.test(fracPart)) return 0n;
+
   // M1: Throw error if decimals exceed token precision
   if (fracPart.length > decimals) {
     throw new Error(`Input has ${fracPart.length} decimals, but token only supports ${decimals}`);

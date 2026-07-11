@@ -42,6 +42,14 @@ describe("parseHumanAmount", () => {
     expect(parseHumanAmount("1.2.3", 6)).toBe(0n);
   });
 
+  it("returns 0n for non-numeric input instead of throwing (documented contract)", () => {
+    // Previously these reached BigInt(...) and threw, contradicting the JSDoc
+    // (`"abc" -> 0n`) and risking an unhandled throw in a live-input caller.
+    for (const bad of ["abc", "1e6", "0x5", "1,000", "12.3a", "--5", "1 000", "NaN", "Infinity"]) {
+      expect(parseHumanAmount(bad, 6)).toBe(0n);
+    }
+  });
+
   it("throws if too many decimal places", () => {
     expect(() => parseHumanAmount("1.1234567", 6)).toThrow(/Input has 7 decimals/);
   });
