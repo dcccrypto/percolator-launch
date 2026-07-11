@@ -14,7 +14,7 @@ import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Tooltip } from "@/components/ui/Tooltip";
-import { useLivePrice } from "@/hooks/useLivePrice";
+import { useLivePriceHasData } from "@/hooks/useLivePrice";
 import { useTokenMeta } from "@/hooks/useTokenMeta";
 import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
@@ -308,7 +308,10 @@ function TradePageInner({ slab }: { slab: string }) {
   const { engine, config, header, loading: slabLoading, error: slabError } = useSlabState();
   useAdvanceOraclePhase(slab);
   const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
-  const { priceUsd } = useLivePrice();
+  // Boolean presence subscription, NOT the full live-price state: this keeps the
+  // trade-page shell OFF the ~4-5/sec price-tick re-render path (it only needs to
+  // know whether a price exists, for the no-data gate below). See useLivePriceHasData.
+  const hasPrice = useLivePriceHasData();
   const shortAddress = `${slab.slice(0, 4)}…${slab.slice(-4)}`;
 
   // Fetch Supabase market data (symbol, name, logo, mainnet_ca) as fallback for on-chain resolution
@@ -476,7 +479,7 @@ function TradePageInner({ slab }: { slab: string }) {
   // false there, so the "no oracle price" warning could never appear on a v17
   // market even during a genuine price outage. `config` is the version-agnostic
   // "market loaded" signal.
-  const hasNoPriceData = !slabLoading && !!config && priceUsd == null;
+  const hasNoPriceData = !slabLoading && !!config && !hasPrice;
 
   // Desktop grid — named areas (dYdX pattern, see file-header comment).
   const gridStyle: CSSProperties = {

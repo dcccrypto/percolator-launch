@@ -144,3 +144,33 @@ export function useLivePrice(): PriceState {
 
   return state;
 }
+
+/**
+ * Lightweight boolean reader over the price store: `true` once a live price
+ * exists for the active slab, else `false`.
+ *
+ * Unlike `useLivePrice()`, the `useSyncExternalStore` snapshot here is a
+ * PRIMITIVE boolean, so React bails on every unchanged render — a consumer
+ * re-renders only when price data appears or disappears (rare), NOT on every
+ * ~4-5/sec tick. Use this instead of `useLivePrice().priceUsd == null` in
+ * components that need price *presence*, not the value (e.g. the trade page
+ * shell's no-data gate), to keep them off the tick path.
+ *
+ * Carries NO seeding side-effects on purpose — those live in `useLivePrice()`,
+ * which the trade page's children (MarketInfoBar, OrderTicket, chart, dock…)
+ * already call, so the store stays seeded regardless.
+ */
+export function useLivePriceHasData(): boolean {
+  const { slabAddress } = useSlabState();
+  const slabAddr = slabAddress || null;
+
+  const subscribe = useCallback(
+    (onChange: () => void) => (slabAddr ? subscribeSlab(slabAddr, onChange) : () => {}),
+    [slabAddr],
+  );
+  const getHasData = useCallback(
+    () => (slabAddr ? getSnapshot(slabAddr).priceUsd != null : false),
+    [slabAddr],
+  );
+  return useSyncExternalStore(subscribe, getHasData, () => false);
+}
