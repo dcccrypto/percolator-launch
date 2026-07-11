@@ -1058,6 +1058,12 @@ function MarketsPageInner() {
                       onMouseEnter={() => prefetchSlab(connection, m.slabAddress)}
                       onFocus={() => prefetchSlab(connection, m.slabAddress)}
                       onTouchStart={() => prefetchSlab(connection, m.slabAddress)}
+                      // content-visibility:auto lets the browser skip layout+paint
+                      // of off-screen rows, so the full ~168-row list scrolls/paints
+                      // like a handful of rows. contain-intrinsic-size reserves each
+                      // off-screen row's box (auto width kept, ~52px tall) so the
+                      // scrollbar doesn't jump. Ignored gracefully where unsupported.
+                      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 52px" }}
                       className={[
                         "grid w-full min-w-[500px] sm:min-w-[700px] grid-cols-[minmax(120px,2.5fr)_minmax(80px,1.2fr)_minmax(50px,0.6fr)_minmax(75px,0.8fr)] sm:grid-cols-[minmax(160px,3fr)_minmax(90px,1.2fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(90px,1fr)_minmax(65px,0.8fr)_minmax(80px,0.9fr)] gap-2 sm:gap-4 items-center px-3 sm:px-5 py-3 transition-all duration-200 hover:bg-[var(--accent)]/[0.06] border-l-2 border-l-transparent hover:border-l-[var(--accent)]/40",
                         i > 0 ? "border-t border-[var(--border)]" : "",
