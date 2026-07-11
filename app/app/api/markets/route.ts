@@ -18,6 +18,7 @@ import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeM
 import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-portfolio";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
+import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
@@ -1589,6 +1590,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // SEC: sanitize the attacker-suppliable logo_url with the SAME allowlist
+  // (https/ipfs only, ≤500 chars) that external-API metadata already gets —
+  // the raw body value was previously stored and rendered as an <img src>,
+  // letting a market creator point every viewer's browser at an arbitrary
+  // host (tracking pixel / phishing graphic inside the trusted UI). Dropped
+  // to null (fallback avatar) when invalid rather than rejecting the launch.
+  const sanitizedLogoUrl = sanitizeLogoUrl(logo_url);
+
   // #813: Validate dex_pool_address is a valid Solana pubkey (when provided)
   if (dex_pool_address) {
     try {
@@ -1900,7 +1909,7 @@ export async function POST(req: NextRequest) {
       trading_fee_bps: trading_fee_bps || 10,
       lp_collateral,
       matcher_context,
-      logo_url: logo_url || null,
+      logo_url: sanitizedLogoUrl,
       mainnet_ca: mainnet_ca || null,
       oracle_mode: resolvedOracleMode,
       dex_pool_address: dex_pool_address || null,

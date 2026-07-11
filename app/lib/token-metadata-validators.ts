@@ -30,7 +30,12 @@ function validateUrl(url: string, allowedProtocols: readonly string[]): string |
 
   try {
     const parsed = new URL(url);
-    const protocol = parsed.protocol.replace('://', '').toLowerCase();
+    // URL.protocol is the scheme plus a trailing colon ("https:"), never
+    // "https://" — the old `.replace('://','')` was a no-op that left the
+    // colon on, so `['https','ipfs'].includes('https:')` was ALWAYS false
+    // and this validator silently rejected every URL (incl. legit https),
+    // dropping all DexScreener/Jupiter logos. Strip the trailing colon.
+    const protocol = parsed.protocol.replace(/:$/, '').toLowerCase();
 
     if (!allowedProtocols.includes(protocol)) {
       console.warn(
@@ -51,6 +56,27 @@ function validateUrl(url: string, allowedProtocols: readonly string[]): string |
     console.warn('[validateUrl] Invalid URL format for logo');
     return undefined;
   }
+}
+
+/**
+ * Sanitize an attacker-suppliable logo URL for storage/display.
+ *
+ * Same policy as the DexScreener/Jupiter validator above (https/ipfs only,
+ * ≤500 chars, rejects javascript:/data:/other schemes) — exported so the
+ * permissionless market-creation path (POST /api/markets, whose `logo_url`
+ * comes straight from the request body) applies the identical allowlist that
+ * external-API metadata already gets, instead of storing the raw value.
+ *
+ * Returns the URL when it passes, or `null` when absent/invalid — the caller
+ * stores `null` (the fallback avatar renders), never an untrusted string.
+ * A rejected URL is dropped, not an error: market creation must not fail just
+ * because a logo is malformed.
+ *
+ * @param url Raw logo URL (or null/undefined) from an untrusted source
+ */
+export function sanitizeLogoUrl(url: unknown): string | null {
+  if (typeof url !== 'string' || url.length === 0) return null;
+  return validateUrl(url, CONSTRAINTS.ALLOWED_URL_PROTOCOLS) ?? null;
 }
 
 /**
