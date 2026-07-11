@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { fetchTokenMetaBatch, type TokenMeta } from "@/lib/tokenMeta";
@@ -20,10 +20,18 @@ export function useMultiTokenMeta(mints: PublicKey[]): Map<string, TokenMeta> {
   // SDK). Filter those out here instead of crashing on `.toBase58()` below —
   // a missing mint degrades to "no metadata for this position" rather than
   // taking down the whole component tree.
-  const definedMints = mints.filter((m): m is PublicKey => !!m);
+  const definedMints = useMemo(
+    () => mints.filter((m): m is PublicKey => !!m),
+    [mints],
+  );
 
-  // Stable key for the mints array
-  const mintsKey = definedMints.map((m) => m.toBase58()).sort().join(",");
+  // Stable key for the mints array — memoized so the filter+map+sort+join (over
+  // up to ~500 mints) only runs when the mints array reference changes, not on
+  // every render. Referentially stable when the caller memoizes `mints`.
+  const mintsKey = useMemo(
+    () => definedMints.map((m) => m.toBase58()).sort().join(","),
+    [definedMints],
+  );
 
   useEffect(() => {
     if (definedMints.length === 0) {

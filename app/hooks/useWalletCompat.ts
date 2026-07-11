@@ -228,36 +228,52 @@ function useWalletCompatAdapterInner() {
 }
 
 /**
+ * Module-level Connection singleton keyed by (rpcUrl, wsEndpoint).
+ *
+ * Previously every useConnectionCompat() consumer (and each mounted hook) built
+ * its OWN new Connection(), so a page with N wallet-aware components held N
+ * Connection objects — each capable of opening its own WS subscription channel.
+ * The RPC config is identical for all of them (single network per session), so
+ * one shared instance is behavior-identical and collapses the duplication. The
+ * batch transport (getBatchRpc) is already a singleton, so this simply stops
+ * re-wrapping it. Rebuilds only if the RPC/WS URL actually changes.
+ */
+let _sharedConnection: Connection | null = null;
+let _sharedConnectionKey = "";
+
+function getSharedConnection(): Connection {
+  const url = getConfig().rpcUrl;
+  const wsEndpoint = getWsEndpoint();
+  const key = `${url}|${wsEndpoint}`;
+  if (_sharedConnection && _sharedConnectionKey === key) return _sharedConnection;
+
+  const isClient = typeof window !== "undefined";
+  const fetchOption = isClient ? getBatchRpc().batchFetch : undefined;
+
+  _sharedConnection = new Connection(url, {
+    commitment: "confirmed",
+    // #869: Always pass wsEndpoint explicitly — omitting it lets @solana/web3.js
+    // auto-derive wss:// from the HTTP proxy URL, causing reconnect storms on Vercel.
+    wsEndpoint,
+    // Disable web3.js built-in retry — our batch transport handles retries
+    // with proper exponential backoff instead of flat 500ms delays
+    ...(isClient ? { disableRetryOnRateLimit: true } : {}),
+    // Custom fetch that batches multiple RPC calls into single HTTP requests
+    ...(fetchOption ? { fetch: fetchOption as any } : {}),
+  });
+  _sharedConnectionKey = key;
+  return _sharedConnection;
+}
+
+/**
  * Compatibility hook replacing useConnection() from wallet-adapter.
- * Returns a Connection object using the app's configured RPC URL.
+ * Returns the shared Connection object (see getSharedConnection).
  *
  * Uses batching RPC transport on the client to coalesce individual JSON-RPC
  * calls into batch requests, reducing HTTP request count by 10-30x and
  * preventing 429 rate limit errors. See lib/batchRpc.ts for details.
  */
 export function useConnectionCompat() {
-  const connection = useMemo(() => {
-    const url = getConfig().rpcUrl;
-    const wsEndpoint = getWsEndpoint();
-
-    // On the client, use batching fetch to coalesce RPC calls
-    const isClient = typeof window !== "undefined";
-    const fetchOption = isClient ? getBatchRpc().batchFetch : undefined;
-
-    return new Connection(url, {
-      commitment: "confirmed",
-      // #869: Always pass wsEndpoint explicitly — omitting it lets @solana/web3.js
-      // auto-derive wss:// from the HTTP proxy URL, causing reconnect storms on Vercel.
-      // getWsEndpoint() always returns a valid WSS URL (Helius if configured,
-      // otherwise public Solana WS endpoint for the current network).
-      wsEndpoint,
-      // Disable web3.js built-in retry — our batch transport handles retries
-      // with proper exponential backoff instead of flat 500ms delays
-      ...(isClient ? { disableRetryOnRateLimit: true } : {}),
-      // Custom fetch that batches multiple RPC calls into single HTTP requests
-      ...(fetchOption ? { fetch: fetchOption as any } : {}),
-    });
-  }, []);
-
+  const connection = useMemo(() => getSharedConnection(), []);
   return { connection };
 }
