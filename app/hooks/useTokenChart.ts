@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { CandleData } from "@/app/api/chart/[mint]/route";
 import { pollWhenVisible } from "@/lib/pollWhenVisible";
+import { boundedSet } from "@/lib/bounded-map";
 
 export type ChartDataStatus = "idle" | "loading" | "success" | "error" | "empty";
 
@@ -45,6 +46,15 @@ const TIMEFRAME_TO_API: Record<
 /** Fetch interval: 60s for short timeframes, 5min for daily */
 const POLL_INTERVAL_MS = 60 * 1000;
 
+// Module-level (not per-component-instance) so switching timeframe and back
+// within the same page session repaints instantly from cache instead of
+// re-fetching. Bounded to a handful of mints x timeframes; see
+// lib/bounded-map.ts for the eviction rationale. (This route's URL has no
+// from/to — it's already deterministic per mint+timeframe, so no
+// quantization is needed to hit its server-side/CDN cache.)
+const CACHE_MAX_ENTRIES = 30;
+const chartCache = new Map<string, { candles: CandleData[]; poolAddress: string | null; status: ChartDataStatus }>();
+
 /**
  * PERC-512: Hook that fetches external OHLCV candle data for a Solana token.
  *
@@ -71,16 +81,30 @@ export function useTokenChart(
 
   const fetchData = useCallback(
     async (mint: string, tf: Timeframe) => {
-      const { timeframe: apiTf, aggregate, limit } = TIMEFRAME_TO_API[tf];
-      const url = `/api/chart/${mint}?timeframe=${apiTf}&aggregate=${aggregate}&limit=${limit}`;
       const key = `${mint}:${tf}`;
       fetchKeyRef.current = key;
 
-      // Don't flip to loading on a repoll that already has candles — keep
-      // showing them to avoid flicker every 60s (mirrors usePythChart's
-      // identical fix). Only the very first fetch for a key sees "loading".
-      setStatus((prev) => (prev === "success" ? "success" : "loading"));
-      setError(null);
+      // Stale-while-revalidate: paint any cached bars for this (mint,
+      // timeframe) instantly, then refetch in the background — without this,
+      // every repeat timeframe switch blanked the chart to "loading" for a
+      // fresh round trip even though we fetched this exact pair moments ago.
+      const cached = chartCache.get(key);
+      if (cached) {
+        candlesRef.current = cached.candles;
+        setCandles(cached.candles);
+        setPoolAddress(cached.poolAddress);
+        setStatus(cached.status);
+        setError(null);
+      } else {
+        // Don't flip to loading on a repoll that already has candles — keep
+        // showing them to avoid flicker every 60s (mirrors usePythChart's
+        // identical fix). Only the very first fetch for a key sees "loading".
+        setStatus((prev) => (prev === "success" ? "success" : "loading"));
+        setError(null);
+      }
+
+      const { timeframe: apiTf, aggregate, limit } = TIMEFRAME_TO_API[tf];
+      const url = `/api/chart/${mint}?timeframe=${apiTf}&aggregate=${aggregate}&limit=${limit}`;
 
       try {
         const res = await fetch(url);
@@ -91,10 +115,13 @@ export function useTokenChart(
         if (fetchKeyRef.current !== key) return;
 
         const fetchedCandles: CandleData[] = json.candles ?? [];
+        const pool = json.poolAddress ?? null;
+        const status: ChartDataStatus = fetchedCandles.length > 0 ? "success" : "empty";
         candlesRef.current = fetchedCandles;
         setCandles(fetchedCandles);
-        setPoolAddress(json.poolAddress ?? null);
-        setStatus(fetchedCandles.length > 0 ? "success" : "empty");
+        setPoolAddress(pool);
+        setStatus(status);
+        boundedSet(chartCache, key, { candles: fetchedCandles, poolAddress: pool, status }, CACHE_MAX_ENTRIES);
       } catch (err) {
         if (fetchKeyRef.current !== key) return;
         console.warn("[useTokenChart] fetch error:", err);

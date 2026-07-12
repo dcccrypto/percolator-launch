@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { Timeframe } from "./usePythChart";
+import { boundedSet } from "@/lib/bounded-map";
 
 export type PercolatorCandleStatus = "idle" | "loading" | "success" | "empty" | "error";
 
@@ -40,6 +41,25 @@ function deriveWsUrl(): string | null {
   return api.replace(/^http/, "ws");
 }
 
+// Module-level (not per-component-instance) so it survives a slab switch and
+// a timeframe switch-and-back within the same page session — resets only on
+// a full reload. Bounded to a handful of timeframes x a handful of markets;
+// see lib/bounded-map.ts for the eviction rationale.
+const CACHE_MAX_ENTRIES = 30;
+const candleCache = new Map<string, { candles: PercolatorCandle[]; status: PercolatorCandleStatus }>();
+
+// `from`/`to` are quantized to this grid (see fetchData) so repeated calls
+// within the window reuse the exact same URL and actually hit the route's
+// `max-age=10` HTTP cache instead of missing on every click because Date.now()
+// makes every URL unique.
+const QUANTIZE_SEC = 10;
+
+// After the first failure (404/error) this session, /api/candles/[slab] is
+// assumed unconfigured for this deployment (no indexer wired up) — skip the
+// network call entirely on subsequent fetches rather than repeating a
+// request that will never succeed (dead-weight request + console noise).
+let endpointUnavailable = false;
+
 /**
  * Internal-trade OHLCV for a Percolator slab. Loads historical bars from
  * /api/candles/:slab (bucketed server-side) and updates the open bar live
@@ -59,14 +79,39 @@ export function usePercolatorCandles(
   const wsRef = useRef<WebSocket | null>(null);
 
   const fetchData = useCallback(async (slab: string, tf: Timeframe) => {
-    const { resolution, lookbackSec } = RESOLUTION_MAP[tf];
-    const to = Math.floor(Date.now() / 1000);
-    const from = to - lookbackSec;
     const key = `${slab}:${tf}`;
     fetchKeyRef.current = key;
 
-    setStatus((prev) => (prev === "success" ? "success" : "loading"));
-    setError(null);
+    // Stale-while-revalidate: paint any cached bars for this (slab, timeframe)
+    // instantly, then refetch in the background — without this, every repeat
+    // timeframe switch blanked the chart to "loading" for a fresh ~300ms-1s
+    // round trip even though we fetched this exact pair moments ago.
+    const cached = candleCache.get(key);
+    if (cached) {
+      setCandles(cached.candles);
+      setStatus(cached.status);
+      setError(null);
+    } else {
+      setStatus((prev) => (prev === "success" ? "success" : "loading"));
+      setError(null);
+    }
+
+    if (endpointUnavailable) {
+      // Known-unconfigured for this deployment/session — skip straight to
+      // the empty state so TradingChart's Pyth/DEX fallback cascade engages
+      // without wasting a network round trip on a route that will 404 again.
+      if (!cached) {
+        setCandles([]);
+        setStatus("empty");
+      }
+      return;
+    }
+
+    const { resolution, lookbackSec } = RESOLUTION_MAP[tf];
+    const nowSec = Math.floor(Date.now() / 1000);
+    const to = Math.floor(nowSec / QUANTIZE_SEC) * QUANTIZE_SEC;
+    const from = to - lookbackSec;
+
     try {
       const res = await fetch(`/api/candles/${slab}?resolution=${resolution}&from=${from}&to=${to}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -80,6 +125,7 @@ export function usePercolatorCandles(
       if (body.s === "no_data") {
         setCandles([]);
         setStatus("empty");
+        boundedSet(candleCache, key, { candles: [], status: "empty" }, CACHE_MAX_ENTRIES);
         return;
       }
       const bars: PercolatorCandle[] = (body.t ?? []).map((t, i) => ({
@@ -90,14 +136,22 @@ export function usePercolatorCandles(
         close: body.c![i],
         volume: body.v![i],
       }));
+      const status: PercolatorCandleStatus = bars.length > 0 ? "success" : "empty";
       setCandles(bars);
-      setStatus(bars.length > 0 ? "success" : "empty");
+      setStatus(status);
+      boundedSet(candleCache, key, { candles: bars, status }, CACHE_MAX_ENTRIES);
     } catch (err) {
+      // Any failure (404, network error, backend error payload) marks the
+      // endpoint unavailable for the rest of this session — see the flag's
+      // declaration comment.
+      endpointUnavailable = true;
       if (fetchKeyRef.current !== key) return;
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[usePercolatorCandles] fetch error:", msg);
       setError(msg);
-      setStatus("error");
+      // Keep-last-good: don't blank a chart that already has cached bars
+      // over a transient failure.
+      if (!cached) setStatus("error");
     }
   }, []);
 
