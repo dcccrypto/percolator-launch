@@ -328,7 +328,18 @@ async function pollConfirmation(
       // Otherwise RPC hiccup — keep polling
     }
 
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    // Adaptive cadence: a tx typically confirms within 1-2 slots (~0.4-0.8s),
+    // so a flat 2s interval made the USER wait ~+1.2s on average purely for
+    // the confirmation FEEDBACK after the chain was already done. Poll fast
+    // while confirmation is imminent, then back off — worst case this adds a
+    // handful of extra getSignatureStatuses calls (cheap, unbatched) in the
+    // first seconds; the common case exits after 2-3 fast polls.
+    const elapsedNow = Date.now() - start;
+    const interval =
+      elapsedNow < 5_000 ? 350 :
+      elapsedNow < 15_000 ? 1_000 :
+      POLL_INTERVAL_MS;
+    await new Promise((r) => setTimeout(r, interval));
   }
 
   throw new Error(
