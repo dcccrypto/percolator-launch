@@ -23,6 +23,10 @@ import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
+import {
+  buildMarketRegistrationMessage,
+  type MarketRegistrationPayload,
+} from "@/lib/market-registration-auth";
 
 /**
  * GH#1526: Map frontend oracle_mode filter values to DB-stored values.
@@ -1424,11 +1428,38 @@ export async function POST(req: NextRequest) {
     // Previously, nonce was consumed first, then signature checked — allowing an attacker
     // to burn a victim's nonces by submitting invalid signatures. Now we verify the
     // cryptographic proof first (cheap, no DB write) so invalid signatures never touch nonces.
-    const nonceBytes = new Uint8Array(Buffer.from(nonce, "utf-8"));
+    /*
+     * Bind authorization to the complete registration payload.
+     * The shared helper excludes only nonce and signature from
+     * the authentication envelope.
+     */
+    let signingMessage: Uint8Array;
+
+    try {
+      signingMessage =
+        buildMarketRegistrationMessage({
+          nonce,
+          deployer,
+          payload:
+            body as MarketRegistrationPayload,
+        });
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            "Invalid market registration authorization payload.",
+        },
+        { status: 400 },
+      );
+    }
     const sigBytes = new Uint8Array(signatureBytes);
     let sigValid = false;
     try {
-      sigValid = nacl.sign.detached.verify(nonceBytes, sigBytes, deployerPubkeyBytes);
+      sigValid = nacl.sign.detached.verify(
+      signingMessage,
+      sigBytes,
+      deployerPubkeyBytes,
+    );
     } catch {
       // nacl throws on invalid input lengths — treat as signature failure
       sigValid = false;
@@ -1445,7 +1476,7 @@ export async function POST(req: NextRequest) {
         }
       );
       return NextResponse.json(
-        { error: "Signature verification failed. Ensure you signed the nonce bytes with the deployer keypair." },
+        { error: "Signature verification failed. Ensure you signed the exact market-registration payload with the deployer keypair." },
         { status: 401 }
       );
     }
