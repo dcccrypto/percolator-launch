@@ -1169,6 +1169,13 @@ export function useCreateMarket() {
       }
 
       const startStep = retryFromStep ?? 0;
+      if (retryFromStep !== undefined) {
+        // Diagnosis breadcrumb (see signAllCompat's counterpart): resume and
+        // retry flows use the sequential per-step path BY DESIGN — if a user
+        // reports many signature prompts and this line is in their console,
+        // they were resuming a stuck launch, not missing the batch path.
+        console.info(`[useCreateMarket] resume/retry from step ${retryFromStep} — sequential flow by design`);
+      }
 
       setState((s) => ({
         ...s,
@@ -1239,6 +1246,7 @@ export function useCreateMarket() {
       // uses the sequential per-step code below unchanged. See
       // `attemptFreshBatchedLaunch`'s header comment for the full contract.
       if (retryFromStep === undefined && wallet.publicKey) {
+        console.info("[useCreateMarket] fresh launch — attempting BATCHED flow (one approval)");
         const batchWalletPk = wallet.publicKey;
         const outcome = await attemptFreshBatchedLaunch({
           connection,

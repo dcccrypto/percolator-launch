@@ -764,11 +764,17 @@ export async function signAllCompat(
   txs: Transaction[],
 ): Promise<Transaction[]> {
   if (wallet.signAllTransactions) {
+    console.info(`[signAllCompat] batch-signing ${txs.length} txs in ONE approval`);
     return wallet.signAllTransactions(txs);
   }
   if (!wallet.signTransaction) {
     throw new Error("Wallet does not support signAllTransactions or signTransaction");
   }
+  // Diagnosis breadcrumb: when users report "I still signed N times", this
+  // line distinguishes "wallet path exposes no batch signing" (this branch,
+  // one prompt per merged tx) from "old bundle / sequential resume flow"
+  // (this function never runs at all there).
+  console.warn(`[signAllCompat] wallet exposes no signAllTransactions — falling back to ${txs.length} sequential prompts`);
   const signed: Transaction[] = [];
   for (const tx of txs) {
     signed.push(await wallet.signTransaction(tx));
