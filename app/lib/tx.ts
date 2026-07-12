@@ -60,7 +60,7 @@ let cachedPriorityFee: { fee: number; ts: number } | null = null;
  * Cached for PRIORITY_FEE_CACHE_MS; falls back to hardcoded value if the RPC
  * call fails.
  */
-async function getPriorityFee(connection: Connection): Promise<number> {
+export async function getPriorityFee(connection: Connection): Promise<number> {
   if (cachedPriorityFee && Date.now() - cachedPriorityFee.ts < PRIORITY_FEE_CACHE_MS) {
     return cachedPriorityFee.fee;
   }
@@ -167,7 +167,7 @@ export function getClockDriftWarning(): string | null {
 const BLOCKHASH_FRESH_MS = 20_000;
 let cachedBlockhash: { blockhash: string; ts: number } | null = null;
 
-async function getFreshBlockhash(connection: Connection, forceFresh = false): Promise<string> {
+export async function getFreshBlockhash(connection: Connection, forceFresh = false): Promise<string> {
   if (!forceFresh && cachedBlockhash && Date.now() - cachedBlockhash.ts < BLOCKHASH_FRESH_MS) {
     return cachedBlockhash.blockhash;
   }
@@ -698,4 +698,122 @@ export async function sendTx({
   }
 
   throw lastError ?? new Error("Transaction failed after retries");
+}
+
+// ============================================================================
+// Batch signing (market-launch wizard fast path)
+// ============================================================================
+//
+// The primitives below let a caller build several INDEPENDENT transactions
+// (each with its own recentBlockhash — they don't need to match, and in
+// practice the keeper-cosign tx below is built server-side against its own
+// blockhash), get them all signed in ONE wallet approval via
+// `signAllTransactions` (falling back to N sequential `signTransaction`
+// popups — never worse than today), then broadcast+confirm each one with the
+// exact same polling semantics `sendTx` already uses. See
+// hooks/useCreateMarket.ts's `attemptFreshBatchedLaunch` for the orchestration
+// that uses these to collapse the fresh quick-launch flow from 12 tx
+// approvals down to one.
+
+/**
+ * Build a Transaction with the same heap-frame + compute-budget instructions
+ * `sendTx` prepends, plus the caller's instructions, blockhash, and fee payer.
+ * Does NOT sign or send — the caller (the batch pipeline) owns both, since
+ * signing happens once for the whole batch and keypair partial-signing must
+ * happen AFTER the wallet signs (Privy embedded wallets can strip unknown
+ * signatures added before their signing flow runs — mirrors the ordering
+ * `sendTx` already uses for `signers`, see above).
+ */
+export function buildBatchTx(params: {
+  instructions: TransactionInstruction[];
+  computeUnits: number;
+  priorityFeeMicroLamports: number;
+  blockhash: string;
+  feePayer: PublicKey;
+}): Transaction {
+  const { instructions, computeUnits, priorityFeeMicroLamports, blockhash, feePayer } = params;
+  // PERC-8388: same defensive Lighthouse-injection filter sendTx applies.
+  const cleanInstructions = instructions.filter(
+    (ix) => ix.programId.toBase58() !== LIGHTHOUSE_PROGRAM_ID
+  );
+  const tx = new Transaction();
+  tx.add(ComputeBudgetProgram.requestHeapFrame({ bytes: 131072 }));
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
+  tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFeeMicroLamports }));
+  for (const ix of cleanInstructions) {
+    tx.add(ix);
+  }
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = feePayer;
+  return tx;
+}
+
+/**
+ * Sign N independent transactions with ONE wallet approval when the wallet
+ * exposes `signAllTransactions` (wallet-adapter's native method, or Privy's
+ * variadic `useSignTransaction().signTransaction` bridged the same way in
+ * PrivyProviderClient.tsx). Falls back to N sequential `signTransaction`
+ * popups when unavailable — identical total approval count to the
+ * pre-batching flow, so this is never a regression.
+ */
+export async function signAllCompat(
+  wallet: {
+    signAllTransactions?: (txs: Transaction[]) => Promise<Transaction[]>;
+    signTransaction?: (tx: Transaction) => Promise<Transaction>;
+  },
+  txs: Transaction[],
+): Promise<Transaction[]> {
+  if (wallet.signAllTransactions) {
+    return wallet.signAllTransactions(txs);
+  }
+  if (!wallet.signTransaction) {
+    throw new Error("Wallet does not support signAllTransactions or signTransaction");
+  }
+  const signed: Transaction[] = [];
+  for (const tx of txs) {
+    signed.push(await wallet.signTransaction(tx));
+  }
+  return signed;
+}
+
+/**
+ * Broadcast an already fully-signed transaction and poll for confirmation —
+ * the exact post-sign path `sendTx` uses for its `signTransaction` fallback
+ * branch (raw send + `pollConfirmation`), extracted so the batch pipeline can
+ * reuse identical confirmation semantics per-tx instead of re-implementing
+ * polling. Does not retry on blockhash expiry — the batch pipeline's own
+ * failure handling decides whether to rebuild + re-prompt (never re-broadcasts
+ * a stale pre-signed tx, per the batch-launch expiry contract).
+ */
+export async function broadcastSignedTx(
+  connection: Connection,
+  signedTx: Transaction,
+  opts: { skipPreflight?: boolean; onProgress?: (elapsedMs: number) => void; abortSignal?: AbortSignal } = {},
+): Promise<string> {
+  let signature: string;
+  try {
+    signature = await connection.sendRawTransaction(signedTx.serialize(), {
+      skipPreflight: opts.skipPreflight ?? false,
+      maxRetries: 5,
+    });
+  } catch (sendErr) {
+    if (sendErr instanceof SendTransactionError) {
+      try {
+        const logs = await sendErr.getLogs(connection);
+        if (logs && logs.length > 0) {
+          const relevantLogs = logs
+            .filter((l: string) => l.includes("Error") || l.includes("failed") || l.includes("Program log:"))
+            .slice(-5)
+            .join("\n");
+          const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+          throw new Error(`${sendMsg}${relevantLogs ? `\n${relevantLogs}` : ""}`);
+        }
+      } catch (logsErr) {
+        if (logsErr instanceof Error && logsErr.message !== sendErr.message) throw logsErr;
+      }
+    }
+    throw sendErr;
+  }
+  await pollConfirmation(connection, signature, opts.onProgress, opts.abortSignal);
+  return signature;
 }

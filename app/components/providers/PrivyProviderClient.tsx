@@ -166,6 +166,32 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
    * When the wallet signs AND sends atomically, there is no post-sign window
    * for wallet middleware to inject assertion instructions that break our tx.
    */
+  /**
+   * signAllTransactions: the market-launch batching fast path's primary sign
+   * method — one Privy approval modal for the whole batch instead of one per
+   * tx. `useSignTransaction().signTransaction` is VARIADIC
+   * (`signTransaction(...inputs: SignTransactionInput[]): Promise<SignTransactionOutput[]>`
+   * — verified in @privy-io/react-auth's dist/dts/solana.d.ts) precisely for
+   * this multi-tx case; spreading N inputs returns N outputs in the same
+   * order, from a single approval.
+   */
+  const signAllTransactions = useMemo(() => {
+    if (!activeWallet) return undefined;
+    return async (txs: Transaction[]): Promise<Transaction[]> => {
+      const network = getNetwork();
+      const chain = network === "mainnet" ? "solana:mainnet" : "solana:devnet";
+      const inputs = txs.map((tx) => ({
+        transaction: new Uint8Array(
+          tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
+        ),
+        wallet: activeWallet,
+        chain: chain as any,
+      }));
+      const results = await privySignTransaction(...inputs);
+      return results.map((result) => Transaction.from(Buffer.from(result.signedTransaction)));
+    };
+  }, [activeWallet, privySignTransaction]);
+
   const signAndSendTransaction = useMemo(() => {
     if (!activeWallet) return undefined;
     return async (tx: Transaction): Promise<Uint8Array> => {
@@ -201,9 +227,10 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
       signTransaction,
       signAndSendTransaction,
       signMessage,
+      signAllTransactions,
       disconnect: logout,
     }),
-    [publicKey, connected, ready, activeWallet, signTransaction, signAndSendTransaction, signMessage, logout],
+    [publicKey, connected, ready, activeWallet, signTransaction, signAndSendTransaction, signMessage, signAllTransactions, logout],
   );
 
   return <WalletApiContext.Provider value={api}>{children}</WalletApiContext.Provider>;

@@ -70,6 +70,7 @@ const AdapterWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
     connecting,
     wallet,
     signTransaction: adapterSignTx,
+    signAllTransactions: adapterSignAllTx,
     signMessage: adapterSignMessage,
     disconnect,
   } = useWallet();
@@ -109,6 +110,25 @@ const AdapterWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
     };
   }, [adapterSignTx, publicKey, cfg.rpcUrl]);
 
+  /**
+   * signAllTransactions: the market-launch batching fast path's primary sign
+   * method (one popup for the whole batch instead of N). Native on most
+   * Wallet Standard adapters (Phantom, Solflare, Backpack) — just ensure fee
+   * payer is set on each tx the same way `signTransaction` above does, since
+   * callers build these with `lib/tx.ts`'s `buildBatchTx` which already sets
+   * both blockhash and feePayer, but this defends the same way for any
+   * caller that doesn't.
+   */
+  const signAllTransactions = useMemo(() => {
+    if (!adapterSignAllTx || !publicKey) return undefined;
+    return async (txs: Transaction[]): Promise<Transaction[]> => {
+      for (const tx of txs) {
+        if (!tx.feePayer) tx.feePayer = publicKey;
+      }
+      return adapterSignAllTx(txs);
+    };
+  }, [adapterSignAllTx, publicKey]);
+
   const api = useMemo<WalletApi>(
     () => ({
       publicKey,
@@ -119,9 +139,10 @@ const AdapterWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
       signAndSendTransaction,
       /** signMessage: available on most Wallet Standard adapters (Phantom, Solflare). */
       signMessage: adapterSignMessage,
+      signAllTransactions,
       disconnect,
     }),
-    [publicKey, connected, connecting, wallet, signTransaction, signAndSendTransaction, adapterSignMessage, disconnect],
+    [publicKey, connected, connecting, wallet, signTransaction, signAndSendTransaction, adapterSignMessage, signAllTransactions, disconnect],
   );
 
   return <WalletApiContext.Provider value={api}>{children}</WalletApiContext.Provider>;

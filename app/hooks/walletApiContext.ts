@@ -23,6 +23,14 @@ export interface WalletApi {
   signTransaction: ((tx: Transaction) => Promise<Transaction>) | undefined;
   signAndSendTransaction: ((tx: Transaction) => Promise<Uint8Array>) | undefined;
   signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | undefined;
+  /**
+   * Batch-sign N independent transactions in ONE wallet approval. Optional —
+   * not every wallet/adapter exposes it. Callers (see lib/tx.ts's
+   * `signAllCompat`) MUST fall back to N sequential `signTransaction` calls
+   * when this is undefined, so batching is purely additive: it never removes
+   * a capability the sequential flow already had.
+   */
+  signAllTransactions: ((txs: Transaction[]) => Promise<Transaction[]>) | undefined;
   disconnect: () => Promise<void>;
 }
 
@@ -35,6 +43,7 @@ export const READ_ONLY_WALLET_API: WalletApi = {
   signTransaction: undefined,
   signAndSendTransaction: undefined,
   signMessage: undefined,
+  signAllTransactions: undefined,
   disconnect: async () => {},
 };
 
