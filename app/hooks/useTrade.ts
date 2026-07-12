@@ -25,7 +25,7 @@ import {
 } from "@/lib/sdk-compat";
 import { sendTx, prewarmTxLanding } from "@/lib/tx";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
-import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { applyConfirmedFill, getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
@@ -554,6 +554,22 @@ export function useTrade(slabAddress: string) {
         instructions.push(tradeIx);
 
         const sig = await sendTx({ connection, wallet, instructions, computeUnits: 600_000 });
+
+        // Immediate local application of the confirmed fill: sendTx's
+        // pollConfirmation has ALREADY verified this tx landed on-chain by
+        // this point, so params.size's effect on position size is a known
+        // fact, not speculation — only the shared scan store's cached READ
+        // hasn't caught up yet (same /api/rpc cache the refresh burst below
+        // is timed around). Patch the store's cached position size right
+        // now so OrderTicket/PositionsDock/ChartPnlBadge (every subscriber)
+        // reflect the new size on THIS render instead of waiting 1-3.5s for
+        // the burst. Capital/pnl/fees are intentionally left untouched (not
+        // deterministic client-side) — those fields still wait on the
+        // refresh burst exactly as before. See applyConfirmedFill's doc.
+        if (isV17Market) {
+          applyConfirmedFill(makePortfolioScanKey(programId, slabAddress, wallet.publicKey), params.size);
+        }
+
         // Re-fetch the slab so useUserAccount re-scans: a trade opens/closes a
         // leg AND changes capital, and the order-ticket balance reads
         // userAccount.account.capital. sendTx already waited for confirmation,

@@ -36,6 +36,7 @@ import {
   getPortfolioUserAccountSnapshot,
   getPortfolioRawSnapshot,
   subscribePortfolioScan,
+  applyConfirmedFill,
   makeHeldNftScanKey,
   triggerHeldNftScan,
   getHeldNftSnapshot,
@@ -252,6 +253,129 @@ describe("userAccountScan — portfolio scan store", () => {
     await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
 
     expect(getPortfolioUserAccountSnapshot(key)).toBeNull();
+  });
+});
+
+describe("userAccountScan — applyConfirmedFill (instant reflection of a confirmed trade)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("applies the signed size delta immediately, publishing once with no RPC call", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 5n }] }));
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    const listener = vi.fn();
+    subscribePortfolioScan(key, listener);
+    getProgramAccounts.mockClear();
+
+    const applied = applyConfirmedFill(key, 10n);
+
+    expect(applied).toBe(true);
+    expect(getProgramAccounts).not.toHaveBeenCalled(); // instant local patch, no re-scan
+    expect(listener).toHaveBeenCalledTimes(1); // publishes exactly once
+    const snapshot = getPortfolioUserAccountSnapshot(key);
+    expect(snapshot?.account.positionSize).toBe(15n); // 5n (existing) + 10n (confirmed delta)
+    // Capital is left untouched by design — the real scan reconciles it.
+    expect(snapshot?.account.capital).toBe(1_000n);
+    expect(snapshot?.provisional).toBe(true);
+  });
+
+  it("supports a negative delta (a close), including reducing a leg to flat", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 20n }] }));
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    // useClosePosition passes trade() a size that's already the signed
+    // closing delta (negative to reduce/flatten a long) — applying it here
+    // must subtract, not add magnitude.
+    const applied = applyConfirmedFill(key, -20n);
+
+    expect(applied).toBe(true);
+    expect(getPortfolioUserAccountSnapshot(key)?.account.positionSize).toBe(0n);
+  });
+
+  it("a subsequent real scan ALWAYS replaces the provisional patch, even when it computes an equal value (equality bail-out doesn't stick)", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 5n }] }));
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    const listener = vi.fn();
+    subscribePortfolioScan(key, listener);
+
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    applyConfirmedFill(key, 10n); // -> basisPosQ 15n, provisional
+    expect(listener).toHaveBeenCalledTimes(2);
+    const patchedSnapshot = getPortfolioUserAccountSnapshot(key);
+    expect(patchedSnapshot?.account.positionSize).toBe(15n);
+
+    // The "real" scan lands and independently computes the SAME basisPosQ
+    // (15n) the provisional patch guessed — a value-equality bail-out would
+    // normally keep the OLD object reference and skip the notify entirely.
+    // Because the entry is still provisional, this publish must go through
+    // anyway: scans are the source of truth and must always be able to
+    // supersede a locally-guessed patch.
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 15n }] }));
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([2]) });
+
+    const rescannedSnapshot = getPortfolioUserAccountSnapshot(key);
+    expect(rescannedSnapshot).not.toBe(patchedSnapshot); // new reference, not the stale patch
+    expect(rescannedSnapshot?.account.positionSize).toBe(15n);
+    expect(rescannedSnapshot?.provisional).toBeUndefined(); // real scan clears the provisional flag
+    expect(listener).toHaveBeenCalledTimes(3); // the bail-out did NOT suppress this publish
+  });
+
+  it("a later scan (post-provisional-window) that finds a genuinely unchanged result still bails out as normal", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 5n }] }));
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    const listener = vi.fn();
+    subscribePortfolioScan(key, listener);
+
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+    // No applyConfirmedFill call here — the entry was never made provisional,
+    // so ordinary equality bail-out behaviour (asserted elsewhere in this
+    // file) is untouched by this feature.
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio({ legs: [{ active: true, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 5n }] }));
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([2]) });
+
+    expect(listener).toHaveBeenCalledTimes(1); // second (unchanged) scan bailed out, as before
+  });
+
+  it("is a no-op for a key with no cached scan result yet", () => {
+    const bogusKey = makePortfolioScanKey(uniquePubkey(), uniquePubkey().toBase58(), uniquePubkey());
+    expect(() => applyConfirmedFill(bogusKey, 10n)).not.toThrow();
+    expect(applyConfirmedFill(bogusKey, 10n)).toBe(false);
+    expect(getPortfolioUserAccountSnapshot(bogusKey)).toBeNull();
+  });
+
+  it("is a no-op when the cached snapshot has no active leg to apply the delta to", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([{ pubkey: portfolioPubkey, account: { data: Buffer.alloc(1) } }]);
+    mocks.parsePortfolioV17.mockReturnValue(
+      makePortfolio({ legs: [{ active: false, assetIndex: 0, marketId: 1n, side: 0, basisPosQ: 0n }] }),
+    );
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+    const before = getPortfolioUserAccountSnapshot(key);
+
+    const applied = applyConfirmedFill(key, 10n);
+
+    expect(applied).toBe(false);
+    expect(getPortfolioUserAccountSnapshot(key)).toBe(before); // untouched
   });
 });
 

@@ -149,6 +149,13 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   const wrapped = useNftWrappedPosition(slabAddress, !hasNormalPosition && !mockMode);
   const activeInfo = hasNormalPosition ? userAccount : wrapped;
   const isNftWrapped = !hasNormalPosition && !!wrapped;
+  // Instant reflection of a just-confirmed trade (lib/userAccountScan.ts's
+  // applyConfirmedFill): the SIZE shown is already an on-chain-confirmed
+  // fact, not a guess — this flag only means capital/pnl on this same row
+  // are still the pre-trade values for another second or two, while the
+  // real scan (already in flight) reconciles them. Subtle affordance only;
+  // never blocks interaction.
+  const isSettling = hasNormalPosition && !!realUserAccount?.provisional;
 
   if (!activeInfo) {
     if (!userAccount) return <EmptyState subtitle="Connect your wallet and deposit collateral to start trading." />;
@@ -312,6 +319,12 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
               <td className="whitespace-nowrap px-3 py-2.5 text-right" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 <span className="text-[var(--text)]">{formatTokenAmount(absPosition, decimals)}</span>
                 <span className="ml-1 text-[var(--text-secondary)]">{symbol}</span>
+                {isSettling && (
+                  <span
+                    className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)]/60 animate-pulse align-middle"
+                    title="Size reflects your confirmed trade — balance is still settling"
+                  />
+                )}
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right text-[var(--text)]" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
                 {formatUsdPriceE6(entryPriceE6)}

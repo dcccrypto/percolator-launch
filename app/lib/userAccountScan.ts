@@ -88,6 +88,17 @@ import {
 export interface UserAccountInfo {
   idx: number;
   account: Account;
+  /** `true` only on the snapshot published immediately by
+   *  `applyConfirmedFill` (a locally-patched confirmed-fill result), and
+   *  only until the next real scan reconciles it (see that function's doc
+   *  and `PortfolioEntry.provisionalUntil`). The position SIZE on this
+   *  snapshot is already an accurate, confirmed on-chain fact — this flag
+   *  exists purely so a consumer MAY show a subtle "settling" affordance
+   *  while capital/pnl/fee fields on this same object are still the
+   *  pre-trade values, not because the size itself is in doubt. Absent
+   *  (`undefined`) on every snapshot that came from a real scan or the v12
+   *  bitmap path. */
+  provisional?: boolean;
 }
 
 /**
@@ -185,6 +196,15 @@ interface PortfolioEntry {
   lastTriggerRaw: Uint8Array | null;
   /** In-flight scan promise for `lastTriggerRaw`, or null once settled. */
   inFlight: Promise<OwnPortfolioScanResult | null> | null;
+  /** Epoch-ms deadline set by `applyConfirmedFill` after a locally-patched
+   *  "provisional" publish (see that function's doc). `0` = not provisional.
+   *  While `Date.now()` is before this deadline, the NEXT publish (the real
+   *  scan already in flight via useTrade's refresh burst) must go through
+   *  even if it happens to compare equal to the provisional snapshot —
+   *  scans are the source of truth and must always be able to supersede a
+   *  locally-guessed patch. Cleared on the next publish, whatever its
+   *  outcome. */
+  provisionalUntil: number;
 }
 
 const portfolioEntries = new Map<string, PortfolioEntry>();
@@ -202,6 +222,7 @@ function getOrCreatePortfolioEntry(key: string): PortfolioEntry {
       listeners: new Set(),
       lastTriggerRaw: null,
       inFlight: null,
+      provisionalUntil: 0,
     };
     portfolioEntries.set(key, entry);
   }
@@ -243,9 +264,17 @@ function ownPortfolioResultsEqual(a: OwnPortfolioScanResult | null, b: OwnPortfo
 }
 
 function publishPortfolioResult(entry: PortfolioEntry, result: OwnPortfolioScanResult | null): void {
-  if (ownPortfolioResultsEqual(entry.raw, result)) return;
+  // A provisional (locally-patched by applyConfirmedFill) snapshot must
+  // never "stick" past the next real scan, even if that scan's data happens
+  // to compare equal field-for-field (e.g. the patch guessed the exact same
+  // basisPosQ the engine landed on) — bypass the equality bail-out for this
+  // one publish so the real, scan-sourced object always becomes the
+  // published reference again.
+  const bypassEqualityForProvisional = entry.provisionalUntil > 0 && Date.now() < entry.provisionalUntil;
+  if (!bypassEqualityForProvisional && ownPortfolioResultsEqual(entry.raw, result)) return;
   entry.raw = result;
   entry.userAccount = result ? { idx: 0, account: portfolioV17ToAccount(result.portfolio) } : null;
+  entry.provisionalUntil = 0;
   notifyPortfolio(entry);
 }
 
@@ -357,6 +386,81 @@ async function runPortfolioScan(
     console.debug("[userAccountScan] portfolio scan failed, keeping last-good cache", e);
     return entry.raw;
   }
+}
+
+/** How long a locally-applied confirmed-fill patch stays "provisional" (see
+ *  `applyConfirmedFill` and the `provisionalUntil` field doc). Generous
+ *  relative to useTrade's refresh burst ([1200, 2200, 3500]ms) so the real
+ *  scan that reconciles the trade has every chance to land and force-replace
+ *  the patch before the window closes; if nothing lands within it, the entry
+ *  just reverts to normal equality-bail behaviour for whatever scan (if any)
+ *  eventually catches up. */
+const CONFIRMED_FILL_PROVISIONAL_MS = 5_000;
+
+/**
+ * Immediately apply a CONFIRMED trade's known signed size delta to the
+ * cached portfolio snapshot for `key`, publishing through the normal path so
+ * every subscriber (OrderTicket, PositionsDock, ChartPnlBadge, ...)
+ * re-renders exactly once — without waiting for the next real scan to land.
+ *
+ * This is NOT speculative optimism: by the time a caller (useTrade, after
+ * `sendTx`'s `pollConfirmation`) invokes this, the transaction has already
+ * been verified on-chain. The fill is a confirmed fact; only this store's
+ * cached READ of it is stale (racing /api/rpc's server-side account cache —
+ * see useTrade.ts's post-confirm comment). This function patches the read,
+ * not the future.
+ *
+ * Only `positionSize` (the active leg's `basisPosQ`, in the SAME
+ * coin-margined native units as the trade's `size` param) is updated.
+ * Capital/pnl/fee-credit changes from a fill are NOT fully deterministic
+ * client-side (fees, funding accrual) — guessing them risks showing a WRONG
+ * number where "still the pre-trade number, one row lower-fidelity for a
+ * couple seconds" would have been honest. Those fields are left untouched;
+ * the real scan already in flight (useTrade's refresh burst) reconciles them
+ * within the existing ~1-2s window.
+ *
+ * No-op (returns `false`, no publish, no notify) when:
+ *   - there is no cached scan result for `key` yet — this store doesn't know
+ *     this portfolio's pubkey or leg layout at all yet, so there is nothing
+ *     to patch (the eventual real scan populates it from scratch); or
+ *   - the cached snapshot has no active leg — a delta can't be applied to a
+ *     leg that doesn't exist locally (this function never fabricates a new
+ *     leg's `marketId`/`assetIndex`/funding-accounting fields; a newly-opened
+ *     first position still waits for the real scan, same as before this
+ *     function existed).
+ *
+ * Marks the entry provisional for `CONFIRMED_FILL_PROVISIONAL_MS`:
+ * `publishPortfolioResult`'s equality bail-out is bypassed for the next
+ * publish that lands inside that window, so the following real scan ALWAYS
+ * supersedes this patch — even in the edge case where it recomputes the
+ * exact same `basisPosQ` this patch guessed. Scans remain the source of
+ * truth; this function only shortens how long a confirmed fill's OWN size
+ * change takes to reach the screen.
+ */
+export function applyConfirmedFill(key: string, signedSizeDeltaQ: bigint): boolean {
+  const entry = portfolioEntries.get(key);
+  if (!entry || !entry.raw) return false;
+
+  const prevPortfolio = entry.raw.portfolio;
+  const legIdx = prevPortfolio.legs.findIndex((l) => l.active);
+  if (legIdx === -1) return false;
+
+  const prevLeg = prevPortfolio.legs[legIdx];
+  const newBasisPosQ = prevLeg.basisPosQ + signedSizeDeltaQ;
+
+  const newLegs = prevPortfolio.legs.slice();
+  newLegs[legIdx] = { ...prevLeg, basisPosQ: newBasisPosQ };
+
+  const patched: OwnPortfolioScanResult = {
+    pubkey: entry.raw.pubkey,
+    portfolio: { ...prevPortfolio, legs: newLegs },
+  };
+
+  entry.raw = patched;
+  entry.userAccount = { idx: 0, account: portfolioV17ToAccount(patched.portfolio), provisional: true };
+  entry.provisionalUntil = Date.now() + CONFIRMED_FILL_PROVISIONAL_MS;
+  notifyPortfolio(entry);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
