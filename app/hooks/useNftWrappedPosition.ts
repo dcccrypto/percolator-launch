@@ -6,13 +6,7 @@ import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import { parsePositionNftAccount, parsePortfolioV17, isV17Account } from "@percolatorct/sdk";
-import { portfolioV17ToAccount, type UserAccountInfo } from "@/hooks/useUserAccount";
-
-// PositionNftV16 on-chain layout is exactly 199 bytes. `last_holder` — the
-// NFT's current/most-recent holder wallet (set to the minter at mint, rewritten
-// to the recipient on every transfer) — occupies bytes [167..199].
-const POSITION_NFT_V17_LEN = 199;
-const NFT_LAST_HOLDER_OFF = 167;
+import { portfolioV17ToAccount, triggerHeldNftScan, type UserAccountInfo } from "@/lib/userAccountScan";
 
 export interface NftWrappedPosition extends UserAccountInfo {
   /** The Token-2022 NFT mint that now escrows this position. */
@@ -72,25 +66,48 @@ export function useNftWrappedPosition(
     (async () => {
       try {
         // 1. Every PositionNft this wallet currently holds (last_holder == wallet).
-        const nfts = await connection.getProgramAccounts(PERCOLATOR_NFT_PROGRAM_ID, {
-          filters: [
-            { dataSize: POSITION_NFT_V17_LEN },
-            { memcmp: { offset: NFT_LAST_HOLDER_OFF, bytes: publicKey.toBase58() } },
-          ],
+        //    Shared scan — byte-for-byte the same query usePositionNft's
+        //    held-NFT fallback runs, joined here rather than fired
+        //    independently (lib/userAccountScan.ts). Also keeps last-good on
+        //    a transient RPC error instead of resolving to an empty array,
+        //    so a blip can't make an active wrapped position vanish.
+        const nfts = await triggerHeldNftScan({
+          connection,
+          nftProgramId: PERCOLATOR_NFT_PROGRAM_ID,
+          wallet: publicKey,
+          raw: raw!,
         });
         if (cancelled) return;
 
-        // 2. Load each wrapped portfolio; keep the one on THIS market that still
-        //    has an active leg (a closed-but-unburned NFT wraps a size-0 leg).
+        // 2. Parse every held NFT up front (cheap, synchronous), then batch-
+        //    fetch all their wrapped portfolios in ONE getMultipleAccountsInfo
+        //    call instead of a serial getAccountInfo per NFT.
+        const parsedNfts: Array<{
+          pubkey: PublicKey;
+          nftMint: PublicKey;
+          portfolioAccount: PublicKey;
+        }> = [];
         for (const nft of nfts) {
-          let parsed;
           try {
-            parsed = parsePositionNftAccount(new Uint8Array(nft.account.data as Buffer));
+            const parsed = parsePositionNftAccount(nft.data);
+            parsedNfts.push({ pubkey: nft.pubkey, nftMint: parsed.nftMint, portfolioAccount: parsed.portfolioAccount });
           } catch {
             continue;
           }
-          const pfInfo = await connection.getAccountInfo(parsed.portfolioAccount);
-          if (cancelled) return;
+        }
+
+        if (parsedNfts.length === 0) {
+          setWrapped(null);
+          return;
+        }
+
+        const pfInfos = await connection.getMultipleAccountsInfo(parsedNfts.map((p) => p.portfolioAccount));
+        if (cancelled) return;
+
+        // 3. Keep the one on THIS market that still has an active leg (a
+        //    closed-but-unburned NFT wraps a size-0 leg).
+        for (let i = 0; i < parsedNfts.length; i++) {
+          const pfInfo = pfInfos[i];
           if (!pfInfo) continue;
           let pf;
           try {
@@ -104,15 +121,20 @@ export function useNftWrappedPosition(
             setWrapped({
               idx: 0,
               account: portfolioV17ToAccount(pf),
-              nftMint: parsed.nftMint,
-              nftPda: nft.pubkey,
+              nftMint: parsedNfts[i].nftMint,
+              nftPda: parsedNfts[i].pubkey,
             });
             return;
           }
         }
         setWrapped(null);
-      } catch {
-        if (!cancelled) setWrapped(null);
+      } catch (e) {
+        // Keep-last-good: a transient error (RPC 429, timeout) here used to
+        // null out `wrapped` unconditionally — making an actively-wrapped
+        // position vanish from the dock on a single blip. Keep whatever was
+        // last successfully determined; only the successful "found nothing on
+        // this market" paths above (`setWrapped(null)`) are allowed to clear it.
+        console.debug("[useNftWrappedPosition] scan failed, keeping last-good state:", e);
       }
     })();
 

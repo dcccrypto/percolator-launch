@@ -19,12 +19,14 @@ import {
   parsePortfolioV17,
   isV17Account,
 } from "@percolatorct/sdk";
+import {
+  triggerPortfolioScan,
+  triggerHeldNftScan,
+  type OwnPortfolioScanResult,
+} from "@/lib/userAccountScan";
 
 // Minimum byte length accepted by the v17 (SDK) NFT account parser.
 const POSITION_NFT_STATE_LEN_V17 = 199;
-
-// v17 portfolio magic bytes for getProgramAccounts filter.
-const V17_PORTFOLIO_MAGIC = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 
 export interface UsePositionNftResult {
   /** Whether the position NFT has been minted (PDA account exists on-chain) */
@@ -111,24 +113,24 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
 
         if (isV17) {
           // ── v17 path ─────────────────────────────────────────────────────
-          // 1. Find the user's portfolio via getProgramAccounts (magic + market_group + owner).
-          // 2. Parse the portfolio to get the active leg's marketId.
+          // 1. Find the user's portfolio via the SHARED portfolio scan store
+          //    (magic + market_group + owner) — byte-for-byte the same query
+          //    useUserAccount runs, so this joins that scan instead of firing
+          //    a second identical getProgramAccounts call (see
+          //    lib/userAccountScan.ts's header for the dedup mechanism).
+          // 2. Read the active leg's marketId from the (already-parsed,
+          //    already owner-reverified, already M10-sorted) shared result.
           // 3. Derive PDA with SDK seeds: ["position_nft", portfolio, marketId_u64_LE].
           // 4. Fetch the PDA account and parse with SDK parser (199 bytes).
           setState((prev) => ({ ...prev, isLoading: prev.nftPdaAddress === null }));
 
           const ownerWalletPk = new PublicKey(walletPubkeyStr!);
-          const allPortfolios = await connection.getProgramAccounts(programId, {
-            filters: [
-              { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC.toString("base64"), encoding: "base64" } },
-              // market_group_id sits at provenance offset 16 (after 8-byte header)
-              { memcmp: { offset: 16, bytes: slabPk.toBase58() } },
-              // Mutable owner (SDK PF_OWNER_OFF) sits at offset 116, NOT provenance
-              // offset 80 (IMMUTABLE). MintPositionNft moves the mutable owner to the
-              // escrow PDA on wrap but leaves provenance pointing at the original
-              // wallet, so filtering on 80 would still match a wrapped portfolio here.
-              { memcmp: { offset: 116, bytes: walletPubkeyStr! } },
-            ],
+          const scanResult: OwnPortfolioScanResult | null = await triggerPortfolioScan({
+            connection,
+            programId,
+            slabAddress,
+            publicKey: ownerWalletPk,
+            raw: raw!,
           });
 
           if (cancelled) return;
@@ -140,13 +142,13 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
           // the escrow PDA, so it no longer matches this scan — the held-NFT scan
           // below (last_holder@167) is what finds those.
           //
-          // IMPORTANT: do NOT treat "allPortfolios.length === 0" as the only
-          // trigger for the held-NFT fallback below. A wallet can ALSO own a
-          // portfolio here with NO active leg (e.g. a stale/closed position,
-          // or simply one it deposited into without ever trading), or own an
-          // active leg here with no self-minted NFT of its own, while SEPARATELY
-          // holding a Position NFT — either self-minted-and-not-yet-transferred,
-          // or received via transfer from someone else (whose escrowed portfolio
+          // IMPORTANT: do NOT treat "scanResult === null" as the only trigger
+          // for the held-NFT fallback below. A wallet can ALSO own a portfolio
+          // here with NO active leg (e.g. a stale/closed position, or simply
+          // one it deposited into without ever trading), or own an active leg
+          // here with no self-minted NFT of its own, while SEPARATELY holding a
+          // Position NFT — either self-minted-and-not-yet-transferred, or
+          // received via transfer from someone else (whose escrowed portfolio
           // is a totally different account). The old code returned early the
           // moment the wallet had its own active leg (regardless of whether that
           // leg had a minted NFT), WITHOUT ever checking whether the wallet holds
@@ -155,16 +157,14 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
           // position on the same market.
           let ownPortfolioPk: PublicKey | null = null;
           let ownActiveLeg: ReturnType<typeof parsePortfolioV17>["legs"][number] | null = null;
-          if (allPortfolios.length > 0) {
-            const pf = parsePortfolioV17(new Uint8Array(allPortfolios[0].account.data));
-            // Defense-in-depth: re-verify the mutable owner actually matches after
-            // fetch — memcmp filters are advisory server-side; don't trust blindly.
-            if (pf.owner.equals(ownerWalletPk)) {
-              const activeLeg = pf.legs.find((l) => l.active);
-              if (activeLeg) {
-                ownPortfolioPk = allPortfolios[0].pubkey;
-                ownActiveLeg = activeLeg;
-              }
+          if (scanResult) {
+            // The shared scan already re-verified owner==wallet (a null result
+            // means either no match or a failed re-verify), so only the
+            // active-leg check remains.
+            const activeLeg = scanResult.portfolio.legs.find((l) => l.active);
+            if (activeLeg) {
+              ownPortfolioPk = scanResult.pubkey;
+              ownActiveLeg = activeLeg;
             }
           }
 
@@ -215,46 +215,73 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
           // This keeps Burn / Send / status working both right after a self-mint
           // and after receiving a transferred NFT (mirrors
           // useNftWrappedPosition, which uses the identical last_holder scan).
-          const heldNfts = await connection.getProgramAccounts(PERCOLATOR_NFT_PROGRAM_ID, {
-            filters: [
-              { dataSize: POSITION_NFT_STATE_LEN_V17 },
-              { memcmp: { offset: 167, bytes: walletPubkeyStr! } },
-            ],
+          // Shared scan — byte-for-byte the same query useNftWrappedPosition
+          // runs (dataSize=199 + last_holder@167==wallet), joined here rather
+          // than fired independently (lib/userAccountScan.ts).
+          const heldNfts = await triggerHeldNftScan({
+            connection,
+            nftProgramId: PERCOLATOR_NFT_PROGRAM_ID,
+            wallet: ownerWalletPk,
+            raw: raw!,
           });
           if (cancelled) return;
+
+          // Parse every held NFT (cheap, synchronous) up front, then batch-
+          // fetch all their wrapped portfolios in ONE getMultipleAccountsInfo
+          // call instead of a serial getAccountInfo per NFT (was N round-trips
+          // for N held NFTs; typically small N, but each round-trip is a full
+          // RPC hop).
+          const parsedHeldNfts: Array<{
+            pubkey: PublicKey;
+            nftMint: PublicKey;
+            portfolioAccount: PublicKey;
+          }> = [];
           for (const heldNft of heldNfts) {
-            let parsedNft;
             try {
-              parsedNft = parsePositionNftAccountSdk(new Uint8Array(heldNft.account.data));
+              const parsedNft = parsePositionNftAccountSdk(heldNft.data);
+              parsedHeldNfts.push({
+                pubkey: heldNft.pubkey,
+                nftMint: parsedNft.nftMint,
+                portfolioAccount: parsedNft.portfolioAccount,
+              });
             } catch {
               continue;
             }
-            const wrappedPfInfo = await connection.getAccountInfo(parsedNft.portfolioAccount);
+          }
+
+          if (parsedHeldNfts.length > 0) {
+            const wrappedInfos = await connection.getMultipleAccountsInfo(
+              parsedHeldNfts.map((p) => p.portfolioAccount),
+            );
             if (cancelled) return;
-            if (!wrappedPfInfo) continue;
-            let wrappedPf;
-            try {
-              wrappedPf = parsePortfolioV17(new Uint8Array(wrappedPfInfo.data));
-            } catch {
-              continue;
+
+            for (let i = 0; i < parsedHeldNfts.length; i++) {
+              const wrappedPfInfo = wrappedInfos[i];
+              if (!wrappedPfInfo) continue;
+              let wrappedPf;
+              try {
+                wrappedPf = parsePortfolioV17(new Uint8Array(wrappedPfInfo.data));
+              } catch {
+                continue;
+              }
+              if (!(wrappedPf.marketGroupId?.equals(slabPk) ?? false)) continue;
+              const wrappedLeg = wrappedPf.legs.find((l) => l.active);
+              setState({
+                hasMintedNft: true,
+                nftMint: parsedHeldNfts[i].nftMint,
+                // No active (non-zero) leg ⇒ closed-but-unburned ⇒ burn to reclaim.
+                pendingSettlement: !wrappedLeg || wrappedLeg.basisPosQ === 0n,
+                nftPdaAddress: parsedHeldNfts[i].pubkey.toBase58(),
+                isLoading: false,
+              });
+              return;
             }
-            if (!(wrappedPf.marketGroupId?.equals(slabPk) ?? false)) continue;
-            const wrappedLeg = wrappedPf.legs.find((l) => l.active);
-            setState({
-              hasMintedNft: true,
-              nftMint: parsedNft.nftMint,
-              // No active (non-zero) leg ⇒ closed-but-unburned ⇒ burn to reclaim.
-              pendingSettlement: !wrappedLeg || wrappedLeg.basisPosQ === 0n,
-              nftPdaAddress: heldNft.pubkey.toBase58(),
-              isLoading: false,
-            });
-            return;
           }
           setState({
             hasMintedNft: false,
             nftMint: null,
             pendingSettlement: false,
-            nftPdaAddress: ownNftPdaStr ?? (allPortfolios.length > 0 ? allPortfolios[0].pubkey.toBase58() : null),
+            nftPdaAddress: ownNftPdaStr ?? (scanResult ? scanResult.pubkey.toBase58() : null),
             isLoading: false,
           });
 
@@ -299,15 +326,16 @@ export function usePositionNft(slabAddress: string): UsePositionNftResult {
           });
         }
       } catch (e) {
-        console.error("[usePositionNft] Error fetching PDA:", e);
+        // Keep-last-good: a transient error (RPC 429, timeout) here used to
+        // reset the WHOLE state to "Not minted" — for an already-minted NFT
+        // that's actively dangerous, not just a flicker: it re-enables the
+        // Mint button and can invite a doomed re-mint attempt on an already-
+        // wrapped position. Keep whatever was last successfully determined
+        // and just clear the loading spinner; only an actually-SUCCESSFUL
+        // scan (the setState calls above) is allowed to report "not minted".
+        console.debug("[usePositionNft] Error fetching PDA, keeping last-good state:", e);
         if (!cancelled) {
-          setState({
-            hasMintedNft: false,
-            nftMint: null,
-            pendingSettlement: false,
-            nftPdaAddress: null,
-            isLoading: false,
-          });
+          setState((prev) => ({ ...prev, isLoading: false }));
         }
       }
     })();
