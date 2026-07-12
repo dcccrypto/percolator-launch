@@ -184,38 +184,64 @@ const PrivyWalletApiBridge: FC<{ children: ReactNode }> = ({ children }) => {
         (tx) => new Uint8Array(tx.serialize({ requireAllSignatures: false, verifySignatures: false })),
       );
 
-      // PREFER the wallet's OWN wallet-standard `solana:signTransaction`
-      // feature called with ALL inputs at once — this is the native batch
-      // path (what wallet-adapter's signAllTransactions does under the
-      // hood), and Phantom/Solflare render it as ONE approval listing every
-      // tx. Routing the batch through Privy's signer instead was observed to
-      // fan out one approval PER transaction for external wallets, which
-      // defeated the entire one-approval launch flow. Structural feature
-      // detection (no SDK types expose this cleanly); any failure falls
-      // through to Privy's variadic signer below.
+      // ATTEMPT 1 — the wallet's OWN wallet-standard `solana:signTransaction`
+      // feature, invoked with ALL inputs in a single call. This is the native
+      // batch path (what wallet-adapter's signAllTransactions uses under the
+      // hood); Phantom/Solflare render it as ONE approval listing every tx.
+      //
+      // The features hang off `ConnectedStandardSolanaWallet.standardWallet`
+      // (a SolanaStandardWallet), NOT off the connected-wallet object itself —
+      // reading `activeWallet.features` finds nothing, silently falls through,
+      // and the user gets one Privy approval PER transaction (the exact
+      // "I still signed 8 times" report on Solflare). Verified against
+      // @privy-io/js-sdk-core's ConnectedStandardSolanaWallet class:
+      // `get standardWallet(): SolanaStandardWallet`.
       try {
-        const walletUnknown = activeWallet as unknown as {
-          features?: Record<string, unknown>;
-          accounts?: Array<{ address: string }>;
+        const connected = activeWallet as unknown as {
           address: string;
+          standardWallet?: {
+            features?: Record<string, unknown>;
+            accounts?: Array<{ address: string }>;
+          };
         };
-        const feature = walletUnknown.features?.["solana:signTransaction"] as
+        const std = connected.standardWallet;
+        const feature = std?.features?.["solana:signTransaction"] as
           | { signTransaction?: (...inputs: unknown[]) => Promise<Array<{ signedTransaction: Uint8Array }>> }
           | undefined;
         const account =
-          walletUnknown.accounts?.find((a) => a.address === walletUnknown.address) ??
-          walletUnknown.accounts?.[0];
-        if (feature?.signTransaction && account) {
+          std?.accounts?.find((a) => a.address === connected.address) ?? std?.accounts?.[0];
+        if (typeof feature?.signTransaction === "function" && account) {
           const outputs = await feature.signTransaction(
             ...serialized.map((bytes) => ({ transaction: bytes, account, chain })),
           );
           if (Array.isArray(outputs) && outputs.length === txs.length) {
-            console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via wallet-standard feature (one approval)`);
+            console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via wallet-standard feature (ONE approval)`);
             return outputs.map((o) => Transaction.from(Buffer.from(o.signedTransaction)));
           }
         }
       } catch (e) {
-        console.warn("[PrivyProviderClient] wallet-standard batch sign unavailable/failed — using Privy signer:", e);
+        console.warn("[PrivyProviderClient] wallet-standard batch sign failed — trying the connected wallet's own signer:", e);
+      }
+
+      // ATTEMPT 2 — ConnectedStandardSolanaWallet's own VARIADIC
+      // signTransaction (a documented wrapper around the same
+      // solana:signTransaction feature). Covers wallets whose feature object
+      // isn't reachable structurally above.
+      try {
+        const walletSigner = activeWallet as unknown as {
+          signTransaction?: (...inputs: unknown[]) => Promise<Array<{ signedTransaction: Uint8Array }> | { signedTransaction: Uint8Array }>;
+        };
+        if (typeof walletSigner.signTransaction === "function" && txs.length > 1) {
+          const outputs = await walletSigner.signTransaction(
+            ...serialized.map((bytes) => ({ transaction: bytes, chain })),
+          );
+          if (Array.isArray(outputs) && outputs.length === txs.length) {
+            console.info(`[PrivyProviderClient] batch-signed ${txs.length} txs via connected-wallet variadic signer (ONE approval)`);
+            return outputs.map((o) => Transaction.from(Buffer.from(o.signedTransaction)));
+          }
+        }
+      } catch (e) {
+        console.warn("[PrivyProviderClient] connected-wallet variadic sign failed — using Privy signer (may prompt per tx):", e);
       }
 
       const inputs = serialized.map((bytes) => ({

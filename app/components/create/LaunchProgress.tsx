@@ -21,6 +21,8 @@ interface LaunchProgressProps {
      */
     phase?: "idle" | "preparing" | "awaiting-signature" | "landing" | "done";
     landingIndex?: number;
+    /** Named market-creation steps, one per batched tx, in order. */
+    landingLabels?: string[];
     landingTotal?: number;
   };
   onReset: () => void;
@@ -85,44 +87,80 @@ export const LaunchProgress: FC<LaunchProgressProps> = ({ state, onReset, onRetr
             </div>
           )}
 
-          {/* Landing: progress bar over landingIndex/landingTotal + landed tx list */}
+          {/* Landing: named market-creation steps (NOT transaction indices —
+              a launching user cares about what's being built, not our tx
+              packing). Each step shows done / in-progress / pending, with the
+              explorer link on the ones that have landed. */}
           {state.phase === "landing" && (
             <div>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[11px] font-medium text-[var(--text)]">
-                  Landing transaction {Math.min(state.landingIndex ?? 0, state.landingTotal ?? 0) || 1} of {state.landingTotal ?? 0}
-                </span>
-                <span className="text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--warning)] animate-pulse">
-                  CONFIRMING...
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-surface)]">
-                <div
-                  className="h-full bg-[var(--accent)] transition-all duration-300"
-                  style={{
-                    width: `${state.landingTotal ? Math.min(100, ((state.landingIndex ?? 0) / state.landingTotal) * 100) : 0}%`,
-                  }}
-                />
-              </div>
-              {state.txSigs.length > 0 && (
-                <ul className="mt-3 space-y-1">
-                  {state.txSigs.map((sig, i) => (
-                    <li key={sig + i} className="flex items-center gap-2">
-                      <span className="flex h-4 w-4 items-center justify-center border border-[var(--long)]/30 bg-[var(--long)]/[0.08] text-[9px] text-[var(--long)]">
-                        ✓
+              {(() => {
+                const labels = state.landingLabels ?? [];
+                const done = state.landingIndex ?? 0;
+                const total = state.landingTotal ?? labels.length;
+                return (
+                  <>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-[var(--text)]">
+                        {labels[Math.min(done, labels.length - 1)] ?? "Finishing up"}
                       </span>
-                      <a
-                        href={`https://explorer.solana.com/tx/${sig}?cluster=devnet`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-mono text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors"
-                      >
-                        tx {i + 1}: {sig.slice(0, 8)}...
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                      <span className="text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--warning)] animate-pulse">
+                        CONFIRMING...
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-surface)]">
+                      <div
+                        className="h-full bg-[var(--accent)] transition-all duration-300"
+                        style={{ width: `${total ? Math.min(100, (done / total) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <ul className="mt-3 space-y-1">
+                      {labels.map((label, i) => {
+                        const isDone = i < done;
+                        const isActive = i === done;
+                        const sig = state.txSigs[i];
+                        return (
+                          <li key={label} className="flex items-center gap-2">
+                            <span
+                              className={[
+                                "flex h-4 w-4 flex-shrink-0 items-center justify-center border text-[9px]",
+                                isDone
+                                  ? "border-[var(--long)]/30 bg-[var(--long)]/[0.08] text-[var(--long)]"
+                                  : isActive
+                                    ? "border-[var(--accent)]/40 bg-[var(--accent)]/[0.08] text-[var(--accent)]"
+                                    : "border-[var(--border)] text-[var(--text-dim)]",
+                              ].join(" ")}
+                            >
+                              {isDone ? "✓" : isActive ? "•" : ""}
+                            </span>
+                            <span
+                              className={[
+                                "text-[10px]",
+                                isDone
+                                  ? "text-[var(--text-secondary)]"
+                                  : isActive
+                                    ? "font-medium text-[var(--text)]"
+                                    : "text-[var(--text-dim)]",
+                              ].join(" ")}
+                            >
+                              {label}
+                            </span>
+                            {isDone && sig && (
+                              <a
+                                href={`https://explorer.solana.com/tx/${sig}?cluster=devnet`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-auto font-mono text-[9px] text-[var(--text-dim)] transition-colors hover:text-[var(--accent)]"
+                              >
+                                {sig.slice(0, 6)}…
+                              </a>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>

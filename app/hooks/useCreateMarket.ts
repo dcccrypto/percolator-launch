@@ -273,6 +273,8 @@ export interface CreateMarketState {
   phase: "idle" | "preparing" | "awaiting-signature" | "landing" | "done";
   /** "landing" phase only: 1-based index of the transaction currently confirming. */
   landingIndex: number;
+  /** Human-readable market-creation step names, one per batched tx, in order. */
+  landingLabels?: string[];
   /** "landing" phase only: total transactions in this batch (4-5 depending on oracle mode). */
   landingTotal: number;
 }
@@ -847,6 +849,18 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
     // cosignTx is deserialized exactly as the server built it — its own
     // blockhash, no heap-frame/CU ixs added — never run through buildBatchTx.
     const orderedTxs: Transaction[] = [m1, ...(cosignTx ? [cosignTx] : []), m2, m3a, m3b, m4];
+    // Human-readable label per batched tx, in the SAME order — the progress UI
+    // shows what is being CREATED ("Creating the market", "Funding liquidity"),
+    // never internal transaction indices. A launching user cares about market
+    // milestones, not our tx-packing scheme.
+    const orderedLabels: string[] = [
+      "Creating the market",
+      ...(cosignTx ? ["Connecting the price feed"] : []),
+      "Setting up the liquidity pool",
+      "Funding liquidity",
+      "Seeding the insurance fund",
+      "Opening staking & LP vaults",
+    ];
 
     // ---- ONE wallet approval for the whole batch --------------------------
     setState((s) => ({ ...s, phase: "awaiting-signature", stepLabel: "Approve the transaction batch in your wallet..." }));
@@ -894,10 +908,20 @@ async function attemptFreshBatchedLaunch(ctx: FreshBatchContext): Promise<FreshB
         phase: "landing",
         landingIndex: landed,
         landingTotal,
-        stepLabel: `Landing transaction ${landed} of ${landingTotal}...`,
+        landingLabels: orderedLabels,
+        // Label the step now IN PROGRESS (the one after what just landed);
+        // once everything has landed, show the finishing state.
+        stepLabel: orderedLabels[landed] ?? "Finishing up",
       }));
     };
-    setState((s) => ({ ...s, phase: "landing", landingIndex: 0, landingTotal, stepLabel: `Landing transaction 1 of ${landingTotal}...` }));
+    setState((s) => ({
+      ...s,
+      phase: "landing",
+      landingIndex: 0,
+      landingTotal,
+      landingLabels: orderedLabels,
+      stepLabel: orderedLabels[0],
+    }));
 
     const m1Sig = await broadcastSignedTx(connection, signedM1);
     setState((s) => ({ ...s, slabAddress: slabPk.toBase58() }));
