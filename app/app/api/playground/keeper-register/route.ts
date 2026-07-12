@@ -382,14 +382,19 @@ export async function POST(req: NextRequest) {
   try {
     await upsertRegisteredMarket(entry);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error("[playground/keeper-register] Blob write failed:", detail);
+    // SEC: log the raw upstream error server-side only. Echoing it to the
+    // caller (the previous `detail` field) leaked internal infra text — the
+    // @vercel/blob error strings can name store IDs / paths and are an
+    // info-leak smell. The generic `error` message is all the client needs.
+    console.error(
+      "[playground/keeper-register] Blob write failed:",
+      err instanceof Error ? err.message : String(err),
+    );
     return NextResponse.json(
       {
         ok: false,
         registered: false,
         error: "Failed to persist market registration to Blob store",
-        detail,
       },
       { status: 502 },
     );
