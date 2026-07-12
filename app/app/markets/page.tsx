@@ -320,11 +320,27 @@ function MarketsPageInner() {
 
   // Batch-warm the slab cache for every listed market in ONE getMultipleAccountsInfo
   // so clicking ANY market opens the terminal instantly (not just hovered rows).
+  //
+  // Keyed on a joined, sorted slab-address STRING (not the `effectiveMarkets`
+  // array reference) — mirrors useMyMarkets.ts's v17SlabsKey and
+  // PositionsBar.tsx's slabKey. `merged` (and therefore `effectiveMarkets`)
+  // is rebuilt from `discovered`/`statsMap` on every SWR poll (~30s), which
+  // gives it a NEW array reference each time even when its contents are
+  // identical — keying the effect on that reference meant this "one-shot"
+  // warm-cache batch fetch re-ran on every poll tick forever. Compounding
+  // it, lib/slabCache.ts's FRESH_MS (20s) is shorter than the poll interval
+  // (30s), so by the time each re-run fired, the previous fetch's cache
+  // entries had already gone stale and the freshness guard inside
+  // prefetchSlabsBatch never actually skipped the refetch either — this was
+  // a real, continuous 30s RPC cost, not a harmless no-op.
+  const slabsKey = useMemo(
+    () => effectiveMarkets.map((m) => m.slabAddress).sort().join(","),
+    [effectiveMarkets],
+  );
   useEffect(() => {
-    if (effectiveMarkets.length > 0) {
-      prefetchSlabsBatch(connection, effectiveMarkets.map((m) => m.slabAddress));
-    }
-  }, [effectiveMarkets, connection]);
+    if (!slabsKey) return;
+    prefetchSlabsBatch(connection, slabsKey.split(","));
+  }, [slabsKey, connection]);
 
   // Fetch on-chain token metadata for ALL markets (no Supabase)
   const allMints = useMemo(() => {

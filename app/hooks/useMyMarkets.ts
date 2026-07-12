@@ -141,12 +141,35 @@ export function useMyMarkets() {
   // Second pass: fetch full slab data to find trader/LP accounts
   const [tradedMarkets, setTradedMarkets] = useState<MyMarket[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
-  // Track which market set we've already scanned to avoid re-blanking on poll
+  // Track which (wallet + market-set) we've already completed a scan for, to
+  // avoid re-blanking on poll. The key MUST include the wallet: it used to be
+  // built from market addresses ONLY, so switching wallet A → B while both
+  // wallets share the same market set produced an IDENTICAL key — the effect
+  // then skipped straight past the "already scanned" check without ever
+  // re-running checkAccounts for B, permanently showing A's traded markets to
+  // B (HIGH wallet-bleed bug).
   const lastScannedKey = useRef<string>("");
+
+  // requestId/generation guard — checkAccounts below has multiple sequential
+  // awaits (a getAccountInfo batch, then a per-v17-market getProgramAccounts
+  // call inside it). Without this, switching wallets (or the market set
+  // emptying) mid-scan let an OLDER, slower in-flight scan resolve AFTER a
+  // newer one and stomp its state (tradedMarkets/accountsLoading/
+  // lastScannedKey). Mirrors useLpPositions.ts / useTradeHistory.ts.
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (!publicKey || !markets.length || discoveryLoading) {
-      // Don't clear tradedMarkets on re-poll — keep showing stale data
+      // Invalidate any in-flight scan from a previous wallet/market-set — it
+      // must not land after this reset and stomp state below.
+      requestIdRef.current++;
+      // Don't clear tradedMarkets on re-poll — keep showing stale data. DO
+      // reset accountsLoading though: a scan in flight when this effect's
+      // deps changed (wallet disconnect, or markets emptied mid-scan) would
+      // otherwise leave it stuck `true` forever — checkAccounts' own
+      // `if (!stale())` guard, now permanently false for that scan, is the
+      // ONLY place that clears it (stuck-loading bug).
+      setAccountsLoading(false);
       return;
     }
 
@@ -160,31 +183,53 @@ export function useMyMarkets() {
 
     const toCheck = nonAdminMarkets.slice(0, 30);
 
-    // Build a key from market addresses to detect actual changes vs poll refreshes
-    const scanKey = toCheck.map((m) => m.slabAddress.toBase58()).sort().join(",");
-    if (scanKey === lastScannedKey.current && tradedMarkets.length > 0) {
-      // Same markets, already scanned — skip to avoid blank flash
+    // Build a key from wallet + market addresses to detect actual changes vs
+    // poll refreshes — see the comment on `lastScannedKey` above for why the
+    // wallet must be part of it.
+    const scanKey = `${walletStr}:${toCheck.map((m) => m.slabAddress.toBase58()).sort().join(",")}`;
+    if (scanKey === lastScannedKey.current) {
+      // Same wallet + same markets, already scanned TO COMPLETION — skip to
+      // avoid a blank flash. This used to also require `tradedMarkets.length
+      // > 0`, which meant a wallet with ZERO traded markets could never
+      // satisfy the skip check and re-ran the full scan every 30s forever
+      // (MEDIUM empty-result rescan bug). `lastScannedKey` is only ever
+      // written once a scan genuinely completes (see the end of
+      // checkAccounts below), independent of how many results it found, so
+      // comparing against it alone is sufficient — no result-count gate needed.
       return;
     }
 
     if (toCheck.length === 0) {
+      // Invalidate any scan still in flight for a PRIOR (nonempty) toCheck —
+      // otherwise it could resolve after this and overwrite the `[]` just
+      // set below with stale results.
+      requestIdRef.current++;
       setTradedMarkets([]);
       lastScannedKey.current = scanKey;
       return;
     }
 
-    let cancelled = false;
+    const requestId = ++requestIdRef.current;
+    const stale = () => requestId !== requestIdRef.current;
     setAccountsLoading(true);
 
     async function checkAccounts() {
       const found: MyMarket[] = [];
+      // v17 markets found in the batches below, keyed by slab address, so the
+      // SINGLE batched owner-scan after this loop (fixing the N+1 bug: this
+      // used to run one getProgramAccounts call PER v17 market found in each
+      // batch — with N traded v17 markets that was N sequential round-trips
+      // every scan) can match its results back to the market they belong to.
+      const v17MarketsBySlab = new Map<string, DiscoveredMarket>();
+      const v17ProgramIdsSeen = new Map<string, PublicKey>();
 
       for (let i = 0; i < toCheck.length; i += 5) {
-        if (cancelled) break;
+        if (stale()) return;
         const batch = toCheck.slice(i, i + 5);
         const results = await Promise.allSettled(
           batch.map((m) => connection.getAccountInfo(m.slabAddress))
         );
+        if (stale()) return;
 
         for (let j = 0; j < results.length; j++) {
           const result = results[j];
@@ -194,34 +239,19 @@ export function useMyMarkets() {
           const data = new Uint8Array(accountInfo.data);
           const market = batch[j];
           try {
-            let role: "trader" | "lp" | null = null;
-
             if (isV17Account(data)) {
               // v17: portfolios are standalone program-owned accounts, NOT
               // embedded in the slab — parseAllAccounts finds nothing here.
-              // Scan getProgramAccounts for this wallet's portfolio on this
-              // market, filtered by the mutable owner (offset 116), same
-              // approach as usePortfolio.ts.
-              const v17ProgramId = accountInfo.owner;
-              const portfolioResults = await connection.getProgramAccounts(v17ProgramId, {
-                filters: [
-                  { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_MM.toString("base64"), encoding: "base64" } },
-                  { memcmp: { offset: V17_PF_MARKET_OFF_MM, bytes: market.slabAddress.toBase58() } },
-                  { memcmp: { offset: V17_PF_OWNER_OFF_MM, bytes: walletStr } },
-                ],
-              });
-              for (const { account: portAcct } of portfolioResults) {
-                const portData = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
-                const portfolio = parsePortfolioV17(portData);
-                // Defense-in-depth: re-verify the mutable owner actually matches
-                // after fetch — memcmp filters are advisory server-side.
-                if (portfolio.owner.toBase58() === walletStr) { role = "trader"; break; }
-              }
+              // Just remember the market + its owning program; the actual
+              // portfolio lookup is the single batched scan below.
+              v17MarketsBySlab.set(market.slabAddress.toBase58(), market);
+              v17ProgramIdsSeen.set(accountInfo.owner.toBase58(), accountInfo.owner);
               // v17 has no embedded LP account to detect here — LP positions
               // are tracked via LP-token balances (see useLpPositions.ts), not
               // a slab-scanned role.
             } else {
               // v12.x legacy path: accounts embedded in the slab.
+              let role: "trader" | "lp" | null = null;
               const accounts = parseAllAccounts(data);
               for (const { account } of accounts) {
                 if (account.owner.toBase58() === walletStr) {
@@ -229,14 +259,13 @@ export function useMyMarkets() {
                   if (account.kind === AccountKind.LP) { role = role ?? "lp"; }
                 }
               }
-            }
-
-            if (role) {
-              found.push({
-                ...market,
-                label: await resolveLabel(market),
-                role,
-              });
+              if (role) {
+                found.push({
+                  ...market,
+                  label: await resolveLabel(market),
+                  role,
+                });
+              }
             }
           } catch {
             // Skip unparseable slabs
@@ -244,7 +273,68 @@ export function useMyMarkets() {
         }
       }
 
-      if (!cancelled) {
+      if (stale()) return;
+
+      // ── v17 owner-scan: ONE getProgramAccounts per distinct v17 program ──
+      // Filtered by magic + owner@116 only (dropped the per-market
+      // market@16 filter, same as usePortfolio.ts's identical fix) — the
+      // owner filter alone already scopes results to just this wallet's
+      // portfolios across every v17 market under that program, so the
+      // (typically small) result set is grouped by `portfolio.marketGroupId`
+      // client-side instead of re-querying per market.
+      if (v17MarketsBySlab.size > 0) {
+        try {
+          const portfolioScans = await Promise.all(
+            Array.from(v17ProgramIdsSeen.values()).map((programId) =>
+              connection.getProgramAccounts(programId, {
+                filters: [
+                  { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_MM.toString("base64"), encoding: "base64" } },
+                  { memcmp: { offset: V17_PF_OWNER_OFF_MM, bytes: walletStr } },
+                ],
+              }).catch(() => [] as Awaited<ReturnType<typeof connection.getProgramAccounts>>),
+            ),
+          );
+          if (stale()) return;
+
+          // Guards against pushing the same market twice if more than one
+          // portfolio account somehow resolved to it (shouldn't happen in
+          // practice — one portfolio per wallet+market — but keeps `found`
+          // parity with the old one-push-per-market-per-scan behavior).
+          const seenTraderSlabs = new Set<string>();
+          for (const portfolioResults of portfolioScans) {
+            for (const { account: portAcct } of portfolioResults) {
+              try {
+                const portData = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
+                const portfolio = parsePortfolioV17(portData);
+                // Defense-in-depth: re-verify the mutable owner actually matches
+                // after fetch — memcmp filters are advisory server-side.
+                if (portfolio.owner.toBase58() !== walletStr) continue;
+                const slabAddrStr = portfolio.marketGroupId?.toBase58();
+                if (!slabAddrStr || seenTraderSlabs.has(slabAddrStr)) continue;
+                const market = v17MarketsBySlab.get(slabAddrStr);
+                // Portfolio belongs to a v17 market outside this scan's
+                // toCheck set (e.g. capped at 30, or an admin market already
+                // covered by the other effect) — nothing to attach it to here.
+                if (!market) continue;
+
+                found.push({
+                  ...market,
+                  label: await resolveLabel(market),
+                  role: "trader",
+                });
+                seenTraderSlabs.add(slabAddrStr);
+              } catch {
+                // Skip unparseable portfolio accounts
+              }
+            }
+          }
+        } catch {
+          // v17 owner-scan is best-effort — a total failure here must not
+          // discard the v12 trader/LP results already collected above.
+        }
+      }
+
+      if (!stale()) {
         setTradedMarkets(found);
         setAccountsLoading(false);
         lastScannedKey.current = scanKey;
@@ -252,7 +342,6 @@ export function useMyMarkets() {
     }
 
     checkAccounts();
-    return () => { cancelled = true; };
   }, [publicKey, markets, discoveryLoading, connection, resolveLabel]);
 
   // Merge admin + traded markets (admin first)
