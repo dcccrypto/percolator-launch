@@ -25,13 +25,22 @@ function unwrapMarketInfo(raw: unknown): MarketWithStats | null {
   return data;
 }
 
-async function fetchMarketInfo(slabAddress: string): Promise<MarketWithStats | null> {
+async function fetchMarketInfo(slabAddress: string): Promise<unknown> {
   const r = await fetch(`/api/markets/${slabAddress}`);
   if (!r.ok) throw new Error(`market request failed (${r.status})`);
   const body = await r.json();
-  const data = unwrapMarketInfo(body);
-  if (!data) throw new Error("Market not found");
-  return data;
+  if (!unwrapMarketInfo(body)) throw new Error("Market not found");
+  // Return the RAW `{ market: {...} }` body — NOT the unwrapped row. This is
+  // the canonical shape for the shared `/api/markets/${slab}` SWR key: the
+  // OTHER consumers of this key (useLivePrice.ts's DB seed and the trade
+  // page's marketMetaJson) read `data.market` directly and are NOT
+  // shape-tolerant. When this fetcher returned the flat row and won the
+  // mount race, their `.market` read came back undefined → the trade page's
+  // symbol resolution fell through to the collateral token and the pair
+  // rendered as "USDC/USD" (mount-order dependent, hence intermittent).
+  // This hook's own read goes through unwrapMarketInfo() below, which
+  // accepts either shape.
+  return body;
 }
 
 /**
@@ -81,7 +90,7 @@ async function fetchMarketInfo(slabAddress: string): Promise<MarketWithStats | n
  */
 export function useMarketInfo(slabAddress: string) {
   const mockMode = isMockMode() && isMockSlab(slabAddress);
-  const { data, error, isLoading } = useSWR<MarketWithStats | null, Error>(
+  const { data, error, isLoading } = useSWR<unknown, Error>(
     mockMode ? null : `/api/markets/${slabAddress}`,
     () => fetchMarketInfo(slabAddress),
     {
