@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { prefetchSlab, prefetchSlabsBatch } from "@/lib/slabCache";
+import { setMarketIdentity } from "@/lib/marketIdentityCache";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMarketDiscovery } from "@/hooks/useMarketDiscovery";
 import { computeMarketHealth, computeMarketHealthFromStats, sanitizeOnChainValue } from "@/lib/health";
@@ -341,6 +342,25 @@ function MarketsPageInner() {
     if (!slabsKey) return;
     prefetchSlabsBatch(connection, slabsKey.split(","));
   }, [slabsKey, connection]);
+
+  // Feed the identity cache: the trade page seeds its pair label/logo from
+  // this synchronously on navigation, so clicking a row never flashes a
+  // fallback name while /api/markets/[slab] is in flight (the "USDC/USD"
+  // flash). Uses the same resolvers the visible rows use, so what the trade
+  // page shows first-frame is exactly what the user just clicked on.
+  useEffect(() => {
+    for (const m of effectiveMarkets) {
+      const symbol = resolveMarketDisplaySymbol(m);
+      if (!symbol) continue;
+      setMarketIdentity(m.slabAddress, {
+        symbol,
+        name: resolveMarketDisplayName(m) ?? undefined,
+        logo_url: m.supabase?.logo_url ?? undefined,
+        mainnet_ca: m.supabase?.mainnet_ca ?? null,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on slabsKey (stable string), not the array identity, same as the prefetch effect above
+  }, [slabsKey]);
 
   // Fetch on-chain token metadata for ALL markets (no Supabase)
   const allMints = useMemo(() => {

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { MarketLogo } from "@/components/market/MarketLogo";
+import { setMarketIdentity } from "@/lib/marketIdentityCache";
 
 interface MarketSwitcherProps {
   slabAddress: string;
@@ -129,9 +130,16 @@ const MarketSwitcherInner: FC<MarketSwitcherProps> = ({ slabAddress, symbol, log
   const goTo = useCallback(
     (slab: string) => {
       setOpen(false);
-      if (slab !== slabAddress) router.push(`/trade/${slab}`);
+      if (slab !== slabAddress) {
+        // Seed the destination's identity BEFORE navigating so the trade page
+        // renders the right pair label on its first frame instead of flashing
+        // a fallback while /api/markets/[slab] loads.
+        const row = allMarkets.find((r) => r.slab === slab);
+        if (row?.symbol) setMarketIdentity(slab, { symbol: row.symbol, name: row.name ?? undefined });
+        router.push(`/trade/${slab}`);
+      }
     },
-    [router, slabAddress],
+    [router, slabAddress, allMarkets],
   );
 
   const fmtPrice = (p: number | null) =>

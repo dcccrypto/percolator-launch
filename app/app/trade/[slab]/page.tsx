@@ -16,7 +16,7 @@ import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useLivePriceHasData, livePriceJsonFetcher } from "@/hooks/useLivePrice";
-import { useTokenMeta } from "@/hooks/useTokenMeta";
+import { getMarketIdentity, setMarketIdentity } from "@/lib/marketIdentityCache";
 import { useToast } from "@/hooks/useToast";
 import { isPlaceholderSymbol, SLUG_ALIASES } from "@/lib/symbol-utils";
 import { AutoDepositProvider } from "@/components/providers/AutoDepositProvider";
@@ -323,7 +323,6 @@ function TradePageInner({ slab }: { slab: string }) {
 
   const { engine, config, header, loading: slabLoading, error: slabError } = useSlabState();
   useAdvanceOraclePhase(slab);
-  const tokenMeta = useTokenMeta(config?.collateralMint ?? null);
   // Boolean presence subscription, NOT the full live-price state: this keeps the
   // trade-page shell OFF the ~4-5/sec price-tick re-render path (it only needs to
   // know whether a price exists, for the no-data gate below). See useLivePriceHasData.
@@ -335,14 +334,22 @@ function TradePageInner({ slab }: { slab: string }) {
   // the same exported fetcher, so the two dedupe into one request per load
   // instead of a raw fetch() + an SWR fetch of the identical URL.
   const { data: marketMetaJson } = useSWR<{ market?: { symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } }>(`/api/markets/${slab}`, livePriceJsonFetcher, MARKET_META_SWR_OPTS);
-  const [supabaseMarket, setSupabaseMarket] = useState<{ symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } | null>(null);
+  // Seed identity synchronously from lib/marketIdentityCache — the markets
+  // list / market switcher / a previous visit already knew this market's real
+  // symbol+logo and wrote them there, so an in-app navigation renders the
+  // correct pair name on its FIRST frame instead of flashing a fallback while
+  // /api/markets/[slab] is in flight.
+  const [supabaseMarket, setSupabaseMarket] = useState<{ symbol?: string; name?: string; logo_url?: string; mainnet_ca?: string | null } | null>(() => getMarketIdentity(slab));
   useEffect(() => {
     const m = marketMetaJson?.market;
     if (!m) return;
     setSupabaseMarket({ symbol: m.symbol ?? undefined, name: m.name ?? undefined, logo_url: m.logo_url ?? undefined, mainnet_ca: m.mainnet_ca ?? null });
-  }, [marketMetaJson]);
+    // Write back so the switcher/other routes and the next visit to this
+    // market start with the resolved identity.
+    setMarketIdentity(slab, { symbol: m.symbol ?? undefined, name: m.name ?? undefined, logo_url: m.logo_url ?? undefined, mainnet_ca: m.mainnet_ca ?? null });
+  }, [marketMetaJson, slab]);
 
-  // Resolve symbol: Supabase market symbol (trading pair) → on-chain (collateral) → truncated address
+  // Resolve symbol: identity cache / market meta (trading pair) → truncated slab address.
   const collateralMintAddress = config?.collateralMint?.toBase58() ?? "";
   const mintAddress = supabaseMarket?.mainnet_ca ?? collateralMintAddress;
   // GH#chart-empty: TradingChart's GeckoTerminal lookup (useTokenChart) needs the market's
@@ -355,16 +362,16 @@ function TradePageInner({ slab }: { slab: string }) {
   // indexer backend is down) and a real wrong-chart flash once it's back. Pass `undefined`
   // instead of the collateral mint while the real CA is still unknown.
   const chartMintAddress = supabaseMarket?.mainnet_ca ?? undefined;
-  const onChainSymbol = tokenMeta?.symbol ?? null;
   const supabaseSymbol = supabaseMarket?.symbol ?? null;
   const symbol = (() => {
     if (!isPlaceholderSymbol(supabaseSymbol, mintAddress)) return supabaseSymbol!;
-    if (!isPlaceholderSymbol(onChainSymbol, mintAddress)) return onChainSymbol!;
-    if (config?.collateralMint) {
-      const b58 = config.collateralMint.toBase58();
-      return `${b58.slice(0, 4)}…${b58.slice(-4)}`;
-    }
-    return "TOKEN";
+    // NO collateral-token fallback here: every playground market collateralizes
+    // with sim-USDC, so the old `tokenMeta.symbol` tier named ANY market whose
+    // metadata was still loading (or missing from the registry) "USDC/USD" —
+    // the single most-reported identity bug. The collateral mint is never the
+    // traded pair. Unknown identity renders as the truncated slab address,
+    // which is honest and can't be mistaken for a different market.
+    return shortAddress;
   })();
   const logoUrl = supabaseMarket?.logo_url ?? null;
 
