@@ -19,6 +19,7 @@ import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
 import { hasInvisibleOrBidi } from "@/lib/text-safety";
+import { sanitizeLogoUrl } from "@/lib/token-metadata-validators";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
@@ -1600,6 +1601,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // SEC: sanitize the attacker-suppliable logo_url with the SAME allowlist
+  // (https/ipfs only, ≤500 chars) that external-API metadata already gets —
+  // the raw body value was previously stored and rendered as an <img src>,
+  // letting a market creator point every viewer's browser at an arbitrary
+  // host (tracking pixel / phishing graphic inside the trusted UI). Dropped
+  // to null (fallback avatar) when invalid rather than rejecting the launch.
+  const sanitizedLogoUrl = sanitizeLogoUrl(logo_url);
+
   // #813: Validate dex_pool_address is a valid Solana pubkey (when provided).
   // Canonicalized (PublicKey round-trip) so it's a reliable second dedupe key
   // below — the pool is the token's on-chain identity when mainnet_ca is
@@ -1935,7 +1944,7 @@ export async function POST(req: NextRequest) {
       trading_fee_bps: trading_fee_bps || 10,
       lp_collateral,
       matcher_context,
-      logo_url: logo_url || null,
+      logo_url: sanitizedLogoUrl,
       // Store the canonical (PublicKey round-trip) forms so the dedupe keys
       // above match on re-registration — a raw value could differ by encoding.
       mainnet_ca: canonicalMainnetCa,
