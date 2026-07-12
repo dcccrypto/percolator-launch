@@ -24,7 +24,7 @@ import {
   deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
-import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError } from "@/lib/errorMessages";
@@ -64,7 +64,12 @@ async function findV17Portfolio(
         { memcmp: { offset: 116, bytes: ownerPk.toBase58() } },
       ],
     });
-    if (accounts.length === 0) return null;
+    // Drop the market's LP portfolio BEFORE the sort/pick below — CRITICAL:
+    // a market CREATOR depositing on their own market must create/top up
+    // THEIR OWN portfolio, never the LP (the LP's owner == the creator's
+    // wallet). See isLpPortfolio's doc comment.
+    const nonLpAccounts = accounts.filter(({ account }) => !isLpPortfolio(account.data));
+    if (nonLpAccounts.length === 0) return null;
     // M10: getProgramAccounts doesn't guarantee stable ordering across RPC
     // nodes/calls. If more than one account ever matches this owner+market
     // filter, picking an arbitrary array element can select a DIFFERENT
@@ -72,7 +77,7 @@ async function findV17Portfolio(
     // same wallet+market — deposit, withdraw, and display would silently
     // disagree about which account holds the user's funds. Sort
     // deterministically by pubkey so every caller converges on the same one.
-    const sorted = [...accounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()));
+    const sorted = [...nonLpAccounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()));
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
     // memcmp filters are advisory server-side; don't trust them blindly.
     const data = sorted[0].account.data;

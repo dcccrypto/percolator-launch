@@ -19,6 +19,7 @@ import {
   type V17MarketGroupOI,
 } from "@percolatorct/sdk";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
+import { isLpPortfolio } from "@/lib/userAccountScan";
 
 // v17 portfolios are standalone program-owned accounts — mirrors
 // findV17Portfolio in useDeposit.ts/useUserAccount.ts. market_group_id at
@@ -305,6 +306,12 @@ export function useMyMarkets() {
             for (const { account: portAcct } of portfolioResults) {
               try {
                 const portData = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
+                // Skip the market's LP portfolio — a market CREATOR owns the
+                // LP (offset-116 owner == the creator's wallet), but that
+                // must not mark them as a "trader" on their own market; the
+                // creator's admin role is already detected separately above
+                // via configV17.marketauth. See isLpPortfolio's doc comment.
+                if (isLpPortfolio(portData)) continue;
                 const portfolio = parsePortfolioV17(portData);
                 // Defense-in-depth: re-verify the mutable owner actually matches
                 // after fetch — memcmp filters are advisory server-side.

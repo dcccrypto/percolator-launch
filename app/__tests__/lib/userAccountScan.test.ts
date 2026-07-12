@@ -41,6 +41,7 @@ import {
   triggerHeldNftScan,
   getHeldNftSnapshot,
   subscribeHeldNftScan,
+  isLpPortfolio,
 } from "@/lib/userAccountScan";
 
 // The scan store is module-level (Map keyed by program/slab/wallet), so its
@@ -376,6 +377,79 @@ describe("userAccountScan — applyConfirmedFill (instant reflection of a confir
 
     expect(applied).toBe(false);
     expect(getPortfolioUserAccountSnapshot(key)).toBe(before); // untouched
+  });
+});
+
+describe("userAccountScan — isLpPortfolio (GH bug: market creator's LP mistaken for own trading account)", () => {
+  /** Builds a portfolio-account-shaped buffer whose trailing 104-byte
+   *  PortfolioMatcherConfigV16 has `enabled` set (or not) at the correct
+   *  offset — mirrors useTrade.v17-portfolio-selection.test.ts's
+   *  createLpPortfolioData helper, trimmed to just what isLpPortfolio reads. */
+  function makePortfolioBuffer(enabled: boolean, totalLen = 200): Buffer {
+    const buf = Buffer.alloc(totalLen);
+    const matcherConfigOffset = buf.length - 104;
+    buf.writeBigUInt64LE(enabled ? 1n : 0n, matcherConfigOffset + 96);
+    return buf;
+  }
+
+  it("returns true when the trailing PortfolioMatcherConfigV16.enabled == 1", () => {
+    expect(isLpPortfolio(makePortfolioBuffer(true))).toBe(true);
+  });
+
+  it("returns false when the trailing PortfolioMatcherConfigV16.enabled == 0", () => {
+    expect(isLpPortfolio(makePortfolioBuffer(false))).toBe(false);
+  });
+
+  it("returns false for a buffer shorter than the trailing config (can't be an LP)", () => {
+    expect(isLpPortfolio(Buffer.alloc(1))).toBe(false);
+    expect(isLpPortfolio(Buffer.alloc(103))).toBe(false);
+  });
+
+  it("also accepts a plain Uint8Array (not just Buffer)", () => {
+    const buf = makePortfolioBuffer(true);
+    const plain = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    expect(isLpPortfolio(plain)).toBe(true);
+  });
+
+  it("runPortfolioScan excludes an LP-shaped match — a creator who owns ONLY the market's LP resolves to null, not the LP", async () => {
+    const { connection, getProgramAccounts } = makeConnection();
+    // The LP's mutable owner (offset 116) is the CREATOR's wallet — same
+    // memcmp match as any normal owned portfolio would produce.
+    getProgramAccounts.mockResolvedValue([
+      { pubkey: portfolioPubkey, account: { data: makePortfolioBuffer(true) } },
+    ]);
+    // parsePortfolioV17 is mocked independently of the raw bytes above (as in
+    // every other test in this file) — the owner re-verify would otherwise
+    // pass, which is exactly why the isLpPortfolio check must run first.
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio());
+
+    const key = makePortfolioScanKey(programId, slabAddress, wallet);
+    await triggerPortfolioScan({ connection, programId, slabAddress, publicKey: wallet, raw: new Uint8Array([1]) });
+
+    expect(getPortfolioUserAccountSnapshot(key)).toBeNull();
+    expect(getPortfolioRawSnapshot(key)).toBeNull();
+  });
+
+  it("runPortfolioScan selects the non-LP portfolio when both an LP and a genuine trading portfolio match the owner filter", async () => {
+    const lpPubkey = uniquePubkey();
+    const ownPubkey = uniquePubkey();
+    const { connection, getProgramAccounts } = makeConnection();
+    getProgramAccounts.mockResolvedValue([
+      { pubkey: lpPubkey, account: { data: makePortfolioBuffer(true) } },
+      { pubkey: ownPubkey, account: { data: makePortfolioBuffer(false) } },
+    ]);
+    mocks.parsePortfolioV17.mockReturnValue(makePortfolio());
+
+    const result = await triggerPortfolioScan({
+      connection,
+      programId,
+      slabAddress,
+      publicKey: wallet,
+      raw: new Uint8Array([1]),
+    });
+
+    expect(result?.pubkey.equals(ownPubkey)).toBe(true);
+    expect(result?.pubkey.equals(lpPubkey)).toBe(false);
   });
 });
 

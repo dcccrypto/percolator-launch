@@ -26,7 +26,7 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
 } from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
-import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
@@ -178,7 +178,13 @@ export function useWithdraw(slabAddress: string) {
                 { memcmp: { offset: 116, bytes: wallet.publicKey.toBase58() } },
               ],
             });
-            if (portfolioAccounts.length > 0) {
+            // Drop the market's LP portfolio BEFORE the sort/pick below —
+            // withdraw must never target the LP (owner == wallet only when
+            // this wallet is the market's CREATOR). See isLpPortfolio's doc.
+            const nonLpPortfolioAccounts = portfolioAccounts.filter(
+              ({ account }) => !isLpPortfolio(account.data),
+            );
+            if (nonLpPortfolioAccounts.length > 0) {
               // M10: getProgramAccounts doesn't guarantee stable ordering
               // across RPC nodes/calls. If more than one account ever matches
               // this owner+market filter, picking an arbitrary array element
@@ -187,7 +193,7 @@ export function useWithdraw(slabAddress: string) {
               // withdraw could silently act on a different account than the
               // one the UI displays. Sort deterministically by pubkey so
               // every caller converges on the same account.
-              const sortedPortfolios = [...portfolioAccounts].sort((a, b) =>
+              const sortedPortfolios = [...nonLpPortfolioAccounts].sort((a, b) =>
                 a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
               );
               const d = sortedPortfolios[0].account.data;

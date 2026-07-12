@@ -25,7 +25,7 @@ import {
 } from "@/lib/sdk-compat";
 import { sendTx, prewarmTxLanding } from "@/lib/tx";
 import { PLAYGROUND_SLAB_META } from "@/lib/playground-slab-meta";
-import { applyConfirmedFill, getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { applyConfirmedFill, getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
@@ -126,12 +126,17 @@ async function findV17Portfolio(
         { memcmp: { offset: PORTFOLIO_OWNER_OFF, bytes: ownerPk.toBase58() } },
       ],
     });
-    if (accounts.length === 0) return null;
+    // Drop the market's LP portfolio BEFORE the sort/pick below — this is
+    // the TAKER's own-portfolio discovery (accountA); a market's CREATOR must
+    // never resolve to their own LP here (that's accountB's job, resolved
+    // separately in resolveV17TradeAccounts). See isLpPortfolio's doc comment.
+    const nonLpAccounts = accounts.filter(({ account }) => !isLpPortfolio(account.data));
+    if (nonLpAccounts.length === 0) return null;
 
     // getProgramAccounts() does not guarantee stable result ordering.
     // Use the same canonical pubkey ordering as deposit and withdraw
     // so every owner+market flow targets the same portfolio account.
-    const sorted = [...accounts].sort((a, b) =>
+    const sorted = [...nonLpAccounts].sort((a, b) =>
       a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()),
     );
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —

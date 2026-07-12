@@ -9,6 +9,7 @@ import { assertKnownProgram } from "@/lib/programAllowlist";
 import { sendTx } from "@/lib/tx";
 import { humanizeError } from "@/lib/errorMessages";
 import { useToast } from "@/hooks/useToast";
+import { isLpPortfolio } from "@/lib/userAccountScan";
 import { PERCOLATOR_NFT_PROGRAM_ID } from "@/lib/nft-program";
 import {
   deriveNftPda,
@@ -81,17 +82,21 @@ export function useMintPositionNft(slabAddress: string) {
             { memcmp: { offset: PORTFOLIO_OWNER_OFF, bytes: walletPubkey.toBase58() } },
           ],
         });
-        if (allPortfolios.length === 0) {
+        // Drop the market's LP portfolio BEFORE picking a result — a market
+        // CREATOR must never mint an NFT wrapping the LP itself. See
+        // isLpPortfolio's doc comment.
+        const nonLpPortfolios = allPortfolios.filter(({ account }) => !isLpPortfolio(account.data));
+        if (nonLpPortfolios.length === 0) {
           throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
         }
         // Defense-in-depth: re-verify the mutable owner actually matches after
         // fetch — memcmp filters are advisory server-side; don't trust them
         // blindly (mirrors useDeposit/usePositionNft's re-verify).
-        const pf = parsePortfolioV17(new Uint8Array(allPortfolios[0].account.data));
+        const pf = parsePortfolioV17(new Uint8Array(nonLpPortfolios[0].account.data));
         if (!pf.owner.equals(walletPubkey)) {
           throw new Error("No portfolio found for your wallet on this market. Deposit collateral first.");
         }
-        portfolioPk = allPortfolios[0].pubkey;
+        portfolioPk = nonLpPortfolios[0].pubkey;
         const activeLeg = pf.legs.find((l) => l.active);
         if (!activeLeg) {
           throw new Error("No active position to mint an NFT for. Open a position first.");

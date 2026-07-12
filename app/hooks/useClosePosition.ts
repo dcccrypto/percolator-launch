@@ -6,7 +6,7 @@ import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
-import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
+import { getPortfolioRawSnapshot, isLpPortfolio, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
@@ -92,8 +92,12 @@ async function readFreshPortfolioData(
       { memcmp: { offset: V17_PF_OWNER_OFF_CP, bytes: owner.toBase58() } },
     ],
   });
-  if (results.length === 0) return null;
-  const data = results[0].account.data;
+  // Drop the market's LP portfolio (owner == this wallet only when this
+  // wallet is the market's CREATOR) BEFORE picking a result — closing a
+  // position must never target the LP. See isLpPortfolio's doc comment.
+  const nonLpResults = results.filter(({ account }) => !isLpPortfolio(account.data));
+  if (nonLpResults.length === 0) return null;
+  const data = nonLpResults[0].account.data;
   return data instanceof Buffer ? data : Buffer.from(data);
 }
 

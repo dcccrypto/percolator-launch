@@ -287,4 +287,79 @@ describe("useTrade v17 portfolio selection", () => {
       canonicalPortfolio.toBase58(),
     );
   });
+
+  describe("LP-portfolio exclusion (GH bug: market creator's LP mistaken for their own trading account)", () => {
+    /** A portfolio buffer whose trailing PortfolioMatcherConfigV16 is
+     *  enabled — same LP shape as createLpPortfolioData, but returned from
+     *  the TAKER's own owner+market scan (findV17Portfolio / accountA),
+     *  simulating a market CREATOR whose wallet is also the LP's owner. */
+    function createOwnerScanLpShapedData(): Buffer {
+      const data = Buffer.alloc(120);
+      const matcherConfigOffset = data.length - 104;
+      data.writeBigUInt64LE(1n, matcherConfigOffset + 96); // enabled = 1
+      return data;
+    }
+
+    // useTrade caches resolved trade accounts per (programId, slabPk, taker)
+    // for 60s (v17TradeAccountsCache) — reusing the describe-level
+    // `slabAddress` here would silently hit the cache populated by the
+    // "selects the canonical portfolio..." tests above and skip the fresh
+    // GPA mocks entirely. Each test below uses its own throwaway slab
+    // address (independent of useSlabState's mocked `programId`, which
+    // isn't part of the cache lookup that matters here since `slabPk` is
+    // derived from this argument) to guarantee a cache miss.
+    const lpMistakenForOwnSlab = new PublicKey(new Uint8Array(32).fill(31)).toBase58();
+    const lpAndGenuineBothMatchSlab = new PublicKey(new Uint8Array(32).fill(32)).toBase58();
+
+    it("never resolves accountA to the market's own LP portfolio, even when it matches the owner+market filter", async () => {
+      connection.getProgramAccounts
+        // First GPA call: LP portfolio discovery (accountB) — a normal LP.
+        .mockResolvedValueOnce([
+          { pubkey: lpPortfolioPk, account: { data: createLpPortfolioData() } },
+        ])
+        // Second GPA call: taker portfolio discovery (accountA) — the ONLY
+        // match is the market's own LP (this wallet is the creator, whose
+        // wallet is the LP's mutable owner too).
+        .mockResolvedValueOnce([
+          { pubkey: portfolioOne, account: { data: createOwnerScanLpShapedData() } },
+        ]);
+
+      const { result, unmount } = renderHook(() => useTrade(lpMistakenForOwnSlab));
+
+      await act(async () => {
+        await expect(
+          result.current.trade({ lpIdx: 0, userIdx: 7, size: 1_000_000n }),
+        ).rejects.toThrow("No portfolio account found for your wallet on this market");
+      });
+
+      unmount();
+    });
+
+    it("selects the genuine (non-LP) portfolio when both it and the LP-shaped one match the owner+market filter", async () => {
+      connection.getProgramAccounts
+        .mockResolvedValueOnce([
+          { pubkey: lpPortfolioPk, account: { data: createLpPortfolioData() } },
+        ])
+        .mockResolvedValueOnce([
+          { pubkey: portfolioOne, account: { data: createOwnerScanLpShapedData() } },
+          { pubkey: portfolioTwo, account: { data: Buffer.from([1]) } }, // genuine, non-LP-shaped
+        ]);
+
+      const { result, unmount } = renderHook(() => useTrade(lpAndGenuineBothMatchSlab));
+
+      await act(async () => {
+        await result.current.trade({ lpIdx: 0, userIdx: 7, size: 1_000_000n });
+      });
+
+      const sendCall = mocks.sendTx.mock.calls.at(-1)?.[0];
+      const instructions = sendCall.instructions as Array<{ keys: Array<{ pubkey: PublicKey }> }>;
+      const tradeInstruction = instructions[instructions.length - 1];
+      const accountA = tradeInstruction.keys[2].pubkey;
+
+      expect(accountA.equals(portfolioTwo)).toBe(true);
+      expect(accountA.equals(portfolioOne)).toBe(false);
+
+      unmount();
+    });
+  });
 });

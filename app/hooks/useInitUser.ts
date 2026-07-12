@@ -24,6 +24,7 @@ import {
   deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
+import { isLpPortfolio } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError } from "@/lib/errorMessages";
@@ -60,7 +61,13 @@ async function findV17PortfolioForInit(
         { memcmp: { offset: V17_PF_OWNER_OFF, bytes: ownerPk.toBase58() } },
       ],
     });
-    if (accounts.length === 0) return null;
+    // Drop the market's LP portfolio BEFORE the sort/pick below — CRITICAL:
+    // a market CREATOR must never have their own LP mistaken for "already has
+    // a portfolio here" (that would silently skip InitPortfolio and leave the
+    // creator with no tradeable account of their own). See isLpPortfolio's
+    // doc comment.
+    const nonLpAccounts = accounts.filter(({ account }) => !isLpPortfolio(account.data));
+    if (nonLpAccounts.length === 0) return null;
     // BUG 11: with no cross-instance lock (OrderTicket / DepositWithdrawCard /
     // useAutoDeposit each mount their own useInitUser and can race through this
     // TOCTOU check concurrently), more than one portfolio can end up owned by
@@ -70,9 +77,9 @@ async function findV17PortfolioForInit(
     // DIFFERENT accounts non-deterministically ("deposit disappeared"). Sort
     // deterministically by pubkey so every caller lands on the same one.
     const sorted =
-      accounts.length > 1
-        ? [...accounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()))
-        : accounts;
+      nonLpAccounts.length > 1
+        ? [...nonLpAccounts].sort((a, b) => a.pubkey.toBase58().localeCompare(b.pubkey.toBase58()))
+        : nonLpAccounts;
     // Defense-in-depth: re-verify the mutable owner actually matches after fetch —
     // memcmp filters are advisory server-side; don't trust them blindly.
     const data = sorted[0].account.data;

@@ -22,6 +22,7 @@ import {
   type Account,
 } from "@percolatorct/sdk";
 import { isSentinelValue } from "@/lib/health";
+import { isLpPortfolio } from "@/lib/userAccountScan";
 import { computeMarkPnlCollateral, computePositionInitialMargin, estimateEntryFromPnl } from "@/lib/trading";
 import { parseV17RiskParams } from "@/lib/v17-engine-config";
 import { getAllProgramIds, getNetwork } from "@/lib/config";
@@ -640,6 +641,11 @@ async function fetchPortfolioSnapshot(
     for (const portfolioResults of scanResults) {
       for (const { account: portAcct } of portfolioResults) {
         const portData = portAcct.data instanceof Buffer ? portAcct.data : Buffer.from(portAcct.data);
+        // Skip the market's LP portfolio (owner == this wallet only when this
+        // wallet is the market's CREATOR) — a creator's OWN portfolio page
+        // must not list the market's seeded LP liquidity as their position.
+        // See isLpPortfolio's doc comment.
+        if (isLpPortfolio(portData)) continue;
         const portfolio = parsePortfolioV17(portData);
         // Defense-in-depth: re-verify the mutable owner actually matches after
         // fetch — memcmp filters are advisory server-side; don't trust them
