@@ -113,7 +113,16 @@ function resolveMarketDisplaySymbol(m: MergedMarket): string | null {
   const addresses = [m.slabAddress, m.mintAddress, m.supabase?.mainnet_ca];
   for (const candidate of [m.supabase?.symbol, m.symbol]) {
     const clean = candidate?.trim();
-    if (!clean || clean.length > 10) continue;
+    if (!clean) continue;
+    // Length sanity-check the BASE ticker, not the raw registry string: the
+    // registry stores symbols with a "-PERP" suffix ("BURNIE-PERP",
+    // "PERCOLATOR-PERP"), and checking the raw length rejected any base
+    // ticker over 5 chars — BURNIE and PERCOLATOR rendered as truncated slab
+    // addresses on this page while SOL/JUP/TRUMP/PENGU (≤10 raw chars)
+    // passed. Guard the suffix-stripped base at 12 chars, generous enough
+    // for real tickers while still rejecting address-like junk.
+    const base = clean.replace(/-PERP$/i, "");
+    if (base.length === 0 || base.length > 12) continue;
     if (!isPlaceholderMarketSymbol(clean, addresses)) return clean;
   }
   return null;

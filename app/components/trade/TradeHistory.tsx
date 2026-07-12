@@ -88,7 +88,12 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
       setError(null);
     } catch {
       if (isStale()) return;
-      setError("Failed to load trades");
+      // Keep last-good rows on a transient failure; only surface the
+      // unavailable state when we have nothing to show. The trade-tape
+      // indexer is an optional external dependency on the playground —
+      // when it's down this endpoint 404s permanently, and a red
+      // "Failed to load trades" error read as the terminal being broken.
+      if (tradesRef.current.length === 0) setError("unavailable");
     } finally {
       if (!isStale()) setLoading(false);
     }
@@ -118,9 +123,15 @@ export const TradeHistory: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   }
 
   if (error) {
+    // Quiet empty-style state, not a red error: matches the Positions tab's
+    // "No open positions" treatment. "Unavailable" (not "no trades") because
+    // trades may exist that we simply can't read while the indexer is down.
     return (
-      <div className="p-3">
-        <p className="text-[10px] text-[var(--text-dim)]">{error}</p>
+      <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+        <p className="text-[11px] text-[var(--text-dim)]">Trade history unavailable</p>
+        <p className="text-[9px] text-[var(--text-dim)] opacity-70">
+          The trade-tape indexer isn&apos;t reachable right now — trading itself is unaffected.
+        </p>
       </div>
     );
   }

@@ -180,7 +180,11 @@ export function LiveMarketRail() {
             name={meta.name}
             mainnetCa={meta.mainnet_ca}
             fallbackPrice={stats?.last_price ?? null}
-            volume24h={stats?.volume_24h ?? null}
+            // `|| null` (not `?? null`): a literal 0 here means "trade-tape
+            // indexer has no data", not "zero volume" — /markets renders the
+            // same state as "—", and this rail showed "$0.00" for it. Map 0
+            // to null so formatStatValue renders the same "—" convention.
+            volume24h={stats?.volume_24h || null}
             maxLeverage={stats?.max_leverage ?? null}
             isLast={i === RAIL_SLABS.length - 1}
           />

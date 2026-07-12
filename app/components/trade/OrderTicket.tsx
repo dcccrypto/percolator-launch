@@ -303,6 +303,12 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
 
   const { market: marketInfo } = useMarketInfo(slabAddress);
   const symbol = marketInfo?.symbol ?? collateralSymbol;
+  // Base ticker for the size-unit toggle: the registry symbol carries a
+  // "-PERP" suffix ("SOL-PERP"), which overflowed the w-16 toggle button into
+  // "SOL-PE…". The size unit is the BASE asset, so strip the suffix; fall
+  // back to a neutral "TOKEN" (never the collateral symbol — sizing is in
+  // base units, and the collateral is sim-USDC on every playground market).
+  const baseTicker = (marketInfo?.symbol ?? "").replace(/-PERP$/i, "").trim() || "TOKEN";
   const initialMarginBps = params?.initialMarginBps ?? 1000n;
   const maintenanceMarginBps = params?.maintenanceMarginBps ?? 500n;
   const tradingFeeBps = params?.tradingFeeBps ?? 30n;
@@ -730,10 +736,10 @@ setEngineLockError(null);
           />
           <button
             onClick={toggleSizeUnit}
-            title={`Switch size unit (currently ${sizeUnit === "token" ? symbol : "USD"})`}
+            title={`Switch size unit (currently ${sizeUnit === "token" ? baseTicker : "USD"})`}
             className="w-16 shrink-0 truncate rounded-none border border-[var(--border)] bg-[var(--bg-elevated)] px-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)] transition-colors duration-150 hover:border-[var(--border-hover)] hover:text-[var(--text)]"
           >
-            {sizeUnit === "token" ? symbol : "USD"}
+            {sizeUnit === "token" ? baseTicker : "USD"}
           </button>
         </div>
         {exceedsBalance && (

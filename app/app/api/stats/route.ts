@@ -79,6 +79,56 @@ function zeroStats() {
  * nothing, so the caller falls through to the indexer/Supabase paths instead
  * of masking a real outage as "0 markets".
  */
+/**
+ * QA 2026-07-12: consistency-first stats path — aggregate over the SAME
+ * market list `/api/markets` serves the rest of the site.
+ *
+ * The raw-discovery path below counts every v17 market-group account ever
+ * deployed to the devnet program (161 at last audit — bug-hunt leftovers,
+ * abandoned wizard launches, test junk), while `/api/markets` applies the
+ * curation/active/zombie filtering and shows 6. The dashboard's
+ * ProtocolStatsBar rendered THIS endpoint's numbers ("161 markets / $237K
+ * OI") next to pages showing 6 markets / ~$35K — on a "don't trust, verify"
+ * product that discrepancy reads as fabrication. Self-fetching the sibling
+ * route makes the two definitionally consistent, whatever its filtering
+ * evolves into. Falls through to the discovery path when unavailable.
+ */
+async function computeStatsFromMarketsApi(request: NextRequest): Promise<(ReturnType<typeof zeroStats>) | null> {
+  try {
+    const base = new URL(request.url).origin;
+    const res = await fetch(`${base}/api/markets?limit=500`, { next: { revalidate: 30 } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const markets: Array<Record<string, unknown>> = Array.isArray(data?.markets) ? data.markets : [];
+    if (markets.length === 0) return null;
+
+    let totalOpenInterest = 0;
+    for (const m of markets) {
+      const oiUsd = m.total_open_interest_usd;
+      if (typeof oiUsd === "number" && isSaneMarketValue(oiUsd)) totalOpenInterest += oiUsd;
+    }
+    const totalMarkets = typeof data.total === "number" ? data.total : markets.length;
+    const activeTotal = typeof data.activeTotal === "number" ? data.activeTotal : markets.length;
+
+    return {
+      totalMarkets,
+      activeTotal,
+      totalListedMarkets: totalMarkets,
+      // No on-chain source for trade history — honest zeros, same as the
+      // discovery path below.
+      totalVolume24h: 0,
+      totalOpenInterest,
+      totalTraders: 0,
+      trades24h: 0,
+      updatedAt: new Date().toISOString(),
+      live: true,
+    };
+  } catch (err) {
+    console.warn("[/api/stats] markets-api consistency path failed:", err);
+    return null;
+  }
+}
+
 async function computeStatsFromOnChainDiscovery(): Promise<(ReturnType<typeof zeroStats>) | null> {
   const cfg = getConfig();
   if (cfg.network !== "devnet") return null;
@@ -248,7 +298,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── PRIMARY PATH: on-chain discovery (devnet, no DB dependency) ──────────
+  // ── PRIMARY PATH: aggregate the same curated list /api/markets serves ────
+  const marketsApiStats = await computeStatsFromMarketsApi(request);
+  if (marketsApiStats) {
+    return NextResponse.json(marketsApiStats, { headers: STATS_CACHE_HEADERS });
+  }
+
+  // ── SECONDARY PATH: raw on-chain discovery (devnet, no DB dependency) ────
   const onChainStats = await computeStatsFromOnChainDiscovery();
   if (onChainStats) {
     return NextResponse.json(onChainStats, { headers: STATS_CACHE_HEADERS });
