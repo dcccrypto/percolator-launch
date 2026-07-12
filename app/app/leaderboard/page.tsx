@@ -58,9 +58,12 @@ function useCollateralDecimals(): number {
   const [decimals, setDecimals] = useState<number>(fallback);
 
   useEffect(() => {
+    let cancelled = false;
+
     fetch("/api/markets?limit=200")
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
+        if (cancelled) return;
         if (!data?.markets?.length) return;
         // Find the modal (most-common) decimal value across all active markets
         const freq: Record<number, number> = {};
@@ -75,6 +78,10 @@ function useCollateralDecimals(): number {
         setDecimals(Number(modal[0]));
       })
       .catch(() => {/* keep fallback */});
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return decimals;
@@ -258,11 +265,20 @@ export default function LeaderboardPage() {
   const prefersReduced = usePrefersReducedMotion();
   const rowsRef = useRef<HTMLDivElement | null>(null);
 
+  // Bug: toggling 24H → 7D fast (before the 24H request lands) could leave
+  // 24H rows displayed under the 7D tab — no abort/sequence guard. Mirrors
+  // the requestSeq pattern in hooks/useTraderStats.ts:23-64.
+  const requestSeqRef = useRef(0);
+
   const fetchLeaderboard = useCallback(async (p: Period) => {
+    const requestSeq = ++requestSeqRef.current;
+    const isCurrentRequest = () => requestSeqRef.current === requestSeq;
+
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/leaderboard?period=${p}&limit=100`);
+      if (!isCurrentRequest()) return;
       if (!res.ok) {
         if (res.status === 429) {
           throw new Error("Leaderboard is temporarily unavailable — too many requests. Try again in a moment.");
@@ -273,12 +289,14 @@ export default function LeaderboardPage() {
         throw new Error("Failed to load leaderboard. Please try again.");
       }
       const json = await res.json();
+      if (!isCurrentRequest()) return;
       setEntries(json.leaderboard ?? []);
       setGeneratedAt(json.generatedAt ?? null);
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setError(err instanceof Error ? err.message : "Failed to load leaderboard. Please try again.");
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, []);
 

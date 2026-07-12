@@ -18,19 +18,21 @@ interface OracleDetailsPanelProps {
  * Desktop: slides in from the right edge, 320px wide.
  * Mobile: bottom sheet, 60% screen height, drag to dismiss.
  *
- * Shows: price feed, freshness bar, feed source, fallback chain,
- * publisher list, and 24h statistics.
+ * Shows: price feed, freshness bar, feed source, and publisher list.
  */
 export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => {
   const { config } = useSlabState();
   const { priceUsd } = useLivePrice();
+  // trackSeconds: this panel renders "Updated Xs ago" and a freshness bar
+  // that drains second-by-second, so it genuinely needs the 1 Hz elapsedSecs
+  // tick — see useOracleFreshness's UseOracleFreshnessOptions doc comment.
   const {
     mode,
     modeLabel,
     elapsedSecs,
     level,
     color,
-  } = useOracleFreshness();
+  } = useOracleFreshness({ trackSeconds: true });
 
   const {
     publisherCount,
@@ -80,8 +82,6 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
   // Freshness bar percentage (drains from 100% → 0% over 30s)
   const freshnessBarPct = Math.max(0, Math.min(100, ((30 - elapsedSecs) / 30) * 100));
 
-  const fallbackChain = getFallbackChain(mode);
-
   // Dynamic publisher data from Pythnet/oracle bridge (PERC-371)
   const publishers = dynamicPublishers;
 
@@ -120,7 +120,6 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
           freshnessBarPct={freshnessBarPct}
           publisherCount={publisherCount}
           publisherTotal={publisherTotal}
-          fallbackChain={fallbackChain}
           publishers={publishers}
           onClose={handleClose}
         />
@@ -160,7 +159,6 @@ export const OracleDetailsPanel: FC<OracleDetailsPanelProps> = ({ onClose }) => 
           freshnessBarPct={freshnessBarPct}
           publisherCount={publisherCount}
           publisherTotal={publisherTotal}
-          fallbackChain={fallbackChain}
           publishers={publishers}
           onClose={handleClose}
         />
@@ -181,7 +179,6 @@ function PanelContent({
   freshnessBarPct,
   publisherCount,
   publisherTotal,
-  fallbackChain,
   publishers,
   onClose,
 }: {
@@ -195,7 +192,6 @@ function PanelContent({
   freshnessBarPct: number;
   publisherCount: number | null;
   publisherTotal: number | null;
-  fallbackChain: string[];
   publishers: PublisherInfo[];
   onClose: () => void;
 }) {
@@ -282,19 +278,8 @@ function PanelContent({
               />
             )}
           </div>
-          {fallbackChain.length > 0 && (
-            <div className="flex items-center justify-between">
-              <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                Fallback
-              </span>
-              <span
-                className="text-[10px] tabular-nums"
-                style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}
-              >
-                {fallbackChain.join(" → ")}
-              </span>
-            </div>
-          )}
+          {/* Fictional "Fallback" chain (Pyth→Chainlink) removed — this
+              system has no such fallback; don't invent one. */}
         </div>
       </Section>
 
@@ -352,15 +337,11 @@ function PanelContent({
         </Section>
       )}
 
-      {/* 24h Statistics */}
-      <Section title="24h Statistics">
-        <div className="grid grid-cols-2 gap-2">
-          <StatItem label="Max deviation" value="0.023%" />
-          <StatItem label="Uptime" value="99.97%" />
-          <StatItem label="Pushes/hour" value="1,847" />
-          <StatItem label="Last anomaly" value="4d ago" />
-        </div>
-      </Section>
+      {/* The "24h Statistics" block that used to live here (max deviation,
+          uptime, pushes/hour, last anomaly) was fabricated — hardcoded
+          literals with no data source behind them. Removed rather than
+          faked; re-add only if backed by real data already in this
+          component's fetched state. */}
     </div>
   );
 }
@@ -389,29 +370,6 @@ function Section({
   );
 }
 
-/** Stat grid item */
-function StatItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p
-        className="text-[9px] uppercase tracking-[0.08em]"
-        style={{ color: "var(--text-muted)" }}
-      >
-        {label}
-      </p>
-      <p
-        className="text-[12px] tabular-nums"
-        style={{
-          fontFamily: "var(--font-mono)",
-          color: "var(--text)",
-        }}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
 /** Large hexagon icon for the panel header */
 function HexIconLarge() {
   return (
@@ -430,18 +388,7 @@ function HexIconLarge() {
   );
 }
 
-/** Get fallback chain for a given mode */
-function getFallbackChain(mode: string | null): string[] {
-  switch (mode) {
-    case "hyperp":
-      return ["Pyth", "Chainlink"];
-    case "pyth-pinned":
-      return ["Chainlink"];
-    case "admin":
-      return [];
-    default:
-      return [];
-  }
-}
-
-/* getMockPublishers removed in PERC-371 — publisher data now fetched dynamically */
+/* getFallbackChain removed — it described a fictional Pyth→Chainlink fallback
+ * chain that doesn't exist in this system (real fallback is Pyth/DEX, per
+ * PLAYGROUND.md). getMockPublishers removed in PERC-371 — publisher data now
+ * fetched dynamically. */

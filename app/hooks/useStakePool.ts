@@ -16,6 +16,7 @@ import {
   unpackMint,
   unpackAccount,
 } from '@solana/spl-token';
+import { pollWhenVisible } from '@/lib/pollWhenVisible';
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -180,11 +181,31 @@ export function useStakePool() {
   const slabAddress = params?.slab as string | undefined;
 
   const [state, setState] = useState<StakePoolState>(DEFAULT_STATE);
-  const [loading, setLoading] = useState(false);
+  // Starts true: refreshState() below is this hook's only source of real
+  // data (vault/LP balances, cooldown status). Previously `loading` had ZERO
+  // call sites anywhere in this hook — it was returned but permanently
+  // false, so consumers rendered the zeroed DEFAULT_STATE as CONFIRMED
+  // on-chain truth (e.g. "0 LP tokens") during the entire first fetch,
+  // indistinguishable from a genuinely empty pool. Wired below: true on
+  // mount and on every market/wallet switch, false once refreshState()
+  // settles (guarded by the same `stale()` pattern as its other setState
+  // calls, so a superseded call can't clear loading a NEWER switch just set).
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Stabilize wallet ref
   const walletPubkeyStr = wallet.publicKey?.toBase58() ?? null;
+
+  // PERC-9204: stable primitive standing in for `slabState.config` in the
+  // immediate-refresh effect below. SlabProvider rebuilds `config` as a
+  // brand-new object literal on every slab poll (~10s on active markets),
+  // even when nothing relevant to this hook changed — using the object
+  // itself as a dependency re-ran the full refresh on every one of those
+  // polls. `collateralMint` is the only `config` field refreshState actually
+  // reads (to derive the user's collateral ATA) — its string form is stable
+  // across polls and still updates on a real market switch. Mirrors the
+  // equivalent fix in useInsuranceLP.ts.
+  const collateralMintStr = slabState.config?.collateralMint.toBase58() ?? null;
 
   // Derive PDAs
   const pdas = useMemo(() => {
@@ -217,7 +238,12 @@ export function useStakePool() {
   const requestIdRef = useRef(0);
 
   const refreshState = useCallback(async () => {
-    if (!pdas || !connection) return;
+    if (!pdas || !connection) {
+      // Nothing to fetch yet (no slabAddress resolved) — don't leave the UI
+      // stuck on a loading skeleton forever.
+      setLoading(false);
+      return;
+    }
     const requestId = ++requestIdRef.current;
     const stale = () => requestId !== requestIdRef.current;
 
@@ -361,6 +387,14 @@ export function useStakePool() {
       if (stale()) return;
       console.error('[useStakePool] Failed to refresh:', err);
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      // Guarded by `stale()`: a superseded call's finally must not clear
+      // loading right after a NEWER call (e.g. a market/wallet switch) just
+      // set it true — that would make the UI briefly show the new market's
+      // zeroed state as if it were already loaded. Covers every path
+      // through the try block above (success, each `if (stale()) return;`
+      // bail-out, and the catch branch).
+      if (!stale()) setLoading(false);
     }
   }, [pdas, connection, walletPubkeyStr, slabState.config]);
 
@@ -377,13 +411,22 @@ export function useStakePool() {
   // the full 10s interval period. Kept as a separate effect (rather than
   // adding these deps to the interval effect below) so the 10s ticker itself
   // stays stable and doesn't get torn down/rebuilt on every dependency change.
+  // Keyed on `collateralMintStr` (see its declaration above), NOT
+  // `slabState.config` — the object identity changes every slab poll, which
+  // previously re-armed loading + refetched on every one of those polls.
   useEffect(() => {
+    // Re-arm loading on market/wallet switch — without this, a switch kept
+    // showing the PREVIOUS market's numbers as if they were the freshly-
+    // loaded state for the new one.
+    setLoading(true);
     refreshRef.current();
-  }, [pdas, walletPubkeyStr, slabState.config]);
+  }, [pdas, walletPubkeyStr, collateralMintStr]);
 
   useEffect(() => {
-    const interval = setInterval(() => refreshRef.current(), 10_000);
-    return () => clearInterval(interval);
+    // Visibility-gated: a backgrounded tab shouldn't keep hitting the
+    // rate-limited devnet RPC every 10s for a Stake panel nobody is looking
+    // at. Fires immediately on tab re-focus (catch-up refresh).
+    return pollWhenVisible(() => refreshRef.current(), 10_000);
   }, []);
 
   return {

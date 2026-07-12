@@ -32,19 +32,40 @@ function isValidSolanaMint(mint: string): boolean {
  * Mint must be a valid Solana address before any browser fetch — avoids noisy calls
  * and leaking malformed input to a third-party API (Prompt 87).
  */
-export function useDexPoolSearch(mint: string | null) {
+export function useDexPoolSearch(mint: string | null): {
+  pools: DexPoolResult[];
+  loading: boolean;
+  /** Set when the DexScreener lookup itself failed (network error, non-2xx).
+   *  Distinct from an empty `pools` array, which means "no pools found" —
+   *  callers computing liquidity tiers should NOT treat an error the same
+   *  as "no pools" (that would silently mis-tier a liquid token as low). */
+  error: string | null;
+} {
   const [pools, setPools] = useState<DexPoolResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setPools([]);
-    const trimmed = mint?.trim() ?? "";
-    if (!trimmed || !isValidSolanaMint(trimmed)) return;
-
+    setError(null);
+    // Abort any in-flight request unconditionally, even when the new mint is
+    // invalid/empty — a stale request must never resolve after this point.
     abortRef.current?.abort();
+
+    const trimmed = mint?.trim() ?? "";
+    if (!trimmed || !isValidSolanaMint(trimmed)) {
+      // Bug: this branch used to leave `loading` at whatever a PRIOR in-flight
+      // request left it. Combined with the aborted-fetch finally() below
+      // (which used to skip resetting loading on abort), the spinner in the
+      // create-market wizard could stick true forever.
+      setLoading(false);
+      return;
+    }
+
     const controller = new AbortController();
     abortRef.current = controller;
+    let cancelled = false;
 
     setLoading(true);
 
@@ -55,6 +76,14 @@ export function useDexPoolSearch(mint: string | null) {
           signal: controller.signal,
           headers: { "User-Agent": "percolator-app/1.0" },
         });
+
+        if (!resp.ok) {
+          // A 429/500 parses to `json.pairs === undefined` → [] → "no pools",
+          // silently mis-classifying a liquid token into tier "low". Treat
+          // non-2xx as a distinct error instead of falling through.
+          throw new Error(`DexScreener API error: ${resp.status}`);
+        }
+
         const json: { pairs?: Array<{
           chainId?: string;
           dexId?: string;
@@ -91,20 +120,26 @@ export function useDexPoolSearch(mint: string | null) {
         // Sort by liquidity descending
         results.sort((a, b) => b.liquidityUsd - a.liquidityUsd);
 
-        if (!controller.signal.aborted) {
-          setPools(results.slice(0, 10));
-        }
-      } catch {
-        // ignore aborts and errors
+        if (cancelled) return;
+        setPools(results.slice(0, 10));
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof Error && err.name === "AbortError") return; // genuine cancellation, not a real error
+        setError(err instanceof Error ? err.message : "Failed to fetch DEX pools");
+        setPools([]);
       } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
+        // Always resolve loading for the CURRENT request — `cancelled` is
+        // scoped per effect run, so a superseded/unmounted run's finally
+        // can't clobber a newer run's loading state.
+        if (!cancelled) setLoading(false);
       }
     })();
 
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [mint]);
 
-  return { pools, loading };
+  return { pools, loading, error };
 }

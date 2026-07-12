@@ -4,10 +4,16 @@ import {
   queryLeaderboard,
 } from "@/lib/indexer-db";
 
-/**
- * ISR: recompute at most once every 30 seconds.
- */
-export const revalidate = 30;
+// Bug: `export const revalidate = 30` was INERT here — this handler reads
+// request.url search params (period/limit), which makes the route dynamic;
+// Next.js route handlers are uncached by default and don't honor
+// `revalidate` once a request is dynamic. No Cache-Control was set either,
+// so every visitor re-ran the full query (the Supabase fallback pulls up to
+// 100k rows). Fix: set real CDN cache headers instead, mirroring the sibling
+// pattern in app/api/stats/route.ts (STATS_CACHE_HEADERS).
+const LEADERBOARD_CACHE_HEADERS = {
+  "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+} as const;
 
 export interface LeaderboardEntry {
   rank: number;
@@ -40,7 +46,10 @@ export async function GET(request: Request) {
         totalVolume: row.totalVolume.toString(),
         lastTradeAt: row.lastTradeAt,
       }));
-      return NextResponse.json({ leaderboard, period, generatedAt: new Date().toISOString() });
+      return NextResponse.json(
+        { leaderboard, period, generatedAt: new Date().toISOString() },
+        { headers: LEADERBOARD_CACHE_HEADERS },
+      );
     } catch (err) {
       console.warn("[leaderboard] indexer-db error, falling back:", err instanceof Error ? err.message : String(err));
       // fall through to Supabase path
@@ -120,10 +129,16 @@ export async function GET(request: Request) {
       lastTradeAt: stats.lastTradeAt,
     }));
 
-    return NextResponse.json({ leaderboard, period, generatedAt: new Date().toISOString() });
+    return NextResponse.json(
+      { leaderboard, period, generatedAt: new Date().toISOString() },
+      { headers: LEADERBOARD_CACHE_HEADERS },
+    );
   } catch (err) {
     // Supabase unavailable (playground) — return empty leaderboard, never 500
     console.warn("[leaderboard] supabase unavailable:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ leaderboard: [], period, generatedAt: new Date().toISOString() });
+    return NextResponse.json(
+      { leaderboard: [], period, generatedAt: new Date().toISOString() },
+      { headers: LEADERBOARD_CACHE_HEADERS },
+    );
   }
 }

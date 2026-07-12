@@ -33,6 +33,7 @@ import { useSlabState } from '../components/providers/SlabProvider';
 import { assertKnownProgram } from '@/lib/programAllowlist';
 import { useParams } from 'next/navigation';
 import { sanitizeOnChainValue } from '@/lib/health';
+import { pollWhenVisible } from '@/lib/pollWhenVisible';
 
 /**
  * Which LP-vault redemption step a `withdraw()` call actually ran:
@@ -144,6 +145,18 @@ export function useInsuranceLP() {
 
   // Stabilize wallet.publicKey reference — PublicKey is not referentially stable
   const walletPubkeyStr = wallet.publicKey?.toBase58() ?? null;
+
+  // PERC-9204: stable primitive standing in for `slabState.config` in the
+  // effect below. SlabProvider rebuilds `config` as a brand-new object literal
+  // on every slab poll (~10s on active markets), even when nothing relevant
+  // to this hook actually changed — using the object itself as a dependency
+  // re-armed `loading` + re-ran the full ~6-RPC refreshState() on every one of
+  // those polls, so the Earn panel kept skeleton-flickering and refetching
+  // continuously. `collateralMint` is the only `config` field refreshState
+  // actually reads (to derive the user's collateral ATA) — keying on its
+  // string form is stable across polls and still updates on a real market
+  // switch (including the null → defined transition when config first loads).
+  const collateralMintStr = slabState.config?.collateralMint.toBase58() ?? null;
 
   // Derive the insurance LP mint PDA
   const lpMintInfo = useMemo(() => {
@@ -375,8 +388,13 @@ export function useInsuranceLP() {
     } finally {
       // Covers every path through the try block above — success, each
       // `if (stale()) return;` bail-out, and the catch branch — so loading
-      // never gets stuck true after this call settles.
-      setLoading(false);
+      // never gets stuck true after this call settles. Guarded by `stale()`:
+      // without it, a SUPERSEDED call's finally (e.g. the previous market's
+      // slow in-flight refresh, still resolving after a market switch) could
+      // clear `loading` right after the market-switch effect below just set
+      // it true for the NEW market, making the UI briefly show the new
+      // market's zeroed state as if it were already loaded.
+      if (!stale()) setLoading(false);
     }
   }, [slabState, lpMintInfo, registryInfo, connection, walletPubkeyStr]);
 
@@ -397,15 +415,19 @@ export function useInsuranceLP() {
     // (or connecting/switching wallets) kept showing the PREVIOUS market's
     // numbers as if they were the freshly-loaded state for the new one, since
     // `loading` had already flipped false from the prior fetch.
+    // Keyed on `collateralMintStr` (see its declaration above), NOT
+    // `slabState.config` — the object identity changes every slab poll.
     setLoading(true);
     refreshStateRef.current();
-  }, [lpMintInfo, registryInfo, walletPubkeyStr, slabState.config]);
+  }, [lpMintInfo, registryInfo, walletPubkeyStr, collateralMintStr]);
 
   useEffect(() => {
     // Set up the 10s auto-refresh interval. The initial call now happens via
     // the immediate-refresh effect above (which also re-fires on mount).
-    const interval = setInterval(() => refreshStateRef.current(), 10_000);
-    return () => clearInterval(interval);
+    // Visibility-gated: a backgrounded tab shouldn't keep hitting the
+    // rate-limited devnet RPC every 10s for an Earn panel nobody is looking
+    // at. Fires immediately on tab re-focus (catch-up refresh).
+    return pollWhenVisible(() => refreshStateRef.current(), 10_000);
   }, []);
 
   // v17 LP Vault operations via the wrapper program.

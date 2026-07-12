@@ -88,12 +88,16 @@ export function useTraderStats(wallet: string | null | undefined): UseTraderStat
     requestSeqRef.current += 1;
     const requestSeq = requestSeqRef.current;
 
-    setStats(null);
+    // Stale-while-revalidate: keep the last-good `stats` on screen for the
+    // round-trip instead of blanking the panel with setStats(null) — fetch_
+    // will replace it once the fresh data lands (its requestSeq cancellation
+    // guard already prevents a stale response from landing out of order).
     setError(null);
 
     if (wallet) {
       void fetch_(requestSeq);
     } else {
+      setStats(null);
       setLoading(false);
     }
   }, [wallet, fetch_]);

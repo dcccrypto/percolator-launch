@@ -106,7 +106,21 @@ export function useDevnetFaucet(): DevnetFaucetState {
   const [dismissed, setDismissed] = useState(true); // default true to avoid flash
   const [checked, setChecked] = useState(false);
 
-  const airdropConnection = useRef(new Connection(PUBLIC_DEVNET_RPC, "confirmed"));
+  // Lazily construct the fallback airdrop Connection on first use instead of
+  // on every render — `useRef(new Connection(...))` evaluates the initializer
+  // (and throws away the result) on every single render, not just the first.
+  const airdropConnectionRef = useRef<Connection | null>(null);
+  const getAirdropConnection = useCallback((): Connection => {
+    if (!airdropConnectionRef.current) {
+      airdropConnectionRef.current = new Connection(PUBLIC_DEVNET_RPC, "confirmed");
+    }
+    return airdropConnectionRef.current;
+  }, []);
+
+  // Tracks whether the most recent airdropSol/airdropUsdc call failed, set
+  // synchronously (unlike `error` state, which is only visible on the NEXT
+  // render). fundAll reads this instead of the stale `error` closure.
+  const lastOpFailedRef = useRef(false);
 
   // Check if previously dismissed for this wallet
   useEffect(() => {
@@ -123,6 +137,19 @@ export function useDevnetFaucet(): DevnetFaucetState {
     } else {
       setDismissed(false);
     }
+  }, [publicKey]);
+
+  // Bug #34: reset per-wallet check/balance state when the connected wallet
+  // changes. Without this, switching from wallet A (already `checked`) to
+  // wallet B left `checked` (and solDone/usdcDone/balances) at wallet A's
+  // values — the "Initial balance check after connect" effect below is
+  // gated on `!checked`, so wallet B's balances were never (re-)fetched.
+  useEffect(() => {
+    setChecked(false);
+    setSolDone(false);
+    setUsdcDone(false);
+    setSolBalance(null);
+    setUsdcBalance(null);
   }, [publicKey]);
 
   const refreshBalances = useCallback(async () => {
@@ -142,8 +169,19 @@ export function useDevnetFaucet(): DevnetFaucetState {
         const amount = BigInt(info.value.amount);
         setUsdcBalance(Number(amount) / 1_000_000);
         if (amount >= USDC_THRESHOLD) setUsdcDone(true);
-      } catch {
-        setUsdcBalance(0);
+      } catch (e) {
+        // Distinguish "no ATA yet" (definitive — this wallet has never
+        // received USDC, so 0 is correct) from a transient RPC hiccup.
+        // Solana JSON-RPC reports a missing account as "could not find
+        // account"; anything else (timeout, 5xx, rate limit) must NOT reset
+        // the balance to 0 — that would pop the faucet modal over an
+        // already-funded wallet.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/could not find account/i.test(msg)) {
+          setUsdcBalance(0);
+        } else {
+          console.warn("[useDevnetFaucet] transient USDC balance fetch error, keeping previous balance:", msg);
+        }
       }
     }
   }, [publicKey, connection, usdcMintPk]);
@@ -182,6 +220,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
     setStep("sol");
     setLoading(true);
     setError(null);
+    lastOpFailedRef.current = false;
     try {
       // PERC-808: Try Helius devnet faucet first (more reliable, higher limits)
       let sig: string | null = null;
@@ -207,13 +246,14 @@ export function useDevnetFaucet(): DevnetFaucetState {
 
       // Fallback: Solana devnet faucet
       if (!sig) {
-        sig = await airdropConnection.current.requestAirdrop(
+        const fallbackConn = getAirdropConnection();
+        sig = await fallbackConn.requestAirdrop(
           publicKey,
           2 * LAMPORTS_PER_SOL,
         );
         const start = Date.now();
         while (Date.now() - start < 60_000) {
-          const { value } = await airdropConnection.current.getSignatureStatuses([sig]);
+          const { value } = await fallbackConn.getSignatureStatuses([sig]);
           const s = value?.[0];
           if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") {
             if (s.err) throw new Error("SOL airdrop transaction failed");
@@ -226,17 +266,19 @@ export function useDevnetFaucet(): DevnetFaucetState {
       setSolDone(true);
       await refreshBalances();
     } catch (e) {
+      lastOpFailedRef.current = true;
       setError(e instanceof Error ? e.message : "SOL airdrop failed — devnet may be rate-limiting. Try the Solana Faucet.");
     } finally {
       setLoading(false);
     }
-  }, [publicKey, refreshBalances]);
+  }, [publicKey, refreshBalances, getAirdropConnection]);
 
   const airdropUsdc = useCallback(async () => {
     if (!publicKey) return;
     setStep("usdc");
     setLoading(true);
     setError(null);
+    lastOpFailedRef.current = false;
     try {
       const resp = await fetch("/api/faucet", {
         method: "POST",
@@ -245,6 +287,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
       });
       const data = await resp.json();
       if (resp.status === 429) {
+        lastOpFailedRef.current = true;
         setRateLimited(true);
         setNextClaimAt(data.nextClaimAt ?? null);
         // GH#1798: distinguish per-wallet DB gate from RPC rate limit
@@ -261,6 +304,7 @@ export function useDevnetFaucet(): DevnetFaucetState {
       setUsdcDone(true);
       await refreshBalances();
     } catch (e) {
+      lastOpFailedRef.current = true;
       setError(e instanceof Error ? e.message : "USDC airdrop failed");
     } finally {
       setLoading(false);
@@ -271,18 +315,26 @@ export function useDevnetFaucet(): DevnetFaucetState {
     if (!publicKey) return;
     setError(null);
 
+    // Bug: this used to check `error` (the render-time closure value) after
+    // the awaits below — setError calls inside airdropSol/airdropUsdc can't
+    // update that closure's binding, so a failed airdrop still flipped step
+    // to "done". lastOpFailedRef is set synchronously by each call instead.
+    let anyFailed = false;
+
     if (!solDone && (solBalance === null || solBalance < 0.05)) {
       await airdropSol();
+      if (lastOpFailedRef.current) anyFailed = true;
     }
 
     if (!usdcDone && (usdcBalance === null || usdcBalance < 1000)) {
       await airdropUsdc();
+      if (lastOpFailedRef.current) anyFailed = true;
     }
 
-    if (!error) {
+    if (!anyFailed) {
       setStep("done");
     }
-  }, [publicKey, solDone, usdcDone, solBalance, usdcBalance, airdropSol, airdropUsdc, error]);
+  }, [publicKey, solDone, usdcDone, solBalance, usdcBalance, airdropSol, airdropUsdc]);
 
   return {
     shouldShow,
@@ -333,11 +385,16 @@ export function useFaucetComplete(): boolean {
     const check = () => {
       try {
         const ts = sessionStorage.getItem(FAUCET_COMPLETE_KEY);
-        if (ts && Date.now() - parseInt(ts, 10) < FAUCET_COMPLETE_WINDOW_MS) {
-          setComplete(true);
-        }
+        // Bug: this used to only ever call setComplete(true) and never
+        // setComplete(false), so it latched forever once the 30s window
+        // passed once — contradicting the documented window (GH#1107) and
+        // letting the auto-deposit wallet-approval popup fire minutes later.
+        // Always resolve to the CURRENT within-window state.
+        const withinWindow = !!ts && Date.now() - parseInt(ts, 10) < FAUCET_COMPLETE_WINDOW_MS;
+        setComplete(withinWindow);
       } catch {
-        // SSR guard
+        // SSR guard / storage unavailable
+        setComplete(false);
       }
     };
     check();
