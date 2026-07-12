@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  normalizeTokenDecimals,
   formatTokenAmount,
   formatCompactTokenAmount,
   formatBps,
@@ -16,6 +17,25 @@ import {
   formatFundingRate,
   chartPricePrecision,
 } from "../../lib/format";
+
+describe("normalizeTokenDecimals", () => {
+  it("preserves valid non-negative integer decimals", () => {
+    expect(normalizeTokenDecimals(0)).toBe(0);
+    expect(normalizeTokenDecimals(6)).toBe(6);
+    expect(normalizeTokenDecimals(18)).toBe(18);
+  });
+
+  it("uses whole-unit formatting for malformed runtime values", () => {
+    expect(normalizeTokenDecimals(-1)).toBe(0);
+    expect(normalizeTokenDecimals(Number.NaN)).toBe(0);
+    expect(normalizeTokenDecimals(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(normalizeTokenDecimals(null as unknown as number)).toBe(0);
+  });
+
+  it("truncates fractional decimal counts", () => {
+    expect(normalizeTokenDecimals(6.9)).toBe(6);
+  });
+});
 
 describe("formatTokenAmount", () => {
   it("returns '0' for null", () => {
@@ -281,6 +301,11 @@ describe("formatPnl", () => {
   it("formats with custom decimals", () => {
     expect(formatPnl(150n, 2)).toBe("+1.5");
   });
+
+  it("falls back to whole units for malformed decimals", () => {
+    expect(formatPnl(12345n, Number.NaN)).toBe("+12345");
+    expect(formatPnl(-12345n, null as unknown as number)).toBe("-12345");
+  });
 });
 
 describe("formatMarginPct", () => {
@@ -392,6 +417,11 @@ describe("formatCompactTokenAmount", () => {
     // 0.5 tokens with 6 decimals = 500_000n raw
     const raw = 500_000n;
     expect(formatCompactTokenAmount(raw, 6)).toBe("0.5");
+  });
+
+  it("falls back to whole units for malformed decimals", () => {
+    expect(formatCompactTokenAmount(1_500n, Number.NaN)).toBe("1.5K");
+    expect(formatCompactTokenAmount(500n, null as unknown as number)).toBe("500.00");
   });
 });
 
