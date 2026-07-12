@@ -19,6 +19,9 @@ vi.mock("@/hooks/useWalletCompat", () => ({
 
 vi.mock("@/hooks/useTrade", () => ({
   useTrade: vi.fn(),
+  // Fire-and-forget prewarm called at the top of the v17 verification path —
+  // a plain no-op here (the real one only warms caches).
+  prewarmTradeSubmission: vi.fn(),
 }));
 
 vi.mock("@/hooks/useUserAccount", () => ({

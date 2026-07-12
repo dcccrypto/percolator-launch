@@ -48,11 +48,28 @@ const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_TIME_MS = 90_000;
 const PRIORITY_FEE_FALLBACK = Number(process.env.NEXT_PUBLIC_PRIORITY_FEE ?? 100_000);
 
+/** How long a fetched priority fee stays reusable. Fee conditions move on
+ *  the order of minutes, not milliseconds — paying a full RPC round-trip for
+ *  a fresh 75th-percentile on EVERY submit added user-visible latency between
+ *  the confirm click and the wallet popup for no pricing benefit. */
+const PRIORITY_FEE_CACHE_MS = 45_000;
+let cachedPriorityFee: { fee: number; ts: number } | null = null;
+
 /**
  * Get dynamic priority fee based on recent network conditions.
- * Falls back to hardcoded value if RPC call fails.
+ * Cached for PRIORITY_FEE_CACHE_MS; falls back to hardcoded value if the RPC
+ * call fails.
  */
 async function getPriorityFee(connection: Connection): Promise<number> {
+  if (cachedPriorityFee && Date.now() - cachedPriorityFee.ts < PRIORITY_FEE_CACHE_MS) {
+    return cachedPriorityFee.fee;
+  }
+  const fee = await fetchPriorityFee(connection);
+  cachedPriorityFee = { fee, ts: Date.now() };
+  return fee;
+}
+
+async function fetchPriorityFee(connection: Connection): Promise<number> {
   try {
     const fees = await connection.getRecentPrioritizationFees();
     
@@ -136,6 +153,41 @@ export function getClockDriftWarning(): string | null {
     );
   }
   return null;
+}
+
+// ============================================================================
+// Blockhash cache + tx-landing prewarm
+// ============================================================================
+
+/** How long a fetched blockhash is reused for NEW submissions. Blockhashes
+ *  stay valid for ~60-90s (150 slots) on-chain; reusing one that is ≤20s old
+ *  is completely safe and removes an entire RPC round-trip from the
+ *  confirm-click → wallet-popup critical path. Retries always force-refresh
+ *  (a stale blockhash is a plausible cause of the failure being retried). */
+const BLOCKHASH_FRESH_MS = 20_000;
+let cachedBlockhash: { blockhash: string; ts: number } | null = null;
+
+async function getFreshBlockhash(connection: Connection, forceFresh = false): Promise<string> {
+  if (!forceFresh && cachedBlockhash && Date.now() - cachedBlockhash.ts < BLOCKHASH_FRESH_MS) {
+    return cachedBlockhash.blockhash;
+  }
+  const { blockhash } = await connection.getLatestBlockhash("confirmed");
+  cachedBlockhash = { blockhash, ts: Date.now() };
+  return blockhash;
+}
+
+/**
+ * Prewarm every cache the tx-submission path reads, so that by the time the
+ * user clicks the final confirm button, sendTx reaches the wallet popup with
+ * ZERO blocking RPC round-trips of its own. Call this the moment intent is
+ * clear — e.g. when a trade/close confirmation modal OPENS (the seconds the
+ * user spends reading it are free prefetch time). Fire-and-forget safe:
+ * every branch swallows its own errors; sendTx falls back to fetching live.
+ */
+export function prewarmTxLanding(connection: Connection): void {
+  void checkClockDrift(connection).catch(() => {});
+  void getPriorityFee(connection).catch(() => {});
+  void getFreshBlockhash(connection).catch(() => {});
 }
 
 // ============================================================================
@@ -336,8 +388,12 @@ export async function sendTx({
     throw new Error("Wallet not connected");
   }
 
-  // Check clock drift (non-blocking, warns in console; cached 5min)
-  await checkClockDrift(connection);
+  // Check clock drift — genuinely non-blocking now (it was awaited serially
+  // here despite its own "non-blocking" comment, costing two RPC round-trips
+  // on the first submission of a session before the wallet popup could
+  // appear). It self-caches for 5min; the warning below reads whatever the
+  // last completed check found.
+  void checkClockDrift(connection).catch(() => {});
   const driftWarning = getClockDriftWarning();
   if (driftWarning) {
     // Log prominently — UI layer can also call getClockDriftWarning() to display a toast
@@ -349,10 +405,20 @@ export async function sendTx({
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Get dynamic priority fee on first attempt
+      // Latency: kick the blockhash fetch off FIRST so it overlaps the fee
+      // lookup below (both usually resolve instantly from their caches after
+      // a prewarmTxLanding call; retries force a fresh blockhash since a
+      // stale one is a plausible cause of the failure being retried).
+      const blockhashPromise = getFreshBlockhash(connection, attempt > 0);
+
+      // Get dynamic priority fee on first attempt (cached 45s)
       const priorityFee = attempt === 0 ? await getPriorityFee(connection) : PRIORITY_FEE_FALLBACK;
 
-      // Pre-flight fee estimation and balance check (first attempt only)
+      // Pre-flight fee estimation and balance check (first attempt only).
+      // Started here, awaited just before signing — it runs CONCURRENTLY with
+      // the blockhash fetch + tx build instead of adding its own serial RPC
+      // round-trip to the popup latency.
+      let balanceCheckPromise: Promise<void> | null = null;
       if (attempt === 0) {
         const numSignatures = 1 + signers.length; // wallet + additional signers
         const fees = estimateFees(computeUnits, priorityFee, numSignatures);
@@ -360,9 +426,9 @@ export async function sendTx({
         // init/first-deposit's InitPortfolio) — a plain trade's instructions
         // contain no CreateAccount ix, so this is 0 and behavior is unchanged.
         const accountCreationLamports = getAccountCreationLamports(instructions);
-        await checkSufficientBalance(connection, wallet.publicKey, fees, accountCreationLamports);
+        balanceCheckPromise = checkSufficientBalance(connection, wallet.publicKey, fees, accountCreationLamports);
       }
-      
+
       // PERC-8388: Strip any Lighthouse assertion instructions that may have been
       // injected into the instruction array by wallet middleware or upstream hooks.
       // This is a defensive filter — our code doesn't add these, but wallet extensions
@@ -382,39 +448,69 @@ export async function sendTx({
         tx.add(ix);
       }
 
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      tx.recentBlockhash = blockhash;
+      tx.recentBlockhash = await blockhashPromise;
       tx.feePayer = wallet.publicKey;
 
-      // Pre-sign simulation: catch program errors before the user signs.
-      // This gives a clear error message instead of a cryptic post-sign failure.
+      // Balance sufficiency must still resolve BEFORE the user is asked to
+      // sign (its "add X SOL" error beats a cryptic on-chain failure) — but
+      // it ran concurrently with everything above instead of serially.
+      if (balanceCheckPromise) await balanceCheckPromise;
+
+      // Simulation: catch program errors before anything is broadcast.
       // Skipped when skipPreflight is true (PERC-8388: wallet middleware injects
       // assertion IXs that fail simulation but aren't in our actual tx).
-      // Skip pre-sign simulation when extra signers are present — the wallet
-      // hasn't signed yet so simulation will fail with MissingRequiredSignature.
-      if (!skipPreflight && signers.length === 0) try {
-        const simResult = await connection.simulateTransaction(tx);
-        if (simResult.value.err) {
-          const logs = simResult.value.logs ?? [];
-          // Extract the most useful log line (program error or custom message)
-          const errorLog = logs
-            .filter((l: string) => l.includes("Error") || l.includes("failed") || l.includes("Program log:"))
-            .slice(-3)
-            .join("\n");
-          throw new Error(
-            `Transaction simulation failed: ${JSON.stringify(simResult.value.err)}` +
-            (errorLog ? `\n${errorLog}` : "")
-          );
+      // Skipped when extra signers are present — the wallet hasn't signed yet
+      // so simulation would fail with MissingRequiredSignature.
+      //
+      // WHERE it runs depends on the signing path:
+      // - signAndSendTransaction (atomic sign+broadcast): the wallet puts the
+      //   tx on the wire the moment the user approves, so simulation must
+      //   complete BEFORE the popup — unchanged behavior.
+      // - signTransaction (we broadcast ourselves): the simulation and the
+      //   wallet-approval popup run CONCURRENTLY, and the broadcast below is
+      //   gated on the simulation verdict. Identical safety property —
+      //   nothing that fails simulation is ever broadcast — but the popup
+      //   appears one full RPC round-trip sooner, and the user's reading/
+      //   approval time absorbs the simulation latency entirely.
+      const usesAtomicSend = !!wallet.signAndSendTransaction && signers.length === 0;
+      const runSimulation = async (): Promise<void> => {
+        try {
+          const simResult = await connection.simulateTransaction(tx);
+          if (simResult.value.err) {
+            const logs = simResult.value.logs ?? [];
+            // Extract the most useful log line (program error or custom message)
+            const errorLog = logs
+              .filter((l: string) => l.includes("Error") || l.includes("failed") || l.includes("Program log:"))
+              .slice(-3)
+              .join("\n");
+            throw new Error(
+              `Transaction simulation failed: ${JSON.stringify(simResult.value.err)}` +
+              (errorLog ? `\n${errorLog}` : "")
+            );
+          }
+        } catch (simError) {
+          // If it's our own simulation error, rethrow with clear message
+          if (simError instanceof Error && simError.message.startsWith("Transaction simulation failed")) {
+            throw simError;
+          }
+          // Otherwise RPC error during simulation — log but don't block
+          // (the tx may still succeed; skipPreflight: false will catch it again)
+          console.warn("[sendTx] Pre-sign simulation failed (non-blocking):", simError);
         }
-      } catch (simError) {
-        // If it's our own simulation error, rethrow with clear message
-        if (simError instanceof Error && simError.message.startsWith("Transaction simulation failed")) {
-          throw simError;
-        }
-        // Otherwise RPC error during simulation — log but don't block
-        // (the tx may still succeed; skipPreflight: false will catch it again)
-        console.warn("[sendTx] Pre-sign simulation failed (non-blocking):", simError);
+      };
+      const wantSimulation = !skipPreflight && signers.length === 0;
+      if (wantSimulation && usesAtomicSend) {
+        await runSimulation();
       }
+      // Settled-result wrapper so a simulation rejection can't become an
+      // unhandled rejection while we're awaiting the wallet popup.
+      const concurrentSimGate: Promise<Error | null> | null =
+        wantSimulation && !usesAtomicSend
+          ? runSimulation().then(
+              () => null,
+              (e) => (e instanceof Error ? e : new Error(String(e))),
+            )
+          : null;
 
       // ================================================================
       // PERC-8388: Use signAndSendTransaction when available.
@@ -468,6 +564,15 @@ export async function sendTx({
             `Sending with skipPreflight=true as workaround.`
           );
           skipPreflight = true;
+        }
+
+        // Gate the broadcast on the concurrent simulation's verdict (started
+        // before the wallet popup, see above). If simulation reported a
+        // program error, the user's signature is simply never broadcast —
+        // same safety property as the old simulate-then-popup ordering.
+        if (concurrentSimGate) {
+          const simErr = await concurrentSimGate;
+          if (simErr) throw simErr;
         }
 
         try {

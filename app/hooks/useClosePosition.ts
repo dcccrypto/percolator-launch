@@ -4,8 +4,9 @@ import { useState, useCallback, useRef } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
-import { useTrade } from "@/hooks/useTrade";
+import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { useUserAccount } from "@/hooks/useUserAccount";
+import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { humanizeError, withTransientRetry } from "@/lib/errorMessages";
@@ -91,7 +92,7 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     let freshPositionSize: bigint | null = null;
 
     if (isV17Market) {
-      // v17: re-fetch via getProgramAccounts + parsePortfolioV17.
+      // v17: re-fetch via a FRESH on-chain read + parsePortfolioV17.
       // parseAccount(bitmap, idx) is a v12-only function and throws on v17 data.
       try {
         if (!programId || !publicKey) {
@@ -100,42 +101,73 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
           );
         }
 
-        const slabPk = new PublicKey(slabAddress);
-        const results = await connection.getProgramAccounts(programId, {
-          filters: [
-            {
-              memcmp: {
-                offset: 0,
-                bytes: V17_PORTFOLIO_MAGIC_CP.toString("base64"),
-                encoding: "base64",
-              },
-            },
-            {
-              memcmp: {
-                offset: V17_PF_MARKET_OFF_CP,
-                bytes: slabPk.toBase58(),
-              },
-            },
-            {
-              memcmp: {
-                offset: V17_PF_OWNER_OFF_CP,
-                bytes: publicKey.toBase58(),
-              },
-            },
-          ],
-        });
+        // Prewarm the rest of the submission path (blockhash, priority fee,
+        // trade-account resolution) so it overlaps this freshness read
+        // instead of running serially after it — the close click reaches the
+        // wallet popup one to three RPC round-trips sooner. Fire-and-forget.
+        prewarmTradeSubmission(connection, programId, slabAddress, publicKey);
 
-        if (results.length === 0) {
+        const slabPk = new PublicKey(slabAddress);
+
+        // Latency: when the shared scan store already knows the portfolio's
+        // PUBKEY (it almost always does — the trade page keeps it hot), a
+        // targeted getAccountInfo is exactly as authoritative-fresh as the
+        // full program scan (both read the chain NOW; the address of a
+        // portfolio never changes) but one cheap account read instead of a
+        // filtered scan. Freshness of the POSITION SIZE is preserved either
+        // way — only the address lookup is skipped, never the data read.
+        let freshData: Buffer | null = null;
+        const cachedPk = getPortfolioRawSnapshot(
+          makePortfolioScanKey(programId, slabAddress, publicKey),
+        )?.pubkey;
+        if (cachedPk) {
+          const info = await connection.getAccountInfo(cachedPk, "confirmed");
+          if (info) freshData = Buffer.from(info.data);
+          // account gone or unreadable → fall through to the scan below
+        }
+
+        if (!freshData) {
+          const results = await connection.getProgramAccounts(programId, {
+            filters: [
+              {
+                memcmp: {
+                  offset: 0,
+                  bytes: V17_PORTFOLIO_MAGIC_CP.toString("base64"),
+                  encoding: "base64",
+                },
+              },
+              {
+                memcmp: {
+                  offset: V17_PF_MARKET_OFF_CP,
+                  bytes: slabPk.toBase58(),
+                },
+              },
+              {
+                memcmp: {
+                  offset: V17_PF_OWNER_OFF_CP,
+                  bytes: publicKey.toBase58(),
+                },
+              },
+            ],
+          });
+          if (results.length > 0) {
+            const data = results[0].account.data;
+            freshData = data instanceof Buffer ? data : Buffer.from(data);
+          }
+        }
+
+        if (!freshData) {
           // The query completed successfully and found no current
           // portfolio for this wallet and market.
           freshPositionSize = 0n;
         } else {
-          const data = results[0].account.data;
-          const portfolio = parsePortfolioV17(
-            data instanceof Buffer ? data : Buffer.from(data),
-          );
+          const portfolio = parsePortfolioV17(freshData);
 
-          // Re-check the mutable owner after the RPC-side memcmp filter.
+          // Re-check the mutable owner after the read — covers both the
+          // RPC-side memcmp filter AND the cached-pubkey shortcut (a wrapped
+          // position's owner moves to the escrow PDA; a mismatch here falls
+          // back to "could not verify" rather than closing someone else's
+          // account).
           if (!portfolio.owner.equals(publicKey)) {
             throw new Error(
               "Fresh portfolio owner does not match the connected wallet.",

@@ -38,7 +38,7 @@
 import { FC, memo, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useWalletCompat, useConnectionCompat } from "@/hooks/useWalletCompat";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { useTrade } from "@/hooks/useTrade";
+import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
 import { humanizeError, isEngineLockError, withTransientRetry } from "@/lib/errorMessages";
 import { explorerTxUrl, getNetwork } from "@/lib/config";
 import { useUserAccount } from "@/hooks/useUserAccount";
@@ -214,7 +214,7 @@ const OrderTicketInner: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const userAccount = realUserAccount ?? (mockMode ? getMockUserAccountIdle(slabAddress) : null);
   const { trade, loading, error } = useTrade(slabAddress);
   const { engine, params, insuranceBalance: liveInsuranceBalance, totalOI: liveTotalOI, hasData: engineHasData } = useEngineState();
-  const { accounts, config: mktConfig, header, refresh: refreshSlab } = useSlabState();
+  const { accounts, config: mktConfig, header, refresh: refreshSlab, programId: slabProgramId } = useSlabState();
   const tokenMeta = useTokenMeta(mktConfig?.collateralMint ?? null);
   // Non-reactive — see file-header comment. NOT `useLivePrice()`.
   const { priceUsd, priceE6: livePriceE6 } = getLivePriceSnapshot(slabAddress);
@@ -1071,6 +1071,11 @@ setEngineLockError(null);
               worstFillPriceE6,
             });
             setShowConfirmModal(true);
+            // Prewarm the entire submission path (blockhash, priority fee,
+            // v17 trade-account resolution) while the user reads the confirm
+            // modal — their confirm click then reaches the wallet popup with
+            // zero blocking RPC round-trips. Fire-and-forget.
+            prewarmTradeSubmission(connection, slabProgramId, slabAddress, publicKey ?? null);
           }}
           disabled={submitDisabled}
           className={`w-full rounded-none py-3 text-[12px] font-bold uppercase tracking-[0.12em] transition-[filter] duration-150 hover:brightness-110 disabled:cursor-not-allowed disabled:hover:brightness-100 ${
