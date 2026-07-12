@@ -16,25 +16,45 @@ describe("one market per token", () => {
     "utf8",
   );
 
-  it("POST rejects a second market for the same mainnet_ca (Supabase path)", () => {
-    expect(routeSource).toContain('.eq("mainnet_ca", canonicalMainnetCa)');
+  it("POST rejects a second market for the same token (Supabase path)", () => {
+    expect(routeSource).toContain('mainnet_ca.eq.${canonicalMainnetCa}');
+    expect(routeSource).toContain(".or(dedupeFilters.join(");
     expect(routeSource).toContain("A market for this token already exists");
     expect(routeSource).toContain("One market per token");
   });
 
-  it("POST canonicalizes mainnet_ca before deduping (no alternate-encoding dodge)", () => {
-    expect(routeSource).toContain("canonicalMainnetCa = new PublicKey(mainnet_ca).toBase58()");
+  it("SEC: dedupes on the DEX pool too, so omitting optional mainnet_ca can't bypass it", () => {
+    // mainnet_ca is not a required field — keying on it alone let a crafted
+    // POST skip the gate by omitting it. dex_pool_address (the keeper's
+    // pricing source) is the second key that closes the bypass.
+    expect(routeSource).toContain('dex_pool_address.eq.${canonicalDexPool}');
+    expect(routeSource).toContain("canonicalDexPool = new PublicKey(dex_pool_address).toBase58()");
   });
 
-  it("POST dedupes on mainnet_ca, never on mint_address (shared sim-USDC collateral)", () => {
-    // The dedupe query must not filter markets by mint_address — every
-    // playground market shares the sim-USDC collateral there, so that key
-    // would false-positive every launch after the first.
+  it("POST canonicalizes both dedupe keys (no alternate-encoding dodge)", () => {
+    expect(routeSource).toContain("canonicalMainnetCa = new PublicKey(mainnet_ca).toBase58()");
+    expect(routeSource).toContain("canonicalDexPool = new PublicKey(dex_pool_address).toBase58()");
+  });
+
+  it("POST stores the CANONICAL mainnet_ca / dex_pool_address (dedupe keys must match on re-register)", () => {
+    // The insert must not persist the raw request values — a non-canonical
+    // encoding would slip past the canonical-keyed dedupe next time.
+    expect(routeSource).toContain("mainnet_ca: canonicalMainnetCa");
+    expect(routeSource).toContain("dex_pool_address: canonicalDexPool");
+    expect(routeSource).not.toContain("mainnet_ca: mainnet_ca || null");
+    expect(routeSource).not.toContain("dex_pool_address: dex_pool_address || null");
+  });
+
+  it("POST never dedupes on mint_address (shared sim-USDC collateral)", () => {
+    // The dedupe must not filter markets by mint_address — every playground
+    // market shares the sim-USDC collateral, so that key would false-positive
+    // every launch after the first.
     expect(routeSource).not.toContain('.eq("mint_address"');
   });
 
-  it("POST also guards the no-Supabase (Blob registry) path", () => {
+  it("POST also guards the no-Supabase (Blob registry) path on either key", () => {
     expect(routeSource).toContain("r.mainnetCA === canonicalMainnetCa");
+    expect(routeSource).toContain("r.poolAddress === canonicalDexPool");
   });
 
   it("GET search matches mainnet_ca so the wizard's duplicate lookup can find the market", () => {
