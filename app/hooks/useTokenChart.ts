@@ -116,12 +116,42 @@ export function useTokenChart(
 
         const fetchedCandles: CandleData[] = json.candles ?? [];
         const pool = json.poolAddress ?? null;
-        const status: ChartDataStatus = fetchedCandles.length > 0 ? "success" : "empty";
-        candlesRef.current = fetchedCandles;
-        setCandles(fetchedCandles);
-        setPoolAddress(pool);
-        setStatus(status);
-        boundedSet(chartCache, key, { candles: fetchedCandles, poolAddress: pool, status }, CACHE_MAX_ENTRIES);
+
+        if (fetchedCandles.length > 0) {
+          candlesRef.current = fetchedCandles;
+          setCandles(fetchedCandles);
+          setPoolAddress(pool);
+          setStatus("success");
+          // Only successful (non-empty) batches are cached — see the empty
+          // branch below for why an empty must never be cached.
+          boundedSet(
+            chartCache,
+            key,
+            { candles: fetchedCandles, poolAddress: pool, status: "success" },
+            CACHE_MAX_ENTRIES,
+          );
+        } else {
+          // Empty response. GeckoTerminal rate-limits (~30 req/min), so an
+          // empty batch is almost always a transient 429 while switching
+          // timeframes quickly — NOT "this token has no chart". Two rules,
+          // mirroring the keep-last-good error branch below:
+          //   1. NEVER cache an empty. A cached empty would be repainted by the
+          //      stale-while-revalidate branch above on every later visit to
+          //      this (mint,timeframe), leaving that one timeframe stuck blank
+          //      for the whole session even though the data is available — the
+          //      exact "1h/1d show empty" bug. Not caching it means the next
+          //      poll / timeframe switch refetches fresh.
+          //   2. If we already have candles for this key, KEEP them (don't
+          //      blank a chart that was populated a moment ago); otherwise
+          //      surface "empty" so the chart falls back to the oracle line,
+          //      and let the 60s poll refill it once GT responds.
+          if (pool) setPoolAddress(pool); // pool can resolve even on an empty batch
+          if (candlesRef.current.length > 0) {
+            setStatus("success");
+          } else {
+            setStatus("empty");
+          }
+        }
       } catch (err) {
         if (fetchKeyRef.current !== key) return;
         console.warn("[useTokenChart] fetch error:", err);
