@@ -485,21 +485,15 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Generate a per-request nonce for CSP using Web Crypto API (Edge Runtime compatible)
-  const nonceBytes = new Uint8Array(16);
-  crypto.getRandomValues(nonceBytes);
-  const nonce = btoa(String.fromCharCode(...nonceBytes));
-
-  // Forward nonce to layout.tsx via request headers
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-nonce", nonce);
-
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
-  addSecurityHeaders(response, nonce);
-  // PERC-695: Prevent CDN/edge caching of nonce-protected HTML responses.
-  // A cached response would carry the old nonce in data-nonce while the middleware
-  // generates a fresh nonce for the CSP header — making the nonce effectively static.
-  response.headers.set("Cache-Control", "no-store, must-revalidate");
+  // Static-rendering perf: the CSP no longer uses a per-request nonce, so the
+  // layout can be statically prerendered + CDN-cached instead of force-dynamic
+  // server-rendered (which cost ~1s TTFB on a cold serverless start). script-src
+  // falls back to the 'unsafe-inline' already declared in addSecurityHeaders.
+  // React escapes rendered output by default so baseline XSS protection remains;
+  // this drops the nonce defense-in-depth layer, a deliberate trade for the
+  // devnet playground's load speed. No per-request nonce → HTML is cacheable.
+  const response = NextResponse.next();
+  addSecurityHeaders(response);
   return response;
 }
 

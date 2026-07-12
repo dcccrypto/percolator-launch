@@ -1,6 +1,5 @@
 import "@/lib/polyfills";
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { JetBrains_Mono, Outfit } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -36,12 +35,6 @@ const fontVarAliases = {
   "--font-geist-mono": "var(--font-jetbrains-mono)",
   "--font-space-grotesk": "var(--font-outfit)",
 } as React.CSSProperties;
-
-// PERC-695 (bug bounty — CSP static nonce): Force dynamic rendering so each request
-// generates a fresh layout render with the new per-request nonce from middleware.
-// Without this, Next.js may serve a cached layout with a stale nonce baked into
-// data-nonce, causing a CSP mismatch with the freshly generated nonce in the header.
-export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   // Canonical host is percolator.trade — percolatorlaunch.com 301s to it.
@@ -89,8 +82,7 @@ export const metadata: Metadata = {
     : undefined,
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const nonce = (await headers()).get("x-nonce") ?? undefined;
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth" className={`${jetbrainsMono.variable} ${outfit.variable}`} style={fontVarAliases}>
       <head>
@@ -99,7 +91,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             the server value and logs a mismatch error on every load. The nonce itself
             still applies — only the noisy warning is suppressed. */}
         <script
-          nonce={nonce}
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `
@@ -122,7 +113,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <link rel="preconnect" href="https://coin-images.coingecko.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://cdn.dexscreener.com" />
       </head>
-        <body suppressHydrationWarning className="min-h-screen antialiased" data-nonce={nonce}>
+        <body suppressHydrationWarning className="min-h-screen antialiased">
         <JsonLd data={[organizationSchema(), websiteSchema()]} />
         <Providers>
           <div className="relative z-[1] flex min-h-screen flex-col">
@@ -142,8 +133,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <MusicPlayer />
           </ChromeGate>
         </Providers>
-        <GoogleAnalytics nonce={nonce} />
-        <CloudflareAnalytics nonce={nonce} />
+        <GoogleAnalytics />
+        <CloudflareAnalytics />
         <Analytics />
       </body>
     </html>
