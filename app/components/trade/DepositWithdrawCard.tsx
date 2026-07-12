@@ -1,5 +1,6 @@
 "use client";
 import { explorerTxUrl } from "@/lib/config";
+import { prewarmTxLanding } from "@/lib/tx";
 
 import { FC, useState, useEffect, useRef } from "react";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
@@ -52,6 +53,15 @@ export const DepositWithdrawCard: FC<DepositWithdrawCardProps> = ({ slabAddress,
 
   const [mode, setMode] = useState<"deposit" | "withdraw">(initialMode);
   const [amount, setAmount] = useState("");
+
+  // Prewarm the tx-landing caches (blockhash, priority fee, clock drift) the
+  // moment this card appears — the user types an amount before submitting,
+  // and that time absorbs the fetches, so the deposit/withdraw click reaches
+  // the wallet popup without blocking on them. Fire-and-forget; sendTx falls
+  // back to live fetches if any prewarm failed.
+  useEffect(() => {
+    if (!mockMode && walletConnected) prewarmTxLanding(connection);
+  }, [connection, mockMode, walletConnected]);
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<bigint | null>(mockMode ? 500_000_000n : null);
   const maxRawRef = useRef<bigint | null>(null);

@@ -26,6 +26,7 @@ import {
   ACCOUNTS_PUSH_ORACLE_PRICE,
 } from "@/lib/sdk-compat";
 import { sendTx } from "@/lib/tx";
+import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
 import { assertKnownProgram } from "@/lib/programAllowlist";
@@ -75,14 +76,20 @@ export function useWithdraw(slabAddress: string) {
         // produce a wallet-signed withdrawal CPI under any bypass scenario.
         assertKnownProgram(slabProgramId);
 
-        // P-CRITICAL-3: Validate network before withdrawal
-        try {
-          const slabInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
-          if (!slabInfo) {
-            throw new Error("Market not found on current network. Please switch networks in your wallet and refresh.");
+        // P-CRITICAL-3: Validate network before withdrawal.
+        // Latency: skipped when SlabProvider has already parsed a v17 config
+        // for this slab — the provider fetched it over THIS connection, so
+        // the market provably exists on the current network and the refetch
+        // is a pure round-trip between the click and the wallet popup.
+        if (wrapperConfigV17 == null) {
+          try {
+            const slabInfo = await connection.getAccountInfo(new PublicKey(slabAddress));
+            if (!slabInfo) {
+              throw new Error("Market not found on current network. Please switch networks in your wallet and refresh.");
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message.includes("Market not found")) throw e;
           }
-        } catch (e) {
-          if (e instanceof Error && e.message.includes("Market not found")) throw e;
         }
         const programId = slabProgramId;
         const slabPk = new PublicKey(slabAddress);
@@ -136,7 +143,29 @@ export function useWithdraw(slabAddress: string) {
           const V17_MAGIC_BYTES = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
           let portfolioPk: PublicKey | null = null;
           let portfolioData: Buffer | null = null;
-          try {
+          // Latency: when the shared scan store knows the portfolio's pubkey
+          // (its address never changes for a wallet+market), one targeted
+          // getAccountInfo replaces the filtered program scan below — the
+          // DATA read is equally live either way (withdraw needs fresh data
+          // for the free-margin gate and the crank-prepend decision). The
+          // owner re-verification below applies to both paths.
+          const storePk = getPortfolioRawSnapshot(
+            makePortfolioScanKey(programId, slabAddress, wallet.publicKey),
+          )?.pubkey;
+          if (storePk) {
+            try {
+              const info = await connection.getAccountInfo(storePk, "confirmed");
+              if (info) {
+                const candidateData = Buffer.from(info.data);
+                const candidatePf = parsePortfolioV17(candidateData);
+                if (candidatePf.owner.equals(wallet.publicKey)) {
+                  portfolioPk = storePk;
+                  portfolioData = candidateData;
+                }
+              }
+            } catch { /* fall through to the scan */ }
+          }
+          if (!portfolioPk) try {
             // Mutable owner (SDK PF_OWNER_OFF) is at offset 116, NOT offset 80
             // (offset 80 is provenanceOwner — IMMUTABLE). MintPositionNft moves the
             // mutable owner to the escrow PDA on wrap but leaves provenance pointing

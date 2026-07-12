@@ -24,6 +24,7 @@ import {
   deriveVaultAuthority,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
+import { getPortfolioRawSnapshot, makePortfolioScanKey } from "@/lib/userAccountScan";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { assertKnownProgram } from "@/lib/programAllowlist";
 import { humanizeError } from "@/lib/errorMessages";
@@ -132,19 +133,25 @@ export function useDeposit(slabAddress: string) {
         // best-effort and let the chain surface any error naturally.
         // ----------------------------------------------------------------
         let slabData: Uint8Array | undefined;
-        try {
-          const slabInfo = await connection.getAccountInfo(slabPk);
-          if (slabInfo === null) {
-            throw new Error(
-              "Market not found on current network. Please switch networks in your wallet and refresh.",
-            );
+        // Latency: SlabProvider having parsed a v17 config for this slab
+        // proves the market exists on THIS connection's network AND settles
+        // the layout question — both purposes of this refetch. Only pay the
+        // round-trip when the provider hasn't loaded yet (first render).
+        if (wrapperConfigV17 == null) {
+          try {
+            const slabInfo = await connection.getAccountInfo(slabPk);
+            if (slabInfo === null) {
+              throw new Error(
+                "Market not found on current network. Please switch networks in your wallet and refresh.",
+              );
+            }
+            if (slabInfo) {
+              slabData = new Uint8Array(slabInfo.data);
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message.includes("switch networks")) throw e;
+            // RPC error — fall through, let the tx surface any on-chain failure
           }
-          if (slabInfo) {
-            slabData = new Uint8Array(slabInfo.data);
-          }
-        } catch (e) {
-          if (e instanceof Error && e.message.includes("switch networks")) throw e;
-          // RPC error — fall through, let the tx surface any on-chain failure
         }
 
         const instructions: TransactionInstruction[] = [];
@@ -173,10 +180,25 @@ export function useDeposit(slabAddress: string) {
           // Portfolio accounts in v17 are standalone program-owned accounts.
           // We must find or create the user's portfolio account.
 
+          // Latency: the ATA-existence check and the portfolio lookup are
+          // independent — run them concurrently instead of serially. The
+          // portfolio lookup itself is usually FREE: the shared scan store
+          // (useUserAccount and friends) already knows the pubkey, which
+          // never changes for a (wallet, market) pair; the program scan is
+          // only the cold-start fallback.
+          const [ataExists, resolvedPortfolioPk] = await Promise.all([
+            getAccount(connection, userAta).then(() => true, () => false),
+            (async () => {
+              const snap = getPortfolioRawSnapshot(
+                makePortfolioScanKey(programId, slabAddress, wallet.publicKey!),
+              );
+              if (snap && snap.portfolio.owner.equals(wallet.publicKey!)) return snap.pubkey;
+              return findV17Portfolio(connection, programId, slabPk, wallet.publicKey!);
+            })(),
+          ]);
+
           // Ensure user ATA exists (prevents token transfer failure)
-          try {
-            await getAccount(connection, userAta);
-          } catch {
+          if (!ataExists) {
             instructions.push(
               createAssociatedTokenAccountInstruction(
                 wallet.publicKey,
@@ -188,7 +210,7 @@ export function useDeposit(slabAddress: string) {
           }
 
           // Find or create the user's portfolio account.
-          let portfolioPk = await findV17Portfolio(connection, programId, slabPk, wallet.publicKey);
+          let portfolioPk = resolvedPortfolioPk;
 
           if (!portfolioPk && !params.accountExists) {
             // No portfolio for this user — create one and run InitPortfolio (tag 1).
