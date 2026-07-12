@@ -57,6 +57,9 @@ const mockUseWallet = vi.fn(() => ({
 const mockConnection = {
   getSlot: vi.fn().mockResolvedValue(1000),
   getMultipleAccountsInfo: vi.fn().mockResolvedValue([]),
+  // Creator detection scans for LP portfolios owned by the wallet (see the
+  // rotated-marketauth test below). Default: the wallet owns none.
+  getProgramAccounts: vi.fn().mockResolvedValue([]),
 };
 const mockUseConnection = vi.fn(() => ({ connection: mockConnection }));
 
@@ -208,6 +211,84 @@ describe('useCreatedMarkets Hook', () => {
       expect(result.current.myMarkets).toHaveLength(1);
     });
     expect(result.current.myMarkets[0].slabAddress.toBase58()).toBe(slab.toBase58());
+  });
+
+  it('finds a launched market whose marketauth was ROTATED away, via its LP portfolio', async () => {
+    // THE BUG THIS GUARDS (user-reported, verified on-chain): a completed
+    // launch's final step (StakeInitPool) irreversibly rotates marketauth to a
+    // stake-pool PDA. So `marketauth === myWallet` is FALSE for every
+    // fully-launched market, and the creator saw "you haven't created a market
+    // with this wallet yet" while staring at markets they had just launched.
+    //
+    // The durable marker is the market's LP portfolio: created by the wizard
+    // with the CREATOR's wallet as owner@116, never rotated. Here the market's
+    // authority belongs to someone else (the PDA) but the wallet owns the LP
+    // portfolio → the market MUST still be listed.
+    const slab = pk(106);
+    const rotatedAuthority = pk(222); // the stake-pool PDA — NOT our wallet
+    const v17Market = {
+      slabAddress: slab,
+      programId: pk(9),
+      header: {},
+      config: {},
+      configV17: { marketauth: rotatedAuthority, unitScale: 1_000_000, collateralMint: pk(1) },
+      engine: {},
+      params: {},
+    } as unknown as DiscoveredMarket;
+    mockMarkets.push(v17Market);
+    mockUseMarketDiscovery.mockReturnValue({ markets: [v17Market], loading: false, error: null, refetch: vi.fn() });
+
+    // An LP portfolio (trailing matcher config enabled) owned by our wallet,
+    // whose market_group_id@16 points at this slab.
+    const lpData = Buffer.alloc(9347);
+    Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]).copy(lpData, 0); // magic
+    slab.toBuffer().copy(lpData, 16);            // market_group_id@16
+    mockPublicKey.toBuffer().copy(lpData, 116);  // owner@116 = us
+    lpData.writeBigUInt64LE(1n, lpData.length - 104 + 96); // matcher enabled -> IS an LP portfolio
+    mockConnection.getProgramAccounts.mockResolvedValueOnce([
+      { pubkey: pk(133), account: { data: lpData } },
+    ]);
+
+    const { result } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(result.current.myMarkets).toHaveLength(1);
+    });
+    expect(result.current.myMarkets[0].slabAddress.toBase58()).toBe(slab.toBase58());
+  });
+
+  it('does NOT list a market where the wallet owns only a TRADING portfolio', async () => {
+    // Symmetry check: owning a plain (non-LP) portfolio means you TRADE that
+    // market, not that you created it — it belongs on /portfolio, not here.
+    const slab = pk(107);
+    const v17Market = {
+      slabAddress: slab,
+      programId: pk(9),
+      header: {},
+      config: {},
+      configV17: { marketauth: pk(223), unitScale: 1_000_000, collateralMint: pk(1) },
+      engine: {},
+      params: {},
+    } as unknown as DiscoveredMarket;
+    mockMarkets.push(v17Market);
+    mockUseMarketDiscovery.mockReturnValue({ markets: [v17Market], loading: false, error: null, refetch: vi.fn() });
+
+    const tradingData = Buffer.alloc(9347);
+    Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]).copy(tradingData, 0);
+    slab.toBuffer().copy(tradingData, 16);
+    mockPublicKey.toBuffer().copy(tradingData, 116);
+    // matcher DISABLED (0) -> a normal trading portfolio
+    tradingData.writeBigUInt64LE(0n, tradingData.length - 104 + 96);
+    mockConnection.getProgramAccounts.mockResolvedValueOnce([
+      { pubkey: pk(134), account: { data: tradingData } },
+    ]);
+
+    const { result } = renderHook(() => useCreatedMarkets());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.myMarkets).toHaveLength(0);
   });
 
   it('generates a truncated-address label when token metadata cannot be resolved', async () => {

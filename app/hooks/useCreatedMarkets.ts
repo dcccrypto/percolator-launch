@@ -15,6 +15,16 @@ import {
   type V17MarketGroupOI,
 } from "@percolatorct/sdk";
 import { fetchTokenMeta } from "@/lib/tokenMeta";
+import { isLpPortfolio } from "@/lib/userAccountScan";
+
+/** v17 portfolio account magic (PERCV16\0), base64 for the memcmp filter. */
+const V17_PORTFOLIO_MAGIC_B64 = Buffer.from([
+  0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50,
+]).toString("base64");
+/** market_group_id — the slab a portfolio belongs to. */
+const V17_PF_MARKET_OFF = 16;
+/** Mutable owner (SDK PF_OWNER_OFF) — NOT provenance@80. */
+const V17_PF_OWNER_OFF = 116;
 
 /**
  * /my-markets creator dashboard — "markets you CREATED" only.
@@ -108,7 +118,6 @@ export function useCreatedMarkets() {
     }
   }, [connection]);
 
-  // Admin markets are instant (from header data) — no second RPC pass needed.
   const [createdMarkets, setCreatedMarkets] = useState<CreatedMarket[]>([]);
 
   useEffect(() => {
@@ -124,23 +133,73 @@ export function useCreatedMarkets() {
     }
     let cancelled = false;
     const walletStr = publicKey.toBase58();
-    // v17 markets carry an empty header ({}); the market authority lives in
-    // configV17.marketauth. Falling back to header.admin keeps v12 working.
-    // Optional chaining prevents the TypeError that otherwise blanked the whole
-    // admin dashboard for anyone with a v17 market.
-    const admins = markets.filter(
-      (m) => (m.configV17?.marketauth ?? m.header?.admin)?.toBase58() === walletStr,
-    );
 
-    Promise.all(admins.map(async (m) => ({
-      ...m,
-      label: await resolveLabel(m),
-    }))).then((results) => {
+    // ── Which markets did THIS wallet create? ────────────────────────────
+    //
+    // NOT "marketauth == my wallet". A completed launch's LAST step
+    // (StakeInitPool) irreversibly ROTATES marketauth to a stake-pool PDA —
+    // verified on-chain against this playground's own wizard-launched markets
+    // (e.g. dui5i3MN… → marketauth ByFxYX3a…, a PDA, not the creator). So the
+    // authority check is FALSE for every fully-launched market, and a creator
+    // saw "you haven't created a market with this wallet yet" while looking at
+    // markets they had just launched. (The old useMyMarkets had the same
+    // defect; its trader/LP roles merely masked it.)
+    //
+    // The durable creator marker is the market's LP PORTFOLIO — the AMM
+    // counterparty holding the seeded liquidity, created by the wizard via
+    // InitUser with the CREATOR's wallet as its owner, and never rotated. One
+    // getProgramAccounts scan (magic + owner@116 == wallet, no market filter)
+    // returns every portfolio this wallet owns across all markets; the ones
+    // that are LP portfolios (isLpPortfolio — trailing matcher config enabled,
+    // the same discriminator that keeps them OUT of trading-account lookups)
+    // identify the markets it created. Their market_group_id@16 is the slab.
+    //
+    // Unioned with the authority check so INCOMPLETE launches (stake-pool step
+    // never ran, marketauth still the wallet) also appear — exactly the markets
+    // a creator most needs to see and finish.
+    const run = async () => {
+      const createdSlabs = new Set<string>(
+        markets
+          .filter((m) => (m.configV17?.marketauth ?? m.header?.admin)?.toBase58() === walletStr)
+          .map((m) => m.slabAddress.toBase58()),
+      );
+
+      const programIds = Array.from(
+        new Set(markets.map((m) => m.programId?.toBase58()).filter((p): p is string => !!p)),
+      );
+      await Promise.all(
+        programIds.map(async (pid) => {
+          try {
+            const owned = await connection.getProgramAccounts(new PublicKey(pid), {
+              filters: [
+                { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_B64, encoding: "base64" } },
+                { memcmp: { offset: V17_PF_OWNER_OFF, bytes: walletStr } },
+              ],
+            });
+            for (const { account } of owned) {
+              if (!isLpPortfolio(account.data)) continue; // a trading portfolio, not a market I created
+              const data =
+                account.data instanceof Buffer ? account.data : Buffer.from(account.data);
+              // market_group_id — the slab this LP portfolio backs.
+              createdSlabs.add(
+                new PublicKey(data.subarray(V17_PF_MARKET_OFF, V17_PF_MARKET_OFF + 32)).toBase58(),
+              );
+            }
+          } catch {
+            /* transient RPC failure — the authority-derived set above still stands */
+          }
+        }),
+      );
+
+      if (cancelled) return;
+      const mine = markets.filter((m) => createdSlabs.has(m.slabAddress.toBase58()));
+      const results = await Promise.all(mine.map(async (m) => ({ ...m, label: await resolveLabel(m) })));
       if (!cancelled) setCreatedMarkets(results);
-    });
+    };
+    void run();
 
     return () => { cancelled = true; };
-  }, [publicKey, markets, resolveLabel]);
+  }, [publicKey, markets, resolveLabel, connection]);
 
   // H11: enrich v17 markets with real OI/insurance/health data. Runs as a
   // separate pass (not folded into the admin effect above) because it needs a
