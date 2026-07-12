@@ -35,7 +35,10 @@ const POLL_INTERVAL_MS = 30_000; // re-poll the in-progress bar every 30 s
 // re-fetching. Bounded to a handful of symbols x timeframes; see
 // lib/bounded-map.ts for the eviction rationale.
 const CACHE_MAX_ENTRIES = 30;
-const chartCache = new Map<string, { candles: PythCandleData[]; status: PythChartStatus }>();
+/** Successful batches only, with a paint-freshness stamp — see useTokenChart's
+ *  chartCache comment for the empty-cache bug this avoids. */
+const CACHE_PAINT_MAX_AGE_MS = 10 * 60_000;
+const chartCache = new Map<string, { candles: PythCandleData[]; at: number }>();
 
 // `to` is quantized to this grid so repeated requests within the window
 // reuse the exact same URL and actually hit the route's `s-maxage=60` CDN
@@ -70,6 +73,23 @@ export function usePythChart(
   // Mirrors `candles` so the error branch below can check "do we already
   // have data" without taking a stale closure over `candles` state.
   const candlesRef = useRef<PythCandleData[]>([]);
+  // WHICH key candlesRef holds data for — keep-last-good must be per-key or a
+  // failed/empty fetch on a NEW timeframe renders the PREVIOUS timeframe's
+  // candles under the new selector with a "success" status. See useTokenChart.
+  const lastGoodKeyRef = useRef<string>("");
+
+  /** Empty batch or fetch failure: retain candles ONLY if they belong to this
+   *  exact key; otherwise show an honest empty/error state. */
+  const applyEmptyOrError = useCallback((key: string, errMsg: string | null) => {
+    setError(errMsg);
+    if (lastGoodKeyRef.current === key && candlesRef.current.length > 0) {
+      setStatus("success");
+      return;
+    }
+    candlesRef.current = [];
+    setCandles([]);
+    setStatus(errMsg ? "error" : "empty");
+  }, []);
 
   const fetchData = useCallback(async (symbol: string, tf: Timeframe) => {
     const key = `${symbol}:${tf}`;
@@ -80,10 +100,11 @@ export function usePythChart(
     // every repeat timeframe switch blanked the chart to "loading" for a
     // fresh round trip even though we fetched this exact pair moments ago.
     const cached = chartCache.get(key);
-    if (cached) {
+    if (cached && Date.now() - cached.at < CACHE_PAINT_MAX_AGE_MS) {
       candlesRef.current = cached.candles;
+      lastGoodKeyRef.current = key;
       setCandles(cached.candles);
-      setStatus(cached.status);
+      setStatus("success");
       setError(null);
     } else {
       // Don't flip to loading on refreshes — keep showing cached data to avoid
@@ -104,23 +125,25 @@ export function usePythChart(
       if (fetchKeyRef.current !== key) return; // stale guard
       if (json.error) throw new Error(json.error);
       const bars = json.candles ?? [];
-      const status: PythChartStatus = bars.length > 0 ? "success" : "empty";
-      candlesRef.current = bars;
-      setCandles(bars);
-      setStatus(status);
-      boundedSet(chartCache, key, { candles: bars, status }, CACHE_MAX_ENTRIES);
+      if (bars.length > 0) {
+        candlesRef.current = bars;
+        lastGoodKeyRef.current = key;
+        setCandles(bars);
+        setStatus("success");
+        // Only SUCCESSFUL batches are cached — an empty result (what a
+        // transient upstream failure looks like) previously got cached and
+        // repainted as a blank chart on every revisit.
+        boundedSet(chartCache, key, { candles: bars, at: Date.now() }, CACHE_MAX_ENTRIES);
+        return;
+      }
+      applyEmptyOrError(key, null);
     } catch (err) {
       if (fetchKeyRef.current !== key) return;
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[usePythChart] fetch error:", msg);
-      setError(msg);
-      // Keep-last-good: a transient repoll failure shouldn't blank a chart
-      // that already has candles retained — only surface "error" when we
-      // genuinely have nothing to show (same fix as the loading-state one
-      // above, applied to the failure path).
-      setStatus(candlesRef.current.length > 0 ? "success" : "error");
+      applyEmptyOrError(key, msg);
     }
-  }, []);
+  }, [applyEmptyOrError]);
 
   useEffect(() => {
     if (!pythSymbol) {

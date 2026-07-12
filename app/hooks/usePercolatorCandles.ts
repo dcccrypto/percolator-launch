@@ -46,7 +46,9 @@ function deriveWsUrl(): string | null {
 // a full reload. Bounded to a handful of timeframes x a handful of markets;
 // see lib/bounded-map.ts for the eviction rationale.
 const CACHE_MAX_ENTRIES = 30;
-const candleCache = new Map<string, { candles: PercolatorCandle[]; status: PercolatorCandleStatus }>();
+/** Successful batches only, with a paint-freshness stamp. */
+const CACHE_PAINT_MAX_AGE_MS = 10 * 60_000;
+const candleCache = new Map<string, { candles: PercolatorCandle[]; at: number }>();
 
 // `from`/`to` are quantized to this grid (see fetchData) so repeated calls
 // within the window reuse the exact same URL and actually hit the route's
@@ -54,10 +56,15 @@ const candleCache = new Map<string, { candles: PercolatorCandle[]; status: Perco
 // makes every URL unique.
 const QUANTIZE_SEC = 10;
 
-// After the first failure (404/error) this session, /api/candles/[slab] is
-// assumed unconfigured for this deployment (no indexer wired up) — skip the
-// network call entirely on subsequent fetches rather than repeating a
-// request that will never succeed (dead-weight request + console noise).
+// A definitive 404 means /api/candles/[slab] is unconfigured for this
+// deployment (no indexer wired up) — skip the network call on subsequent
+// fetches rather than repeating a request that will never succeed
+// (dead-weight request + console noise).
+//
+// ONLY a 404 sets this. Setting it on ANY throw (as it originally did) meant a
+// single transient 500 or network blip permanently disabled the tier-0 candle
+// source for the entire session — and because this hook has no poll, nothing
+// ever retried it.
 let endpointUnavailable = false;
 
 /**
@@ -87,9 +94,9 @@ export function usePercolatorCandles(
     // timeframe switch blanked the chart to "loading" for a fresh ~300ms-1s
     // round trip even though we fetched this exact pair moments ago.
     const cached = candleCache.get(key);
-    if (cached) {
+    if (cached && Date.now() - cached.at < CACHE_PAINT_MAX_AGE_MS) {
       setCandles(cached.candles);
-      setStatus(cached.status);
+      setStatus("success");
       setError(null);
     } else {
       setStatus((prev) => (prev === "success" ? "success" : "loading"));
@@ -123,9 +130,11 @@ export function usePercolatorCandles(
       if (fetchKeyRef.current !== key) return; // stale guard
       if (body.s === "error") throw new Error(body.errmsg ?? "backend error");
       if (body.s === "no_data") {
+        // NEVER cache an empty batch: a market whose candles simply haven't
+        // been indexed yet would then paint blank from cache forever (this
+        // hook has no poll — see the effect below).
         setCandles([]);
         setStatus("empty");
-        boundedSet(candleCache, key, { candles: [], status: "empty" }, CACHE_MAX_ENTRIES);
         return;
       }
       const bars: PercolatorCandle[] = (body.t ?? []).map((t, i) => ({
@@ -136,15 +145,21 @@ export function usePercolatorCandles(
         close: body.c![i],
         volume: body.v![i],
       }));
-      const status: PercolatorCandleStatus = bars.length > 0 ? "success" : "empty";
-      setCandles(bars);
-      setStatus(status);
-      boundedSet(candleCache, key, { candles: bars, status }, CACHE_MAX_ENTRIES);
+      if (bars.length > 0) {
+        setCandles(bars);
+        setStatus("success");
+        boundedSet(candleCache, key, { candles: bars, at: Date.now() }, CACHE_MAX_ENTRIES);
+        return;
+      }
+      setCandles([]);
+      setStatus("empty");
     } catch (err) {
-      // Any failure (404, network error, backend error payload) marks the
-      // endpoint unavailable for the rest of this session — see the flag's
-      // declaration comment.
-      endpointUnavailable = true;
+      // Only a definitive 404 means "this deployment has no candles backend".
+      // Marking the endpoint dead on ANY throw (a transient 500, a network
+      // blip) permanently disabled the tier-0 candle source for the whole
+      // session — and since this hook has no poll, nothing ever retried.
+      const msg404 = err instanceof Error && /\b404\b/.test(err.message);
+      if (msg404) endpointUnavailable = true;
       if (fetchKeyRef.current !== key) return;
       const msg = err instanceof Error ? err.message : String(err);
       console.warn("[usePercolatorCandles] fetch error:", msg);

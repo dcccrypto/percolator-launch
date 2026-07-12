@@ -53,7 +53,20 @@ const POLL_INTERVAL_MS = 60 * 1000;
 // from/to — it's already deterministic per mint+timeframe, so no
 // quantization is needed to hit its server-side/CDN cache.)
 const CACHE_MAX_ENTRIES = 30;
-const chartCache = new Map<string, { candles: CandleData[]; poolAddress: string | null; status: ChartDataStatus }>();
+/** How old a cached batch may be and still be PAINTED on a repeat visit.
+ *  The cache is a paint accelerator, not a source of truth — every read still
+ *  revalidates in the background — but painting a hours-old batch for a
+ *  round-trip is misleading, so stale entries fall back to the loading state. */
+const CACHE_PAINT_MAX_AGE_MS = 10 * 60_000;
+/** Retry cadence for timeframes excluded from the normal poll (7d/30d) while
+ *  they have no data — see the poll block for why. */
+const EMPTY_RETRY_INTERVAL_MS = 20_000;
+/** Only SUCCESSFUL, non-empty batches are ever cached. Caching an empty result
+ *  (which is what a transient GeckoTerminal 429 looks like — the route turns
+ *  an upstream 429 into an empty 200) made a timeframe render blank from cache
+ *  on every revisit until the background revalidation landed, and on the
+ *  non-polling timeframes (7d/30d) it never healed at all. */
+const chartCache = new Map<string, { candles: CandleData[]; poolAddress: string | null; at: number }>();
 
 /**
  * PERC-512: Hook that fetches external OHLCV candle data for a Solana token.
@@ -75,9 +88,32 @@ export function useTokenChart(
 
   // Track current mint+timeframe to avoid stale updates
   const fetchKeyRef = useRef<string>("");
-  // Mirrors `candles` so the error branch below can check "do we already
+  // Mirrors `candles` so the empty/error branches can check "do we already
   // have data" without taking a stale closure over `candles` state.
   const candlesRef = useRef<CandleData[]>([]);
+  // WHICH key `candlesRef` holds data for. Without this, keep-last-good is
+  // cross-key and renders the WRONG chart: on 1h (3 bars) → switch to 4h →
+  // 4h fails/returns empty → the retained 1h bars were shown under the 4h
+  // selector with a "success" status. Keep-last-good must be per-key.
+  const lastGoodKeyRef = useRef<string>("");
+  // Non-reactive mirror of `status` for the retry loop below (a dep on `status`
+  // would tear down and re-arm the interval on every status change).
+  const statusRef = useRef<ChartDataStatus>("idle");
+  statusRef.current = status;
+
+  /** Empty batch or fetch failure: keep the retained candles ONLY if they
+   *  belong to this exact key; otherwise show an honest empty/error state
+   *  rather than another timeframe's data. */
+  const applyEmptyOrError = useCallback((key: string, errMsg: string | null) => {
+    setError(errMsg);
+    if (lastGoodKeyRef.current === key && candlesRef.current.length > 0) {
+      setStatus("success"); // transient blip over data we already have for THIS key
+      return;
+    }
+    candlesRef.current = [];
+    setCandles([]);
+    setStatus(errMsg ? "error" : "empty");
+  }, []);
 
   const fetchData = useCallback(
     async (mint: string, tf: Timeframe) => {
@@ -89,11 +125,12 @@ export function useTokenChart(
       // every repeat timeframe switch blanked the chart to "loading" for a
       // fresh round trip even though we fetched this exact pair moments ago.
       const cached = chartCache.get(key);
-      if (cached) {
+      if (cached && Date.now() - cached.at < CACHE_PAINT_MAX_AGE_MS) {
         candlesRef.current = cached.candles;
+        lastGoodKeyRef.current = key;
         setCandles(cached.candles);
         setPoolAddress(cached.poolAddress);
-        setStatus(cached.status);
+        setStatus("success");
         setError(null);
       } else {
         // Don't flip to loading on a repoll that already has candles — keep
@@ -116,23 +153,29 @@ export function useTokenChart(
 
         const fetchedCandles: CandleData[] = json.candles ?? [];
         const pool = json.poolAddress ?? null;
-        const status: ChartDataStatus = fetchedCandles.length > 0 ? "success" : "empty";
-        candlesRef.current = fetchedCandles;
-        setCandles(fetchedCandles);
-        setPoolAddress(pool);
-        setStatus(status);
-        boundedSet(chartCache, key, { candles: fetchedCandles, poolAddress: pool, status }, CACHE_MAX_ENTRIES);
+
+        if (fetchedCandles.length > 0) {
+          candlesRef.current = fetchedCandles;
+          lastGoodKeyRef.current = key;
+          setCandles(fetchedCandles);
+          setPoolAddress(pool);
+          setStatus("success");
+          boundedSet(chartCache, key, { candles: fetchedCandles, poolAddress: pool, at: Date.now() }, CACHE_MAX_ENTRIES);
+          return;
+        }
+
+        // Empty batch — usually a transient upstream 429 (the route maps an
+        // upstream failure to an empty 200), occasionally a genuinely
+        // dataless timeframe. NEVER cache it (see chartCache's comment) and
+        // keep-last-good only if the retained candles belong to THIS key.
+        applyEmptyOrError(key, null);
       } catch (err) {
         if (fetchKeyRef.current !== key) return;
         console.warn("[useTokenChart] fetch error:", err);
-        setError(err instanceof Error ? err.message : "Unknown error");
-        // Keep-last-good: a transient repoll failure shouldn't blank a chart
-        // that already has candles retained — only surface "error" when we
-        // genuinely have nothing to show.
-        setStatus(candlesRef.current.length > 0 ? "success" : "error");
+        applyEmptyOrError(key, err instanceof Error ? err.message : "Unknown error");
       }
     },
-    []
+    [applyEmptyOrError]
   );
 
   // Initial fetch + timeframe changes
@@ -155,6 +198,14 @@ export function useTokenChart(
     if (POLLING_TIMEFRAMES.includes(timeframe)) {
       return pollWhenVisible(() => fetchData(mintAddress, timeframe), POLL_INTERVAL_MS);
     }
+    // 7d/30d are excluded from the poll above (their candles barely move), but
+    // that left them with NO recovery path: a transient upstream 429 (which the
+    // route surfaces as an empty batch) blanked the chart until a hard refresh.
+    // Retry only while we still have nothing to show — stops as soon as data
+    // lands, so a genuinely-dataless timeframe settles after one retry cycle.
+    return pollWhenVisible(() => {
+      if (statusRef.current !== "success") fetchData(mintAddress, timeframe);
+    }, EMPTY_RETRY_INTERVAL_MS);
   }, [mintAddress, timeframe, fetchData]);
 
   const refresh = useCallback(() => {
