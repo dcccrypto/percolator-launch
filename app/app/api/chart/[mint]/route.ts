@@ -29,6 +29,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { boundedSet } from "@/lib/bounded-map";
+import { geckoFetch } from "@/lib/gecko-fetch";
 
 export const dynamic = "force-dynamic";
 
@@ -44,8 +45,6 @@ export interface CandleData {
 }
 
 const GECKOTERMINAL_BASE = "https://api.geckoterminal.com/api/v2/networks/solana";
-const FETCH_TIMEOUT_MS = 8_000;
-const GECKO_HEADERS = { Accept: "application/json", "User-Agent": "percolator-chart-proxy/1.0" };
 
 const CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
@@ -140,11 +139,8 @@ async function resolveTopPool(mint: string): Promise<string | null> {
 
 async function resolveTopPoolUncached(mint: string): Promise<string | null> {
   try {
-    const res = await fetch(`${GECKOTERMINAL_BASE}/tokens/${mint}?include=top_pools`, {
-      headers: GECKO_HEADERS,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
+    const res = await geckoFetch(`${GECKOTERMINAL_BASE}/tokens/${mint}?include=top_pools`);
+    if (!res || !res.ok) return null;
     const json = await res.json();
 
     const topIds: string[] = (json?.data?.relationships?.top_pools?.data ?? [])
@@ -180,8 +176,8 @@ async function fetchCandles(
     const url =
       `${GECKOTERMINAL_BASE}/pools/${encodeURIComponent(pool)}/ohlcv/${timeframe}` +
       `?aggregate=${encodeURIComponent(aggregate)}&limit=${encodeURIComponent(limit)}`;
-    const res = await fetch(url, { headers: GECKO_HEADERS, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) return [];
+    const res = await geckoFetch(url);
+    if (!res || !res.ok) return [];
     const json = await res.json();
     const bars = json?.data?.attributes?.ohlcv_list as GeckoOhlcvBar[] | undefined;
     if (!Array.isArray(bars) || bars.length === 0) return [];
