@@ -13,7 +13,11 @@ export {
   computeRequiredMargin,
   computeMaxLeverage,
 } from "@percolatorct/sdk";
-import { computeRequiredMargin as sdkComputeRequiredMargin } from "@percolatorct/sdk";
+import {
+  computeRequiredMargin as sdkComputeRequiredMargin,
+  computeMarkPnl,
+  computePnlPercent,
+} from "@percolatorct/sdk";
 
 /**
  * Convert a `computeMarkPnl()` result into collateral-equivalent raw units.
@@ -84,6 +88,64 @@ export function computePositionInitialMargin(
  * figure. Falls back to `oraclePrice` (no distance travelled) when there's
  * no position or mark to work with, matching computeMarkPnl's own fallback.
  */
+/**
+ * Live-mark PnL + ROE% for one open position, given the CURRENT (possibly
+ * WS-ticking) mark price. Extracted from three call sites that had
+ * independently re-derived the exact same chain — the portfolio page's
+ * `PositionCard`, `PositionsBar`'s `PositionChip`, and the portfolio hero's
+ * live-total roll-up — so a fix to the math only needs to happen once.
+ *
+ * The chain is VERBATIM what `usePortfolio.ts`'s `buildV17Position` computes
+ * with the POLLED oracle price, just re-run with a fresher mark:
+ *   1. `computeMarkPnl` — the SDK's coin-margined formula. Its bigint result
+ *      is scaled in NATIVE units (same scale as `positionSize`), NOT
+ *      collateral/USD — see `computeMarkPnlCollateral`'s own doc comment.
+ *   2. `computeMarkPnlCollateral` — converts that native PnL into
+ *      collateral-scale raw units using the same mark price.
+ *   3. ROE (`pnlPercent`) divides by the position's OWN locked initial
+ *      margin (`computePositionInitialMargin`), not total account capital —
+ *      capital can include collateral not backing this specific position.
+ *      Falls back to `capitalFallback` (typically account capital) when the
+ *      position has no computable initial margin (e.g. a flat/closed leg),
+ *      then to `pnlPercentFallback` (typically the position's last-polled
+ *      `pnlPercent`) if that's also unavailable.
+ *
+ * `entryPriceE6 <= 0n` / `markPriceE6 <= 0n` / a flat `positionSize` all fall
+ * back to `unrealizedPnlFallback`/`pnlPercentFallback` (typically the
+ * position's last-polled `unrealizedPnl`/`pnlPercent` from `usePortfolio`),
+ * matching every call site's pre-extraction behavior exactly.
+ */
+export function computeLivePositionPnl(
+  positionSize: bigint,
+  entryPriceE6: bigint,
+  markPriceE6: bigint,
+  initialMarginBps: bigint,
+  capitalFallback: bigint,
+  unrealizedPnlFallback: bigint,
+  pnlPercentFallback: number,
+): { pnl: bigint; pnlPercent: number } {
+  const pnl = (() => {
+    if (positionSize === 0n || entryPriceE6 <= 0n || markPriceE6 <= 0n) return unrealizedPnlFallback;
+    try {
+      return computeMarkPnlCollateral(computeMarkPnl(positionSize, entryPriceE6, markPriceE6), markPriceE6);
+    } catch {
+      return unrealizedPnlFallback;
+    }
+  })();
+
+  const pnlPercent = (() => {
+    try {
+      const initialMargin = computePositionInitialMargin(positionSize, entryPriceE6, initialMarginBps);
+      if (initialMargin > 0n) return computePnlPercent(pnl, initialMargin);
+      return capitalFallback > 0n ? computePnlPercent(pnl, capitalFallback) : pnlPercentFallback;
+    } catch {
+      return pnlPercentFallback;
+    }
+  })();
+
+  return { pnl, pnlPercent };
+}
+
 export function estimateEntryFromPnl(
   positionSize: bigint,
   onChainPnl: bigint,

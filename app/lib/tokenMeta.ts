@@ -21,6 +21,16 @@ function sanitizeTokenString(input: string, maxLen: number): string {
 /** Well-known tokens that don't need a Jupiter lookup. */
 const KNOWN_TOKENS: Record<string, { symbol: string; name: string }> = {
   A16Gd8AfaPnG6rohE6iPFDf6mr9gk519d6aMUJAperc: { symbol: "PERC", name: "Percolator" },
+  // Playground's canonical sim-USDC collateral mint (PLAYGROUND.md #15) —
+  // the ONE collateral token shared across every devnet playground market.
+  // Both `fetchTokenMetaBatch` and `fetchTokenMeta` below already hardcode
+  // `decimals: 6` for any KNOWN_TOKENS hit, so seeding it here alone is
+  // enough to skip a Helius DAS round trip for it entirely: every portfolio
+  // page load was paying a network fetch just to (re-)learn "6 decimals,
+  // USDC" for the same address every time, which is what gated
+  // `tokenMetasLoading` in app/app/portfolio/page.tsx on a round trip that
+  // could never return anything different.
+  DJ54k4wH92NTtNP8RuHAwG8si1bevXEknzctDdqYN8eC: { symbol: "USDC", name: "Sim USDC (devnet)" },
 };
 
 /** Format a truncated mint address for display (e.g. "A16G...perc") */

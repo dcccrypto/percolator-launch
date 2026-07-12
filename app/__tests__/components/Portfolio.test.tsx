@@ -19,6 +19,7 @@ import { usePortfolio } from "@/hooks/usePortfolio";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { PublicKey } from "@solana/web3.js";
 import { AccountKind } from "@percolatorct/sdk";
+import { computeLivePositionPnl } from "@/lib/trading";
 
 // Mock Next.js
 vi.mock("next/link", () => ({
@@ -34,7 +35,16 @@ vi.mock("next/dynamic", () => ({
 
 // Mock hooks
 vi.mock("@/hooks/useWalletCompat");
-vi.mock("@/hooks/usePortfolio");
+// Only `usePortfolio` itself is mocked per-test via `vi.mocked(...).mockReturnValue(...)`
+// below — `getLiquidationSeverity` (a pure function from the SAME module,
+// used directly by both PortfolioPage and AtRiskBanner) must stay REAL, or
+// every severity-dependent branch (liquidation banners, AtRiskBanner) would
+// silently see `undefined` from the auto-mock and always fall through to
+// the non-danger/non-warning path.
+vi.mock("@/hooks/usePortfolio", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/usePortfolio")>();
+  return { ...actual, usePortfolio: vi.fn() };
+});
 vi.mock("@/hooks/useMultiTokenMeta");
 vi.mock("@/hooks/useLpPositions", () => ({
   useLpPositions: () => ({
@@ -499,6 +509,210 @@ describe("Portfolio Component Tests", () => {
       render(<PortfolioPage />);
 
       expect(screen.getByText(/Connect your wallet to view positions/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("PORT-006: Tier 1 hero + Tier 2 regrouped stat tiles", () => {
+    it("shows the Portfolio Value hero and the 4 regrouped Tier-2 tiles instead of the old 5-tile row", () => {
+      vi.mocked(useWalletCompat).mockReturnValue({
+        connected: true,
+        publicKey: mockPublicKey,
+      });
+
+      vi.mocked(usePortfolio).mockReturnValue({
+        positions: [],
+        totalPnl: 0n,
+        totalDeposited: 0n,
+        atRiskCount: 0,
+        loading: false,
+        refresh: vi.fn(),
+      });
+
+      vi.mocked(useMultiTokenMeta).mockReturnValue(new Map());
+
+      render(<PortfolioPage />);
+
+      // Tier 1 hero
+      expect(screen.getByText("Portfolio Value")).toBeInTheDocument();
+      // Tier 2 — regrouped from the old 5-tile row; "Positions" is now
+      // "Open Positions", and idle deposits get their own tile.
+      expect(screen.getByText("Total Deposited")).toBeInTheDocument();
+      expect(screen.getByText("LP Value")).toBeInTheDocument();
+      expect(screen.getByText("Open Positions")).toBeInTheDocument();
+      expect(screen.getByText("Idle Deposits")).toBeInTheDocument();
+    });
+  });
+
+  describe("PORT-007: AtRiskBanner", () => {
+    const buildPosition = (overrides: Record<string, unknown> = {}) => ({
+      slabAddress: "test-slab-risk",
+      symbol: "SOL",
+      idx: 0,
+      collateralMint: mockPublicKey,
+      account: {
+        kind: AccountKind.User,
+        owner: mockPublicKey,
+        capital: 1000000n,
+        positionSize: 5000000n,
+        pnl: -900000n,
+        entryPrice: 100000000n,
+      },
+      market: {
+        slabAddress: mockPublicKey,
+        config: { collateralMint: mockPublicKey },
+        engine: {},
+      },
+      collateralMint2: mockPublicKey,
+      effectiveEntryPrice: 100000000n,
+      unrealizedPnl: -900000n,
+      oraclePriceE6: 92000000n,
+      pnlPercent: -90,
+      leverage: 5,
+      liquidationPriceE6: 90000000n,
+      // Within "danger" distance (<=10%, see getLiquidationSeverity).
+      liquidationDistancePct: 5,
+      initialMarginBps: 1000n,
+      ...overrides,
+    });
+
+    it("renders a liquidation-risk strip listing the at-risk symbol when a position is within danger distance", () => {
+      vi.mocked(useWalletCompat).mockReturnValue({
+        connected: true,
+        publicKey: mockPublicKey,
+      });
+
+      vi.mocked(usePortfolio).mockReturnValue({
+        positions: [buildPosition()],
+        totalPnl: -900000n,
+        totalDeposited: 1000000n,
+        atRiskCount: 1,
+        loading: false,
+        refresh: vi.fn(),
+      });
+
+      vi.mocked(useMultiTokenMeta).mockReturnValue(
+        new Map([[mockPublicKey.toBase58(), { symbol: "SOL", decimals: 6 }]])
+      );
+
+      render(<PortfolioPage />);
+
+      // No /i flag: AtRiskBanner's own copy is "Liquidation risk" (lowercase
+      // "risk") — PositionCard's PER-ROW banner is "Liquidation Risk"
+      // (capital R) + a "— X% away" suffix, a deliberately different string
+      // so this assertion targets AtRiskBanner specifically, not both.
+      expect(screen.getByText(/Liquidation risk/)).toBeInTheDocument();
+      expect(screen.getByText(/SOL \(5\.0%\)/)).toBeInTheDocument();
+    });
+
+    it("renders nothing (zero height) when no position is at risk", () => {
+      vi.mocked(useWalletCompat).mockReturnValue({
+        connected: true,
+        publicKey: mockPublicKey,
+      });
+
+      vi.mocked(usePortfolio).mockReturnValue({
+        // liquidationPriceE6: 0n too — PositionCard recomputes ITS OWN
+        // liquidationDistancePct live from (liquidationPriceE6, markE6) when
+        // both are positive, which would otherwise override this "safe"
+        // distance regardless of the field set here.
+        positions: [buildPosition({ liquidationDistancePct: 100, liquidationPriceE6: 0n })],
+        totalPnl: -900000n,
+        totalDeposited: 1000000n,
+        atRiskCount: 0,
+        loading: false,
+        refresh: vi.fn(),
+      });
+
+      vi.mocked(useMultiTokenMeta).mockReturnValue(
+        new Map([[mockPublicKey.toBase58(), { symbol: "SOL", decimals: 6 }]])
+      );
+
+      render(<PortfolioPage />);
+
+      expect(screen.queryByText(/Liquidation risk/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Approaching liquidation/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("PORT-008: computeLivePositionPnl (lib/trading.ts) — shared live-PnL math", () => {
+    // Extracted from PositionCard/PositionChip's identical duplicated IIFEs
+    // (PERF PLAN #3) — these pin the exact chain: computeMarkPnl (native) ->
+    // computeMarkPnlCollateral (collateral) -> ROE ÷ initial margin.
+    it("computes live PnL/ROE for a long position whose mark moved up", () => {
+      const { pnl, pnlPercent } = computeLivePositionPnl(
+        5_000_000n, // positionSize (long)
+        100_000_000n, // entryPriceE6 ($100)
+        110_000_000n, // markPriceE6 ($110, live tick above entry)
+        1_000n, // initialMarginBps (10%)
+        0n, // capitalFallback (unused — initial margin is > 0)
+        -1n, // unrealizedPnlFallback (sentinel — must NOT be returned)
+        -1, // pnlPercentFallback (sentinel — must NOT be returned)
+      );
+      expect(pnl).toBeGreaterThan(0n);
+      expect(pnlPercent).toBeGreaterThan(0);
+    });
+
+    it("falls back to the provided fallbacks when the position is flat", () => {
+      const { pnl, pnlPercent } = computeLivePositionPnl(
+        0n, // flat position
+        100_000_000n,
+        110_000_000n,
+        1_000n,
+        0n,
+        -777n,
+        -77,
+      );
+      expect(pnl).toBe(-777n);
+      expect(pnlPercent).toBe(-77);
+    });
+
+    it("falls back to unrealizedPnlFallback for `pnl` when the live mark isn't available yet (markPriceE6 <= 0)", () => {
+      // NOTE: `pnlPercent` is preserved VERBATIM from the original
+      // PositionCard/PositionChip IIFEs, which recompute ROE from the
+      // position's OWN entry/size/marginBps independent of whether a live
+      // mark was available — only `pnl` itself short-circuits to the
+      // fallback. So with a nonzero entry/size, `pnlPercent` here is NOT
+      // simply `pnlPercentFallback`; it's the fallback `pnl` divided by the
+      // position's real (mark-independent) initial margin.
+      const { pnl, pnlPercent } = computeLivePositionPnl(
+        5_000_000n,
+        100_000_000n,
+        0n, // no live tick yet
+        1_000n,
+        0n,
+        123n,
+        4.5,
+      );
+      expect(pnl).toBe(123n);
+      expect(Number.isFinite(pnlPercent)).toBe(true);
+      expect(pnlPercent).not.toBe(4.5);
+    });
+
+    it("falls back to pnlPercentFallback when NEITHER a live mark NOR an entry price is available", () => {
+      const { pnl, pnlPercent } = computeLivePositionPnl(
+        5_000_000n,
+        0n, // no entry price either -> initial margin is also 0
+        0n,
+        1_000n,
+        0n, // capitalFallback = 0 -> falls all the way through to pnlPercentFallback
+        123n,
+        4.5,
+      );
+      expect(pnl).toBe(123n);
+      expect(pnlPercent).toBe(4.5);
+    });
+
+    it("falls back to capitalFallback for ROE when initial margin is zero (e.g. no entry price)", () => {
+      const { pnlPercent } = computeLivePositionPnl(
+        5_000_000n,
+        100_000_000n,
+        110_000_000n,
+        0n, // initialMarginBps = 0 -> computePositionInitialMargin returns 0
+        2_000_000n, // capitalFallback > 0 -> used for ROE denominator
+        0n,
+        0,
+      );
+      expect(Number.isFinite(pnlPercent)).toBe(true);
     });
   });
 });

@@ -2,15 +2,30 @@
 
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { formatTokenAmount, formatUsdFromNumber } from "@/lib/format";
-import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
 import { useEffect, useState } from "react";
 import { ShimmerSkeleton } from "@/components/ui/ShimmerSkeleton";
+import type { MarketWithStats } from "@/hooks/useAllMarketStats";
 
 interface TradeHistoryTableProps {
   wallet: string | null | undefined;
   slabFilter?: string;
   /** Maximum rows to show (default 20, loads more on demand) */
   pageSize?: number;
+  /**
+   * slab_address -> market stats (from `useAllMarketStats`), used ONLY to
+   * resolve the row's display symbol. Optional — falls back to the
+   * truncated slab address (previous behavior) when omitted or when a
+   * given slab isn't in the map (e.g. a market not in the curated/API
+   * directory yet).
+   */
+  statsMap?: Map<string, MarketWithStats>;
+}
+
+/** Row market label: resolved symbol when available, truncated slab address
+ *  otherwise — same fallback shape as the portfolio page's own marketLabel. */
+function marketLabel(slabAddress: string, statsMap?: Map<string, MarketWithStats>): string {
+  const symbol = statsMap?.get(slabAddress)?.symbol;
+  return symbol ? `${symbol}/USD` : `${shortAddress(slabAddress)}/USD`;
 }
 
 function formatPrice(priceNum: number): string {
@@ -87,6 +102,7 @@ export function TradeHistoryTable({
   wallet,
   slabFilter,
   pageSize = 20,
+  statsMap,
 }: TradeHistoryTableProps) {
   const { trades, total, loading, error, hasMore, loadMore } = useTradeHistory({
     wallet,
@@ -96,17 +112,6 @@ export function TradeHistoryTable({
 
   // Slab → collateral decimals map (fetched from /api/markets)
   const slabDecimals = useSlabDecimals();
-
-  // Collect unique slab addresses to resolve market symbols
-  const slabAddresses = [...new Set(trades.map((t) => t.slab_address))];
-  const tokenMetaMap = useMultiTokenMeta(
-    // useMultiTokenMeta expects PublicKey-like strings or empty strings
-    // The portfolio page uses collateralMint, but here we have slab addresses.
-    // We'll resolve market symbols via a separate lookup below.
-    [],
-  );
-  void tokenMetaMap; // not used yet — we show slab short address as market id
-  void slabAddresses;
 
   if (!wallet) return null;
 
@@ -138,18 +143,18 @@ export function TradeHistoryTable({
     );
   }
 
+  // Shared quiet placeholder for "nothing to show" — TradeStatsPanel stays
+  // silent (returns null) for this same no-data case (see its own doc
+  // comment), so THIS is the one place the combined activity section
+  // (ActivitySection) actually surfaces a message for it, instead of two
+  // components independently rendering their own slightly-different copy.
   if (!loading && trades.length === 0) {
     return (
       <div className="border border-dashed border-[var(--border)] bg-[var(--panel-bg)]/50 p-8 text-center">
-        <p className="text-[13px] text-[var(--text)]">No trades yet</p>
+        <p className="text-[13px] text-[var(--text)]">Trade history requires the indexer (currently unavailable)</p>
         <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
-          Your executed trades will appear here once the trade indexer has processed them.
+          Your executed trades will appear here once the indexer has processed them.
         </p>
-        {(process.env.NEXT_PUBLIC_DEFAULT_NETWORK ?? process.env.NEXT_PUBLIC_SOLANA_NETWORK) === "devnet" && (
-          <p className="mt-2 text-[10px] text-[var(--warning)]/60">
-            ⚠ Devnet: trade indexer may not be running. Trades are on-chain but not yet indexed.
-          </p>
-        )}
       </div>
     );
   }
@@ -183,14 +188,14 @@ export function TradeHistoryTable({
               key={trade.id}
               className="grid grid-cols-2 gap-x-4 gap-y-1.5 bg-[var(--panel-bg)] px-4 py-3 transition-colors duration-100 hover:bg-[var(--bg-elevated)] sm:grid-cols-[1fr_80px_110px_110px_90px_110px_32px] sm:items-center sm:gap-y-0"
             >
-              {/* Market (slab short address) */}
+              {/* Market — resolved symbol via statsMap, truncated slab address fallback */}
               <div className="sm:truncate">
                 <p
                   className="text-[11px] font-medium text-[var(--text)]"
                   style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
                   title={trade.slab_address}
                 >
-                  {shortAddress(trade.slab_address)}/USD
+                  {marketLabel(trade.slab_address, statsMap)}
                 </p>
               </div>
 

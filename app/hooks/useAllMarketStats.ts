@@ -4,7 +4,7 @@ import useSWR from "swr";
 import { isBlockedSlab } from "@/lib/blocklist";
 import type { Database } from "@/lib/database.types";
 
-type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
+export type MarketWithStats = Database['public']['Views']['markets_with_stats']['Row'];
 type MarketsApiResponse = {
   markets?: MarketWithStats[];
   error?: string;

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
-import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
+import { computeLivePositionPnl } from "@/lib/trading";
 import { SlabProvider } from "@/components/providers/SlabProvider";
 import { useClosePosition } from "@/hooks/useClosePosition";
 import { useEngineFreshness } from "@/hooks/useEngineFreshness";
@@ -11,8 +11,9 @@ import { ClosePositionModal } from "@/components/trade/ClosePositionModal";
 import { clearEntryPrice } from "@/lib/entry-price";
 import { useWalletCompat } from "@/hooks/useWalletCompat";
 import { usePortfolio, getLiquidationSeverity, type PortfolioPosition } from "@/hooks/usePortfolio";
+import { useLiveSlabPrices } from "@/hooks/useLiveSlabPrices";
 import { useLpPositions } from "@/hooks/useLpPositions";
-import { LpPositionsPanel } from "@/components/portfolio/LpPositionsPanel";
+import { AtRiskBanner } from "@/components/portfolio/AtRiskBanner";
 import { formatTokenAmount, formatUsdPriceE6 } from "@/lib/format";
 import dynamic from "next/dynamic";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
@@ -23,14 +24,62 @@ import { useAllMarketStats } from "@/hooks/useAllMarketStats";
 import { PublicKey } from "@solana/web3.js";
 import { isMockMode } from "@/lib/mock-mode";
 import { getMockPortfolioPositions } from "@/lib/mock-trade-data";
-import { TradeHistoryTable } from "@/components/trade/TradeHistoryTable";
-import { TradeStatsPanel } from "@/components/trade/TradeStatsPanel";
 import { useTraderStats } from "@/hooks/useTraderStats";
 import { formatLeverage, RISK_LEVERAGE_LABEL, RISK_LEVERAGE_TITLE } from "@/lib/leverage-display";
 
 const ConnectButton = dynamic(
   () => import("@/components/wallet/ConnectButton").then((m) => m.ConnectButton),
   { ssr: false }
+);
+
+// PERF PLAN #4: below-the-fold sections lazy-loaded exactly like
+// app/app/dashboard/page.tsx's widgets — ssr:false + a fixed-height
+// skeleton (no CLS when the real component swaps in).
+const ActivitySection = dynamic(
+  () => import("@/components/portfolio/ActivitySection").then((m) => m.ActivitySection),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="space-y-2">
+        <div className="h-[72px] border border-[var(--border)] bg-[var(--panel-bg)] p-3.5">
+          <div className="grid h-full grid-cols-2 gap-4 sm:grid-cols-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="space-y-1.5">
+                <ShimmerSkeleton className="h-2.5 w-16" />
+                <ShimmerSkeleton className="h-4 w-20" />
+              </div>
+            ))}
+          </div>
+        </div>
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="flex items-center gap-4 border border-[var(--border)] bg-[var(--panel-bg)] px-4 py-3">
+            <ShimmerSkeleton className="h-4 w-16" />
+            <ShimmerSkeleton className="h-4 w-12 rounded" />
+            <ShimmerSkeleton className="h-4 w-20" />
+            <ShimmerSkeleton className="h-4 w-20" />
+            <ShimmerSkeleton className="h-4 w-16" />
+            <ShimmerSkeleton className="h-4 w-24 ml-auto" />
+          </div>
+        ))}
+      </div>
+    ),
+  },
+);
+
+const LpPositionsPanel = dynamic(
+  () => import("@/components/portfolio/LpPositionsPanel").then((m) => m.LpPositionsPanel),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[140px] border border-[var(--border)] bg-[var(--panel-bg)] p-4">
+        <ShimmerSkeleton className="mb-4 h-4 w-32" />
+        <div className="space-y-2">
+          <ShimmerSkeleton className="h-8 w-full" />
+          <ShimmerSkeleton className="h-8 w-full" />
+        </div>
+      </div>
+    ),
+  },
 );
 
 function formatPnl(pnl: bigint | undefined | null, decimals = 6): string {
@@ -141,31 +190,20 @@ function PositionCard({
   const hasPosition = posSize !== 0n;
 
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
-  // Live PnL: EXACTLY usePortfolio's corrected math with the live mark
-  // substituted — computeMarkPnl yields coin-margined NATIVE units, which
-  // must be converted to collateral via computeMarkPnlCollateral before
-  // display, and ROE divides by the position's INITIAL MARGIN (capital
-  // fallback), not total account capital. See enrichPosition in usePortfolio.
-  const pnlTokens = (() => {
-    if (!hasPosition || posEntry <= 0n || markE6 <= 0n) return pos.unrealizedPnl;
-    try {
-      return computeMarkPnlCollateral(computeMarkPnl(posSize, posEntry, markE6), markE6);
-    } catch {
-      return pos.unrealizedPnl;
-    }
-  })();
-  const pnlPct = (() => {
-    try {
-      const positionInitialMargin = computePositionInitialMargin(posSize, posEntry, pos.initialMarginBps);
-      return positionInitialMargin > 0n
-        ? computePnlPercent(pnlTokens, positionInitialMargin)
-        : posCapital > 0n
-          ? computePnlPercent(pnlTokens, posCapital)
-          : pos.pnlPercent;
-    } catch {
-      return pos.pnlPercent;
-    }
-  })();
+  // Live PnL/ROE: EXACTLY usePortfolio's corrected math with the live mark
+  // substituted — see computeLivePositionPnl's doc comment (lib/trading.ts)
+  // for the coin-margined-native → collateral conversion + ROE-vs-initial-
+  // margin chain. Shared verbatim with PositionsBar's PositionChip and the
+  // portfolio hero's live totals below.
+  const { pnl: pnlTokens, pnlPercent: pnlPct } = computeLivePositionPnl(
+    posSize,
+    posEntry,
+    markE6,
+    pos.initialMarginBps,
+    posCapital,
+    pos.unrealizedPnl,
+    pos.pnlPercent,
+  );
   const liquidationDistancePct =
     hasPosition && liquidationPriceE6 > 0n && markE6 > 0n
       ? Math.max(0, Math.min(100, (Math.abs(Number(markE6) - Number(liquidationPriceE6)) / Number(markE6)) * 100))
@@ -470,6 +508,51 @@ export default function PortfolioPage() {
     ? computeUsdTotals()
     : { depositedUsd: 0, unrealizedPnlUsd: 0, valueUsd: 0 };
 
+  // PERF PLAN #3: the hero tiles (Portfolio Value / Unrealized PnL) tick
+  // LIVE off the shared WS price store, instead of only refreshing on
+  // usePortfolio's 30s poll like `usdTotals` above (which the cards below
+  // already escape via PositionCard's own per-row live subscription).
+  // `useLiveSlabPrices` batches every open position's slab into ONE
+  // subscribing effect (see its own doc comment) rather than mounting N
+  // useSyncExternalStore instances just for this roll-up.
+  const livePrices = useLiveSlabPrices(openPositions.map((pos) => pos.slabAddress));
+  const liveUsdTotals = activePositions.length > 0 && !tokenMetasLoading
+    ? (() => {
+        let unrealizedPnlUsd = 0;
+        for (const pos of activePositions) {
+          const decimals = getDecimals(pos);
+          const divisor = 10 ** decimals;
+          const posSize = pos.account?.positionSize ?? 0n;
+          const liveE6 = livePrices.get(pos.slabAddress);
+          const markE6 = liveE6 != null && liveE6 > 0n ? liveE6 : pos.oraclePriceE6;
+          // Same live-mark chain as PositionCard/PositionChip (see
+          // computeLivePositionPnl's doc comment) — flat/idle positions
+          // (posSize === 0n) fall straight through to `pos.unrealizedPnl`
+          // (always 0 for a flat account), so this sum is safe over
+          // `activePositions` (open + idle), not just `openPositions`.
+          const { pnl } = computeLivePositionPnl(
+            posSize,
+            pos.effectiveEntryPrice,
+            markE6,
+            pos.initialMarginBps,
+            pos.account?.capital ?? 0n,
+            pos.unrealizedPnl,
+            pos.pnlPercent,
+          );
+          unrealizedPnlUsd += Number(pnl) / divisor;
+        }
+        // Deposited total isn't price-dependent — reuse usdTotals' value
+        // rather than re-summing capital a second time.
+        return { unrealizedPnlUsd, valueUsd: usdTotals.depositedUsd + unrealizedPnlUsd };
+      })()
+    : { unrealizedPnlUsd: 0, valueUsd: 0 };
+
+  // Idle (parked, non-position) collateral value — its own Tier-2 tile now
+  // that "Positions" no longer conflates open positions with idle deposits.
+  const idleDepositsUsd = !tokenMetasLoading
+    ? idleDeposits.reduce((sum, pos) => sum + Number(pos.account?.capital ?? 0n) / (10 ** getDecimals(pos)), 0)
+    : 0;
+
   if (!connected) {
     return (
       <div className="min-h-[calc(100dvh-48px)] relative">
@@ -528,44 +611,76 @@ export default function PortfolioPage() {
           </div>
         </ScrollReveal>
 
-        {/* Summary stats */}
+        {/* At-risk strip — zero height unless a position is within the
+            liquidation warning distance (see getLiquidationSeverity). */}
+        <AtRiskBanner positions={openPositions} />
+
+        {/* Tier 1 hero: Portfolio Value (live) + live Unrealized PnL beneath. */}
         <ScrollReveal stagger={0.08}>
-          <div className="mb-8 grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] sm:grid-cols-5">
-            {/* #863: gate loading shimmer on walletConnected; show "—" (muted) when no wallet */}
+          <div className="mb-2 border border-[var(--border)] bg-[var(--panel-bg)] p-6 transition-colors duration-200 hover:bg-[var(--bg-elevated)] sm:p-8">
+            <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">Portfolio Value</p>
+            <p
+              className={`text-3xl font-bold tabular-nums sm:text-4xl ${!walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]"}`}
+              style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
+            >
+              {!walletConnected
+                ? "\u2014"
+                : (loading || tokenMetasLoading)
+                  ? "\u2026"
+                  : `$${liveUsdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            </p>
+            {walletConnected && !loading && !tokenMetasLoading && (
+              <div className="mt-3 flex items-baseline gap-2">
+                <span
+                  className={`text-sm font-bold sm:text-base ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]"}`}
+                  style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}
+                >
+                  {liveUsdTotals.unrealizedPnlUsd >= 0 ? "+" : ""}
+                  ${Math.abs(liveUsdTotals.unrealizedPnlUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span
+                  className={`text-xs font-medium ${liveUsdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]/70" : "text-[var(--short)]/70"}`}
+                >
+                  {formatPnlPct(usdTotals.depositedUsd > 0 ? (liveUsdTotals.unrealizedPnlUsd / usdTotals.depositedUsd) * 100 : 0)} unrealized
+                </span>
+              </div>
+            )}
+          </div>
+        </ScrollReveal>
+
+        {/* Tier 2: Total Deposited / LP Value / Open Positions / Idle Deposits */}
+        <ScrollReveal stagger={0.08}>
+          <div className="mb-8 grid grid-cols-2 gap-px overflow-hidden border border-[var(--border)] bg-[var(--border)] sm:grid-cols-4">
+            {/* #863: gate loading shimmer on walletConnected; show "\u2014" (muted) when no wallet */}
             {[
               {
-                label: "Portfolio Value",
-                value: !walletConnected ? "—" : (loading || tokenMetasLoading) ? "\u2026" : `$${usdTotals.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
-              },
-              {
                 label: "Total Deposited",
-                value: !walletConnected ? "—" : (loading || tokenMetasLoading) ? "\u2026" : `$${usdTotals.depositedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : `$${usdTotals.depositedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                 color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
-              },
-              {
-                label: "Unrealized PnL",
-                value: !walletConnected ? "—" : (loading || tokenMetasLoading) ? "\u2026" : `${usdTotals.unrealizedPnlUsd >= 0 ? "+" : ""}$${Math.abs(usdTotals.unrealizedPnlUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                color: !walletConnected ? "text-[var(--text-dim)]" : usdTotals.unrealizedPnlUsd >= 0 ? "text-[var(--long)]" : "text-[var(--short)]",
-                sub: !walletConnected || loading || tokenMetasLoading ? undefined : `${usdTotals.depositedUsd > 0 ? formatPnlPct((usdTotals.unrealizedPnlUsd / usdTotals.depositedUsd) * 100) : "0.00%"}`,
               },
               {
                 label: "LP Value",
-                value: !walletConnected ? "—" : lpPositions.loading ? "\u2026" : `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                value: !walletConnected ? "\u2014" : lpPositions.loading ? "\u2026" : `$${lpPositions.totalRedeemable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                 color: !walletConnected ? "text-[var(--text-dim)]" : lpPositions.totalRedeemable > 0 ? "text-[var(--cyan)]" : "text-[var(--text-secondary)]",
                 sub: walletConnected && lpPositions.positions.length > 0
                   ? `${lpPositions.positions.length} pool${lpPositions.positions.length > 1 ? "s" : ""}`
                   : undefined,
               },
               {
-                label: "Positions",
-                value: !walletConnected ? "—" : loading ? "\u2026" : openPositions.length.toString(),
+                label: "Open Positions",
+                value: !walletConnected ? "\u2014" : loading ? "\u2026" : openPositions.length.toString(),
                 color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
-                sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : walletConnected && idleDeposits.length > 0 ? `${idleDeposits.length} market deposit${idleDeposits.length === 1 ? "" : "s"}` : undefined,
+                sub: walletConnected && atRiskCount > 0 ? `${atRiskCount} at risk` : undefined,
                 subColor: atRiskCount > 0 ? "text-[var(--short)]" : undefined,
               },
-            ].map((stat, idx, arr) => (
-              <div key={stat.label} className={`bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]${idx === arr.length - 1 && arr.length % 2 !== 0 ? " col-span-2 sm:col-span-1" : ""}`}>
+              {
+                label: "Idle Deposits",
+                value: !walletConnected ? "\u2014" : (loading || tokenMetasLoading) ? "\u2026" : `$${idleDepositsUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                color: !walletConnected ? "text-[var(--text-dim)]" : "text-[var(--text)]",
+                sub: walletConnected && idleDeposits.length > 0 ? `${idleDeposits.length} market deposit${idleDeposits.length === 1 ? "" : "s"}` : undefined,
+              },
+            ].map((stat) => (
+              <div key={stat.label} className="bg-[var(--panel-bg)] p-5 transition-colors duration-200 hover:bg-[var(--bg-elevated)]">
                 <p className="mb-2 text-[9px] font-medium uppercase tracking-[0.2em] text-[var(--text)]">{stat.label}</p>
                 <p className={`text-xl font-bold tabular-nums ${stat.color}`} style={{ fontFamily: "var(--font-jetbrains-mono)", fontVariantNumeric: "tabular-nums" }}>
                   {stat.value}
@@ -692,26 +807,17 @@ export default function PortfolioPage() {
           </div>
         </ScrollReveal>
 
-        {/* Trade history + stats */}
+        {/* Trade history + stats — PERC-481, lazy-loaded (PERF PLAN #4) */}
         <ScrollReveal delay={0.3}>
           <div className="mt-8">
             <h2 className="mb-3 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--accent)]/60">
               // trade history
             </h2>
-            {/* PERC-481: Aggregate stats banner */}
-            {(traderStats.stats || traderStats.loading) && (
-              <div className="mb-2">
-                <TradeStatsPanel
-                  stats={traderStats.stats}
-                  loading={traderStats.loading}
-                  error={traderStats.error}
-                  onRetry={traderStats.refresh}
-                />
-              </div>
-            )}
-            <TradeHistoryTable
+            <ActivitySection
               wallet={walletPublicKey?.toBase58() ?? null}
               pageSize={20}
+              traderStats={traderStats}
+              statsMap={statsMap}
             />
           </div>
         </ScrollReveal>

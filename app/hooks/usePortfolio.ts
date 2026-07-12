@@ -818,11 +818,43 @@ interface PortfolioCacheEntry {
  *  widget) into a single scan. */
 const PORTFOLIO_CACHE_TTL_MS = 12_000;
 
+/**
+ * How stale a cached snapshot may be and still be handed back SYNCHRONOUSLY
+ * as a component's initial state (see `peekPortfolioSnapshot` + the lazy
+ * `useState` initializers in `usePortfolio` below). This is deliberately a
+ * SEPARATE, much longer window than `PORTFOLIO_CACHE_TTL_MS`: that constant
+ * governs whether a NEW concurrent scan is skipped (a dedup TTL); this one
+ * only governs "is this old snapshot still good enough to paint instantly
+ * while a real refresh runs in the background" — a stale-while-revalidate
+ * seed, not a cache-freshness guarantee. Five minutes covers the common case
+ * (navigating away and back within the same session) without ever risking a
+ * genuinely-stale portfolio being mistaken for the fetch effect's real,
+ * always-still-running 30s refresh.
+ */
+const PORTFOLIO_SEED_MAX_AGE_MS = 5 * 60_000;
+
 const portfolioSnapshotCache = new Map<string, PortfolioCacheEntry>();
 const portfolioInflight = new Map<string, Promise<PortfolioSnapshot>>();
 
 function portfolioCacheKey(walletBase58: string, network: string): string {
   return `${network}:${walletBase58}`;
+}
+
+/**
+ * Read-only, synchronous peek at the last scan's snapshot for (wallet,
+ * network) — no fetch, no dedup/inflight join, never mutates the cache.
+ * Exists so `usePortfolio`'s `useState` calls can lazily seed from whatever
+ * the LAST mounted instance already scanned, instead of always starting
+ * blank/loading on every mount (e.g. a route navigation away from and back
+ * to /portfolio). Returns `null` when there's no entry, or the entry is
+ * older than `PORTFOLIO_SEED_MAX_AGE_MS` — a stale seed would show wrong
+ * numbers for longer than "stale-while-revalidate" should tolerate.
+ */
+export function peekPortfolioSnapshot(key: string): PortfolioSnapshot | null {
+  const cached = portfolioSnapshotCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.ts >= PORTFOLIO_SEED_MAX_AGE_MS) return null;
+  return cached.snapshot;
 }
 
 /**
@@ -883,30 +915,75 @@ function loadPortfolioShared(
 export function usePortfolio(enabled: boolean = true): PortfolioData {
   const { connection } = useConnectionCompat();
   const { publicKey } = useWalletCompat();
-  const [positions, setPositions] = useState<PortfolioPosition[]>([]);
-  const [totalPnl, setTotalPnl] = useState<bigint>(0n);
-  const [totalDeposited, setTotalDeposited] = useState<bigint>(0n);
-  const [totalValue, setTotalValue] = useState<bigint>(0n);
-  const [totalUnrealizedPnl, setTotalUnrealizedPnl] = useState<bigint>(0n);
-  const [atRiskCount, setAtRiskCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+
+  // Synchronous seed: peek whatever the LAST scan for THIS (wallet, network)
+  // already produced, so a return visit (e.g. navigating back to /portfolio,
+  // or a second widget mounting after the first already scanned) paints
+  // instantly instead of flashing an empty/loading UI while the fetch effect
+  // below re-runs. `peekPortfolioSnapshot` itself enforces the freshness
+  // window (`PORTFOLIO_SEED_MAX_AGE_MS`) — a too-old entry seeds nothing here.
+  // Deliberately only read at the FIRST render of a given publicKey identity;
+  // the wallet-identity-change effect below re-peeks (and this closure over
+  // `publicKey` is fine for that: lazy useState initializers only ever run
+  // once per mount, not once per render).
+  const peekNow = (): PortfolioSnapshot | null =>
+    publicKey ? peekPortfolioSnapshot(portfolioCacheKey(publicKey.toBase58(), getNetwork())) : null;
+
+  const [positions, setPositions] = useState<PortfolioPosition[]>(() => peekNow()?.positions ?? []);
+  const [totalPnl, setTotalPnl] = useState<bigint>(() => peekNow()?.totalPnl ?? 0n);
+  const [totalDeposited, setTotalDeposited] = useState<bigint>(() => peekNow()?.totalDeposited ?? 0n);
+  const [totalValue, setTotalValue] = useState<bigint>(() => peekNow()?.totalValue ?? 0n);
+  const [totalUnrealizedPnl, setTotalUnrealizedPnl] = useState<bigint>(() => peekNow()?.totalUnrealizedPnl ?? 0n);
+  const [atRiskCount, setAtRiskCount] = useState(() => peekNow()?.atRiskCount ?? 0);
+  // loading = !snapshot: if we found a fresh-enough seed, skip straight past
+  // the "nothing to show yet" state — the fetch effect below still runs and
+  // (via `hasLoadedOnce` below, also seeded) treats it as a background
+  // refresh (`isRefreshing`), not an initial load.
+  const [loading, setLoading] = useState(() => peekNow() === null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const hasLoadedOnce = useRef(false);
+  const hasLoadedOnce = useRef(peekNow() !== null);
   const [refreshCounter, setRefreshCounter] = useState(0);
   // Set by `refresh()` just before it bumps refreshCounter, and consumed
   // (read + reset) at the start of the next fetch effect run — see that
   // effect's comment and loadPortfolioShared's `force` param.
   const forceNextLoad = useRef(false);
 
-  // Reset initial-load lifecycle when wallet identity changes (CodeRabbit fix)
+  // Reset (or re-seed) initial-load lifecycle when wallet identity changes
+  // (CodeRabbit fix). Originally this unconditionally blanked state to
+  // force a fresh "loading" UI on every wallet switch — but if the NEW
+  // identity already has its own fresh-enough cached snapshot (e.g.
+  // switching back to a wallet used earlier this session), re-peek and seed
+  // from it instead of needlessly blanking to empty/loading.
   const prevPublicKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const pkStr = publicKey?.toBase58() ?? null;
-    if (pkStr !== prevPublicKeyRef.current) {
-      prevPublicKeyRef.current = pkStr;
-      hasLoadedOnce.current = false;
-      setIsRefreshing(false);
+    if (pkStr === prevPublicKeyRef.current) return;
+    prevPublicKeyRef.current = pkStr;
+    setIsRefreshing(false);
+
+    const snap = pkStr ? peekPortfolioSnapshot(portfolioCacheKey(pkStr, getNetwork())) : null;
+    if (snap) {
+      setPositions(snap.positions);
+      setTotalPnl(snap.totalPnl);
+      setTotalDeposited(snap.totalDeposited);
+      setTotalValue(snap.totalValue);
+      setTotalUnrealizedPnl(snap.totalUnrealizedPnl);
+      setAtRiskCount(snap.atRiskCount);
+      setLoading(false);
+      hasLoadedOnce.current = true;
+      return;
     }
+
+    // No fresh cached snapshot for the new identity — blank until the fetch
+    // effect below resolves, same as the pre-existing behavior.
+    setPositions([]);
+    setTotalPnl(0n);
+    setTotalDeposited(0n);
+    setTotalValue(0n);
+    setTotalUnrealizedPnl(0n);
+    setAtRiskCount(0);
+    setLoading(true);
+    hasLoadedOnce.current = false;
   }, [publicKey]);
 
   useEffect(() => {

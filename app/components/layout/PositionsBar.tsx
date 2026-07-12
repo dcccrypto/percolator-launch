@@ -7,7 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 import { parseWrapperConfigV17, isV17Account, V17_HEADER_LEN } from "@percolatorct/sdk";
 import { subscribeSlab, getSnapshot, applyOnChainPoll } from "@/lib/priceStore/priceStore";
 import { sanitizePriceE6 } from "@/lib/oraclePrice";
-import { computeMarkPnl, computeMarkPnlCollateral, computePnlPercent, computePositionInitialMargin } from "@/lib/trading";
+import { computeLivePositionPnl } from "@/lib/trading";
 import { usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
 import { useConnectionCompat, useWalletCompat } from "@/hooks/useWalletCompat";
 import { useMultiTokenMeta } from "@/hooks/useMultiTokenMeta";
@@ -51,31 +51,18 @@ function PositionChip({ pos, decimals }: { pos: PortfolioPosition; decimals: num
   const posEntry = pos.effectiveEntryPrice;
   const markE6 = livePriceE6 != null && livePriceE6 > 0n ? livePriceE6 : pos.oraclePriceE6;
 
-  // Same collateral-unit conversion as usePortfolio / the portfolio cards:
-  // computeMarkPnl is coin-margined native units, NOT collateral — convert
-  // via computeMarkPnlCollateral. Falls back to the hook's own (already
-  // collateral-converted) unrealizedPnl when entry/mark are unavailable.
-  const pnl = (() => {
-    if (posSize === 0n || posEntry <= 0n || markE6 <= 0n) return pos.unrealizedPnl;
-    try {
-      return computeMarkPnlCollateral(computeMarkPnl(posSize, posEntry, markE6), markE6);
-    } catch {
-      return pos.unrealizedPnl;
-    }
-  })();
-
-  // Live ROE — same basis as the portfolio cards: PnL ÷ the position's own
-  // locked initial margin, capital fallback, hook's pnlPercent last resort.
-  const pnlPct = (() => {
-    try {
-      const im = computePositionInitialMargin(posSize, posEntry, pos.initialMarginBps);
-      if (im > 0n) return computePnlPercent(pnl, im);
-      const capital = pos.account?.capital ?? 0n;
-      return capital > 0n ? computePnlPercent(pnl, capital) : pos.pnlPercent;
-    } catch {
-      return pos.pnlPercent;
-    }
-  })();
+  // Same live-mark PnL/ROE chain as the portfolio cards (PositionCard) — see
+  // computeLivePositionPnl's doc comment for the full unit-conversion story
+  // (coin-margined native → collateral, ROE ÷ initial margin).
+  const { pnl, pnlPercent: pnlPct } = computeLivePositionPnl(
+    posSize,
+    posEntry,
+    markE6,
+    pos.initialMarginBps,
+    pos.account?.capital ?? 0n,
+    pos.unrealizedPnl,
+    pos.pnlPercent,
+  );
 
   const symbol = pos.symbol ?? `${pos.slabAddress.slice(0, 4)}…`;
   const colorClass =
