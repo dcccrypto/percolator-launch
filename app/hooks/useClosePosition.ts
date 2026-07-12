@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { useConnectionCompat } from "@/hooks/useWalletCompat";
 import { AccountKind, isV17Account, parsePortfolioV17 } from "@percolatorct/sdk";
 import { useTrade, prewarmTradeSubmission } from "@/hooks/useTrade";
@@ -25,6 +25,10 @@ export interface UseClosePositionReturn {
   phase: "idle" | "submitting" | "confirming";
   lastSig: string | null;
   resetPhase: () => void;
+  /** Fire when the close MODAL opens (fire-and-forget): starts the fresh
+   *  portfolio read + trade-account/blockhash/fee prewarms so the confirm
+   *  click reaches the wallet popup with zero blocking RPC round-trips. */
+  prewarmClose: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,6 +41,89 @@ export interface UseClosePositionReturn {
 const V17_PORTFOLIO_MAGIC_CP = Buffer.from([0x00, 0x36, 0x31, 0x56, 0x43, 0x52, 0x45, 0x50]);
 const V17_PF_MARKET_OFF_CP = 16;
 const V17_PF_OWNER_OFF_CP = 116;
+
+// ---------------------------------------------------------------------------
+// Prewarmable fresh-portfolio read.
+//
+// The authoritative pre-close position read is safety-critical (an outdated
+// size can over-close and open opposite exposure), so it is NEVER replaced by
+// cached UI state. But "authoritative" doesn't have to mean "started only
+// after the user clicks": a direct chain read taken when the close MODAL
+// opened, at most FRESH_READ_TTL_MS old, is dramatically fresher than the 30s
+// UI poll this guard exists to distrust — and consuming it makes the click →
+// wallet-popup gap near-zero. If the user lingers past the TTL, the click
+// falls back to a live read exactly as before. Any close failure invalidates
+// the entry.
+// ---------------------------------------------------------------------------
+/** Maximum age of a prewarmed read the close click may consume. Position size
+ *  only moves via the owner's own txs, liquidation, or ADL — a ≤4s window is
+ *  well inside the risk this guard was built for (stale 30s UI polls). */
+const FRESH_READ_TTL_MS = 4_000;
+const freshReadCache = new Map<string, { data: Buffer | null; ts: number }>();
+const freshReadInflight = new Map<string, Promise<Buffer | null>>();
+
+function freshReadKey(programId: PublicKey, slab: string, owner: PublicKey): string {
+  return `${programId.toBase58()}|${slab}|${owner.toBase58()}`;
+}
+
+/** One direct chain read of the caller's v17 portfolio for this market:
+ *  targeted getAccountInfo when the shared scan store knows the pubkey
+ *  (address never changes; the DATA read is live either way), full
+ *  owner-filtered scan otherwise. `null` = read succeeded, no portfolio. */
+async function readFreshPortfolioData(
+  connection: Connection,
+  programId: PublicKey,
+  slabAddress: string,
+  owner: PublicKey,
+): Promise<Buffer | null> {
+  const slabPk = new PublicKey(slabAddress);
+  const cachedPk = getPortfolioRawSnapshot(
+    makePortfolioScanKey(programId, slabAddress, owner),
+  )?.pubkey;
+  if (cachedPk) {
+    const info = await connection.getAccountInfo(cachedPk, "confirmed");
+    if (info) return Buffer.from(info.data);
+    // account gone or unreadable → fall through to the scan
+  }
+  const results = await connection.getProgramAccounts(programId, {
+    filters: [
+      { memcmp: { offset: 0, bytes: V17_PORTFOLIO_MAGIC_CP.toString("base64"), encoding: "base64" } },
+      { memcmp: { offset: V17_PF_MARKET_OFF_CP, bytes: slabPk.toBase58() } },
+      { memcmp: { offset: V17_PF_OWNER_OFF_CP, bytes: owner.toBase58() } },
+    ],
+  });
+  if (results.length === 0) return null;
+  const data = results[0].account.data;
+  return data instanceof Buffer ? data : Buffer.from(data);
+}
+
+/** Cache-or-read with in-flight dedup. `maxAgeMs` bounds how old an accepted
+ *  cached read may be (0 forces a live read). */
+function getFreshPortfolioData(
+  connection: Connection,
+  programId: PublicKey,
+  slabAddress: string,
+  owner: PublicKey,
+  maxAgeMs: number,
+): Promise<Buffer | null> {
+  const key = freshReadKey(programId, slabAddress, owner);
+  const cached = freshReadCache.get(key);
+  if (cached && Date.now() - cached.ts < maxAgeMs) {
+    return Promise.resolve(cached.data);
+  }
+  const inflight = freshReadInflight.get(key);
+  if (inflight) return inflight;
+  const p = readFreshPortfolioData(connection, programId, slabAddress, owner)
+    .then((data) => {
+      freshReadCache.set(key, { data, ts: Date.now() });
+      return data;
+    })
+    .finally(() => {
+      freshReadInflight.delete(key);
+    });
+  freshReadInflight.set(key, p);
+  return p;
+}
 
 export function useClosePosition(slabAddress: string): UseClosePositionReturn {
   const { connection } = useConnectionCompat();
@@ -103,58 +190,17 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
 
         // Prewarm the rest of the submission path (blockhash, priority fee,
         // trade-account resolution) so it overlaps this freshness read
-        // instead of running serially after it — the close click reaches the
-        // wallet popup one to three RPC round-trips sooner. Fire-and-forget.
+        // instead of running serially after it. Usually a no-op: prewarmClose
+        // already fired all of this when the close modal opened.
         prewarmTradeSubmission(connection, programId, slabAddress, publicKey);
 
-        const slabPk = new PublicKey(slabAddress);
-
-        // Latency: when the shared scan store already knows the portfolio's
-        // PUBKEY (it almost always does — the trade page keeps it hot), a
-        // targeted getAccountInfo is exactly as authoritative-fresh as the
-        // full program scan (both read the chain NOW; the address of a
-        // portfolio never changes) but one cheap account read instead of a
-        // filtered scan. Freshness of the POSITION SIZE is preserved either
-        // way — only the address lookup is skipped, never the data read.
-        let freshData: Buffer | null = null;
-        const cachedPk = getPortfolioRawSnapshot(
-          makePortfolioScanKey(programId, slabAddress, publicKey),
-        )?.pubkey;
-        if (cachedPk) {
-          const info = await connection.getAccountInfo(cachedPk, "confirmed");
-          if (info) freshData = Buffer.from(info.data);
-          // account gone or unreadable → fall through to the scan below
-        }
-
-        if (!freshData) {
-          const results = await connection.getProgramAccounts(programId, {
-            filters: [
-              {
-                memcmp: {
-                  offset: 0,
-                  bytes: V17_PORTFOLIO_MAGIC_CP.toString("base64"),
-                  encoding: "base64",
-                },
-              },
-              {
-                memcmp: {
-                  offset: V17_PF_MARKET_OFF_CP,
-                  bytes: slabPk.toBase58(),
-                },
-              },
-              {
-                memcmp: {
-                  offset: V17_PF_OWNER_OFF_CP,
-                  bytes: publicKey.toBase58(),
-                },
-              },
-            ],
-          });
-          if (results.length > 0) {
-            const data = results[0].account.data;
-            freshData = data instanceof Buffer ? data : Buffer.from(data);
-          }
-        }
+        // Consume the modal-open prewarmed read when it's ≤FRESH_READ_TTL_MS
+        // old (see the cache's doc comment for why that preserves the safety
+        // property); otherwise this performs a live read right now, exactly
+        // as before the prewarm existed.
+        const freshData = await getFreshPortfolioData(
+          connection, programId, slabAddress, publicKey, FRESH_READ_TTL_MS,
+        );
 
         if (!freshData) {
           // The query completed successfully and found no current
@@ -283,6 +329,11 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
         setTimeout(() => setPhase("idle"), 2000);
         return { signature: sig ?? null };
       } catch (e) {
+        // Drop any prewarmed read — whatever failed, the next attempt should
+        // start from a live view of the chain.
+        if (programId && publicKey) {
+          freshReadCache.delete(freshReadKey(programId, slabAddress, publicKey));
+        }
         const msg = e instanceof Error ? e.message : String(e);
         console.error("[useClosePosition] error:", msg);
         setError(humanizeError(msg));
@@ -296,5 +347,13 @@ export function useClosePosition(slabAddress: string): UseClosePositionReturn {
     [connection, publicKey, userAccount, trade, lpIdx, slabAddress, mockMode, isV17Market, programId],
   );
 
-  return { closePosition, loading, error, phase, lastSig, resetPhase };
+  const prewarmClose = useCallback(() => {
+    if (mockMode || !isV17Market || !programId || !publicKey) return;
+    prewarmTradeSubmission(connection, programId, slabAddress, publicKey);
+    // maxAge 1.5s: dedupes a double-fire (open + re-render) without letting a
+    // seconds-old read masquerade as a prewarm of THIS modal-open.
+    void getFreshPortfolioData(connection, programId, slabAddress, publicKey, 1_500).catch(() => {});
+  }, [connection, programId, publicKey, slabAddress, mockMode, isV17Market]);
+
+  return { closePosition, loading, error, phase, lastSig, resetPhase, prewarmClose };
 }

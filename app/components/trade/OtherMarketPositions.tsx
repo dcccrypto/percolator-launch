@@ -28,7 +28,7 @@
  * information — usePortfolio has no cross-instance dedup.
  */
 
-import { FC, memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { FC, memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { subscribeSlab, getSnapshot } from "@/lib/priceStore/priceStore";
 import { usePortfolio, type PortfolioPosition } from "@/hooks/usePortfolio";
@@ -71,7 +71,11 @@ const CloseFlow: FC<{
   decimals: number;
   onDone: (closed: boolean) => void;
 }> = ({ pos, markE6, priceUsd, symbol, decimals, onDone }) => {
-  const { closePosition, loading } = useClosePosition(pos.slabAddress);
+  const { closePosition, loading, prewarmClose } = useClosePosition(pos.slabAddress);
+  // CloseFlow only mounts when the close modal opens, so mount === modal-open:
+  // start the fresh position read + tx prewarms now, and the confirm click
+  // reaches the wallet popup with zero blocking round-trips.
+  useEffect(() => { prewarmClose(); }, [prewarmClose]);
   // Same H6/H7 staleness protections as the dock's own PositionRow: a close
   // on an oracle-stale or engine-stale market reverts on-chain — block the
   // modal's Confirm instead of letting the user burn a failed tx. Both hooks

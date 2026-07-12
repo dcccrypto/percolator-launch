@@ -215,7 +215,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
   const symbol = marketInfo?.symbol ?? collateralSymbol;
   const decimals = tokenMeta?.decimals ?? 6;
 
-  const { closePosition, loading: closeLoading, error: closeError } = useClosePosition(slabAddress);
+  const { closePosition, loading: closeLoading, error: closeError, prewarmClose } = useClosePosition(slabAddress);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showAddMarginModal, setShowAddMarginModal] = useState(false);
 
@@ -498,7 +498,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
             {/* Spacer + CLOSE button */}
             <div className="flex-1" />
             <button
-              onClick={() => setShowCloseModal(true)}
+              onClick={() => { prewarmClose(); setShowCloseModal(true); }}
               disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
               title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : "Close position"}
               aria-label="Close position"
@@ -655,7 +655,7 @@ export const PositionPanel: FC<{ slabAddress: string }> = ({ slabAddress }) => {
                 + Margin
               </button>
               <button
-                onClick={() => setShowCloseModal(true)}
+                onClick={() => { prewarmClose(); setShowCloseModal(true); }}
                 disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
                 title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : undefined}
                 className="flex-1 rounded-none border border-[var(--short)]/30 py-2 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 disabled:cursor-not-allowed disabled:opacity-50"

@@ -116,7 +116,7 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
   // is unaffected.
   const marketDisplaySymbol = symbol.replace(/-PERP$/i, "");
 
-  const { closePosition, loading: closeLoading, error: closeError } = useClosePosition(slabAddress);
+  const { closePosition, loading: closeLoading, error: closeError, prewarmClose } = useClosePosition(slabAddress);
   // Called unconditionally, before the `!activeInfo` early return below, per
   // rules of hooks — mirrors MarketInfoBar's MarkPrice / MarketBookCard's
   // Oracle cell (same shared hook, see hooks/usePriceFlash.ts).
@@ -372,7 +372,10 @@ const PositionRow: FC<{ slabAddress: string }> = memo(function PositionRow({ sla
                   </span>
                 ) : (
                   <button
-                    onClick={() => setShowCloseModal(true)}
+                    // prewarmClose: start the fresh position read + tx prewarms
+                    // the moment the modal opens, so the confirm click reaches
+                    // the wallet popup with zero blocking round-trips.
+                    onClick={() => { prewarmClose(); setShowCloseModal(true); }}
                     disabled={closeLoading || lpUnderfunded || !hasValidMark || engineStale}
                     title={!hasValidMark ? "Waiting for price data…" : engineStale ? "Market crank behind — trading paused. This market needs a re-seed before closing works." : undefined}
                     className="rounded-none border border-[var(--short)]/30 px-3 py-1 text-[9px] font-medium uppercase tracking-[0.1em] text-[var(--short)] transition-colors duration-150 hover:bg-[var(--short)]/8 hover:border-[var(--short)]/50 disabled:cursor-not-allowed disabled:opacity-50"
