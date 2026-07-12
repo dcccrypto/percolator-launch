@@ -29,6 +29,10 @@ vi.mock("@/lib/tx", () => ({
 vi.mock("@/lib/programAllowlist", () => ({
   isKnownProgram: () => true,
   assertKnownProgram: () => {},
+  // #2381: useTrade now pins the CPI matcher via assertCanonicalMatcher — stub it
+  // (like assertKnownProgram) so this portfolio-selection test isn't coupled to the
+  // canonical-matcher check (which has its own dedicated coverage).
+  assertCanonicalMatcher: () => {},
 }));
 
 vi.mock("@/lib/oraclePrice", () => ({

@@ -26,7 +26,7 @@ import {
 import { sendTx } from "@/lib/tx";
 import { useSlabState } from "@/components/providers/SlabProvider";
 import { detectOracleMode } from "@/lib/oraclePrice";
-import { assertKnownProgram } from "@/lib/programAllowlist";
+import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
 import { getLivePriceSnapshot } from "@/lib/priceStore/priceStore";
 import { computeLimitPriceE6 } from "@/lib/slippage";
 
@@ -272,6 +272,12 @@ export function useTrade(slabAddress: string) {
           accountB = lpPda;
           matcherProg = lpAccount.account.matcherProgram;
           matcherCtx = lpAccount.account.matcherContext;
+          // NOTE: the canonical-matcher assertion is applied on the v17 path
+          // below (every current playground market is v17). It is deliberately
+          // NOT added to this legacy v12 branch — v12's matcher invariants
+          // aren't verifiable from the client here, and no current market
+          // takes this path, so guarding it risks changing legacy behavior for
+          // no live benefit.
           const [delegatePk] = deriveMatcherDelegate(
             programId, slabPk, accountB, lpAccount.account.owner, matcherProg, matcherCtx,
           );
@@ -325,6 +331,13 @@ export function useTrade(slabAddress: string) {
           const matcherCfg = readPortfolioMatcherConfig(lpPortfolioData)!;
           matcherProg = matcherCfg.matcherProgram;
           matcherCtx = matcherCfg.matcherContext;
+          // SEC: matcherProg/matcherCtx come from the LP portfolio's on-chain
+          // matcher config — attacker-controlled for an attacker-created
+          // market. The trade ix places matcherProg as the executable CPI
+          // target [4] and matcherCtx as a writable account [5], so pin the
+          // matcher to the canonical one before we build a signable tx around
+          // it (assertKnownProgram would accept any deployed program here).
+          assertCanonicalMatcher(matcherProg);
 
           // Read LP owner from provenance header of the LP portfolio.
           const lpOwner = readPortfolioOwner(lpPortfolioData);

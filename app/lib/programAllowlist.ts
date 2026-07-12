@@ -1,5 +1,5 @@
 import type { PublicKey } from "@solana/web3.js";
-import { getAllProgramIds } from "@/lib/config";
+import { getAllProgramIds, getConfig } from "@/lib/config";
 
 /**
  * Returns true iff `programId` is one of the deployed program IDs for the
@@ -41,5 +41,44 @@ export function assertKnownProgram(programId: PublicKey | string | null | undefi
   }
   throw new Error(
     "This market is not owned by a recognized Percolator program. Refusing to build a transaction.",
+  );
+}
+
+/**
+ * Throws unless `matcherProgram` is EXACTLY the configured matcher program for
+ * the current network.
+ *
+ * The v17 trade/batch-trade instructions take the matcher program as account
+ * [4] — an executable CPI target — and the matcher context as account [5], a
+ * WRITABLE account. Both are read from the LP portfolio's on-chain matcher
+ * config, which the LP sets. For an attacker-CREATED market the attacker is
+ * the LP and controls those bytes, so without this check a victim trading
+ * that market would sign a tx whose wrapper CPIs into an attacker-chosen
+ * program with an attacker-writable context. `assertKnownProgram` is too
+ * loose here — it accepts ANY deployed program (wrapper/vault/nft/matcher),
+ * so it wouldn't reject swapping the matcher for, say, the wrapper id. This
+ * pins it to the one canonical matcher. Every legitimate market uses it, so
+ * this is free for honest flows and removes the arbitrary-CPI-target
+ * property entirely.
+ *
+ * Generic error + no echo, same rationale as `assertKnownProgram`.
+ */
+export function assertCanonicalMatcher(matcherProgram: PublicKey | string | null | undefined): void {
+  const canonical = getConfig().matcherProgramId as string | undefined;
+  const idStr =
+    matcherProgram == null
+      ? null
+      : typeof matcherProgram === "string"
+        ? matcherProgram
+        : matcherProgram.toBase58();
+  if (canonical && idStr && idStr === canonical) return;
+  if (process.env.NODE_ENV !== "production") {
+    console.error(
+      `[assertCanonicalMatcher] Refusing to build a trade whose matcher program ` +
+        `(${idStr ?? "<null>"}) is not the canonical matcher (${canonical ?? "<unset>"}).`,
+    );
+  }
+  throw new Error(
+    "This market's matcher is not the recognized Percolator matcher program. Refusing to build a transaction.",
   );
 }

@@ -31,7 +31,7 @@ import {
   buildIx,
 } from "@percolatorct/sdk";
 import { sendTx } from "@/lib/tx";
-import { assertKnownProgram } from "@/lib/programAllowlist";
+import { assertKnownProgram, assertCanonicalMatcher } from "@/lib/programAllowlist";
 
 export type { BatchTradeCpiLeg };
 
@@ -82,6 +82,11 @@ export function useBatchTrade() {
         if (params.legs.length === 0 || params.legs.length > 16) {
           throw new Error(`Batch trade legs must be 1-16, got ${params.legs.length}`);
         }
+
+        // SEC: matcherProg is account [4] — an executable CPI target read
+        // from the (LP-controlled) matcher config; pin it to the canonical
+        // matcher before building the tx. See assertCanonicalMatcher.
+        assertCanonicalMatcher(params.matcherProg);
 
         const slabPk = new PublicKey(params.slabAddress);
         const takerPortfolioPk = new PublicKey(params.takerPortfolio);
