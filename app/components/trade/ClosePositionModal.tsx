@@ -72,6 +72,12 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   useLockBodyScroll();
   const [percent, setPercent] = useState(100);
 
+function sanitizeClosePercent(value: number): number {
+  if (!Number.isFinite(value)) return 100;
+
+  return Math.min(100, Math.max(1, Math.trunc(value)));
+}
+
   // Ref-based callback to prevent WS price ticks from replaying the GSAP animation
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
@@ -150,10 +156,12 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
   const colSym = collateralSymbol ?? symbol;
   const absPosition = abs(positionSize);
 
+  const safePercent = sanitizeClosePercent(percent);
+
   const preview = useMemo(() => {
-    const closeAbs = percent >= 100
+    const closeAbs = safePercent >= 100
       ? absPosition
-      : (absPosition * BigInt(percent)) / 100n;
+      : (absPosition * BigInt(safePercent)) / 100n;
     const remainingAbs = absPosition - closeAbs;
 
     // Compute PnL on the close portion. computeMarkPnl returns coin-margined
@@ -167,9 +175,9 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
     const pnl = currentPrice > 0n ? computeMarkPnlCollateral(pnlNative, currentPrice) : 0n;
 
     // Proportional capital for the close portion
-    const closeCapital = percent >= 100
+    const closeCapital = safePercent >= 100
       ? capital
-      : (capital * BigInt(percent)) / 100n;
+      : (capital * BigInt(safePercent)) / 100n;
 
     // B-3: Compute the trading fee charged on close (notional * feeBps / 10_000).
     // Without this, "Est. Receive" overstates what the user actually receives on-chain.
@@ -363,7 +371,7 @@ export const ClosePositionModal: FC<ClosePositionModalProps> = ({
             Cancel
           </button>
           <button
-            onClick={() => onConfirm(percent)}
+            onClick={() => onConfirm(safePercent)}
             disabled={loading || oracleStale}
             className="flex-1 rounded-none bg-[var(--short)] py-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-white transition-[filter,opacity] duration-150 hover:brightness-110 disabled:opacity-50"
           >
