@@ -18,6 +18,7 @@ import { isSaneMarketValue, isActiveMarket, isZombieMarket } from "@/lib/activeM
 import { getKnownMarketLpCapitals, scanEnabledMarketLpCapitals } from "@/lib/lp-portfolio";
 import { isPhantomOpenInterest, MIN_VAULT_FOR_OI } from "@/lib/phantom-oi";
 import { computeDisplayOiUsd } from "@/lib/oi-display";
+import { hasInvisibleOrBidi } from "@/lib/text-safety";
 import { computeMarketHealthFromStats } from "@/lib/health";
 import { BLOCKED_SLAB_ADDRESSES } from "@/lib/blocklist";
 import { SLUG_ALIASES } from "@/lib/symbol-utils";
@@ -1585,6 +1586,16 @@ export async function POST(req: NextRequest) {
   if (/[\x00-\x1f\x7f]/.test(resolvedName)) {
     return NextResponse.json(
       { error: "Invalid name: must not contain control characters" },
+      { status: 400 }
+    );
+  }
+  // SEC: reject invisible / bidirectional / format characters (RTL overrides,
+  // zero-width chars, etc.) \u2014 the name-impersonation vectors the sweep
+  // flagged. These are NOT control chars (they passed the check above).
+  // Visible Unicode (accents, CJK, emoji) stays allowed. See hasInvisibleOrBidi.
+  if (hasInvisibleOrBidi(resolvedName)) {
+    return NextResponse.json(
+      { error: "Invalid name: must not contain invisible or bidirectional formatting characters" },
       { status: 400 }
     );
   }
