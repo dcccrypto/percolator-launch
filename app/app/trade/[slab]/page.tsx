@@ -9,7 +9,7 @@ import { UsdToggleProvider, useUsdToggle } from "@/components/providers/UsdToggl
 import { OrderTicket } from "@/components/trade/OrderTicket";
 import { PositionNftPanel } from "@/components/trade/PositionNftPanel";
 import { PositionsDock } from "@/components/trade/PositionsDock";
-import { TradingChart } from "@/components/trade/TradingChart";
+import dynamic from "next/dynamic";
 import { MarketInfoBar } from "@/components/trade/MarketInfoBar";
 import { useIsLargeScreen } from "@/hooks/useIsLargeScreen";
 import { useAdvanceOraclePhase } from "@/hooks/useAdvanceOraclePhase";
@@ -25,6 +25,19 @@ import { ShareButton } from "@/components/market/ShareCard";
 import { getNetwork } from "@/lib/config";
 import { RenderProfiler } from "@/components/dev/RenderProfiler";
 import TradingPageLoading from "./loading";
+
+// Lazy-load the chart so lightweight-charts (~372KB) streams AFTER the order
+// ticket + positions are interactive, instead of blocking the trade page's
+// initial load. ssr:false — the chart is client-only (createChart needs the DOM).
+const TradingChart = dynamic(
+  () => import("@/components/trade/TradingChart").then((m) => m.TradingChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full w-full animate-pulse rounded-sm border border-[var(--border)] bg-[var(--panel-bg)]" />
+    ),
+  },
+);
 
 /**
  * Phase 3 (trade-terminal rebuild) layout notes:
